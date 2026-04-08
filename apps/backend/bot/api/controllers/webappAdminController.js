@@ -1781,6 +1781,154 @@ const getUserPayments = async (req, res) => {
   }
 };
 
+// ─── MeruLink admin functions ─────────────────────────────────────────────────
+
+/**
+ * GET /api/webapp/admin/meru-links/stats
+ * Return total/used/available counts grouped by product
+ */
+const meruLinkStats = async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT
+        product,
+        COUNT(*) AS total,
+        COUNT(CASE WHEN status = 'used' THEN 1 END) AS used,
+        COUNT(CASE WHEN status = 'active' THEN 1 END) AS available
+      FROM meru_payment_links
+      GROUP BY product
+      ORDER BY product
+    `);
+
+    const stats = result.rows.map(row => ({
+      product: row.product,
+      total: parseInt(row.total, 10),
+      used: parseInt(row.used, 10),
+      available: parseInt(row.available, 10),
+    }));
+
+    return res.json({ success: true, stats });
+  } catch (error) {
+    logger.error('Error fetching meru link stats:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * GET /api/webapp/admin/meru-links
+ * List all meru_payment_links — unused first, then used, both groups by created_at DESC
+ */
+const listMeruLinks = async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT
+        id, product, meru_link AS url, status,
+        used_by, used_by_username, used_at, created_at
+      FROM meru_payment_links
+      ORDER BY
+        CASE WHEN status = 'active' THEN 0 ELSE 1 END ASC,
+        created_at DESC
+    `);
+
+    const links = result.rows.map(row => ({
+      id: row.id,
+      product: row.product,
+      url: row.url,
+      is_used: row.status !== 'active',
+      status: row.status,
+      used_by: row.used_by || null,
+      used_by_username: row.used_by_username || null,
+      used_at: row.used_at ? row.used_at.toISOString() : null,
+      created_at: row.created_at ? row.created_at.toISOString() : null,
+    }));
+
+    return res.json({ success: true, links });
+  } catch (error) {
+    logger.error('Error listing meru links:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * POST /api/webapp/admin/meru-links
+ * Body: { product: string, links: string[] }  (array of raw URLs)
+ * Inserts up to 100 links at once; derives the code from the URL path segment.
+ */
+const addMeruLinks = async (req, res) => {
+  try {
+    const { product, links } = req.body;
+
+    if (!product || typeof product !== 'string' || product.trim().length === 0) {
+      return res.status(400).json({ error: 'product is required' });
+    }
+    if (!Array.isArray(links) || links.length === 0) {
+      return res.status(400).json({ error: 'links array is required and must not be empty' });
+    }
+    if (links.length > 100) {
+      return res.status(400).json({ error: 'Maximum 100 links per request' });
+    }
+
+    const cleanProduct = product.trim();
+    let added = 0;
+
+    for (const rawUrl of links) {
+      if (typeof rawUrl !== 'string') continue;
+      const url = rawUrl.trim();
+      if (!url) continue;
+
+      // Extract code from the last path segment of the URL
+      const code = url.split('/').filter(Boolean).pop();
+      if (!code || code.length > 100 || !/^[A-Za-z0-9_\-]+$/.test(code)) continue;
+
+      try {
+        const insertResult = await query(
+          `INSERT INTO meru_payment_links (code, meru_link, product, status)
+           VALUES ($1, $2, $3, 'active')
+           ON CONFLICT (code) DO NOTHING`,
+          [code, url, cleanProduct]
+        );
+        if (insertResult.rowCount > 0) added++;
+      } catch (insertErr) {
+        // Skip duplicate meru_link violations (UNIQUE on meru_link column)
+        logger.warn('Skipping duplicate meru link:', { url, error: insertErr.message });
+      }
+    }
+
+    logger.info('Admin added meru links', { product: cleanProduct, added, adminId: req.user?.id });
+    return res.json({ success: true, added });
+  } catch (error) {
+    logger.error('Error adding meru links:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * DELETE /api/webapp/admin/meru-links/:id
+ * Only deletes links with status = 'active' (not yet redeemed)
+ */
+const deleteMeruLink = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await query(
+      `DELETE FROM meru_payment_links
+       WHERE id = $1 AND status = 'active'
+       RETURNING id, code`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Link not found or already redeemed — cannot delete' });
+    }
+
+    logger.info('Admin deleted meru link', { id, code: result.rows[0].code, adminId: req.user?.id });
+    return res.json({ success: true, message: 'Link deleted' });
+  } catch (error) {
+    logger.error('Error deleting meru link:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getStats,
   getDemographics,
@@ -1820,4 +1968,9 @@ module.exports = {
   revokeCreator,
   // User payment history
   getUserPayments,
+  // MeruLink admin
+  meruLinkStats,
+  listMeruLinks,
+  addMeruLinks,
+  deleteMeruLink,
 };

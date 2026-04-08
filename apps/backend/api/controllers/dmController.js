@@ -1,10 +1,9 @@
-const crypto = require('crypto');
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const { getRedis } = require('../../config/redis');
 const { resolveUserId } = require('../../utils/helpers');
 const DmService = require('../../services/dmService');
-const jaasService = require('../../services/jaasService');
+const { generateToken, LIVEKIT_WS_URL } = require('../../services/livekitService');
 
 const DM_CALL_TTL_SECONDS = 4 * 60 * 60;
 const DM_CALL_KEY_PREFIX = 'dm:call:';
@@ -141,10 +140,6 @@ const createDmVideoCallInvite = async (req, res) => {
     return res.status(400).json({ error: 'You cannot call yourself' });
   }
 
-  if (!jaasService.isConfigured()) {
-    return res.status(503).json({ error: 'Embedded video calls are unavailable right now' });
-  }
-
   try {
     const { rows } = await query(
       `SELECT id FROM users WHERE id = $1`,
@@ -155,11 +150,12 @@ const createDmVideoCallInvite = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const roomName = `pnptv-dm-${crypto.randomUUID()}`;
-    const createdAt = new Date();
-    const expiresAt = new Date(createdAt.getTime() + DM_CALL_TTL_SECONDS * 1000).toISOString();
     const callerId = String(user.id);
     const calleeId = String(partnerId);
+    // Deterministic room name — same for both participants regardless of who initiates
+    const roomName = `dm-${Math.min(Number(callerId), Number(calleeId))}-${Math.max(Number(callerId), Number(calleeId))}`;
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + DM_CALL_TTL_SECONDS * 1000).toISOString();
     const callLink = buildDmCallLink(roomName, callerId, calleeId);
 
     await getRedis().set(
@@ -175,6 +171,9 @@ const createDmVideoCallInvite = async (req, res) => {
       DM_CALL_TTL_SECONDS
     );
 
+    const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
+    const token = await generateToken(roomName, callerId, displayName, true);
+
     return res.json({
       success: true,
       roomName,
@@ -182,6 +181,8 @@ const createDmVideoCallInvite = async (req, res) => {
       callerId,
       calleeId,
       expiresAt,
+      token,
+      livekitUrl: LIVEKIT_WS_URL,
     });
   } catch (err) {
     logger.error('createDmVideoCallInvite error', err);
@@ -195,10 +196,6 @@ const joinDmVideoCall = async (req, res) => {
 
   if (!roomName) {
     return res.status(400).json({ error: 'Room name is required' });
-  }
-
-  if (!jaasService.isConfigured()) {
-    return res.status(503).json({ error: 'Embedded video calls are unavailable right now' });
   }
 
   try {
@@ -218,24 +215,17 @@ const joinDmVideoCall = async (req, res) => {
       return res.status(403).json({ error: 'You do not have access to this video call' });
     }
 
+    await redis.expire(`${DM_CALL_KEY_PREFIX}${roomName}`, DM_CALL_TTL_SECONDS);
+
     const isModerator = currentUserId === callerId;
     const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
-    const avatar = user.photoUrl || user.photo_url || user.photo_file_id || '';
-    const token = jaasService.generateToken({
-      roomName,
-      userId: currentUserId,
-      userName: displayName,
-      userAvatar: avatar,
-      isModerator,
-      enableLivestreaming: false,
-      enableRecording: false,
-      expiresIn: '4h',
-    });
+    const token = await generateToken(roomName, currentUserId, displayName, isModerator);
 
     return res.json({
       success: true,
       roomName,
-      meetingUrl: jaasService.generateMeetingUrl(roomName, token),
+      token,
+      livekitUrl: LIVEKIT_WS_URL,
       callLink: buildDmCallLink(roomName, callerId, calleeId),
       callerId,
       calleeId,

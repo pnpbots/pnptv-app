@@ -437,7 +437,7 @@ export default function Subscribe() {
       await fetch("/api/newsletter/subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: user.email, list_ids: [1], name: user.firstName || undefined }),
+        body: JSON.stringify({ email: user.email, list_ids: [3], name: user.firstName || undefined }),
       });
       setNewsletterSubscribed(true);
     } catch { /* silent */ }

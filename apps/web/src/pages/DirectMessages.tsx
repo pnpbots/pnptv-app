@@ -17,6 +17,7 @@ import {
 } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
+import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -122,6 +123,162 @@ function renderTextWithLinks(content: string) {
       )}
     </React.Fragment>
   ));
+}
+
+// ─── DM LiveKit Floating Panel ───────────────────────────────────────────────
+
+const DM_PANEL_WIDTH = 420;
+const DM_PANEL_HEIGHT = 560;
+
+function clampVal(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function getDefaultDmPanelPos(): { x: number; y: number } {
+  return {
+    x: Math.max(16, window.innerWidth - DM_PANEL_WIDTH - 24),
+    y: Math.max(16, window.innerHeight - DM_PANEL_HEIGHT - 96),
+  };
+}
+
+interface DmLiveKitPanelProps {
+  token: string;
+  livekitUrl: string;
+  roomName: string;
+  partnerName: string;
+  callLink: string;
+  onCopyLink: () => void;
+  onClose: () => void;
+}
+
+function DmLiveKitPanel({
+  token,
+  livekitUrl,
+  roomName,
+  partnerName,
+  callLink,
+  onCopyLink,
+  onClose,
+}: DmLiveKitPanelProps) {
+  const dragRef = useRef<{
+    pointerId: number | null;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  }>({ pointerId: null, startX: 0, startY: 0, originX: 0, originY: 0 });
+
+  const [floatingPos, setFloatingPos] = useState<{ x: number; y: number }>(() => ({ x: 16, y: 16 }));
+
+  useEffect(() => {
+    setFloatingPos(getDefaultDmPanelPos());
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => {
+      setFloatingPos((prev) => ({
+        x: clampVal(prev.x, 8, Math.max(8, window.innerWidth - DM_PANEL_WIDTH - 8)),
+        y: clampVal(prev.y, 8, Math.max(8, window.innerHeight - DM_PANEL_HEIGHT - 8)),
+      }));
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: floatingPos.x,
+      originY: floatingPos.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current.pointerId !== event.pointerId) return;
+    const nextX = dragRef.current.originX + (event.clientX - dragRef.current.startX);
+    const nextY = dragRef.current.originY + (event.clientY - dragRef.current.startY);
+    setFloatingPos({
+      x: clampVal(nextX, 8, Math.max(8, window.innerWidth - DM_PANEL_WIDTH - 8)),
+      y: clampVal(nextY, 8, Math.max(8, window.innerHeight - DM_PANEL_HEIGHT - 8)),
+    });
+  };
+
+  const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current.pointerId !== event.pointerId) return;
+    dragRef.current.pointerId = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  return (
+    <div
+      className="fixed z-[95]"
+      style={{ width: DM_PANEL_WIDTH, height: DM_PANEL_HEIGHT, left: floatingPos.x, top: floatingPos.y }}
+    >
+      <div
+        className="flex h-full flex-col overflow-hidden rounded-[22px] border shadow-2xl"
+        style={{
+          background: "linear-gradient(180deg, rgba(22,27,42,0.98), rgba(14,18,28,0.98))",
+          borderColor: "rgba(100,210,255,0.22)",
+        }}
+      >
+        {/* Draggable header */}
+        <div
+          className="flex items-center gap-3 border-b px-3 py-2 flex-shrink-0 cursor-grab active:cursor-grabbing select-none"
+          style={{ borderColor: "rgba(255,255,255,0.08)" }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+        >
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+            <p className="truncate text-sm font-bold text-white">
+              {partnerName ? `Call with ${partnerName}` : "Video Call"}
+            </p>
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <button
+              type="button"
+              onClick={onCopyLink}
+              className="inline-flex h-8 items-center gap-1 rounded-full border px-2 text-[11px] text-white/60 transition-all hover:bg-white/10"
+              style={{ borderColor: "rgba(255,255,255,0.1)" }}
+              title="Copy call link"
+            >
+              Copy link
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border text-white/50 transition-all hover:bg-white/10"
+              style={{ borderColor: "rgba(255,255,255,0.1)" }}
+              aria-label="Leave call"
+              title="Leave call"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        {/* LiveKit room */}
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <LiveKitRoom
+            token={token}
+            serverUrl={livekitUrl}
+            connect={true}
+            video={true}
+            audio={true}
+            onDisconnected={onClose}
+            style={{ height: "100%", background: "transparent" }}
+          >
+            <VideoConference />
+          </LiveKitRoom>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── Chat View (conversation with a specific user) ──────────────────────────
@@ -884,46 +1041,15 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
       )}
 
       {activeCall && (
-        <div className="fixed inset-0 z-[70] bg-black flex flex-col">
-          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10 bg-[#111216]">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-white truncate">{partnerName || "Video call"}</p>
-              <p className="text-xs text-white/60 truncate">Embedded call link active in this chat</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void copyToClipboard(activeCall.callLink)}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white/80 border border-white/10 hover:bg-white/5 transition-all active:scale-95"
-              >
-                Copy link
-              </button>
-              <a
-                href={activeCall.meetingUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white/80 border border-white/10 hover:bg-white/5 transition-all active:scale-95"
-              >
-                Open tab
-              </a>
-              <button
-                type="button"
-                onClick={closeActiveCall}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white transition-all active:scale-95"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-          <iframe
-            src={activeCall.meetingUrl}
-            title={`Video call with ${partnerName || "user"}`}
-            className="flex-1 w-full border-0 bg-black"
-            allow="camera; microphone; fullscreen; display-capture; autoplay; clipboard-read; clipboard-write"
-            referrerPolicy="strict-origin-when-cross-origin"
-          />
-        </div>
+        <DmLiveKitPanel
+          token={activeCall.token}
+          livekitUrl={activeCall.livekitUrl}
+          roomName={activeCall.roomName}
+          partnerName={partnerName}
+          callLink={activeCall.callLink}
+          onCopyLink={() => void copyToClipboard(activeCall.callLink)}
+          onClose={closeActiveCall}
+        />
       )}
 
       {/* Lightbox */}

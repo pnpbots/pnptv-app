@@ -14,7 +14,7 @@ const { query, getPool } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
 const callCheckoutService = require('../../services/callCheckoutService');
 const callPackageService = require('../../services/callPackageService');
-const jaasService = require('../../services/jaasService');
+const { generateToken, LIVEKIT_WS_URL } = require('../../services/livekitService');
 const CallBookingService = require('../../services/CallBookingService');
 const moment = require('moment-timezone');
 const logger = require('../../../utils/logger');
@@ -129,21 +129,14 @@ async function getBooking(req, res) {
     const photoUrl = (isModerator ? credit.creator_photo : credit.member_photo) || '';
 
     let jaasInfo = null;
-    if (jaasService.isConfigured()) {
-      try {
-        if (isModerator) {
-          jaasInfo = jaasService.generateModeratorConfig(roomName, userId, displayName, '', photoUrl);
-        } else {
-          jaasInfo = jaasService.generateViewerConfig(roomName, userId, displayName, '', photoUrl);
-        }
-        // Normalise to a consistent shape: { token, roomName, meetingUrl }
-        jaasInfo = { token: jaasInfo.token, roomName: jaasInfo.roomName, meetingUrl: jaasInfo.url };
-      } catch (jaasErr) {
-        logger.warn('[callBookingController] JaaS token generation failed', {
-          creditId,
-          error: jaasErr.message,
-        });
-      }
+    try {
+      const token = await generateToken(roomName, userId, displayName, isModerator);
+      jaasInfo = { token, roomName, livekitUrl: LIVEKIT_WS_URL, meetingUrl: null };
+    } catch (livekitErr) {
+      logger.warn('[callBookingController] LiveKit token generation failed', {
+        creditId,
+        error: livekitErr.message,
+      });
     }
 
     const booking = {

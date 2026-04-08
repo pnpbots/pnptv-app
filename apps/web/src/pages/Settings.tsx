@@ -456,7 +456,7 @@ export default function Settings() {
         const res = await fetch("/api/newsletter/subscription", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: user.email, list_ids: [1], name: user.firstName || undefined }),
+          body: JSON.stringify({ email: user.email, list_ids: [3], name: user.firstName || undefined }),
         });
         if (res.ok) {
           localStorage.setItem("pnp_newsletter_subscribed", "1");

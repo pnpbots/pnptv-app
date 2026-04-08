@@ -1209,7 +1209,7 @@ services:
           cpus: '0.05'
           memory: 64m
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/health || exit 1"]
+      test: ["CMD", "./fider", "ping"]
       interval: 30s
       timeout: 5s
       retries: 3

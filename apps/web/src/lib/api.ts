@@ -1975,10 +1975,11 @@ export interface DmVideoCallInvite {
   callerId: string;
   calleeId: string;
   expiresAt: string;
+  token: string;
+  livekitUrl: string;
 }
 
 export interface DmVideoCallSession extends DmVideoCallInvite {
-  meetingUrl: string;
   role: "moderator" | "viewer";
 }
 
@@ -5466,4 +5467,47 @@ export function getOnlineUsers(region?: string, limit = 100): Promise<{ success:
   if (region) params.append("region", region);
   params.append("limit", String(limit));
   return request(`/api/webapp/nearby/online-users?${params}`);
+}
+
+// ─── MeruLink admin ───────────────────────────────────────────────────────────
+
+export interface MeruLinkStat {
+  product: string;
+  total: number;
+  used: number;
+  available: number;
+}
+
+export interface MeruLink {
+  id: string;
+  product: string;
+  url: string;
+  is_used: boolean;
+  status: string;
+  used_by: string | null;
+  used_by_username: string | null;
+  used_at: string | null;
+  created_at: string | null;
+}
+
+export function getMeruLinkStats(): Promise<{ success: boolean; stats: MeruLinkStat[] }> {
+  return request("/api/webapp/admin/meru-links/stats");
+}
+
+export function listMeruLinks(): Promise<{ success: boolean; links: MeruLink[] }> {
+  return request("/api/webapp/admin/meru-links");
+}
+
+export function addMeruLinks(
+  product: string,
+  links: string[]
+): Promise<{ success: boolean; added: number }> {
+  return request("/api/webapp/admin/meru-links", {
+    method: "POST",
+    body: { product, links },
+  });
+}
+
+export function deleteMeruLink(id: string): Promise<{ success: boolean; message: string }> {
+  return request(`/api/webapp/admin/meru-links/${id}`, { method: "DELETE" });
 }

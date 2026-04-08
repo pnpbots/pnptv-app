@@ -64,6 +64,7 @@ const SupportDashboard = lazy(() => import("@/pages/admin/SupportDashboard"));
 const AccessMatrix = lazy(() => import("@/pages/admin/AccessMatrix"));
 const CreatorSubscriptions = lazy(() => import("@/pages/admin/CreatorSubscriptions"));
 const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
+const MeruLinks = lazy(() => import("@/pages/admin/MeruLinks"));
 
 // Creator Studio pages
 const CreatorLayout = lazy(() => import("@/components/creators/CreatorLayout"));
@@ -466,6 +467,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <XAutoCampaigns />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "meru-links",
+        element: (
+          <ModuleLoader>
+            <MeruLinks />
           </ModuleLoader>
         ),
       },
