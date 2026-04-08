@@ -66,16 +66,23 @@ function registerGroupSecurityHandlers(bot) {
       logger.info('Bot status changed in chat', { chatId: chatIdStr, chatTitle, chatType, newStatus });
 
       if (['member', 'administrator'].includes(newStatus) && chatType !== 'private') {
-        // Bot was added to a group/channel — welcome and explain /link
-        try {
-          await ctx.reply(
-            `👋 Hello! I'm the PNPtv bot.\n\n` +
-            `To link this group to a PNPtv hangout, the hangout owner should run:\n` +
-            `/link <hangout_id>\n\n` +
-            `You can find the hangout ID in the PNPtv webapp.`
-          );
-        } catch (e) {
-          logger.debug('Could not send welcome message', { error: e.message });
+        // Don't send /link instructions in the main community group — it's already
+        // set up and we don't want to encourage command usage there.
+        const mainGroupId = process.env.GROUP_ID;
+        if (mainGroupId && chatIdStr === mainGroupId) {
+          logger.info('Bot added to main community group, skipping /link welcome', { chatIdStr });
+        } else {
+          // External group — tell the owner how to link it to a hangout
+          try {
+            await ctx.reply(
+              `👋 Hello! I'm the PNPtv bot.\n\n` +
+              `To link this group to a PNPtv hangout, the hangout owner should run:\n` +
+              `/link <hangout_id>\n\n` +
+              `You can find the hangout ID in the PNPtv webapp.`
+            );
+          } catch (e) {
+            logger.debug('Could not send welcome message', { error: e.message });
+          }
         }
       }
 

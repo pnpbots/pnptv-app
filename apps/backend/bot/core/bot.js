@@ -359,6 +359,37 @@ const startBot = async () => {
       return next();
     });
 
+    // ─── EARLY GROUP COMMAND SILENCER ────────────────────────────────────────
+    // Must be registered BEFORE any bot.command() calls so it intercepts first.
+    // In the main community group, non-admins typing commands (e.g. /link,
+    // /subscribe, /start) see their message deleted instantly with zero response.
+    // This prevents the command handlers below from ever responding to the group.
+    bot.use(async (ctx, next) => {
+      const isGroup = ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup';
+      if (!isGroup) return next();
+
+      const text = ctx.message?.text || '';
+      if (!text.startsWith('/') || !ctx.message?.message_id) return next();
+
+      const chatIdStr = ctx.chat?.id?.toString();
+      const mainGroupId = process.env.GROUP_ID;
+      if (!mainGroupId || chatIdStr !== mainGroupId) return next();
+
+      // Delete the command immediately regardless of who sent it
+      try { await ctx.deleteMessage(); } catch (_) {}
+
+      // Let env-level admins through so their commands still work
+      const userId = ctx.from?.id;
+      const PermSvc = require('../services/permissionService');
+      const isEnvAdmin = userId && (
+        PermSvc.isEnvSuperAdmin(userId) || PermSvc.isEnvAdmin(userId)
+      );
+      if (isEnvAdmin) return next();
+
+      // Non-admins: silently stop. No response, no Cristina, nothing.
+      return;
+    });
+
     // Mono — personal AI business assistant (admin-only)
     try {
       const { registerMonoHandlers } = require('../handlers/admin/monoHandler');

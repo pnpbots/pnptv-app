@@ -225,7 +225,8 @@ Aquí la vuelta es simple: gente real, buena vibra, cero filtro.
 • High Legend of the Cult (más interacciones) = 3 días PRIME
 • Tribute of the Cult (nuevo miembro rápido)
 • The Loyal Disciple (más fotos)
-👉 /subscribe`
+
+👉 Gestiona tu cuenta en la webapp:`
       : `👋 Hey ${username}, welcome to PNPtv!
 
 This place is simple: real people, real vibes, no filters.
@@ -250,9 +251,17 @@ This place is simple: real people, real vibes, no filters.
 • High Legend of the Cult (most interactions) = 3 days PRIME
 • Tribute of the Cult (fast new member)
 • The Loyal Disciple (most photos)
-👉 /subscribe`;
 
-    const sentMessage = await ctx.reply(message, { parse_mode: 'Markdown' });
+👉 Manage your account on the webapp:`;
+
+    const webappButton = Markup.inlineKeyboard([
+      [Markup.button.url(
+        lang === 'es' ? '🌐 Abrir PNPtv!' : '🌐 Open PNPtv!',
+        'https://app.pnptv.app'
+      )],
+    ]);
+
+    const sentMessage = await ctx.reply(message, { parse_mode: 'Markdown', ...webappButton });
     ChatCleanupService.scheduleWelcomeMessage(ctx.telegram, sentMessage);
 
     logger.info('Welcome message sent', {
