@@ -1611,6 +1611,15 @@ app.post('/checkout/pnp/confirmation', webhookLimiter, webhookController.handleE
 
 // Main Daimo webhook handler
 app.post('/api/webhooks/daimo', webhookLimiter, webhookController.handleDaimoWebhook);
+// LiveKit webhook — participant_joined, participant_left, room_finished
+// Signed by LiveKit with LIVEKIT_API_SECRET; verified inside the handler.
+// express.raw() preserves the raw body needed for WebhookReceiver signature check.
+app.post(
+  '/api/webhooks/livekit',
+  webhookLimiter,
+  express.raw({ type: 'application/webhook+json' }),
+  webhookController.handleLiveKitWebhook
+);
 app.post('/api/webhooks/visa-cybersource', webhookLimiter, require('./controllers/visaCybersourceWebhookController').handleWebhook);
 app.get('/api/webhooks/visa-cybersource/health', adminGuard, require('./controllers/visaCybersourceWebhookController').healthCheck);
 app.get('/api/payment-response', webhookController.handlePaymentResponse);

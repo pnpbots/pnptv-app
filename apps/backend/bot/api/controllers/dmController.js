@@ -154,24 +154,39 @@ const createDmVideoCallInvite = async (req, res) => {
     const calleeId = String(partnerId);
     // Deterministic room name — same for both participants regardless of who initiates
     const roomName = `dm-${Math.min(Number(callerId), Number(calleeId))}-${Math.max(Number(callerId), Number(calleeId))}`;
+
+    // Dedup: atomic NX set — prevents duplicate rooms if bot and webapp race
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + DM_CALL_TTL_SECONDS * 1000).toISOString();
-    const callLink = buildDmCallLink(roomName, callerId, calleeId);
+    const callData = JSON.stringify({ roomName, callerId, calleeId, createdAt: createdAt.toISOString(), expiresAt });
 
-    await getRedis().set(
+    const wasSet = await getRedis().set(
       `${DM_CALL_KEY_PREFIX}${roomName}`,
-      JSON.stringify({
-        roomName,
-        callerId,
-        calleeId,
-        createdAt: createdAt.toISOString(),
-        expiresAt,
-      }),
+      callData,
       'EX',
-      DM_CALL_TTL_SECONDS
+      DM_CALL_TTL_SECONDS,
+      'NX'
     );
 
     const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
+
+    if (!wasSet) {
+      const raw = await getRedis().get(`${DM_CALL_KEY_PREFIX}${roomName}`);
+      const existingCall = raw ? JSON.parse(raw) : { callerId, calleeId, expiresAt };
+      const token = await generateToken(roomName, callerId, displayName, true);
+      return res.json({
+        success: true,
+        roomName,
+        callLink: buildDmCallLink(roomName, existingCall.callerId, existingCall.calleeId),
+        callerId: existingCall.callerId,
+        calleeId: existingCall.calleeId,
+        expiresAt: existingCall.expiresAt,
+        token,
+        livekitUrl: LIVEKIT_WS_URL,
+      });
+    }
+
+    const callLink = buildDmCallLink(roomName, callerId, calleeId);
     const token = await generateToken(roomName, callerId, displayName, true);
 
     return res.json({

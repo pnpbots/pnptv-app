@@ -1213,41 +1213,6 @@ function initSocketIO(io) {
       }
     });
 
-    // Decline an incoming DM video call (callee only)
-    socket.on('dm:call:decline', async ({ callId } = {}) => {
-      if (!callId) return;
-
-      try {
-        const { rows, rowCount } = await query(
-          `UPDATE dm_video_calls
-           SET status = 'declined', ended_at = NOW(), ended_by = $1
-           WHERE id = $2 AND callee_id = $1 AND status = 'active'
-           RETURNING id, caller_id, callee_id`,
-          [user.id, callId]
-        );
-
-        if (rowCount === 0) {
-          socket.emit('dm:error', { message: 'Call not found or already ended', code: 'NOT_FOUND' });
-          return;
-        }
-
-        const call = rows[0];
-        io.to(`user:${call.caller_id}`).emit('dm:call:declined', {
-          callId: call.id,
-          declinedBy: {
-            id: user.id,
-            username: user.username,
-            firstName: user.firstName || user.first_name,
-          },
-        });
-
-        logger.info('DM call declined via socket', { callId, calleeId: user.id, callerId: call.caller_id });
-      } catch (err) {
-        logger.error('dm:call:decline error', err);
-        socket.emit('dm:error', { message: 'Failed to decline call', code: 'SERVER_ERROR' });
-      }
-    });
-
     // ── Live Stream Chat ──────────────────────────────────────────────────────
 
     socket.on('live:join', async ({ streamId } = {}) => {

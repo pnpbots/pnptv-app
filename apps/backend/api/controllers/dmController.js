@@ -155,11 +155,26 @@ const createDmVideoCallInvite = async (req, res) => {
     // Deterministic room name — same for both participants regardless of who initiates
     const roomName = `dm-${Math.min(Number(callerId), Number(calleeId))}-${Math.max(Number(callerId), Number(calleeId))}`;
 
-    // Dedup: if an active call already exists, return it without creating a duplicate
-    const existing = await getRedis().get(`${DM_CALL_KEY_PREFIX}${roomName}`);
-    if (existing) {
-      const existingCall = JSON.parse(existing);
-      const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
+    // Dedup: atomic NX set — only one concurrent caller can create the room.
+    // If NX returns null, a call already exists; fetch and return it.
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + DM_CALL_TTL_SECONDS * 1000).toISOString();
+    const callData = JSON.stringify({ roomName, callerId, calleeId, createdAt: createdAt.toISOString(), expiresAt });
+
+    const wasSet = await getRedis().set(
+      `${DM_CALL_KEY_PREFIX}${roomName}`,
+      callData,
+      'EX',
+      DM_CALL_TTL_SECONDS,
+      'NX'
+    );
+
+    const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
+
+    if (!wasSet) {
+      // Another call already exists for this pair — return the existing one
+      const raw = await getRedis().get(`${DM_CALL_KEY_PREFIX}${roomName}`);
+      const existingCall = raw ? JSON.parse(raw) : { callerId, calleeId, expiresAt };
       const token = await generateToken(roomName, callerId, displayName, true);
       return res.json({
         success: true,
@@ -173,24 +188,7 @@ const createDmVideoCallInvite = async (req, res) => {
       });
     }
 
-    const createdAt = new Date();
-    const expiresAt = new Date(createdAt.getTime() + DM_CALL_TTL_SECONDS * 1000).toISOString();
     const callLink = buildDmCallLink(roomName, callerId, calleeId);
-
-    await getRedis().set(
-      `${DM_CALL_KEY_PREFIX}${roomName}`,
-      JSON.stringify({
-        roomName,
-        callerId,
-        calleeId,
-        createdAt: createdAt.toISOString(),
-        expiresAt,
-      }),
-      'EX',
-      DM_CALL_TTL_SECONDS
-    );
-
-    const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
     const token = await generateToken(roomName, callerId, displayName, true);
 
     return res.json({
