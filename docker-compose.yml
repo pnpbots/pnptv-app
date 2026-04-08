@@ -1457,8 +1457,16 @@ services:
       REDIS_URL: "redis://:${REDIS_PNPTV_PASSWORD}@redis-pnptv:6379/3"
       ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY}
       AUTH_SECRET: ${INFISICAL_AUTH_SECRET}
-      SITE_URL: http://127.0.0.1:8200
+      SITE_URL: https://infisical.pnptv.app
       NODE_ENV: production
+      SMTP_HOST: smtp.hostinger.com
+      SMTP_PORT: "587"
+      SMTP_SECURE: "false"
+      SMTP_USERNAME: ${PNPTV_SMTP_USER}
+      SMTP_PASSWORD: ${PNPTV_SMTP_PASS}
+      SMTP_FROM_NAME: PNPtv Secrets
+      SMTP_FROM_ADDRESS: ${PNPTV_FROM_EMAIL}
+      INVITE_ONLY_SIGNUP: "false"
     networks:
       - pnptvapp_net
     depends_on:
