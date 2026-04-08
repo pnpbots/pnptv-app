@@ -7,6 +7,7 @@ const ffmpegPath = require('ffmpeg-static');
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
 const logger = require('../../utils/logger');
 const SocialPostService = require('../../services/socialPostService');
+const MeilisearchService = require('../../services/meilisearchService');
 const axios = require('axios');
 
 const { query: dbQuery } = require('../../config/postgres');
@@ -278,6 +279,7 @@ const createPost = async (req, res) => {
     // Parse @mentions and notify tagged users (non-blocking)
     setImmediate(() => {
       mentionService.createPostMentions(post.id, user.id, content.trim()).catch(() => {});
+      MeilisearchService.upsertPost(post.id).catch(() => {});
     });
 
     const io = req.app.get('io');
@@ -348,6 +350,7 @@ const deletePost = async (req, res) => {
   try {
     const deleted = await SocialPostService.deletePost(postId, user.id, isAdmin);
     if (!deleted) return res.status(404).json({ error: 'Post not found or not yours' });
+    setImmediate(() => { MeilisearchService.upsertPost(postId).catch(() => {}); });
     return res.json({ success: true });
   } catch (err) {
     logger.error('deletePost error', err);
@@ -688,6 +691,7 @@ const createPostWithMedia = async (req, res) => {
 
     const io = req.app.get('io');
     emitNewPost(io, fullPost, user.id);
+    setImmediate(() => { MeilisearchService.upsertPost(post.id).catch(() => {}); });
 
     return res.json({ success: true, post: fullPost });
   } catch (err) {
@@ -949,6 +953,7 @@ const createPostWithMultiMedia = async (req, res) => {
 
     const io = req.app.get('io');
     emitNewPost(io, fullPost, user.id);
+    setImmediate(() => { MeilisearchService.upsertPost(post.id).catch(() => {}); });
 
     return res.json({ success: true, post: fullPost });
   } catch (err) {

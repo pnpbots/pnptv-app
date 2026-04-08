@@ -13,6 +13,7 @@ const FileType = require('file-type');
 // ── Enforced follows (shared service) ────────────────────────────────────────
 const { enforceDefaultFollows } = require('../../services/followService');
 const AuthentikService = require('../../services/authentikService');
+const MeilisearchService = require('../../services/meilisearchService');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1942,6 +1943,7 @@ const updateProfile = async (req, res) => {
     );
 
     logger.info(`Profile updated: user ${user.id}`);
+    setImmediate(() => { MeilisearchService.upsertUser(user.id).catch(() => {}); });
     return res.json({ success: true });
   } catch (error) {
     logger.error('Update profile error:', error);

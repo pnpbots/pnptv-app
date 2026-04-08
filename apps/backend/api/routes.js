@@ -4565,6 +4565,40 @@ app.post('/api/admin/social/sync-content', adminGuard, asyncHandler(contentFeedS
 // Users search
 app.get('/api/webapp/users/search', asyncHandler(usersController.searchUsers));
 
+// ── Meilisearch global search ────────────────────────────────────────────────
+const MeilisearchService = require('../services/meilisearchService');
+
+// Multi-entity search (users, creators, posts)
+app.get('/api/webapp/search', requireSessionAuth, asyncHandler(async (req, res) => {
+  const { q = '', limit = 8, indexes } = req.query;
+  if (!q.trim()) return res.json({ success: true, users: [], creators: [], posts: [] });
+  const lim = Math.min(Number(limit) || 8, 20);
+  const indexList = indexes ? String(indexes).split(',').filter(Boolean) : undefined;
+  try {
+    const results = await MeilisearchService.search(q.trim(), { limit: lim, ...(indexList ? { indexes: indexList } : {}) });
+    return res.json({ success: true, ...results });
+  } catch (err) {
+    // Meilisearch unavailable — fall back to PG user search
+    logger.warn('[search] Meilisearch unavailable, falling back to PG', { error: err.message });
+    const escaped = q.trim().replace(/[%_]/g, '\\$&');
+    const { rows } = await query(
+      `SELECT id::text, username, first_name, last_name, photo_file_id, pnptv_id
+       FROM users
+       WHERE is_deleted = false
+         AND (username ILIKE $1 ESCAPE '\\' OR first_name ILIKE $1 ESCAPE '\\' OR pnptv_id ILIKE $1 ESCAPE '\\')
+       ORDER BY first_name ASC LIMIT $2`,
+      [`%${escaped}%`, lim]
+    );
+    return res.json({ success: true, users: rows, creators: [], posts: [] });
+  }
+}));
+
+// Admin: trigger re-index
+app.post('/api/admin/search/reindex', adminGuard, asyncHandler(async (req, res) => {
+  const counts = await MeilisearchService.reindexAll();
+  return res.json({ success: true, counts });
+}));
+
 // ── @Mention autocomplete ────────────────────────────────────────────────────
 const mentionController = require('./controllers/mentionController');
 app.get('/api/webapp/users/mention-search', requireSessionAuth, asyncHandler(mentionController.mentionSearch));

@@ -21,6 +21,7 @@ const CreatorPayoutService = require(path.join(backendPath, 'bot/services/creato
 const SubscriptionReminderEmailService = require(path.join(backendPath, 'services/subscriptionReminderEmailService'));
 const TelegramSubscriptionReminderService = require(path.join(backendPath, 'bot/services/subscriptionReminderService'));
 const NotificationDigestScheduler = require(path.join(backendPath, 'bot/services/notificationDigestScheduler'));
+const MeilisearchService = require(path.join(backendPath, 'services/meilisearchService'));
 
 /**
  * Initialize and start cron jobs
@@ -373,6 +374,26 @@ const startCronJobs = async (bot = null) => {
         await NotificationDigestScheduler.runDigest();
       } catch (error) {
         logger.error('Error in notification digest cron:', error);
+      }
+    });
+
+    // Meilisearch re-index — daily at 2am
+    cron.schedule('0 2 * * *', async () => {
+      try {
+        const counts = await MeilisearchService.reindexAll();
+        logger.info('Meilisearch re-index complete', counts);
+      } catch (error) {
+        logger.warn('Meilisearch re-index failed (non-critical)', { error: error.message });
+      }
+    });
+
+    // Trigger initial index on startup (non-blocking)
+    setImmediate(async () => {
+      try {
+        const counts = await MeilisearchService.reindexAll();
+        logger.info('[Meilisearch] Initial index complete', counts);
+      } catch (err) {
+        logger.warn('[Meilisearch] Initial index failed (non-critical)', { error: err.message });
       }
     });
 

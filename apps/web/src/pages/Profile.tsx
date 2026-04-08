@@ -23,6 +23,8 @@ import {
   unsubscribeFromCreator,
   initiateCreatorSubscriptionPayment,
   searchUsers,
+  searchAll,
+  type GlobalSearchResult,
   getUserLabel,
   getLabelColor,
   assertPaymentUrl,
@@ -186,7 +188,7 @@ export default function Profile() {
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<Array<{ id: string; username: string; first_name: string; last_name: string | null; photo_file_id: string | null; pnptv_id: string }>>([]);
+  const [searchResults, setSearchResults] = useState<GlobalSearchResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -205,9 +207,15 @@ export default function Profile() {
     setSearchOpen(true);
     searchTimerRef.current = setTimeout(async () => {
       try {
-        const res = await searchUsers(value.trim(), 10);
-        if (res.success) setSearchResults(res.users);
-      } catch { /* ignore */ }
+        const res = await searchAll(value.trim(), 8);
+        if (res.success) setSearchResults(res);
+      } catch {
+        // fallback to basic user search
+        try {
+          const res = await searchUsers(value.trim(), 8);
+          if (res.success) setSearchResults({ success: true, users: res.users, creators: [], posts: [] });
+        } catch { /* ignore */ }
+      }
       setSearchLoading(false);
     }, 300);
   }, []);
@@ -797,7 +805,7 @@ export default function Profile() {
             />
             {searchQuery && (
               <button
-                onClick={() => { setSearchQuery(""); setSearchResults([]); setSearchOpen(false); }}
+                onClick={() => { setSearchQuery(""); setSearchResults(null); setSearchOpen(false); }}
                 className="absolute right-3 top-1/2 -translate-y-1/2"
                 style={{ color: "#8E8E93" }}
               >
@@ -819,39 +827,85 @@ export default function Profile() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                 </div>
-              ) : searchResults.length === 0 ? (
+              ) : !searchResults || (searchResults.users.length === 0 && searchResults.creators.length === 0 && searchResults.posts.length === 0) ? (
                 <p className="text-center text-sm py-6" style={{ color: "#8E8E93" }}>{p.noUsersFound}</p>
               ) : (
-                searchResults.map((u) => {
-                  const photo = resolvePhotoUrl(u.photo_file_id);
-                  const initial = (u.first_name || u.username || "?")[0].toUpperCase();
-                  return (
-                    <button
-                      key={u.id}
-                      onClick={() => { setSearchOpen(false); setSearchQuery(""); navigate(`/profile/${u.id}`); }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
-                    >
-                      {photo ? (
-                        <img src={photo} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-                      ) : (
-                        <div
-                          className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                <>
+                  {searchResults.users.length > 0 && (
+                    <>
+                      <p className="px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider" style={{ color: "#8E8E93" }}>People</p>
+                      {searchResults.users.map((u) => {
+                        const photo = resolvePhotoUrl(u.photo_file_id);
+                        const initial = (u.first_name || u.username || "?")[0].toUpperCase();
+                        return (
+                          <button
+                            key={u.id}
+                            onClick={() => { setSearchOpen(false); setSearchQuery(""); setSearchResults(null); navigate(`/profile/${u.id}`); }}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                          >
+                            {photo ? (
+                              <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                            ) : (
+                              <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
+                                {initial}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-white truncate">{u.first_name}{u.last_name ? ` ${u.last_name}` : ""}</p>
+                              {u.username && <p className="text-xs truncate" style={{ color: "#8E8E93" }}>@{u.username}</p>}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </>
+                  )}
+                  {searchResults.creators.length > 0 && (
+                    <>
+                      <p className="px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider" style={{ color: "#8E8E93" }}>Creators</p>
+                      {searchResults.creators.map((c) => {
+                        const photo = c.photo_url ? resolvePhotoUrl(c.photo_url) : null;
+                        const initial = (c.display_name || c.username || "?")[0].toUpperCase();
+                        return (
+                          <button
+                            key={c.id}
+                            onClick={() => { setSearchOpen(false); setSearchQuery(""); setSearchResults(null); navigate(`/profile/${c.user_id}`); }}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                          >
+                            {photo ? (
+                              <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                            ) : (
+                              <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg, #5ED1C4, #D4007A)", color: "#fff" }}>
+                                {initial}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-white truncate">{c.display_name || c.username}</p>
+                              {c.category && <p className="text-xs truncate" style={{ color: "#8E8E93" }}>{c.category}</p>}
+                            </div>
+                            {c.verified && <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>Verified</span>}
+                          </button>
+                        );
+                      })}
+                    </>
+                  )}
+                  {searchResults.posts.length > 0 && (
+                    <>
+                      <p className="px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider" style={{ color: "#8E8E93" }}>Posts</p>
+                      {searchResults.posts.map((post) => (
+                        <button
+                          key={post.id}
+                          onClick={() => { setSearchOpen(false); setSearchQuery(""); setSearchResults(null); navigate(`/profile/${post.author_id}`); }}
+                          className="w-full flex items-start gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
                         >
-                          {initial}
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">
-                          {u.first_name}{u.last_name ? ` ${u.last_name}` : ""}
-                        </p>
-                        {u.username && (
-                          <p className="text-xs truncate" style={{ color: "#8E8E93" }}>@{u.username}</p>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-white/60 mb-0.5">@{post.author_username}</p>
+                            <p className="text-sm text-white truncate">{post.content}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </>
               )}
             </div>
           )}

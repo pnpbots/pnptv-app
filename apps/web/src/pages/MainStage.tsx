@@ -135,10 +135,16 @@ export default function MainStage() {
     try {
       setCallError(null);
       setError("");
-      const hasActive = mainGroup.hasActiveCall;
-      const result = hasActive
-        ? await joinHangoutCall(mainGroup.id)
-        : await startHangoutCall(mainGroup.id);
+      let result;
+      try {
+        result = await joinHangoutCall(mainGroup.id);
+      } catch (joinErr: any) {
+        if (joinErr?.status === 404 || joinErr?.message?.includes('404')) {
+          result = await startHangoutCall(mainGroup.id);
+        } else {
+          throw joinErr;
+        }
+      }
       setCallToken(result.token);
       setCallRoomName(result.roomName);
       setCallLivekitUrl(result.livekitUrl || "wss://livekit.pnptv.app");
