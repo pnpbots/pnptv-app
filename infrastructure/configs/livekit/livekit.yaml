@@ -13,3 +13,7 @@ logging:
 turn:
   enabled: true
   udp_port: 3478
+webhook:
+  api_key: API43c72f0f0e6338a3
+  urls:
+    - https://pnptv.app/api/webhooks/livekit
