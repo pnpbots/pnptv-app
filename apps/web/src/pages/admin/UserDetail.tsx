@@ -370,7 +370,7 @@ export default function UserDetail() {
               type="text"
               value={editForm.username}
               onChange={(e) => handleFormChange("username", e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
             />
           </div>
           <div>
@@ -382,7 +382,7 @@ export default function UserDetail() {
               type="email"
               value={editForm.email}
               onChange={(e) => handleFormChange("email", e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
             />
           </div>
           <div>
@@ -393,7 +393,7 @@ export default function UserDetail() {
               id="edit-sub-status"
               value={editForm.subscriptionStatus}
               onChange={(e) => handleFormChange("subscriptionStatus", e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
             >
               <option value="active">active</option>
               <option value="churned">churned</option>
@@ -408,7 +408,7 @@ export default function UserDetail() {
               id="edit-sub-plan"
               value={editForm.subscriptionPlan}
               onChange={(e) => handleFormChange("subscriptionPlan", e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
             >
               <option value="">— None —</option>
               {plans.map((p) => (
@@ -427,7 +427,7 @@ export default function UserDetail() {
               type="date"
               value={editForm.planExpiry}
               onChange={(e) => handleFormChange("planExpiry", e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
             />
           </div>
           <div>
@@ -438,7 +438,7 @@ export default function UserDetail() {
               id="edit-tier"
               value={editForm.tier}
               onChange={(e) => handleFormChange("tier", e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
             >
               <option value="free">free</option>
               <option value="member">member</option>

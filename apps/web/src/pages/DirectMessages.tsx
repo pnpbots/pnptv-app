@@ -1,11 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
-import { getMessageThreads, markThreadAsRead, toggleDmMessageReaction, type MessageThread } from "@/lib/api";
+import { PermissionGate } from "@/components/PermissionGate";
+import {
+  createDmVideoCall,
+  getMessageThreads,
+  joinDmVideoCall,
+  markThreadAsRead,
+  toggleDmMessageReaction,
+  type DmVideoCallSession,
+  type MessageThread,
+} from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 
@@ -35,6 +44,13 @@ interface DmMessage {
   reactions?: DmReaction[];
 }
 
+interface ParsedDmCallInvite {
+  roomName: string;
+  callerId: string;
+  calleeId: string;
+  url: string;
+}
+
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
 function timeAgo(dateStr: string): string {
@@ -51,6 +67,7 @@ function timeAgo(dateStr: string): string {
 // ─── Emoji data ───────────────────────────────────────────────────────────────
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "😮", "😢"];
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
 const EMOJI_CATEGORIES = [
   { label: "Reactions", emojis: ["👍", "❤️", "😂", "🔥", "😮", "😢", "🙏", "💀", "😍", "🤣", "👀", "💯", "🫡", "🤡", "🥵", "💪"] },
@@ -59,10 +76,59 @@ const EMOJI_CATEGORIES = [
   { label: "Nature", emojis: ["🌈", "🦋", "🌺", "🌸", "🐝", "🦊", "🐺", "🌊", "⚡", "🍄"] },
 ] as const;
 
+function parseDmCallInvite(content: string | null): ParsedDmCallInvite | null {
+  if (!content) return null;
+
+  const urlMatch = content.match(URL_REGEX)?.[0];
+  if (!urlMatch) return null;
+
+  try {
+    const url = new URL(urlMatch);
+    const roomName = url.searchParams.get("call");
+    const callerId = url.searchParams.get("caller");
+    const calleeId = url.searchParams.get("callee");
+
+    if (!roomName || !callerId || !calleeId || url.pathname !== "/dm") {
+      return null;
+    }
+
+    return {
+      roomName,
+      callerId,
+      calleeId,
+      url: url.toString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function renderTextWithLinks(content: string) {
+  const matches = content.match(URL_REGEX) || [];
+  const parts = content.split(URL_REGEX);
+
+  return parts.map((part, idx) => (
+    <React.Fragment key={`${part}-${idx}`}>
+      {part}
+      {matches[idx] && (
+        <a
+          href={matches[idx]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline underline-offset-2 break-all text-white/90"
+        >
+          {matches[idx]}
+        </a>
+      )}
+    </React.Fragment>
+  ));
+}
+
 // ─── Chat View (conversation with a specific user) ──────────────────────────
 
-function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
+function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: string; myUserId: string }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<DmMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
@@ -76,7 +142,10 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [partnerName, setPartnerName] = useState("");
   const [partnerPhoto, setPartnerPhoto] = useState<string | null>(null);
-  const [partnerTelegramId, setPartnerTelegramId] = useState<string | null>(null);
+  const [showPermGate, setShowPermGate] = useState(false);
+  const [pendingCallRoom, setPendingCallRoom] = useState<string | null>(null);
+  const [activeCall, setActiveCall] = useState<DmVideoCallSession | null>(null);
+  const [callBusy, setCallBusy] = useState(false);
 
   // Context menu / emoji picker
   const [contextMenu, setContextMenu] = useState<{ msg: DmMessage; x: number; y: number } | null>(null);
@@ -87,13 +156,43 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const lastTypingEmit = useRef(0);
-  const hasFetched = useRef(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inviteRoomFromQuery = searchParams.get("call");
+
+  const syncCallParams = useCallback((roomName: string, callerId: string, calleeId: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("call", roomName);
+    next.set("caller", callerId);
+    next.set("callee", calleeId);
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const clearCallParams = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("call");
+    next.delete("caller");
+    next.delete("callee");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const copyToClipboard = useCallback(async (value: string) => {
+    if (!navigator.clipboard?.writeText) return false;
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   // Fetch partner info + messages
   useEffect(() => {
-    if (hasFetched.current) return;
-    hasFetched.current = true;
+    setIsLoading(true);
+    setChatError(null);
+    setMessages([]);
+    setHasMore(true);
+    setPartnerName("");
+    setPartnerPhoto(null);
 
     fetch(`${API_BASE}/api/webapp/dm/user/${userId}`, { credentials: "include" })
       .then((r) => r.ok ? r.json() : null)
@@ -101,7 +200,6 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
         if (data?.success && data.user) {
           setPartnerName(data.user.first_name || data.user.username || "User");
           setPartnerPhoto(data.user.photo_file_id || null);
-          setPartnerTelegramId(data.user.telegram || null);
         }
       })
       .catch(() => {});
@@ -126,6 +224,11 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 50);
     }
   }, [isLoading]);
+
+  useEffect(() => {
+    if (!inviteRoomFromQuery || activeCall?.roomName === inviteRoomFromQuery) return;
+    setPendingCallRoom(inviteRoomFromQuery);
+  }, [activeCall?.roomName, inviteRoomFromQuery]);
 
   // Socket.IO real-time
   useEffect(() => {
@@ -215,6 +318,73 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
     lastTypingEmit.current = now;
     connectSocket().emit("dm:typing", { recipientId: userId });
   };
+
+  const beginJoinCall = useCallback((roomName: string, callerId?: string | null, calleeId?: string | null) => {
+    setPendingCallRoom(roomName);
+    if (callerId && calleeId) {
+      syncCallParams(roomName, callerId, calleeId);
+    }
+    setShowPermGate(true);
+  }, [syncCallParams]);
+
+  const handleJoinCall = useCallback(async () => {
+    if (!pendingCallRoom) return;
+
+    setShowPermGate(false);
+    setCallBusy(true);
+    setChatError(null);
+
+    try {
+      const session = await joinDmVideoCall(pendingCallRoom);
+      setActiveCall(session);
+      syncCallParams(session.roomName, session.callerId, session.calleeId);
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Failed to join video call");
+    } finally {
+      setCallBusy(false);
+    }
+  }, [pendingCallRoom, syncCallParams]);
+
+  const handleStartVideoCall = useCallback(async () => {
+    if (callBusy) return;
+
+    setCallBusy(true);
+    setChatError(null);
+
+    try {
+      const invite = await createDmVideoCall(userId);
+      const inviteMessage = `Join my PNPtv video call:\n${invite.callLink}`;
+      const res = await fetch(`${API_BASE}/api/webapp/dm/send/${userId}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: inviteMessage }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.message) {
+          setMessages((prev) => prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]);
+          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+        }
+      }
+
+      await copyToClipboard(invite.callLink);
+      setPendingCallRoom(invite.roomName);
+      syncCallParams(invite.roomName, invite.callerId, invite.calleeId);
+      setShowPermGate(true);
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Failed to start video call");
+    } finally {
+      setCallBusy(false);
+    }
+  }, [callBusy, copyToClipboard, syncCallParams, userId]);
+
+  const closeActiveCall = useCallback(() => {
+    setActiveCall(null);
+    setPendingCallRoom(null);
+    clearCallParams();
+  }, [clearCallParams]);
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() && !mediaFile) return;
@@ -332,6 +502,48 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
 
   const isValidPhoto = (p: string | null | undefined) => p && (p.startsWith("/") || p.startsWith("http"));
 
+  const renderMessageContent = (content: string | null) => {
+    if (!content) return null;
+
+    const callInvite = parseDmCallInvite(content);
+    if (callInvite) {
+      const inviteLabel = content.replace(callInvite.url, "").trim() || "PNPtv video call invite";
+      const inviteActive = activeCall?.roomName === callInvite.roomName;
+      const canJoinInvite =
+        String(myUserId) === String(callInvite.callerId) ||
+        String(myUserId) === String(callInvite.calleeId);
+
+      return (
+        <div className="space-y-2">
+          <div>
+            <p className="font-semibold">{inviteLabel}</p>
+            <p className="text-xs mt-1 text-white/70">Open the call right here in chat.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => beginJoinCall(callInvite.roomName, callInvite.callerId, callInvite.calleeId)}
+              disabled={!canJoinInvite}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white transition-all active:scale-95 disabled:opacity-50"
+              style={{ background: "rgba(255,255,255,0.16)" }}
+            >
+              {inviteActive ? "Return to call" : "Join call"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void copyToClipboard(callInvite.url)}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white/80 border border-white/10 hover:bg-white/5 transition-all active:scale-95"
+            >
+              Copy link
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return <p>{renderTextWithLinks(content)}</p>;
+  };
+
   return (
     <div className="flex flex-col" style={{ height: "calc(100dvh - 3.5rem - 4rem)" }}>
       {/* Header */}
@@ -353,22 +565,52 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
           <p className="text-sm font-bold text-pnp-textPrimary truncate leading-tight">{partnerName || "Conversation"}</p>
           <p className="text-[11px] text-pnp-textSecondary leading-tight">Tap to view profile</p>
         </button>
-        {/* Telegram video call — opens partner's Telegram chat for native video call */}
-        {partnerTelegramId && (
-          <a
-            href={`tg://user?id=${partnerTelegramId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0"
-            title={`Call ${partnerName} on Telegram`}
-            aria-label="Video call on Telegram"
-          >
+        <button
+          type="button"
+          onClick={() => void handleStartVideoCall()}
+          disabled={callBusy}
+          className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0 disabled:opacity-50"
+          title={`Start video call with ${partnerName || "this user"}`}
+          aria-label="Start video call"
+        >
+          {callBusy ? (
+            <svg className="w-5 h-5 animate-spin text-pnp-accent" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+          ) : (
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="#29A8E2" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
             </svg>
-          </a>
-        )}
+          )}
+        </button>
       </div>
+
+      {inviteRoomFromQuery && !activeCall && (
+        <div className="px-3 py-2 border-b border-pnp-border bg-[#101114] flex items-center justify-between gap-3 flex-shrink-0">
+          <div>
+            <p className="text-sm font-semibold text-pnp-textPrimary">Video call invite</p>
+            <p className="text-xs text-pnp-textSecondary">Join the call without leaving this chat.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => beginJoinCall(inviteRoomFromQuery)}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white transition-all active:scale-95"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              Join
+            </button>
+            <button
+              type="button"
+              onClick={clearCallParams}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-pnp-textSecondary border border-white/10 hover:bg-white/5 transition-all active:scale-95"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error banner — dismissible */}
       {chatError && (
@@ -437,7 +679,7 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
                             <MediaMessage mediaUrl={msg.media_url} mediaType={msg.media_type} thumbUrl={msg.media_thumb_url} onExpandImage={(url) => setLightboxUrl(url)} isMe={isMe} />
                           </div>
                         )}
-                        {msg.content && <p>{msg.content}</p>}
+                        {renderMessageContent(msg.content)}
                         <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
                           <span className={`text-[10px] ${isMe ? "text-white/50" : "text-pnp-textSecondary/60"}`}>{timeStr}</span>
                           {msg.edited_at && <span className={`text-[10px] ${isMe ? "text-white/40" : "text-pnp-textSecondary/50"}`}>(edited)</span>}
@@ -634,6 +876,56 @@ function DmChatView({ userId, myDbId }: { userId: string; myDbId: string }) {
         </>
       )}
 
+      {showPermGate && (
+        <PermissionGate
+          onGranted={() => void handleJoinCall()}
+          onCancel={() => setShowPermGate(false)}
+        />
+      )}
+
+      {activeCall && (
+        <div className="fixed inset-0 z-[70] bg-black flex flex-col">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10 bg-[#111216]">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-white truncate">{partnerName || "Video call"}</p>
+              <p className="text-xs text-white/60 truncate">Embedded call link active in this chat</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void copyToClipboard(activeCall.callLink)}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white/80 border border-white/10 hover:bg-white/5 transition-all active:scale-95"
+              >
+                Copy link
+              </button>
+              <a
+                href={activeCall.meetingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white/80 border border-white/10 hover:bg-white/5 transition-all active:scale-95"
+              >
+                Open tab
+              </a>
+              <button
+                type="button"
+                onClick={closeActiveCall}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white transition-all active:scale-95"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+          <iframe
+            src={activeCall.meetingUrl}
+            title={`Video call with ${partnerName || "user"}`}
+            className="flex-1 w-full border-0 bg-black"
+            allow="camera; microphone; fullscreen; display-capture; autoplay; clipboard-read; clipboard-write"
+            referrerPolicy="strict-origin-when-cross-origin"
+          />
+        </div>
+      )}
+
       {/* Lightbox */}
       {lightboxUrl && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center" onClick={() => setLightboxUrl(null)}>
@@ -795,9 +1087,21 @@ function ThreadListView() {
 
 export default function DirectMessages() {
   const { userId } = useParams<{ userId: string }>();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("dm");
   const { dm: t } = useI18n();
+  const inviteCallerId = searchParams.get("caller");
+  const inviteCalleeId = searchParams.get("callee");
+
+  let activeUserId = userId;
+  if (!activeUserId && user?.id && inviteCallerId && inviteCalleeId) {
+    if (String(user.id) === String(inviteCallerId)) {
+      activeUserId = inviteCalleeId;
+    } else if (String(user.id) === String(inviteCalleeId)) {
+      activeUserId = inviteCallerId;
+    }
+  }
 
   return (
     <>
@@ -805,10 +1109,10 @@ export default function DirectMessages() {
         <title>{t.pageTitle || "Messages"} — PNPtv!</title>
         <meta name="description" content={t.pageDescription || "Your direct messages"} />
       </Helmet>
-      {showTutorial && !userId && <TutorialOverlay section="dm" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
+      {showTutorial && !activeUserId && <TutorialOverlay section="dm" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
       <div className="max-w-3xl mx-auto">
-        {userId ? (
-          <DmChatView userId={userId} myDbId={user?.dbId ?? user?.id ?? ""} />
+        {activeUserId ? (
+          <DmChatView userId={activeUserId} myDbId={user?.dbId ?? user?.id ?? ""} myUserId={user?.id ?? ""} />
         ) : (
           <ThreadListView />
         )}

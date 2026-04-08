@@ -86,7 +86,8 @@ export default function ResetPassword() {
               placeholder="New password (min 8 characters)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50"
+              style={{ fontSize: "16px" }}
+              className="w-full px-3 py-2.5 rounded-xl text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50"
             />
             <input
               type="password"
@@ -94,7 +95,8 @@ export default function ResetPassword() {
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-              className="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50"
+              style={{ fontSize: "16px" }}
+              className="w-full px-3 py-2.5 rounded-xl text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50"
             />
             {error && <p className="text-red-400 text-xs">{error}</p>}
             <button

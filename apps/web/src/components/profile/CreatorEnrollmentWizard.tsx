@@ -270,8 +270,8 @@ export default function CreatorEnrollmentWizard({
                   value={paymentAddress}
                   onChange={(e) => setPaymentAddress(e.target.value)}
                   placeholder={paymentMethod === "meru" ? pr.meruPlaceholder : pr.walletPlaceholder}
-                  className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  className="w-full rounded-lg px-3 py-2.5 text-white outline-none"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
                   autoComplete="off"
                 />
               </div>

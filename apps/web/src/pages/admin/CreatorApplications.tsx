@@ -274,7 +274,8 @@ export default function CreatorApplications() {
                             placeholder="Notes (optional)"
                             value={castingNotes[app.id] || ""}
                             onChange={(e) => setCastingNotes((prev) => ({ ...prev, [app.id]: e.target.value }))}
-                            className="w-full bg-white/5 text-white text-xs rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/20"
+                            style={{ fontSize: "16px" }}
+                            className="w-full bg-white/5 text-white rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/20"
                           />
                           <div className="flex gap-2">
                             <button
@@ -464,7 +465,8 @@ export default function CreatorApplications() {
                             onChange={(e) =>
                               setActionNotes((prev) => ({ ...prev, [app.id]: e.target.value }))
                             }
-                            className="w-full bg-white/5 text-white text-xs rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/20"
+                            style={{ fontSize: "16px" }}
+                            className="w-full bg-white/5 text-white rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/20"
                           />
                           <div className="flex gap-2">
                             <button

@@ -11,7 +11,6 @@ import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useHangoutSocket } from "@/hooks/useHangoutSocket";
-import type { WebRtcPeer } from "@/hooks/useHangoutSocket";
 import { useI18n } from "@/lib/i18n";
 import {
   getHangoutGroups,
@@ -40,7 +39,8 @@ import {
   kickGroupMember,
   updateMemberRole,
   getHangoutFeed,
-  getVideoChatStatus,
+  startHangoutCall,
+  joinHangoutCall,
   dropToFeed,
   togglePostLike,
   deleteSocialPost,
@@ -70,6 +70,7 @@ import { EventDetailModal } from "@/components/events";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import { VideoCallButton } from "@/components/hangouts/VideoCallButton";
+import TelegramCallDock from "@/components/hangouts/TelegramCallDock";
 
 type View = "list" | "chat";
 
@@ -79,31 +80,6 @@ function getTelegramDeepLink(inviteLink: string): string {
   // https://t.me/+HASH → tg://join?invite=HASH
   const match = inviteLink.match(/t\.me\/\+(.+)/);
   return match ? `tg://join?invite=${match[1]}` : inviteLink;
-}
-
-// ─── RemotePeerVideo ─────────────────────────────────────────────────────────
-
-function RemotePeerVideo({ peer }: { peer: WebRtcPeer }) {
-  const videoRef = React.useRef<HTMLVideoElement>(null);
-  React.useEffect(() => {
-    if (videoRef.current && peer.stream) {
-      videoRef.current.srcObject = peer.stream;
-    }
-  }, [peer.stream]);
-  return (
-    <div className="relative rounded-xl overflow-hidden bg-black/40 flex items-center justify-center">
-      {peer.stream ? (
-        <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-      ) : (
-        <div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: 'rgba(212,0,122,0.3)' }}>
-          {(peer.displayName || '?')[0].toUpperCase()}
-        </div>
-      )}
-      <span className="absolute bottom-2 left-2 text-[11px] text-white/80 bg-black/40 px-2 py-0.5 rounded-full">
-        {peer.displayName}
-      </span>
-    </div>
-  );
 }
 
 // ─── HangoutChatPanel (PostgreSQL + Socket.IO) ──────────────────────────────
@@ -1004,17 +980,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Group members (loaded on chat open for member management panels)
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
 
-  // Socket hook — presence + socket connection state + WebRTC
+  // Socket hook — presence + socket connection state
   const {
     isConnected,
     onlineMembers,
-    webRtcPeers,
-    localStream,
-    inWebRtcCall,
-    startWebRtcCall,
-    leaveWebRtcCall,
-    toggleMic,
-    toggleCam,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
 
   // Video call / general chat error
@@ -1086,24 +1055,17 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Dedicated error states for non-upload errors
   const [discoverError, setDiscoverError] = useState<string | null>(null);
 
-  // WebRTC mic/cam toggle state + local video element ref
-  const [micEnabled, setMicEnabled] = useState(true);
-  const [camEnabled, setCamEnabled] = useState(true);
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-
-  // Telegram video chat status — driven by Socket.IO events (real-time)
-  const [telegramCallActive, setTelegramCallActive] = useState(false);
-  // Popover for the disabled call button (no telegramChatId)
-  const [showNoTgPopover, setShowNoTgPopover] = useState(false);
-  // Toast shown when user clicks "Start Call"
-  const [showCallToast, setShowCallToast] = useState(false);
-  // Embedded call panel state
+  // LiveKit call panel state
+  const [showTelegramDock, setShowTelegramDock] = useState(false);
+  const [callToken, setCallToken] = useState<string | null>(null);
+  const [callRoomName, setCallRoomName] = useState<string | null>(null);
+  const [callLivekitUrl, setCallLivekitUrl] = useState<string>("wss://livekit.pnptv.app");
   const [callStartedBy, setCallStartedBy] = useState<string | null>(null);
   const [callStartTime, setCallStartTime] = useState<Date | null>(null);
   const [callParticipantCount, setCallParticipantCount] = useState<number>(0);
   const [callPanelDismissed, setCallPanelDismissed] = useState(false);
   const [callDuration, setCallDuration] = useState("0:00");
-  const [callInviteLink, setCallInviteLink] = useState<string | null>(null);
+  const [callError, setCallError] = useState<string | null>(null);
 
   // SpotlightStrip — hangout events
   const [hangoutEvents, setHangoutEvents] = useState<EventItem[]>([]);
@@ -1140,86 +1102,50 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       .catch(() => {});
   }, []);
 
-  // ─── WebRTC call handlers ──────────────────────────────────────────────────
+  // ─── LiveKit call handlers ────────────────────────────────────────────────
   const handleStartCall = useCallback(async () => {
-    if (!activeGroup) return;
-    const displayName = user?.firstName || user?.username || 'User';
+    if (!activeGroup?.id) return;
     try {
-      await startWebRtcCall(displayName);
-      setTelegramCallActive(true);
-      setCallStartTime(new Date());
+      setCallError(null);
+      const hasActive = activeGroup.hasActiveCall;
+      const result = hasActive
+        ? await joinHangoutCall(activeGroup.id)
+        : await startHangoutCall(activeGroup.id);
+      setCallToken(result.token);
+      setCallRoomName(result.roomName);
+      setCallLivekitUrl(result.livekitUrl || "wss://livekit.pnptv.app");
+      setShowTelegramDock(true);
       setCallPanelDismissed(false);
-      setCallStartedBy(displayName);
     } catch {
-      setChatError('Could not access camera/microphone. Please check permissions.');
+      setCallError("Could not connect to the call. Please try again.");
     }
-  }, [activeGroup, startWebRtcCall, user]);
+  }, [activeGroup]);
 
   const handleLeaveCall = useCallback(() => {
-    leaveWebRtcCall();
-    setTelegramCallActive(false);
-    setCallStartTime(null);
-    setCallStartedBy(null);
-    setCallParticipantCount(0);
+    setShowTelegramDock(false);
     setCallPanelDismissed(true);
-    setCallDuration('0:00');
-  }, [leaveWebRtcCall]);
+  }, []);
 
-  // ─── Telegram video chat status — initial fetch on group open ───────────
-  // Polling replaced by real-time Socket.IO events (hangout:call:started/ended).
-  // We still do one fetch on mount to restore state if a call was already active.
-
-  useEffect(() => {
-    // Always reset all call state when switching groups
-    setTelegramCallActive(false);
-    setCallStartTime(null);
-    setCallStartedBy(null);
-    setCallParticipantCount(0);
-    setCallInviteLink(null);
-    setCallPanelDismissed(false);
-    setCallDuration("0:00");
-
-    if (!activeGroup?.id || !activeGroup.telegramChatId) {
-      return;
-    }
-    let cancelled = false;
-    getVideoChatStatus(activeGroup.id)
-      .then((res) => {
-        if (cancelled) return;
-        setTelegramCallActive(res.active);
-        if (res.active) {
-          // We don't know start time from poll; set to now as approximation
-          setCallStartTime(new Date());
-          setCallPanelDismissed(false);
-          if (res.inviteLink) setCallInviteLink(res.inviteLink);
-        }
-      })
-      .catch(() => { /* silent */ });
-    return () => { cancelled = true; };
-  }, [activeGroup?.id, activeGroup?.telegramChatId]);
-
-  // ─── Socket.IO listeners for Telegram video call events ─────────────────
+  // ─── Socket.IO listeners for LiveKit call events ─────────────────────────
   useEffect(() => {
     if (!activeGroup?.id) return;
     const socket = connectSocket();
 
-    const onCallStarted = (data: { groupId: number; startedBy?: { firstName?: string; username?: string }; inviteLink?: string | null }) => {
+    const onCallStarted = (data: { groupId: number; startedBy?: { firstName?: string; username?: string } }) => {
       if (data.groupId !== activeGroup.id) return;
-      setTelegramCallActive(true);
       setCallStartTime(new Date());
       setCallParticipantCount(0);
-      setCallPanelDismissed(false);
       setCallStartedBy(data.startedBy?.firstName || data.startedBy?.username || null);
-      if (data.inviteLink) setCallInviteLink(data.inviteLink);
     };
 
     const onCallEnded = (data: { groupId: number }) => {
       if (data.groupId !== activeGroup.id) return;
-      setTelegramCallActive(false);
+      setShowTelegramDock(false);
+      setCallToken(null);
+      setCallRoomName(null);
       setCallStartTime(null);
       setCallStartedBy(null);
       setCallParticipantCount(0);
-      setCallInviteLink(null);
       setCallDuration("0:00");
     };
 
@@ -1241,33 +1167,26 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
   // ─── Call duration counter ────────────────────────────────────────────────
   useEffect(() => {
-    if (!telegramCallActive || !callStartTime) { setCallDuration("0:00"); return; }
+    if (!callStartTime) { setCallDuration("0:00"); return; }
     const iv = setInterval(() => {
       const secs = Math.floor((Date.now() - callStartTime.getTime()) / 1000);
       const m = Math.floor(secs / 60), s = secs % 60;
       setCallDuration(`${m}:${s.toString().padStart(2, "0")}`);
     }, 1000);
     return () => clearInterval(iv);
-  }, [telegramCallActive, callStartTime]);
-
-  // Attach local stream to video element when it changes
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-    }
-  }, [localStream]);
+  }, [callStartTime]);
 
   // Reset call state when switching groups
   useEffect(() => {
-    setTelegramCallActive(false);
-    setShowNoTgPopover(false);
-    setShowCallToast(false);
+    setShowTelegramDock(false);
+    setCallToken(null);
+    setCallRoomName(null);
     setCallStartedBy(null);
     setCallStartTime(null);
     setCallParticipantCount(0);
     setCallPanelDismissed(false);
     setCallDuration("0:00");
-    setCallInviteLink(null);
+    setCallError(null);
   }, [activeGroup?.id]);
 
   // ─── Global hangout socket events (invite received, feed posts) ──────────
@@ -1296,6 +1215,21 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       socket.off("hangout:feed:new_post", onHangoutFeedPost);
     };
   }, [activeGroup?.id, chatTab, loadGroups]);
+
+  // ─── Discover groups ──────────────────────────────────────────────────
+
+  const loadDiscover = useCallback(async () => {
+    setDiscoverLoading(true);
+    setDiscoverError(null);
+    try {
+      const data = await discoverHangoutGroups();
+      setDiscoverList(data.groups || []);
+    } catch {
+      setDiscoverError("Failed to load groups. Tap to retry.");
+    } finally {
+      setDiscoverLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     setIsLoading(true);
@@ -1347,21 +1281,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setCreating(false);
     }
   };
-
-  // ─── Discover groups ──────────────────────────────────────────────────
-
-  const loadDiscover = useCallback(async () => {
-    setDiscoverLoading(true);
-    setDiscoverError(null);
-    try {
-      const data = await discoverHangoutGroups();
-      setDiscoverList(data.groups || []);
-    } catch {
-      setDiscoverError("Failed to load groups. Tap to retry.");
-    } finally {
-      setDiscoverLoading(false);
-    }
-  }, []);
 
   const handleDiscoverJoin = async (group: DiscoverGroup) => {
     try {
@@ -1608,93 +1527,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
     return (
       <>
-      {/* WebRTC Video Call Overlay — tgcalls-compatible browser WebRTC */}
-      {inWebRtcCall && (
-        <div className="fixed inset-0 z-[100] bg-black flex flex-col" style={{ background: '#1C1C1E' }}>
-          {/* Video grid */}
-          <div className="flex-1 min-h-0 grid gap-1 p-2" style={{
-            gridTemplateColumns: webRtcPeers.length === 0 ? '1fr' : webRtcPeers.length <= 1 ? '1fr 1fr' : 'repeat(2, 1fr)',
-          }}>
-            {/* Local video */}
-            <div className="relative rounded-xl overflow-hidden bg-black/40 flex items-center justify-center">
-              <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-              {!camEnabled && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-                  <div className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: 'rgba(212,0,122,0.3)' }}>
-                    {(user?.firstName || 'Y')[0].toUpperCase()}
-                  </div>
-                </div>
-              )}
-              <span className="absolute bottom-2 left-2 text-[11px] text-white/80 bg-black/40 px-2 py-0.5 rounded-full">You</span>
-            </div>
-
-            {/* Remote peers */}
-            {webRtcPeers.map(peer => (
-              <RemotePeerVideo key={peer.peerId} peer={peer} />
-            ))}
-
-            {/* Waiting state when no peers yet */}
-            {webRtcPeers.length === 0 && (
-              <div className="flex flex-col items-center justify-center text-white/50 gap-3">
-                <div className="w-12 h-12 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" />
-                <p className="text-sm">Waiting for others to join…</p>
-              </div>
-            )}
-          </div>
-
-          {/* Controls bar */}
-          <div className="flex items-center justify-center gap-4 py-4 flex-shrink-0">
-            {/* Mic toggle */}
-            <button
-              onClick={() => { const next = !micEnabled; setMicEnabled(next); toggleMic(next); }}
-              className="w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-90"
-              style={{ background: micEnabled ? 'rgba(255,255,255,0.15)' : 'rgba(255,59,48,0.8)' }}
-              aria-label={micEnabled ? 'Mute microphone' : 'Unmute microphone'}
-            >
-              {micEnabled ? (
-                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                </svg>
-              ) : (
-                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-                </svg>
-              )}
-            </button>
-
-            {/* Camera toggle */}
-            <button
-              onClick={() => { const next = !camEnabled; setCamEnabled(next); toggleCam(next); }}
-              className="w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-90"
-              style={{ background: camEnabled ? 'rgba(255,255,255,0.15)' : 'rgba(255,59,48,0.8)' }}
-              aria-label={camEnabled ? 'Disable camera' : 'Enable camera'}
-            >
-              {camEnabled ? (
-                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              ) : (
-                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 01-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-1.409c.407-.407.659-.97.659-1.591v-9a2.25 2.25 0 00-2.25-2.25h-9c-.621 0-1.184.252-1.591.659" />
-                </svg>
-              )}
-            </button>
-
-            {/* End call */}
-            <button
-              onClick={handleLeaveCall}
-              className="w-16 h-16 rounded-full flex items-center justify-center transition-all active:scale-90"
-              style={{ background: 'linear-gradient(135deg, #FF3B30, #FF2D55)' }}
-              aria-label="End call"
-            >
-              <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="fixed inset-0 lg:left-72 flex flex-col bg-pnp-background z-[30] overflow-hidden chat-overlay-safe">
         {/* Chat header — clean two-section layout: left (nav+info) / right (actions) */}
         <div className="flex items-center px-1.5 sm:px-3 py-1.5 sm:py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
@@ -1758,10 +1590,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
           {/* Right: call + menu — 44px min touch targets */}
           <div className="flex items-center flex-shrink-0">
-            {/* Video call button — WebRTC native */}
+            {/* Video call button — opens LiveKit call panel */}
             <VideoCallButton
-              hasActiveCall={inWebRtcCall || telegramCallActive}
-              participantCount={inWebRtcCall ? webRtcPeers.length + 1 : callParticipantCount}
+              hasActiveCall={showTelegramDock || !!activeGroup?.hasActiveCall}
+              participantCount={callParticipantCount}
               onStartCall={handleStartCall}
               isLoading={false}
             />
@@ -1886,106 +1718,23 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           </div>
         )}
 
-        {/* "Opening Telegram" context toast — shown briefly after Start Call click */}
-        {showCallToast && (
-          <div
-            className="mx-3 mt-2 px-3 py-2 rounded-xl flex items-center gap-2 flex-shrink-0 animate-fade-in-up"
-            style={{ background: "rgba(41,168,226,0.12)", border: "1px solid rgba(41,168,226,0.25)" }}
-          >
-            <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="#29A8E2">
-              <path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" />
-            </svg>
-            <p className="flex-1 text-xs" style={{ color: "#29A8E2" }}>
-              Opening Telegram... tap the 📹 video camera icon in the group to start a call. Others in the group will see a notification to join.
-            </p>
+        {callError && (
+          <div className="mx-3 mt-2 rounded-xl border px-3 py-2 text-xs text-red-300 flex-shrink-0" style={{ background: "rgba(255,59,48,0.08)", borderColor: "rgba(255,59,48,0.2)" }}>
+            {callError}
           </div>
         )}
 
-        {/* Embedded Telegram call panel — shown when a call is live */}
-        {telegramCallActive && !callPanelDismissed && activeGroup?.telegramChatId && (
-          <div
-            className="flex-shrink-0 mx-3 mt-2 rounded-2xl overflow-hidden"
-            style={{ background: "#1a1a2e", border: "1px solid rgba(41,168,226,0.3)", borderLeft: "3px solid #29A8E2" }}
-          >
-            {/* Header row */}
-            <div className="flex items-center gap-2.5 px-3 pt-3 pb-2">
-              {/* Telegram logo SVG */}
-              <svg className="w-7 h-7 flex-shrink-0" viewBox="0 0 36 36" fill="none">
-                <circle cx="18" cy="18" r="18" fill="#29A8E2" />
-                <path d="M27.6 9.4L5.5 17.7c-.8.3-.8 1.1-.1 1.4l5.5 1.7 2.1 6.5c.2.5.7.6 1 .3l3.1-3.1 6.1 4.5c.7.5 1.3.2 1.5-.7l3.3-17.2c.2-.9-.4-1.3-.7-.7z" fill="white" />
-              </svg>
-              {/* LIVE badge with pulsing dot */}
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-widest" style={{ background: "rgba(255,59,48,0.15)", color: "#FF3B30" }}>
-                <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
-                </span>
-                LIVE
-              </span>
-              {/* Heading + duration */}
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-white leading-tight">Video Call Active</p>
-                <p className="text-[10px] font-mono leading-tight" style={{ color: "#29A8E2" }}>{callDuration}</p>
-              </div>
-              {/* Dismiss */}
-              <button
-                onClick={() => setCallPanelDismissed(true)}
-                className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all flex-shrink-0"
-                aria-label="Dismiss call panel"
-                style={{ color: "rgba(255,255,255,0.4)" }}
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Meta row — started by + participant count */}
-            {(callStartedBy || callParticipantCount > 0) && (
-              <div className="flex items-center gap-3 px-3 pb-2">
-                {callStartedBy && (
-                  <p className="text-[11px] text-white/50 truncate">Started by <span className="text-white/70 font-medium">{callStartedBy}</span></p>
-                )}
-                {callParticipantCount > 0 && (
-                  <span className="ml-auto flex-shrink-0 text-[11px] font-medium" style={{ color: "#29A8E2" }}>
-                    {callParticipantCount} in call
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Action buttons */}
-            <div className="flex gap-2 px-3 pb-3">
-              <a
-                href={(() => {
-                  const link = callInviteLink || activeGroup.telegramInviteLink;
-                  return link ? getTelegramDeepLink(link) : `tg://resolve?domain=${String(activeGroup.telegramChatId).replace("-100", "")}`;
-                })()}
-                className="flex-1 min-h-[44px] flex items-center justify-center gap-2 rounded-xl text-sm font-bold transition-all hover:opacity-90 active:scale-95"
-                style={{ background: "#29A8E2", color: "#fff" }}
-                aria-label="Join video call in Telegram app"
-              >
-                <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" />
-                </svg>
-                Join in Telegram
-              </a>
-              <a
-                href="https://web.telegram.org"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 min-h-[44px] flex items-center justify-center gap-1 rounded-xl text-sm font-bold transition-all hover:bg-white/10 active:scale-95"
-                style={{ border: "1px solid rgba(41,168,226,0.5)", color: "#29A8E2" }}
-                aria-label="Join video call in Telegram Web"
-              >
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
-                Join in Browser
-              </a>
-            </div>
-          </div>
-        )}
+        <TelegramCallDock
+          open={showTelegramDock && !callPanelDismissed}
+          onClose={() => { setCallPanelDismissed(true); setShowTelegramDock(false); }}
+          token={callToken}
+          livekitUrl={callLivekitUrl || "wss://livekit.pnptv.app"}
+          roomName={callRoomName}
+          startedBy={callStartedBy}
+          participantCount={callParticipantCount}
+          durationLabel={callDuration}
+          onCallEnded={() => { setShowTelegramDock(false); setCallToken(null); setCallRoomName(null); }}
+        />
 
         {/* Online Members Panel */}
         {showOnline && (
@@ -2397,7 +2146,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                   type="text"
                                   placeholder="Add custom tag..."
                                   maxLength={30}
-                                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 text-[11px] text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent"
+                                  style={{ fontSize: "16px" }}
+                                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 text-white placeholder-pnp-textSecondary outline-none focus:border-pnp-accent"
                                 />
                                 <button
                                   type="submit"

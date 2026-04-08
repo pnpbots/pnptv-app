@@ -806,7 +806,8 @@ export default function Live() {
             placeholder={t.live.dpnsPlaceholder}
             value={dpnsInput}
             onChange={(e) => setDpnsInput(e.target.value)}
-            className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+            style={{ fontSize: "16px" }}
+            className="flex-1 min-w-0 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
           />
           <button onClick={handleSaveDpns} disabled={dpnsSaving} className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium disabled:opacity-50">
             {dpnsSaving ? t.live.saving : t.live.save}

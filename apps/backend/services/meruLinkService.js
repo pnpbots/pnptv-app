@@ -60,10 +60,14 @@ class MeruLinkService {
   /**
    * Get all active/available Meru links for randomizer
    * Excludes used, expired, or invalid links
-   * @param {string} product - Product type (default: 'lifetime-pass')
+   * @param {string} product - Product type
    * @returns {Promise<Array>}
    */
-  async getAvailableLinks(product = 'lifetime-pass') {
+  async getAvailableLinks(product) {
+    if (!product) {
+      logger.error('Product type is required for getAvailableLinks');
+      return [];
+    }
     try {
       const result = await query(
         `SELECT id, code, meru_link, product, status, created_at
@@ -82,10 +86,14 @@ class MeruLinkService {
 
   /**
    * Get a random available link for new users
-   * @param {string} product - Product type (default: 'lifetime-pass')
+   * @param {string} product - Product type
    * @returns {Promise<{code: string, meru_link: string} | null>}
    */
-  async getRandomAvailableLink(product = 'lifetime-pass') {
+  async getRandomAvailableLink(product) {
+    if (!product) {
+      logger.error('Product type is required for getRandomAvailableLink');
+      return null;
+    }
     try {
       const result = await query(
         `SELECT code, meru_link FROM meru_payment_links
@@ -204,11 +212,13 @@ class MeruLinkService {
         `INSERT INTO meru_payment_links (code, meru_link, product, status)
          VALUES ($1, $2, $3, 'active')
          ON CONFLICT (code) DO UPDATE SET
+           meru_link = EXCLUDED.meru_link,
+           product = EXCLUDED.product,
            status = CASE WHEN meru_payment_links.status = 'used' THEN meru_payment_links.status ELSE 'active' END`,
         [meruCode, meruLink, product]
       );
 
-      logger.info('Meru link added to system', { code: meruCode, product });
+      logger.info('Meru link added/updated in system', { code: meruCode, product });
       return true;
     } catch (error) {
       logger.error('Error adding Meru link:', error);

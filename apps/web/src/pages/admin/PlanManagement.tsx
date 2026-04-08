@@ -445,7 +445,7 @@ export default function PlanManagement() {
               value={filters.search}
               onChange={(e) => setFilter("search", e.target.value)}
               placeholder="Search by name or SKU…"
-              className="w-full pl-9 pr-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent transition-colors"
+              className="w-full pl-9 pr-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent transition-colors" style={{ fontSize: "16px" }}
             />
           </div>
 
@@ -572,7 +572,7 @@ export default function PlanManagement() {
                   onChange={(e) => setField("name", e.target.value)}
                   placeholder="e.g. PRIME Monthly"
                   maxLength={100}
-                  className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+                  className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
                 />
               </div>
 
@@ -588,7 +588,7 @@ export default function PlanManagement() {
                     value={form.price}
                     onChange={(e) => setField("price", e.target.value)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+                    className="w-full pl-7 pr-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
                   />
                 </div>
               </div>

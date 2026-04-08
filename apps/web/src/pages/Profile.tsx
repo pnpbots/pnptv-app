@@ -1153,10 +1153,10 @@ export default function Profile() {
           {isOwnProfile ? (
             <>
               {/* Primary actions */}
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setEditOpen(true)}
-                  className="flex-1 py-2 rounded-lg text-sm font-semibold text-white border border-white/20 hover:border-white/40 transition-colors"
+                  className="flex-1 min-w-[100px] min-h-[40px] py-2 rounded-lg text-sm font-semibold text-white border border-white/20 hover:border-white/40 transition-colors"
                 >
                   {p.editProfile}
                 </button>
@@ -1182,6 +1182,19 @@ export default function Profile() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
                         </svg>
                         Studio
+                      </a>
+                      <a
+                        href={import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-80"
+                        style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.15)" }}
+                        title="Manage your booking availability on Cal.com"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Bookings
                       </a>
                     </>
                   );
@@ -1267,12 +1280,12 @@ export default function Profile() {
             </>
           ) : (
             <>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {isAuthenticated && (
                   <button
                     onClick={handleFollow}
                     disabled={followLoading}
-                    className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                    className="flex-1 min-w-[80px] min-h-[40px] py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
                     style={isFollowing
                       ? { background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" }
                       : { background: accentGradient, color: "#fff" }
@@ -1286,7 +1299,7 @@ export default function Profile() {
                 )}
                 <button
                   onClick={() => navigate(`/dm/${profile.id || paramUserId}`)}
-                  className="flex-1 py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors flex items-center justify-center gap-1.5"
+                  className="flex-1 min-w-[80px] min-h-[40px] py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors flex items-center justify-center gap-1.5"
                 >
                   <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -1297,7 +1310,8 @@ export default function Profile() {
                   <button
                     onClick={() => window.open(`https://t.me/${profile.username}`, "_blank")}
                     title="Message on Telegram"
-                    className="p-2 rounded-lg text-white border border-white/20 hover:border-white/40 transition-colors flex items-center justify-center flex-shrink-0"
+                    aria-label="Message on Telegram"
+                    className="min-h-[40px] min-w-[40px] p-2 rounded-lg text-white border border-white/20 hover:border-white/40 transition-colors flex items-center justify-center flex-shrink-0"
                   >
                     <svg
                       className="w-4 h-4 flex-shrink-0"
@@ -1315,7 +1329,7 @@ export default function Profile() {
                     <button
                       onClick={handleSubscribe}
                       disabled={subscribeLoading}
-                      className="flex-1 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                      className="flex-1 min-w-[100px] min-h-[40px] py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
                       style={isSubscribed
                         ? { background: `rgba(${tc.rgb},0.12)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.35)` }
                         : { background: tc.gradient, color: "#fff" }
@@ -1328,7 +1342,7 @@ export default function Profile() {
                 {/* Share profile — icon-only button */}
                 <button
                   onClick={handleShareProfile}
-                  className="flex items-center justify-center w-10 h-10 rounded-lg flex-shrink-0 transition-all"
+                  className="flex items-center justify-center min-w-[40px] min-h-[40px] w-10 h-10 rounded-lg flex-shrink-0 transition-all"
                   style={shareProfileCopied
                     ? { background: "rgba(52,199,89,0.1)", color: "#34C759", border: "1px solid rgba(52,199,89,0.3)" }
                     : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.12)" }
@@ -1349,16 +1363,32 @@ export default function Profile() {
               </div>
               {isPerformer && (
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => setShowBookCall(true)}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
-                    style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                    </svg>
-                    Book a Call
-                  </button>
+                  {/* Cal.com booking — opens creator's booking page on booking.pnptv.app */}
+                  {profile.username ? (
+                    <a
+                      href={`${import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app"}/${profile.username}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
+                      style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      Book a Session
+                    </a>
+                  ) : (
+                    <button
+                      onClick={() => setShowBookCall(true)}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
+                      style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                      </svg>
+                      Book a Call
+                    </button>
+                  )}
                 </div>
               )}
               {/* Block / Unblock — authenticated, other profiles only */}

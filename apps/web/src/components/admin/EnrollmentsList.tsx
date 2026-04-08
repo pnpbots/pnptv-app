@@ -308,7 +308,7 @@ export default function EnrollmentsList() {
                               [enrollment.id]: e.target.value,
                             }))
                           }
-                          className="w-full bg-white/5 text-white text-xs rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/20"
+                          style={{ fontSize: "16px" }} className="w-full bg-white/5 text-white rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/20"
                           disabled={isActioning}
                         />
                         <div className="flex gap-2">

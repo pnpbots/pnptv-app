@@ -628,7 +628,7 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
             onKeyDown={handleKeyDown}
             placeholder="Type a reply... (Ctrl+Enter to send)"
             rows={3}
-            className="flex-1 rounded-xl bg-pnp-surface border border-pnp-border text-pnp-textPrimary text-sm px-3 py-2.5 placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent resize-none"
+            className="flex-1 rounded-xl bg-pnp-surface border border-pnp-border text-pnp-textPrimary px-3 py-2.5 placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent resize-none" style={{ fontSize: "16px" }}
           />
           <button
             onClick={handleSend}

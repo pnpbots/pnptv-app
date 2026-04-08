@@ -291,7 +291,7 @@ export default function AdminNotifications() {
               onChange={(e) => handleChange("title", e.target.value)}
               maxLength={TITLE_MAX}
               placeholder={n.titlePlaceholder}
-              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent ${focusRing}`}
+              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent ${focusRing}`} style={{ fontSize: "16px" }}
             />
           </div>
 
@@ -310,7 +310,7 @@ export default function AdminNotifications() {
               rows={3}
               maxLength={BODY_MAX}
               placeholder={n.bodyPlaceholder}
-              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent resize-none ${focusRing}`}
+              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent resize-none ${focusRing}`} style={{ fontSize: "16px" }}
             />
             <p className="text-xs text-pnp-textSecondary mt-1 text-right">
               {form.body.length}/{BODY_MAX}
@@ -331,7 +331,7 @@ export default function AdminNotifications() {
               value={form.url}
               onChange={(e) => handleChange("url", e.target.value)}
               placeholder={n.urlPlaceholder}
-              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent ${focusRing}`}
+              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent ${focusRing}`} style={{ fontSize: "16px" }}
             />
           </div>
 
@@ -347,7 +347,7 @@ export default function AdminNotifications() {
               id="notif-type"
               value={form.targetType}
               onChange={(e) => handleChange("targetType", e.target.value as TargetType)}
-              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent ${focusRing}`}
+              className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent ${focusRing}`} style={{ fontSize: "16px" }}
             >
               <option value="all">{n.targetAll}</option>
               <option value="tier">{n.targetTier}</option>
@@ -368,7 +368,7 @@ export default function AdminNotifications() {
                 id="notif-tier"
                 value={form.tier}
                 onChange={(e) => handleChange("tier", e.target.value)}
-                className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent ${focusRing}`}
+                className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent ${focusRing}`} style={{ fontSize: "16px" }}
               >
                 <option value="free">free</option>
                 <option value="member">member</option>
@@ -392,7 +392,7 @@ export default function AdminNotifications() {
                 onChange={(e) => handleChange("userIdsRaw", e.target.value)}
                 rows={3}
                 placeholder={n.userIdsPlaceholder}
-                className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent resize-none font-mono ${focusRing}`}
+                className={`w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent resize-none font-mono ${focusRing}`} style={{ fontSize: "16px" }}
               />
               {form.userIdsRaw.trim() && (
                 <div className="mt-2 flex flex-wrap gap-1.5">

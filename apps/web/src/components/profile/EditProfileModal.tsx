@@ -197,7 +197,8 @@ export default function EditProfileModal({
                   onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, "").slice(0, 30))}
                   placeholder="your_username"
                   maxLength={30}
-                  className="w-full rounded-lg border border-yellow-400/30 bg-white/10 text-pnp-textPrimary text-sm pl-7 pr-3 py-2 outline-none focus:border-yellow-400/60 placeholder:text-white/30"
+                  className="w-full rounded-lg border border-yellow-400/30 bg-white/10 text-pnp-textPrimary pl-7 pr-3 py-2 outline-none focus:border-yellow-400/60 placeholder:text-white/30"
+                style={{ fontSize: "16px" }}
                 />
               </div>
               <p className="text-[10px] text-pnp-textSecondary/50 mt-1">Letters, numbers and underscores only · 3–30 characters · cannot be changed later</p>
@@ -229,7 +230,8 @@ export default function EditProfileModal({
             value={bio}
             onChange={(e) => setBio(e.target.value.slice(0, 160))}
             placeholder={p.bioPlaceholder}
-            className="w-full rounded-lg border border-white/20 bg-white/10 text-pnp-textPrimary text-sm p-3 resize-none outline-none focus:border-pnp-accent placeholder:text-white/50"
+            className="w-full rounded-lg border border-white/20 bg-white/10 text-pnp-textPrimary p-3 resize-none outline-none focus:border-pnp-accent placeholder:text-white/50"
+            style={{ fontSize: "16px" }}
             rows={3}
           />
           <span className="text-xs text-pnp-textSecondary float-right">{bio.length}/160</span>
@@ -254,7 +256,8 @@ export default function EditProfileModal({
               value={dob}
               onChange={(e) => setDob(e.target.value)}
               max={dobMax}
-              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+              style={{ fontSize: "16px" }}
             />
             <button
               type="button"
@@ -286,7 +289,8 @@ export default function EditProfileModal({
               value={city}
               onChange={(e) => setCity(e.target.value)}
               maxLength={100}
-              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary/40 focus:outline-none focus:border-pnp-accent"
+              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-pnp-textPrimary placeholder-pnp-textSecondary/40 focus:outline-none focus:border-pnp-accent"
+              style={{ fontSize: "16px" }}
             />
             <input
               type="text"
@@ -294,7 +298,8 @@ export default function EditProfileModal({
               value={country}
               onChange={(e) => setCountry(e.target.value)}
               maxLength={100}
-              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary/40 focus:outline-none focus:border-pnp-accent"
+              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-pnp-textPrimary placeholder-pnp-textSecondary/40 focus:outline-none focus:border-pnp-accent"
+              style={{ fontSize: "16px" }}
             />
             <button
               type="button"
@@ -324,7 +329,8 @@ export default function EditProfileModal({
               onChange={(e) => setXHandle(e.target.value.replace(/^@/, "").replace(/\s/g, "").slice(0, 50))}
               placeholder="your_x_handle"
               maxLength={50}
-              className="w-full rounded-lg border border-white/20 bg-white/10 text-pnp-textPrimary text-sm pl-7 pr-3 py-2 outline-none focus:border-pnp-accent placeholder:text-white/40"
+              className="w-full rounded-lg border border-white/20 bg-white/10 text-pnp-textPrimary pl-7 pr-3 py-2 outline-none focus:border-pnp-accent placeholder:text-white/40"
+              style={{ fontSize: "16px" }}
             />
           </div>
           <p className="text-[10px] text-pnp-textSecondary/50 mt-1">Your X handle for cross-posting and profile display</p>

@@ -121,7 +121,8 @@ export default function IdentityConnections({ telegramUsername }: IdentityConnec
                       value={emailInput}
                       onChange={(e) => setEmailInput(e.target.value)}
                       placeholder="email@example.com"
-                      className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-pink-500"
+                      style={{ fontSize: "16px" }}
+                      className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-white outline-none focus:border-pink-500"
                     />
                     <button
                       onClick={handleRecover}

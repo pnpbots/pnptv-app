@@ -423,6 +423,32 @@ export default function Subscribe() {
     );
   }
 
+  // Newsletter opt-in state (shown after payment success)
+  const [newsletterDismissed, setNewsletterDismissed] = useState(() => {
+    try { return localStorage.getItem("pnp_newsletter_dismissed") === "1"; } catch { return false; }
+  });
+  const [newsletterSubscribed, setNewsletterSubscribed] = useState(false);
+  const [newsletterLoading, setNewsletterLoading] = useState(false);
+
+  const handleNewsletterSubscribe = useCallback(async () => {
+    if (!user?.email) return;
+    setNewsletterLoading(true);
+    try {
+      await fetch("/api/newsletter/subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: user.email, list_ids: [1], name: user.firstName || undefined }),
+      });
+      setNewsletterSubscribed(true);
+    } catch { /* silent */ }
+    finally { setNewsletterLoading(false); }
+  }, [user]);
+
+  const handleNewsletterDismiss = useCallback(() => {
+    try { localStorage.setItem("pnp_newsletter_dismissed", "1"); } catch { /* noop */ }
+    setNewsletterDismissed(true);
+  }, []);
+
   // Payment success state
   if (paymentSuccess) {
     return (
@@ -437,6 +463,31 @@ export default function Subscribe() {
           <p className="text-pnp-textSecondary mb-4 text-sm">
             {s.subscriptionNowActive}
           </p>
+
+          {/* Newsletter opt-in */}
+          {!newsletterDismissed && !newsletterSubscribed && user?.email && (
+            <div className="mb-4 p-3 rounded-xl text-left" style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.2)" }}>
+              <p className="text-xs font-semibold text-pnp-textPrimary mb-0.5">Stay in the loop</p>
+              <p className="text-xs text-pnp-textSecondary mb-2">Get PNPtv! news, creator drops, and exclusive offers in your inbox.</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleNewsletterSubscribe}
+                  disabled={newsletterLoading}
+                  className="flex-1 py-1.5 rounded-lg text-xs font-semibold text-white transition-all disabled:opacity-50"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {newsletterLoading ? "..." : "Subscribe"}
+                </button>
+                <button onClick={handleNewsletterDismiss} className="py-1.5 px-3 rounded-lg text-xs text-pnp-textSecondary hover:text-white/70 transition-colors">
+                  No thanks
+                </button>
+              </div>
+            </div>
+          )}
+          {newsletterSubscribed && (
+            <p className="text-xs text-green-400 mb-4">You're subscribed to the PNPtv! newsletter.</p>
+          )}
+
           <button
             onClick={() => navigate("/welcome")}
             className="btn-gradient px-6 py-2.5 rounded-xl text-white font-medium"
@@ -926,7 +977,8 @@ export default function Subscribe() {
           onChange={(e) => { setMeruEmail(e.target.value); setMeruError(null); }}
           placeholder={s.emailPlaceholder}
           disabled={meruSubmitting}
-          className="w-full rounded-xl px-4 py-2.5 mb-2 bg-white/5 border border-white/10 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors disabled:opacity-50"
+          className="w-full rounded-xl px-4 py-2.5 mb-2 bg-white/5 border border-white/10 text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors disabled:opacity-50"
+          style={{ fontSize: "16px" }}
         />
         <div className="flex gap-2">
           <input
@@ -935,7 +987,8 @@ export default function Subscribe() {
             onChange={(e) => { setMeruCode(e.target.value); setMeruError(null); }}
             placeholder={s.meruCodePlaceholder}
             disabled={meruSubmitting}
-            className="flex-1 rounded-xl px-4 py-2.5 bg-white/5 border border-white/10 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors disabled:opacity-50"
+            className="flex-1 rounded-xl px-4 py-2.5 bg-white/5 border border-white/10 text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors disabled:opacity-50"
+            style={{ fontSize: "16px" }}
           />
           <button
             onClick={handleMeruActivate}

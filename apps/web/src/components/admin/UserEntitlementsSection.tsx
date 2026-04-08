@@ -180,7 +180,7 @@ function ExtendForm({ addOnId, addOnName, userId, onDone, onCancel }: ExtendForm
             min={1}
             value={days}
             onChange={(e) => { setDays(e.target.value); setErr(null); }}
-            className="w-24 px-3 py-2 rounded-lg border border-pnp-border bg-pnp-surface text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+            style={{ fontSize: "16px" }} className="w-24 px-3 py-2 rounded-lg border border-pnp-border bg-pnp-surface text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
           />
         </div>
         <div className="flex-1 min-w-0">
@@ -193,7 +193,7 @@ function ExtendForm({ addOnId, addOnName, userId, onDone, onCancel }: ExtendForm
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="e.g. customer request"
-            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-surface text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+            style={{ fontSize: "16px" }} className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-surface text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
           />
         </div>
       </div>
@@ -287,7 +287,7 @@ function GrantEntitlementForm({ userId, availableAddOns, onGranted }: GrantFormP
             id="grant-addon"
             value={selectedAddOnId}
             onChange={(e) => { setSelectedAddOnId(e.target.value); setErr(null); setSuccessMsg(null); }}
-            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+            style={{ fontSize: "16px" }} className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
           >
             <option value="">— Select add-on —</option>
             {availableAddOns.map((a) => (
@@ -308,7 +308,7 @@ function GrantEntitlementForm({ userId, availableAddOns, onGranted }: GrantFormP
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="e.g. promo, manual fix"
-            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+            style={{ fontSize: "16px" }} className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
           />
         </div>
       </div>

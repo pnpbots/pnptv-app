@@ -341,10 +341,11 @@ function AwardForm({ allBadges, lang }: { allBadges: GamificationBadge[]; lang: 
             value={form.telegramId}
             onChange={(e) => setField("telegramId", e.target.value)}
             placeholder={g.telegramIdPlaceholder}
-            className="w-full rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none transition-colors"
+            className="w-full rounded-lg px-3 py-2.5 text-white placeholder:text-white/25 outline-none transition-colors"
             style={{
               background: "rgba(255,255,255,0.06)",
               border: "1px solid rgba(255,255,255,0.1)",
+              fontSize: "16px",
             }}
             disabled={form.submitting}
             aria-required="true"
@@ -362,10 +363,11 @@ function AwardForm({ allBadges, lang }: { allBadges: GamificationBadge[]; lang: 
             id="award-badge-slug"
             value={form.badgeSlug}
             onChange={(e) => setField("badgeSlug", e.target.value)}
-            className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none transition-colors appearance-none"
+            className="w-full rounded-lg px-3 py-2.5 text-white outline-none transition-colors appearance-none"
             style={{
               background: "rgba(255,255,255,0.06)",
               border: "1px solid rgba(255,255,255,0.1)",
+              fontSize: "16px",
             }}
             disabled={form.submitting}
             aria-required="true"

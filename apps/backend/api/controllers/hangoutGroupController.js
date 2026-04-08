@@ -2040,7 +2040,152 @@ module.exports = {
   linkTelegramGroup,
   unlinkTelegramGroup,
   getVideoChatStatus,
+  startCall,
+  joinCall,
+  endCall,
 };
+
+// ── LiveKit video calls ──────────────────────────────────────────────────────
+
+const livekitService = require('../../services/livekitService');
+
+// POST /api/webapp/hangouts/groups/:id/call/start
+async function startCall(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    const member = await isMember(groupId, user.id);
+    if (!member) return res.status(403).json({ error: 'Not a member of this group' });
+
+    const roomName = `hangout-${groupId}`;
+
+    // If an active call already exists, join it instead of creating a new one
+    const { rows: existing } = await query(
+      `SELECT id, room_name FROM hangout_video_calls WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
+      [groupId]
+    );
+
+    if (existing.length > 0) {
+      const activeRoomName = existing[0].room_name;
+      const displayName = user.firstName || user.first_name || user.username || 'User';
+      const token = await livekitService.generateToken(activeRoomName, String(user.id), displayName, false);
+      await query(
+        `UPDATE hangout_video_calls SET participant_count = participant_count + 1 WHERE id=$1`,
+        [existing[0].id]
+      );
+      return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName: activeRoomName });
+    }
+
+    // Create a new call record
+    const { rows: created } = await query(
+      `INSERT INTO hangout_video_calls (group_id, creator_id, room_name, status, jaas_room_name, jitsi_domain, participant_count)
+       VALUES ($1, $2, $3, 'active', NULL, 'livekit.pnptv.app', 1)
+       RETURNING id`,
+      [groupId, user.id, roomName]
+    );
+
+    const displayName = user.firstName || user.first_name || user.username || 'User';
+    const token = await livekitService.generateToken(roomName, String(user.id), displayName, true);
+
+    // Notify everyone in the hangout room
+    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+    if (io) {
+      io.to(`hangout:${groupId}`).emit('hangout:call:started', {
+        groupId,
+        callId: created[0].id,
+        startedBy: { firstName: user.firstName || user.first_name, username: user.username },
+      });
+    }
+
+    logger.info(`startCall: group=${groupId} call=${created[0].id} user=${user.id}`);
+    return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName });
+  } catch (err) {
+    logger.error('startCall error', err);
+    return res.status(500).json({ error: 'Failed to start call' });
+  }
+}
+
+// POST /api/webapp/hangouts/groups/:id/call/join
+async function joinCall(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    const member = await isMember(groupId, user.id);
+    if (!member) return res.status(403).json({ error: 'Not a member of this group' });
+
+    const { rows } = await query(
+      `SELECT id, room_name FROM hangout_video_calls WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
+      [groupId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'No active call for this group' });
+
+    const { id: callId, room_name: roomName } = rows[0];
+    const displayName = user.firstName || user.first_name || user.username || 'User';
+    const token = await livekitService.generateToken(roomName, String(user.id), displayName, false);
+
+    await query(
+      `UPDATE hangout_video_calls SET participant_count = participant_count + 1 WHERE id=$1`,
+      [callId]
+    );
+
+    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+    if (io) {
+      io.to(`hangout:${groupId}`).emit('hangout:call:participant-joined', {
+        groupId,
+        callId,
+        user: { id: user.id, firstName: user.firstName || user.first_name, username: user.username },
+      });
+    }
+
+    return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName });
+  } catch (err) {
+    logger.error('joinCall error', err);
+    return res.status(500).json({ error: 'Failed to join call' });
+  }
+}
+
+// POST /api/webapp/hangouts/groups/:id/call/end
+async function endCall(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    const isAdminRole = (user.role || '').toLowerCase() === 'admin' || (user.role || '').toLowerCase() === 'superadmin';
+
+    // Fetch the active call to verify ownership
+    const { rows } = await query(
+      `SELECT id, creator_id FROM hangout_video_calls WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
+      [groupId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'No active call to end' });
+
+    const { id: callId, creator_id } = rows[0];
+    if (!isAdminRole && String(creator_id) !== String(user.id)) {
+      return res.status(403).json({ error: 'Only the call creator or an admin can end the call' });
+    }
+
+    await query(
+      `UPDATE hangout_video_calls SET status='ended', ended_at=NOW(), ended_by=$1 WHERE id=$2`,
+      [user.id, callId]
+    );
+
+    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+    if (io) {
+      io.to(`hangout:${groupId}`).emit('hangout:call:ended', { groupId, callId });
+    }
+
+    logger.info(`endCall: group=${groupId} call=${callId} endedBy=${user.id}`);
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('endCall error', err);
+    return res.status(500).json({ error: 'Failed to end call' });
+  }
+}
 
 // POST /api/webapp/hangouts/groups/:id/link-telegram
 async function linkTelegramGroup(req, res) {

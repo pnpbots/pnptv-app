@@ -104,6 +104,30 @@ volumes:
       type: none
       o: bind
       device: /opt/pnptvapp/infrastructure/data/btcpay/postgres
+  vol_pg_listmonk:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/pnptvapp/infrastructure/data/listmonk/postgres
+  vol_pg_fider:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/pnptvapp/infrastructure/data/fider/postgres
+  vol_pg_infisical:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/pnptvapp/infrastructure/data/infisical/postgres
+  vol_pg_hoppscotch:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/pnptvapp/infrastructure/data/hoppscotch/postgres
 
 services:
 
@@ -158,37 +182,53 @@ services:
       start_period: 10s
 
   # ===========================================
-  # BLOCK 0.5 - Turborepo Remote Cache
-  # Internal-only build artifact cache server.
-  # Docker builds reach it at http://turbo-cache:3000
-  # Host-side turbo commands reach it at http://127.0.0.1:3333
-  # Token auth enforced via TURBO_TOKEN env var.
+  # BLOCK 0.1 - Docker Socket Proxy (RW)
+  # Write-access proxy for Dockge stack manager.
+  # POST/DELETE enabled — scoped to Dockge only.
+  # Never expose to internet-facing services.
   # ===========================================
 
-  turbo-cache:
-    image: ducktors/turborepo-remote-cache:latest
-    container_name: turbo-cache
+  docker-socket-proxy-rw:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: docker-socket-proxy-rw
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:3333:3000"  # Host-side turbo CLI access — localhost only
-    environment:
-      TURBO_TOKEN: ${TURBO_CACHE_TOKEN}
-      STORAGE_PROVIDER: local
-      STORAGE_PATH: /cache
+    privileged: false
     volumes:
-      - ./infrastructure/data/turbo-cache:/cache
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # Read operations
+      CONTAINERS: 1
+      SERVICES: 1
+      TASKS: 1
+      NETWORKS: 1
+      INFO: 1
+      VERSION: 1
+      EVENTS: 1
+      IMAGES: 1
+      VOLUMES: 1
+      # Write operations — required for Dockge compose management
+      POST: 1
+      DELETE: 1
+      # Dangerous operations — disabled
+      BUILD: 0
+      COMMIT: 0
+      EXEC: 0
+      AUTH: 0
+      SECRETS: 0
+      SWARM: 0
+      NODES: 0
+      PLUGINS: 0
+      SYSTEM: 0
+      DISTRIBUTION: 0
     networks:
       - pnptvapp_net
     deploy:
       resources:
         limits:
           cpus: '0.25'
-          memory: 256m
-        reservations:
-          cpus: '0.05'
-          memory: 64m
+          memory: 128m
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/v8/artifacts/status || exit 1"]
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:2375/version || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -1046,6 +1086,135 @@ services:
   # Self-hosted payment processor for Dash
   # ===========================================
 
+  # ===========================================
+  # BLOCK L - Newsletter (Listmonk)
+  # Self-hosted email campaigns & mailing lists
+  # Admin UI at newsletter.pnptv.app
+  # Public subscription API proxied via nginx
+  # ===========================================
+
+  pg-listmonk:
+    image: postgres:16-alpine
+    container_name: pg-listmonk
+    restart: unless-stopped
+    volumes:
+      - vol_pg_listmonk:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: listmonk_db
+      POSTGRES_USER: listmonk_user
+      POSTGRES_PASSWORD: ${PG_LISTMONK_PASSWORD}
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U listmonk_user -d listmonk_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  listmonk:
+    image: listmonk/listmonk:latest
+    container_name: listmonk
+    restart: unless-stopped
+    depends_on:
+      pg-listmonk:
+        condition: service_healthy
+    environment:
+      LISTMONK_app__address: "0.0.0.0:9000"
+      LISTMONK_db__host: pg-listmonk
+      LISTMONK_db__port: "5432"
+      LISTMONK_db__user: listmonk_user
+      LISTMONK_db__password: ${PG_LISTMONK_PASSWORD}
+      LISTMONK_db__database: listmonk_db
+      LISTMONK_db__ssl_mode: disable
+      LISTMONK_app__admin_username: admin
+      LISTMONK_app__admin_password: ${LISTMONK_ADMIN_PASSWORD}
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+        reservations:
+          cpus: '0.05'
+          memory: 64m
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ===========================================
+  # BLOCK M - Community Feedback (Fider)
+  # Self-hosted feature voting & feedback board
+  # Exposed at feedback.pnptv.app
+  # Embedded as iframe in /support page
+  # ===========================================
+
+  pg-fider:
+    image: postgres:16-alpine
+    container_name: pg-fider
+    restart: unless-stopped
+    volumes:
+      - vol_pg_fider:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: fider_db
+      POSTGRES_USER: fider_user
+      POSTGRES_PASSWORD: ${PG_FIDER_PASSWORD}
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fider_user -d fider_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  fider:
+    image: getfider/fider:stable
+    container_name: fider
+    restart: unless-stopped
+    depends_on:
+      pg-fider:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://fider_user:${PG_FIDER_PASSWORD}@pg-fider:5432/fider_db?sslmode=disable
+      JWT_SECRET: ${FIDER_JWT_SECRET}
+      EMAIL_NOREPLY: support@pnptv.app
+      EMAIL_SMTP_HOST: smtp.hostinger.com
+      EMAIL_SMTP_PORT: "587"
+      EMAIL_SMTP_USERNAME: support@pnptv.app
+      EMAIL_SMTP_PASSWORD: ${FIDER_SMTP_PASSWORD}
+      BASE_URL: https://feedback.pnptv.app
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+        reservations:
+          cpus: '0.05'
+          memory: 64m
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
   pg-btcpay:
     image: postgres:16-alpine
     container_name: pg-btcpay
@@ -1151,3 +1320,276 @@ services:
           cpus: '1.0'
           memory: 1g
     # No healthcheck — BTCPay .NET runtime image has no curl/wget
+
+  # ===========================================
+  # BLOCK Z — Developer Tooling
+  # All tools are localhost-only (127.0.0.1).
+  # Access via SSH tunnel or npm-proxy + Authentik.
+  # ===========================================
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8282:8080"
+    environment:
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+    networks:
+      - pnptvapp_net
+    depends_on:
+      - docker-socket-proxy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128m
+    # No healthcheck — dozzle uses a distroless image (no shell/wget/curl)
+
+  dockge:
+    image: louislam/dockge:1
+    container_name: dockge
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5001"
+    volumes:
+      - ./infrastructure/data/dockge/data:/app/data
+      - ./infrastructure/data/dockge/stacks:/opt/stacks
+    environment:
+      DOCKGE_STACKS_DIR: /opt/stacks
+      DOCKER_HOST: tcp://docker-socket-proxy-rw:2375
+    networks:
+      - pnptvapp_net
+    depends_on:
+      - docker-socket-proxy-rw
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5001 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  pgweb:
+    image: sosedoff/pgweb:latest
+    container_name: pgweb
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5050:8081"
+    environment:
+      PGWEB_DATABASE_URL: ${PGWEB_DB_URL}
+    networks:
+      - pnptvapp_net
+    depends_on:
+      - pg-pnptv
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  databasus:
+    image: databasus/databasus:latest
+    container_name: databasus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8383:4005"
+    environment:
+      DB_HOST: pg-pnptv
+      DB_PORT: 5432
+      DB_USER: ${PG_PNPTV_USER}
+      DB_PASSWORD: ${PG_PNPTV_PASSWORD}
+      DB_NAME: ${PG_PNPTV_DB}
+    volumes:
+      - ./infrastructure/data/databasus:/backups
+    networks:
+      - pnptvapp_net
+    depends_on:
+      - pg-pnptv
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+
+  pg-infisical:
+    image: postgres:16-alpine
+    container_name: pg-infisical
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_INFISICAL_USER}
+      POSTGRES_PASSWORD: ${PG_INFISICAL_PASSWORD}
+      POSTGRES_DB: ${PG_INFISICAL_DB}
+    volumes:
+      - vol_pg_infisical:/var/lib/postgresql/data
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_INFISICAL_USER} -d ${PG_INFISICAL_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  infisical:
+    image: infisical/infisical:latest
+    container_name: infisical
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8200:8080"
+    environment:
+      DB_CONNECTION_URI: "postgres://${PG_INFISICAL_USER}:${PG_INFISICAL_PASSWORD}@pg-infisical:5432/${PG_INFISICAL_DB}"
+      REDIS_URL: "redis://:${REDIS_PNPTV_PASSWORD}@redis-pnptv:6379/3"
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET}
+      SITE_URL: http://127.0.0.1:8200
+      NODE_ENV: production
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-infisical:
+        condition: service_healthy
+      redis-pnptv:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  pg-hoppscotch:
+    image: postgres:16-alpine
+    container_name: pg-hoppscotch
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_HOPPSCOTCH_USER}
+      POSTGRES_PASSWORD: ${PG_HOPPSCOTCH_PASSWORD}
+      POSTGRES_DB: ${PG_HOPPSCOTCH_DB}
+    volumes:
+      - vol_pg_hoppscotch:/var/lib/postgresql/data
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_HOPPSCOTCH_USER} -d ${PG_HOPPSCOTCH_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  hoppscotch:
+    image: hoppscotch/hoppscotch:latest
+    container_name: hoppscotch
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3100:3100"
+      - "127.0.0.1:3170:3170"
+    environment:
+      DATABASE_URL: "postgresql://${PG_HOPPSCOTCH_USER}:${PG_HOPPSCOTCH_PASSWORD}@pg-hoppscotch:5432/${PG_HOPPSCOTCH_DB}"
+      JWT_SECRET: ${HOPPSCOTCH_JWT_SECRET}
+      TOKEN_SALT_COMPLEXITY: 10
+      MAGIC_LINK_TOKEN_VALIDITY: 3
+      REFRESH_TOKEN_VALIDITY: "604800000ms"
+      ACCESS_TOKEN_VALIDITY: "86400000ms"
+      SESSION_SECRET: ${HOPPSCOTCH_SESSION_SECRET}
+      ALLOW_SECURE_COOKIES: "false"
+      VITE_ALLOWED_AUTH_PROVIDERS: "EMAIL"
+      VITE_BASE_URL: "http://127.0.0.1:3100"
+      VITE_SHORTCODE_BASE_URL: "http://127.0.0.1:3100"
+      VITE_BACKEND_GQL_URL: "http://127.0.0.1:3100/backend/graphql"
+      VITE_BACKEND_WS_URL: "ws://127.0.0.1:3100/backend/graphql"
+      VITE_BACKEND_API_URL: "http://127.0.0.1:3100/backend/v1"
+      VITE_APP_TOS_LINK: "https://docs.hoppscotch.io/legal/terms"
+      VITE_APP_PRIVACY_POLICY_LINK: "https://docs.hoppscotch.io/legal/privacy"
+      MAILER_SMTP_ENABLE: "true"
+      MAILER_USE_CUSTOM_CONFIGS: "true"
+      MAILER_ADDRESS_FROM: '"PNPtv Tools" <support@pnptv.app>'
+      MAILER_SMTP_HOST: "smtp.hostinger.com"
+      MAILER_SMTP_PORT: 587
+      MAILER_SMTP_SECURE: "false"
+      MAILER_SMTP_USER: "support@pnptv.app"
+      MAILER_SMTP_PASSWORD: "Apelo801050)"
+      RATE_LIMIT_TTL: 60
+      RATE_LIMIT_MAX: 100
+      WHITELISTED_ORIGINS: "http://127.0.0.1:3100,http://localhost:3100"
+      DATA_ENCRYPTION_KEY: ${HOPPSCOTCH_DATA_ENCRYPTION_KEY}
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-hoppscotch:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512m
+
+  it-tools:
+    image: corentinth/it-tools:latest
+    container_name: it-tools
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8086:80"
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.7
+    container_name: meilisearch
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7700:7700"
+    environment:
+      MEILI_MASTER_KEY: ${MEILISEARCH_MASTER_KEY}
+      MEILI_ENV: production
+    volumes:
+      - ./infrastructure/data/meilisearch:/meili_data
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7700/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

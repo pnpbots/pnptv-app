@@ -1,10 +1,14 @@
 'use strict';
 
+const { randomUUID } = require('crypto');
 const XAutoCampaignService = require('../../services/xAutoCampaignService');
 const XPostService = require('../../services/xPostService');
 const logger = require('../../../utils/logger');
 
 const ITEMS_PER_PAGE = 20;
+
+// In-memory tracking for background post-deletion jobs (admin-only, low-volume)
+const deleteJobs = new Map();
 
 const getStats = async (req, res) => {
   try {
@@ -285,6 +289,76 @@ const duplicateCampaign = async (req, res) => {
   }
 };
 
+const VALID_DELETE_RANGES = new Set(['24h', '7d', 'all']);
+
+const startDeleteAccountPosts = async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const { timeRange } = req.body;
+
+    if (!timeRange || !VALID_DELETE_RANGES.has(timeRange)) {
+      return res.status(400).json({ error: 'timeRange must be "24h", "7d", or "all"' });
+    }
+
+    const jobId = randomUUID();
+    deleteJobs.set(jobId, {
+      accountId,
+      timeRange,
+      status: 'running',
+      total: 0,
+      deleted: 0,
+      failed: 0,
+      errors: [],
+      startedAt: new Date().toISOString(),
+    });
+
+    // Kick off in background — fire-and-forget
+    XPostService.deleteAccountPosts(accountId, timeRange, (progress) => {
+      const job = deleteJobs.get(jobId);
+      if (job) Object.assign(job, progress);
+    }).then((result) => {
+      const job = deleteJobs.get(jobId);
+      if (job) {
+        Object.assign(job, result, { status: 'completed', completedAt: new Date().toISOString() });
+      }
+      // Auto-cleanup after 30 minutes
+      setTimeout(() => deleteJobs.delete(jobId), 30 * 60 * 1000);
+    }).catch((err) => {
+      const job = deleteJobs.get(jobId);
+      if (job) {
+        job.status = 'failed';
+        job.error = err.message;
+      }
+      logger.error('Background X post deletion failed', { jobId, accountId, error: err.message });
+    });
+
+    logger.info('X account post deletion job started', {
+      jobId,
+      accountId,
+      timeRange,
+      adminId: req.session?.user?.id,
+      adminUsername: req.session?.user?.username,
+    });
+
+    return res.json({ success: true, jobId });
+  } catch (error) {
+    logger.error('Error starting X post deletion job:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+const getDeleteJobStatus = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const job = deleteJobs.get(jobId);
+    if (!job) return res.status(404).json({ error: 'Job not found or expired' });
+    return res.json({ success: true, ...job });
+  } catch (error) {
+    logger.error('Error getting delete job status:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getStats,
   listCampaigns,
@@ -299,4 +373,6 @@ module.exports = {
   getRandomVideo,
   previewCampaign,
   duplicateCampaign,
+  startDeleteAccountPosts,
+  getDeleteJobStatus,
 };

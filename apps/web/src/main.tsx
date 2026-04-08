@@ -3,6 +3,49 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles/globals.css";
 
+async function clearClientCaches() {
+  if ("serviceWorker" in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((reg) => reg.unregister()));
+  }
+  if ("caches" in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  }
+}
+
+const url = new URL(window.location.href);
+const resetInProgress = url.searchParams.get("update") === "1" || url.searchParams.get("reset") === "1";
+if (resetInProgress) {
+  clearClientCaches()
+    .catch(() => undefined)
+    .finally(() => {
+      url.searchParams.delete("update");
+      url.searchParams.delete("reset");
+      window.location.replace(url.toString());
+    });
+  document.documentElement.style.background = "#0a0a14";
+  document.body.innerHTML = "";
+}
+
+window.addEventListener("error", (event) => {
+  const message = String(event.error?.message || event.message || "");
+  const file = String(event.filename || "");
+  const isStaleChunk =
+    file.includes("/assets/Chat-") &&
+    (message.includes("before initialization") || message.includes("is not defined"));
+  if (!isStaleChunk || sessionStorage.getItem("pnptv:stale-chunk-reload") === "1") return;
+
+  sessionStorage.setItem("pnptv:stale-chunk-reload", "1");
+  clearClientCaches()
+    .catch(() => undefined)
+    .finally(() => {
+      const retryUrl = new URL(window.location.href);
+      retryUrl.searchParams.set("update", "1");
+      window.location.replace(retryUrl.toString());
+    });
+});
+
 // ── Patch DOM to prevent "removeChild" / "insertBefore" crashes ──────────────
 // Browser extensions (Google Translate, ad blockers, etc.) and PWA chrome can
 // mutate the DOM outside of React. When React later tries to reconcile, it
@@ -31,23 +74,27 @@ if (typeof Node !== "undefined") {
   };
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+if (!resetInProgress) {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
+}
 
 // Hide splash screen after React mounts
-requestAnimationFrame(() => {
-  const splash = document.getElementById("splash");
-  if (splash) {
-    splash.classList.add("hide");
-    setTimeout(() => splash.remove(), 500);
-  }
-});
+if (!resetInProgress) {
+  requestAnimationFrame(() => {
+    const splash = document.getElementById("splash");
+    if (splash) {
+      splash.classList.add("hide");
+      setTimeout(() => splash.remove(), 500);
+    }
+  });
+}
 
 // ── Service Worker update detection ────────────────────────────────────────
-if ("serviceWorker" in navigator) {
+if (!resetInProgress && "serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((reg) => {
     // Check for updates every 60s
     setInterval(() => reg.update(), 60_000);
@@ -80,4 +127,3 @@ if ("serviceWorker" in navigator) {
     }
   });
 }
-

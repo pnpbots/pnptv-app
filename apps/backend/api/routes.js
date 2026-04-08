@@ -67,7 +67,7 @@ const canvaRoutes = require('./routes/canvaRoutes');
 // Courtesy invite links — admin/model create, any authenticated user redeems
 const courtesyInviteRoutes = require('./routes/courtesyInviteRoutes');
 
-// Community Room (Haus) — 24/7 open video room powered by JaaS
+// Community Room (Haus) — 24/7 Telegram-powered community hangout
 const communityRoomController = require('./controllers/communityRoomController');
 
 // JaaS token generation (viewer, moderator, live streaming) — handled by jaasStreamController
@@ -3341,6 +3341,32 @@ async function ensureEmailCredentials(userId, email, language) {
   return { created: true };
 }
 
+// Get a random available Meru link for a product
+app.get('/api/meru/random-link', requireSessionAuth, asyncHandler(async (req, res) => {
+  const { product = 'lifetime-pass' } = req.query;
+  const meruLinkService = require('../services/meruLinkService');
+  
+  try {
+    const link = await meruLinkService.getRandomAvailableLink(product);
+    
+    if (!link) {
+      return res.status(404).json({ 
+        success: false, 
+        error: `No active Meru links found for product: ${product}` 
+      });
+    }
+    
+    res.json({
+      success: true,
+      code: link.code,
+      url: link.meru_link
+    });
+  } catch (error) {
+    logger.error('Error in /api/meru/random-link:', error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+}));
+
 // Meru Lifetime Pass activation (webapp)
 app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
@@ -3389,7 +3415,7 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
 
     // 1. Check code exists and is available
     const meruLinkService = require('../services/meruLinkService');
-    const availableLinks = await meruLinkService.getAvailableLinks();
+    const availableLinks = await meruLinkService.getAvailableLinks('lifetime100');
     const matchingLink = availableLinks.find((link) => link.code === meruCode);
 
     if (!matchingLink) {
@@ -4314,7 +4340,11 @@ app.post('/api/webapp/hangouts/groups/:id/delete-message', requireSessionAuth, a
 app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, asyncHandler(socialController.getHangoutFeed));
 app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asyncHandler(socialController.dropToFeed));
 
-// Hangout video calls now use Telegram native — startCall endpoint in hangoutGroupController
+// Hangout video calls — LiveKit
+const { startCall, joinCall, endCall } = require('./controllers/hangoutGroupController');
+app.post('/api/webapp/hangouts/groups/:id/call/start', requireSessionAuth, asyncHandler(startCall));
+app.post('/api/webapp/hangouts/groups/:id/call/join', requireSessionAuth, asyncHandler(joinCall));
+app.post('/api/webapp/hangouts/groups/:id/call/end', requireSessionAuth, asyncHandler(endCall));
 
 // DM Video Calls — removed (dead code, never called from frontend)
 
@@ -4483,6 +4513,8 @@ app.get('/api/webapp/dm/threads', requireSessionAuth, asyncHandler(dmController.
 app.get('/api/webapp/dm/conversation/:partnerId/search', requireSessionAuth, asyncHandler(dmController.searchDmMessages));
 app.get('/api/webapp/dm/conversation/:partnerId', requireSessionAuth, asyncHandler(dmController.getConversation));
 app.get('/api/webapp/dm/user/:partnerId', requireSessionAuth, asyncHandler(dmController.getPartnerInfo));
+app.post('/api/webapp/dm/call/join', requireSessionAuth, asyncHandler(dmController.joinDmVideoCall));
+app.post('/api/webapp/dm/call/start/:partnerId', requireSessionAuth, asyncHandler(dmController.createDmVideoCallInvite));
 app.post('/api/webapp/dm/send/:recipientId', requireFreeTierDmLimit, asyncHandler(dmController.sendMessage));
 // DM message management (edit / delete)
 app.patch('/api/webapp/dm/messages/:msgId', requireSessionAuth, asyncHandler(dmController.editDmMessage));
@@ -7060,7 +7092,7 @@ app.use('/api/webapp/gamification', gamificationRoutes);
 app.use('/api/canva', canvaRoutes);
 
 // ==========================================
-// Community Room (Haus) — 24/7 open video room powered by JaaS
+// Community Room (Haus) — 24/7 Telegram-powered community hangout
 // ==========================================
 app.post('/api/community-room/join', requireSessionAuth, asyncHandler(communityRoomController.joinCommunityRoom));
 app.get('/api/community-room/occupancy', requireSessionAuth, asyncHandler(communityRoomController.getRoomOccupancy));

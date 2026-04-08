@@ -6,5 +6,6 @@ export { MediaUploadButton } from "./MediaUploadButton";
 
 // ─── Video Call Components ──────────────────────────────────────────────────
 export { VideoCallButton } from "./VideoCallButton";
+export { TelegramCallDock } from "./TelegramCallDock";
 
 export { HangoutMusicBar } from "./HangoutMusicBar";

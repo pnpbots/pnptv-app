@@ -1,14 +1,34 @@
+const crypto = require('crypto');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { getRedis } = require('../../../config/redis');
 const { resolveUserId } = require('../../utils/helpers');
 const DmService = require('../../services/dmService');
+const jaasService = require('../../services/jaasService');
+
+const DM_CALL_TTL_SECONDS = 4 * 60 * 60;
+const DM_CALL_KEY_PREFIX = 'dm:call:';
+const APP_PUBLIC_URL = (
+  process.env.APP_PUBLIC_URL ||
+  process.env.WEB_APP_URL ||
+  process.env.WEBAPP_ORIGIN ||
+  'https://app.pnptv.app'
+).replace(/\/+$/, '');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
   if (!user) { res.status(401).json({ error: 'Not authenticated' }); return null; }
   return user;
 };
+
+function buildDmCallLink(roomName, callerId, calleeId) {
+  const params = new URLSearchParams({
+    call: roomName,
+    caller: String(callerId),
+    callee: String(calleeId),
+  });
+  return `${APP_PUBLIC_URL}/dm?${params.toString()}`;
+}
 
 // List DM threads for current user
 const getThreads = async (req, res) => {
@@ -106,6 +126,127 @@ const getPartnerInfo = async (req, res) => {
   } catch (err) {
     logger.error('getPartnerInfo error', err);
     return res.status(500).json({ error: 'Failed to load user' });
+  }
+};
+
+const createDmVideoCallInvite = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const partnerId = (await resolveUserId(req.params.partnerId)) || req.params.partnerId;
+
+  if (!partnerId) {
+    return res.status(400).json({ error: 'Partner is required' });
+  }
+
+  if (String(partnerId) === String(user.id)) {
+    return res.status(400).json({ error: 'You cannot call yourself' });
+  }
+
+  if (!jaasService.isConfigured()) {
+    return res.status(503).json({ error: 'Embedded video calls are unavailable right now' });
+  }
+
+  try {
+    const { rows } = await query(
+      `SELECT id FROM users WHERE id = $1`,
+      [partnerId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const roomName = `pnptv-dm-${crypto.randomUUID()}`;
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + DM_CALL_TTL_SECONDS * 1000).toISOString();
+    const callerId = String(user.id);
+    const calleeId = String(partnerId);
+    const callLink = buildDmCallLink(roomName, callerId, calleeId);
+
+    await getRedis().set(
+      `${DM_CALL_KEY_PREFIX}${roomName}`,
+      JSON.stringify({
+        roomName,
+        callerId,
+        calleeId,
+        createdAt: createdAt.toISOString(),
+        expiresAt,
+      }),
+      'EX',
+      DM_CALL_TTL_SECONDS
+    );
+
+    return res.json({
+      success: true,
+      roomName,
+      callLink,
+      callerId,
+      calleeId,
+      expiresAt,
+    });
+  } catch (err) {
+    logger.error('createDmVideoCallInvite error', err);
+    return res.status(500).json({ error: 'Failed to create video call' });
+  }
+};
+
+const joinDmVideoCall = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const roomName = String(req.body?.roomName || '').trim();
+
+  if (!roomName) {
+    return res.status(400).json({ error: 'Room name is required' });
+  }
+
+  if (!jaasService.isConfigured()) {
+    return res.status(503).json({ error: 'Embedded video calls are unavailable right now' });
+  }
+
+  try {
+    const redis = getRedis();
+    const rawCall = await redis.get(`${DM_CALL_KEY_PREFIX}${roomName}`);
+
+    if (!rawCall) {
+      return res.status(404).json({ error: 'This video call link has expired' });
+    }
+
+    const call = JSON.parse(rawCall);
+    const callerId = String(call.callerId || '');
+    const calleeId = String(call.calleeId || '');
+    const currentUserId = String(user.id);
+
+    if (currentUserId !== callerId && currentUserId !== calleeId) {
+      return res.status(403).json({ error: 'You do not have access to this video call' });
+    }
+
+    await redis.expire(`${DM_CALL_KEY_PREFIX}${roomName}`, DM_CALL_TTL_SECONDS);
+
+    const isModerator = currentUserId === callerId;
+    const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
+    const avatar = user.photoUrl || user.photo_url || user.photo_file_id || '';
+    const token = jaasService.generateToken({
+      roomName,
+      userId: currentUserId,
+      userName: displayName,
+      userAvatar: avatar,
+      isModerator,
+      enableLivestreaming: false,
+      enableRecording: false,
+      expiresIn: '4h',
+    });
+
+    return res.json({
+      success: true,
+      roomName,
+      meetingUrl: jaasService.generateMeetingUrl(roomName, token),
+      callLink: buildDmCallLink(roomName, callerId, calleeId),
+      callerId,
+      calleeId,
+      expiresAt: call.expiresAt || null,
+      role: isModerator ? 'moderator' : 'viewer',
+    });
+  } catch (err) {
+    logger.error('joinDmVideoCall error', err);
+    return res.status(500).json({ error: 'Failed to join video call' });
   }
 };
 
@@ -288,4 +429,14 @@ const searchDmMessages = async (req, res) => {
   }
 };
 
-module.exports = { getThreads, getConversation, getPartnerInfo, sendMessage, editDmMessage, deleteDmMessage, searchDmMessages };
+module.exports = {
+  getThreads,
+  getConversation,
+  getPartnerInfo,
+  createDmVideoCallInvite,
+  joinDmVideoCall,
+  sendMessage,
+  editDmMessage,
+  deleteDmMessage,
+  searchDmMessages,
+};

@@ -730,29 +730,36 @@ function SubmitPlaceModal({ myPos, onClose }: { myPos: { lat: number; lng: numbe
         ) : (
           <div className="space-y-3">
             <input placeholder={t.booking.placeName} value={form.name} onChange={e => set("name", e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
+              style={{ fontSize: "16px" }}
+              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
             <select value={form.categoryId ?? ""} onChange={e => set("categoryId", e.target.value ? Number(e.target.value) : undefined)}
-              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary focus:outline-none focus:border-pnp-accent">
+              style={{ fontSize: "16px" }}
+              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary focus:outline-none focus:border-pnp-accent">
               <option value="">{t.booking.selectCategory}</option>
               {PLACE_CATEGORIES_IDS.map(c => (
                 <option key={c.id} value={c.id}>{c.emoji} {t.booking[c.key]}</option>
               ))}
             </select>
             <input placeholder={t.booking.address} value={form.address ?? ""} onChange={e => set("address", e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
+              style={{ fontSize: "16px" }}
+              className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
             <div className="flex gap-2">
               <input placeholder={t.booking.city} value={form.city ?? ""} onChange={e => set("city", e.target.value)}
-                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
+                style={{ fontSize: "16px" }}
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
               <input placeholder={t.booking.country} value={form.country ?? ""} onChange={e => set("country", e.target.value)}
-                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
+                style={{ fontSize: "16px" }}
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
             </div>
             <textarea placeholder={t.booking.descriptionOptional} value={form.description ?? ""} onChange={e => set("description", e.target.value)}
-              rows={2} className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent resize-none" />
+              rows={2} style={{ fontSize: "16px" }} className="w-full px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent resize-none" />
             <div className="flex gap-2">
               <input placeholder={t.booking.instagramOptional} value={form.instagram ?? ""} onChange={e => set("instagram", e.target.value)}
-                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
+                style={{ fontSize: "16px" }}
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
               <input placeholder={t.booking.websiteOptional} value={form.website ?? ""} onChange={e => set("website", e.target.value)}
-                className="flex-1 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
+                style={{ fontSize: "16px" }}
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent" />
             </div>
             {err && <p className="text-xs text-red-400">{err}</p>}
             <button onClick={submit} disabled={loading}

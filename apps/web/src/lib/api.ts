@@ -1969,6 +1969,36 @@ export function searchDmMessages(
   return request(`/api/webapp/dm/conversation/${partnerId}/search?q=${encodeURIComponent(q)}`);
 }
 
+export interface DmVideoCallInvite {
+  roomName: string;
+  callLink: string;
+  callerId: string;
+  calleeId: string;
+  expiresAt: string;
+}
+
+export interface DmVideoCallSession extends DmVideoCallInvite {
+  meetingUrl: string;
+  role: "moderator" | "viewer";
+}
+
+export function createDmVideoCall(
+  partnerId: string
+): Promise<{ success: boolean } & DmVideoCallInvite> {
+  return request(`/api/webapp/dm/call/start/${encodeURIComponent(partnerId)}`, {
+    method: "POST",
+  });
+}
+
+export function joinDmVideoCall(
+  roomName: string
+): Promise<{ success: boolean } & DmVideoCallSession> {
+  return request("/api/webapp/dm/call/join", {
+    method: "POST",
+    body: { roomName },
+  });
+}
+
 // ── DM Message Reactions ─────────────────────────────────────────────────────
 
 export function toggleDmMessageReaction(
@@ -3348,6 +3378,29 @@ export function duplicateAdminXCampaign(id: string): Promise<{ success: boolean;
   return request(`/api/webapp/admin/x-campaigns/${id}/duplicate`, { method: "POST" });
 }
 
+export function deleteXAccountPosts(
+  accountId: string,
+  timeRange: "24h" | "7d" | "all"
+): Promise<{ success: boolean; jobId: string }> {
+  return request(`/api/webapp/admin/x-campaigns/accounts/${accountId}/delete-posts`, {
+    method: "POST",
+    body: { timeRange },
+  });
+}
+
+export function getXDeleteJobStatus(jobId: string): Promise<{
+  success: boolean;
+  status: "running" | "completed" | "failed";
+  total: number;
+  deleted: number;
+  failed: number;
+  errors: string[];
+  rateLimited?: boolean;
+  retryAfter?: number;
+}> {
+  return request(`/api/webapp/admin/x-campaigns/delete-jobs/${jobId}`);
+}
+
 export function startXOAuth(adminId?: number, adminUsername?: string): Promise<{ success: boolean; url: string }> {
   const params = new URLSearchParams();
   if (adminId) params.set("admin_id", String(adminId));
@@ -4191,7 +4244,7 @@ export function updateAdminTicket(
 }
 
 // ============================================================================
-// Community Room (Main Stage) API — 24/7 open video room powered by JaaS
+// Community Room (Main Stage) API — 24/7 open Telegram-powered hangout
 // ============================================================================
 
 export interface StagePermissions {
@@ -4210,9 +4263,11 @@ export interface StageState {
 }
 
 export interface CommunityRoomInfo {
-  token: string;
-  meetingUrl: string;
-  domain: string;
+  token?: string;
+  meetingUrl?: string;
+  domain?: string;
+  videoProvider?: "telegram-webk";
+  telegramWebPath?: string;
   roomName: string;
   roomId: string;
   isModerator: boolean;
@@ -4228,6 +4283,11 @@ export interface CommunityRoomInfo {
     isPersistent: boolean;
     isOpen24_7: boolean;
     description: string;
+  };
+  telegram?: {
+    groupId: number | null;
+    telegramChatId: number | null;
+    telegramInviteLink: string | null;
   };
 }
 
@@ -5373,6 +5433,18 @@ export function linkTelegramGroup(
 
 export function getVideoChatStatus(groupId: number): Promise<{ active: boolean; inviteLink: string | null }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/video-chat-status`);
+}
+
+export function startHangoutCall(groupId: number): Promise<{ token: string; livekitUrl: string; roomName: string }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/call/start`, { method: "POST" });
+}
+
+export function joinHangoutCall(groupId: number): Promise<{ token: string; livekitUrl: string; roomName: string }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/call/join`, { method: "POST" });
+}
+
+export function endHangoutCall(groupId: number): Promise<void> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/call/end`, { method: "POST" });
 }
 
 // ── Online Users ──────────────────────────────────────────────────────────────

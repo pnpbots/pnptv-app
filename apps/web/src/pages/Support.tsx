@@ -38,7 +38,7 @@ const CATEGORIES: { value: TicketCategory; label: string; icon: string }[] = [
 export function Support() {
   const { support: t } = useI18n();
   const { isAuthenticated, user } = useAuth();
-  const [tab, setTab] = useState<"cristina" | "ticket">("cristina");
+  const [tab, setTab] = useState<"cristina" | "ticket" | "feedback">("cristina");
 
   // Bug report modal
   const [showBugModal, setShowBugModal] = useState(false);
@@ -100,12 +100,23 @@ export function Support() {
           <button onClick={() => setTab("ticket")} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${tab === "ticket" ? "text-white" : "text-pnp-textSecondary hover:text-white/70"}`} style={tab === "ticket" ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}>
             Support Ticket
           </button>
+          <button onClick={() => setTab("feedback")} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${tab === "feedback" ? "text-white" : "text-pnp-textSecondary hover:text-white/70"}`} style={tab === "feedback" ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}>
+            Feedback
+          </button>
         </div>
       )}
 
       {/* Tab content */}
       {tab === "cristina" ? (
         <CristinaWidget mode="page" />
+      ) : tab === "feedback" ? (
+        <iframe
+          src={import.meta.env.VITE_FIDER_URL || "https://feedback.pnptv.app"}
+          className="w-full rounded-xl border border-white/10"
+          style={{ height: "calc(100dvh - 14rem)", minHeight: "400px" }}
+          title="Community Feedback"
+          loading="lazy"
+        />
       ) : isAuthenticated ? (
         <TicketChat userId={user?.dbId || ""} />
       ) : null}
@@ -129,7 +140,7 @@ export function Support() {
               </div>
             ) : (
               <>
-                <textarea ref={textareaRef} value={bugText} onChange={(e) => setBugText(e.target.value)} placeholder={t.reportBugPlaceholder} maxLength={2000} rows={5} className="w-full rounded-xl p-3 text-sm bg-pnp-dark text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 border border-white/10 focus:border-red-400/50 focus:outline-none resize-none" />
+                <textarea ref={textareaRef} value={bugText} onChange={(e) => setBugText(e.target.value)} placeholder={t.reportBugPlaceholder} maxLength={2000} rows={5} style={{ fontSize: "16px" }} className="w-full rounded-xl p-3 bg-pnp-dark text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 border border-white/10 focus:border-red-400/50 focus:outline-none resize-none" />
                 <div className="flex items-center justify-between mt-2 mb-4">
                   <p className="text-[10px] text-pnp-textSecondary">{t.reportBugDeviceInfo}</p>
                   <p className="text-[10px] text-pnp-textSecondary">{bugText.length}/2000</p>
@@ -285,7 +296,7 @@ function TicketChat({ userId }: { userId: string }) {
               ))}
             </div>
             {/* Description */}
-            <textarea value={newDescription} onChange={(e) => setNewDescription(e.target.value)} placeholder="Describe your issue in detail (min 10 characters)..." rows={4} maxLength={2000} className="w-full rounded-xl p-3 text-sm bg-white/5 text-white placeholder-pnp-textSecondary border border-white/10 focus:border-pnp-accent/50 focus:outline-none resize-none" />
+            <textarea value={newDescription} onChange={(e) => setNewDescription(e.target.value)} placeholder="Describe your issue in detail (min 10 characters)..." rows={4} maxLength={2000} style={{ fontSize: "16px" }} className="w-full rounded-xl p-3 bg-white/5 text-white placeholder-pnp-textSecondary border border-white/10 focus:border-pnp-accent/50 focus:outline-none resize-none" />
             <div className="flex gap-2">
               <button onClick={() => setShowCreateForm(false)} className="flex-1 py-2.5 rounded-xl text-sm font-medium text-pnp-textSecondary bg-white/5 hover:bg-white/10">Cancel</button>
               <button onClick={handleCreate} disabled={creating || newDescription.trim().length < 10} className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
@@ -404,7 +415,7 @@ function TicketChat({ userId }: { userId: string }) {
       {/* Input bar */}
       {ticket.status === "open" && (
         <div className="flex items-end gap-2 px-3 py-2 border-t border-pnp-border" style={{ background: "#1C1C1E" }}>
-          <textarea value={messageInput} onChange={(e) => setMessageInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder="Type a message..." className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2.5 text-sm resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-24" rows={1} style={{ minHeight: "40px" }} />
+          <textarea value={messageInput} onChange={(e) => setMessageInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder="Type a message..." className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2.5 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-24" rows={1} style={{ minHeight: "40px", fontSize: "16px" }} />
           <button type="button" onClick={handleSend} disabled={sending || !messageInput.trim()} className="p-2 rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }} aria-label="Send">
             {sending ? (
               <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>

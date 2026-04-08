@@ -16,7 +16,8 @@ class MeruLinkInitializer {
       Promise.all([
         this.createPaymentHistoryTable().catch(e => logger.warn(`Payment history table creation failed: ${e.message}`)),
         this.createMeruLinksTable().catch(e => logger.warn(`Meru links table creation failed: ${e.message}`)),
-        this.initializeKnownLinks().catch(e => logger.warn(`Meru links initialization failed: ${e.message}`))
+        this.initializeKnownLinks().catch(e => logger.warn(`Meru links initialization failed: ${e.message}`)),
+        this.initializeKnownLinksLifetime100().catch(e => logger.warn(`Meru links for lifetime100 initialization failed: ${e.message}`))
       ]).then(() => {
         logger.info('✓ Meru Link tracking system initialized');
       });
@@ -138,6 +139,32 @@ class MeruLinkInitializer {
       logger.info(`✓ Initialized ${addedCount}/${knownLinks.length} known Meru links`);
     } catch (error) {
       logger.error('Error initializing known Meru links:', error);
+      throw error;
+    }
+  }
+
+  async initializeKnownLinksLifetime100() {
+    try {
+      const knownLinks = [
+        { code: 'kssYDk', url: 'https://pay.getmeru.com/kssYDk' },
+        { code: 'HFEDrj', url: 'https://pay.getmeru.com/HFEDrj' },
+        { code: 'shM9Ss', url: 'https://pay.getmeru.com/shM9Ss' },
+        { code: '_Kn068', url: 'https://pay.getmeru.com/_Kn068' },
+        { code: 'LlV4TQ', url: 'https://pay.getmeru.com/LlV4TQ' },
+        { code: 'P45cOC', url: 'https://pay.getmeru.com/P45cOC' },
+        { code: '1RYyjR', url: 'https://pay.getmeru.com/1RYyjR' },
+        { code: 'cf3vub', url: 'https://pay.getmeru.com/cf3vub' },
+      ];
+
+      let addedCount = 0;
+      for (const link of knownLinks) {
+        const success = await meruLinkService.addLink(link.code, link.url, 'lifetime100');
+        if (success) addedCount++;
+      }
+
+      logger.info(`✓ Initialized ${addedCount}/${knownLinks.length} known Meru links for lifetime100`);
+    } catch (error) {
+      logger.error('Error initializing known Meru links for lifetime100:', error);
       throw error;
     }
   }

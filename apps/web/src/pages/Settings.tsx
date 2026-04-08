@@ -174,6 +174,12 @@ export default function Settings() {
   const [txLoading, setTxLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
+  // ── Newsletter subscription state ─────────────────────────────────────
+  const [newsletterSubscribed, setNewsletterSubscribed] = useState(() => {
+    try { return localStorage.getItem("pnp_newsletter_subscribed") === "1"; } catch { return false; }
+  });
+  const [newsletterLoading, setNewsletterLoading] = useState(false);
+
   // ── Load data ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -430,6 +436,37 @@ export default function Settings() {
     });
   }, [referralStats]);
 
+  const handleNewsletterToggle = useCallback(async () => {
+    if (!user?.email) return;
+    setNewsletterLoading(true);
+    try {
+      if (newsletterSubscribed) {
+        // Unsubscribe: POST to unsubscribe endpoint (Listmonk public API)
+        const res = await fetch("/api/newsletter/subscription/form", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: user.email, list_uuids: [], unsubscribe: true }),
+        });
+        if (res.ok) {
+          localStorage.setItem("pnp_newsletter_subscribed", "0");
+          setNewsletterSubscribed(false);
+        }
+      } else {
+        // Subscribe
+        const res = await fetch("/api/newsletter/subscription", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: user.email, list_ids: [1], name: user.firstName || undefined }),
+        });
+        if (res.ok) {
+          localStorage.setItem("pnp_newsletter_subscribed", "1");
+          setNewsletterSubscribed(true);
+        }
+      }
+    } catch { /* silent — toggle reverts visually */ }
+    finally { setNewsletterLoading(false); }
+  }, [user, newsletterSubscribed]);
+
   // ── Auth guard ────────────────────────────────────────────────────────────
 
   if (!isAuthenticated) {
@@ -523,11 +560,12 @@ export default function Settings() {
             value={selectedLang}
             onChange={(e) => handleLanguageChange(e.target.value as Lang)}
             disabled={langSaving}
-            className="rounded-lg px-3 py-2 text-sm flex-shrink-0 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-white/20"
+            className="rounded-lg px-3 py-2 flex-shrink-0 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-white/20"
             style={{
               background: "rgba(255,255,255,0.05)",
               border: "1px solid rgba(255,255,255,0.12)",
               color: "#fff",
+              fontSize: "16px",
             }}
           >
             <option value="en">English</option>
@@ -686,11 +724,12 @@ export default function Settings() {
                 onChange={(e) => { setDpnsInput(e.target.value); setDpnsError(null); }}
                 placeholder={p.dpnsPlaceholder}
                 disabled={dpnsSaving}
-                className="flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#008DE4]/40 disabled:opacity-50"
+                className="flex-1 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#008DE4]/40 disabled:opacity-50"
                 style={{
                   background: "rgba(255,255,255,0.05)",
                   border: "1px solid rgba(255,255,255,0.12)",
                   color: "#fff",
+                  fontSize: "16px",
                 }}
               />
               <button
@@ -830,11 +869,11 @@ export default function Settings() {
             </p>
 
             {/* Column headers */}
-            <div className="flex items-center gap-1 mb-2 px-1">
-              <div className="flex-1" />
-              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelPush}</div>
-              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelBot}</div>
-              <div className="w-11 text-center text-[10px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelEmail}</div>
+            <div className="flex items-center gap-0.5 mb-2 px-1">
+              <div className="flex-1 min-w-0" />
+              <div className="w-10 text-center text-[9px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelPush}</div>
+              <div className="w-10 text-center text-[9px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelBot}</div>
+              <div className="w-10 text-center text-[9px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelEmail}</div>
             </div>
 
             {/* Notification type rows */}
@@ -852,25 +891,25 @@ export default function Settings() {
               return (
                 <div
                   key={key}
-                  className="flex items-center gap-1 rounded-lg px-3 py-2.5 mb-1"
+                  className="flex items-center gap-0.5 rounded-lg px-2 py-2.5 mb-1"
                   style={{ background: "rgba(255,255,255,0.03)" }}
                 >
-                  <p className="flex-1 text-sm text-white truncate">{label}</p>
-                  <div className="w-11 flex justify-center">
+                  <p className="flex-1 min-w-0 text-sm text-white truncate pr-1">{label}</p>
+                  <div className="w-10 flex justify-center flex-shrink-0">
                     <Toggle
                       checked={pref.push !== false}
                       onChange={() => handleNotifToggle(key, "push", pref.push === false)}
                       accentColor="#5ED1C4"
                     />
                   </div>
-                  <div className="w-11 flex justify-center">
+                  <div className="w-10 flex justify-center flex-shrink-0">
                     <Toggle
                       checked={pref.bot === true}
                       onChange={() => handleNotifToggle(key, "bot", !pref.bot)}
                       accentColor="#5ED1C4"
                     />
                   </div>
-                  <div className="w-11 flex justify-center">
+                  <div className="w-10 flex justify-center flex-shrink-0">
                     <Toggle
                       checked={pref.email === true}
                       onChange={() => handleNotifToggle(key, "email", !pref.email)}
@@ -904,6 +943,24 @@ export default function Settings() {
             {p.notifLoadError}
           </p>
         )}
+      </Section>
+
+      {/* ── Communications ───────────────────────────────────────────────── */}
+      <Section title="Communications">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0 mr-4">
+            <p className="text-sm text-white font-medium">PNPtv! Newsletter</p>
+            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+              Receive creator drops, platform news, and exclusive offers by email.
+            </p>
+          </div>
+          <Toggle
+            checked={newsletterSubscribed}
+            onChange={handleNewsletterToggle}
+            disabled={newsletterLoading || !user?.email}
+            accentColor="#D4007A"
+          />
+        </div>
       </Section>
 
       {/* ── Referral Program ─────────────────────────────────────────────── */}
@@ -1184,11 +1241,12 @@ export default function Settings() {
               onChange={(e) => setDeleteConfirmText(e.target.value)}
               disabled={deleting}
               autoFocus
-              className="w-full rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-500/50 disabled:opacity-50"
+              className="w-full rounded-lg px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-red-500/50 disabled:opacity-50"
               style={{
                 background: "rgba(255,255,255,0.05)",
                 border: "1px solid rgba(255,59,48,0.3)",
                 color: "#fff",
+                fontSize: "16px",
               }}
               placeholder={p.deleteConfirmWord}
               aria-label={p.typeToConfirm.replace("{word}", p.deleteConfirmWord)}
@@ -1320,11 +1378,12 @@ export default function Settings() {
                   onChange={(e) => setEraseConfirmText(e.target.value)}
                   disabled={erasing}
                   autoFocus
-                  className="w-full rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-500/50 disabled:opacity-50"
+                  className="w-full rounded-lg px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-red-500/50 disabled:opacity-50"
                   style={{
                     background: "rgba(255,255,255,0.05)",
                     border: "1px solid rgba(255,59,48,0.4)",
                     color: "#fff",
+                    fontSize: "16px",
                   }}
                   placeholder="DELETE MY ACCOUNT"
                   aria-label="Type DELETE MY ACCOUNT to confirm erasure"

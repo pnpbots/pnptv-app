@@ -158,8 +158,8 @@ export function CreateEventModal({ onClose, onCreated, defaultType, canCreateLiv
               <select
                 value={hangoutGroupId}
                 onChange={(e) => setHangoutGroupId(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-white/20 transition-colors"
-                style={{ colorScheme: "dark" }}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white outline-none focus:border-white/20 transition-colors"
+                style={{ colorScheme: "dark", fontSize: "16px" }}
               >
                 <option value="">Any group / no specific group</option>
                 {userGroups.map((g) => (
@@ -202,7 +202,8 @@ export function CreateEventModal({ onClose, onCreated, defaultType, canCreateLiv
               onChange={(e) => setTitle(e.target.value)}
               placeholder={isLive ? "e.g. Friday Night Show" : "e.g. PNP Movie Night"}
               maxLength={80}
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-white/25 outline-none focus:border-white/20 transition-colors"
+              style={{ fontSize: "16px" }}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white placeholder-white/25 outline-none focus:border-white/20 transition-colors"
             />
           </div>
 
@@ -215,7 +216,8 @@ export function CreateEventModal({ onClose, onCreated, defaultType, canCreateLiv
               placeholder="What's this event about?"
               rows={3}
               maxLength={500}
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-white/25 outline-none focus:border-white/20 transition-colors resize-none"
+              style={{ fontSize: "16px" }}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white placeholder-white/25 outline-none focus:border-white/20 transition-colors resize-none"
             />
           </div>
 
@@ -228,8 +230,8 @@ export function CreateEventModal({ onClose, onCreated, defaultType, canCreateLiv
                 value={scheduledAt}
                 min={minDate}
                 onChange={(e) => setScheduledAt(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-white/20 transition-colors"
-                style={{ colorScheme: "dark" }}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white outline-none focus:border-white/20 transition-colors"
+                style={{ colorScheme: "dark", fontSize: "16px" }}
               />
             </div>
             <div>
@@ -237,8 +239,8 @@ export function CreateEventModal({ onClose, onCreated, defaultType, canCreateLiv
               <select
                 value={duration}
                 onChange={(e) => setDuration(parseInt(e.target.value, 10))}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-white/20 transition-colors"
-                style={{ colorScheme: "dark" }}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white outline-none focus:border-white/20 transition-colors"
+                style={{ colorScheme: "dark", fontSize: "16px" }}
               >
                 {DURATIONS.map((d) => (
                   <option key={d} value={d}>
@@ -260,7 +262,8 @@ export function CreateEventModal({ onClose, onCreated, defaultType, canCreateLiv
                 placeholder="Leave blank for unlimited"
                 min={2}
                 max={500}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-white/25 outline-none focus:border-white/20 transition-colors"
+                style={{ fontSize: "16px" }}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white placeholder-white/25 outline-none focus:border-white/20 transition-colors"
               />
             </div>
           )}
@@ -273,7 +276,8 @@ export function CreateEventModal({ onClose, onCreated, defaultType, canCreateLiv
               value={tags}
               onChange={(e) => setTags(e.target.value)}
               placeholder="e.g. party, music, chill"
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-white/25 outline-none focus:border-white/20 transition-colors"
+              style={{ fontSize: "16px" }}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white placeholder-white/25 outline-none focus:border-white/20 transition-colors"
             />
           </div>
 

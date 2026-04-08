@@ -12,11 +12,13 @@
   "dependencies": {
     "@daimo/sdk": "^1.1.0",
     "@directus/sdk": "^18.0.0",
+    "@livekit/components-react": "^2.9.20",
     "@pnptv/ui-kit": "*",
     "clsx": "^2.1.1",
     "dompurify": "^3.3.2",
     "hls.js": "^1.5.0",
     "leaflet": "^1.9.0",
+    "livekit-client": "^2.18.1",
     "matrix-js-sdk": "^41.1.0",
     "oidc-client-ts": "^3.1.0",
     "qrcode.react": "^4.2.0",

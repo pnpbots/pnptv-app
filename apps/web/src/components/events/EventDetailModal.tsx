@@ -174,8 +174,8 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
         <input
           value={title}
           onChange={e => setTitle(e.target.value)}
-          className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
-          style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}
+          className="w-full rounded-lg px-3 py-2 text-white outline-none"
+          style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
         />
       </div>
       <div>
@@ -184,8 +184,8 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
           value={description}
           onChange={e => setDescription(e.target.value)}
           rows={3}
-          className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none resize-none"
-          style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}
+          className="w-full rounded-lg px-3 py-2 text-white outline-none resize-none"
+          style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
         />
       </div>
 
@@ -198,8 +198,8 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
             value={scheduledAt}
             min={toLocalDatetimeValue(new Date(Date.now() + 15 * 60 * 1000))}
             onChange={(e) => setScheduledAt(e.target.value)}
-            className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
-            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark" }}
+            className="w-full rounded-lg px-3 py-2 text-white outline-none"
+            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark", fontSize: "16px" }}
           />
         </div>
         <div>
@@ -207,8 +207,8 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
           <select
             value={duration}
             onChange={(e) => setDuration(parseInt(e.target.value, 10))}
-            className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
-            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark" }}
+            className="w-full rounded-lg px-3 py-2 text-white outline-none"
+            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark", fontSize: "16px" }}
           >
             {EDIT_DURATIONS.map((d) => (
               <option key={d} value={d}>{formatDurationLabel(d)}</option>
@@ -224,8 +224,8 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
           <select
             value={hangoutGroupId}
             onChange={e => setHangoutGroupId(e.target.value)}
-            className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
-            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark" }}
+            className="w-full rounded-lg px-3 py-2 text-white outline-none"
+            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark", fontSize: "16px" }}
           >
             <option value="">No specific group</option>
             {groups.map(g => (

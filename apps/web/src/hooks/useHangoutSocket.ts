@@ -1,116 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { connectSocket } from "@/lib/socket";
 
-// ─── WebRTC Peer Manager (tgcalls-compatible browser WebRTC) ────────────────
-// RTCPeerConnection mesh — same pattern as Telegram Web A's call implementation
-
-const STUN_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-];
-
-export interface WebRtcPeer {
-  peerId: string;   // socket.id of remote
-  userId: string;
-  displayName: string;
-  stream: MediaStream | null;
-}
-
-class WebRtcMesh {
-  private pcs = new Map<string, RTCPeerConnection>();
-  private localStream: MediaStream | null = null;
-  public peers: Map<string, WebRtcPeer> = new Map();
-
-  constructor(
-    private groupId: number,
-    private socket: ReturnType<typeof connectSocket>,
-    private onPeersChange: (peers: WebRtcPeer[]) => void
-  ) {}
-
-  async start(displayName: string): Promise<MediaStream> {
-    this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-    this.socket.emit('webrtc:join', { groupId: this.groupId, displayName });
-    return this.localStream;
-  }
-
-  async handleUserJoined(peerId: string, userId: string, displayName: string) {
-    if (this.pcs.has(peerId)) return;
-    const pc = this._createPc(peerId, userId, displayName);
-    // Initiator creates offer
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    this.socket.emit('webrtc:offer', { groupId: this.groupId, to: peerId, sdp: offer });
-  }
-
-  async handleOffer(from: string, sdp: RTCSessionDescriptionInit, userId: string, displayName: string) {
-    if (!this.pcs.has(from)) this._createPc(from, userId, displayName);
-    const pc = this.pcs.get(from)!;
-    await pc.setRemoteDescription(sdp);
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    this.socket.emit('webrtc:answer', { groupId: this.groupId, to: from, sdp: answer });
-  }
-
-  async handleAnswer(from: string, sdp: RTCSessionDescriptionInit) {
-    const pc = this.pcs.get(from);
-    if (pc) await pc.setRemoteDescription(sdp);
-  }
-
-  async handleIce(from: string, candidate: RTCIceCandidateInit | null) {
-    const pc = this.pcs.get(from);
-    if (pc && candidate) await pc.addIceCandidate(candidate);
-  }
-
-  handleUserLeft(peerId: string) {
-    this.pcs.get(peerId)?.close();
-    this.pcs.delete(peerId);
-    this.peers.delete(peerId);
-    this.onPeersChange(Array.from(this.peers.values()));
-  }
-
-  stop() {
-    this.localStream?.getTracks().forEach(t => t.stop());
-    this.pcs.forEach(pc => pc.close());
-    this.pcs.clear();
-    this.peers.clear();
-    this.localStream = null;
-  }
-
-  toggleMic(enabled: boolean) {
-    this.localStream?.getAudioTracks().forEach(t => { t.enabled = enabled; });
-  }
-
-  toggleCam(enabled: boolean) {
-    this.localStream?.getVideoTracks().forEach(t => { t.enabled = enabled; });
-  }
-
-  private _createPc(peerId: string, userId: string, displayName: string): RTCPeerConnection {
-    const pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
-    this.localStream?.getTracks().forEach(t => pc.addTrack(t, this.localStream!));
-
-    pc.onicecandidate = ({ candidate }) => {
-      this.socket.emit('webrtc:ice', { groupId: this.groupId, to: peerId, candidate: candidate ?? null });
-    };
-
-    pc.ontrack = ({ streams }) => {
-      const peer = this.peers.get(peerId) ?? { peerId, userId, displayName, stream: null };
-      peer.stream = streams[0] ?? null;
-      this.peers.set(peerId, peer);
-      this.onPeersChange(Array.from(this.peers.values()));
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        this.handleUserLeft(peerId);
-      }
-    };
-
-    this.peers.set(peerId, { peerId, userId, displayName, stream: null });
-    this.pcs.set(peerId, pc);
-    return pc;
-  }
-}
-
 interface OnlineMember {
   userId: string;
   name: string;
@@ -164,12 +54,6 @@ export function useHangoutSocket(
   // Feature 3: Rich participant list (separate from the legacy string[] in CallState)
   const [callParticipants, setCallParticipants] = useState<CallParticipant[]>([]);
 
-  // WebRTC state
-  const [webRtcPeers, setWebRtcPeers] = useState<WebRtcPeer[]>([]);
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [inWebRtcCall, setInWebRtcCall] = useState(false);
-  const meshRef = useRef<WebRtcMesh | null>(null);
-
   // Refs for debouncing and cleanup
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastTypingEmit = useRef(0);
@@ -183,11 +67,6 @@ export function useHangoutSocket(
       setScreenShareUser(null);
       setCallStartedAt(null);
       setCallParticipants([]);
-      meshRef.current?.stop();
-      meshRef.current = null;
-      setInWebRtcCall(false);
-      setLocalStream(null);
-      setWebRtcPeers([]);
       return;
     }
 
@@ -300,33 +179,6 @@ export function useHangoutSocket(
       setScreenShareUser(data.sharing ? String(data.userId).slice(0, 64) : null);
     };
 
-    // WebRTC signaling listeners
-    const onWebRtcUserJoined = async (data: { peerId: string; userId: string; displayName: string }) => {
-      if (meshRef.current) {
-        await meshRef.current.handleUserJoined(data.peerId, data.userId, data.displayName);
-        setWebRtcPeers(Array.from(meshRef.current.peers.values()));
-      }
-    };
-    const onWebRtcOffer = async (data: { from: string; sdp: RTCSessionDescriptionInit }) => {
-      if (meshRef.current) {
-        await meshRef.current.handleOffer(data.from, data.sdp, '', 'User');
-        setWebRtcPeers(Array.from(meshRef.current.peers.values()));
-      }
-    };
-    const onWebRtcAnswer = async (data: { from: string; sdp: RTCSessionDescriptionInit }) => {
-      if (meshRef.current) await meshRef.current.handleAnswer(data.from, data.sdp);
-    };
-    const onWebRtcIce = async (data: { from: string; candidate: RTCIceCandidateInit | null }) => {
-      if (meshRef.current) await meshRef.current.handleIce(data.from, data.candidate);
-    };
-    const onWebRtcUserLeft = (data: { peerId: string }) => {
-      if (meshRef.current) {
-        meshRef.current.handleUserLeft(data.peerId);
-        setWebRtcPeers(Array.from(meshRef.current.peers.values()));
-        if (meshRef.current.peers.size === 0) setInWebRtcCall(false);
-      }
-    };
-
     // Register ALL listeners BEFORE emitting join
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -336,11 +188,6 @@ export function useHangoutSocket(
     socket.on("hangout:call:participant:left", onParticipantLeft);
     socket.on("hangout:call:participants", onCallParticipants);
     socket.on("hangout:call:screenshare", onScreenShare);
-    socket.on('webrtc:user-joined', onWebRtcUserJoined);
-    socket.on('webrtc:offer', onWebRtcOffer);
-    socket.on('webrtc:answer', onWebRtcAnswer);
-    socket.on('webrtc:ice', onWebRtcIce);
-    socket.on('webrtc:user-left', onWebRtcUserLeft);
 
     // Now emit join — if already connected, emit directly; otherwise onConnect handles it
     // Guard behind userId: an unauthenticated socket must not join a private room
@@ -361,18 +208,6 @@ export function useHangoutSocket(
       socket.off("hangout:call:participant:left", onParticipantLeft);
       socket.off("hangout:call:participants", onCallParticipants);
       socket.off("hangout:call:screenshare", onScreenShare);
-      socket.off('webrtc:user-joined', onWebRtcUserJoined);
-      socket.off('webrtc:offer', onWebRtcOffer);
-      socket.off('webrtc:answer', onWebRtcAnswer);
-      socket.off('webrtc:ice', onWebRtcIce);
-      socket.off('webrtc:user-left', onWebRtcUserLeft);
-
-      // Stop any active WebRTC call
-      meshRef.current?.stop();
-      meshRef.current = null;
-      setInWebRtcCall(false);
-      setLocalStream(null);
-      setWebRtcPeers([]);
 
       // Clear typing timers and map
       typingTimers.current.forEach((t) => clearTimeout(t));
@@ -454,33 +289,6 @@ export function useHangoutSocket(
     [groupId, userId]
   );
 
-  const startWebRtcCall = useCallback(async (displayName: string) => {
-    if (!groupId || inWebRtcCall) return;
-    const socket = connectSocket();
-    meshRef.current = new WebRtcMesh(groupId, socket, (peers) => setWebRtcPeers(peers));
-    const stream = await meshRef.current.start(displayName);
-    setLocalStream(stream);
-    setInWebRtcCall(true);
-  }, [groupId, inWebRtcCall]);
-
-  const leaveWebRtcCall = useCallback(() => {
-    if (!groupId) return;
-    connectSocket().emit('webrtc:leave', { groupId });
-    meshRef.current?.stop();
-    meshRef.current = null;
-    setInWebRtcCall(false);
-    setLocalStream(null);
-    setWebRtcPeers([]);
-  }, [groupId]);
-
-  const toggleMic = useCallback((enabled: boolean) => {
-    meshRef.current?.toggleMic(enabled);
-  }, []);
-
-  const toggleCam = useCallback((enabled: boolean) => {
-    meshRef.current?.toggleCam(enabled);
-  }, []);
-
   const mergedTypingUsers = useMemo(() => typingUsers, [typingUsers]);
 
   return {
@@ -501,13 +309,5 @@ export function useHangoutSocket(
     emitDeleteMessage,
     emitReaction,
     emitReadMessage,
-    // WebRTC
-    webRtcPeers,
-    localStream,
-    inWebRtcCall,
-    startWebRtcCall,
-    leaveWebRtcCall,
-    toggleMic,
-    toggleCam,
   };
 }

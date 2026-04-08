@@ -242,7 +242,8 @@ class XPostService {
   static async getAccount(accountId) {
     const query = `
       SELECT account_id, handle, display_name, encrypted_access_token, encrypted_refresh_token,
-             token_expires_at, is_active, oauth_version, encrypted_access_token_secret, consumer_key_ref
+             token_expires_at, is_active, oauth_version, encrypted_access_token_secret, consumer_key_ref,
+             x_user_id
       FROM x_accounts
       WHERE account_id = $1
     `;
@@ -1359,6 +1360,250 @@ class XPostService {
       WHERE post_id = $2
     `;
     await db.query(query, [delayMinutes, postId]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bulk delete tweets from an X account
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fetch all tweet IDs from the user's timeline via X API v2.
+   * Handles OAuth2 and OAuth1 accounts. Paginates until all tweets are fetched.
+   * @param {object} account - From getAccount()
+   * @param {'24h'|'7d'|'all'} timeRange
+   * @returns {Promise<Array<{id: string, text: string, created_at: string}>>}
+   */
+  static async fetchUserTweets(account, timeRange) {
+    let xUserId = account.x_user_id;
+
+    // If x_user_id is missing, fetch it from the API
+    if (!xUserId) {
+      logger.info('x_user_id missing for account, fetching from API', { accountId: account.account_id, handle: account.handle });
+      if (account.oauth_version === '1.0a') {
+        const XOAuth1Service = require('./xOAuth1Service');
+        const ref = (account.consumer_key_ref || 'generic').toUpperCase();
+        const consumerKey = process.env[`${ref}_CONSUMER_KEY`] || process.env.TWITTER_CONSUMER_KEY;
+        const consumerSecret = process.env[`${ref}_CONSUMER_SECRET`] || process.env.TWITTER_CONSUMER_SECRET;
+        let decryptedToken = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token);
+        let decryptedSecret = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token_secret);
+        const accessToken = decryptedToken?.accessToken || decryptedToken?.token;
+        const tokenSecret = decryptedSecret?.accessToken || decryptedSecret?.token;
+        const meUrl = 'https://api.twitter.com/2/users/me';
+        const authHeader = XOAuth1Service.buildAuthHeader('GET', meUrl, {}, { consumerKey, consumerSecret, accessToken, tokenSecret });
+        const meRes = await axios.get(meUrl, { headers: { Authorization: authHeader }, timeout: 10000 });
+        xUserId = meRes.data?.data?.id;
+      } else {
+        const accessToken = await this.getValidAccessToken(account);
+        const meRes = await axios.get('https://api.twitter.com/2/users/me', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 10000,
+        });
+        xUserId = meRes.data?.data?.id;
+      }
+      if (xUserId) {
+        await db.query('UPDATE x_accounts SET x_user_id = $1 WHERE account_id = $2', [xUserId, account.account_id]);
+        account.x_user_id = xUserId;
+      }
+    }
+
+    if (!xUserId) throw new Error(`Cannot determine X user ID for @${account.handle}`);
+
+    // Build start_time for time range filtering
+    let startTime = null;
+    if (timeRange === '24h') {
+      startTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    } else if (timeRange === '7d') {
+      startTime = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    const tweets = [];
+    let nextToken = null;
+    let pageCount = 0;
+
+    const getAuthHeader = async () => {
+      if (account.oauth_version === '1.0a') {
+        return null; // handled inline
+      }
+      return `Bearer ${await this.getValidAccessToken(account)}`;
+    };
+
+    const getOAuth1Creds = () => {
+      const ref = (account.consumer_key_ref || 'generic').toUpperCase();
+      const consumerKey = process.env[`${ref}_CONSUMER_KEY`] || process.env.TWITTER_CONSUMER_KEY;
+      const consumerSecret = process.env[`${ref}_CONSUMER_SECRET`] || process.env.TWITTER_CONSUMER_SECRET;
+      let decryptedToken = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token);
+      let decryptedSecret = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token_secret);
+      const accessToken = decryptedToken?.accessToken || decryptedToken?.token;
+      const tokenSecret = decryptedSecret?.accessToken || decryptedSecret?.token;
+      return { consumerKey, consumerSecret, accessToken, tokenSecret };
+    };
+
+    do {
+      const params = { max_results: 100, 'tweet.fields': 'created_at,text' };
+      if (startTime) params.start_time = startTime;
+      if (nextToken) params.pagination_token = nextToken;
+
+      const url = `${X_API_BASE}/users/${xUserId}/tweets`;
+
+      let response;
+      if (account.oauth_version === '1.0a') {
+        const XOAuth1Service = require('./xOAuth1Service');
+        const creds = getOAuth1Creds();
+        const authHeader = XOAuth1Service.buildAuthHeader('GET', url, params, creds);
+        const qs = new URLSearchParams(params).toString();
+        response = await axios.get(`${url}?${qs}`, {
+          headers: { Authorization: authHeader },
+          timeout: 15000,
+        });
+      } else {
+        const bearerHeader = await getAuthHeader();
+        response = await axios.get(url, {
+          headers: { Authorization: bearerHeader },
+          params,
+          timeout: 15000,
+        });
+      }
+
+      const data = response.data;
+      if (data?.data?.length) {
+        tweets.push(...data.data.map(t => ({ id: t.id, text: t.text, created_at: t.created_at })));
+      }
+
+      nextToken = data?.meta?.next_token || null;
+      pageCount++;
+
+      // Safety: pause 1s between pages to avoid rate limit on timeline reads
+      if (nextToken) await new Promise(r => setTimeout(r, 1000));
+    } while (nextToken && pageCount < 500); // max 50k tweets safety cap
+
+    logger.info('fetchUserTweets completed', {
+      accountId: account.account_id,
+      handle: account.handle,
+      timeRange,
+      count: tweets.length,
+      pages: pageCount,
+    });
+
+    return tweets;
+  }
+
+  /**
+   * Delete a single tweet from X API v2.
+   */
+  static async deleteTweet(account, tweetId) {
+    const url = `${X_API_BASE}/tweets/${tweetId}`;
+
+    if (account.oauth_version === '1.0a') {
+      const XOAuth1Service = require('./xOAuth1Service');
+      const ref = (account.consumer_key_ref || 'generic').toUpperCase();
+      const consumerKey = process.env[`${ref}_CONSUMER_KEY`] || process.env.TWITTER_CONSUMER_KEY;
+      const consumerSecret = process.env[`${ref}_CONSUMER_SECRET`] || process.env.TWITTER_CONSUMER_SECRET;
+      let decryptedToken = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token);
+      let decryptedSecret = PaymentSecurityService.decryptSensitiveData(account.encrypted_access_token_secret);
+      const accessToken = decryptedToken?.accessToken || decryptedToken?.token;
+      const tokenSecret = decryptedSecret?.accessToken || decryptedSecret?.token;
+      const authHeader = XOAuth1Service.buildAuthHeader('DELETE', url, {}, { consumerKey, consumerSecret, accessToken, tokenSecret });
+      await axios.delete(url, {
+        headers: { Authorization: authHeader },
+        timeout: 15000,
+      });
+    } else {
+      const accessToken = await this.getValidAccessToken(account);
+      await axios.delete(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 15000,
+      });
+    }
+
+    return { deleted: true };
+  }
+
+  /**
+   * Bulk-delete all tweets from an X account within a time range.
+   * Runs deletions with a delay to respect X API rate limits.
+   * @param {string} accountId
+   * @param {'24h'|'7d'|'all'} timeRange
+   * @param {function} onProgress - called with ({ total, deleted, failed }) after each deletion
+   */
+  static async deleteAccountPosts(accountId, timeRange, onProgress) {
+    const account = await this.getAccount(accountId);
+    if (!account) throw new Error('Cuenta de X no encontrada');
+    if (!account.is_active) throw new Error('La cuenta de X está inactiva');
+
+    const tweets = await this.fetchUserTweets(account, timeRange);
+    const total = tweets.length;
+    let deleted = 0;
+    let failed = 0;
+    const errors = [];
+
+    logger.info('Starting bulk X post deletion', {
+      accountId,
+      handle: account.handle,
+      timeRange,
+      total,
+    });
+
+    for (const tweet of tweets) {
+      try {
+        await this.deleteTweet(account, tweet.id);
+        deleted++;
+
+        // Mark matching local x_post_jobs as deleted
+        await db.query(
+          `UPDATE x_post_jobs SET status = 'deleted', updated_at = NOW()
+           WHERE response_json->'data'->>'id' = $1 AND account_id = $2`,
+          [tweet.id, accountId]
+        ).catch(() => { /* non-critical */ });
+
+        logger.info('X tweet deleted', { handle: account.handle, tweetId: tweet.id });
+      } catch (err) {
+        const status = err?.response?.status;
+
+        if (status === 429) {
+          // Rate limited — wait for Retry-After or default 15 min
+          const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '900', 10);
+          logger.warn('X delete rate limited, waiting', { retryAfter });
+          if (onProgress) onProgress({ total, deleted, failed, rateLimited: true, retryAfter });
+          await new Promise(r => setTimeout(r, retryAfter * 1000));
+          // Retry once after waiting
+          try {
+            await this.deleteTweet(account, tweet.id);
+            deleted++;
+            await db.query(
+              `UPDATE x_post_jobs SET status = 'deleted', updated_at = NOW()
+               WHERE response_json->'data'->>'id' = $1 AND account_id = $2`,
+              [tweet.id, accountId]
+            ).catch(() => {});
+          } catch (retryErr) {
+            failed++;
+            errors.push(`${tweet.id}: ${retryErr.message}`);
+          }
+        } else {
+          failed++;
+          const msg = `${tweet.id}: ${err.message}`;
+          errors.push(msg);
+          logger.warn('X tweet deletion failed', { handle: account.handle, tweetId: tweet.id, error: err.message });
+        }
+      }
+
+      if (onProgress) onProgress({ total, deleted, failed });
+
+      // ~3 second delay between deletions (stays well under Free tier 50/15min limit)
+      if (deleted + failed < total) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+
+    logger.info('Bulk X post deletion completed', {
+      accountId,
+      handle: account.handle,
+      timeRange,
+      total,
+      deleted,
+      failed,
+    });
+
+    return { total, deleted, failed, errors };
   }
 }
 

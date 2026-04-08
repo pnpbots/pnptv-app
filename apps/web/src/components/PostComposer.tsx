@@ -760,8 +760,8 @@ export function PostComposer({
             placeholder={resolvedPlaceholder}
             rows={compact ? 2 : 3}
             disabled={isPosting}
-            className="w-full bg-transparent text-white text-sm py-2 border-b border-white/10 mb-2 resize-none outline-none placeholder:text-white/40 disabled:opacity-60 overflow-hidden"
-            style={{ minHeight: "44px" }}
+            className="w-full bg-transparent text-white py-2 border-b border-white/10 mb-2 resize-none outline-none placeholder:text-white/40 disabled:opacity-60 overflow-hidden"
+            style={{ minHeight: "44px", fontSize: "16px" }}
             aria-describedby={error ? `${baseId}-error` : undefined}
           />
 
@@ -810,7 +810,8 @@ export function PostComposer({
                   disabled={isPosting}
                   rows={2}
                   maxLength={500}
-                  className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-2 border border-white/10 outline-none placeholder:text-white/30 focus:border-pnp-pink/50 disabled:opacity-60 resize-none transition-colors"
+                  className="w-full bg-white/5 text-white rounded-lg px-3 py-2 border border-white/10 outline-none placeholder:text-white/30 focus:border-pnp-pink/50 disabled:opacity-60 resize-none transition-colors"
+                  style={{ fontSize: "16px" }}
                 />
                 <div className="flex justify-end mt-0.5">
                   <span

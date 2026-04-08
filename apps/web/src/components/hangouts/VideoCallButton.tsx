@@ -69,7 +69,7 @@ export function VideoCallButton({
     ? participantCount > 0
       ? `Join active call (${participantCount} participant${participantCount !== 1 ? "s" : ""})`
       : "Join active call"
-    : "Start a new call";
+    : "Open Telegram call dock";
 
   if (hasActiveCall) {
     return (
@@ -123,7 +123,7 @@ export function VideoCallButton({
     );
   }
 
-  // No active call — "Start Call" button
+  // No active call — open the Telegram call dock
   return (
     <div className="relative flex-shrink-0">
       <button
@@ -135,7 +135,7 @@ export function VideoCallButton({
         onBlur={hideTooltip}
         className="w-9 h-9 rounded-full flex items-center justify-center hover:opacity-80 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
         style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))" }}
-        aria-label="Start video call"
+        aria-label="Open Telegram call dock"
       >
         {isLoading ? (
           <svg className="w-4 h-4 text-pnp-amber animate-spin" fill="none" viewBox="0 0 24 24">

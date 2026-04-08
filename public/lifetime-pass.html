@@ -536,15 +536,6 @@
 
 
     <script>
-        const meruPaymentLinks = [
-            'https://pay.getmeru.com/MoXzNM',
-            'https://pay.getmeru.com/Gps_Vx',
-            'https://pay.getmeru.com/xJP7mm',
-            'https://pay.getmeru.com/EPYR_E',
-            'https://pay.getmeru.com/7KHOXg',
-            'https://pay.getmeru.com/h5Zt7O'
-        ];
-
         const modalStrings = {
             en: {
                 title: "Your Payment Code",
@@ -583,12 +574,29 @@
             modal.style.display = 'none';
         }
 
-        function payNow() {
-            const randomIndex = Math.floor(Math.random() * meruPaymentLinks.length);
-            const selectedLink = meruPaymentLinks[randomIndex];
-            const paymentCode = selectedLink.substring(selectedLink.lastIndexOf('/') + 1);
+        async function payNow() {
+            const btn = document.querySelector('.cta-button');
+            const originalText = btn.innerHTML;
             
-            showPaymentCodePopup(selectedLink, paymentCode);
+            try {
+                btn.disabled = true;
+                btn.innerText = 'LOADING...';
+
+                const response = await fetch('/api/meru/random-link?product=lifetime100');
+                const data = await response.json();
+
+                if (!data.success) {
+                    throw new Error(data.error || 'No links available');
+                }
+
+                showPaymentCodePopup(data.url, data.code);
+            } catch (error) {
+                console.error('Error fetching Meru link:', error);
+                alert('Sorry, no payment links are currently available for this offer. Please try again later or contact support.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
         }
 
         // Language Logic

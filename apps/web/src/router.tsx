@@ -284,7 +284,14 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
-      { path: "become-a-model", element: <Navigate to="/creators/apply" replace /> },
+      {
+        path: "become-a-model",
+        element: (
+          <ModuleLoader>
+            <BecomeModel />
+          </ModuleLoader>
+        ),
+      },
       { path: "creator", element: <Navigate to="/creators" replace /> },
       { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "pnplive", element: <Navigate to="/live" replace /> },
@@ -337,6 +344,10 @@ export const router = createBrowserRouter([
             <ContentModeration />
           </ModuleLoader>
         ),
+      },
+      {
+        path: "moderation",
+        element: <Navigate to="/admin/posts" replace />,
       },
       {
         path: "hangouts",
@@ -501,6 +512,14 @@ export const router = createBrowserRouter([
         ),
       },
     ],
+  },
+  {
+    path: "/auth",
+    element: (
+      <ModuleLoader>
+        <LoginPage />
+      </ModuleLoader>
+    ),
   },
   {
     path: "/join",

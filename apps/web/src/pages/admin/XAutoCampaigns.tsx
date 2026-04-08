@@ -22,6 +22,8 @@ import {
   resetGrokManagerChat,
   previewAdminXCampaign,
   duplicateAdminXCampaign,
+  deleteXAccountPosts,
+  getXDeleteJobStatus,
   type XAutoCampaignStats,
   type XAutoCampaign,
   type XAutoCampaignPost,
@@ -393,6 +395,13 @@ export default function XAutoCampaigns() {
 
   // OAuth app selector
   const [oauthApp, setOauthApp] = useState<"generic" | "santino" | "lex">("generic");
+
+  // Delete posts modal state
+  const [deletePostsModal, setDeletePostsModal] = useState<{ accountId: string; handle: string } | null>(null);
+  const [deleteTimeRange, setDeleteTimeRange] = useState<"24h" | "7d" | "all">("all");
+  const [deleteJobId, setDeleteJobId] = useState<string | null>(null);
+  const [deleteJobProgress, setDeleteJobProgress] = useState<{ status: string; total: number; deleted: number; failed: number; errors: string[]; rateLimited?: boolean; retryAfter?: number } | null>(null);
+  const [deletePostsLoading, setDeletePostsLoading] = useState(false);
 
   // Grok Manager chat state
   const [grokOpen, setGrokOpen] = useState(false);
@@ -963,7 +972,7 @@ export default function XAutoCampaigns() {
                 <input
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                   placeholder="Daily PNP Promo"
                   required
                 />
@@ -974,7 +983,7 @@ export default function XAutoCampaigns() {
                   <select
                     value={form.accountId}
                     onChange={(e) => setForm((f) => ({ ...f, accountId: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
+                    className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                     required
                   >
                     <option value="">Select account...</option>
@@ -993,7 +1002,7 @@ export default function XAutoCampaigns() {
               <textarea
                 value={form.topic}
                 onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[80px]"
+                className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[80px]" style={{ fontSize: "16px" }}
                 placeholder={t.admin.xCampaigns.form.topicPlaceholder}
                 required
               />
@@ -1005,7 +1014,7 @@ export default function XAutoCampaigns() {
                 <select
                   value={form.grokMode}
                   onChange={(e) => setForm((f) => ({ ...f, grokMode: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                 >
                   {GROK_MODES.map((m) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
@@ -1017,7 +1026,7 @@ export default function XAutoCampaigns() {
                 <select
                   value={form.language}
                   onChange={(e) => setForm((f) => ({ ...f, language: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                 >
                   {LANGUAGES.map((l) => (
                     <option key={l.value} value={l.value}>{l.label}</option>
@@ -1029,7 +1038,7 @@ export default function XAutoCampaigns() {
                 <select
                   value={form.personaType}
                   onChange={(e) => setForm((f) => ({ ...f, personaType: e.target.value as "santino" | "lex" | "generic" }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary focus:border-pnp-accent focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                 >
                   {PERSONA_TYPES.map((p) => (
                     <option key={p.value} value={p.value}>{p.label}</option>
@@ -1042,7 +1051,7 @@ export default function XAutoCampaigns() {
                   type="number"
                   value={form.intervalMinutes}
                   onChange={(e) => setForm((f) => ({ ...f, intervalMinutes: parseInt(e.target.value) || 240 }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                   min={15}
                 />
               </div>
@@ -1052,7 +1061,7 @@ export default function XAutoCampaigns() {
                   type="number"
                   value={form.maxPosts}
                   onChange={(e) => setForm((f) => ({ ...f, maxPosts: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                   placeholder={t.admin.xCampaigns.form.maxPostsPlaceholder}
                   min={1}
                 />
@@ -1069,7 +1078,7 @@ export default function XAutoCampaigns() {
                     const [h, m] = e.target.value.split(":").map(Number);
                     setForm((f) => ({ ...f, activeHoursStart: h * 60 + (m || 0) }));
                   }}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary focus:border-pnp-accent focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                 />
               </div>
               <div>
@@ -1081,7 +1090,7 @@ export default function XAutoCampaigns() {
                     const [h, m] = e.target.value.split(":").map(Number);
                     setForm((f) => ({ ...f, activeHoursEnd: h * 60 + (m || 0) }));
                   }}
-                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary focus:border-pnp-accent focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                 />
               </div>
             </div>
@@ -1091,7 +1100,7 @@ export default function XAutoCampaigns() {
               <textarea
                 value={form.customPrompt}
                 onChange={(e) => setForm((f) => ({ ...f, customPrompt: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[60px]"
+                className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none min-h-[60px]" style={{ fontSize: "16px" }}
                 placeholder={t.admin.xCampaigns.form.customPromptPlaceholder}
               />
               <div className="mt-2 p-2.5 rounded-lg bg-orange-500/10 border border-orange-500/20 text-xs text-orange-300/90">
@@ -1330,7 +1339,7 @@ export default function XAutoCampaigns() {
                     }
                   }}
                   placeholder="Ask Grok anything about your campaigns, strategy, demographics..."
-                  className="flex-1 px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none resize-none min-h-[38px] max-h-[120px]"
+                  className="flex-1 px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none resize-none min-h-[38px] max-h-[120px]" style={{ fontSize: "16px" }}
                   rows={1}
                   disabled={grokLoading}
                 />

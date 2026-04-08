@@ -263,8 +263,8 @@ function IssueStrikeForm({
         onChange={(e) => setForm((prev) => ({ ...prev, reason: e.target.value, error: null }))}
         placeholder="Reason for strike (required)..."
         rows={3}
-        className="w-full rounded-lg px-3 py-2 text-xs text-white placeholder:text-white/25 outline-none resize-none mb-2"
-        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+        className="w-full rounded-lg px-3 py-2 text-white placeholder:text-white/25 outline-none resize-none mb-2"
+        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
         disabled={form.submitting}
       />
       {form.error && (

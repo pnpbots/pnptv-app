@@ -1,12 +1,12 @@
 const CommunityRoomService = require('../../services/communityRoomService');
-const jaasService = require('../../services/jaasService');
+const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { resolveUserId } = require('../../utils/helpers');
 const EntitlementAccessService = require('../../services/entitlementAccessService');
 const socketSingleton = require('../../services/socketSingleton');
 
 /**
- * Get community room info and generate token
+ * Get community room info and register presence.
  * POST /api/community-room/join
  * Anyone can join - no moderator required
  */
@@ -64,21 +64,18 @@ const joinCommunityRoom = async (req, res) => {
       avatarUrl
     );
 
-    // Generate tier-specific JaaS JWT
-    const token = await CommunityRoomService.generateCommunityToken(
-      userId,
-      displayName,
-      '',
-      permissions,
-      sessionUser.photoUrl || ''
-    );
-
-    const meetingUrl = jaasService.generateMeetingUrl(CommunityRoomService.COMMUNITY_ROOM_NAME, token);
-
     // Get current stage state to include in join response
     const stageState = await CommunityRoomService.getStageState();
+    const { rows: mainGroupRows } = await query(
+      `SELECT id, telegram_chat_id, telegram_invite_link
+         FROM hangout_groups
+        WHERE is_main = true
+        ORDER BY id ASC
+        LIMIT 1`
+    );
+    const mainGroup = mainGroupRows[0] || null;
 
-    logger.info('User joined community room (24/7 open)', {
+    logger.info('User joined community room (Telegram Main Stage)', {
       userId,
       displayName,
       tier: permissions.role,
@@ -87,9 +84,8 @@ const joinCommunityRoom = async (req, res) => {
 
     res.json({
       success: true,
-      token,
-      meetingUrl,
-      domain: '8x8.vc',
+      videoProvider: 'telegram-webk',
+      telegramWebPath: '/telegram/k/',
       roomName: CommunityRoomService.COMMUNITY_ROOM_NAME,
       roomId: CommunityRoomService.COMMUNITY_ROOM_ID,
       isModerator: permissions.isModerator,
@@ -115,8 +111,13 @@ const joinCommunityRoom = async (req, res) => {
         maxParticipants: room.maxParticipants,
         isPersistent: true,
         isOpen24_7: true,
-        description: 'PNPtv 24/7 Main Stage - Open to all members'
-      }
+        description: 'PNPtv 24/7 Main Stage - Telegram community hangout'
+      },
+      telegram: {
+        groupId: mainGroup?.id || null,
+        telegramChatId: mainGroup?.telegram_chat_id || null,
+        telegramInviteLink: mainGroup?.telegram_invite_link || null,
+      },
     });
   } catch (error) {
     logger.error('Error joining community room:', error);

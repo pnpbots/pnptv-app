@@ -299,7 +299,7 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
                 id="creator-channel"
                 value={channelRef}
                 onChange={(e) => setChannelRef(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-purple-500/50"
+                style={{ fontSize: "16px" }} className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-purple-500/50"
               >
                 <option value="">— No channel —</option>
                 {availableChannels.map((ch) => (
@@ -326,7 +326,7 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
               id="creator-type"
               value={creatorType}
               onChange={(e) => setCreatorType(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-purple-500/50"
+              style={{ fontSize: "16px" }} className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-purple-500/50"
             >
               <option value="">— Select type —</option>
               {CREATOR_TYPES.map((t) => (
@@ -349,7 +349,7 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
               step="0.50"
               value={priceUsd}
               onChange={(e) => setPriceUsd(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-purple-500/50"
+              style={{ fontSize: "16px" }} className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-purple-500/50"
             />
           </div>
 
