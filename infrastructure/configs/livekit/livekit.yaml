@@ -7,7 +7,7 @@ rtc:
   tcp_port: 7881
   use_external_ip: true
 keys:
-  APIa22e65f8d8f9fff7: JQa5cJVBfYGqgFtrXmAeM6Sn9mLII_KeCUDWAbF6Ijk
+  API43c72f0f0e6338a3: LNEjm4LVgldaaI4142uRYavT_SGCxaz21uPa_MLBYAs
 logging:
   level: info
 turn:
