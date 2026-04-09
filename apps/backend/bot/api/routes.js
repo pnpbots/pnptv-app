@@ -281,6 +281,13 @@ function geoBlockResponse(req, res) {
   return res.status(451).send(GEO_BLOCKED_HTML);
 }
 
+// ── Geo country detection endpoint ──────────────────────────────────────────
+// Used by the frontend to determine if the user is in a LATAM country so
+// specific features (Social, Hangouts, Channels, Live) can be gated unless
+// the user holds a PRIME membership.
+// No auth required — IP is the only input.
+// Route registered below after session middleware is set up.
+
 const getActorId = (req) => String(req.user?.id || req.user?.userId || '');
 
 const requireSelfOrAdmin = async (req, res, next) => {
@@ -399,6 +406,15 @@ app.use(ipTracker); // Log every authenticated request IP for security
 // app.use(latamGeoBlock); // LATAM geo-block — DISABLED until further notice
 
 // express-session handles Set-Cookie automatically — no custom middleware needed
+
+// Geo country detection — used by frontend LATAM feature gate
+app.get('/api/webapp/geo', asyncHandler(async (req, res) => {
+  const ip = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+  const geo = geoip.lookup(ip);
+  const country = geo?.country || null;
+  const isLatam = country ? LATAM_COUNTRIES.has(country) : false;
+  return res.json({ country, isLatam });
+}));
 
 
 // Function to conditionally apply middleware (skip for Telegram webhook)

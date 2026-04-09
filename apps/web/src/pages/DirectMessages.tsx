@@ -303,6 +303,8 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
   const [pendingCallRoom, setPendingCallRoom] = useState<string | null>(null);
   const [activeCall, setActiveCall] = useState<DmVideoCallSession | null>(null);
   const [callBusy, setCallBusy] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<{ roomName: string; callerId: string; calleeId: string; callerName: string } | null>(null);
+  const incomingCallDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Context menu / emoji picker
   const [contextMenu, setContextMenu] = useState<{ msg: DmMessage; x: number; y: number } | null>(null);
@@ -445,6 +447,26 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
       setChatError(data.message || data.error || "Something went wrong");
     };
 
+    const onDmCallIncoming = (data: { roomName: string; callerId: string; calleeId: string; callerName: string }) => {
+      // Only show if we're the callee
+      if (String(data.calleeId) !== String(myUserId)) return;
+      setIncomingCall(data);
+      // Auto-dismiss after 30 seconds
+      if (incomingCallDismissTimer.current) clearTimeout(incomingCallDismissTimer.current);
+      incomingCallDismissTimer.current = setTimeout(() => {
+        setIncomingCall(null);
+        incomingCallDismissTimer.current = null;
+      }, 30000);
+    };
+
+    const onDmCallDeclined = () => {
+      setIncomingCall(null);
+      if (incomingCallDismissTimer.current) {
+        clearTimeout(incomingCallDismissTimer.current);
+        incomingCallDismissTimer.current = null;
+      }
+    };
+
     socket.on("dm:message", onDmMessage);
     socket.on("dm:sent", onDmSent);
     socket.on("dm:typing", onDmTyping);
@@ -452,6 +474,8 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     socket.on("dm:message:deleted", onDmDeleted);
     socket.on("dm:reaction:updated", onDmReactionUpdated);
     socket.on("dm:error", onDmError);
+    socket.on("dm:call:incoming", onDmCallIncoming);
+    socket.on("dm:call:declined", onDmCallDeclined);
 
     return () => {
       socket.off("dm:message", onDmMessage);
@@ -461,13 +485,19 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
       socket.off("dm:message:deleted", onDmDeleted);
       socket.off("dm:reaction:updated", onDmReactionUpdated);
       socket.off("dm:error", onDmError);
+      socket.off("dm:call:incoming", onDmCallIncoming);
+      socket.off("dm:call:declined", onDmCallDeclined);
       // Clear any pending long-press timer to avoid state updates after unmount
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
         longPressTimer.current = null;
       }
+      if (incomingCallDismissTimer.current) {
+        clearTimeout(incomingCallDismissTimer.current);
+        incomingCallDismissTimer.current = null;
+      }
     };
-  }, [userId]);
+  }, [userId, myUserId]);
 
   const emitTyping = () => {
     const now = Date.now();
@@ -764,6 +794,50 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
               className="px-3 py-1.5 rounded-xl text-xs font-semibold text-pnp-textSecondary border border-white/10 hover:bg-white/5 transition-all active:scale-95"
             >
               Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Incoming call notification banner */}
+      {incomingCall && (
+        <div className="px-3 py-2.5 border-b border-pnp-border flex items-center justify-between gap-3 flex-shrink-0 bg-[#0d1f0d]">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse flex-shrink-0" />
+            <p className="text-sm font-semibold text-white truncate">
+              Incoming call from {incomingCall.callerName}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const call = incomingCall;
+                setIncomingCall(null);
+                if (incomingCallDismissTimer.current) {
+                  clearTimeout(incomingCallDismissTimer.current);
+                  incomingCallDismissTimer.current = null;
+                }
+                beginJoinCall(call.roomName, call.callerId, call.calleeId);
+              }}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white transition-all active:scale-95 bg-green-600 hover:bg-green-500"
+            >
+              Answer
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const call = incomingCall;
+                setIncomingCall(null);
+                if (incomingCallDismissTimer.current) {
+                  clearTimeout(incomingCallDismissTimer.current);
+                  incomingCallDismissTimer.current = null;
+                }
+                connectSocket().emit("dm:call:decline", { roomName: call.roomName });
+              }}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white/80 border border-white/10 hover:bg-red-500/20 hover:border-red-500/40 hover:text-red-400 transition-all active:scale-95"
+            >
+              Decline
             </button>
           </div>
         </div>

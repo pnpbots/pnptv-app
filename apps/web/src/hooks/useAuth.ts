@@ -26,6 +26,7 @@ interface PnptvUser {
   lastLoginMethod?: string | null;
   city?: string | null;
   country?: string | null;
+  email?: string;
 }
 
 interface AuthState {

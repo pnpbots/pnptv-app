@@ -23,6 +23,9 @@ const strings = {
     // Conversation states
     tryAgain: "Try Again",
 
+    // Empty state
+    noConversations: "No conversations yet",
+
     // Timestamps
     timeNow: "now",
   },
@@ -44,6 +47,8 @@ const strings = {
     backToThreads: "Volver a los mensajes",
 
     tryAgain: "Intentar de nuevo",
+
+    noConversations: "Sin conversaciones aún",
 
     timeNow: "ahora",
   },

@@ -1,7 +1,7 @@
 'use strict';
 
 const { AccessToken } = require('livekit-server-sdk');
-const logger = require('../utils/logger');
+const logger = require('../../utils/logger');
 
 const LIVEKIT_API_KEY = 'APIa22e65f8d8f9fff7';
 const LIVEKIT_API_SECRET = 'JQa5cJVBfYGqgFtrXmAeM6Sn9mLII_KeCUDWAbF6Ijk';

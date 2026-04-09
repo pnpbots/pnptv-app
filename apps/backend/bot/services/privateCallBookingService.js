@@ -4,7 +4,7 @@ const CallSessionModel = require('../../models/callSessionModel');
 const BookingNotificationModel = require('../../models/bookingNotificationModel');
 const PerformerModel = require('../../models/performerModel');
 const UserService = require('./userService');
-const jaasService = require('./jaasService');
+const { generateToken, LIVEKIT_WS_URL } = require('./livekitService');
 const logger = require('../../utils/logger');
 
 /**
@@ -487,43 +487,31 @@ class PrivateCallBookingService {
         return { success: false, error: 'booking_not_found' };
       }
 
-      // Require JaaS — no public fallback for private calls
-      if (!jaasService.isConfigured()) {
-        logger.error('JaaS is not configured — cannot create private call session', { bookingId });
-        return { success: false, error: 'video_service_unavailable' };
-      }
-
       // Generate a cryptographically unpredictable room ID using a full UUID suffix
       const roomId = `pnptv-priv-${uuidv4()}`;
 
-      // Generate per-participant JaaS JWTs (2 h TTL, no recording)
-      const userToken = jaasService.generateToken({
-        roomName: roomId,
-        userId: String(booking.userId),
-        userName: booking.userName || 'User',
-        isModerator: false,
-        enableLivestreaming: false,
-        enableRecording: false,
-        expiresIn: '2h',
-      });
+      // Generate per-participant LiveKit tokens
+      const userToken = await generateToken(
+        roomId,
+        String(booking.userId),
+        booking.userName || 'User',
+        false
+      );
 
-      const performerToken = jaasService.generateToken({
-        roomName: roomId,
-        userId: `performer-${booking.performerId}`,
-        userName: booking.performerName || 'Performer',
-        isModerator: true,
-        enableLivestreaming: false,
-        enableRecording: false,
-        expiresIn: '2h',
-      });
+      const performerToken = await generateToken(
+        roomId,
+        `performer-${booking.performerId}`,
+        booking.performerName || 'Performer',
+        true
+      );
 
-      const joinUrlUser = jaasService.generateMeetingUrl(roomId, userToken);
-      const joinUrlPerformer = jaasService.generateMeetingUrl(roomId, performerToken);
+      const joinUrlUser = JSON.stringify({ token: userToken, livekitUrl: LIVEKIT_WS_URL, roomName: roomId });
+      const joinUrlPerformer = JSON.stringify({ token: performerToken, livekitUrl: LIVEKIT_WS_URL, roomName: roomId });
 
       // Create session
       const session = await CallSessionModel.create({
         bookingId,
-        roomProvider: 'jaas',
+        roomProvider: 'livekit',
         roomId,
         roomName: `Private Call - ${booking.performerName}`,
         joinUrlUser,

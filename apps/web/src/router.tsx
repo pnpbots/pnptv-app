@@ -4,7 +4,7 @@ import { Layout } from "@/components/Layout";
 import { AdminLayout } from "@/components/admin/AdminLayout";
 import { ModuleLoader } from "@/components/ModuleLoader";
 import { VerificationGate } from "@/components/VerificationGate";
-import { TierGate } from "@/components/TierGate";
+import { TierGate, LatamPrimeGate } from "@/components/TierGate";
 
 const Home = lazy(() => import("@/pages/Home"));
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
@@ -106,7 +106,9 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <Live />
+              <LatamPrimeGate>
+                <Live />
+              </LatamPrimeGate>
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -116,7 +118,9 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <Stream />
+              <LatamPrimeGate>
+                <Stream />
+              </LatamPrimeGate>
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -140,7 +144,9 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <Channels />
+              <LatamPrimeGate>
+                <Channels />
+              </LatamPrimeGate>
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -164,7 +170,9 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <Chat />
+              <LatamPrimeGate>
+                <Chat />
+              </LatamPrimeGate>
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -204,7 +212,9 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <Social />
+              <LatamPrimeGate>
+                <Social />
+              </LatamPrimeGate>
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -214,7 +224,9 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <VerificationGate>
-              <PostDetail />
+              <LatamPrimeGate>
+                <PostDetail />
+              </LatamPrimeGate>
             </VerificationGate>
           </ModuleLoader>
         ),

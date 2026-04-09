@@ -29,6 +29,10 @@ import {
   type StreamOverlay,
   getRecentTips,
   getWalletBalance,
+  getWebAppLiveStreams,
+  initiateRaid,
+  setHostedChannel,
+  getHostedChannel,
 } from "@/lib/api";
 
 function extractChannelRef(streamId: string): string | null {
@@ -1019,7 +1023,7 @@ export default function Stream() {
                   className="px-1.5 py-0.5 rounded-full text-[9px] font-medium text-white/70 border border-white/20"
                   style={{ background: "rgba(255,255,255,0.08)" }}
                 >
-                  {t.live[tag as keyof typeof t.live] || tag}
+                  {(t.live[tag as keyof typeof t.live] as string) || tag}
                 </span>
               ))}
             </div>

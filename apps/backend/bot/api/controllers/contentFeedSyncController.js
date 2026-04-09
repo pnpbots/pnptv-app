@@ -25,7 +25,10 @@ let syncTimer = null;
  */
 async function resolveUserId(pnptvId) {
   if (!pnptvId) return null;
-  const res = await query('SELECT id FROM users WHERE pnptv_id = $1 LIMIT 1', [pnptvId]);
+  const res = await query(
+    'SELECT id FROM users WHERE pnptv_id = $1 OR id::text = $1 LIMIT 1',
+    [String(pnptvId)]
+  );
   return res.rows[0]?.id || null;
 }
 

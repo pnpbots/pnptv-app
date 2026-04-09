@@ -2,7 +2,8 @@ import React, { useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { useTier } from "@/hooks/useTier";
+import { useTier, useLatam } from "@/hooks/useTier";
+import { LatamPrimeGate } from "@/components/TierGate";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { updateProfile, getHangoutGroups, getSocialFeedPosts, type HangoutGroup, type SocialPostItem } from "@/lib/api";
@@ -396,8 +397,23 @@ export default function Home() {
 
       {/* View content */}
       {viewMode === "feed" ? (
-        hangoutFilter ? (
-          /* Hangout-scoped feed */
+        <LatamPrimeGate>
+          {hangoutFilter ? (
+            /* Hangout-scoped feed */
+            <SocialFeedTabs
+              currentUserId={user?.dbId ? String(user.dbId) : ""}
+              isAdmin={isAdmin}
+              isAuthenticated={isAuthenticated}
+              userLang={user?.language}
+              viewerCity={user?.city}
+              viewerCountry={user?.country}
+              contentDisclaimerAccepted={contentDisclaimer}
+              onAcceptDisclaimer={handleAcceptDisclaimer}
+              onNavigate={navigate}
+              showComposer={false}
+              hangoutGroupId={parseInt(hangoutFilter, 10)}
+            />
+          ) : (
           <SocialFeedTabs
             currentUserId={user?.dbId ? String(user.dbId) : ""}
             isAdmin={isAdmin}
@@ -408,34 +424,23 @@ export default function Home() {
             contentDisclaimerAccepted={contentDisclaimer}
             onAcceptDisclaimer={handleAcceptDisclaimer}
             onNavigate={navigate}
-            showComposer={false}
-            hangoutGroupId={parseInt(hangoutFilter, 10)}
+            showComposer={!hashtagFilter}
+            hashtagFilter={hashtagFilter}
           />
-        ) : (
-        <SocialFeedTabs
-          currentUserId={user?.dbId ? String(user.dbId) : ""}
-          isAdmin={isAdmin}
-          isAuthenticated={isAuthenticated}
-          userLang={user?.language}
-          viewerCity={user?.city}
-          viewerCountry={user?.country}
-          contentDisclaimerAccepted={contentDisclaimer}
-          onAcceptDisclaimer={handleAcceptDisclaimer}
-          onNavigate={navigate}
-          showComposer={!hashtagFilter}
-          hashtagFilter={hashtagFilter}
-        />
-        )
+          )}
+        </LatamPrimeGate>
       ) : (
-        <Suspense
-          fallback={
-            <div className="flex items-center justify-center py-16">
-              <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: "#D4007A", borderTopColor: "transparent" }} />
-            </div>
-          }
-        >
-          <ChatEmbedded embeddedMode />
-        </Suspense>
+        <LatamPrimeGate>
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center py-16">
+                <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: "#D4007A", borderTopColor: "transparent" }} />
+              </div>
+            }
+          >
+            <ChatEmbedded embeddedMode />
+          </Suspense>
+        </LatamPrimeGate>
       )}
       </>}
     </div>

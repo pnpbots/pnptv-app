@@ -181,6 +181,10 @@ export function checkAuthStatus(): Promise<AuthStatusResponse> {
   return request("/api/auth-status");
 }
 
+export function getGeoCountry(): Promise<{ country: string | null; isLatam: boolean }> {
+  return request("/api/webapp/geo");
+}
+
 export function acceptTerms(): Promise<{ success: boolean }> {
   return request("/api/accept-terms", { method: "POST" });
 }
@@ -3601,6 +3605,7 @@ export interface AdminDemographics {
     hangoutMembers: number; streams: number; notificationsSent: number; follows: number;
     mediaPlays: number; mediaFavorites: number; tips: number; pushSubscribers: number;
     xLinked: number;
+    blueskyLinked: number;
   };
   insights: { type: string; title: string; body: string }[];
 }
@@ -3737,7 +3742,7 @@ export interface AddOn {
   features?: string[];
 }
 
-export interface PlanAddOn {
+export interface AdminPlanAddOn {
   add_on_id: string;
   name: string;
   duration_days: number | null;
@@ -3748,7 +3753,7 @@ export function getAddOns(): Promise<{ success: boolean; addOns: AddOn[] }> {
   return request("/api/webapp/admin/add-ons");
 }
 
-export function getPlanAddOns(planId: string): Promise<{ success: boolean; addOns: PlanAddOn[] }> {
+export function getPlanAddOns(planId: string): Promise<{ success: boolean; addOns: AdminPlanAddOn[] }> {
   return request(`/api/webapp/admin/plans/${planId}/add-ons`);
 }
 
@@ -5548,4 +5553,36 @@ export function addMeruLinks(
 
 export function deleteMeruLink(id: string): Promise<{ success: boolean; message: string }> {
   return request(`/api/webapp/admin/meru-links/${id}`, { method: "DELETE" });
+}
+
+// ── Videorama (Invidious video discovery) ────────────────────────────────────
+
+export interface InvidiousVideo {
+  type: string;
+  title: string;
+  videoId: string;
+  author: string;
+  authorId: string;
+  description: string;
+  viewCount: number;
+  lengthSeconds: number;
+  videoThumbnails: { quality: string; url: string; width: number; height: number }[];
+  published: number;
+  publishedText: string;
+}
+
+export function searchVideorama(q: string, page = 1): Promise<{ success: boolean; results: InvidiousVideo[] }> {
+  return request(`/api/webapp/videorama/search?q=${encodeURIComponent(q)}&page=${page}`);
+}
+
+export function getVideoramaTrending(): Promise<{ success: boolean; results: InvidiousVideo[] }> {
+  return request("/api/webapp/videorama/trending");
+}
+
+export function getVideoramaPopular(): Promise<{ success: boolean; results: InvidiousVideo[] }> {
+  return request("/api/webapp/videorama/popular");
+}
+
+export function getVideoramaVideo(videoId: string): Promise<{ success: boolean; video: InvidiousVideo & { formatStreams?: { url: string; qualityLabel: string }[] } }> {
+  return request(`/api/webapp/videorama/video/${videoId}`);
 }

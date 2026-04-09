@@ -4608,6 +4608,41 @@ app.post('/api/admin/search/reindex', adminGuard, asyncHandler(async (req, res) 
   return res.json({ success: true, counts });
 }));
 
+// ── Videorama — Invidious video discovery proxy ─────────────────────────────
+const invidiousService = require('../services/invidiousService');
+
+app.get('/api/webapp/videorama/search', requireSessionAuth, asyncHandler(async (req, res) => {
+  const { q = '', page = 1, sort_by = 'relevance' } = req.query;
+  if (!q.trim()) return res.json({ success: true, results: [] });
+  const results = await invidiousService.searchVideos(q.trim(), { page: Number(page), sortBy: sort_by });
+  return res.json({ success: true, results });
+}));
+
+app.get('/api/webapp/videorama/trending', requireSessionAuth, asyncHandler(async (req, res) => {
+  const results = await invidiousService.getTrendingVideos({ region: req.query.region || 'US' });
+  return res.json({ success: true, results });
+}));
+
+app.get('/api/webapp/videorama/popular', requireSessionAuth, asyncHandler(async (req, res) => {
+  const results = await invidiousService.getPopularVideos();
+  return res.json({ success: true, results });
+}));
+
+app.get('/api/webapp/videorama/video/:videoId', requireSessionAuth, asyncHandler(async (req, res) => {
+  const details = await invidiousService.getVideoDetails(req.params.videoId);
+  return res.json({ success: true, video: details });
+}));
+
+app.get('/api/webapp/videorama/channel/:channelId', requireSessionAuth, asyncHandler(async (req, res) => {
+  const info = await invidiousService.getChannelInfo(req.params.channelId);
+  return res.json({ success: true, channel: info });
+}));
+
+app.get('/api/webapp/videorama/channel/:channelId/videos', requireSessionAuth, asyncHandler(async (req, res) => {
+  const videos = await invidiousService.getChannelVideos(req.params.channelId, { page: Number(req.query.page || 1) });
+  return res.json({ success: true, videos });
+}));
+
 // ── @Mention autocomplete ────────────────────────────────────────────────────
 const mentionController = require('./controllers/mentionController');
 app.get('/api/webapp/users/mention-search', requireSessionAuth, asyncHandler(mentionController.mentionSearch));

@@ -176,6 +176,18 @@ const createDmVideoCallInvite = async (req, res) => {
       const raw = await getRedis().get(`${DM_CALL_KEY_PREFIX}${roomName}`);
       const existingCall = raw ? JSON.parse(raw) : { callerId, calleeId, expiresAt };
       const token = await generateToken(roomName, callerId, displayName, true);
+
+      // Notify callee of incoming call via socket
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`user:${existingCall.calleeId}`).emit('dm:call:incoming', {
+          roomName,
+          callerId: existingCall.callerId,
+          calleeId: existingCall.calleeId,
+          callerName: displayName,
+        });
+      }
+
       return res.json({
         success: true,
         roomName,
@@ -190,6 +202,17 @@ const createDmVideoCallInvite = async (req, res) => {
 
     const callLink = buildDmCallLink(roomName, callerId, calleeId);
     const token = await generateToken(roomName, callerId, displayName, true);
+
+    // Notify callee of incoming call via socket
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${calleeId}`).emit('dm:call:incoming', {
+        roomName,
+        callerId,
+        calleeId,
+        callerName: displayName,
+      });
+    }
 
     return res.json({
       success: true,

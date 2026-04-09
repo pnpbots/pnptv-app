@@ -199,7 +199,7 @@ export default function Profile() {
     setSearchQuery(value);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     if (value.trim().length < 2) {
-      setSearchResults([]);
+      setSearchResults(null);
       setSearchOpen(false);
       return;
     }

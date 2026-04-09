@@ -25,7 +25,11 @@ let syncTimer = null;
  */
 async function resolveUserId(pnptvId) {
   if (!pnptvId) return null;
-  const res = await query('SELECT id FROM users WHERE pnptv_id = $1 LIMIT 1', [pnptvId]);
+  // Try matching by pnptv_id first, then fall back to matching by id (Telegram user ID)
+  const res = await query(
+    'SELECT id FROM users WHERE pnptv_id = $1 OR id::text = $1 LIMIT 1',
+    [String(pnptvId)]
+  );
   return res.rows[0]?.id || null;
 }
 

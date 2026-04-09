@@ -15,6 +15,7 @@ import {
   type ContentReaction,
   type SocialPostItem,
   type CreatorChannel,
+  type InvidiousVideo,
   getContentReactions,
   toggleContentReaction,
   getPublicProfile,
@@ -27,6 +28,8 @@ import {
   getWebRTCStreams,
   getFeaturedPerformers,
   getUpcomingEvents,
+  searchVideorama,
+  getVideoramaTrending,
   type LiveStream,
   type FeaturedPerformer,
 } from "@/lib/api";
@@ -60,7 +63,7 @@ const PlayIcon = () => (
 const PRIME_CREATOR = "santinofurioso";
 
 // ── Section nav tabs ─────────────────────────────────────────────────────────
-type PrimeSection = "vault" | "feed" | "schedule";
+type PrimeSection = "vault" | "feed" | "schedule" | "discover";
 
 export default function Media() {
   const { isPrime, isMember } = useTier();
@@ -113,6 +116,12 @@ export default function Media() {
   // ── Schedule state ─────────────────────────────────────────────────────────
   const [liveEvents, setLiveEvents] = useState<EventItem[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
+
+  // ── Discover (Invidious) state ────────────────────────────────────────────
+  const [discoverQuery, setDiscoverQuery] = useState("");
+  const [discoverResults, setDiscoverResults] = useState<InvidiousVideo[]>([]);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverMode, setDiscoverMode] = useState<"trending" | "search">("trending");
 
   // ── Video filters ──────────────────────────────────────────────────────────
   const CATEGORIES = useMemo(() => {
@@ -296,6 +305,28 @@ export default function Media() {
       .catch(() => setLiveEvents([]))
       .finally(() => setEventsLoading(false));
   }, []);
+
+  // ── Discover: load trending on tab switch ──────────────────────────────────
+  useEffect(() => {
+    if (activeSection !== "discover") return;
+    if (discoverResults.length > 0) return; // already loaded
+    setDiscoverLoading(true);
+    getVideoramaTrending()
+      .then((res) => { if (res.success) setDiscoverResults(res.results.slice(0, 30)); setDiscoverMode("trending"); })
+      .catch(() => {})
+      .finally(() => setDiscoverLoading(false));
+  }, [activeSection]);
+
+  const handleDiscoverSearch = useCallback(async () => {
+    if (!discoverQuery.trim()) return;
+    setDiscoverLoading(true);
+    setDiscoverMode("search");
+    try {
+      const res = await searchVideorama(discoverQuery.trim());
+      if (res.success) setDiscoverResults(res.results);
+    } catch { /* silent */ }
+    setDiscoverLoading(false);
+  }, [discoverQuery]);
 
   // ── Feed actions ───────────────────────────────────────────────────────────
   const handleLike = useCallback(async (postId: number) => {
@@ -606,6 +637,7 @@ export default function Media() {
               { key: "vault" as const, label: "The Vault", icon: "film" },
               { key: "feed" as const, label: "The Wall", icon: "feed" },
               { key: "schedule" as const, label: "Coming Up", icon: "cal" },
+              { key: "discover" as const, label: "Discover", icon: "search" },
             ]).map((tab) => (
               <button
                 key={tab.key}
@@ -1180,6 +1212,89 @@ export default function Media() {
               </svg>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          DISCOVER — Invidious video search
+         ══════════════════════════════════════════════════════════════════════ */}
+      {activeChannelId === null && activeSection === "discover" && (
+        <div className="px-4 pb-20">
+          {/* Search bar */}
+          <div className="flex gap-2 mb-4">
+            <input
+              type="text"
+              value={discoverQuery}
+              onChange={(e) => setDiscoverQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleDiscoverSearch()}
+              placeholder="Search videos..."
+              className="flex-1 px-4 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-pink-500/50"
+            />
+            <button
+              onClick={handleDiscoverSearch}
+              disabled={discoverLoading || !discoverQuery.trim()}
+              className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all active:scale-95 disabled:opacity-40"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              Search
+            </button>
+          </div>
+
+          <p className="text-xs text-white/40 mb-3">
+            {discoverMode === "trending" ? "Trending" : `Results for "${discoverQuery}"`}
+          </p>
+
+          {discoverLoading ? (
+            <div className="grid grid-cols-2 gap-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.04)" }}>
+                  <Skeleton className="w-full aspect-video" />
+                  <div className="p-2 space-y-1">
+                    <Skeleton className="h-3 w-3/4" />
+                    <Skeleton className="h-2 w-1/2" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : discoverResults.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-white/40 text-sm">No videos found. Try a different search.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {discoverResults.filter(v => v.type === "video" || v.videoId).map((video) => {
+                const thumb = video.videoThumbnails?.find(t => t.quality === "medium") || video.videoThumbnails?.[0];
+                return (
+                  <a
+                    key={video.videoId}
+                    href={`https://www.youtube.com/watch?v=${video.videoId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-xl overflow-hidden transition-transform active:scale-[0.97]"
+                    style={{ background: "rgba(255,255,255,0.04)" }}
+                  >
+                    <div className="relative aspect-video">
+                      {thumb && (
+                        <img src={thumb.url} alt={video.title} className="w-full h-full object-cover" loading="lazy" />
+                      )}
+                      {video.lengthSeconds > 0 && (
+                        <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-black/70 text-white">
+                          {formatDuration(video.lengthSeconds)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="p-2">
+                      <p className="text-xs font-medium text-white line-clamp-2 leading-tight">{video.title}</p>
+                      <p className="text-[10px] text-white/40 mt-1 truncate">{video.author}</p>
+                      {video.viewCount > 0 && (
+                        <p className="text-[10px] text-white/30">{(video.viewCount / 1000).toFixed(0)}K views</p>
+                      )}
+                    </div>
+                  </a>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

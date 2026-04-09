@@ -1213,6 +1213,28 @@ function initSocketIO(io) {
       }
     });
 
+    // ── Decline an incoming DM video call ────────────────────────────────────
+    socket.on('dm:call:decline', async ({ roomName } = {}) => {
+      if (!roomName) return;
+      try {
+        const redis = getRedis();
+        if (!redis) return;
+        const raw = await redis.get(`dm:call:${roomName}`);
+        if (!raw) return;
+        const call = JSON.parse(raw);
+        // Notify the caller that the call was declined
+        io.to(`user:${call.callerId}`).emit('dm:call:declined', {
+          roomName,
+          declinedBy: { id: user.id, username: user.username },
+        });
+        // Remove the call from Redis so it can't be joined
+        await redis.del(`dm:call:${roomName}`);
+        logger.info('DM call declined', { roomName, declinedBy: user.id });
+      } catch (err) {
+        logger.error('dm:call:decline error', err);
+      }
+    });
+
     // ── Live Stream Chat ──────────────────────────────────────────────────────
 
     socket.on('live:join', async ({ streamId } = {}) => {
