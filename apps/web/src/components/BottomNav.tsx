@@ -33,6 +33,16 @@ const navItems = [
     ),
   },
   {
+    id: "channels",
+    to: "/channels",
+    label: "Channels",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2m0 2a2 2 0 00-2 2v1a2 2 0 002 2m0-6h10m0 0V2m0 2a2 2 0 012 2v1a2 2 0 01-2 2M7 10v1a2 2 0 002 2h6a2 2 0 002-2v-1m-4 4v6m-4-3h8" />
+      </svg>
+    ),
+  },
+  {
     id: "live",
     to: "/live",
     label: "Live",
@@ -68,6 +78,9 @@ export function BottomNav() {
     }
     if (item.id === "explore") {
       return location.pathname.startsWith("/nearby");
+    }
+    if (item.id === "channels") {
+      return location.pathname.startsWith("/channels");
     }
     if (item.id === "you") {
       return location.pathname.startsWith("/profile") || location.pathname.startsWith("/settings") || location.pathname.startsWith("/support") || location.pathname.startsWith("/creators");
