@@ -95,7 +95,7 @@ class EventModel {
        LEFT JOIN users u ON u.id = e.creator_id
        LEFT JOIN ${RSVP_TABLE} r ON r.event_id = e.id AND r.user_id = $${rsvpIdx}
        WHERE e.status = 'upcoming'
-         AND e.scheduled_at > NOW() - INTERVAL '1 hour'
+         AND e.scheduled_at > NOW()
          ${extraFilters}
        ORDER BY e.is_featured DESC, e.scheduled_at ASC
        LIMIT $1`,
@@ -116,7 +116,7 @@ class EventModel {
        LEFT JOIN ${RSVP_TABLE} r ON r.event_id = e.id AND r.user_id = $1
        WHERE e.status = 'upcoming'
          AND e.is_featured = TRUE
-         AND e.scheduled_at > NOW() - INTERVAL '1 hour'
+         AND e.scheduled_at > NOW()
        ORDER BY e.scheduled_at ASC
        LIMIT 5`,
       [viewerUserId ? String(viewerUserId) : null]
@@ -133,7 +133,9 @@ class EventModel {
        FROM ${TABLE} e
        LEFT JOIN users u ON u.id = e.creator_id
        WHERE e.creator_id = $1
-       ORDER BY e.scheduled_at DESC
+         AND e.status = 'upcoming'
+         AND e.scheduled_at > NOW()
+       ORDER BY e.scheduled_at ASC
        LIMIT 50`,
       [String(creatorId)]
     );
@@ -229,7 +231,7 @@ class EventModel {
        LEFT JOIN users u ON u.id = e.creator_id
        WHERE r.user_id = $1
          AND e.status IN ('upcoming', 'live')
-         AND e.scheduled_at > NOW() - INTERVAL '1 hour'
+         AND e.scheduled_at > NOW()
        ORDER BY e.scheduled_at ASC`,
       [String(userId)]
     );
