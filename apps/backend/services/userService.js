@@ -1,6 +1,7 @@
 const logger = require('../utils/logger');
 const UserModel = require('../models/userModel');
 const { query } = require('../config/postgres');
+const { Pool } = require('pg');
 
 /**
  * Helper to check if user is admin/superadmin from env vars
@@ -259,6 +260,80 @@ class UserService {
     }
 
     return { revoked, kept, threshold };
+  }
+
+  /**
+   * Provision a Cal.com user for a newly approved performer.
+   * Creates: user → schedule → availability → "Private Session" event type.
+   * Idempotent — skips if a Cal.com user with the same email already exists.
+   * Returns { calcomUserId } or { skipped: true, reason }.
+   */
+  async provisionCalcomUser({ username, email, name, timeZone = 'America/New_York' }) {
+    if (!email) {
+      logger.warn('provisionCalcomUser: no email — skipping', { username });
+      return { skipped: true, reason: 'no_email' };
+    }
+
+    const calcomDbUrl = `postgresql://${process.env.PG_CALCOM_USER || 'calcom_user'}:${process.env.PG_CALCOM_PASSWORD || ''}@pg-calcom:5432/${process.env.PG_CALCOM_DB || 'calcom_db'}`;
+    const pool = new Pool({ connectionString: calcomDbUrl, max: 1 });
+
+    try {
+      const client = await pool.connect();
+      try {
+        // Check if user already exists
+        const existing = await client.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]);
+        if (existing.rows.length > 0) {
+          logger.info('provisionCalcomUser: user already exists', { email, calcomUserId: existing.rows[0].id });
+          return { calcomUserId: existing.rows[0].id, skipped: true, reason: 'already_exists' };
+        }
+
+        // Create user
+        const slug = (username || email.split('@')[0]).toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 50);
+        const userRes = await client.query(
+          `INSERT INTO users (username, email, name, "timeZone", "completedOnboarding", "emailVerified", "identityProvider", uuid)
+           VALUES ($1, $2, $3, $4, true, NOW(), 'CAL', gen_random_uuid())
+           RETURNING id`,
+          [slug, email, name || slug, timeZone]
+        );
+        const calcomUserId = userRes.rows[0].id;
+
+        // Create default schedule (all 7 days, 10am-10pm)
+        const schedRes = await client.query(
+          `INSERT INTO "Schedule" ("userId", name, "timeZone")
+           VALUES ($1, 'Working Hours', $2)
+           RETURNING id`,
+          [calcomUserId, timeZone]
+        );
+        const scheduleId = schedRes.rows[0].id;
+
+        // Set as default schedule
+        await client.query('UPDATE users SET "defaultScheduleId" = $1 WHERE id = $2', [scheduleId, calcomUserId]);
+
+        // Create availability (all 7 days, 10:00-22:00)
+        await client.query(
+          `INSERT INTO "Availability" ("scheduleId", days, "startTime", "endTime")
+           VALUES ($1, '{0,1,2,3,4,5,6}', '10:00:00', '22:00:00')`,
+          [scheduleId]
+        );
+
+        // Create "Private Session" event type (30 min)
+        await client.query(
+          `INSERT INTO "EventType" (title, slug, length, "userId", description, "schedulingType")
+           VALUES ($1, $2, 30, $3, 'Book a private 1-on-1 session', NULL)`,
+          ['Private Session', 'private-session', calcomUserId]
+        );
+
+        logger.info('provisionCalcomUser: created Cal.com user', { calcomUserId, username: slug, email });
+        return { calcomUserId };
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      logger.error('provisionCalcomUser error', { error: err.message, username, email });
+      return { skipped: true, reason: err.message };
+    } finally {
+      await pool.end();
+    }
   }
 }
 

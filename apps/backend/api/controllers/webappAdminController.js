@@ -1670,6 +1670,20 @@ const makeCreator = async (req, res) => {
       logger.warn('makeCreator: audit log write failed (non-fatal)', { error: auditErr.message });
     });
 
+    // Provision Cal.com booking account for the performer
+    const userForCal = await query('SELECT username, email, first_name FROM users WHERE id = $1', [userId]);
+    if (userForCal.rows.length > 0) {
+      const u = userForCal.rows[0];
+      const calResult = await UserService.provisionCalcomUser({
+        username: u.username,
+        email: u.email,
+        name: u.first_name || u.username,
+      });
+      if (calResult.calcomUserId) {
+        logger.info('Cal.com user provisioned for creator', { userId, calcomUserId: calResult.calcomUserId });
+      }
+    }
+
     // Invalidate Redis user cache
     await cache.del(`user:${userId}`);
 
