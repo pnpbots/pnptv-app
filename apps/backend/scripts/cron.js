@@ -22,6 +22,7 @@ const SubscriptionReminderEmailService = require(path.join(backendPath, 'service
 const TelegramSubscriptionReminderService = require(path.join(backendPath, 'bot/services/subscriptionReminderService'));
 const NotificationDigestScheduler = require(path.join(backendPath, 'bot/services/notificationDigestScheduler'));
 const MeilisearchService = require(path.join(backendPath, 'services/meilisearchService'));
+const AppUserService = require(path.join(backendPath, 'services/userService'));
 
 /**
  * Initialize and start cron jobs
@@ -126,6 +127,24 @@ const startCronJobs = async (bot = null) => {
         });
       } catch (error) {
         logger.error('Error in membership sync cron:', error);
+      }
+    });
+
+    // Performer eligibility enforcement — daily at 7 AM UTC
+    // Revokes creator role from performers who no longer have a profile photo
+    // or whose activity score drops below the top 10% threshold.
+    cron.schedule('0 7 * * *', async () => {
+      try {
+        logger.info('Running performer eligibility enforcement...');
+        const results = await AppUserService.enforcePerformerEligibility();
+        logger.info('Performer eligibility enforcement completed', {
+          revoked: results.revoked.length,
+          kept: results.kept.length,
+          threshold: results.threshold,
+          revokedUsers: results.revoked.map(r => r.username),
+        });
+      } catch (error) {
+        logger.error('Error in performer eligibility cron:', error);
       }
     });
 

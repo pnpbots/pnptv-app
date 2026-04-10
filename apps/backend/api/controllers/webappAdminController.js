@@ -4,6 +4,7 @@ const { cache } = require('../../config/redis');
 const AdminDashboardService = require('../../services/adminDashboardService');
 const VideoCallModel = require('../../models/videoCallModel');
 const SocialPostService = require('../../services/socialPostService');
+const UserService = require('../../services/userService');
 
 // Escape LIKE/ILIKE metacharacters so user input cannot widen search patterns
 const escapeLike = (str) => str.replace(/[%_\\]/g, '\\$&');
@@ -1577,6 +1578,18 @@ const makeCreator = async (req, res) => {
     const userCheck = await query('SELECT id, username FROM users WHERE id = $1', [userId]);
     if (userCheck.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    // Performer eligibility: must have profile photo + top 10% activity
+    const eligibility = await UserService.checkPerformerEligibility(userId);
+    if (!eligibility.eligible) {
+      return res.status(403).json({
+        success: false,
+        error: 'User does not meet performer requirements',
+        reasons: eligibility.reasons,
+        score: eligibility.score,
+        threshold: eligibility.threshold,
+      });
     }
 
     // If a channelRef is being assigned, check it is not already taken by another user

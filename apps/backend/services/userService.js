@@ -1,5 +1,6 @@
 const logger = require('../utils/logger');
 const UserModel = require('../models/userModel');
+const { query } = require('../config/postgres');
 
 /**
  * Helper to check if user is admin/superadmin from env vars
@@ -166,6 +167,98 @@ class UserService {
       logger.error('Error recording activity:', error);
       return false;
     }
+  }
+
+  /**
+   * Calculate a user's activity score.
+   * Score = posts*3 + DMs(30d) + chat_messages(30d)
+   */
+  async getActivityScore(userId) {
+    const { rows } = await query(
+      `SELECT
+         (SELECT COUNT(*) FROM social_posts WHERE user_id = $1 AND is_deleted = false) * 3 +
+         (SELECT COUNT(*) FROM direct_messages WHERE sender_id = $1 AND created_at > NOW() - INTERVAL '30 days') +
+         (SELECT COUNT(*) FROM chat_messages WHERE user_id = $1 AND created_at > NOW() - INTERVAL '30 days') AS score`,
+      [String(userId)]
+    );
+    return Number(rows[0]?.score || 0);
+  }
+
+  /**
+   * Get the top-10% activity score threshold (among users with score > 0).
+   */
+  async getTop10PctThreshold() {
+    const { rows } = await query(
+      `WITH active_scores AS (
+         SELECT
+           (SELECT COUNT(*) FROM social_posts WHERE user_id = u.id::text AND is_deleted = false) * 3 +
+           (SELECT COUNT(*) FROM direct_messages WHERE sender_id = u.id::text AND created_at > NOW() - INTERVAL '30 days') +
+           (SELECT COUNT(*) FROM chat_messages WHERE user_id = u.id::text AND created_at > NOW() - INTERVAL '30 days') AS score
+         FROM users u
+         WHERE u.is_deleted = false AND u.role NOT IN ('blocked','system')
+       )
+       SELECT COALESCE(PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY score), 1) AS threshold
+       FROM active_scores
+       WHERE score > 0`
+    );
+    return Math.max(Number(rows[0]?.threshold || 1), 1);
+  }
+
+  /**
+   * Check whether a user meets performer eligibility:
+   *  1. Has a profile picture
+   *  2. Activity score is in the top 10% of active users
+   * Returns { eligible, reasons[] }
+   */
+  async checkPerformerEligibility(userId) {
+    const reasons = [];
+
+    const { rows } = await query(
+      `SELECT photo_file_id FROM users WHERE id = $1 AND is_deleted = false`,
+      [String(userId)]
+    );
+    if (rows.length === 0) return { eligible: false, reasons: ['user_not_found'] };
+
+    const hasPhoto = rows[0].photo_file_id && rows[0].photo_file_id.trim() !== '';
+    if (!hasPhoto) reasons.push('no_profile_picture');
+
+    const [score, threshold] = await Promise.all([
+      this.getActivityScore(userId),
+      this.getTop10PctThreshold(),
+    ]);
+
+    if (score < threshold) {
+      reasons.push(`activity_too_low`);
+    }
+
+    return { eligible: reasons.length === 0, reasons, score, threshold };
+  }
+
+  /**
+   * Revoke performers who no longer meet eligibility criteria.
+   * Returns { revoked: string[], kept: string[] }
+   */
+  async enforcePerformerEligibility() {
+    const { rows: creators } = await query(
+      `SELECT id, username FROM users WHERE role = 'creator' AND is_deleted = false`
+    );
+
+    const threshold = await this.getTop10PctThreshold();
+    const revoked = [];
+    const kept = [];
+
+    for (const creator of creators) {
+      const { eligible, reasons, score } = await this.checkPerformerEligibility(creator.id);
+      if (!eligible) {
+        await query(`UPDATE users SET role = 'user' WHERE id = $1`, [creator.id]);
+        revoked.push({ id: creator.id, username: creator.username, score, threshold, reasons });
+        logger.info('Performer revoked — eligibility failed', { userId: creator.id, username: creator.username, score, threshold, reasons });
+      } else {
+        kept.push({ id: creator.id, username: creator.username, score });
+      }
+    }
+
+    return { revoked, kept, threshold };
   }
 }
 
