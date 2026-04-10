@@ -1345,11 +1345,11 @@ export default function Nearby() {
         {/* ── Real World mode ─────────────────────────────────────────────────── */}
         {mode === "realworld" && (
           <>
-            {/* User grid */}
+            {/* Merged users + places grid, sorted by distance */}
             <div className="mt-3 px-3">
               {isSearching && nearbyUsers.length === 0 ? (
                 <GridSkeleton />
-              ) : nearbyUsers.length === 0 && !isSearching ? (
+              ) : nearbyUsers.length === 0 && filteredPlaces.length === 0 && !isSearching ? (
                 /* Empty state */
                 <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
                   <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4"
@@ -1368,100 +1368,93 @@ export default function Nearby() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-0.5">
-                  {nearbyUsers.map((u) => {
-                    const name = u.name || u.username || `User #${u.user_id}`;
-                    const isOnline = u.status !== "offline";
-                    return (
-                      <UserCard
-                        key={u.user_id}
-                        name={name}
-                        photoUrl={u.photo_url}
-                        label={formatUserDistMi(u)}
-                        labelColor={isOnline ? "#FFB454" : "#555"}
-                        isOnline={isOnline}
-                        onClick={() => { setSelectedUser(u); setSelectedOnlineUser(null); setSelectedPlace(null); }}
-                      />
-                    );
-                  })}
-                </div>
+                <>
+                  {/* Category chips for place filtering */}
+                  {nearbyPlaces.length > 0 && (
+                    <div className="flex gap-1.5 mb-2.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
+                      {PLACE_CATEGORY_CHIPS.map((chip) => (
+                        <button
+                          key={chip.slug ?? "all"}
+                          onClick={() => setPlaceCategory(chip.slug)}
+                          className={`flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors whitespace-nowrap ${
+                            placeCategory === chip.slug
+                              ? "bg-amber-500/20 border-amber-500/50 text-amber-400"
+                              : "border-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary"
+                          }`}
+                          style={placeCategory !== chip.slug ? { background: "rgba(255,255,255,0.05)" } : undefined}
+                          aria-pressed={placeCategory === chip.slug}
+                        >
+                          {chip.emoji} {chip.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-0.5">
+                    {/* Merge users + places into one sorted array by distance */}
+                    {(() => {
+                      const userItems = nearbyUsers.map((u) => ({ kind: "user" as const, distKm: u.distance_km ?? 9999, data: u }));
+                      const placeItems = filteredPlaces.map((p) => ({ kind: "place" as const, distKm: p.distance ?? 9999, data: p }));
+                      const merged = [...userItems, ...placeItems].sort((a, b) => a.distKm - b.distKm);
+
+                      return merged.map((item) => {
+                        if (item.kind === "user") {
+                          const u = item.data;
+                          const name = u.name || u.username || `User #${u.user_id}`;
+                          const isOnline = u.status !== "offline";
+                          return (
+                            <UserCard
+                              key={`u-${u.user_id}`}
+                              name={name}
+                              photoUrl={u.photo_url}
+                              label={formatUserDistMi(u)}
+                              labelColor={isOnline ? "#FFB454" : "#555"}
+                              isOnline={isOnline}
+                              onClick={() => { setSelectedUser(u); setSelectedOnlineUser(null); setSelectedPlace(null); }}
+                            />
+                          );
+                        }
+                        const p = item.data;
+                        const distMi = p.distance ? (p.distance * 0.621371) : null;
+                        const distLabel = distMi != null ? (distMi < 0.1 ? `${Math.round((p.distance || 0) * 1000)}m` : `${distMi.toFixed(1)} mi`) : "";
+                        return (
+                          <button
+                            key={`p-${p.id}`}
+                            onClick={() => { setSelectedPlace(p); setSelectedUser(null); setSelectedOnlineUser(null); }}
+                            className="flex flex-col items-center text-center p-1 rounded-xl transition-all active:scale-[0.95]"
+                            style={{ background: "rgba(255,255,255,0.03)" }}
+                          >
+                            <div className="relative w-full aspect-square rounded-lg overflow-hidden mb-1">
+                              {isValidPhotoUrl(p.photoUrl) ? (
+                                <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, #1a3a2a, #2a4a3a)" }}>
+                                  <span className="text-lg">{p.emoji || "📍"}</span>
+                                </div>
+                              )}
+                              <span className="absolute top-1 left-1 px-1 py-0.5 rounded text-[8px] font-bold text-white bg-amber-600/90">
+                                PLACE
+                              </span>
+                            </div>
+                            <p className="text-[11px] font-medium text-pnp-textPrimary leading-tight truncate w-full">{p.name}</p>
+                            {distLabel && <p className="text-[9px] text-amber-400 font-medium">{distLabel}</p>}
+                          </button>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                  {/* Suggest a place button */}
+                  <button
+                    onClick={() => setSubmitPlaceOpen(true)}
+                    className="w-full mt-3 py-3 rounded-xl border border-dashed border-white/15 flex items-center justify-center gap-2 hover:border-pnp-accent/40 hover:bg-pnp-accent/5 transition-all text-pnp-textSecondary hover:text-pnp-textPrimary active:scale-[0.98]"
+                  >
+                    <IcoPlus className="w-4 h-4 text-pnp-accent" />
+                    <span className="text-xs font-medium">Know a PNP-friendly place? Add it</span>
+                  </button>
+                </>
               )}
             </div>
-
-            {/* Nearby Places strip */}
-            {nearbyPlaces.length > 0 && (
-              <div className="mt-5 px-3">
-                {/* Section header */}
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-sm font-bold text-pnp-textPrimary">Nearby Places</h2>
-                  <span className="text-xs text-pnp-textSecondary">{nearbyPlaces.length} found</span>
-                </div>
-
-                {/* Category chips */}
-                <div className="flex gap-1.5 mb-2.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
-                  {PLACE_CATEGORY_CHIPS.map((chip) => (
-                    <button
-                      key={chip.slug ?? "all"}
-                      onClick={() => setPlaceCategory(chip.slug)}
-                      className={`flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors whitespace-nowrap ${
-                        placeCategory === chip.slug
-                          ? "bg-amber-500/20 border-amber-500/50 text-amber-400"
-                          : "border-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary"
-                      }`}
-                      style={placeCategory !== chip.slug ? { background: "rgba(255,255,255,0.05)" } : undefined}
-                      aria-pressed={placeCategory === chip.slug}
-                    >
-                      {chip.emoji} {chip.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Horizontal scroll strip */}
-                <div className="flex gap-2.5 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
-                  {filteredPlaces.length > 0 ? (
-                    <>
-                      {filteredPlaces.map((p) => (
-                        <PlaceCard
-                          key={p.id}
-                          place={p}
-                          isFavorited={favoritedPlaces.has(p.id)}
-                          onClick={() => { setSelectedPlace(p); setSelectedUser(null); setSelectedOnlineUser(null); }}
-                        />
-                      ))}
-                      {/* Suggest a Place button */}
-                      <button
-                        onClick={() => setSubmitPlaceOpen(true)}
-                        className="flex-shrink-0 w-40 rounded-xl border border-dashed border-white/20 flex flex-col items-center justify-center gap-2 py-6 hover:border-pnp-accent/50 hover:bg-pnp-accent/5 transition-all active:scale-[0.97]"
-                        aria-label={t.booking.addPlace}
-                      >
-                        <div className="w-8 h-8 rounded-full flex items-center justify-center"
-                          style={{ background: "rgba(212,0,122,0.15)" }}>
-                          <IcoPlus className="w-4 h-4 text-pnp-accent" />
-                        </div>
-                        <span className="text-[11px] text-pnp-textSecondary font-medium text-center leading-tight">
-                          Suggest a Place
-                        </span>
-                      </button>
-                    </>
-                  ) : (
-                    <p className="text-xs text-pnp-textSecondary py-4">No places in this category nearby.</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* No places yet — show suggest button */}
-            {nearbyPlaces.length === 0 && !isSearching && (
-              <div className="mt-4 mx-3">
-                <button
-                  onClick={() => setSubmitPlaceOpen(true)}
-                  className="w-full py-3 rounded-xl border border-dashed border-white/15 flex items-center justify-center gap-2 hover:border-pnp-accent/40 hover:bg-pnp-accent/5 transition-all text-pnp-textSecondary hover:text-pnp-textPrimary active:scale-[0.98]"
-                >
-                  <IcoPlus className="w-4 h-4 text-pnp-accent" />
-                  <span className="text-xs font-medium">Know a PNP-friendly place? Add it</span>
-                </button>
-              </div>
-            )}
           </>
         )}
 
@@ -1502,8 +1495,8 @@ export default function Nearby() {
           </div>
         )}
 
-        {/* ── Prime Channels strip ───────────────────────────────────────────── */}
-        {exploreChannels.length > 0 && (
+        {/* Prime Channels and Performers strips removed — available via Channels tab */}
+        {false && exploreChannels.length > 0 && (
           <div className="mt-5 px-3">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-bold text-pnp-textPrimary">Prime Channels</h2>
@@ -1551,8 +1544,7 @@ export default function Nearby() {
           </div>
         )}
 
-        {/* ── Performers strip ───────────────────────────────────────────────── */}
-        {explorePerformers.length > 0 && (
+        {false && explorePerformers.length > 0 && (
           <div className="mt-5 px-3">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-bold text-pnp-textPrimary">Performers</h2>
