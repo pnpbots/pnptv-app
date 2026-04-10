@@ -36,7 +36,7 @@ function timeUntil(iso: string): string {
 }
 
 function isValidUrl(url: string | undefined | null): url is string {
-  return !!url && (url.startsWith("/") || url.startsWith("http"));
+  return !!url && (url.startsWith("/uploads/") || url.startsWith("http"));
 }
 
 const isLiveType = (e: EventItem) => e.type === "live_stream";

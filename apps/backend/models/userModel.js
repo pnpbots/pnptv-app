@@ -55,7 +55,7 @@ class UserModel {
       email: row.email,
       emailVerified: row.email_verified,
       bio: row.bio,
-      photoFileId: row.photo_file_id,
+      photoFileId: row.photo_file_id && (row.photo_file_id.startsWith('/uploads/') || row.photo_file_id.startsWith('http')) ? row.photo_file_id : null,
       photoUpdatedAt: row.photo_updated_at,
       interests: row.interests || [],
       location: row.location_lat && row.location_lng ? {

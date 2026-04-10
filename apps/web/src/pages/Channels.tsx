@@ -33,7 +33,7 @@ const SORT_OPTIONS = [
 // ── Helper ───────────────────────────────────────────────────────────────────
 function isValidPhotoUrl(url: string | null | undefined): url is string {
   if (!url) return false;
-  return url.startsWith("/") || url.startsWith("http");
+  return url.startsWith("/uploads/") || url.startsWith("http");
 }
 
 // ── Creator Channel Card ─────────────────────────────────────────────────────

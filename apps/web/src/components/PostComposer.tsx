@@ -37,7 +37,7 @@ const ACCEPTED_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function isValidPhotoUrl(photo: string | null | undefined): photo is string {
-  return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
+  return !!photo && (photo.startsWith("/uploads/") || photo.startsWith("http"));
 }
 
 function isImageType(file: File): boolean {

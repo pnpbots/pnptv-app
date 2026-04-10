@@ -23,7 +23,7 @@ function timeAgo(dateStr: string): string {
 }
 
 function isValidPhotoUrl(url: string | null | undefined): url is string {
-  return !!url && (url.startsWith("/") || url.startsWith("http"));
+  return !!url && (url.startsWith("/uploads/") || url.startsWith("http"));
 }
 
 function PostSkeleton() {

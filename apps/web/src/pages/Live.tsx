@@ -101,7 +101,7 @@ if (!CALCOM_URL.startsWith("https://")) {
 const ALLOWED_IMAGE_HOSTS = ["cms.pnptv.app", "app.pnptv.app", "pnptv.app"];
 function isValidPhotoUrl(photo: string | null | undefined): photo is string {
   if (!photo) return false;
-  if (photo.startsWith("/")) return true;
+  if (photo.startsWith("/uploads/")) return true;
   try {
     const url = new URL(photo);
     return (

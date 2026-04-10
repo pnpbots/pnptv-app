@@ -136,7 +136,7 @@ type PageState = "loading" | "denied" | "ready";
 // ─── Utility helpers ──────────────────────────────────────────────────────────
 
 function isValidPhotoUrl(url: string | null | undefined): url is string {
-  return !!url && (url.startsWith("/") || url.startsWith("http"));
+  return !!url && (url.startsWith("/uploads/") || url.startsWith("http"));
 }
 
 function sanitizePhone(phone: string): string {

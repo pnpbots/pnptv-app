@@ -13,7 +13,7 @@ import { useI18n } from "@/lib/i18n";
 import { SocialFeedTabs } from "@/components/social";
 
 function isValidPhotoUrl(photo: string | null | undefined): photo is string {
-  return !!photo && (photo.startsWith("/") || photo.startsWith("http"));
+  return !!photo && (photo.startsWith("/uploads/") || photo.startsWith("http"));
 }
 
 export default function Social() {
