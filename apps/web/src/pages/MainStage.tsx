@@ -9,6 +9,7 @@ import {
   useRoomContext,
   useTracks,
   useParticipants,
+  useLocalParticipant,
   AudioTrack,
   VideoTrack,
   RoomAudioRenderer,
@@ -648,7 +649,8 @@ function ReconnectHandler({
 // ─── Connection Quality Pill ─────────────────────────────────────────────────
 
 function ConnectionQualityPill() {
-  const { quality } = useConnectionQualityIndicator();
+  const { localParticipant } = useLocalParticipant();
+  const { quality } = useConnectionQualityIndicator({ participant: localParticipant });
 
   const label =
     quality === ConnectionQuality.Excellent ? "Excellent" :
