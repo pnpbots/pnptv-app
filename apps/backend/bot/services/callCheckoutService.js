@@ -57,7 +57,14 @@ async function createCallCheckout(memberId, packageId, provider, email) {
     throw err;
   }
 
-  if (!['epayco', 'daimo'].includes(provider)) {
+  if (provider === 'daimo') {
+    const err = new Error('Daimo Pay is temporarily unavailable. Please use Card or Dash.');
+    err.code = 'DAIMO_DISABLED';
+    err.status = 503;
+    throw err;
+  }
+
+  if (!['epayco'].includes(provider)) {
     const err = new Error(`Invalid payment provider: ${provider}`);
     err.code = 'INVALID_PROVIDER';
     throw err;

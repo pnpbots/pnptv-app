@@ -37,7 +37,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "epayco" | "daimo" | "dash";
+type Provider = "epayco" | "dash";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -464,12 +464,6 @@ export function BookCallModal({
         selectedSlot: selectedSlot?.startUtc ?? null,
       };
       const res = await createCallCheckout(payload);
-
-      if (provider === "daimo" && res.checkoutUrl) {
-        onClose();
-        navigate(new URL(assertPaymentUrl(res.checkoutUrl)).pathname);
-        return;
-      }
 
       if (provider === "epayco" && res.checkoutUrl) {
         window.location.href = assertPaymentUrl(res.checkoutUrl);
@@ -1046,8 +1040,8 @@ export function BookCallModal({
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider mb-2.5" style={{ color: "#8E8E93" }}>{t.creator.paymentMethodLabel}</p>
         <div className="flex gap-2">
-          {(["epayco", "daimo", "dash"] as Provider[]).map((p) => {
-            const label = p === "epayco" ? t.creator.payMethodCard : p === "daimo" ? "USDC" : "Dash";
+          {(["epayco", "dash"] as Provider[]).map((p) => {
+            const label = p === "epayco" ? t.creator.payMethodCard : "Dash";
             return (
               <button
                 key={p}
@@ -1069,11 +1063,6 @@ export function BookCallModal({
             );
           })}
         </div>
-        {provider === "daimo" && (
-          <p className="text-[11px] mt-2" style={{ color: "#8E8E93" }}>
-            {t.creator.daimoCheckoutHint}
-          </p>
-        )}
       </div>
 
       {/* Email input */}
@@ -1168,8 +1157,6 @@ export function BookCallModal({
               <Spinner size={18} />
               <span>{t.creator.processing}</span>
             </>
-          ) : provider === "daimo" ? (
-            t.creator.payWithCrypto
           ) : (
             t.creator.proceedToCheckout
           )}

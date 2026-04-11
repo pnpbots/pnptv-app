@@ -21,7 +21,7 @@ import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
 
-type Provider = "epayco" | "daimo" | "dash";
+type Provider = "epayco" | "dash";
 
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
@@ -297,16 +297,9 @@ export default function Subscribe() {
       } else {
         const result = await createPayment(selectedPlan, provider);
         if (result.success && result.paymentUrl) {
-          if (provider === "daimo" && result.paymentId) {
-            // Navigate in-SPA for Daimo — preserves React state
-            // Store paymentId so we can resume polling if user comes back
-            try { sessionStorage.setItem("pnp_pending_payment", result.paymentId); } catch {}
-            navigate(new URL(assertPaymentUrl(result.paymentUrl)).pathname);
-          } else {
-            window.open(assertPaymentUrl(result.paymentUrl), "_blank", "noopener,noreferrer");
-            if (result.paymentId) {
-              setPollingPaymentId(result.paymentId);
-            }
+          window.open(assertPaymentUrl(result.paymentUrl), "_blank", "noopener,noreferrer");
+          if (result.paymentId) {
+            setPollingPaymentId(result.paymentId);
           }
         } else {
           setError(result.error || s.failedToCreatePayment);
@@ -732,7 +725,7 @@ export default function Subscribe() {
       {/* Payment method */}
       <div className="mb-6">
         <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">{s.paymentMethod}</h3>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
             onClick={() => setProvider("epayco")}
             className={`rounded-xl p-3 border-2 transition-all text-center ${
@@ -744,18 +737,6 @@ export default function Subscribe() {
             <div className="text-lg mb-1">💳</div>
             <div className="text-xs font-medium text-pnp-textPrimary">{s.cardPse}</div>
             <div className="text-[10px] text-pnp-textSecondary">{s.cardPseDesc}</div>
-          </button>
-          <button
-            onClick={() => setProvider("daimo")}
-            className={`rounded-xl p-3 border-2 transition-all text-center ${
-              provider === "daimo"
-                ? "border-[#D4007A] bg-[#D4007A]/10"
-                : "border-white/10 bg-white/5 hover:border-white/20"
-            }`}
-          >
-            <div className="text-lg mb-1">💸</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">{s.usdc}</div>
-            <div className="text-[10px] text-pnp-textSecondary">{s.usdcDesc}</div>
           </button>
           <button
             onClick={() => dashAvailable !== false && setProvider("dash")}
@@ -778,15 +759,6 @@ export default function Subscribe() {
             )}
           </button>
         </div>
-
-        {/* Daimo info panel */}
-        {provider === "daimo" && (
-          <div className="mt-3 rounded-xl p-3 border border-[#D4007A]/30 bg-[#D4007A]/5">
-            <p className="text-xs text-pnp-textSecondary">
-              {s.daimoHint}
-            </p>
-          </div>
-        )}
 
         {/* Dash info panel */}
         {provider === "dash" && (

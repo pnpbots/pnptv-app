@@ -428,6 +428,18 @@ class PaymentService {
 
   static async createPayment({ userId, planId, provider, sku, chatId, creatorId, amountOverride, extraMetadata }) {
     try {
+      // Daimo Pay is disabled platform-wide. Callers must use 'epayco' (card/PSE) or 'dash' (BTCPay).
+      // Kept as a runtime fence so stale clients, bot handlers, and direct API callers all hit the
+      // same error instead of silently routing to Daimo's 403 account-expired response.
+      if (provider === 'daimo') {
+        logger.warn('Daimo payment rejected — provider disabled', { userId, planId });
+        return {
+          success: false,
+          code: 'DAIMO_DISABLED',
+          error: 'Daimo Pay is temporarily unavailable. Please use Card or Dash.',
+        };
+      }
+
       const plan = await PlanModel.getById(planId);
       if (!plan || !plan.active) {
         logger.error('Invalid or inactive plan', { planId });

@@ -230,6 +230,13 @@ class TokenCheckoutService {
    * }>}
    */
   static async createWalletCheckout(userId, packageId) {
+    // Daimo Pay is disabled platform-wide. Wallet (USDC/Daimo) token checkout is unavailable;
+    // use createCardCheckout (ePayco) or createDashCheckout (BTCPay) instead.
+    throw Object.assign(
+      new Error('Daimo Pay is temporarily unavailable. Please use Card or Dash.'),
+      { code: 'DAIMO_DISABLED', status: 503 }
+    );
+    // eslint-disable-next-line no-unreachable
     const pkg = resolvePackage(packageId);
     if (!pkg) {
       throw Object.assign(new Error('Invalid package ID'), { code: 'INVALID_PACKAGE', status: 400 });
