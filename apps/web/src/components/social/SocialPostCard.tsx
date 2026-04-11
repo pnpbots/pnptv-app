@@ -11,6 +11,7 @@ import {
   adminFlagWofPost,
   adminUnflagWofPost,
   requestWofDeletion,
+  editSocialPost,
   type SocialPostItem,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -81,6 +82,10 @@ export default function SocialPostCard({
   const [wofToggling, setWofToggling] = useState(false);
   const [translatedContent, setTranslatedContent] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(post.content || "");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [localContent, setLocalContent] = useState<string | null>(null);
 
   const isOwn = String(post.author_id) === currentUserId;
   const canDelete = isOwn || isAdmin;
@@ -179,6 +184,32 @@ export default function SocialPostCard({
     setTimeout(() => setDeleting(false), 5000);
   }, [post.id, onDelete]);
 
+  const handleStartEdit = useCallback(() => {
+    setEditContent(localContent ?? post.content ?? "");
+    setIsEditing(true);
+  }, [localContent, post.content]);
+
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setEditContent(localContent ?? post.content ?? "");
+  }, [localContent, post.content]);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (savingEdit) return;
+    const trimmed = editContent.trim();
+    if (!trimmed) return;
+    setSavingEdit(true);
+    try {
+      const res = await editSocialPost(post.id, trimmed);
+      if (res.success) {
+        setLocalContent(res.content ?? trimmed);
+        setTranslatedContent(null);
+        setIsEditing(false);
+      }
+    } catch { /* silent */ }
+    setSavingEdit(false);
+  }, [post.id, editContent, savingEdit]);
+
   const authorPath =
     String(post.author_id) === currentUserId
       ? "/profile"
@@ -210,6 +241,8 @@ export default function SocialPostCard({
             className="w-10 h-10 rounded-full object-cover ring-2 ring-[#1C1C1E]"
             style={{ background: "#1a1a2e" }}
           />
+        ) : post.user_id === "cristina-ai" ? (
+          <span className="w-10 h-10 rounded-full flex items-center justify-center text-2xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
         ) : isValidPhotoUrl(post.author_photo) ? (
           <img
             src={post.author_photo}
@@ -222,7 +255,7 @@ export default function SocialPostCard({
             }}
           />
         ) : null}
-        {!post.is_promoted && (
+        {!post.is_promoted && post.user_id !== "cristina-ai" && (
           <div
             className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ring-2 ring-[#1C1C1E]"
             style={{
@@ -349,12 +382,37 @@ export default function SocialPostCard({
               </button>
             )}
 
+            {/* Edit (own posts only) */}
+            {isOwn && !isEditing && !post.blurred && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleStartEdit(); }}
+                className="ml-auto text-xs hover:text-cyan-400 transition-colors"
+                style={{ color: "#8E8E93" }}
+                aria-label="Edit post"
+                title="Edit post"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"
+                  />
+                </svg>
+              </button>
+            )}
+
             {/* Delete (own posts or admin) */}
             {canDelete && (
               <button
                 onClick={(e) => { e.stopPropagation(); handleDelete(); }}
                 disabled={deleting}
-                className="ml-auto text-xs hover:text-red-400 transition-colors"
+                className={`${isOwn && !isEditing && !post.blurred ? "" : "ml-auto"} text-xs hover:text-red-400 transition-colors`}
                 style={{ color: "#8E8E93" }}
                 aria-label={
                   isAdmin && !isOwn ? "Delete post (admin)" : "Delete post"
@@ -475,12 +533,43 @@ export default function SocialPostCard({
                 </div>
               )}
 
-              <MentionText
-                text={translatedContent ?? post.content}
-                className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed block"
-                maxLength={200}
-              />
-              {translatedContent && (
+              {isEditing ? (
+                <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    rows={3}
+                    className="w-full rounded-lg p-2 text-sm text-white bg-white/5 border border-white/15 focus:outline-none focus:border-pink-500 resize-none"
+                    placeholder="Edit your post..."
+                    disabled={savingEdit}
+                  />
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleSaveEdit(); }}
+                      disabled={savingEdit || !editContent.trim()}
+                      className="px-3 py-1 rounded-full text-xs font-semibold transition-all disabled:opacity-40"
+                      style={{ background: "#D4007A", color: "#fff" }}
+                    >
+                      {savingEdit ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleCancelEdit(); }}
+                      disabled={savingEdit}
+                      className="px-3 py-1 rounded-full text-xs font-semibold transition-all"
+                      style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <MentionText
+                  text={translatedContent ?? localContent ?? post.content}
+                  className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed block"
+                  maxLength={200}
+                />
+              )}
+              {translatedContent && !isEditing && (
                 <button
                   onClick={(e) => { e.stopPropagation(); setTranslatedContent(null); }}
                   className="text-xs mt-0.5"
@@ -536,13 +625,9 @@ export default function SocialPostCard({
                         controlsList="nodownload"
                         onContextMenu={(e) => e.preventDefault()}
                         playsInline
-                        muted
-                        className="w-full max-h-80 rounded-lg object-cover"
+                        className="w-full max-h-[480px] rounded-lg object-contain bg-black"
                         preload="metadata"
-                        onError={(e) => {
-                          (e.target as HTMLVideoElement).parentElement!.style.display =
-                            "none";
-                        }}
+                        poster={post.video_thumbnail_url || undefined}
                       />
                     </>
                   ) : (

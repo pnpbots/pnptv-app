@@ -6,6 +6,7 @@ import {
   getSocialFeedPosts,
   getPostsByHashtag,
   getHangoutFeed,
+  getFollowingFeed,
   togglePostLike,
   deleteSocialPost,
   updateProfile,
@@ -74,6 +75,9 @@ export default function SocialFeedTabs({
   const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Feed mode tab — "all" (default) or "following" (only when no filter is active)
+  const [feedMode, setFeedMode] = useState<"all" | "following">("all");
+  const canShowTabs = !hashtagFilter && !hangoutGroupId && isAuthenticated;
 
   // Content disclaimer local mirror
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(contentDisclaimerAccepted);
@@ -99,7 +103,9 @@ export default function SocialFeedTabs({
         ? await getHangoutFeed(hangoutGroupId, cursor, 20)
         : hashtagFilter
           ? await getPostsByHashtag(hashtagFilter, cursor, 20)
-          : await getSocialFeedPosts(cursor, 20);
+          : feedMode === "following" && isAuthenticated
+            ? await getFollowingFeed(cursor)
+            : await getSocialFeedPosts(cursor, 20);
       if (res.success) {
         if (cursor) {
           setPosts((prev) => [...prev, ...res.posts]);
@@ -114,7 +120,7 @@ export default function SocialFeedTabs({
       setIsLoading(false);
       setLoadingMore(false);
     }
-  }, [hashtagFilter, hangoutGroupId]);
+  }, [hashtagFilter, hangoutGroupId, feedMode, isAuthenticated]);
 
   // Reset and reload whenever the hashtag filter changes
   useEffect(() => {
@@ -194,6 +200,34 @@ export default function SocialFeedTabs({
 
   return (
     <div>
+      {/* For You / Following tabs — only when no hashtag/hangout filter */}
+      {canShowTabs && (
+        <div className="flex items-center gap-2 mb-4">
+          <button
+            onClick={() => { if (feedMode !== "all") { setFeedMode("all"); setPosts([]); setNextCursor(null); setIsLoading(true); } }}
+            className="px-4 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
+            style={
+              feedMode === "all"
+                ? { background: "#D4007A", color: "#fff" }
+                : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
+            }
+          >
+            For You
+          </button>
+          <button
+            onClick={() => { if (feedMode !== "following") { setFeedMode("following"); setPosts([]); setNextCursor(null); setIsLoading(true); } }}
+            className="px-4 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
+            style={
+              feedMode === "following"
+                ? { background: "#D4007A", color: "#fff" }
+                : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
+            }
+          >
+            Following
+          </button>
+        </div>
+      )}
+
       {/* Hashtag filter banner */}
       {hashtagFilter && (
         <div className="flex items-center gap-2 mb-4 px-4 py-2.5 rounded-xl" style={{ background: "rgba(212,0,122,0.1)", border: "1px solid rgba(212,0,122,0.25)" }}>
