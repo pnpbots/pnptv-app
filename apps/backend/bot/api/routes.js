@@ -546,14 +546,29 @@ app.use((req, res, next) => {
 // ========== PAYMENT ROUTES (BEFORE static middleware) ==========
 // These must be BEFORE serveStaticWithBlocking to ensure they're processed first
 
-// 3DS bank challenge iframes load from bank domains (e.g. jpmorgan.com, bancolombia.com).
-// Override helmet's restrictive CSP for checkout pages so frame-src, connect-src, img-src,
-// and form-action allow any HTTPS origin. script-src is widened with wildcards covering
-// every ePayco / Cardinal Commerce / payco subdomain because the ePayco SDK loads
-// ephemeral 3DS device-data-collection scripts at runtime from subdomains that are not
-// stable across deploys (e.g. apiflow-*.epayco.co, eks-ms-3ds-*.epayco.io). Listing
-// each subdomain explicitly is brittle — wildcards keep the directive accurate while
-// still constraining script execution to ePayco-controlled hosts.
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║  STOP — DO NOT NARROW THE script-src WILDCARDS BELOW                  ║
+// ╠══════════════════════════════════════════════════════════════════════╣
+// ║  CHECKOUT_CSP is load-bearing. The wildcards                          ║
+// ║    https://*.epayco.co  https://*.epayco.com  https://*.epayco.io     ║
+// ║    https://*.payco.co  https://*.cardinalcommerce.com                 ║
+// ║  are required because:                                                ║
+// ║   1. multimedia.epayco.co/general/3DS/validateThreeds.min.js (the     ║
+// ║      script that exposes window.validate3ds) MUST be allowed          ║
+// ║   2. ePayco loads ephemeral 3DS DDC scripts at runtime from           ║
+// ║      subdomains that change between deploys (apiflow-*.epayco.co,     ║
+// ║      eks-ms-3ds-*.epayco.io, etc.)                                    ║
+// ║                                                                      ║
+// ║  Replacing these wildcards with an exact-match list silently          ║
+// ║  breaks ePayco card payments. See feedback_epayco_3ds_do_not_modify   ║
+// ║  in the project memory and commit a37f127 / 4ea6fbf for the           ║
+// ║  regression history.                                                  ║
+// ║                                                                      ║
+// ║  frame-src/connect-src/form-action are intentionally permissive       ║
+// ║  ('self' https:) because 3DS bank challenge iframes load from         ║
+// ║  arbitrary issuer-bank domains (bancolombia.com, davivienda.com,      ║
+// ║  etc.) that we cannot enumerate ahead of time.                        ║
+// ╚══════════════════════════════════════════════════════════════════════╝
 const CHECKOUT_CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com https://*.epayco.co https://*.epayco.com https://*.epayco.io https://*.payco.co https://*.cardinalcommerce.com",

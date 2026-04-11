@@ -483,19 +483,40 @@
         </div>
     </div>
 
-    <!-- jQuery (required by ePayco SDK) — SRI integrity hash prevents CDN tampering -->
+    <!--
+      ╔══════════════════════════════════════════════════════════════════╗
+      ║  STOP — READ BEFORE TOUCHING THE THREE <script> TAGS BELOW        ║
+      ╠══════════════════════════════════════════════════════════════════╣
+      ║  This block is the entire ePayco card-payment integration        ║
+      ║  surface. It is load-bearing and confirmed working in production ║
+      ║  on 2026-04-11 after a 6-week regression caused by a previous    ║
+      ║  Claude session that "consolidated" these scripts.               ║
+      ║                                                                  ║
+      ║  All three scripts MUST stay, in this exact order:               ║
+      ║    1. jQuery       — required by the ePayco SDK                  ║
+      ║    2. epayco.min.js — exports ePayco.token / ePayco.card only    ║
+      ║    3. validateThreeds.min.js — exports window.validate3ds        ║
+      ║                                                                  ║
+      ║  validate3ds() is NOT in epayco.min.js. It lives ONLY in         ║
+      ║  validateThreeds.min.js. Without it, every 3DS-required card     ║
+      ║  payment silently abandons.                                      ║
+      ║                                                                  ║
+      ║  Verify with:                                                    ║
+      ║    curl -s https://checkout.epayco.co/epayco.min.js \            ║
+      ║      | grep -oE "window\\.[a-zA-Z_]+|ePayco\\.[a-zA-Z]+" | sort -u║
+      ║                                                                  ║
+      ║  Regression history: feaf61c (2026-02-28) deleted the third      ║
+      ║  script tag → 6 weeks of silent abandonment → restored in        ║
+      ║  a37f127 (2026-04-11). Do not let it happen a third time.        ║
+      ╚══════════════════════════════════════════════════════════════════╝
+    -->
+    <!-- 1. jQuery (required by ePayco SDK) — SRI integrity hash prevents CDN tampering -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"
             integrity="sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs"
             crossorigin="anonymous"></script>
-    <!-- ePayco SDK for frontend card tokenization (ePayco.token, ePayco.card) -->
+    <!-- 2. ePayco base SDK — only exports ePayco.token and ePayco.card. Does NOT export validate3ds. -->
     <script src="https://checkout.epayco.co/epayco.min.js"></script>
-    <!--
-      ePayco 3DS 2.0 validator (Cardinal Commerce DDC + bank challenge).
-      This is a SEPARATE script from epayco.min.js — it exposes window.validate3ds()
-      which handles the full 3DS 2.0 lifecycle. Removing this script is the regression
-      from commit feaf61c that broke every 3DS-required ePayco card payment for ~6 weeks.
-      Do NOT delete it: epayco.min.js by itself does NOT export validate3ds.
-    -->
+    <!-- 3. ePayco 3DS 2.0 validator — exports window.validate3ds (Cardinal Commerce DDC + bank challenge). LOAD-BEARING. -->
     <script src="https://multimedia.epayco.co/general/3DS/validateThreeds.min.js"></script>
 
     <script>
