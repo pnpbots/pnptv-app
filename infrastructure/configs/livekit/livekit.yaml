@@ -6,14 +6,23 @@ rtc:
   port_range_end: 50060
   tcp_port: 7881
   use_external_ip: true
+# Keys are loaded from environment variables at runtime.
+# Set LIVEKIT_API_KEY and LIVEKIT_API_SECRET in the container environment.
+# Do NOT add plaintext keys here — rotate immediately if any were committed.
 keys:
-  API43c72f0f0e6338a3: LNEjm4LVgldaaI4142uRYavT_SGCxaz21uPa_MLBYAs
+  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
 logging:
   level: info
 turn:
   enabled: true
+  # UDP for standard NAT traversal
   udp_port: 3478
+  # TLS-TURN is required for strict-NAT / corporate users that block UDP.
+  # Clients behind firewalls that only permit 443/TCP will use this port.
+  tls_port: 5349
+  domain: ${LIVEKIT_TURN_DOMAIN}
+  external_tls: true
 webhook:
-  api_key: API43c72f0f0e6338a3
+  api_key: ${LIVEKIT_API_KEY}
   urls:
     - https://pnptv.app/api/webhooks/livekit
