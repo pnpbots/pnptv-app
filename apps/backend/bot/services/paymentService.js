@@ -436,7 +436,10 @@ class PaymentService {
         throw new Error('El plan seleccionado no existe o está inactivo. | Plan not found');
       }
 
-      // For creator subscriptions, use the creator's dynamic price
+      // Dynamic pricing for plan templates that need a per-resource price.
+      //   creator_monthly  → users.creator_price_usd  (creatorId = creator user id)
+      //   channel_access   → creator_channels.price_usd (creatorId is overloaded to carry channel id)
+      // For everything else we use the plan's static price as-is.
       let paymentAmount = plan.price;
       if (planId === 'creator_monthly' && creatorId) {
         const creatorRes = await query(
@@ -445,6 +448,15 @@ class PaymentService {
         );
         if (creatorRes.rows[0]) {
           paymentAmount = parseFloat(creatorRes.rows[0].creator_price_usd);
+        }
+      } else if (planId === 'channel_access' && creatorId) {
+        // creatorId in this context is the channel id (route-level convention).
+        const channelRes = await query(
+          'SELECT price_usd FROM creator_channels WHERE id = $1 AND is_active = true',
+          [parseInt(creatorId, 10)]
+        );
+        if (channelRes.rows[0] && Number(channelRes.rows[0].price_usd) > 0) {
+          paymentAmount = parseFloat(channelRes.rows[0].price_usd);
         }
       }
 
