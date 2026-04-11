@@ -1290,6 +1290,9 @@ export interface HangoutGroup {
   channelAccessType?: 'free' | 'prime' | 'subscription' | 'paid' | null;
   channelPriceUsd?: number | null;
   channelName?: string | null;
+  // Moderation / posting controls (returned at top-level by hangoutGroupController)
+  isReadOnly?: boolean;
+  slowModeSeconds?: number;
 }
 
 export interface MessageReaction {
@@ -2247,6 +2250,20 @@ export function purchaseChannelAccess(
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/channels/${channelId}/purchase`, {
+    method: 'POST',
+    body: { provider, email },
+  });
+}
+
+// Purchase access to a standalone paid hangout (not linked to a channel).
+// For channel-linked paid hangouts, use purchaseChannelAccess instead —
+// channel-access grants cover both the channel and its linked hangout.
+export function purchaseHangoutAccess(
+  hangoutGroupId: number,
+  provider: 'epayco' | 'daimo',
+  email?: string
+): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
+  return request(`/api/webapp/hangouts/groups/${hangoutGroupId}/purchase`, {
     method: 'POST',
     body: { provider, email },
   });

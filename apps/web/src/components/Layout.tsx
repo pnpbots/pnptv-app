@@ -1082,7 +1082,7 @@ export function Layout() {
                 <div>
                   <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Account</p>
                   {[
-                    { to: "/my-access", label: "My Access" },
+                    { to: "/my-access", label: t.nav.myAccess || "My Access" },
                     { to: "/settings", label: t.nav.settings || "Settings" },
                     { to: "/support", label: t.nav.help || "Help & Support" },
                   ].map((link) => (

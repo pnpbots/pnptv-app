@@ -12,7 +12,6 @@ const UserService = require(path.join(backendPath, 'bot/services/userService'));
 const MembershipCleanupService = require(path.join(backendPath, 'bot/services/membershipCleanupService'));
 const TutorialReminderService = require(path.join(backendPath, 'bot/services/tutorialReminderService'));
 const CultEventService = require(path.join(backendPath, 'bot/services/cultEventService'));
-const VisaCybersourceService = require(path.join(backendPath, 'bot/services/visaCybersourceService'));
 const logger = require(path.join(backendPath, 'utils/logger'));
 const PaymentRecoveryService = require(path.join(backendPath, 'bot/services/paymentRecoveryService'));
 const MediaCleanupService = require(path.join(backendPath, 'bot/services/mediaCleanupService'));
@@ -23,6 +22,7 @@ const TelegramSubscriptionReminderService = require(path.join(backendPath, 'bot/
 const NotificationDigestScheduler = require(path.join(backendPath, 'bot/services/notificationDigestScheduler'));
 const MeilisearchService = require(path.join(backendPath, 'services/meilisearchService'));
 const AppUserService = require(path.join(backendPath, 'services/userService'));
+const CristinaFeedService = require(path.join(backendPath, 'services/cristinaFeedService'));
 
 /**
  * Initialize and start cron jobs
@@ -188,37 +188,12 @@ const startCronJobs = async (bot = null) => {
       });
     }
 
-    // Process recurring payments - runs daily at 8 AM UTC
-    // Charges cards for subscriptions that are due for renewal
-    cron.schedule(process.env.RECURRING_PAYMENTS_CRON || '0 8 * * *', async () => {
-      try {
-        logger.info('Running recurring payments processing...');
-        const results = await VisaCybersourceService.processDuePayments();
-        logger.info('Recurring payments processing completed', {
-          total: results.total,
-          successful: results.successful,
-          failed: results.failed,
-          errors: results.errors?.length || 0,
-        });
-      } catch (error) {
-        logger.error('Error in recurring payments cron:', error);
-      }
-    });
-
-    // Retry failed recurring payments - runs at 2 PM UTC (for retry after morning failures)
-    cron.schedule(process.env.RECURRING_RETRY_CRON || '0 14 * * *', async () => {
-      try {
-        logger.info('Running recurring payment retry...');
-        const results = await VisaCybersourceService.processDuePayments();
-        logger.info('Recurring payment retry completed', {
-          total: results.total,
-          successful: results.successful,
-          failed: results.failed,
-        });
-      } catch (error) {
-        logger.error('Error in recurring payment retry cron:', error);
-      }
-    });
+    // NOTE: The recurring-payments cron schedules (VisaCybersourceService.processDuePayments)
+    // were removed with the rest of the visaCybersource cleanup. The service never
+    // worked in production — config/payment.config.js did not exist so the axios
+    // endpoint was always `undefined/...`. Real recurring renewals happen via the
+    // ePayco / Daimo / BTCPay webhook paths which call grantEntitlementsForPlan
+    // with the payment row's metadata.
 
     // Creator eligibility batch check - daily at 3 AM UTC
     cron.schedule('0 3 * * *', async () => {
@@ -393,6 +368,50 @@ const startCronJobs = async (bot = null) => {
         await NotificationDigestScheduler.runDigest();
       } catch (error) {
         logger.error('Error in notification digest cron:', error);
+      }
+    });
+
+    // ── Cristina AI social feed posts ─────────────────────────────────────────
+    // Posts rotate: wellness → feature tutorial → PRIME promo → feature tutorial
+    // Spread across the day to keep the feed lively without spamming.
+
+    // Wellness tip — 10:00 AM UTC (morning check-in)
+    cron.schedule(process.env.CRISTINA_WELLNESS_CRON || '0 10 * * *', async () => {
+      try {
+        logger.info('CristinaFeed: posting wellness tip...');
+        await CristinaFeedService.postWellness();
+      } catch (error) {
+        logger.error('CristinaFeed: wellness cron error', { error: error.message });
+      }
+    });
+
+    // Feature tutorial #1 — 2:00 PM UTC (afternoon engagement)
+    cron.schedule(process.env.CRISTINA_TUTORIAL1_CRON || '0 14 * * *', async () => {
+      try {
+        logger.info('CristinaFeed: posting feature tutorial...');
+        await CristinaFeedService.postFeatureTutorial();
+      } catch (error) {
+        logger.error('CristinaFeed: tutorial cron error', { error: error.message });
+      }
+    });
+
+    // PRIME promo — 6:00 PM UTC (evening conversion window)
+    cron.schedule(process.env.CRISTINA_PROMO_CRON || '0 18 * * *', async () => {
+      try {
+        logger.info('CristinaFeed: posting PRIME promo...');
+        await CristinaFeedService.postPrimePromo();
+      } catch (error) {
+        logger.error('CristinaFeed: promo cron error', { error: error.message });
+      }
+    });
+
+    // Feature tutorial #2 — 10:00 PM UTC (late-night engagement)
+    cron.schedule(process.env.CRISTINA_TUTORIAL2_CRON || '0 22 * * *', async () => {
+      try {
+        logger.info('CristinaFeed: posting feature tutorial...');
+        await CristinaFeedService.postFeatureTutorial();
+      } catch (error) {
+        logger.error('CristinaFeed: tutorial cron error', { error: error.message });
       }
     });
 

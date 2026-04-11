@@ -1628,8 +1628,6 @@ app.post(
   express.raw({ type: 'application/webhook+json' }),
   webhookController.handleLiveKitWebhook
 );
-app.post('/api/webhooks/visa-cybersource', webhookLimiter, require('./controllers/visaCybersourceWebhookController').handleWebhook);
-app.get('/api/webhooks/visa-cybersource/health', adminGuard, require('./controllers/visaCybersourceWebhookController').healthCheck);
 app.get('/api/payment-response', webhookController.handlePaymentResponse);
 
 // Cal.com webhook — booking lifecycle events (C-03)
@@ -1821,113 +1819,12 @@ app.get('/recurring-checkout/:userId/:planId', pageLimiter, (req, res) => {
   sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
-// Recurring Subscription API routes
-const VisaCybersourceService = require('../services/visaCybersourceService');
-
-// Tokenize card for recurring subscription
-app.post('/api/recurring/tokenize', authenticateUser, bindAuthenticatedUserId, asyncHandler(async (req, res) => {
-  const { userId, cardToken } = req.body;
-
-  // PCI DSS Compliance: Reject any raw card data sent to the server
-  const forbiddenFields = ['cardNumber', 'cvc', 'expMonth', 'expYear', 'card_number', 'cvv', 'exp_month', 'exp_year'];
-  for (const field of forbiddenFields) {
-    if (req.body.hasOwnProperty(field)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Raw card data cannot be sent to server. Use ePayco.js tokenization in browser.'
-      });
-    }
-  }
-
-  if (!userId || !cardToken) {
-    return res.status(400).json({ success: false, error: 'Missing required fields: userId and cardToken' });
-  }
-
-  // Token should be a pre-generated token from ePayco.js frontend tokenization.
-  // The token is never echoed back in the response — doing so would expose it to
-  // any MitM observer or browser extension that captures XHR responses.
-  try {
-    res.json({ success: true, message: 'Token received' });
-  } catch (error) {
-    logger.error('Error processing tokenized card:', error);
-    res.status(500).json({ success: false, error: 'Failed to process token' });
-  }
-}));
-
-// Rate limiter for recurring subscribe — 2 attempts per 10 minutes per user.
-// Prevents automated subscription-creation loops and trial-period abuse where
-// an attacker rapidly creates/cancels subscriptions to probe billing logic.
-const recurringSubscribeLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000, // 10 minutes
-  max: 2,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.session?.user?.id || req.ip,
-  handler: (req, res) => res.status(429).json({
-    success: false,
-    error: 'Too many subscription attempts. Please wait 10 minutes before trying again.',
-  }),
-});
-
-// Create recurring subscription
-app.post('/api/recurring/subscribe', recurringSubscribeLimiter, authenticateUser, bindAuthenticatedUserId, asyncHandler(async (req, res) => {
-  // Security: userId is always taken from the authenticated session — never from req.body.
-  // bindAuthenticatedUserId middleware already overwrites req.body.userId with the session
-  // value, but we read directly from the session here as an explicit defence-in-depth
-  // measure so that the auth source is unambiguous even if middleware order changes.
-  const userId = getActorId(req);
-  if (!userId) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
-
-  // trialDays is intentionally NOT accepted from the client body — trial duration is
-  // determined server-side from the plan record to prevent free-trial abuse.
-  const { planId, cardToken, email } = req.body;
-
-  if (!planId) {
-    return res.status(400).json({ success: false, error: 'Missing required field: planId' });
-  }
-
-  const result = await VisaCybersourceService.createRecurringSubscription({
-    userId,
-    planId,
-    cardToken,
-    email,
-  });
-
-  res.json(result);
-}));
-
-// Get subscription details
-app.get('/api/recurring/subscription/:userId', authenticateUser, requireSelfOrAdmin, asyncHandler(async (req, res) => {
-  const { userId } = req.params;
-  const subscription = await VisaCybersourceService.getSubscriptionDetails(userId);
-  res.json({ success: true, subscription });
-}));
-
-// Cancel subscription
-app.post('/api/recurring/cancel', authenticateUser, bindAuthenticatedUserId, asyncHandler(async (req, res) => {
-  const { userId, immediately } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ success: false, error: 'Missing userId' });
-  }
-
-  const result = await VisaCybersourceService.cancelRecurringSubscription(userId, immediately || false);
-  res.json(result);
-}));
-
-// Reactivate subscription
-app.post('/api/recurring/reactivate', authenticateUser, bindAuthenticatedUserId, asyncHandler(async (req, res) => {
-  const { userId } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ success: false, error: 'Missing userId' });
-  }
-
-  const result = await VisaCybersourceService.reactivateSubscription(userId);
-  res.json(result);
-}));
+// NOTE: The /api/recurring/* routes and VisaCybersourceService integration
+// were removed. The service was non-functional in production because its
+// required config (config/payment.config.js) never existed — every call
+// resolved to `undefined/token/card` via an unconfigured axios endpoint.
+// Recurring-subscription tokenization is handled inside the regular ePayco
+// webhook path; frontends use the unified /api/webapp/payments/create flow.
 
 // Subscription API routes
 app.get('/api/subscription/plans', asyncHandler(subscriptionController.getPlans));

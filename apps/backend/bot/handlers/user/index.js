@@ -10,7 +10,6 @@ const settingsHandlers = require('./settings');
 const groupWelcomeHandlers = require('./groupWelcome');
 const { registerAgeVerificationHandlers } = require('./ageVerificationHandler');
 const lifetimeMigrationHandlers = require('./lifetimeMigration');
-const { registerSubscriptionHandlers } = require('./subscriptionManagement');
 const registerPNPLiveHandlers = require('./pnpLiveHandler');
 const PNPLiveNotificationService = require('../../services/pnpLiveNotificationService');
 const registerHangoutsHandlers = require('./hangoutsHandler');
@@ -35,7 +34,6 @@ const registerUserHandlers = (bot) => {
   settingsHandlers(bot);
   groupWelcomeHandlers(bot);
   lifetimeMigrationHandlers(bot);
-  registerSubscriptionHandlers(bot);
   registerPNPLiveHandlers(bot);
   registerHangoutsHandlers(bot);
 

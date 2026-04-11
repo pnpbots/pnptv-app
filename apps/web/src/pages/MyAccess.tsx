@@ -1,28 +1,39 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { getMyAccess, type MyAccessResponse } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatExpiry(iso: string | null, isLifetime: boolean): string {
-  if (isLifetime) return "Lifetime";
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "—";
-  const now = Date.now();
-  const diffMs = d.getTime() - now;
-  if (diffMs <= 0) return "Expired";
-  const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  if (days <= 1) return "Expires today";
-  if (days <= 30) return `${days} days left`;
-  return `Until ${d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+function useFormatExpiry() {
+  const t = useI18n();
+  return useMemo(
+    () => (iso: string | null, isLifetime: boolean): string => {
+      if (isLifetime) return t.myAccess.lifetime;
+      if (!iso) return t.myAccess.dash;
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return t.myAccess.dash;
+      const diffMs = d.getTime() - Date.now();
+      if (diffMs <= 0) return t.myAccess.expired;
+      const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      if (days <= 1) return t.myAccess.expiresToday;
+      if (days <= 30) return t.myAccess.daysLeft(days);
+      return t.myAccess.untilDate(
+        d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+      );
+    },
+    [t]
+  );
 }
 
-function tierBadge(tier: "PRIME" | "BASIC" | "FREE"): { label: string; className: string } {
-  if (tier === "PRIME") return { label: "PRIME", className: "bg-gradient-to-r from-amber-400 to-orange-500 text-black" };
-  if (tier === "BASIC") return { label: "BASIC", className: "bg-blue-500/90 text-white" };
-  return { label: "FREE", className: "bg-neutral-700 text-white" };
+function tierBadge(
+  tier: "PRIME" | "BASIC" | "FREE",
+  t: ReturnType<typeof useI18n>
+): { label: string; className: string } {
+  if (tier === "PRIME") return { label: t.myAccess.primeLabel, className: "bg-gradient-to-r from-amber-400 to-orange-500 text-black" };
+  if (tier === "BASIC") return { label: t.myAccess.basicLabel, className: "bg-blue-500/90 text-white" };
+  return { label: t.myAccess.freeLabel, className: "bg-neutral-700 text-white" };
 }
 
 // ── Components ──────────────────────────────────────────────────────────────
@@ -91,6 +102,8 @@ function AccessRow({
 
 export default function MyAccess() {
   const navigate = useNavigate();
+  const t = useI18n();
+  const formatExpiry = useFormatExpiry();
   const [data, setData] = useState<MyAccessResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +118,7 @@ export default function MyAccess() {
         if (!cancelled) setData(res);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load access");
+          setError(err instanceof Error ? err.message : t.myAccess.loadError);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -114,21 +127,19 @@ export default function MyAccess() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
-  const badge = data ? tierBadge(data.tier) : tierBadge("FREE");
+  const badge = data ? tierBadge(data.tier, t) : tierBadge("FREE", t);
 
   return (
     <div className="min-h-screen bg-pnp-background text-pnp-textPrimary">
       <Helmet>
-        <title>My Access — PNPtv!</title>
+        <title>{t.myAccess.pageTitle}</title>
       </Helmet>
 
       <div className="max-w-xl mx-auto p-4 pb-24">
-        <h1 className="text-xl font-bold mb-1">My Access</h1>
-        <p className="text-xs text-pnp-textSecondary mb-5">
-          What you currently have access to on PNPtv.
-        </p>
+        <h1 className="text-xl font-bold mb-1">{t.myAccess.heading}</h1>
+        <p className="text-xs text-pnp-textSecondary mb-5">{t.myAccess.subheading}</p>
 
         {loading && (
           <div className="space-y-3">
@@ -157,26 +168,26 @@ export default function MyAccess() {
                     className="text-xs font-semibold text-pnp-accent underline"
                     onClick={() => navigate("/subscribe")}
                   >
-                    Upgrade
+                    {t.myAccess.upgrade}
                   </button>
                 )}
               </div>
               <div className="grid grid-cols-1 gap-2 text-sm">
                 {data.global.primeLifetime || data.global.primeExpiresAt ? (
                   <div className="flex justify-between">
-                    <span className="text-pnp-textSecondary">PRIME</span>
+                    <span className="text-pnp-textSecondary">{t.myAccess.rowPrime}</span>
                     <span>{formatExpiry(data.global.primeExpiresAt, data.global.primeLifetime)}</span>
                   </div>
                 ) : null}
                 {data.global.memberLifetime || data.global.memberExpiresAt ? (
                   <div className="flex justify-between">
-                    <span className="text-pnp-textSecondary">Member</span>
+                    <span className="text-pnp-textSecondary">{t.myAccess.rowMember}</span>
                     <span>{formatExpiry(data.global.memberExpiresAt, data.global.memberLifetime)}</span>
                   </div>
                 ) : null}
                 {data.global.privateCallCredits > 0 ? (
                   <div className="flex justify-between">
-                    <span className="text-pnp-textSecondary">Private call credits</span>
+                    <span className="text-pnp-textSecondary">{t.myAccess.rowPrivateCalls}</span>
                     <span>{data.global.privateCallCredits}</span>
                   </div>
                 ) : null}
@@ -184,7 +195,7 @@ export default function MyAccess() {
                   && !data.global.memberLifetime && !data.global.memberExpiresAt
                   && data.global.privateCallCredits === 0 && (
                     <p className="text-xs text-pnp-textSecondary">
-                      No active membership. Upgrade to unlock live streams, hangouts, and more.
+                      {t.myAccess.noMembership}
                     </p>
                   )}
               </div>
@@ -192,15 +203,15 @@ export default function MyAccess() {
 
             {/* Paid Channels */}
             <Section
-              title="Paid Channels"
-              subtitle="Channels you have purchased direct access to."
-              empty="No paid channels yet. Buy access from the channel itself."
+              title={t.myAccess.paidChannelsTitle}
+              subtitle={t.myAccess.paidChannelsSubtitle}
+              empty={t.myAccess.paidChannelsEmpty}
             >
               {data.channels.map((c) => (
                 <AccessRow
                   key={`ch-${c.id}`}
-                  title={c.name}
-                  subtitle="Channel access"
+                  title={c.name || t.myAccess.defaultChannelName}
+                  subtitle={t.myAccess.rowChannelAccess}
                   expiryText={formatExpiry(c.expiresAt, c.isLifetime)}
                   thumbnailUrl={c.coverUrl}
                   onClick={() => navigate(c.url)}
@@ -210,14 +221,14 @@ export default function MyAccess() {
 
             {/* Subscribed Creators */}
             <Section
-              title="Subscribed Creators"
-              subtitle="Creators you support with a recurring subscription."
-              empty="No creator subscriptions yet. Visit a creator's profile to subscribe."
+              title={t.myAccess.subscribedCreatorsTitle}
+              subtitle={t.myAccess.subscribedCreatorsSubtitle}
+              empty={t.myAccess.subscribedCreatorsEmpty}
             >
               {data.creators.map((cr) => (
                 <AccessRow
                   key={`cr-${cr.id}`}
-                  title={cr.displayName}
+                  title={cr.displayName || t.myAccess.defaultCreatorName}
                   subtitle={cr.handle ? `@${cr.handle}` : undefined}
                   expiryText={formatExpiry(cr.expiresAt, cr.isLifetime)}
                   thumbnailUrl={cr.avatarUrl}
@@ -228,15 +239,15 @@ export default function MyAccess() {
 
             {/* Paid Hangouts (standalone) */}
             <Section
-              title="Paid Hangouts"
-              subtitle="Standalone paid hangouts you have access to."
-              empty="No paid hangouts."
+              title={t.myAccess.paidHangoutsTitle}
+              subtitle={t.myAccess.paidHangoutsSubtitle}
+              empty={t.myAccess.paidHangoutsEmpty}
             >
               {data.hangouts.map((h) => (
                 <AccessRow
                   key={`hg-${h.id}`}
-                  title={h.name}
-                  subtitle="Hangout access"
+                  title={h.name || t.myAccess.defaultHangoutName}
+                  subtitle={t.myAccess.rowHangoutAccess}
                   expiryText={formatExpiry(h.expiresAt, h.isLifetime)}
                   thumbnailUrl={h.avatarUrl}
                   onClick={() => navigate(h.url)}

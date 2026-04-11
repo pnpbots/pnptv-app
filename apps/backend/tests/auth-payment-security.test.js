@@ -86,6 +86,18 @@ jest.mock(
   }),
   { virtual: true }
 );
+// AuthentikService is the SSO identity provider. In tests we can't reach the
+// real Authentik server, so stub it to always return a synthetic UUID and
+// no-op the email/group sync side effects.
+jest.mock('../services/authentikService', () => ({
+  syncTelegramUser: jest.fn(async (telegramUser) => ({
+    uuid: `pnptv-${telegramUser?.id || 'test'}`,
+    pk: 1,
+    isNew: false,
+  })),
+  updateUserEmail: jest.fn(async () => true),
+  syncUserGroups: jest.fn(async () => undefined),
+}));
 jest.mock('../bot/services/platformBanService', () => ({
   isBanned: jest.fn(async () => null),
 }));
@@ -106,10 +118,19 @@ jest.mock('../bot/api/controllers/webhookController', () => ({
   handleDaimoWebhook: jest.fn((req, res) => res.json({ success: true })),
   handlePaymentResponse: jest.fn((req, res) => res.send('<html>ok</html>')),
 }));
-jest.mock('../bot/api/controllers/visaCybersourceWebhookController', () => ({
-  handleWebhook: jest.fn((req, res) => res.json({ success: true })),
-  healthCheck: jest.fn((req, res) => res.json({ status: 'ok' })),
-}));
+// visaCybersourceWebhookController was removed — the visaCybersource integration
+// was non-functional in production (missing config/payment.config.js made the
+// axios endpoint resolve to undefined/...). This mock is kept as virtual so the
+// test file loads cleanly and the mock is harmless for any lingering test cases
+// that reference it.
+jest.mock(
+  '../bot/api/controllers/visaCybersourceWebhookController',
+  () => ({
+    handleWebhook: jest.fn((req, res) => res.json({ success: true })),
+    healthCheck: jest.fn((req, res) => res.json({ status: 'ok' })),
+  }),
+  { virtual: true }
+);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

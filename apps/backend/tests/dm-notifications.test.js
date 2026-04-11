@@ -19,6 +19,13 @@ const request = require('supertest');
 const express = require('express');
 const session = require('express-session');
 
+// livekitService throws at require-time if its env vars are missing, and it
+// is pulled in transitively via dmController. Set harmless placeholders so
+// the module loads in the test environment. (Real LiveKit SDK calls are not
+// exercised by these tests.)
+process.env.LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'test-livekit-api-key';
+process.env.LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'test-livekit-api-secret-min-32-chars-long-xx';
+
 // ── Mock ioredis ──────────────────────────────────────────────────────────────
 
 jest.mock('../config/redis', () => {

@@ -12,6 +12,7 @@ import { join, type JoinStrings } from "./join";
 import { welcome, type WelcomeStrings } from "./welcome";
 import { profile, type ProfileStrings } from "./profile";
 import { subscribe, type SubscribeStrings } from "./subscribe";
+import { myAccess, type MyAccessStrings } from "./myAccess";
 import { booking, type BookingStrings } from "./booking";
 import { chat, type ChatStrings } from "./chat";
 import { live, type LiveStrings } from "./live";
@@ -53,6 +54,7 @@ export interface I18n {
   welcome: Widen<WelcomeStrings>;
   profile: Widen<ProfileStrings>;
   subscribe: Widen<SubscribeStrings>;
+  myAccess: Widen<MyAccessStrings>;
   booking: Widen<BookingStrings>;
   chat: Widen<ChatStrings>;
   live: Widen<LiveStrings>;
@@ -92,6 +94,7 @@ function resolve(lang: Lang): I18n {
     welcome: pick(welcome, lang),
     profile: pick(profile, lang),
     subscribe: pick(subscribe, lang),
+    myAccess: pick(myAccess, lang),
     booking: pick(booking, lang),
     chat: pick(chat, lang),
     live: pick(live, lang),

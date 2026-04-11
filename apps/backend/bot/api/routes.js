@@ -1642,8 +1642,6 @@ app.post(
   express.raw({ type: 'application/webhook+json' }),
   webhookController.handleLiveKitWebhook
 );
-app.post('/api/webhooks/visa-cybersource', webhookLimiter, require('./controllers/visaCybersourceWebhookController').handleWebhook);
-app.get('/api/webhooks/visa-cybersource/health', adminGuard, require('./controllers/visaCybersourceWebhookController').healthCheck);
 app.get('/api/payment-response', webhookController.handlePaymentResponse);
 
 // Cal.com webhook — booking lifecycle events (C-03)
@@ -1835,113 +1833,12 @@ app.get('/recurring-checkout/:userId/:planId', pageLimiter, (req, res) => {
   sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
-// Recurring Subscription API routes
-const VisaCybersourceService = require('../services/visaCybersourceService');
-
-// Tokenize card for recurring subscription
-app.post('/api/recurring/tokenize', authenticateUser, bindAuthenticatedUserId, asyncHandler(async (req, res) => {
-  const { userId, cardToken } = req.body;
-
-  // PCI DSS Compliance: Reject any raw card data sent to the server
-  const forbiddenFields = ['cardNumber', 'cvc', 'expMonth', 'expYear', 'card_number', 'cvv', 'exp_month', 'exp_year'];
-  for (const field of forbiddenFields) {
-    if (req.body.hasOwnProperty(field)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Raw card data cannot be sent to server. Use ePayco.js tokenization in browser.'
-      });
-    }
-  }
-
-  if (!userId || !cardToken) {
-    return res.status(400).json({ success: false, error: 'Missing required fields: userId and cardToken' });
-  }
-
-  // Token should be a pre-generated token from ePayco.js frontend tokenization.
-  // The token is never echoed back in the response — doing so would expose it to
-  // any MitM observer or browser extension that captures XHR responses.
-  try {
-    res.json({ success: true, message: 'Token received' });
-  } catch (error) {
-    logger.error('Error processing tokenized card:', error);
-    res.status(500).json({ success: false, error: 'Failed to process token' });
-  }
-}));
-
-// Rate limiter for recurring subscribe — 2 attempts per 10 minutes per user.
-// Prevents automated subscription-creation loops and trial-period abuse where
-// an attacker rapidly creates/cancels subscriptions to probe billing logic.
-const recurringSubscribeLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000, // 10 minutes
-  max: 2,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.session?.user?.id || req.ip,
-  handler: (req, res) => res.status(429).json({
-    success: false,
-    error: 'Too many subscription attempts. Please wait 10 minutes before trying again.',
-  }),
-});
-
-// Create recurring subscription
-app.post('/api/recurring/subscribe', recurringSubscribeLimiter, authenticateUser, bindAuthenticatedUserId, asyncHandler(async (req, res) => {
-  // Security: userId is always taken from the authenticated session — never from req.body.
-  // bindAuthenticatedUserId middleware already overwrites req.body.userId with the session
-  // value, but we read directly from the session here as an explicit defence-in-depth
-  // measure so that the auth source is unambiguous even if middleware order changes.
-  const userId = getActorId(req);
-  if (!userId) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
-
-  // trialDays is intentionally NOT accepted from the client body — trial duration is
-  // determined server-side from the plan record to prevent free-trial abuse.
-  const { planId, cardToken, email } = req.body;
-
-  if (!planId) {
-    return res.status(400).json({ success: false, error: 'Missing required field: planId' });
-  }
-
-  const result = await VisaCybersourceService.createRecurringSubscription({
-    userId,
-    planId,
-    cardToken,
-    email,
-  });
-
-  res.json(result);
-}));
-
-// Get subscription details
-app.get('/api/recurring/subscription/:userId', authenticateUser, requireSelfOrAdmin, asyncHandler(async (req, res) => {
-  const { userId } = req.params;
-  const subscription = await VisaCybersourceService.getSubscriptionDetails(userId);
-  res.json({ success: true, subscription });
-}));
-
-// Cancel subscription
-app.post('/api/recurring/cancel', authenticateUser, bindAuthenticatedUserId, asyncHandler(async (req, res) => {
-  const { userId, immediately } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ success: false, error: 'Missing userId' });
-  }
-
-  const result = await VisaCybersourceService.cancelRecurringSubscription(userId, immediately || false);
-  res.json(result);
-}));
-
-// Reactivate subscription
-app.post('/api/recurring/reactivate', authenticateUser, bindAuthenticatedUserId, asyncHandler(async (req, res) => {
-  const { userId } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ success: false, error: 'Missing userId' });
-  }
-
-  const result = await VisaCybersourceService.reactivateSubscription(userId);
-  res.json(result);
-}));
+// NOTE: The /api/recurring/* routes and VisaCybersourceService integration
+// were removed. The service was non-functional in production because its
+// required config (config/payment.config.js) never existed — every call
+// resolved to `undefined/token/card` via an unconfigured axios endpoint.
+// Recurring-subscription tokenization is handled inside the regular ePayco
+// webhook path; frontends use the unified /api/webapp/payments/create flow.
 
 // Subscription API routes
 app.get('/api/subscription/plans', asyncHandler(subscriptionController.getPlans));
@@ -5368,6 +5265,91 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
     logger.error(`Channels list error: ${error.message}`);
     res.json({ success: true, channels: [], nextPage: null, total: 0 });
   }
+}));
+
+// Purchase access to a standalone paid hangout (not linked to a channel).
+// For channel-linked paid hangouts, use POST /api/webapp/channels/:channelId/purchase
+// instead — that route grants channel-access which covers the linked hangout.
+app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user || req.user;
+  const hangoutId = parseInt(req.params.id, 10);
+  const { provider, email } = req.body || {};
+
+  if (!Number.isFinite(hangoutId)) {
+    return res.status(400).json({ error: 'Invalid hangout ID' });
+  }
+  if (!['epayco', 'daimo'].includes(provider)) {
+    return res.status(400).json({ error: 'Provider must be epayco or daimo' });
+  }
+
+  const { rows: groups } = await getPool().query(
+    `SELECT id, creator_id, is_paid, price_usd, channel_id, name
+       FROM hangout_groups WHERE id = $1 LIMIT 1`,
+    [hangoutId]
+  );
+  if (groups.length === 0) return res.status(404).json({ error: 'Hangout not found' });
+  const hangout = groups[0];
+
+  if (hangout.channel_id) {
+    // Channel-linked hangouts are purchased via the channel route, which grants
+    // channel-access covering both the channel and its linked hangout.
+    return res.status(400).json({
+      error: 'This hangout is linked to a channel. Purchase channel access instead.',
+      channelId: hangout.channel_id,
+    });
+  }
+  if (!hangout.is_paid || !hangout.price_usd || Number(hangout.price_usd) <= 0) {
+    return res.status(400).json({ error: 'This hangout does not require payment' });
+  }
+
+  // Check if user already has access via the unified resolver.
+  const EntitlementAccessService = require('../../services/entitlementAccessService');
+  const decision = await EntitlementAccessService.hasResourceAccess(user.id, 'hangout', String(hangout.id));
+  if (decision.allowed) {
+    return res.status(400).json({ error: 'You already have access to this hangout' });
+  }
+
+  // Create a hangout_access payment. The plan is a price-agnostic template;
+  // we override payments.amount below with the hangout's actual price.
+  const PaymentService = require('../../services/paymentService');
+  const payment = await PaymentService.createPayment({
+    userId: user.id,
+    planId: 'hangout_access',
+    provider,
+  });
+
+  // Override amount + stamp metadata for the webhook handler.
+  const hangoutPrice = Number(hangout.price_usd);
+  const usdToCopRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+  const expectedCOP = String(Math.round(hangoutPrice * usdToCopRate));
+  await getPool().query(
+    `UPDATE payments
+        SET amount = $1,
+            metadata = COALESCE(metadata, '{}'::jsonb)
+                       || $2::jsonb
+                       || jsonb_build_object('expected_epayco_amount', $3, 'expected_epayco_currency', 'COP')
+      WHERE id = $4`,
+    [
+      hangoutPrice,
+      JSON.stringify({ hangoutGroupId: hangout.id, hangoutName: hangout.name }),
+      expectedCOP,
+      payment.id,
+    ]
+  );
+
+  if (email) {
+    await getPool().query(
+      `UPDATE payments SET metadata = metadata || $1::jsonb WHERE id = $2`,
+      [JSON.stringify({ email }), payment.id]
+    );
+  }
+
+  return res.json({
+    success: true,
+    paymentId: payment.id,
+    paymentUrl: payment.paymentUrl || `/payment/${payment.id}`,
+    checkoutUrl: payment.checkoutUrl || `/checkout/${payment.id}`,
+  });
 }));
 
 // Purchase access to a paid channel (and its linked hangout).

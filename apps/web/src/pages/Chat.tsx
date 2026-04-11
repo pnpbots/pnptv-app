@@ -50,6 +50,10 @@ import {
   editGroupMessage,
   deleteGroupMessage,
   toggleMessageReaction,
+  getOwnChannels,
+  purchaseChannelAccess,
+  purchaseHangoutAccess,
+  getPaymentStatus,
   type HangoutGroup,
   type GroupMessage,
   type GroupMember,
@@ -101,6 +105,7 @@ function HangoutChatPanel({
   groupMembers: any[];
 }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   // Only use dbId (Telegram numeric ID) — user.id is the Authentik UUID and will
   // never match msg.user_id which is always a Telegram ID.
   const myId = user?.dbId ?? "";
@@ -526,14 +531,14 @@ function HangoutChatPanel({
                       onTouchEnd={handleTouchEnd}
                       onTouchMove={handleTouchEnd}
                     >
-                      {/* Avatar — only for first message in group */}
+                      {/* Avatar — only for first message in group, linked to profile */}
                       {!isMe && (
-                        <div className="flex-shrink-0 mt-auto w-6">
+                        <div className="flex-shrink-0 mt-auto w-6" onClick={() => navigate(`/profile/${msg.user_id}`)} role="button" tabIndex={0}>
                           {!grouped ? (
                             isValidPhoto(msg.photo_url) ? (
-                              <img src={msg.photo_url!} alt="" className="w-6 h-6 rounded-full object-cover" />
+                              <img src={msg.photo_url!} alt="" className="w-6 h-6 rounded-full object-cover cursor-pointer" />
                             ) : (
-                              <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>
+                              <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold cursor-pointer" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>
                                 {(msg.first_name || msg.username || "?")[0].toUpperCase()}
                               </div>
                             )
@@ -541,9 +546,9 @@ function HangoutChatPanel({
                         </div>
                       )}
                       <div className={`max-w-[80%] sm:max-w-[75%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                        {/* Name — only for first in group */}
+                        {/* Name — only for first in group, linked to profile */}
                         {!isMe && !grouped && (
-                          <p className="text-[10px] text-pnp-textSecondary mb-0.5 px-1">{msg.first_name || msg.username || "User"}</p>
+                          <p className="text-[10px] text-pnp-textSecondary mb-0.5 px-1 cursor-pointer hover:text-pnp-accent transition-colors" onClick={() => navigate(`/profile/${msg.user_id}`)}>{msg.first_name || msg.username || "User"}</p>
                         )}
                         <div
                           className={`rounded-2xl px-3 py-2 text-sm ${isMe ? "text-white rounded-br-md" : "bg-white/10 text-white rounded-bl-md"}`}
@@ -960,7 +965,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [newIsPaid, setNewIsPaid] = useState(false);
   const [newPrice, setNewPrice] = useState("");
   const [newRules, setNewRules] = useState("");
+  const [newReadOnly, setNewReadOnly] = useState(false);
+  const [newSlowMode, setNewSlowMode] = useState(0);
+  const [newFeedVisibility, setNewFeedVisibility] = useState<"public" | "shadow" | "ghost">("public");
   const [createSuccess, setCreateSuccess] = useState<{ id: number; name: string } | null>(null);
+  const [newChannelId, setNewChannelId] = useState<number | null>(null);
+  const [ownChannels, setOwnChannels] = useState<any[]>([]);
 
   // Discover groups
   const [discoverList, setDiscoverList] = useState<DiscoverGroup[]>([]);
@@ -968,6 +978,21 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [showDiscover, setShowDiscover] = useState(true);
   const [discoverLoading, setDiscoverLoading] = useState(false);
   const [discoverTagFilter, setDiscoverTagFilter] = useState<string | null>(null);
+
+  // Payment gate modal
+  const [showPaymentGate, setShowPaymentGate] = useState(false);
+  const [paymentGateInfo, setPaymentGateInfo] = useState<{
+    accessType: 'prime' | 'subscription' | 'paid';
+    priceUsd?: number;
+    channelId?: number;
+    channelName?: string;
+    creatorId?: string;
+    groupId: number;
+    groupName?: string;
+  } | null>(null);
+  const [pgProvider, setPgProvider] = useState<'epayco' | 'daimo'>('daimo');
+  const [pgLoading, setPgLoading] = useState(false);
+  const [pgPolling, setPgPolling] = useState(false);
 
   // Join requests management (for creators)
   const [joinRequests, setJoinRequests] = useState<Record<number, JoinRequest[]>>({});
@@ -1256,14 +1281,32 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     setCreating(true);
     setCreateError(null);
     try {
-      const paidPrice = newIsPaid ? parseFloat(newPrice) || 0 : 0;
-      const result = await createHangoutGroup(newName.trim(), newDesc.trim(), newIsPublic, newIsPaid, paidPrice, newRules.trim() || undefined);
+      // When linked to a channel, access rules come from the channel — no standalone paid
+      const isPaidEffective = newChannelId ? false : newIsPaid;
+      // Standalone paid hangouts are fixed at $5
+      const paidPrice = isPaidEffective ? 5 : 0;
+      const result = await createHangoutGroup(
+        newName.trim(),
+        newDesc.trim(),
+        newIsPublic,
+        isPaidEffective,
+        paidPrice,
+        newRules.trim() || undefined,
+        newChannelId
+      );
       const createdGroup = result?.group;
-      // If tags were selected, apply them after creation
-      if (newTags.length > 0 && createdGroup?.id) {
-        try {
-          await updateHangoutSettings(createdGroup.id, { tags: newTags });
-        } catch { /* non-blocking */ }
+      // Apply advanced settings after creation (tags, read-only, slow mode, feed visibility)
+      if (createdGroup?.id) {
+        const advancedSettings: Record<string, unknown> = {};
+        if (newTags.length > 0) advancedSettings.tags = newTags;
+        if (newReadOnly) advancedSettings.isReadOnly = true;
+        if (newSlowMode > 0) advancedSettings.slowModeSeconds = newSlowMode;
+        if (newFeedVisibility !== "public") advancedSettings.feedVisibility = newFeedVisibility;
+        if (Object.keys(advancedSettings).length > 0) {
+          try {
+            await updateHangoutSettings(createdGroup.id, advancedSettings);
+          } catch { /* non-blocking */ }
+        }
       }
       // Show success state
       setCreateSuccess({ id: createdGroup?.id, name: newName.trim() });
@@ -1274,6 +1317,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setNewPrice("");
       setNewRules("");
       setNewTags([]);
+      setNewReadOnly(false);
+      setNewSlowMode(0);
+      setNewFeedVisibility("public");
+      setNewChannelId(null);
       loadGroups();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : t.chat.errorFailedToCreate);
@@ -1281,6 +1328,20 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setCreating(false);
     }
   };
+
+  // Fetch own unlinked channels when the create form opens (active creators only)
+  useEffect(() => {
+    if (!showCreate) return;
+    if (!isPrime) return;
+    getOwnChannels()
+      .then((res) => {
+        if (res.success) {
+          // Only show channels that haven't been linked to a hangout yet
+          setOwnChannels(res.channels.filter((ch: any) => !ch.hangoutGroupId));
+        }
+      })
+      .catch(() => setOwnChannels([]));
+  }, [showCreate, isPrime]);
 
   const handleDiscoverJoin = async (group: DiscoverGroup) => {
     try {
@@ -1294,10 +1355,63 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       }
     } catch (err: any) {
       if (err?.isPaid || err?.message?.includes("Payment required")) {
-        setDiscoverError(`This hangout costs $${Number(group.priceUsd || 0).toFixed(2)} to join. Payment checkout coming soon.`);
+        const gAny = group as any;
+        const accessType = gAny.channelAccessType || (group.isPaid ? 'paid' : 'free');
+        setPaymentGateInfo({
+          accessType: accessType as any,
+          priceUsd: Number(gAny.channelPriceUsd || group.priceUsd || 5),
+          channelId: gAny.channelId || undefined,
+          channelName: gAny.channelName || undefined,
+          creatorId: gAny.creatorId || group.creatorId || undefined,
+          groupId: group.id,
+          groupName: group.name,
+        });
+        setShowPaymentGate(true);
       } else {
         setDiscoverError(err instanceof Error ? err.message : "Failed to join group");
       }
+    }
+  };
+
+  // ─── Payment gate handler ────────────────────────────────────────────
+  // Unified purchase handler: picks channel-access or hangout-access based on
+  // whether the gated resource is a channel-linked hangout (channelId present)
+  // or a standalone paid hangout.
+  const handlePurchaseChannel = async () => {
+    if (!paymentGateInfo) return;
+    const { channelId, groupId } = paymentGateInfo;
+    if (!channelId && !groupId) return;
+    setPgLoading(true);
+    try {
+      const res = channelId
+        ? await purchaseChannelAccess(channelId, pgProvider)
+        : await purchaseHangoutAccess(groupId, pgProvider);
+      if (pgProvider === 'epayco' && res.paymentUrl) {
+        window.open(res.paymentUrl, '_blank');
+      } else if (pgProvider === 'daimo' && res.checkoutUrl) {
+        window.open(res.checkoutUrl, '_blank');
+      }
+      setPgPolling(true);
+      const pollId = res.paymentId;
+      const interval = setInterval(async () => {
+        try {
+          const status = await getPaymentStatus(pollId);
+          if (['completed', 'paid', 'success'].includes(status.status)) {
+            clearInterval(interval);
+            setPgPolling(false);
+            setShowPaymentGate(false);
+            setPaymentGateInfo(null);
+            loadGroups();
+            loadDiscover();
+          }
+        } catch {}
+      }, 5000);
+      setTimeout(() => { clearInterval(interval); setPgPolling(false); }, 600000);
+    } catch (err: any) {
+      setDiscoverError(err?.message || 'Payment failed');
+      setShowPaymentGate(false);
+    } finally {
+      setPgLoading(false);
     }
   };
 
@@ -1527,9 +1641,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
     return (
       <>
-      <div className="fixed inset-0 lg:left-72 flex flex-col bg-pnp-background z-[30] overflow-hidden chat-overlay-safe">
-        {/* Chat header — clean two-section layout: left (nav+info) / right (actions) */}
-        <div className="flex items-center px-1.5 sm:px-3 py-1.5 sm:py-2 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
+      <div className="chat-overlay-safe left-0 right-0 lg:left-72 flex flex-col bg-pnp-background overflow-hidden">
+        {/* Chat header — fixed strip: name, members, video call */}
+        <div className="flex items-center px-1.5 sm:px-3 border-b border-pnp-border flex-shrink-0 bg-pnp-surface" style={{ minHeight: 56, paddingTop: "max(0.75rem, env(safe-area-inset-top, 0px))", paddingBottom: "0.75rem" }}>
           {/* Left: back + avatar + info */}
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <button
@@ -1576,15 +1690,31 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               )}
             </button>
 
-            {/* Name + member count */}
+            {/* Name + member count + setting badges */}
             <div className="flex-1 min-w-0">
               <h2 className="text-sm font-bold text-pnp-textPrimary truncate leading-tight">{activeGroup.name}</h2>
-              <p className="text-xs text-pnp-textSecondary truncate leading-tight">
-                {activeGroup.memberCount} {activeGroup.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
+              <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
+                <span className="text-xs text-pnp-textSecondary flex-shrink-0">
+                  {activeGroup.memberCount} {activeGroup.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
+                </span>
                 {activeGroup.isPaid && (activeGroup.priceUsd ?? 0) > 0 && (
-                  <span className="text-amber-400 font-medium"> · ${Number(activeGroup.priceUsd).toFixed(2)}</span>
+                  <span className="text-[10px] text-amber-400 font-medium flex-shrink-0">${Number(activeGroup.priceUsd).toFixed(2)}</span>
                 )}
-              </p>
+                {(groupDetail?.isReadOnly || activeGroup.isReadOnly) && (
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400 font-semibold flex-shrink-0">Read-Only</span>
+                )}
+                {(groupDetail?.slowModeSeconds ?? activeGroup.slowModeSeconds ?? 0) > 0 && (
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 font-semibold flex-shrink-0">
+                    Slow {(groupDetail?.slowModeSeconds ?? activeGroup.slowModeSeconds ?? 0) < 60 ? `${groupDetail?.slowModeSeconds ?? activeGroup.slowModeSeconds}s` : `${(groupDetail?.slowModeSeconds ?? activeGroup.slowModeSeconds ?? 0) / 60}m`}
+                  </span>
+                )}
+                {activeGroup.feedVisibility === "shadow" && (
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-purple-500/15 text-purple-400 font-semibold flex-shrink-0">Shadow</span>
+                )}
+                {activeGroup.feedVisibility === "ghost" && (
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-white/10 text-pnp-textSecondary font-semibold flex-shrink-0">Ghost</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1926,6 +2056,55 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                         <div className="border-t border-white/10 pt-4">
                           <p className="text-xs font-semibold text-pnp-textSecondary mb-3 uppercase tracking-wider">Admin Controls</p>
 
+                          {/* Group Avatar Upload */}
+                          <div className="flex items-center gap-3 mb-4">
+                            <button
+                              onClick={() => avatarInputRef.current?.click()}
+                              disabled={settingsAvatarUploading}
+                              className="relative flex-shrink-0 group"
+                            >
+                              {activeGroup.avatarUrl && !activeGroup.isMain ? (
+                                <img src={activeGroup.avatarUrl} alt="" className="w-16 h-16 rounded-full object-cover ring-2 ring-white/10" />
+                              ) : (
+                                <div
+                                  className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold"
+                                  style={{
+                                    background: "linear-gradient(135deg, rgba(212,0,122,0.3), rgba(123,97,255,0.3))",
+                                    color: "#D4007A",
+                                  }}
+                                >
+                                  {(activeGroup.name?.[0] || "?").toUpperCase()}
+                                </div>
+                              )}
+                              <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                              </div>
+                              {settingsAvatarUploading && (
+                                <div className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center">
+                                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                </div>
+                              )}
+                            </button>
+                            <input
+                              ref={avatarInputRef}
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,image/gif"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleGroupAvatarUpload(file);
+                                e.target.value = "";
+                              }}
+                            />
+                            <div>
+                              <p className="text-xs text-white font-medium">Group Photo</p>
+                              <p className="text-[10px] text-pnp-textSecondary">Tap to upload (max 5MB)</p>
+                            </div>
+                          </div>
+
                           {/* Edit name & description */}
                           <div className="space-y-2 mb-3">
                             <input
@@ -1990,31 +2169,31 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                           {/* Public/Private Toggle */}
                           <button
                             onClick={async () => {
-                              const newVal = !(groupDetail?.is_public ?? activeGroup.isPublic);
+                              const newVal = !(groupDetail?.isPublic ?? activeGroup.isPublic);
                               await updateHangoutSettings(activeGroup.id, { isPublic: newVal });
                               loadGroupDetail(activeGroup.id);
                               loadGroups();
                             }}
                             className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-white/5 mb-2"
                           >
-                            <span className="text-sm text-white">{(groupDetail?.is_public ?? activeGroup.isPublic) ? "Public" : "Private"}</span>
-                            <div className={`w-9 h-5 rounded-full transition-colors relative ${(groupDetail?.is_public ?? activeGroup.isPublic) ? "bg-pnp-accent" : "bg-white/20"}`}>
-                              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${(groupDetail?.is_public ?? activeGroup.isPublic) ? "left-[18px]" : "left-0.5"}`} />
+                            <span className="text-sm text-white">{(groupDetail?.isPublic ?? activeGroup.isPublic) ? "Public" : "Private"}</span>
+                            <div className={`w-9 h-5 rounded-full transition-colors relative ${(groupDetail?.isPublic ?? activeGroup.isPublic) ? "bg-pnp-accent" : "bg-white/20"}`}>
+                              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${(groupDetail?.isPublic ?? activeGroup.isPublic) ? "left-[18px]" : "left-0.5"}`} />
                             </div>
                           </button>
 
                           {/* Read-Only Toggle */}
                           <button
                             onClick={async () => {
-                              const newVal = !(groupDetail?.is_read_only ?? false);
+                              const newVal = !(groupDetail?.isReadOnly ?? false);
                               await updateHangoutSettings(activeGroup.id, { isReadOnly: newVal });
                               loadGroupDetail(activeGroup.id);
                             }}
                             className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-white/5 mb-2"
                           >
                             <span className="text-sm text-white">Read-Only Mode</span>
-                            <div className={`w-9 h-5 rounded-full transition-colors relative ${(groupDetail?.is_read_only) ? "bg-pnp-accent" : "bg-white/20"}`}>
-                              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${(groupDetail?.is_read_only) ? "left-[18px]" : "left-0.5"}`} />
+                            <div className={`w-9 h-5 rounded-full transition-colors relative ${(groupDetail?.isReadOnly) ? "bg-pnp-accent" : "bg-white/20"}`}>
+                              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${(groupDetail?.isReadOnly) ? "left-[18px]" : "left-0.5"}`} />
                             </div>
                           </button>
 
@@ -2022,7 +2201,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                           <div className="px-3 py-2.5 rounded-lg bg-white/5 mb-2">
                             <div className="flex items-center justify-between mb-1">
                               <span className="text-sm text-white">Slow Mode</span>
-                              <span className="text-xs text-pnp-textSecondary">{(groupDetail?.slow_mode_seconds ?? 0) === 0 ? "Off" : `${groupDetail?.slow_mode_seconds}s`}</span>
+                              <span className="text-xs text-pnp-textSecondary">{(groupDetail?.slowModeSeconds ?? 0) === 0 ? "Off" : `${groupDetail?.slowModeSeconds}s`}</span>
                             </div>
                             <div className="flex gap-1.5">
                               {[0, 10, 30, 60, 300].map((sec) => (
@@ -2034,7 +2213,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                   }}
                                   className="flex-1 py-1.5 rounded text-[10px] font-semibold transition-all"
                                   style={{
-                                    background: (groupDetail?.slow_mode_seconds ?? 0) === sec ? "linear-gradient(135deg, #D4007A, #E69138)" : "rgba(255,255,255,0.05)",
+                                    background: (groupDetail?.slowModeSeconds ?? 0) === sec ? "linear-gradient(135deg, #D4007A, #E69138)" : "rgba(255,255,255,0.05)",
                                     color: "#fff",
                                   }}
                                 >
@@ -2048,7 +2227,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                           <div className="px-3 py-2.5 rounded-lg bg-white/5 mb-2">
                             <div className="flex items-center justify-between mb-1">
                               <span className="text-sm text-white">Feed Mode</span>
-                              <span className="text-xs text-pnp-textSecondary capitalize">{groupDetail?.feed_visibility ?? activeGroup.feedVisibility ?? "public"}</span>
+                              <span className="text-xs text-pnp-textSecondary capitalize">{groupDetail?.feedVisibility ?? activeGroup.feedVisibility ?? "public"}</span>
                             </div>
                             <div className="flex gap-1.5">
                               {([
@@ -2067,7 +2246,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                   }}
                                   className="flex-1 py-1.5 rounded text-[10px] font-semibold transition-all"
                                   style={{
-                                    background: (groupDetail?.feed_visibility ?? activeGroup.feedVisibility ?? "public") === value
+                                    background: (groupDetail?.feedVisibility ?? activeGroup.feedVisibility ?? "public") === value
                                       ? "linear-gradient(135deg, #7B61FF, #D4007A)"
                                       : "rgba(255,255,255,0.05)",
                                     color: "#fff",
@@ -2084,7 +2263,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                             <span className="text-sm text-white block mb-1">Tags <span className="text-pnp-textSecondary text-[10px] font-normal">(max 5)</span></span>
                             <div className="flex flex-wrap gap-1 mb-2">
                               {/* Preset tags */}
-                              {["chill", "party", "dating", "music", "gaming", "art", "fitness", "travel"].map((tag) => {
+                              {["clouds", "slamming", "kinks", "chill", "party", "dating", "hookups", "after-hours"].map((tag) => {
                                 const current = groupDetail?.tags || [];
                                 const isActive = current.includes(tag);
                                 return (
@@ -2107,7 +2286,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                               })}
                               {/* Custom tags already added (not in preset list) */}
                               {(groupDetail?.tags || [])
-                                .filter((t: string) => !["chill", "party", "dating", "music", "gaming", "art", "fitness", "travel"].includes(t))
+                                .filter((t: string) => !["clouds", "slamming", "kinks", "chill", "party", "dating", "hookups", "after-hours"].includes(t))
                                 .map((tag: string) => (
                                   <button
                                     key={tag}
@@ -2614,7 +2793,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           <div>
             <p className="text-xs font-medium text-pnp-textSecondary mb-1.5">Vibe tags <span className="text-pnp-textSecondary/60 font-normal">(optional, up to 5)</span></p>
             <div className="flex flex-wrap gap-1.5">
-              {["chill", "party", "dating", "music", "gaming", "art", "fitness", "travel"].map((tag) => {
+              {["clouds", "slamming", "kinks", "chill", "party", "dating", "hookups", "after-hours"].map((tag) => {
                 const isActive = newTags.includes(tag);
                 return (
                   <button
@@ -2668,8 +2847,71 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             </div>
           </button>
 
-          {/* Paid hangout toggle */}
-          <button
+          {/* Link to Channel — only when the creator has unlinked channels */}
+          {ownChannels.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-pnp-textSecondary mb-2">
+                Link to Channel <span className="text-pnp-textSecondary/60 font-normal">(optional)</span>
+              </p>
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => setNewChannelId(null)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left transition-all"
+                  style={newChannelId === null
+                    ? { background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)" }
+                    : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }
+                  }
+                >
+                  <div className="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center"
+                    style={{ borderColor: newChannelId === null ? "#fff" : "rgba(255,255,255,0.3)" }}>
+                    {newChannelId === null && <div className="w-2 h-2 rounded-full bg-white" />}
+                  </div>
+                  <span className="text-sm text-pnp-textPrimary">None — standalone hangout</span>
+                </button>
+                {ownChannels.map((ch: any) => {
+                  const at = ch.accessType ?? (ch.isPremium ? "subscription" : "free");
+                  let badgeBg = "rgba(94,209,196,0.2)";
+                  let badgeColor = "#5ED1C4";
+                  let badgeLabel = "Free";
+                  if (at === "prime") { badgeBg = "rgba(167,139,250,0.2)"; badgeColor = "#A78BFA"; badgeLabel = "Prime"; }
+                  else if (at === "subscription") { badgeBg = "rgba(212,0,122,0.2)"; badgeColor = "#D4007A"; badgeLabel = "Sub"; }
+                  else if (at === "paid") { badgeBg = "rgba(230,145,56,0.2)"; badgeColor = "#E69138"; badgeLabel = `$${ch.priceUsd ?? 0}`; }
+                  const isSelected = newChannelId === ch.id;
+                  return (
+                    <button
+                      key={ch.id}
+                      type="button"
+                      onClick={() => setNewChannelId(ch.id)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left transition-all"
+                      style={isSelected
+                        ? { background: "rgba(212,0,122,0.12)", border: "1px solid rgba(212,0,122,0.4)" }
+                        : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }
+                      }
+                    >
+                      <div className="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center"
+                        style={{ borderColor: isSelected ? "#D4007A" : "rgba(255,255,255,0.3)" }}>
+                        {isSelected && <div className="w-2 h-2 rounded-full" style={{ background: "#D4007A" }} />}
+                      </div>
+                      <span className="flex-1 text-sm text-pnp-textPrimary truncate">{ch.name}</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold flex-shrink-0"
+                        style={{ background: badgeBg, color: badgeColor }}>
+                        {badgeLabel}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {newChannelId && (
+                <p className="text-[11px] text-white/40 mt-1.5 leading-relaxed">
+                  Access rules are inherited from the channel. The paid toggle below will be hidden.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Paid hangout toggle — hidden when a channel is linked */}
+          {!newChannelId && <button
             type="button"
             onClick={() => setNewIsPaid(!newIsPaid)}
             className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-white/5 transition-colors hover:bg-white/10"
@@ -2692,26 +2934,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             <div className={`w-10 rounded-full transition-colors relative ${newIsPaid ? "bg-amber-500" : "bg-white/20"}`} style={{ width: 40, height: 22 }}>
               <div className={`absolute top-0.5 w-[18px] h-[18px] rounded-full bg-white transition-transform shadow-sm ${newIsPaid ? "translate-x-[19px]" : "translate-x-[2px]"}`} />
             </div>
-          </button>
+          </button>}
 
-          {/* Price input — visible when paid */}
-          {newIsPaid && (
-            <div>
-              <label className="text-xs font-medium text-pnp-textSecondary mb-1 block" htmlFor="new-group-price">Entry price (USD)</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-pnp-textSecondary font-medium">$</span>
-                <input
-                  id="new-group-price"
-                  type="number"
-                  min="0.50"
-                  max="9999"
-                  step="0.50"
-                  value={newPrice}
-                  onChange={(e) => setNewPrice(e.target.value)}
-                  placeholder="5.00"
-                  className="w-full bg-white/5 rounded-xl pl-7 pr-3 py-2.5 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-amber-500/50 transition-colors"
-                />
-              </div>
+          {/* Standalone paid hangout: fixed $5 price info */}
+          {!newChannelId && newIsPaid && (
+            <div className="px-3 py-2.5 rounded-xl" style={{ background: "rgba(230,145,56,0.1)", border: "1px solid rgba(230,145,56,0.2)" }}>
+              <p className="text-sm font-semibold text-amber-400">$5.00 entry fee</p>
+              <p className="text-[11px] text-white/40 mt-0.5">Standalone hangouts have a fixed $5 entry fee.</p>
             </div>
           )}
 
@@ -2742,6 +2971,78 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             />
             <div style={{ textAlign: 'right', fontSize: '11px', color: 'rgba(255,255,255,0.35)', marginTop: '4px' }}>
               {newRules.length}/1000
+            </div>
+          </div>
+
+          {/* Advanced Settings */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-pnp-textSecondary">Advanced <span className="text-pnp-textSecondary/60 font-normal">(optional)</span></p>
+
+            {/* Read-Only Toggle */}
+            <button
+              type="button"
+              onClick={() => setNewReadOnly(!newReadOnly)}
+              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-white/5 transition-colors hover:bg-white/10"
+            >
+              <div className="text-left">
+                <span className="text-sm text-pnp-textPrimary font-medium block">Read-Only</span>
+                <span className="text-[11px] text-pnp-textSecondary">Only mods/owner can send messages</span>
+              </div>
+              <div className={`w-10 rounded-full transition-colors relative ${newReadOnly ? "bg-pnp-accent" : "bg-white/20"}`} style={{ width: 40, height: 22 }}>
+                <div className={`absolute top-0.5 w-[18px] h-[18px] rounded-full bg-white transition-transform shadow-sm ${newReadOnly ? "translate-x-[19px]" : "translate-x-[2px]"}`} />
+              </div>
+            </button>
+
+            {/* Slow Mode */}
+            <div className="px-3 py-2.5 rounded-xl bg-white/5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm text-pnp-textPrimary font-medium">Slow Mode</span>
+                <span className="text-[11px] text-pnp-textSecondary">{newSlowMode === 0 ? "Off" : newSlowMode < 60 ? `${newSlowMode}s` : `${newSlowMode / 60}m`}</span>
+              </div>
+              <div className="flex gap-1.5">
+                {[0, 10, 30, 60, 300].map((sec) => (
+                  <button
+                    key={sec}
+                    type="button"
+                    onClick={() => setNewSlowMode(sec)}
+                    className="flex-1 py-1.5 rounded text-[10px] font-semibold transition-all"
+                    style={{
+                      background: newSlowMode === sec ? "linear-gradient(135deg, #D4007A, #E69138)" : "rgba(255,255,255,0.05)",
+                      color: "#fff",
+                    }}
+                  >
+                    {sec === 0 ? "Off" : sec < 60 ? `${sec}s` : `${sec / 60}m`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Feed Visibility */}
+            <div className="px-3 py-2.5 rounded-xl bg-white/5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm text-pnp-textPrimary font-medium">Feed Mode</span>
+                <span className="text-[11px] text-pnp-textSecondary capitalize">{newFeedVisibility}</span>
+              </div>
+              <div className="flex gap-1.5">
+                {([
+                  { value: "public" as const, label: "Public" },
+                  { value: "shadow" as const, label: "Shadow" },
+                  { value: "ghost" as const, label: "Ghost" },
+                ]).map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setNewFeedVisibility(value)}
+                    className="flex-1 py-1.5 rounded text-[10px] font-semibold transition-all"
+                    style={{
+                      background: newFeedVisibility === value ? "linear-gradient(135deg, #7B61FF, #D4007A)" : "rgba(255,255,255,0.05)",
+                      color: "#fff",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -2934,14 +3235,27 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                           {t.chat.labelPrivate}
                         </span>
                       )}
-                      {group.isPaid && (group.priceUsd ?? 0) > 0 && (
+                      {group.channelId && group.channelAccessType && group.channelAccessType !== "free" ? (
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                          style={
+                            group.channelAccessType === "prime"
+                              ? { background: "rgba(167,139,250,0.15)", color: "#A78BFA", border: "1px solid rgba(167,139,250,0.25)" }
+                              : group.channelAccessType === "subscription"
+                              ? { background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.25)" }
+                              : { background: "rgba(230,145,56,0.15)", color: "#E69138", border: "1px solid rgba(230,145,56,0.25)" }
+                          }
+                        >
+                          {group.channelAccessType === "prime" ? "Prime" : group.channelAccessType === "subscription" ? "Sub" : `$${Number(group.channelPriceUsd ?? 0).toFixed(0)}`}
+                        </span>
+                      ) : group.isPaid && (group.priceUsd ?? 0) > 0 ? (
                         <span
                           className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
                           style={{ background: "rgba(230,145,56,0.15)", color: "#E69138", border: "1px solid rgba(230,145,56,0.25)" }}
                         >
                           ${Number(group.priceUsd).toFixed(2)}
                         </span>
-                      )}
+                      ) : null}
                       {group.hasActiveCall && (
                         <div className="flex items-center gap-1">
                           <span className="relative flex h-1.5 w-1.5">
@@ -3177,11 +3491,23 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                 {t.chat.labelPrivate}
                               </span>
                             )}
-                            {group.isPaid && (group.priceUsd ?? 0) > 0 && (
+                            {(group as any).channelId && (group as any).channelAccessType && (group as any).channelAccessType !== "free" ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0"
+                                style={
+                                  (group as any).channelAccessType === "prime"
+                                    ? { background: "rgba(167,139,250,0.15)", color: "#A78BFA" }
+                                    : (group as any).channelAccessType === "subscription"
+                                    ? { background: "rgba(212,0,122,0.15)", color: "#D4007A" }
+                                    : { background: "rgba(230,145,56,0.15)", color: "#E69138" }
+                                }
+                              >
+                                {(group as any).channelAccessType === "prime" ? "Prime" : (group as any).channelAccessType === "subscription" ? "Sub" : `$${Number((group as any).channelPriceUsd ?? 0).toFixed(0)}`}
+                              </span>
+                            ) : group.isPaid && (group.priceUsd ?? 0) > 0 ? (
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0" style={{ background: "rgba(230,145,56,0.15)", color: "#E69138" }}>
                                 ${Number(group.priceUsd).toFixed(2)}
                               </span>
-                            )}
+                            ) : null}
                           </div>
                           <p className="text-xs text-pnp-textSecondary truncate mt-0.5">
                             {group.memberCount} {group.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
@@ -3427,6 +3753,115 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             setDetailEvent(updated);
           }}
         />
+      )}
+
+      {/* ── Payment Gate Modal ─────────────────────────────────────────── */}
+      {showPaymentGate && paymentGateInfo && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center"
+          style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowPaymentGate(false); setPgPolling(false); } }}
+        >
+          <div
+            className="w-full max-w-md rounded-t-2xl p-5 pb-safe space-y-4"
+            style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            <div className="flex justify-center">
+              <div className="w-10 h-1 rounded-full bg-white/20" />
+            </div>
+
+            {paymentGateInfo.accessType === 'prime' && (
+              <>
+                <div className="text-center">
+                  <span className="text-3xl">👑</span>
+                  <h3 className="text-lg font-bold text-white mt-2">PRIME Required</h3>
+                  <p className="text-sm text-pnp-textSecondary mt-1">This hangout is exclusive to PRIME members</p>
+                </div>
+                <button
+                  onClick={() => { setShowPaymentGate(false); navigate('/subscribe'); }}
+                  className="w-full py-3 rounded-xl text-sm font-bold text-white"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  Upgrade to PRIME
+                </button>
+              </>
+            )}
+
+            {paymentGateInfo.accessType === 'subscription' && (
+              <>
+                <div className="text-center">
+                  <span className="text-3xl">🔒</span>
+                  <h3 className="text-lg font-bold text-white mt-2">Creator Subscription</h3>
+                  <p className="text-sm text-pnp-textSecondary mt-1">Subscribe to this creator to access their hangout</p>
+                </div>
+                <button
+                  onClick={() => { setShowPaymentGate(false); if (paymentGateInfo.creatorId) navigate(`/profile/${paymentGateInfo.creatorId}`); }}
+                  className="w-full py-3 rounded-xl text-sm font-bold text-white"
+                  style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
+                >
+                  Subscribe to Creator
+                </button>
+              </>
+            )}
+
+            {paymentGateInfo.accessType === 'paid' && (
+              <>
+                <div className="text-center">
+                  <span className="text-3xl">🎟</span>
+                  <h3 className="text-lg font-bold text-white mt-2">
+                    {paymentGateInfo.channelName || paymentGateInfo.groupName || 'Hangout'}
+                  </h3>
+                  <p className="text-2xl font-black mt-1" style={{ color: "#E69138" }}>
+                    ${paymentGateInfo.priceUsd?.toFixed(0)} USD
+                  </p>
+                  <p className="text-xs text-pnp-textSecondary mt-1">One-time access — includes video calls</p>
+                </div>
+
+                {pgPolling ? (
+                  <div className="flex flex-col items-center gap-3 py-4">
+                    <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                    <p className="text-sm text-pnp-textSecondary">Waiting for payment confirmation...</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-[10px] text-pnp-textSecondary text-center uppercase tracking-wider font-semibold">Choose payment method</p>
+                    <button
+                      onClick={() => { setPgProvider('daimo'); handlePurchaseChannel(); }}
+                      disabled={pgLoading}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
+                      style={{ background: "linear-gradient(135deg, #3B82F6, #06B6D4)" }}
+                    >
+                      Pay with USDC (Crypto)
+                    </button>
+                    <button
+                      onClick={() => { setPgProvider('epayco'); handlePurchaseChannel(); }}
+                      disabled={pgLoading}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
+                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                    >
+                      Pay with Card
+                    </button>
+                    <button
+                      onClick={() => { setPgProvider('daimo'); handlePurchaseChannel(); }}
+                      disabled={pgLoading}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white/70 transition-all active:scale-[0.98] disabled:opacity-50"
+                      style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}
+                    >
+                      Pay with Dash (Crypto)
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+
+            <button
+              onClick={() => { setShowPaymentGate(false); setPgPolling(false); }}
+              className="w-full py-2 text-sm text-pnp-textSecondary hover:text-white transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
 
     </div>
