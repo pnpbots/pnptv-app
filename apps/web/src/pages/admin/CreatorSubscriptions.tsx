@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Badge } from "@pnptv/ui-kit";
+import { useI18n } from "@/lib/i18n";
 import { DataTable } from "@/components/admin/DataTable";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
 import {
@@ -87,9 +88,10 @@ function MonthlyRevenueTable({
   rows: MonthlyRevenueRow[];
   showCreators?: boolean;
 }) {
+  const t = useI18n().admin;
   if (rows.length === 0) {
     return (
-      <p className="text-xs text-pnp-textSecondary py-2">No revenue data yet.</p>
+      <p className="text-xs text-pnp-textSecondary py-2">{t.creatorSubs.noRevenueData}</p>
     );
   }
   return (
@@ -98,25 +100,25 @@ function MonthlyRevenueTable({
         <thead>
           <tr className="border-b border-pnp-border">
             <th className="text-left py-2 pr-4 text-xs font-semibold text-pnp-textSecondary">
-              Month
+              {t.creatorSubs.month}
             </th>
             <th className="text-right py-2 pr-4 text-xs font-semibold text-pnp-textSecondary">
-              Gross
+              {t.creatorSubs.gross}
             </th>
             <th className="text-right py-2 pr-4 text-xs font-semibold text-pnp-textSecondary">
-              Creator (70%)
+              {t.creatorSubs.creatorShare}
             </th>
             <th className="text-right py-2 pr-4 text-xs font-semibold text-pnp-textSecondary">
-              Platform (30%)
+              {t.creatorSubs.platformShare}
             </th>
             {!showCreators && (
               <th className="text-right py-2 text-xs font-semibold text-pnp-textSecondary">
-                Subs
+                {t.creatorSubs.subs}
               </th>
             )}
             {showCreators && (
               <th className="text-right py-2 text-xs font-semibold text-pnp-textSecondary">
-                Creators
+                {t.creators.title}
               </th>
             )}
           </tr>
@@ -165,44 +167,45 @@ function PayoutSummaryCard({
   onProcessAll: () => void;
   processing: boolean;
 }) {
+  const t = useI18n().admin;
   return (
     <div className="rounded-xl border border-pnp-border bg-pnp-surface p-5 space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-bold text-pnp-textPrimary">
-          Platform Payout Summary
+          {t.creatorSubs.payoutSummary}
         </h2>
         <button
           onClick={onProcessAll}
           disabled={processing || parseFloat(String(summary.total_pending)) <= 0}
           className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {processing ? "Processing..." : "Process All Payouts"}
+          {processing ? t.shared.processing : t.creatorSubs.processAll}
         </button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <PayoutStatCard
-          label="Total Pending"
+          label={t.creatorSubs.totalPending}
           value={fmtUsd(summary.total_pending)}
           highlight={parseFloat(String(summary.total_pending)) > 0}
         />
         <PayoutStatCard
-          label="Paid This Month"
+          label={t.creatorSubs.paidThisMonth}
           value={fmtUsd(summary.paid_this_month)}
         />
         <PayoutStatCard
-          label="Creators Awaiting Pay"
+          label={t.creatorSubs.creatorsAwaiting}
           value={String(summary.creators_with_pending)}
         />
         <PayoutStatCard
-          label="Platform Revenue (All Time)"
+          label={t.creatorSubs.platformRevenue}
           value={fmtUsd(summary.total_platform_revenue)}
         />
       </div>
 
       <div>
         <h3 className="text-sm font-semibold text-pnp-textSecondary mb-3">
-          Platform Monthly Revenue (Last 6 Months)
+          {t.creatorSubs.monthlyRevenue}
         </h3>
         <MonthlyRevenueTable rows={monthlyRevenue} showCreators />
       </div>
@@ -253,6 +256,7 @@ function CreatorDetailPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const t = useI18n().admin;
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutMsg, setPayoutMsg] = useState<string | null>(null);
 
@@ -356,7 +360,7 @@ function CreatorDetailPanel({
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 border-b border-pnp-border bg-pnp-background">
           <h2 className="text-base font-bold text-pnp-textPrimary">
-            {loading ? "Loading..." : detail?.creator ? `@${detail.creator.username}` : "Creator Detail"}
+            {loading ? t.shared.loading : detail?.creator ? `@${detail.creator.username}` : t.creators.title}
           </h2>
           <button
             onClick={onClose}
@@ -406,7 +410,7 @@ function CreatorDetailPanel({
             {/* Payout action */}
             <div className="rounded-lg border border-pnp-border bg-pnp-surface p-4 flex flex-col sm:flex-row sm:items-center gap-3">
               <div className="flex-1">
-                <p className="text-xs text-pnp-textSecondary">Pending Payout</p>
+                <p className="text-xs text-pnp-textSecondary">{t.creatorSubs.pendingPayout}</p>
                 <p className="text-xl font-bold text-amber-400">
                   {fmtUsd(detail.payoutSummary.pending_total)}
                 </p>
@@ -419,7 +423,7 @@ function CreatorDetailPanel({
                 disabled={payoutLoading || parseFloat(String(detail.payoutSummary.pending_total)) <= 0}
                 className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
               >
-                {payoutLoading ? "Processing..." : "Pay Now"}
+                {payoutLoading ? t.shared.processing : t.creatorSubs.payNow}
               </button>
             </div>
 
@@ -432,7 +436,7 @@ function CreatorDetailPanel({
             {/* Monthly revenue */}
             <div>
               <h3 className="text-sm font-semibold text-pnp-textSecondary mb-3">
-                Revenue (Last 6 Months)
+                {t.creatorSubs.revenueLast6}
               </h3>
               <MonthlyRevenueTable rows={detail.monthlyRevenue} />
             </div>
@@ -440,10 +444,10 @@ function CreatorDetailPanel({
             {/* Subscriber list */}
             <div>
               <h3 className="text-sm font-semibold text-pnp-textSecondary mb-3">
-                Subscribers ({detail.subscriptions.length})
+                {t.creatorSubs.subscribers} ({detail.subscriptions.length})
               </h3>
               {detail.subscriptions.length === 0 ? (
-                <p className="text-xs text-pnp-textSecondary">No subscriptions found.</p>
+                <p className="text-xs text-pnp-textSecondary">{t.creatorSubs.noSubs}</p>
               ) : (
                 <div className="space-y-2">
                   {detail.subscriptions.map((sub) => (
@@ -491,13 +495,13 @@ function CreatorDetailPanel({
                               }}
                               className="text-xs text-pnp-accent hover:underline"
                             >
-                              Extend
+                              {t.creatorSubs.extend}
                             </button>
                             <button
                               onClick={() => setCancelTarget(sub)}
                               className="text-xs text-red-400 hover:underline"
                             >
-                              Cancel
+                              {t.shared.cancel}
                             </button>
                           </>
                         )}
@@ -514,9 +518,9 @@ function CreatorDetailPanel({
       {/* Payout confirm */}
       <ConfirmModal
         open={showPayoutConfirm}
-        title="Process Payout"
+        title={t.creatorSubs.processPayout}
         message={`Process payout of ${detail ? fmtUsd(detail.payoutSummary.pending_total) : "$0.00"} to @${detail?.creator.username ?? ""}?`}
-        confirmLabel="Pay Now"
+        confirmLabel={t.creatorSubs.payNow}
         variant="warning"
         onConfirm={handlePayout}
         onCancel={() => setShowPayoutConfirm(false)}
@@ -526,9 +530,9 @@ function CreatorDetailPanel({
       {/* Cancel confirm */}
       <ConfirmModal
         open={!!cancelTarget}
-        title="Cancel Subscription"
+        title={t.creatorSubs.cancelSubscription}
         message={`Cancel @${cancelTarget?.subscriber_username ?? ""}'s subscription? They will lose access when the current period ends.`}
-        confirmLabel="Cancel Subscription"
+        confirmLabel={t.creatorSubs.cancelSubscription}
         variant="danger"
         onConfirm={handleCancel}
         onCancel={() => setCancelTarget(null)}
@@ -547,7 +551,7 @@ function CreatorDetailPanel({
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-base font-bold text-pnp-textPrimary mb-2">
-              Extend Subscription
+              {t.creatorSubs.extendSubscription}
             </h3>
             <p className="text-xs text-pnp-textSecondary mb-4">
               Extending for @{extendTarget.subscriber_username} (currently expires{" "}
@@ -559,7 +563,7 @@ function CreatorDetailPanel({
               </div>
             )}
             <label className="block text-xs text-pnp-textSecondary mb-1">
-              Days to add
+              {t.creatorSubs.daysToAdd}
             </label>
             <input
               type="number"
@@ -575,14 +579,14 @@ function CreatorDetailPanel({
                 disabled={extendLoading}
                 className="px-4 py-2 text-sm rounded-lg border border-pnp-border text-pnp-textSecondary hover:bg-pnp-surface disabled:opacity-50 transition-colors"
               >
-                Cancel
+                {t.shared.cancel}
               </button>
               <button
                 onClick={handleExtend}
                 disabled={extendLoading}
                 className="px-4 py-2 text-sm rounded-lg bg-pnp-accent text-white font-medium hover:bg-pnp-accent/80 disabled:opacity-50 transition-colors"
               >
-                {extendLoading ? "Extending..." : "Extend"}
+                {extendLoading ? t.shared.processing : t.creatorSubs.extend}
               </button>
             </div>
           </div>
@@ -597,6 +601,7 @@ function CreatorDetailPanel({
 type SortKey = "active_subscribers" | "total_revenue" | "pending_payout";
 
 export default function CreatorSubscriptions() {
+  const t = useI18n().admin;
   const [creators, setCreators] = useState<CreatorSubscriptionSummary[]>([]);
   const [loadingCreators, setLoadingCreators] = useState(true);
   const [creatorsError, setCreatorsError] = useState<string | null>(null);
@@ -711,7 +716,7 @@ export default function CreatorSubscriptions() {
     },
     {
       key: "creator_type",
-      header: "Tier",
+      header: t.users.tier,
       render: (row: CreatorSubscriptionSummary) => (
         <Badge variant={CREATOR_TYPE_BADGE[row.creator_type ?? ""] ?? "default"}>
           {row.creator_type ?? "—"}
@@ -720,7 +725,7 @@ export default function CreatorSubscriptions() {
     },
     {
       key: "creator_price_usd",
-      header: "Price/mo",
+      header: t.creatorSubs.pricePerMonth,
       render: (row: CreatorSubscriptionSummary) => (
         <span className="text-pnp-textPrimary font-medium">
           {fmtUsd(row.creator_price_usd)}
@@ -729,7 +734,7 @@ export default function CreatorSubscriptions() {
     },
     {
       key: "active_subscribers",
-      header: "Active Subs",
+      header: t.creatorSubs.activeSubs,
       render: (row: CreatorSubscriptionSummary) => (
         <span className="text-pnp-textPrimary font-semibold">
           {row.active_subscribers}
@@ -738,14 +743,14 @@ export default function CreatorSubscriptions() {
     },
     {
       key: "total_revenue",
-      header: "Total Revenue",
+      header: t.creatorSubs.totalRevenueSort,
       render: (row: CreatorSubscriptionSummary) => (
         <span className="text-pnp-textPrimary">{fmtUsd(row.total_revenue)}</span>
       ),
     },
     {
       key: "pending_payout",
-      header: "Pending Payout",
+      header: t.creatorSubs.pendingPayout,
       render: (row: CreatorSubscriptionSummary) => (
         <span
           className={
@@ -770,7 +775,7 @@ export default function CreatorSubscriptions() {
             }}
             className="text-xs text-pnp-accent hover:underline"
           >
-            View Detail
+            {t.creatorSubs.viewDetail}
           </button>
         </div>
       ),
@@ -783,10 +788,10 @@ export default function CreatorSubscriptions() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-pnp-textPrimary">
-            Creator Subscriptions
+            {t.creatorSubs.title}
           </h1>
           <p className="text-sm text-pnp-textSecondary mt-1">
-            Manage creator subscriber lists, revenue, and payouts
+            {t.creatorSubs.subtitle}
           </p>
         </div>
       </div>
@@ -799,7 +804,7 @@ export default function CreatorSubscriptions() {
             onClick={() => setProcessAllMsg(null)}
             className="text-green-400/70 hover:text-green-400 flex-shrink-0"
           >
-            Dismiss
+            {t.shared.dismiss}
           </button>
         </div>
       )}
@@ -827,18 +832,18 @@ export default function CreatorSubscriptions() {
       <div className="rounded-xl border border-pnp-border bg-pnp-surface p-5 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h2 className="text-base font-bold text-pnp-textPrimary">
-            Active Creators ({creators.length})
+            {t.creatorSubs.activeCreators} ({creators.length})
           </h2>
           <div className="flex items-center gap-2">
-            <label className="text-xs text-pnp-textSecondary">Sort by</label>
+            <label className="text-xs text-pnp-textSecondary">{t.creatorSubs.sortBy}</label>
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as SortKey)}
               className="px-2 py-1.5 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-xs focus:outline-none focus:border-pnp-accent"
             >
-              <option value="active_subscribers">Active Subscribers</option>
-              <option value="total_revenue">Total Revenue</option>
-              <option value="pending_payout">Pending Payout</option>
+              <option value="active_subscribers">{t.creatorSubs.activeSubs}</option>
+              <option value="total_revenue">{t.creatorSubs.totalRevenueSort}</option>
+              <option value="pending_payout">{t.creatorSubs.pendingPayout}</option>
             </select>
           </div>
         </div>
@@ -853,7 +858,7 @@ export default function CreatorSubscriptions() {
           columns={columns}
           data={sorted}
           loading={loadingCreators}
-          emptyMessage="No active creators with subscriptions found."
+          emptyMessage={t.creatorSubs.noActiveCreators}
           getRowId={(row) => row.creator_id}
           onRowClick={(row) => setSelectedCreatorId(row.creator_id)}
         />
@@ -873,9 +878,9 @@ export default function CreatorSubscriptions() {
 
       <ConfirmModal
         open={showProcessAllConfirm}
-        title="Process All Payouts"
+        title={t.creatorSubs.processAll}
         message={`Process payouts for all ${summary?.summary.creators_with_pending ?? 0} creators with pending balances (${fmtUsd(summary?.summary.total_pending ?? 0)} total)?`}
-        confirmLabel="Process All"
+        confirmLabel={t.creatorSubs.processAll}
         variant="warning"
         onConfirm={handleProcessAll}
         onCancel={() => setShowProcessAllConfirm(false)}

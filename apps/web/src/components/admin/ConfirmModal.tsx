@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { useI18n } from "@/lib/i18n";
 
 interface ConfirmModalProps {
   open: boolean;
@@ -22,13 +23,16 @@ export function ConfirmModal({
   open,
   title,
   message,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   variant = "default",
   onConfirm,
   onCancel,
   loading,
 }: ConfirmModalProps) {
+  const t = useI18n().admin;
+  const resolvedConfirmLabel = confirmLabel ?? t.shared.confirm;
+  const resolvedCancelLabel = cancelLabel ?? t.shared.cancel;
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -62,14 +66,14 @@ export function ConfirmModal({
             disabled={loading}
             className="px-4 py-2 text-sm rounded-lg border border-pnp-border text-pnp-textSecondary hover:bg-pnp-surface disabled:opacity-50"
           >
-            {cancelLabel}
+            {resolvedCancelLabel}
           </button>
           <button
             onClick={onConfirm}
             disabled={loading}
             className={`px-4 py-2 text-sm rounded-lg font-medium disabled:opacity-50 ${variantStyles[variant]}`}
           >
-            {loading ? "Processing..." : confirmLabel}
+            {loading ? t.shared.processing : resolvedConfirmLabel}
           </button>
         </div>
       </div>

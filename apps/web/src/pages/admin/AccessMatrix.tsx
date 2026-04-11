@@ -1,4 +1,5 @@
 import React from "react";
+import { useI18n } from "@/lib/i18n";
 
 // ─── Static data ────────────────────────────────────────────────────────────
 
@@ -90,21 +91,22 @@ function StatusBadge({ value, note }: { value: CellValue; note?: string }) {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function AccessMatrix() {
+  const t = useI18n().admin;
   return (
     <div className="page-container space-y-6">
 
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-pnp-textPrimary">Access Matrix</h1>
+        <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.accessMatrix.title}</h1>
         <p className="text-sm text-pnp-textSecondary mt-1">
-          Reference — what each add-on unlocks per tier
+          {t.accessMatrix.subtitle}
         </p>
       </div>
 
       {/* How plans work note */}
       <div className="rounded-xl border border-pnp-border bg-pnp-surface px-4 py-4 space-y-1.5">
         <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wide">
-          How plans work
+          {t.accessMatrix.howPlansWork}
         </p>
         <p className="text-sm text-pnp-textPrimary leading-relaxed">
           Plans bundle one or more add-ons together with a price and duration. For example, a plan
@@ -118,7 +120,7 @@ export default function AccessMatrix() {
       {/* Feature matrix table */}
       <div className="rounded-xl border border-pnp-border bg-pnp-surface overflow-hidden">
         <div className="px-4 py-3 border-b border-pnp-border">
-          <h2 className="text-sm font-semibold text-pnp-textPrimary">Feature access by tier</h2>
+          <h2 className="text-sm font-semibold text-pnp-textPrimary">{t.accessMatrix.featureAccess}</h2>
         </div>
 
         <div className="overflow-x-auto">
@@ -126,7 +128,7 @@ export default function AccessMatrix() {
             <thead>
               <tr className="border-b border-pnp-border">
                 <th className="text-left px-4 py-3 text-pnp-textSecondary font-medium text-xs uppercase tracking-wide w-full">
-                  Feature
+                  {t.accessMatrix.feature}
                 </th>
                 <th className="px-4 py-3 text-center text-pnp-textSecondary font-medium text-xs uppercase tracking-wide whitespace-nowrap min-w-[80px]">
                   Free
@@ -179,21 +181,21 @@ export default function AccessMatrix() {
       <div className="flex flex-wrap items-center gap-4 text-xs text-pnp-textSecondary">
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-500/15 text-green-400 text-xs">✓</span>
-          <span>Included</span>
+          <span>{t.accessMatrix.included}</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-500/10 text-red-400 text-xs">✕</span>
-          <span>Not included</span>
+          <span>{t.accessMatrix.notIncluded}</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-yellow-500/10 text-yellow-400 text-xs">~</span>
-          <span>Limited — see note</span>
+          <span>{t.accessMatrix.limited}</span>
         </div>
       </div>
 
       {/* Add-on reference cards */}
       <div>
-        <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">Add-on reference</h2>
+        <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">{t.accessMatrix.addonRef}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {ADD_ON_DESCRIPTIONS.map((addon) => (
             <div
@@ -210,7 +212,7 @@ export default function AccessMatrix() {
       {/* Builder tip */}
       <div className="rounded-xl border border-pnp-border bg-pnp-surface px-4 py-4">
         <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wide mb-2">
-          Builder tip
+          {t.accessMatrix.builderTip}
         </p>
         <ul className="space-y-1.5 text-sm text-pnp-textPrimary">
           <li className="flex gap-2">

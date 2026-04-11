@@ -5,6 +5,7 @@ import { ConfirmModal } from "@/components/admin/ConfirmModal";
 import { STATUS_BADGE_VARIANTS } from "@/components/admin/shared";
 import { Badge } from "@pnptv/ui-kit";
 import { ServiceCard } from "@/components/ServiceCard";
+import { useI18n } from "@/lib/i18n";
 import {
   getAdminStats,
   triggerCristinaNeighborDM,
@@ -72,6 +73,7 @@ function SkeletonStatCard() {
 }
 
 export default function StatsOverview() {
+  const t = useI18n().admin;
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +87,7 @@ export default function StatsOverview() {
       setStats(res.stats);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load stats");
+      setError(err instanceof Error ? err.message : t.statsOverview.failedToLoadStats);
     } finally {
       setLoading(false);
     }
@@ -103,27 +105,27 @@ export default function StatsOverview() {
   const paymentMethodColumns = [
     {
       key: "method",
-      header: "Method",
+      header: t.statsOverview.method,
       render: (row: AdminStats["topPaymentMethods"][number]) => (
         <span className="text-pnp-textPrimary font-medium">{row.method ?? "—"}</span>
       ),
     },
     {
       key: "transactions",
-      header: "Transactions",
+      header: t.statsOverview.transactions,
       render: (row: AdminStats["topPaymentMethods"][number]) => (
         <span className="text-pnp-textSecondary">{row.transactions ?? 0}</span>
       ),
     },
     {
       key: "revenue",
-      header: "Revenue",
+      header: t.statsOverview.revenue,
       render: (row: AdminStats["topPaymentMethods"][number]) =>
         formatCurrency(typeof row.revenue === "number" && !isNaN(row.revenue) ? row.revenue : 0),
     },
     {
       key: "successRate",
-      header: "Success Rate",
+      header: t.statsOverview.successRate,
       render: (row: AdminStats["topPaymentMethods"][number]) => {
         const rate = typeof row.successRate === "number" && !isNaN(row.successRate) ? row.successRate : 0;
         return `${rate.toFixed(1)}%`;
@@ -134,26 +136,26 @@ export default function StatsOverview() {
   const transactionColumns = [
     {
       key: "date",
-      header: "Date",
+      header: t.statsOverview.date,
       render: (row: AdminStats["recentTransactions"][number]) =>
         row.date ? formatDate(row.date) : "—",
     },
     {
       key: "username",
-      header: "User",
+      header: t.statsOverview.user,
       render: (row: AdminStats["recentTransactions"][number]) => (
         <span className="text-pnp-textPrimary">{row.username ?? "—"}</span>
       ),
     },
     {
       key: "amount",
-      header: "Amount",
+      header: t.statsOverview.amount,
       render: (row: AdminStats["recentTransactions"][number]) =>
         formatCurrency(typeof row.amount === "number" && !isNaN(row.amount) ? row.amount : 0),
     },
     {
       key: "status",
-      header: "Status",
+      header: t.shared.status,
       render: (row: AdminStats["recentTransactions"][number]) => (
         <Badge variant={STATUS_BADGE_VARIANTS[row.status] ?? "default"}>
           {row.status ?? "—"}
@@ -162,7 +164,7 @@ export default function StatsOverview() {
     },
     {
       key: "method",
-      header: "Method",
+      header: t.statsOverview.method,
       render: (row: AdminStats["recentTransactions"][number]) => (
         <span className="text-pnp-textSecondary">{row.method ?? "—"}</span>
       ),
@@ -173,20 +175,20 @@ export default function StatsOverview() {
     <div className="page-container space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">Stats Overview</h1>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.statsOverview.title}</h1>
           <p className="text-sm text-pnp-textSecondary mt-1">
-            Platform metrics · auto-refreshes every 60s
+            {t.statsOverview.subtitle}
           </p>
         </div>
         {loading && !stats && (
-          <span className="text-xs text-pnp-textSecondary">Loading...</span>
+          <span className="text-xs text-pnp-textSecondary">{t.shared.loading}</span>
         )}
         {!loading && (
           <button
             onClick={load}
             className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary border border-pnp-border rounded-lg px-3 py-1.5 transition-colors"
           >
-            Refresh
+            {t.shared.refresh}
           </button>
         )}
       </div>
@@ -209,32 +211,32 @@ export default function StatsOverview() {
         ) : (
           <>
             <StatCard
-              label="Total Revenue"
+              label={t.statsOverview.totalRevenue}
               value={stats ? formatCurrency(stats.totalRevenue) : "$0.00 USD"}
               icon={<DollarIcon />}
               variant="success"
-              subtitle="All time (USD)"
+              subtitle={t.statsOverview.allTimeUsd}
             />
             <StatCard
-              label="Active Subscribers"
+              label={t.statsOverview.activeSubscribers}
               value={stats?.activeSubscribers ?? 0}
               icon={<UsersIcon />}
               variant="default"
               subtitle={`of ${stats?.totalUsers ?? 0} total users`}
             />
             <StatCard
-              label="Monthly Revenue"
+              label={t.statsOverview.monthlyRevenue}
               value={stats ? formatCurrency(stats.monthlyRevenue) : "$0.00 USD"}
               icon={<TrendUpIcon />}
               variant="warning"
-              subtitle="Rolling 30 days (USD)"
+              subtitle={t.statsOverview.rolling30Days}
             />
             <StatCard
-              label="Churned Users"
+              label={t.statsOverview.churnedUsers}
               value={stats?.churnedUsers ?? 0}
               icon={<TrendDownIcon />}
               variant="danger"
-              subtitle="Cancelled subscriptions"
+              subtitle={t.statsOverview.cancelledSubs}
             />
           </>
         )}
@@ -244,7 +246,7 @@ export default function StatsOverview() {
       {dailyRevenue.length > 0 && (
         <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
           <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-4">
-            Daily Revenue USD (Last 30 Days)
+            {t.statsOverview.dailyRevenue}
           </h2>
           <div className="flex items-end gap-1 max-h-32 h-32">
             {dailyRevenue.map((day, idx) => {
@@ -279,7 +281,7 @@ export default function StatsOverview() {
       {stats?.membershipBreakdown && Object.keys(stats.membershipBreakdown).length > 0 && (
         <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
           <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-4">
-            Membership Breakdown
+            {t.statsOverview.membershipBreakdown}
           </h2>
           <div className="flex flex-wrap gap-3">
             {Object.entries(stats.membershipBreakdown).map(([status, count]) => (
@@ -297,13 +299,13 @@ export default function StatsOverview() {
       {/* Top Payment Methods */}
       <div>
         <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-3">
-          Top Payment Methods
+          {t.statsOverview.topPaymentMethods}
         </h2>
         <DataTable
           columns={paymentMethodColumns}
           data={stats?.topPaymentMethods ?? []}
           loading={loading && !stats}
-          emptyMessage="No payment method data"
+          emptyMessage={t.statsOverview.noPaymentData}
           getRowId={(row, idx) => row.method ?? `method-${idx}`}
         />
       </div>
@@ -311,13 +313,13 @@ export default function StatsOverview() {
       {/* Recent Transactions */}
       <div>
         <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-3">
-          Recent Transactions
+          {t.statsOverview.recentTransactions}
         </h2>
         <DataTable
           columns={transactionColumns}
           data={stats?.recentTransactions ?? []}
           loading={loading && !stats}
-          emptyMessage="No recent transactions"
+          emptyMessage={t.statsOverview.noRecentTransactions}
           getRowId={(row, idx) =>
             `${row.date ?? ""}-${row.userId ?? ""}-${row.amount ?? 0}-${row.status ?? ""}-${idx}`
           }
@@ -327,7 +329,7 @@ export default function StatsOverview() {
       {/* Admin Campaign Actions */}
       <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
         <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-4">
-          Automated Campaigns
+          {t.statsOverview.autoCampaigns}
         </h2>
         {actionMsg && (
           <div className="mb-3 px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm text-green-400">
@@ -336,8 +338,8 @@ export default function StatsOverview() {
         )}
         <div className="flex flex-wrap gap-3">
           <div className="flex-1 min-w-[220px] p-3 rounded-lg border border-pnp-border bg-pnp-background">
-            <p className="text-sm font-medium text-pnp-textPrimary mb-1">Cristina — Neighbor DM</p>
-            <p className="text-xs text-pnp-textSecondary mb-3">Send each user a DM from Cristina about their closest neighbor + referral link. One send per user per 30 days.</p>
+            <p className="text-sm font-medium text-pnp-textPrimary mb-1">{t.statsOverview.cristinaNeighborDm}</p>
+            <p className="text-xs text-pnp-textSecondary mb-3">{t.statsOverview.cristinaNeighborDesc}</p>
             <button
               disabled={!!actionLoading}
               onClick={async () => {
@@ -351,12 +353,12 @@ export default function StatsOverview() {
               }}
               className="px-3 py-1.5 text-xs rounded-lg bg-pnp-accent/20 text-pnp-accent border border-pnp-accent/30 hover:bg-pnp-accent/30 disabled:opacity-40 transition-colors"
             >
-              {actionLoading === "neighbor" ? "Starting..." : "Run Campaign"}
+              {actionLoading === "neighbor" ? t.statsOverview.starting : t.statsOverview.runCampaign}
             </button>
           </div>
           <div className="flex-1 min-w-[220px] p-3 rounded-lg border border-pnp-border bg-pnp-background">
-            <p className="text-sm font-medium text-pnp-textPrimary mb-1">Revoke Unused Trials</p>
-            <p className="text-xs text-pnp-textSecondary mb-3">Downgrade PRIME trial users who have 0 posts and incomplete profiles. Sends each user a Cristina DM.</p>
+            <p className="text-sm font-medium text-pnp-textPrimary mb-1">{t.statsOverview.revokeTrials}</p>
+            <p className="text-xs text-pnp-textSecondary mb-3">{t.statsOverview.revokeTrialsDesc}</p>
             <div className="flex gap-2">
               <button
                 disabled={!!actionLoading}
@@ -371,14 +373,14 @@ export default function StatsOverview() {
                 }}
                 className="px-3 py-1.5 text-xs rounded-lg border border-pnp-border text-pnp-textSecondary hover:bg-pnp-surface disabled:opacity-40 transition-colors"
               >
-                {actionLoading === "revoke-dry" ? "Running..." : "Dry Run"}
+                {actionLoading === "revoke-dry" ? t.statsOverview.running : t.statsOverview.dryRun}
               </button>
               <button
                 disabled={!!actionLoading}
                 onClick={() => setShowRevokeConfirm(true)}
                 className="px-3 py-1.5 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 disabled:opacity-40 transition-colors"
               >
-                {actionLoading === "revoke" ? "Running..." : "Revoke Now"}
+                {actionLoading === "revoke" ? t.statsOverview.running : t.statsOverview.revokeNow}
               </button>
             </div>
           </div>
@@ -388,13 +390,13 @@ export default function StatsOverview() {
       {/* Quick Links */}
       <div>
         <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-3">
-          Quick Links
+          {t.statsOverview.quickLinks}
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <ServiceCard
             to="/admin/users"
-            title="User Management"
-            description="View, search, and manage all registered platform users."
+            title={t.statsOverview.qlUsers}
+            description={t.statsOverview.qlUsersDesc}
             status="online"
             icon={
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -404,8 +406,8 @@ export default function StatsOverview() {
           />
           <ServiceCard
             to="/admin/plans"
-            title="Plan Management"
-            description="Configure subscription plans, pricing, and trial settings."
+            title={t.statsOverview.qlPlans}
+            description={t.statsOverview.qlPlansDesc}
             status="online"
             icon={
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -415,8 +417,8 @@ export default function StatsOverview() {
           />
           <ServiceCard
             to="/admin/creators"
-            title="Creator Applications"
-            description="Review and approve pending creator program applications."
+            title={t.statsOverview.qlCreators}
+            description={t.statsOverview.qlCreatorsDesc}
             status="online"
             icon={
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -426,8 +428,8 @@ export default function StatsOverview() {
           />
           <ServiceCard
             to="/admin/notifications"
-            title="Notifications"
-            description="Send broadcasts, push alerts, and Cristina AI messages."
+            title={t.statsOverview.qlNotifications}
+            description={t.statsOverview.qlNotificationsDesc}
             status="online"
             icon={
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -437,8 +439,8 @@ export default function StatsOverview() {
           />
           <ServiceCard
             to="/admin/moderation"
-            title="Content Moderation"
-            description="Review flagged posts, reports, and enforce community standards."
+            title={t.statsOverview.qlContent}
+            description={t.statsOverview.qlContentDesc}
             status="online"
             icon={
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -448,8 +450,8 @@ export default function StatsOverview() {
           />
           <ServiceCard
             to="/admin/streams"
-            title="Stream Management"
-            description="Monitor live streams, manage time slots, and view overlays."
+            title={t.statsOverview.qlStreams}
+            description={t.statsOverview.qlStreamsDesc}
             status="online"
             icon={
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -462,9 +464,9 @@ export default function StatsOverview() {
 
       <ConfirmModal
         open={showRevokeConfirm}
-        title="Revoke Unused Trials"
-        message="This will revoke PRIME trials for inactive users and send each one a Cristina DM. Are you sure?"
-        confirmLabel="Revoke Now"
+        title={t.statsOverview.revokeTrials}
+        message={t.statsOverview.revokeConfirm}
+        confirmLabel={t.statsOverview.revokeNow}
         variant="danger"
         onConfirm={async () => {
           setShowRevokeConfirm(false);

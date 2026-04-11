@@ -7,6 +7,7 @@ import {
   type StreamOverlay,
 } from "@/lib/api";
 import { OverlayEditorModal } from "@/components/admin/OverlayEditorModal";
+import { useI18n } from "@/lib/i18n";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ interface ChannelCardProps {
 }
 
 function ChannelCard({ overlay, onEdit }: ChannelCardProps) {
+  const t = useI18n().admin;
   return (
     <Card className="flex flex-col gap-3 p-4">
       {/* Header row */}
@@ -53,7 +55,7 @@ function ChannelCard({ overlay, onEdit }: ChannelCardProps) {
               : "bg-pnp-surfaceHover text-pnp-textSecondary"
           }`}
         >
-          {overlay.is_active ? "Active" : "Inactive"}
+          {overlay.is_active ? t.shared.active : t.shared.inactive}
         </span>
       </div>
 
@@ -84,7 +86,7 @@ function ChannelCard({ overlay, onEdit }: ChannelCardProps) {
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-xs text-pnp-textSecondary">
-            {overlay.logo_url ? "Logo set" : "No logo"}
+            {overlay.logo_url ? t.streams.logoSet : t.streams.noLogo}
           </p>
           {overlay.banner_text ? (
             <p className="text-xs text-pnp-textPrimary truncate mt-0.5">
@@ -92,7 +94,7 @@ function ChannelCard({ overlay, onEdit }: ChannelCardProps) {
             </p>
           ) : (
             <p className="text-xs text-pnp-textSecondary/60 mt-0.5">
-              No banner text
+              {t.streams.noBannerText}
             </p>
           )}
         </div>
@@ -108,7 +110,7 @@ function ChannelCard({ overlay, onEdit }: ChannelCardProps) {
         onClick={() => onEdit(overlay)}
         className="w-full min-h-[44px] rounded-lg bg-pnp-surfaceHover border border-pnp-border text-sm font-medium text-pnp-textPrimary hover:border-pnp-accent/40 hover:text-pnp-accent active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
       >
-        Edit Overlay
+        {t.streams.editOverlay}
       </button>
     </Card>
   );
@@ -119,6 +121,7 @@ function ChannelCard({ overlay, onEdit }: ChannelCardProps) {
 export default function StreamManagement() {
   const { isAdmin, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const t = useI18n().admin;
 
   const [overlays, setOverlays] = useState<StreamOverlay[]>([]);
   const [loading, setLoading] = useState(true);
@@ -174,16 +177,16 @@ export default function StreamManagement() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-bold text-pnp-textPrimary">
-            Stream Management
+            {t.streams.title}
           </h1>
           <p className="text-sm text-pnp-textSecondary mt-1">
-            Manage overlays and branding for live streams
+            {t.streams.subtitle}
           </p>
         </div>
         <button
           onClick={load}
           disabled={loading}
-          aria-label="Refresh overlays"
+          aria-label={t.streams.refreshOverlays}
           className="min-h-[44px] min-w-[44px] px-4 flex items-center gap-2 rounded-xl border border-pnp-border text-sm text-pnp-textSecondary hover:text-pnp-textPrimary hover:border-pnp-accent/40 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
         >
           <svg
@@ -199,7 +202,7 @@ export default function StreamManagement() {
               d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
             />
           </svg>
-          Refresh
+          {t.shared.refresh}
         </button>
       </div>
 
@@ -259,14 +262,14 @@ export default function StreamManagement() {
             </svg>
           </div>
           <p className="text-pnp-textPrimary font-medium mb-1">
-            Failed to load stream overlays
+            {t.streams.failedToLoad}
           </p>
           <p className="text-sm text-pnp-textSecondary mb-4">{error}</p>
           <button
             onClick={load}
             className="px-5 py-2.5 min-h-[44px] rounded-xl btn-gradient text-white text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
           >
-            Try Again
+            {t.shared.tryAgain}
           </button>
         </div>
       )}
@@ -290,10 +293,10 @@ export default function StreamManagement() {
             </svg>
           </div>
           <p className="text-pnp-textPrimary font-medium mb-1">
-            No stream channels found
+            {t.streams.noChannels}
           </p>
           <p className="text-sm text-pnp-textSecondary">
-            Channels will appear here once they are registered in the system.
+            {t.streams.noChannelsDesc}
           </p>
         </div>
       )}

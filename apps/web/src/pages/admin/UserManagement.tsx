@@ -6,6 +6,7 @@ import { SearchBar } from "@/components/admin/SearchBar";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
 import { TIER_BADGE_VARIANTS, STATUS_BADGE_VARIANTS, formatDateShort } from "@/components/admin/shared";
 import { Badge } from "@pnptv/ui-kit";
+import { useI18n } from "@/lib/i18n";
 import {
   getAdminUsers,
   getAdminPlans,
@@ -24,6 +25,7 @@ interface UpgradeForm {
 
 export default function UserManagement() {
   const navigate = useNavigate();
+  const t = useI18n().admin;
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [plans, setPlans] = useState<AdminPlan[]>([]);
@@ -57,7 +59,7 @@ export default function UserManagement() {
       setTotal(res.pagination.total);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load users");
+      setError(err instanceof Error ? err.message : t.users.failedToLoad);
     } finally {
       setLoading(false);
     }
@@ -161,11 +163,11 @@ export default function UserManagement() {
   };
 
   const BULK_ACTION_LABELS: Record<BulkAction, string> = {
-    upgrade: "Upgrade to PRIME",
-    downgrade: "Downgrade to Free",
-    ban: "Ban Selected",
-    unban: "Unban Selected",
-    delete: "Delete Selected",
+    upgrade: t.users.upgradeToPrime,
+    downgrade: t.users.downgradeToFree,
+    ban: t.users.banSelected,
+    unban: t.users.unbanSelected,
+    delete: t.users.deleteSelected,
   };
 
   const BULK_ACTION_VARIANTS: Record<BulkAction, "default" | "warning" | "danger"> = {
@@ -179,7 +181,7 @@ export default function UserManagement() {
   const columns = [
     {
       key: "username",
-      header: "Username",
+      header: t.users.username,
       render: (row: AdminUser) => (
         <span className="font-medium text-pnp-textPrimary">
           {row.username || "—"}
@@ -188,14 +190,14 @@ export default function UserManagement() {
     },
     {
       key: "email",
-      header: "Email",
+      header: t.users.email,
       render: (row: AdminUser) => (
         <span className="text-pnp-textSecondary">{row.email || "—"}</span>
       ),
     },
     {
       key: "tier",
-      header: "Tier",
+      header: t.users.tier,
       render: (row: AdminUser) => {
         const tier = row.tier ?? "free";
         return (
@@ -207,7 +209,7 @@ export default function UserManagement() {
     },
     {
       key: "subscription_status",
-      header: "Status",
+      header: t.shared.status,
       render: (row: AdminUser) => {
         const status = row.subscription_status ?? "free";
         return (
@@ -219,21 +221,21 @@ export default function UserManagement() {
     },
     {
       key: "subscription_plan",
-      header: "Plan",
+      header: t.users.plan,
       render: (row: AdminUser) => (
         <span className="text-pnp-textSecondary text-xs">{row.subscription_plan || "—"}</span>
       ),
     },
     {
       key: "plan_expiry",
-      header: "Expiry",
+      header: t.users.expiry,
       render: (row: AdminUser) => (
         <span className="text-pnp-textSecondary text-xs">{formatDateShort(row.plan_expiry)}</span>
       ),
     },
     {
       key: "last_login_at",
-      header: "Last Login",
+      header: t.users.lastLogin,
       render: (row: AdminUser) => (
         <span className="text-pnp-textSecondary text-xs">
           {row.last_login_at ? formatDateShort(row.last_login_at) : "—"}
@@ -245,14 +247,14 @@ export default function UserManagement() {
     },
     {
       key: "created_at",
-      header: "Joined",
+      header: t.users.joined,
       render: (row: AdminUser) => (
         <span className="text-pnp-textSecondary text-xs">{formatDateShort(row.created_at)}</span>
       ),
     },
     {
       key: "actions",
-      header: "Actions",
+      header: t.shared.actions,
       render: (row: AdminUser) => (
         <button
           onClick={(e) => {
@@ -261,7 +263,7 @@ export default function UserManagement() {
           }}
           className="text-xs text-pnp-accent hover:underline"
         >
-          View
+          {t.shared.view}
         </button>
       ),
     },
@@ -270,9 +272,9 @@ export default function UserManagement() {
   return (
     <div className="page-container space-y-4">
       <div>
-        <h1 className="text-2xl font-bold text-pnp-textPrimary">User Management</h1>
+        <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.users.title}</h1>
         <p className="text-sm text-pnp-textSecondary mt-1">
-          Search, view, and manage all platform users
+          {t.users.subtitle}
         </p>
       </div>
 
@@ -292,66 +294,66 @@ export default function UserManagement() {
       <SearchBar
         value={search}
         onChange={handleSearch}
-        placeholder="Search by username, email, or ID..."
+        placeholder={t.users.searchPlaceholder}
       />
 
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[120px]">
-          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Tier</label>
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">{t.users.tier}</label>
           <select
             value={filters.tier || ""}
             onChange={(e) => handleFilterChange("tier", e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
           >
-            <option value="">All Tiers</option>
-            <option value="PRIME">PRIME</option>
-            <option value="member">Member</option>
-            <option value="creator">Creator</option>
-            <option value="free">Free</option>
-            <option value="banned">Banned</option>
+            <option value="">{t.users.allTiers}</option>
+            <option value="PRIME">{t.users.prime}</option>
+            <option value="member">{t.users.member}</option>
+            <option value="creator">{t.users.creator}</option>
+            <option value="free">{t.users.free}</option>
+            <option value="banned">{t.shared.banned}</option>
           </select>
         </div>
         <div className="flex-1 min-w-[120px]">
-          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Status</label>
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">{t.users.status}</label>
           <select
             value={filters.status || ""}
             onChange={(e) => handleFilterChange("status", e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
           >
-            <option value="">All Statuses</option>
-            <option value="active">Active</option>
-            <option value="expired">Expired</option>
-            <option value="churned">Churned</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="free">Free</option>
+            <option value="">{t.users.allStatuses}</option>
+            <option value="active">{t.shared.active}</option>
+            <option value="expired">{t.shared.expired}</option>
+            <option value="churned">{t.shared.churned}</option>
+            <option value="cancelled">{t.shared.cancelled}</option>
+            <option value="free">{t.users.free}</option>
           </select>
         </div>
         <div className="flex-1 min-w-[120px]">
-          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Plan</label>
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">{t.users.plan}</label>
           <select
             value={filters.plan || ""}
             onChange={(e) => handleFilterChange("plan", e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
           >
-            <option value="">All Plans</option>
-            <option value="__none__">No Plan</option>
+            <option value="">{t.users.allPlans}</option>
+            <option value="__none__">{t.users.noPlan}</option>
             {plans.map((p) => (
               <option key={p.id} value={p.id}>{p.display_name || p.name}</option>
             ))}
           </select>
         </div>
         <div className="flex-1 min-w-[120px]">
-          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Role</label>
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">{t.users.role}</label>
           <select
             value={filters.role || ""}
             onChange={(e) => handleFilterChange("role", e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
           >
-            <option value="">All Roles</option>
-            <option value="superadmin">Superadmin</option>
-            <option value="admin">Admin</option>
-            <option value="user">User</option>
+            <option value="">{t.users.allRoles}</option>
+            <option value="superadmin">{t.users.superadmin}</option>
+            <option value="admin">{t.users.admin}</option>
+            <option value="user">{t.users.userRole}</option>
           </select>
         </div>
         {hasActiveFilters && (
@@ -359,7 +361,7 @@ export default function UserManagement() {
             onClick={clearFilters}
             className="px-3 py-2 text-xs rounded-lg border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors whitespace-nowrap"
           >
-            Clear filters
+            {t.shared.clearFilters}
           </button>
         )}
       </div>
@@ -367,8 +369,8 @@ export default function UserManagement() {
       {/* Result count */}
       {!loading && (
         <p className="text-xs text-pnp-textSecondary">
-          {total} user{total !== 1 ? "s" : ""} found
-          {hasActiveFilters ? " (filtered)" : ""}
+          {t.users.usersFound.replace("{0}", String(total))}
+          {hasActiveFilters ? ` ${t.users.filtered}` : ""}
         </p>
       )}
 
@@ -376,43 +378,43 @@ export default function UserManagement() {
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 px-4 py-3 rounded-xl bg-pnp-surface border border-pnp-accent/30">
           <span className="text-sm font-medium text-pnp-accent mr-2">
-            {selectedIds.size} selected
+            {t.users.selected.replace("{0}", String(selectedIds.size))}
           </span>
           <button
             onClick={() => openBulkAction("upgrade")}
             className="px-3 py-1.5 text-xs rounded-lg bg-pnp-accent/20 text-pnp-accent border border-pnp-accent/30 hover:bg-pnp-accent/30 transition-colors"
           >
-            Upgrade to PRIME
+            {t.users.upgradeToPrime}
           </button>
           <button
             onClick={() => openBulkAction("downgrade")}
             className="px-3 py-1.5 text-xs rounded-lg bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 hover:bg-yellow-500/20 transition-colors"
           >
-            Downgrade to Free
+            {t.users.downgradeToFree}
           </button>
           <button
             onClick={() => openBulkAction("ban")}
             className="px-3 py-1.5 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
           >
-            Ban Selected
+            {t.users.banSelected}
           </button>
           <button
             onClick={() => openBulkAction("unban")}
             className="px-3 py-1.5 text-xs rounded-lg bg-pnp-border text-pnp-textSecondary border border-pnp-border hover:bg-pnp-surface transition-colors"
           >
-            Unban Selected
+            {t.users.unbanSelected}
           </button>
           <button
             onClick={() => openBulkAction("delete")}
             className="px-3 py-1.5 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
           >
-            Delete Selected
+            {t.users.deleteSelected}
           </button>
           <button
             onClick={() => setSelectedIds(new Set())}
             className="ml-auto text-xs text-pnp-textSecondary hover:text-pnp-textPrimary"
           >
-            Clear
+            {t.users.clear}
           </button>
         </div>
       )}
@@ -421,11 +423,11 @@ export default function UserManagement() {
       {showUpgradeForm && pendingAction === "upgrade" && (
         <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4 space-y-3">
           <h3 className="text-sm font-semibold text-pnp-textPrimary">
-            Upgrade {selectedIds.size} user(s) to PRIME
+            {t.users.upgradeTitle.replace("{0}", String(selectedIds.size))}
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-pnp-textSecondary mb-1">Plan</label>
+              <label className="block text-xs text-pnp-textSecondary mb-1">{t.users.plan}</label>
               <select
                 value={upgradeForm.planId}
                 onChange={(e) => setUpgradeForm((prev) => ({ ...prev, planId: e.target.value }))}
@@ -439,7 +441,7 @@ export default function UserManagement() {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-pnp-textSecondary mb-1">Expiry Date</label>
+              <label className="block text-xs text-pnp-textSecondary mb-1">{t.users.expiryDate}</label>
               <input
                 type="date"
                 value={upgradeForm.expiry}
@@ -454,13 +456,13 @@ export default function UserManagement() {
               disabled={!upgradeForm.planId}
               className="px-4 py-2 text-sm rounded-lg bg-pnp-accent text-white font-medium hover:bg-pnp-accent/80 disabled:opacity-50 transition-colors"
             >
-              Continue
+              {t.users.continue}
             </button>
             <button
               onClick={() => { setShowUpgradeForm(false); setPendingAction(null); }}
               className="px-4 py-2 text-sm rounded-lg border border-pnp-border text-pnp-textSecondary hover:bg-pnp-surface transition-colors"
             >
-              Cancel
+              {t.shared.cancel}
             </button>
           </div>
         </div>
@@ -471,7 +473,7 @@ export default function UserManagement() {
         data={users}
         loading={loading}
         onRowClick={(row) => navigate(`/admin/users/${row.id}`)}
-        emptyMessage="No users found"
+        emptyMessage={t.users.noUsersFound}
         selectable
         selectedIds={selectedIds}
         onSelectToggle={handleSelectToggle}
@@ -484,7 +486,7 @@ export default function UserManagement() {
       <ConfirmModal
         open={confirmOpen && !!pendingAction && !showUpgradeForm}
         title={pendingAction ? BULK_ACTION_LABELS[pendingAction] : "Confirm"}
-        message={`Are you sure you want to ${pendingAction} ${selectedIds.size} user(s)? This action cannot be undone easily.`}
+        message={pendingAction ? t.users.bulkConfirm.replace("{0}", pendingAction).replace("{1}", String(selectedIds.size)) : ""}
         confirmLabel={pendingAction ? BULK_ACTION_LABELS[pendingAction] : "Confirm"}
         variant={pendingAction ? BULK_ACTION_VARIANTS[pendingAction] : "default"}
         onConfirm={executeBulkAction}

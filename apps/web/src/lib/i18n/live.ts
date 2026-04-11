@@ -6,8 +6,8 @@ const strings = {
       "Watch live broadcasts, tip performers, and book private sessions on PNPtv.",
 
     // Header
-    liveTitle: "Live",
-    liveSubtitle: "Watch live broadcasts and tip performers",
+    liveTitle: "PNP Live",
+    liveSubtitle: "Live broadcasts, tips & private sessions",
 
     // Stream status badges
     statusLive: "LIVE",
@@ -198,13 +198,13 @@ const strings = {
     countdownLabel: "Going live in",
 
     // Category tags
-    tagChat: "Chat",
-    tagMusic: "Music",
-    tagGaming: "Gaming",
-    tagCooking: "Cooking",
-    tagFitness: "Fitness",
-    tagArt: "Art",
-    tagOther: "Other",
+    tagClouds: "Clouds",
+    tagSlamming: "Slamming",
+    tagKinks: "Kinks",
+    tagChill: "Chill",
+    tagParty: "Party",
+    tagHookups: "Hookups",
+    tagAfterHours: "After Hours",
 
     // Live page
     viewProfile: "View Profile",
@@ -235,8 +235,8 @@ const strings = {
       "Mira transmisiones en vivo, envía propinas a artistas y reserva sesiones privadas en PNPtv.",
 
     // Header
-    liveTitle: "En vivo",
-    liveSubtitle: "Mira transmisiones en vivo y da propinas a los artistas",
+    liveTitle: "PNP Live",
+    liveSubtitle: "Transmisiones en vivo, propinas y sesiones privadas",
 
     // Stream status badges
     statusLive: "EN VIVO",
@@ -432,13 +432,13 @@ const strings = {
     countdownLabel: "En vivo en",
 
     // Category tags
-    tagChat: "Chat",
-    tagMusic: "Música",
-    tagGaming: "Juegos",
-    tagCooking: "Cocina",
-    tagFitness: "Fitness",
-    tagArt: "Arte",
-    tagOther: "Otro",
+    tagClouds: "Nubes",
+    tagSlamming: "Slamming",
+    tagKinks: "Kinks",
+    tagChill: "Chill",
+    tagParty: "Fiesta",
+    tagHookups: "Encuentros",
+    tagAfterHours: "After Hours",
 
     // Live page
     viewProfile: "Ver Perfil",

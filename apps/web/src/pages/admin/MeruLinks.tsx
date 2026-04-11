@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useI18n } from "@/lib/i18n";
 import { DataTable } from "@/components/admin/DataTable";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
 import { Badge } from "@pnptv/ui-kit";
@@ -47,6 +48,7 @@ function truncateUrl(url: string, max = 40): string {
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 export default function MeruLinks() {
+  const t = useI18n().admin;
   const [stats, setStats] = useState<MeruLinkStat[]>([]);
   const [links, setLinks] = useState<MeruLink[]>([]);
   const [loading, setLoading] = useState(true);
@@ -308,9 +310,9 @@ export default function MeruLinks() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">Meru Links</h1>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.meruLinks.title}</h1>
           <p className="text-sm text-pnp-textSecondary mt-1">
-            Manage one-time Meru payment links assigned to users during onboarding
+            {t.meruLinks.subtitle}
           </p>
         </div>
         <button
@@ -318,14 +320,14 @@ export default function MeruLinks() {
           disabled={loading}
           className="px-3 py-2 rounded-lg border border-pnp-border text-xs text-pnp-textSecondary hover:text-pnp-textPrimary hover:border-pnp-accent/50 disabled:opacity-50 transition-colors"
         >
-          {loading ? "Loading…" : "Refresh"}
+          {loading ? t.shared.loading : t.shared.refresh}
         </button>
       </div>
 
       {error && (
         <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 underline">Dismiss</button>
+          <button onClick={() => setError(null)} className="ml-2 underline">{t.shared.dismiss}</button>
         </div>
       )}
 
@@ -336,22 +338,22 @@ export default function MeruLinks() {
           <div className="grid grid-cols-3 gap-3">
             <div className="rounded-xl border border-pnp-border bg-pnp-surface px-4 py-3 text-center">
               <p className="text-2xl font-bold text-pnp-textPrimary">{totals.total}</p>
-              <p className="text-xs text-pnp-textSecondary mt-0.5">Total Links</p>
+              <p className="text-xs text-pnp-textSecondary mt-0.5">{t.meruLinks.totalLinks}</p>
             </div>
             <div className="rounded-xl border border-pnp-border bg-pnp-surface px-4 py-3 text-center">
               <p className="text-2xl font-bold text-green-400">{totals.available}</p>
-              <p className="text-xs text-pnp-textSecondary mt-0.5">Available</p>
+              <p className="text-xs text-pnp-textSecondary mt-0.5">{t.meruLinks.available}</p>
             </div>
             <div className="rounded-xl border border-pnp-border bg-pnp-surface px-4 py-3 text-center">
               <p className="text-2xl font-bold text-pnp-textSecondary">{totals.used}</p>
-              <p className="text-xs text-pnp-textSecondary mt-0.5">Used</p>
+              <p className="text-xs text-pnp-textSecondary mt-0.5">{t.meruLinks.used}</p>
             </div>
           </div>
 
           {/* Per-product breakdown */}
           <div className="rounded-xl border border-pnp-border bg-pnp-surface overflow-hidden">
             <div className="px-4 py-2.5 border-b border-pnp-border">
-              <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wide">By Product</p>
+              <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wide">{t.meruLinks.byProduct}</p>
             </div>
             <div className="divide-y divide-pnp-border">
               {stats.map((s) => (
@@ -383,7 +385,7 @@ export default function MeruLinks() {
 
       {/* ─── Add links form ───────────────────────────────────────────────── */}
       <div className="rounded-xl border border-pnp-border bg-pnp-surface p-4 space-y-3">
-        <p className="text-sm font-semibold text-pnp-textPrimary">Add New Links</p>
+        <p className="text-sm font-semibold text-pnp-textPrimary">{t.meruLinks.addNewLinks}</p>
 
         {addError && (
           <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
@@ -399,13 +401,13 @@ export default function MeruLinks() {
         <div className="flex flex-wrap gap-3">
           {/* Product selector */}
           <div className="flex flex-col gap-1 min-w-[200px]">
-            <label className="text-xs text-pnp-textSecondary">Product</label>
+            <label className="text-xs text-pnp-textSecondary">{t.meruLinks.product}</label>
             <input
               type="text"
               list="meru-products-list"
               value={addProduct}
               onChange={(e) => setAddProduct(e.target.value)}
-              placeholder="e.g. lifetime-pass"
+              placeholder={t.meruLinks.productPlaceholder}
               className="px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent transition-colors"
               style={{ fontSize: "16px" }}
             />
@@ -422,8 +424,7 @@ export default function MeruLinks() {
         {/* URL textarea */}
         <div className="flex flex-col gap-1">
           <label className="text-xs text-pnp-textSecondary">
-            URLs{" "}
-            <span className="text-pnp-textSecondary/60">— one per line, up to 100</span>
+            {t.meruLinks.urlsLabel}
           </label>
           <textarea
             value={addRawUrls}
@@ -444,7 +445,7 @@ export default function MeruLinks() {
           disabled={addLoading}
           className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm font-medium hover:bg-pnp-accent/80 disabled:opacity-50 transition-colors"
         >
-          {addLoading ? "Adding…" : "Add Links"}
+          {addLoading ? t.meruLinks.adding : t.meruLinks.addLinks}
         </button>
       </div>
 
@@ -453,13 +454,13 @@ export default function MeruLinks() {
         <div className="flex items-center gap-4 flex-wrap">
           {/* Product filter */}
           <div className="flex items-center gap-2">
-            <label className="text-xs text-pnp-textSecondary whitespace-nowrap">Product</label>
+            <label className="text-xs text-pnp-textSecondary whitespace-nowrap">{t.meruLinks.product}</label>
             <select
               value={filters.product}
               onChange={(e) => setFilters((f) => ({ ...f, product: e.target.value }))}
               className="px-2 py-1.5 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-xs focus:outline-none focus:border-pnp-accent transition-colors"
             >
-              <option value="all">All</option>
+              <option value="all">{t.shared.all}</option>
               {knownProducts.map((p) => (
                 <option key={p} value={p}>
                   {p}
@@ -470,15 +471,15 @@ export default function MeruLinks() {
 
           {/* Status filter */}
           <div className="flex items-center gap-2">
-            <label className="text-xs text-pnp-textSecondary whitespace-nowrap">Status</label>
+            <label className="text-xs text-pnp-textSecondary whitespace-nowrap">{t.shared.status}</label>
             <select
               value={filters.status}
               onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as StatusFilter }))}
               className="px-2 py-1.5 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-xs focus:outline-none focus:border-pnp-accent transition-colors"
             >
-              <option value="all">All</option>
-              <option value="available">Available</option>
-              <option value="used">Used</option>
+              <option value="all">{t.shared.all}</option>
+              <option value="available">{t.meruLinks.available}</option>
+              <option value="used">{t.meruLinks.used}</option>
             </select>
           </div>
 
@@ -491,7 +492,7 @@ export default function MeruLinks() {
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
-              Clear
+              {t.shared.clearFilters}
             </button>
           )}
 
@@ -524,8 +525,8 @@ export default function MeruLinks() {
         loading={loading}
         emptyMessage={
           hasActiveFilters
-            ? "No links match the current filters."
-            : "No Meru links yet. Use the form above to add some."
+            ? t.meruLinks.noLinksFilter
+            : t.meruLinks.noLinksYet
         }
         getRowId={(row) => row.id}
       />
@@ -533,9 +534,9 @@ export default function MeruLinks() {
       {/* Delete confirmation */}
       <ConfirmModal
         open={!!deleteTarget}
-        title="Delete Meru Link"
+        title={t.meruLinks.deleteMeruLink}
         message={`Delete the link for product "${deleteTarget?.product ?? ""}"?\n\n${deleteTarget?.url ?? ""}\n\nThis cannot be undone.`}
-        confirmLabel="Delete"
+        confirmLabel={t.shared.delete}
         variant="danger"
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}

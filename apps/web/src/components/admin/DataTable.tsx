@@ -1,4 +1,5 @@
 import React from "react";
+import { useI18n } from "@/lib/i18n";
 
 interface Column<T> {
   key: string;
@@ -37,13 +38,15 @@ export function DataTable<T>({
   data,
   loading,
   onRowClick,
-  emptyMessage = "No data found",
+  emptyMessage,
   selectable,
   selectedIds,
   onSelectToggle,
   onSelectAll,
   getRowId,
 }: DataTableProps<T>) {
+  const t = useI18n().admin;
+  const resolvedEmptyMessage = emptyMessage ?? t.shared.noResults;
   const allSelected = data.length > 0 && selectedIds && getRowId && data.every((r, i) => selectedIds.has(getRowId(r, i)));
 
   return (
@@ -78,7 +81,7 @@ export function DataTable<T>({
               ? (
                 <tr>
                   <td colSpan={columns.length + (selectable ? 1 : 0)} className="px-4 py-8 text-center text-pnp-textSecondary">
-                    {emptyMessage}
+                    {resolvedEmptyMessage}
                   </td>
                 </tr>
               )

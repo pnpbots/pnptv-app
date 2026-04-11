@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { getAdminDemographics, type AdminDemographics } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 const LANG_LABELS: Record<string, string> = {
   en: "English", es: "Spanish", "pt-br": "Portuguese (BR)", fr: "French",
@@ -124,6 +125,7 @@ function SkeletonBlock({ h = "h-48" }: { h?: string }) {
 }
 
 export default function AdminDemographics() {
+  const t = useI18n().admin;
   const [data, setData] = useState<AdminDemographics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -149,14 +151,14 @@ export default function AdminDemographics() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">Demographics & Engagement</h1>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.demographics.title}</h1>
           <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
-            Population snapshot · strategy insights · feature adoption
+            {t.demographics.subtitle}
           </p>
         </div>
         {!loading && (
           <button onClick={load} className="text-xs border rounded-lg px-3 py-1.5 transition-colors hover:text-white" style={{ color: "#8E8E93", borderColor: "rgba(255,255,255,0.1)" }}>
-            Refresh
+            {t.shared.refresh}
           </button>
         )}
       </div>
@@ -170,7 +172,7 @@ export default function AdminDemographics() {
       {/* Strategy Insights */}
       {loading ? <SkeletonBlock h="h-32" /> : data?.insights && (
         <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "#8E8E93" }}>Strategy Insights</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "#8E8E93" }}>{t.demographics.strategyInsights}</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {data.insights.map((ins, i) => {
               const style = INSIGHT_COLORS[ins.type] || INSIGHT_COLORS.opportunity;
@@ -191,12 +193,12 @@ export default function AdminDemographics() {
       {/* Population KPIs */}
       {loading ? <SkeletonBlock h="h-24" /> : data && (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-          <StatPill label="Total Users" value={data.activity.total.toLocaleString()} />
-          <StatPill label="Active 7d" value={data.activity.active7d.toLocaleString()} sub={`${pct(data.activity.active7d, total)}%`} />
-          <StatPill label="Active 30d" value={data.activity.active30d.toLocaleString()} sub={`${pct(data.activity.active30d, total)}%`} />
-          <StatPill label="New 30d" value={data.activity.new30d.toLocaleString()} sub="signups" />
-          <StatPill label="Age Verified" value={`${pct(data.activity.ageVerified, total)}%`} sub={`${data.activity.ageVerified.toLocaleString()} users`} />
-          <StatPill label="Avg XP" value={data.activity.avgXp.toFixed(0)} sub="engagement score" />
+          <StatPill label={t.demographics.totalUsers} value={data.activity.total.toLocaleString()} />
+          <StatPill label={t.demographics.active7d} value={data.activity.active7d.toLocaleString()} sub={`${pct(data.activity.active7d, total)}%`} />
+          <StatPill label={t.demographics.active30d} value={data.activity.active30d.toLocaleString()} sub={`${pct(data.activity.active30d, total)}%`} />
+          <StatPill label={t.demographics.new30d} value={data.activity.new30d.toLocaleString()} sub={t.demographics.signups} />
+          <StatPill label={t.demographics.ageVerified} value={`${pct(data.activity.ageVerified, total)}%`} sub={`${data.activity.ageVerified.toLocaleString()} users`} />
+          <StatPill label={t.demographics.avgXp} value={data.activity.avgXp.toFixed(0)} sub={t.demographics.engagementScore} />
         </div>
       )}
 
@@ -208,7 +210,7 @@ export default function AdminDemographics() {
       ) : data && (
         <div className="grid md:grid-cols-2 gap-4">
           {/* Tier Distribution */}
-          <Section title="Tier Distribution">
+          <Section title={t.demographics.tierDistribution}>
             <BarChart
               data={data.tiers}
               colorFn={(label) => TIER_COLORS[label] || "#636366"}
@@ -225,7 +227,7 @@ export default function AdminDemographics() {
           </Section>
 
           {/* Language Breakdown */}
-          <Section title="Language Breakdown">
+          <Section title={t.demographics.languageBreakdown}>
             <BarChart
               data={data.languages}
               colorFn={(_, i) => `hsl(${(i * 53 + 200) % 360}, 65%, 58%)`}
@@ -233,19 +235,19 @@ export default function AdminDemographics() {
           </Section>
 
           {/* Location / Region */}
-          <Section title="Location / Region">
+          <Section title={t.demographics.locationRegion}>
             {data.locations.length > 0 ? (
               <BarChart
                 data={data.locations}
                 colorFn={(_, i) => `hsl(${(i * 41 + 160) % 360}, 60%, 55%)`}
               />
             ) : (
-              <p className="text-xs" style={{ color: "#8E8E93" }}>No location data yet. Most users haven't shared their location.</p>
+              <p className="text-xs" style={{ color: "#8E8E93" }}>{t.demographics.noLocationData}</p>
             )}
           </Section>
 
           {/* XP / Engagement Buckets */}
-          <Section title="Engagement (XP Buckets)">
+          <Section title={t.demographics.engagementXp}>
             <BarChart
               data={data.xpBuckets}
               colorFn={(_, i) => {
@@ -254,12 +256,12 @@ export default function AdminDemographics() {
               }}
             />
             <p className="text-xs mt-3" style={{ color: "#636366" }}>
-              XP reflects in-app activity. 0 XP = never engaged. Higher buckets = power users.
+              {t.demographics.xpDesc}
             </p>
           </Section>
 
           {/* Subscription Type */}
-          <Section title="Subscription Type">
+          <Section title={t.demographics.subscriptionType}>
             <BarChart
               data={data.subscriptionTypes}
               colorFn={(_, i) => i === 0 ? "#D4007A" : "#E69138"}
@@ -267,13 +269,13 @@ export default function AdminDemographics() {
           </Section>
 
           {/* Profile Completion */}
-          <Section title="Profile Completion">
+          <Section title={t.demographics.profileCompletion}>
             {[
-              { label: "Has Bio", count: data.activity.withBio },
-              { label: "Has Photo", count: data.activity.withPhoto },
-              { label: "Has Location", count: data.activity.withLocation },
-              { label: "Terms Accepted", count: data.activity.termsAccepted ?? 0 },
-              { label: "Age Verified", count: data.activity.ageVerified },
+              { label: t.demographics.hasBio, count: data.activity.withBio },
+              { label: t.demographics.hasPhoto, count: data.activity.withPhoto },
+              { label: t.demographics.hasLocation, count: data.activity.withLocation },
+              { label: t.demographics.termsAccepted, count: data.activity.termsAccepted ?? 0 },
+              { label: t.demographics.ageVerified, count: data.activity.ageVerified },
             ].map((item) => (
               <div key={item.label} className="flex items-center gap-3 mb-2">
                 <div className="w-28 text-xs shrink-0" style={{ color: "#8E8E93" }}>{item.label}</div>
@@ -292,7 +294,7 @@ export default function AdminDemographics() {
 
       {/* Signup Trend */}
       {loading ? <SkeletonBlock h="h-32" /> : data && (
-        <Section title="New Signups — Last 30 Days">
+        <Section title={t.demographics.newSignups}>
           <Sparkline data={data.signupTrend} />
           <div className="flex justify-between mt-1 text-xs" style={{ color: "#636366" }}>
             {data.signupTrend[0] && <span>{data.signupTrend[0].day}</span>}
@@ -300,22 +302,22 @@ export default function AdminDemographics() {
           </div>
           <div className="mt-3 flex gap-4 text-sm">
             <span className="text-white font-bold">{data.activity.new30d.toLocaleString()}</span>
-            <span style={{ color: "#8E8E93" }}>new users in last 30 days</span>
+            <span style={{ color: "#8E8E93" }}>{t.demographics.newUsersLast30}</span>
             <span className="text-white font-bold">{data.activity.new7d.toLocaleString()}</span>
-            <span style={{ color: "#8E8E93" }}>last 7 days</span>
+            <span style={{ color: "#8E8E93" }}>{t.demographics.last7Days}</span>
           </div>
         </Section>
       )}
 
       {/* Retention */}
       {loading ? <SkeletonBlock h="h-20" /> : data && data.retention.cohortSize > 0 && (
-        <Section title="30-Day Retention (Users Who Joined 30–60 Days Ago)">
+        <Section title={t.demographics.retention}>
           <div className="flex items-center gap-6">
             <div>
               <div className="text-3xl font-bold" style={{ color: (data.retention.rate ?? 0) >= 30 ? "#30D158" : "#FF453A" }}>
                 {data.retention.rate !== null ? `${data.retention.rate}%` : "—"}
               </div>
-              <div className="text-xs mt-1" style={{ color: "#8E8E93" }}>retention rate</div>
+              <div className="text-xs mt-1" style={{ color: "#8E8E93" }}>{t.demographics.retentionRate}</div>
             </div>
             <div className="flex-1 h-3 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
               <div
@@ -335,26 +337,26 @@ export default function AdminDemographics() {
 
       {/* Feature Engagement */}
       {loading ? <SkeletonBlock /> : data && (
-        <Section title="Feature Interactions & Engagement">
+        <Section title={t.demographics.featureEngagement}>
           <div className="grid md:grid-cols-2 gap-x-8">
             <div>
-              <FeatureRow label="Social Posts" value={data.features.posts} icon="📝" total={total} />
-              <FeatureRow label="Post Likes" value={data.features.postLikes} icon="❤️" total={total} />
-              <FeatureRow label="User Follows" value={data.features.follows} icon="👥" total={total} />
-              <FeatureRow label="Direct Messages" value={data.features.dms} icon="💬" total={total} />
-              <FeatureRow label="Chat Messages" value={data.features.chatMessages} icon="🗨️" total={total} />
-              <FeatureRow label="Hangout Rooms" value={data.features.hangouts} icon="🎥" total={total} />
-              <FeatureRow label="Hangout Members" value={data.features.hangoutMembers} icon="🙋" total={total} />
+              <FeatureRow label={t.demographics.socialPosts} value={data.features.posts} icon="📝" total={total} />
+              <FeatureRow label={t.demographics.postLikes} value={data.features.postLikes} icon="❤️" total={total} />
+              <FeatureRow label={t.demographics.userFollows} value={data.features.follows} icon="👥" total={total} />
+              <FeatureRow label={t.demographics.directMessages} value={data.features.dms} icon="💬" total={total} />
+              <FeatureRow label={t.demographics.chatMessages} value={data.features.chatMessages} icon="🗨️" total={total} />
+              <FeatureRow label={t.demographics.hangoutRooms} value={data.features.hangouts} icon="🎥" total={total} />
+              <FeatureRow label={t.demographics.hangoutMembers} value={data.features.hangoutMembers} icon="🙋" total={total} />
             </div>
             <div>
-              <FeatureRow label="Live Streams" value={data.features.streams} icon="🔴" total={total} />
-              <FeatureRow label="Media Plays" value={data.features.mediaPlays} icon="▶️" total={total} />
-              <FeatureRow label="Media Favorites" value={data.features.mediaFavorites} icon="⭐" total={total} />
-              <FeatureRow label="Tips Sent" value={data.features.tips} icon="💸" total={total} />
-              <FeatureRow label="Push Subscribers" value={data.features.pushSubscribers} icon="🔔" total={total} />
-              <FeatureRow label="Notifications Sent" value={data.features.notificationsSent} icon="📣" total={total} />
-              <FeatureRow label="X / Twitter Linked" value={data.features.xLinked} icon="𝕏" total={total} />
-              <FeatureRow label="Bluesky Linked" value={data.features.blueskyLinked} icon="🦋" total={total} />
+              <FeatureRow label={t.demographics.liveStreams} value={data.features.streams} icon="🔴" total={total} />
+              <FeatureRow label={t.demographics.mediaPlays} value={data.features.mediaPlays} icon="▶️" total={total} />
+              <FeatureRow label={t.demographics.mediaFavorites} value={data.features.mediaFavorites} icon="⭐" total={total} />
+              <FeatureRow label={t.demographics.tipsSent} value={data.features.tips} icon="💸" total={total} />
+              <FeatureRow label={t.demographics.pushSubscribers} value={data.features.pushSubscribers} icon="🔔" total={total} />
+              <FeatureRow label={t.demographics.notificationsSent} value={data.features.notificationsSent} icon="📣" total={total} />
+              <FeatureRow label={t.demographics.xLinked} value={data.features.xLinked} icon="𝕏" total={total} />
+              <FeatureRow label={t.demographics.blueskyLinked} value={data.features.blueskyLinked} icon="🦋" total={total} />
             </div>
           </div>
         </Section>

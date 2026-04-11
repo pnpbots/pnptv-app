@@ -171,7 +171,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const isAdmin = !!user && (user.role === "admin" || user.role === "superadmin" || user.role === "creator");
+  const isAdmin = !!user && (user.role === "admin" || user.role === "superadmin");
   const isCreatorAdmin = !!user && user.role === "creator";
 
   const value: AuthState = {

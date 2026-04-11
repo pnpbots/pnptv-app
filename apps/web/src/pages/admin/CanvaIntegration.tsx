@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useI18n } from "@/lib/i18n";
 import { DataTable } from "@/components/admin/DataTable";
 import { Pagination } from "@/components/admin/Pagination";
 import { StatCard } from "@/components/admin/StatCard";
@@ -53,6 +54,7 @@ function formatDate(dateStr: string | undefined): string {
 }
 
 export default function CanvaIntegration() {
+  const t = useI18n().admin;
   // Stats
   const [stats, setStats] = useState<AdminCanvaStats | null>(null);
 
@@ -92,7 +94,7 @@ export default function CanvaIntegration() {
       const res = await getAdminCanvaStats();
       setStats(res.stats);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load Canva stats");
+      setError(err instanceof Error ? err.message : t.canva.failedToLoad);
     }
   }, []);
 
@@ -132,7 +134,7 @@ export default function CanvaIntegration() {
       window.history.replaceState({}, "", window.location.pathname);
     }
     if (canvaConnectedParam) {
-      setSuccess("Canva account connected successfully!");
+      setSuccess(t.canva.connectedSuccess);
       window.history.replaceState({}, "", window.location.pathname);
     }
 
@@ -186,22 +188,22 @@ export default function CanvaIntegration() {
     try {
       if (confirmAction.type === "unlink") {
         await adminUnlinkCanvaUser(confirmAction.id);
-        setSuccess("User Canva account unlinked");
+        setSuccess(t.canva.unlinkedSuccess);
         loadUsers();
         loadStats();
       } else if (confirmAction.type === "retry") {
         await adminRetryCanvaJob(confirmAction.id);
-        setSuccess("Job queued for retry");
+        setSuccess(t.canva.retrySuccess);
         loadJobs(jobPage, jobStatusFilter);
         loadStats();
       } else if (confirmAction.type === "cancel") {
         await adminCancelCanvaJob(confirmAction.id);
-        setSuccess("Job cancelled");
+        setSuccess(t.canva.cancelledSuccess);
         loadJobs(jobPage, jobStatusFilter);
         loadStats();
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Action failed");
+      setError(err instanceof Error ? err.message : t.canva.actionFailed);
     } finally {
       setConfirmAction(null);
     }
@@ -224,12 +226,12 @@ export default function CanvaIntegration() {
     setExportingId(design.id);
     try {
       await startCanvaExport(design.id, design.title || "Untitled");
-      setSuccess("Export job created");
+      setSuccess(t.canva.exportCreated);
       setShowDesigns(false);
       loadJobs(1, jobStatusFilter);
       loadStats();
     } catch {
-      setError("Failed to start export");
+      setError(t.canva.failedExport);
     } finally {
       setExportingId(null);
     }
@@ -241,11 +243,11 @@ export default function CanvaIntegration() {
       setCanvaConnected(false);
       setCanvaDisplayName(undefined);
       setDesigns([]);
-      setSuccess("Canva account disconnected");
+      setSuccess(t.canva.disconnect);
       loadUsers();
       loadStats();
     } catch {
-      setError("Failed to disconnect");
+      setError(t.canva.failedDisconnect);
     }
   };
 
@@ -362,9 +364,9 @@ export default function CanvaIntegration() {
 
   return (
     <div>
-      <h1 className="text-xl font-bold text-pnp-textPrimary mb-1">Canva Integration</h1>
+      <h1 className="text-xl font-bold text-pnp-textPrimary mb-1">{t.canva.title}</h1>
       <p className="text-sm text-pnp-textSecondary mb-6">
-        Manage Canva connections, browse designs, and monitor export jobs.
+        {t.canva.subtitle}
       </p>
 
       {/* Feedback */}
@@ -381,15 +383,15 @@ export default function CanvaIntegration() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <StatCard label="Connected Users" value={stats?.connectedUsers ?? "\u2014"} />
-        <StatCard label="Total Exports" value={stats?.totalExports ?? "\u2014"} />
+        <StatCard label={t.canva.connectedUsers} value={stats?.connectedUsers ?? "\u2014"} />
+        <StatCard label={t.canva.exportJobs} value={stats?.totalExports ?? "\u2014"} />
         <StatCard
-          label="Success Rate"
+          label={t.canva.successRate}
           value={stats ? `${stats.successRate}%` : "\u2014"}
           variant={stats && stats.successRate >= 80 ? "success" : stats && stats.successRate >= 50 ? "warning" : "default"}
         />
         <StatCard
-          label="Active Jobs"
+          label={t.canva.activeJobs}
           value={stats?.activeJobs ?? "\u2014"}
           variant={stats && stats.activeJobs > 0 ? "warning" : "default"}
         />
@@ -398,10 +400,10 @@ export default function CanvaIntegration() {
       {/* Admin Connection Card */}
       <div className="mb-6 p-4 rounded-xl bg-pnp-surface border border-pnp-border">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-pnp-textPrimary">Admin Canva Connection</h2>
+          <h2 className="text-sm font-semibold text-pnp-textPrimary">{t.canva.adminConnection}</h2>
           {canvaConnected && canvaDisplayName && (
             <span className="text-xs text-pnp-textSecondary">
-              Connected as: {canvaDisplayName}
+              {t.canva.connectedAs} {canvaDisplayName}
             </span>
           )}
         </div>
@@ -411,7 +413,7 @@ export default function CanvaIntegration() {
               href={getCanvaLoginUrl()}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#7B2FBE] text-white hover:bg-[#6B21A8] transition-colors"
             >
-              Connect Canva
+              {t.canva.connectCanva}
             </a>
           ) : (
             <>
@@ -421,19 +423,19 @@ export default function CanvaIntegration() {
                 rel="noopener noreferrer"
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#7B2FBE] text-white hover:bg-[#6B21A8] transition-colors"
               >
-                Create in Canva
+                {t.canva.createInCanva}
               </a>
               <button
                 onClick={handleLoadDesigns}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-pnp-accent text-white hover:bg-pnp-accent/80 transition-colors"
               >
-                Import from Canva
+                {t.canva.importFromCanva}
               </button>
               <button
                 onClick={handleDisconnect}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium text-pnp-textSecondary hover:text-red-400 transition-colors"
               >
-                Disconnect
+                {t.canva.disconnect}
               </button>
             </>
           )}
@@ -443,12 +445,12 @@ export default function CanvaIntegration() {
         {showDesigns && canvaConnected && (
           <div className="mt-3 border-t border-pnp-border pt-3">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold text-pnp-textPrimary">Your Canva Designs</p>
+              <p className="text-xs font-semibold text-pnp-textPrimary">{t.canva.yourDesigns}</p>
               <button
                 onClick={() => setShowDesigns(false)}
                 className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary"
               >
-                Close
+                {t.canva.close}
               </button>
             </div>
             {loadingDesigns ? (
@@ -459,7 +461,7 @@ export default function CanvaIntegration() {
               </div>
             ) : designs.length === 0 ? (
               <p className="text-xs text-pnp-textSecondary py-4 text-center">
-                No designs found. Create a video in Canva first!
+                {t.canva.noDesigns}
               </p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-64 overflow-y-auto">
@@ -481,7 +483,7 @@ export default function CanvaIntegration() {
                         disabled={exportingId === d.id}
                         className="mt-1 w-full px-2 py-1 rounded text-[10px] font-medium bg-pnp-accent text-white hover:bg-pnp-accent/80 disabled:opacity-50 transition-colors"
                       >
-                        {exportingId === d.id ? "Starting..." : "Export as PRIME Video"}
+                        {exportingId === d.id ? t.shared.loading : t.canva.exportAsPrime}
                       </button>
                     </div>
                   </div>
@@ -494,19 +496,19 @@ export default function CanvaIntegration() {
 
       {/* Connected Users Table */}
       <div className="mb-6">
-        <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">Connected Users</h2>
+        <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">{t.canva.connectedUsers}</h2>
         <DataTable
           columns={userColumns}
           data={users}
           loading={loadingUsers}
-          emptyMessage="No users have connected Canva"
+          emptyMessage={t.canva.noConnected}
           getRowId={(row) => row.id}
         />
       </div>
 
       {/* Export Jobs Table */}
       <div>
-        <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">Export Jobs</h2>
+        <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">{t.canva.exportJobs}</h2>
 
         {/* Status filter tabs */}
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-none">
@@ -532,7 +534,7 @@ export default function CanvaIntegration() {
           columns={jobColumns}
           data={jobs}
           loading={loadingJobs}
-          emptyMessage="No export jobs found"
+          emptyMessage={t.shared.noResults}
           getRowId={(row) => row.id}
         />
 
@@ -547,9 +549,9 @@ export default function CanvaIntegration() {
       {confirmAction && (
         <ConfirmModal
           open={true}
-          title={confirmAction.type === "unlink" ? "Unlink Canva Account" : confirmAction.type === "retry" ? "Retry Export" : "Cancel Export"}
+          title={confirmAction.type === "unlink" ? t.canva.unlinkAccount : confirmAction.type === "retry" ? t.canva.retryExport : t.canva.cancelExport}
           message={confirmAction.label}
-          confirmLabel={confirmAction.type === "unlink" ? "Unlink" : confirmAction.type === "retry" ? "Retry" : "Cancel Job"}
+          confirmLabel={confirmAction.type === "unlink" ? t.canva.unlink : confirmAction.type === "retry" ? t.canva.retry : t.canva.cancelJob}
           variant={confirmAction.type === "retry" ? "default" : "danger"}
           onConfirm={handleConfirm}
           onCancel={() => setConfirmAction(null)}

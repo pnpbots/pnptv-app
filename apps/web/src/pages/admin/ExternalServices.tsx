@@ -2,6 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, Badge } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
+import { useI18n } from "@/lib/i18n";
 
 interface AdminLink {
   title: string;
@@ -186,6 +187,7 @@ const ArrowRightIcon = () => (
 export default function ExternalServices() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const t = useI18n().admin;
 
   const handleClick = (link: AdminLink) => {
     if (link.external) {
@@ -199,9 +201,9 @@ export default function ExternalServices() {
     <div className="page-container">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">External Services</h1>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.services.title}</h1>
           <p className="text-sm text-pnp-textSecondary mt-1">
-            Quick access to all PNPtv infrastructure and app services
+            {t.services.subtitle}
           </p>
         </div>
         <Badge variant="warning">Admin</Badge>
@@ -234,12 +236,12 @@ export default function ExternalServices() {
       <div className="mt-6">
         <Card>
           <p className="text-xs text-pnp-textSecondary">
-            Signed in as:{" "}
+            {t.services.signedInAs}{" "}
             <span className="text-pnp-textPrimary font-medium">
               {user?.displayName || user?.username || "Admin"}
             </span>
             {" \u00B7 "}
-            Admin panel is only accessible to authenticated users with admin privileges.
+            {t.services.adminNote}
           </p>
         </Card>
       </div>

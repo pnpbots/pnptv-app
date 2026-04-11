@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useI18n } from "@/lib/i18n";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
 import { Badge } from "@pnptv/ui-kit";
 import {
@@ -33,6 +34,7 @@ const CalendarIcon = () => (
 );
 
 export default function HangoutModeration() {
+  const t = useI18n().admin;
   const [hangouts, setHangouts] = useState<AdminHangout[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export default function HangoutModeration() {
       setHangouts(res.hangouts);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load hangouts");
+      setError(err instanceof Error ? err.message : t.hangoutMod.failedToLoad);
     } finally {
       setLoading(false);
     }
@@ -65,7 +67,7 @@ export default function HangoutModeration() {
       setEndTarget(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to end hangout");
+      setError(err instanceof Error ? err.message : t.hangoutMod.failedToLoad);
       setEndTarget(null);
     } finally {
       setEndLoading(false);
@@ -78,16 +80,16 @@ export default function HangoutModeration() {
     <div className="page-container space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">Hangout Moderation</h1>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.hangoutMod.title}</h1>
           <p className="text-sm text-pnp-textSecondary mt-1">
-            Monitor and manage active hangout rooms
+            {t.hangoutMod.subtitle}
           </p>
         </div>
         <button
           onClick={load}
           className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary border border-pnp-border rounded-lg px-3 py-1.5 transition-colors"
         >
-          Refresh
+          {t.shared.refresh}
         </button>
       </div>
 
@@ -109,9 +111,9 @@ export default function HangoutModeration() {
           <svg className="w-12 h-12 mx-auto mb-4 text-pnp-textSecondary/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          <p className="text-pnp-textSecondary font-medium">No active hangouts</p>
+          <p className="text-pnp-textSecondary font-medium">{t.hangoutMod.noHangouts}</p>
           <p className="text-sm text-pnp-textSecondary/60 mt-1">
-            All hangout rooms are currently empty or ended.
+            {t.hangoutMod.noHangoutsDesc}
           </p>
         </div>
       ) : (
@@ -124,13 +126,13 @@ export default function HangoutModeration() {
               {/* Header */}
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h3 className="font-semibold text-pnp-textPrimary truncate">{hangout.title || "Untitled Room"}</h3>
+                  <h3 className="font-semibold text-pnp-textPrimary truncate">{hangout.title || t.hangoutMod.untitledRoom}</h3>
                   <p className="text-xs text-pnp-textSecondary mt-0.5">
-                    by {hangout.creatorName}
+                    {t.hangoutMod.byCreator.replace("{0}", hangout.creatorName)}
                   </p>
                 </div>
                 <Badge variant={hangout.isPublic ? "success" : "warning"}>
-                  {hangout.isPublic ? "Public" : "Private"}
+                  {hangout.isPublic ? t.hangoutMod.public : t.hangoutMod.private}
                 </Badge>
               </div>
 
@@ -142,7 +144,7 @@ export default function HangoutModeration() {
               {/* Member count + capacity */}
               <div className="flex items-center gap-1.5 text-xs text-pnp-textSecondary">
                 <UsersIcon />
-                <span>{memberCount(hangout).toLocaleString()} / {hangout.maxParticipants || 200} members</span>
+                <span>{memberCount(hangout).toLocaleString()} / {hangout.maxParticipants || 200} {t.hangoutMod.members}</span>
               </div>
 
               {/* Footer */}
@@ -155,7 +157,7 @@ export default function HangoutModeration() {
                   onClick={() => setEndTarget(hangout)}
                   className="px-3 py-1.5 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors font-medium"
                 >
-                  Delete Group
+                  {t.hangoutMod.deleteGroup}
                 </button>
               </div>
             </div>
@@ -165,9 +167,11 @@ export default function HangoutModeration() {
 
       <ConfirmModal
         open={!!endTarget}
-        title="Delete Group"
-        message={`Are you sure you want to delete "${endTarget?.title ?? ""}"? All ${endTarget?.currentParticipants ?? 0} member(s) will be removed.`}
-        confirmLabel="Delete Group"
+        title={t.hangoutMod.deleteGroup}
+        message={t.hangoutMod.deleteConfirm
+          .replace("{0}", endTarget?.title ?? "")
+          .replace("{1}", String(endTarget?.currentParticipants ?? 0))}
+        confirmLabel={t.hangoutMod.deleteGroup}
         variant="danger"
         onConfirm={handleEnd}
         onCancel={() => setEndTarget(null)}

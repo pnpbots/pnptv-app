@@ -3,6 +3,7 @@ import { DataTable } from "@/components/admin/DataTable";
 import { Pagination } from "@/components/admin/Pagination";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
 import { Badge } from "@pnptv/ui-kit";
+import { useI18n } from "@/lib/i18n";
 import {
   getAdminPlaces,
   getAdminPlaceStats,
@@ -22,17 +23,7 @@ interface CategoryOption {
   slug: string;
 }
 
-const CATEGORIES: CategoryOption[] = [
-  { id: 1,  name: "Wellness",              emoji: "🧘", slug: "wellness" },
-  { id: 2,  name: "Cruising Spots",        emoji: "🌙", slug: "cruising" },
-  { id: 3,  name: "+18 Businesses",        emoji: "🔞", slug: "adult_entertainment" },
-  { id: 4,  name: "PNP Friendly",          emoji: "💨", slug: "pnp_friendly" },
-  { id: 5,  name: "Help Centers",          emoji: "🏥", slug: "help_centers" },
-  { id: 6,  name: "Saunas & Bath Houses",  emoji: "🧖", slug: "saunas" },
-  { id: 7,  name: "Bars & Clubs",          emoji: "🍸", slug: "bars_clubs" },
-  { id: 8,  name: "Community Businesses",  emoji: "🏪", slug: "community_business" },
-  { id: 25, name: "Hotels & Lodging",      emoji: "🏨", slug: "hotels_lodging" },
-];
+// CATEGORIES is populated inside the component using t.places.* so the array is defined there
 
 const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   pending: "warning",
@@ -41,13 +32,7 @@ const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" 
   suspended: "default",
 };
 
-const STATUS_TABS: { value: PlaceStatus; label: string }[] = [
-  { value: "all",       label: "All" },
-  { value: "pending",   label: "Pending" },
-  { value: "approved",  label: "Approved" },
-  { value: "rejected",  label: "Rejected" },
-  { value: "suspended", label: "Suspended" },
-];
+// STATUS_TABS labels are set inside the component using t.shared.*
 
 function formatDate(dateStr: string | undefined): string {
   if (!dateStr) return "\u2014";
@@ -59,6 +44,28 @@ function formatDate(dateStr: string | undefined): string {
 }
 
 export default function NearbyPlaces() {
+  const t = useI18n().admin;
+
+  const CATEGORIES: CategoryOption[] = [
+    { id: 1,  name: t.places.wellness,        emoji: "🧘", slug: "wellness" },
+    { id: 2,  name: t.places.cruisingSpots,   emoji: "🌙", slug: "cruising" },
+    { id: 3,  name: t.places.adultBusinesses, emoji: "🔞", slug: "adult_entertainment" },
+    { id: 4,  name: t.places.pnpFriendly,     emoji: "💨", slug: "pnp_friendly" },
+    { id: 5,  name: t.places.helpCenters,     emoji: "🏥", slug: "help_centers" },
+    { id: 6,  name: t.places.saunas,          emoji: "🧖", slug: "saunas" },
+    { id: 7,  name: t.places.barsClubs,       emoji: "🍸", slug: "bars_clubs" },
+    { id: 8,  name: t.places.communityBiz,    emoji: "🏪", slug: "community_business" },
+    { id: 25, name: t.places.hotelsLodging,   emoji: "🏨", slug: "hotels_lodging" },
+  ];
+
+  const STATUS_TABS: { value: PlaceStatus; label: string }[] = [
+    { value: "all",       label: t.shared.all },
+    { value: "pending",   label: t.shared.pending },
+    { value: "approved",  label: t.shared.active },
+    { value: "rejected",  label: t.shared.reject },
+    { value: "suspended", label: t.places.suspended },
+  ];
+
   const [places, setPlaces]             = useState<AdminPlace[]>([]);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState<string | null>(null);
@@ -97,7 +104,7 @@ export default function NearbyPlaces() {
         setTotalPages(res.pagination.totalPages);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load places");
+        setError(err instanceof Error ? err.message : t.places.failedToLoad);
       } finally {
         setLoading(false);
       }
@@ -179,11 +186,11 @@ export default function NearbyPlaces() {
     if (!confirmAction) return "";
     const { type, placeName } = confirmAction;
     switch (type) {
-      case "approve":   return `Approve "${placeName}"? It will become visible to users.`;
-      case "reject":    return `Reject "${placeName}"? You can provide a reason below.`;
-      case "suspend":   return `Suspend "${placeName}"? It will be hidden from users.`;
-      case "unsuspend": return `Unsuspend "${placeName}"? It will become visible again.`;
-      case "delete":    return `Permanently delete "${placeName}"? This cannot be undone.`;
+      case "approve":   return t.places.approveConfirm.replace("{0}", placeName);
+      case "reject":    return t.places.rejectConfirm.replace("{0}", placeName);
+      case "suspend":   return t.places.suspendConfirm.replace("{0}", placeName);
+      case "unsuspend": return t.places.unsuspendConfirm.replace("{0}", placeName);
+      case "delete":    return t.places.deleteConfirm.replace("{0}", placeName);
       default:          return "";
     }
   };
@@ -198,7 +205,7 @@ export default function NearbyPlaces() {
   const columns = [
     {
       key: "name",
-      header: "Name",
+      header: t.places.name,
       render: (row: AdminPlace) => (
         <div>
           <span className="font-medium text-pnp-textPrimary">{row.name}</span>
@@ -212,7 +219,7 @@ export default function NearbyPlaces() {
     },
     {
       key: "category",
-      header: "Category",
+      header: t.places.category,
       render: (row: AdminPlace) => (
         <span className="text-xs text-pnp-textSecondary">
           {row.categoryEmoji ? `${row.categoryEmoji} ` : ""}
@@ -222,7 +229,7 @@ export default function NearbyPlaces() {
     },
     {
       key: "city",
-      header: "City",
+      header: t.places.city,
       render: (row: AdminPlace) => (
         <span className="text-xs text-pnp-textSecondary">{row.city || "\u2014"}</span>
       ),
@@ -238,28 +245,28 @@ export default function NearbyPlaces() {
     },
     {
       key: "status",
-      header: "Status",
+      header: t.shared.status,
       render: (row: AdminPlace) => (
         <Badge variant={STATUS_BADGE[row.status] ?? "default"}>{row.status}</Badge>
       ),
     },
     {
       key: "viewCount",
-      header: "Views",
+      header: t.places.views,
       render: (row: AdminPlace) => (
         <span className="text-xs text-pnp-textSecondary">{row.viewCount ?? 0}</span>
       ),
     },
     {
       key: "createdAt",
-      header: "Created",
+      header: t.places.created,
       render: (row: AdminPlace) => (
         <span className="text-xs text-pnp-textSecondary">{formatDate(row.createdAt)}</span>
       ),
     },
     {
       key: "actions",
-      header: "Actions",
+      header: t.shared.actions,
       render: (row: AdminPlace) => (
         <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
           {row.status === "pending" && (
@@ -268,13 +275,13 @@ export default function NearbyPlaces() {
                 onClick={() => openAction("approve", row)}
                 className="text-[10px] px-2 py-1 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20"
               >
-                Approve
+                {t.shared.approve}
               </button>
               <button
                 onClick={() => openAction("reject", row)}
                 className="text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
               >
-                Reject
+                {t.shared.reject}
               </button>
             </>
           )}
@@ -283,7 +290,7 @@ export default function NearbyPlaces() {
               onClick={() => openAction("suspend", row)}
               className="text-[10px] px-2 py-1 rounded bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20"
             >
-              Suspend
+              {t.places.suspend}
             </button>
           )}
           {row.status === "suspended" && (
@@ -291,14 +298,14 @@ export default function NearbyPlaces() {
               onClick={() => openAction("unsuspend", row)}
               className="text-[10px] px-2 py-1 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20"
             >
-              Unsuspend
+              {t.places.unsuspend}
             </button>
           )}
           <button
             onClick={() => openAction("delete", row)}
             className="text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
           >
-            Delete
+            {t.shared.delete}
           </button>
         </div>
       ),
@@ -308,9 +315,9 @@ export default function NearbyPlaces() {
   return (
     <div className="page-container space-y-4">
       <div>
-        <h1 className="text-2xl font-bold text-pnp-textPrimary">Nearby Places</h1>
+        <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.places.title}</h1>
         <p className="text-sm text-pnp-textSecondary mt-1">
-          Manage nearby places, businesses, and points of interest
+          {t.places.subtitle}
         </p>
       </div>
 
@@ -318,11 +325,11 @@ export default function NearbyPlaces() {
       {Object.keys(stats).length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {[
-            { label: "Total",     key: "total",     color: "text-pnp-textPrimary" },
-            { label: "Pending",   key: "pending",   color: "text-yellow-400" },
-            { label: "Approved",  key: "approved",  color: "text-green-400" },
-            { label: "Rejected",  key: "rejected",  color: "text-red-400" },
-            { label: "Suspended", key: "suspended", color: "text-pnp-textSecondary" },
+            { label: t.places.total,    key: "total",     color: "text-pnp-textPrimary" },
+            { label: t.shared.pending,  key: "pending",   color: "text-yellow-400" },
+            { label: t.shared.active,   key: "approved",  color: "text-green-400" },
+            { label: t.shared.reject,   key: "rejected",  color: "text-red-400" },
+            { label: t.places.suspended,key: "suspended", color: "text-pnp-textSecondary" },
           ].map((s) => (
             <div key={s.label} className="rounded-xl bg-pnp-surface border border-pnp-border p-3">
               <div className="text-xs text-pnp-textSecondary">{s.label}</div>
@@ -337,7 +344,7 @@ export default function NearbyPlaces() {
         <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400 flex justify-between items-center">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300 ml-2">
-            Dismiss
+            {t.shared.dismiss}
           </button>
         </div>
       )}
@@ -345,7 +352,7 @@ export default function NearbyPlaces() {
         <div className="px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/20 text-sm text-green-400 flex justify-between items-center">
           <span>{success}</span>
           <button onClick={() => setSuccess(null)} className="text-green-400 hover:text-green-300 ml-2">
-            Dismiss
+            {t.shared.dismiss}
           </button>
         </div>
       )}
@@ -356,7 +363,7 @@ export default function NearbyPlaces() {
           type="text"
           value={searchInput}
           onChange={(e) => handleSearchChange(e.target.value)}
-          placeholder="Search by name, city, address..."
+          placeholder={t.places.searchPlaceholder}
           className="px-3 py-2 text-sm rounded-lg border border-pnp-border bg-pnp-surface text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-pnp-accent w-64"
         />
         <select
@@ -364,7 +371,7 @@ export default function NearbyPlaces() {
           onChange={(e) => handleCategoryFilter(e.target.value ? Number(e.target.value) : undefined)}
           className="px-3 py-2 text-sm rounded-lg border border-pnp-border bg-pnp-surface text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
         >
-          <option value="">All Categories</option>
+          <option value="">{t.places.allCategories}</option>
           {CATEGORIES.map((cat) => (
             <option key={cat.id} value={cat.id}>
               {cat.emoji} {cat.name}
@@ -380,7 +387,7 @@ export default function NearbyPlaces() {
             }}
             className="text-xs px-3 py-2 rounded-lg border border-pnp-border text-pnp-textSecondary hover:bg-pnp-surface"
           >
-            Clear Filters
+            {t.shared.clearFilters}
           </button>
         )}
       </div>
@@ -410,7 +417,7 @@ export default function NearbyPlaces() {
         columns={columns}
         data={places}
         loading={loading}
-        emptyMessage="No places found"
+        emptyMessage={t.places.noPlaces}
         getRowId={(row) => row.id}
       />
 
@@ -425,7 +432,7 @@ export default function NearbyPlaces() {
             : "Confirm"
         }
         message={getConfirmMessage()}
-        confirmLabel={confirmAction?.type === "delete" ? "Delete" : "Confirm"}
+        confirmLabel={confirmAction?.type === "delete" ? t.shared.delete : t.shared.confirm}
         variant={getConfirmVariant()}
         onConfirm={executeAction}
         onCancel={() => setConfirmAction(null)}
@@ -443,12 +450,12 @@ export default function NearbyPlaces() {
             className="relative bg-pnp-background border border-pnp-border rounded-xl p-6 max-w-md w-full shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-bold text-pnp-textPrimary mb-2">Reject Place</h3>
+            <h3 className="text-lg font-bold text-pnp-textPrimary mb-2">{t.places.rejectPlace}</h3>
             <p className="text-sm text-pnp-textSecondary mb-4">{getConfirmMessage()}</p>
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Reason for rejection (optional)"
+              placeholder={t.places.rejectReason}
               rows={3}
               className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent mb-4 resize-none"
             />
@@ -458,14 +465,14 @@ export default function NearbyPlaces() {
                 disabled={actionLoading}
                 className="px-4 py-2 text-sm rounded-lg border border-pnp-border text-pnp-textSecondary hover:bg-pnp-surface disabled:opacity-50"
               >
-                Cancel
+                {t.shared.cancel}
               </button>
               <button
                 onClick={executeAction}
                 disabled={actionLoading}
                 className="px-4 py-2 text-sm rounded-lg font-medium bg-yellow-600 hover:bg-yellow-700 text-white disabled:opacity-50"
               >
-                {actionLoading ? "Processing..." : "Reject"}
+                {actionLoading ? t.shared.processing : t.shared.reject}
               </button>
             </div>
           </div>

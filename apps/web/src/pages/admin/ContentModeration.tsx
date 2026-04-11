@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useI18n } from "@/lib/i18n";
 import { DataTable } from "@/components/admin/DataTable";
 import { Pagination } from "@/components/admin/Pagination";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
@@ -26,6 +27,7 @@ function truncate(text: string, maxLen: number): string {
 }
 
 export default function ContentModeration() {
+  const t = useI18n().admin;
   const [posts, setPosts] = useState<AdminPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export default function ContentModeration() {
       setTotalPages(res.pagination.totalPages);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load posts");
+      setError(err instanceof Error ? err.message : t.contentMod.failedToLoad);
     } finally {
       setLoading(false);
     }
@@ -61,7 +63,7 @@ export default function ContentModeration() {
       setDeleteTarget(null);
       await load(page);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete post");
+      setError(err instanceof Error ? err.message : t.shared.failedToLoad);
       setDeleteTarget(null);
     } finally {
       setDeleteLoading(false);
@@ -71,7 +73,7 @@ export default function ContentModeration() {
   const columns = [
     {
       key: "author",
-      header: "Author",
+      header: t.contentMod.author,
       render: (row: AdminPost) => (
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
@@ -91,14 +93,14 @@ export default function ContentModeration() {
     },
     {
       key: "content",
-      header: "Content",
+      header: t.contentMod.content,
       render: (row: AdminPost) => (
         <span className="text-sm text-pnp-textPrimary">{truncate(row.content ?? "", 80)}</span>
       ),
     },
     {
       key: "media",
-      header: "Media",
+      header: t.contentMod.media,
       render: (row: AdminPost) =>
         row.mediaUrl ? (
           <Badge variant="accent">{row.mediaType ?? "media"}</Badge>
@@ -108,14 +110,14 @@ export default function ContentModeration() {
     },
     {
       key: "likesCount",
-      header: "Likes",
+      header: t.contentMod.likes,
       render: (row: AdminPost) => (
         <span className="text-pnp-textSecondary text-sm">{row.likesCount}</span>
       ),
     },
     {
       key: "repliesCount",
-      header: "Replies",
+      header: t.contentMod.replies,
       render: (row: AdminPost) => (
         <span className="text-pnp-textSecondary text-sm">{row.repliesCount}</span>
       ),
@@ -135,7 +137,7 @@ export default function ContentModeration() {
           onClick={(e) => { e.stopPropagation(); setDeleteTarget(row); }}
           className="text-xs text-red-400 hover:underline"
         >
-          Delete
+          {t.shared.delete}
         </button>
       ),
     },
@@ -144,9 +146,9 @@ export default function ContentModeration() {
   return (
     <div className="page-container space-y-4">
       <div>
-        <h1 className="text-2xl font-bold text-pnp-textPrimary">Content Moderation</h1>
+        <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.contentMod.title}</h1>
         <p className="text-sm text-pnp-textSecondary mt-1">
-          Review and remove community posts
+          {t.contentMod.subtitle}
         </p>
       </div>
 
@@ -161,7 +163,7 @@ export default function ContentModeration() {
         columns={columns}
         data={posts}
         loading={loading}
-        emptyMessage="No posts found"
+        emptyMessage={t.contentMod.noPosts}
         getRowId={(row) => String(row.id)}
       />
 
@@ -169,9 +171,9 @@ export default function ContentModeration() {
 
       <ConfirmModal
         open={!!deleteTarget}
-        title="Delete Post"
-        message={`Are you sure you want to permanently delete this post by @${deleteTarget?.authorUsername ?? "unknown"}? This action cannot be undone.`}
-        confirmLabel="Delete Post"
+        title={t.contentMod.deletePost}
+        message={t.contentMod.deleteConfirm.replace("{0}", deleteTarget?.authorUsername ?? "unknown")}
+        confirmLabel={t.contentMod.deletePost}
         variant="danger"
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}

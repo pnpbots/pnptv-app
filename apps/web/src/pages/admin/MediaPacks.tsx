@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
+import { useI18n } from "@/lib/i18n";
 import {
   getMediaPacks,
   getMediaPackItems,
@@ -14,6 +15,7 @@ import {
 const PACK_TYPE_LABELS: Record<string, string> = { sticker: "Sticker", gif: "GIF", emoji: "Custom Emoji" };
 
 export default function MediaPacks() {
+  const t = useI18n().admin;
   const [packs, setPacks] = useState<MediaPack[]>([]);
   const [selectedPack, setSelectedPack] = useState<MediaPack | null>(null);
   const [items, setItems] = useState<MediaPackItem[]>([]);
@@ -90,20 +92,20 @@ export default function MediaPacks() {
     <div className="page-container space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">Media Packs</h1>
-          <p className="text-pnp-textSecondary text-sm mt-1">Manage sticker, GIF, and custom emoji packs</p>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.mediaPacks.title}</h1>
+          <p className="text-pnp-textSecondary text-sm mt-1">{t.mediaPacks.subtitle}</p>
         </div>
         <button
           onClick={() => setShowNewPackForm(v => !v)}
           className="flex items-center gap-1.5 px-3 py-2 bg-pnp-accent hover:bg-pnp-accent/80 text-white rounded-lg text-sm font-medium transition-colors"
         >
-          + New Pack
+          {t.mediaPacks.newPack}
         </button>
       </div>
 
       {showNewPackForm && (
         <div className="bg-pnp-surface border border-pnp-border rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-pnp-textSecondary mb-3">Create New Pack</h3>
+          <h3 className="text-sm font-semibold text-pnp-textSecondary mb-3">{t.mediaPacks.createNewPack}</h3>
           {createError && (
             <div className="mb-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
               {createError}
@@ -127,9 +129,9 @@ export default function MediaPacks() {
               onChange={e => setNewPack(p => ({ ...p, pack_type: e.target.value }))}
               className="bg-pnp-background border border-pnp-border rounded-lg px-3 py-2 text-sm text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
             >
-              <option value="sticker">Sticker Pack</option>
-              <option value="gif">GIF Pack</option>
-              <option value="emoji">Custom Emoji Pack</option>
+              <option value="sticker">{t.mediaPacks.stickerPack}</option>
+              <option value="gif">{t.mediaPacks.gifPack}</option>
+              <option value="emoji">{t.mediaPacks.emojiPack}</option>
             </select>
             <label className="flex items-center gap-2 text-sm text-pnp-textSecondary cursor-pointer">
               <input
@@ -138,7 +140,7 @@ export default function MediaPacks() {
                 onChange={e => setNewPack(p => ({ ...p, is_premium: e.target.checked }))}
                 className="w-4 h-4 accent-pnp-accent"
               />
-              Premium-only pack
+              {t.mediaPacks.premiumOnly}
             </label>
           </div>
           <div className="flex gap-2 mt-3">
@@ -147,13 +149,13 @@ export default function MediaPacks() {
               disabled={creating}
               className="px-4 py-2 bg-pnp-accent hover:bg-pnp-accent/80 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
             >
-              {creating ? "Creating..." : "Create Pack"}
+              {creating ? t.mediaPacks.creating : t.mediaPacks.createPack}
             </button>
             <button
               onClick={() => setShowNewPackForm(false)}
               className="px-4 py-2 bg-pnp-surface hover:bg-pnp-surface/80 border border-pnp-border text-pnp-textSecondary rounded-lg text-sm transition-colors"
             >
-              Cancel
+              {t.shared.cancel}
             </button>
           </div>
         </div>
@@ -162,10 +164,10 @@ export default function MediaPacks() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Pack list */}
         <div className="lg:col-span-1 space-y-2">
-          {loading && <div className="text-pnp-textSecondary text-sm py-4 text-center">Loading packs...</div>}
+          {loading && <div className="text-pnp-textSecondary text-sm py-4 text-center">{t.shared.loading}</div>}
           {!loading && packs.length === 0 && (
             <div className="text-pnp-textSecondary text-sm text-center py-10 border border-pnp-border rounded-xl">
-              No packs yet
+              {t.mediaPacks.noPacks}
             </div>
           )}
           {packs.map(pack => (
@@ -184,9 +186,9 @@ export default function MediaPacks() {
                   <div className="text-xs text-pnp-textSecondary mt-0.5">{PACK_TYPE_LABELS[pack.pack_type]} · {pack.item_count} items</div>
                 </div>
                 <div className="flex gap-1 flex-shrink-0">
-                  {pack.is_premium && <span className="text-xs bg-amber-900/40 text-amber-300 px-1.5 py-0.5 rounded">PRO</span>}
+                  {pack.is_premium && <span className="text-xs bg-amber-900/40 text-amber-300 px-1.5 py-0.5 rounded">{t.mediaPacks.pro}</span>}
                   <span className={`text-xs px-1.5 py-0.5 rounded ${pack.is_active ? "bg-green-900/40 text-green-400" : "bg-pnp-surface text-pnp-textSecondary"}`}>
-                    {pack.is_active ? "Active" : "Off"}
+                    {pack.is_active ? t.shared.active : t.mediaPacks.off}
                   </span>
                 </div>
               </div>
@@ -195,13 +197,13 @@ export default function MediaPacks() {
                   onClick={e => { e.stopPropagation(); handleToggle(pack.id, pack.is_active); }}
                   className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
                 >
-                  {pack.is_active ? "Disable" : "Enable"}
+                  {pack.is_active ? t.mediaPacks.disable : t.mediaPacks.enable}
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); setDeletePackTarget(pack); }}
                   className="text-xs text-red-400 hover:text-red-300 transition-colors"
                 >
-                  Delete
+                  {t.shared.delete}
                 </button>
               </div>
             </div>
@@ -212,7 +214,7 @@ export default function MediaPacks() {
         <div className="lg:col-span-2">
           {!selectedPack ? (
             <div className="flex flex-col items-center justify-center h-full min-h-[200px] text-pnp-textSecondary border border-pnp-border rounded-xl">
-              <span className="text-sm">Select a pack to view its items</span>
+              <span className="text-sm">{t.mediaPacks.selectPack}</span>
             </div>
           ) : (
             <>
@@ -222,7 +224,7 @@ export default function MediaPacks() {
               </div>
               {items.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-40 text-pnp-textSecondary text-sm border border-pnp-border rounded-xl gap-1">
-                  <span>No items in this pack yet</span>
+                  <span>{t.mediaPacks.noItems}</span>
                   <code className="text-xs text-pnp-textSecondary mt-1 bg-pnp-surface px-2 py-0.5 rounded">
                     POST /api/webapp/admin/media-packs/{selectedPack.id}/items
                   </code>
@@ -243,7 +245,7 @@ export default function MediaPacks() {
                       <button
                         onClick={() => setDeleteItemTarget(item)}
                         className="absolute top-1 right-1 hidden group-hover:flex items-center justify-center w-5 h-5 rounded-full bg-red-500 hover:bg-red-400 text-white text-xs"
-                        aria-label="Delete item"
+                        aria-label={t.mediaPacks.deleteItem}
                       >
                         ✕
                       </button>
@@ -258,9 +260,9 @@ export default function MediaPacks() {
 
       <ConfirmModal
         open={!!deletePackTarget}
-        title="Delete Pack"
+        title={t.mediaPacks.deletePack}
         message={`Delete "${deletePackTarget?.name}" and all its items? This cannot be undone.`}
-        confirmLabel="Delete Pack"
+        confirmLabel={t.mediaPacks.deletePack}
         variant="danger"
         onConfirm={handleDeletePack}
         onCancel={() => setDeletePackTarget(null)}
@@ -268,9 +270,9 @@ export default function MediaPacks() {
 
       <ConfirmModal
         open={!!deleteItemTarget}
-        title="Delete Item"
+        title={t.mediaPacks.deleteItemTitle}
         message={`Delete "${deleteItemTarget?.name}"? This cannot be undone.`}
-        confirmLabel="Delete"
+        confirmLabel={t.shared.delete}
         variant="danger"
         onConfirm={handleDeleteItem}
         onCancel={() => setDeleteItemTarget(null)}

@@ -1,4 +1,5 @@
 import React from "react";
+import { useI18n } from "@/lib/i18n";
 
 interface PaginationProps {
   page: number;
@@ -7,6 +8,7 @@ interface PaginationProps {
 }
 
 export function Pagination({ page, totalPages, onPageChange }: PaginationProps) {
+  const t = useI18n().admin;
   if (totalPages <= 1) return null;
 
   const pages: (number | "...")[] = [];
@@ -25,7 +27,7 @@ export function Pagination({ page, totalPages, onPageChange }: PaginationProps) 
         disabled={page <= 1}
         className="px-3 py-1.5 text-sm rounded-lg border border-pnp-border text-pnp-textSecondary hover:bg-pnp-surface disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        Prev
+        {t.shared.prev}
       </button>
       {pages.map((p, idx) =>
         p === "..." ? (
@@ -49,7 +51,7 @@ export function Pagination({ page, totalPages, onPageChange }: PaginationProps) 
         disabled={page >= totalPages}
         className="px-3 py-1.5 text-sm rounded-lg border border-pnp-border text-pnp-textSecondary hover:bg-pnp-surface disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        Next
+        {t.shared.next}
       </button>
     </div>
   );

@@ -202,7 +202,7 @@ function RandomVideoActionCard({ action, mediaFolderId, onSaved, t }: {
       setSaved(true);
       onSaved?.();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to enable video on campaign");
+      setError(e instanceof Error ? e.message : t.admin.xCampaigns.feedback.failedVideoEnable);
     } finally {
       setSaving(false);
     }
@@ -252,15 +252,16 @@ function RandomVideoActionCard({ action, mediaFolderId, onSaved, t }: {
   );
 }
 
-const QUICK_ACTIONS = [
-  { label: "Analyze campaigns", prompt: "Analyze my current campaigns. What's working and what should I change?" },
-  { label: "Demographics insights", prompt: "Based on the demographics, what's the best content strategy to convert free users to paid?" },
-  { label: "Optimize schedules", prompt: "Review my campaign schedules and suggest better time windows based on the target regions." },
-  { label: "Create strategy", prompt: "Create a full 3-campaign strategy to grow subscribers in LATAM and Asia Pacific. Give me the campaign configs." },
-  { label: "Fix failing posts", prompt: "Why are my posts failing? What do you recommend to fix it?" },
-  { label: "Improve prompts", prompt: "Review my campaign custom prompts and rewrite them for better X algorithm performance." },
-  { label: "Add random video", prompt: "I want to add a random video from our media library to boost engagement. Suggest adding one and explain why video content performs better on X." },
-  { label: "🔥 Lifetime100 campaign", prompt: "Create a Lifetime100 campaign that posts in this exact format: [EMOJI] [HOOK IN ALL CAPS] [EMOJI] / [body mentioning Lex, Santino, clouds, slams, live shows] / 👉 pnptv.app/lifetime100. Use the example: '🔥 $100 LIFETIME ACCESS to PNPtv IS HERE! 🔥 Raw Latino slams, clouds that never stop, and Lex + Santino taking you deep into the spun fire. One payment = forever pig paradise.' Give me the full campaign config." },
+// Quick action labels are resolved at render time via t.admin.xCampaigns.quickActions
+const QUICK_ACTION_KEYS = [
+  { key: "analyze", prompt: "Analyze my current campaigns. What's working and what should I change?" },
+  { key: "demographics", prompt: "Based on the demographics, what's the best content strategy to convert free users to paid?" },
+  { key: "optimize", prompt: "Review my campaign schedules and suggest better time windows based on the target regions." },
+  { key: "strategy", prompt: "Create a full 3-campaign strategy to grow subscribers in LATAM and Asia Pacific. Give me the campaign configs." },
+  { key: "fixFailing", prompt: "Why are my posts failing? What do you recommend to fix it?" },
+  { key: "improvePrompts", prompt: "Review my campaign custom prompts and rewrite them for better X algorithm performance." },
+  { key: "addVideo", prompt: "I want to add a random video from our media library to boost engagement. Suggest adding one and explain why video content performs better on X." },
+  { key: "lifetime100", prompt: "Create a Lifetime100 campaign that posts in this exact format: [EMOJI] [HOOK IN ALL CAPS] [EMOJI] / [body mentioning Lex, Santino, clouds, slams, live shows] / 👉 pnptv.app/lifetime100. Use the example: '🔥 $100 LIFETIME ACCESS to PNPtv IS HERE! 🔥 Raw Latino slams, clouds that never stop, and Lex + Santino taking you deep into the spun fire. One payment = forever pig paradise.' Give me the full campaign config." },
 ];
 
 const LIFETIME100_TEMPLATE = {
@@ -285,12 +286,7 @@ Always include $100 and lifetime/forever. Hook must be ALL CAPS. CTA must use �
 
 type CampaignStatus = "all" | "active" | "paused" | "completed";
 
-const STATUS_TABS: { value: CampaignStatus; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "active", label: "Active" },
-  { value: "paused", label: "Paused" },
-  { value: "completed", label: "Completed" },
-];
+const STATUS_TAB_KEYS: CampaignStatus[] = ["all", "active", "paused", "completed"];
 
 const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
   active: "success",
@@ -298,30 +294,17 @@ const STATUS_BADGE: Record<string, "default" | "accent" | "success" | "warning" 
   completed: "default",
 };
 
-const GROK_MODES = [
-  { value: "xPost", label: "X Post (3 options)" },
-  { value: "broadcast", label: "Broadcast" },
-  { value: "salesPost", label: "Sales Post" },
-  { value: "sharePost", label: "Share Post" },
-];
+const GROK_MODE_KEYS = ["xPost", "broadcast", "salesPost", "sharePost"] as const;
 
-const PERSONA_TYPES = [
-  { value: "generic", label: "Generic PnP Brand" },
-  { value: "santino", label: "🔥 SXNTINX (Dominant)" },
-  { value: "lex", label: "🐷 Lex (Submissive)" },
-];
+const PERSONA_KEYS = ["generic", "santino", "lex"] as const;
 
-const PERSONA_BADGE: Record<string, string> = {
+const PERSONA_EMOJI: Record<string, string> = {
   santino: "🔥",
   lex: "🐷",
   generic: "",
 };
 
-const LANGUAGES = [
-  { value: "es", label: "Spanish" },
-  { value: "en", label: "English" },
-  { value: "bilingual", label: "Bilingual" },
-];
+const LANGUAGE_KEYS = ["es", "en", "bilingual"] as const;
 
 function formatDate(dateStr: string | undefined | null): string {
   if (!dateStr) return "\u2014";
@@ -501,7 +484,7 @@ export default function XAutoCampaigns() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.accountId || !form.topic) {
-      setError("Name, account, and topic are required");
+      setError(t.admin.xCampaigns.feedback.nameAccountTopicRequired);
       return;
     }
     setFormLoading(true);
@@ -520,7 +503,7 @@ export default function XAutoCampaigns() {
           mediaFolderId: form.attachVideos && mediaFolderId ? mediaFolderId : null,
           personaType: form.personaType,
         });
-        setSuccess(`Campaign "${form.name}" updated`);
+        setSuccess(t.admin.xCampaigns.feedback.campaignUpdated.replace("{name}", form.name));
       } else {
         await createAdminXCampaign({
           name: form.name,
@@ -536,7 +519,7 @@ export default function XAutoCampaigns() {
           mediaFolderId: form.attachVideos && mediaFolderId ? mediaFolderId : undefined,
           personaType: form.personaType,
         });
-        setSuccess("Campaign created (paused)");
+        setSuccess(t.admin.xCampaigns.feedback.campaignCreated);
       }
       setForm(defaultForm);
       setShowForm(false);
@@ -544,7 +527,7 @@ export default function XAutoCampaigns() {
       loadStats();
       loadCampaigns(page, statusFilter);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : editingCampaign ? "Failed to update campaign" : "Failed to create campaign");
+      setError(err instanceof Error ? err.message : editingCampaign ? t.admin.xCampaigns.feedback.failedUpdate : t.admin.xCampaigns.feedback.failedCreate);
     } finally {
       setFormLoading(false);
     }
@@ -554,15 +537,15 @@ export default function XAutoCampaigns() {
     try {
       if (campaign.status === "active") {
         await pauseAdminXCampaign(campaign.campaign_id);
-        setSuccess(`"${campaign.name}" paused`);
+        setSuccess(t.admin.xCampaigns.feedback.paused.replace("{name}", campaign.name));
       } else {
         await resumeAdminXCampaign(campaign.campaign_id);
-        setSuccess(`"${campaign.name}" resumed`);
+        setSuccess(t.admin.xCampaigns.feedback.resumed.replace("{name}", campaign.name));
       }
       loadStats();
       loadCampaigns(page, statusFilter);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Action failed");
+      setError(err instanceof Error ? err.message : t.admin.xCampaigns.feedback.actionFailed);
     }
   };
 
@@ -571,15 +554,15 @@ export default function XAutoCampaigns() {
     try {
       if (confirmAction.type === "delete") {
         await deleteAdminXCampaign(confirmAction.id);
-        setSuccess("Campaign deleted");
+        setSuccess(t.admin.xCampaigns.feedback.deleted);
       } else if (confirmAction.type === "generate") {
         await triggerAdminXCampaignGenerate(confirmAction.id);
-        setSuccess("Post generated and queued");
+        setSuccess(t.admin.xCampaigns.feedback.generated);
       }
       loadStats();
       loadCampaigns(page, statusFilter);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Action failed");
+      setError(err instanceof Error ? err.message : t.admin.xCampaigns.feedback.actionFailed);
     } finally {
       setConfirmAction(null);
     }
@@ -614,11 +597,11 @@ export default function XAutoCampaigns() {
   const handleClone = async (campaign: XAutoCampaign) => {
     try {
       await duplicateAdminXCampaign(campaign.campaign_id);
-      setSuccess(`"${campaign.name}" cloned`);
+      setSuccess(t.admin.xCampaigns.feedback.cloned.replace("{name}", campaign.name));
       loadStats();
       loadCampaigns(page, statusFilter);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to clone campaign");
+      setError(err instanceof Error ? err.message : t.admin.xCampaigns.feedback.failedClone);
     }
   };
 
@@ -630,7 +613,7 @@ export default function XAutoCampaigns() {
       const res = await previewAdminXCampaign(campaign.campaign_id);
       setPreviewOptions(res.options);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to generate preview");
+      setError(err instanceof Error ? err.message : t.admin.xCampaigns.feedback.failedPreview);
       setPreviewTarget(null);
     } finally {
       setPreviewLoading(false);
@@ -717,14 +700,14 @@ export default function XAutoCampaigns() {
   const campaignColumns = [
     {
       key: "name",
-      header: "Campaign",
+      header: t.admin.xCampaigns.table.campaign,
       render: (row: XAutoCampaign) => (
         <div className="max-w-[180px]">
           <p className="text-sm font-medium truncate">
-            {row.media_folder_id && <span title="Video attached" className="text-pnp-accent mr-1">&#9654;</span>}
-            {PERSONA_BADGE[row.persona_type || "generic"] && (
+            {row.media_folder_id && <span title="Video" className="text-pnp-accent mr-1">&#9654;</span>}
+            {PERSONA_EMOJI[row.persona_type || "generic"] && (
               <span title={`Persona: ${row.persona_type}`} className="mr-1">
-                {PERSONA_BADGE[row.persona_type || "generic"]}
+                {PERSONA_EMOJI[row.persona_type || "generic"]}
               </span>
             )}
             {row.name}
@@ -735,7 +718,7 @@ export default function XAutoCampaigns() {
     },
     {
       key: "topic",
-      header: "Topic",
+      header: t.admin.xCampaigns.table.topic,
       render: (row: XAutoCampaign) => (
         <span className="text-xs text-pnp-textSecondary truncate block max-w-[200px]" title={row.topic}>
           {row.topic.length > 60 ? row.topic.slice(0, 60) + "..." : row.topic}
@@ -744,10 +727,10 @@ export default function XAutoCampaigns() {
     },
     {
       key: "schedule",
-      header: "Schedule",
+      header: t.admin.xCampaigns.table.schedule,
       render: (row: XAutoCampaign) => (
         <span className="text-xs">
-          Every {formatInterval(row.interval_minutes)}
+          {t.admin.xCampaigns.misc.every} {formatInterval(row.interval_minutes)}
           <br />
           <span className="text-pnp-textSecondary">{String(Math.floor(row.active_hours_start / 60)).padStart(2, "0")}:{String(row.active_hours_start % 60).padStart(2, "0")}{"\u2013"}{String(Math.floor(row.active_hours_end / 60)).padStart(2, "0")}:{String(row.active_hours_end % 60).padStart(2, "0")} UTC</span>
         </span>
@@ -755,7 +738,7 @@ export default function XAutoCampaigns() {
     },
     {
       key: "status",
-      header: "Status",
+      header: t.admin.xCampaigns.table.status,
       render: (row: XAutoCampaign) => (
         <div>
           <Badge variant={STATUS_BADGE[row.status] || "default"}>{row.status}</Badge>
@@ -769,18 +752,18 @@ export default function XAutoCampaigns() {
     },
     {
       key: "progress",
-      header: "Progress",
+      header: t.admin.xCampaigns.table.progress,
       render: (row: XAutoCampaign) => (
         <span className="text-xs">
-          {row.total_generated} gen / {row.total_posted} posted
-          {row.total_failed > 0 ? ` / ${row.total_failed} failed` : ""}
-          {row.max_posts ? ` / ${row.max_posts} max` : ""}
+          {row.total_generated} {t.admin.xCampaigns.table.gen} / {row.total_posted} {t.admin.xCampaigns.table.posted}
+          {row.total_failed > 0 ? ` / ${row.total_failed} ${t.admin.xCampaigns.misc.failed}` : ""}
+          {row.max_posts ? ` / ${row.max_posts} ${t.admin.xCampaigns.table.max}` : ""}
         </span>
       ),
     },
     {
       key: "next_run_at",
-      header: "Next Run",
+      header: t.admin.xCampaigns.table.nextRun,
       render: (row: XAutoCampaign) =>
         row.status === "active" ? (
           <div>
@@ -803,42 +786,42 @@ export default function XAutoCampaigns() {
                   : "text-green-400 hover:text-green-300"
               }`}
             >
-              {row.status === "active" ? "Pause" : "Resume"}
+              {row.status === "active" ? t.admin.xCampaigns.tableActions.pause : t.admin.xCampaigns.tableActions.resume}
             </button>
           )}
           <button
             onClick={() => handleEditClick(row)}
             className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
           >
-            Edit
+            {t.admin.xCampaigns.tableActions.edit}
           </button>
           <button
             onClick={() => handleClone(row)}
             className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
           >
-            Clone
+            {t.admin.xCampaigns.tableActions.clone}
           </button>
           <button
             onClick={() => handlePreview(row)}
             className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
           >
-            Preview
+            {t.admin.xCampaigns.tableActions.preview}
           </button>
           <button
             onClick={() =>
-              setConfirmAction({ type: "generate", id: row.campaign_id, label: `Generate a post now for "${row.name}"?` })
+              setConfirmAction({ type: "generate", id: row.campaign_id, label: t.admin.xCampaigns.confirm.generateMessage.replace("{name}", row.name) })
             }
             className="text-xs text-pnp-accent hover:text-pnp-accent/80 transition-colors"
           >
-            Generate
+            {t.admin.xCampaigns.tableActions.generate}
           </button>
           <button
             onClick={() =>
-              setConfirmAction({ type: "delete", id: row.campaign_id, label: `Delete campaign "${row.name}"? Post history will be preserved.` })
+              setConfirmAction({ type: "delete", id: row.campaign_id, label: t.admin.xCampaigns.confirm.deleteMessage.replace("{name}", row.name) })
             }
             className="text-xs text-red-400 hover:text-red-300 transition-colors"
           >
-            Delete
+            {t.admin.xCampaigns.tableActions.delete}
           </button>
         </div>
       ),
@@ -848,12 +831,12 @@ export default function XAutoCampaigns() {
   const historyColumns = [
     {
       key: "text",
-      header: "Post Text",
+      header: t.admin.xCampaigns.history.postText,
       render: (row: XAutoCampaignPost) => <ExpandablePostText text={row.text} />,
     },
     {
       key: "status",
-      header: "Status",
+      header: t.admin.xCampaigns.history.status,
       render: (row: XAutoCampaignPost) => {
         const badge: Record<string, "default" | "accent" | "success" | "warning" | "error"> = {
           scheduled: "warning", sending: "accent", sent: "success", failed: "error",
@@ -863,12 +846,12 @@ export default function XAutoCampaigns() {
     },
     {
       key: "sent_at",
-      header: "Sent",
+      header: t.admin.xCampaigns.history.sent,
       render: (row: XAutoCampaignPost) => formatDate(row.sent_at),
     },
     {
       key: "created_at",
-      header: "Created",
+      header: t.admin.xCampaigns.history.created,
       render: (row: XAutoCampaignPost) => formatDate(row.created_at),
     },
   ];
@@ -899,7 +882,7 @@ export default function XAutoCampaigns() {
           variant={stats && stats.totalFailed > 0 ? "danger" : "default"}
         />
         <StatCard
-          label="Success Rate"
+          label={t.admin.xCampaigns.misc.successRate}
           value={stats && stats.totalGenerated > 0
             ? `${Math.round((stats.totalPosted / stats.totalGenerated) * 100)}%`
             : "\u2014"}
@@ -951,7 +934,7 @@ export default function XAutoCampaigns() {
                     window.location.href = res.url;
                   }
                 } catch (err: unknown) {
-                  setError(err instanceof Error ? err.message : "Failed to start X OAuth");
+                  setError(err instanceof Error ? err.message : t.admin.xCampaigns.feedback.failedOAuth);
                 }
               }}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:border-pnp-accent/50 transition-colors"
@@ -986,7 +969,7 @@ export default function XAutoCampaigns() {
                     className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                     required
                   >
-                    <option value="">Select account...</option>
+                    <option value="">{t.admin.xCampaigns.misc.selectAccount}</option>
                     {accounts.map((a) => (
                       <option key={a.account_id} value={a.account_id}>
                         @{a.handle}
@@ -1016,8 +999,8 @@ export default function XAutoCampaigns() {
                   onChange={(e) => setForm((f) => ({ ...f, grokMode: e.target.value }))}
                   className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                 >
-                  {GROK_MODES.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
+                  {GROK_MODE_KEYS.map((key) => (
+                    <option key={key} value={key}>{(t.admin.xCampaigns.grokModes as Record<string, string>)[key]}</option>
                   ))}
                 </select>
               </div>
@@ -1028,20 +1011,20 @@ export default function XAutoCampaigns() {
                   onChange={(e) => setForm((f) => ({ ...f, language: e.target.value }))}
                   className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                 >
-                  {LANGUAGES.map((l) => (
-                    <option key={l.value} value={l.value}>{l.label}</option>
+                  {LANGUAGE_KEYS.map((key) => (
+                    <option key={key} value={key}>{(t.admin.xCampaigns.languages as Record<string, string>)[key]}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="text-xs text-pnp-textSecondary block mb-1">Persona</label>
+                <label className="text-xs text-pnp-textSecondary block mb-1">{t.admin.xCampaigns.personas.label}</label>
                 <select
                   value={form.personaType}
                   onChange={(e) => setForm((f) => ({ ...f, personaType: e.target.value as "santino" | "lex" | "generic" }))}
                   className="w-full px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary focus:border-pnp-accent focus:outline-none" style={{ fontSize: "16px" }}
                 >
-                  {PERSONA_TYPES.map((p) => (
-                    <option key={p.value} value={p.value}>{p.label}</option>
+                  {PERSONA_KEYS.map((key) => (
+                    <option key={key} value={key}>{PERSONA_EMOJI[key] ? `${PERSONA_EMOJI[key]} ` : ""}{(t.admin.xCampaigns.personas as Record<string, string>)[key]}</option>
                   ))}
                 </select>
               </div>
@@ -1104,7 +1087,7 @@ export default function XAutoCampaigns() {
                 placeholder={t.admin.xCampaigns.form.customPromptPlaceholder}
               />
               <div className="mt-2 p-2.5 rounded-lg bg-orange-500/10 border border-orange-500/20 text-xs text-orange-300/90">
-                <p className="font-semibold mb-1">🔥 Lifetime100 Required Format</p>
+                <p className="font-semibold mb-1">🔥 {t.admin.xCampaigns.misc.lifetime100Format}</p>
                 <p className="font-mono whitespace-pre-wrap leading-relaxed text-orange-200/70">{`[EMOJI] [HOOK IN ALL CAPS] [EMOJI]
 [Benefits: Lex, Santino, clouds, slams, live shows]
 👉 pnptv.app/lifetime100 [emojis]`}</p>
@@ -1161,20 +1144,17 @@ export default function XAutoCampaigns() {
         <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">{t.admin.xCampaigns.table.campaigns}</h2>
 
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-none">
-          {STATUS_TABS.map((tab) => (
+          {STATUS_TAB_KEYS.map((key) => (
             <button
-              key={tab.value}
-              onClick={() => { setStatusFilter(tab.value); setPage(1); }}
+              key={key}
+              onClick={() => { setStatusFilter(key); setPage(1); }}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                statusFilter === tab.value
+                statusFilter === key
                   ? "bg-pnp-accent text-white"
                   : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/50"
               }`}
             >
-              {tab.label === "All" ? t.common.viewAll :
-               tab.label === "Active" ? t.admin.xCampaigns.stats.active :
-               tab.label === "Paused" ? t.admin.xCampaigns.actions.pause :
-               tab.label === "Completed" ? "Completed" : tab.label}
+              {t.admin.xCampaigns.statusTabs[key]}
             </button>
           ))}
         </div>
@@ -1237,9 +1217,9 @@ export default function XAutoCampaigns() {
       {confirmAction && (
         <ConfirmModal
           open={true}
-          title={confirmAction.type === "delete" ? "Delete Campaign" : "Generate Post Now"}
+          title={confirmAction.type === "delete" ? t.admin.xCampaigns.confirm.deleteTitle : t.admin.xCampaigns.confirm.generateTitle}
           message={confirmAction.label}
-          confirmLabel={confirmAction.type === "delete" ? "Delete" : "Generate"}
+          confirmLabel={confirmAction.type === "delete" ? t.admin.xCampaigns.tableActions.delete : t.admin.xCampaigns.tableActions.generate}
           variant={confirmAction.type === "delete" ? "danger" : "default"}
           onConfirm={handleConfirm}
           onCancel={() => setConfirmAction(null)}
@@ -1255,10 +1235,10 @@ export default function XAutoCampaigns() {
         >
           <div className="flex items-center gap-2">
             <span className="text-lg">⚡</span>
-            <span className="text-sm font-semibold text-pnp-textPrimary">Grok Strategy Manager</span>
-            <span className="text-xs text-pnp-textSecondary">— AI social media strategist with live campaign data</span>
+            <span className="text-sm font-semibold text-pnp-textPrimary">{t.admin.xCampaigns.grok.title}</span>
+            <span className="text-xs text-pnp-textSecondary">— {t.admin.xCampaigns.grok.subtitle}</span>
           </div>
-          <span className="text-pnp-textSecondary text-xs">{grokOpen ? "▲ Collapse" : "▼ Open"}</span>
+          <span className="text-pnp-textSecondary text-xs">{grokOpen ? `▲ ${t.admin.xCampaigns.misc.collapse}` : `▼ ${t.admin.xCampaigns.misc.open}`}</span>
         </button>
 
         {grokOpen && (
@@ -1304,7 +1284,7 @@ export default function XAutoCampaigns() {
               {grokLoading && (
                 <div className="flex justify-start">
                   <div className="bg-pnp-background border border-pnp-border rounded-xl rounded-bl-sm px-3 py-2">
-                    <span className="text-pnp-textSecondary text-xs animate-pulse">Grok is thinking...</span>
+                    <span className="text-pnp-textSecondary text-xs animate-pulse">{t.admin.xCampaigns.grok.thinking}</span>
                   </div>
                 </div>
               )}
@@ -1313,14 +1293,14 @@ export default function XAutoCampaigns() {
 
             {/* Quick actions */}
             <div className="px-4 py-2 flex gap-2 flex-wrap border-t border-pnp-border/50">
-              {QUICK_ACTIONS.map((qa) => (
+              {QUICK_ACTION_KEYS.map((qa) => (
                 <button
-                  key={qa.label}
+                  key={qa.key}
                   onClick={() => sendGrokMessage(qa.prompt)}
                   disabled={grokLoading}
                   className="text-xs px-2.5 py-1 rounded-full bg-pnp-background border border-pnp-border text-pnp-textSecondary hover:border-pnp-accent/50 hover:text-pnp-textPrimary transition-colors disabled:opacity-40"
                 >
-                  {qa.label}
+                  {qa.key === "lifetime100" ? "🔥 " : ""}{(t.admin.xCampaigns.quickActions as Record<string, string>)[qa.key] || qa.key}
                 </button>
               ))}
             </div>
@@ -1338,7 +1318,7 @@ export default function XAutoCampaigns() {
                       sendGrokMessage(grokInput);
                     }
                   }}
-                  placeholder="Ask Grok anything about your campaigns, strategy, demographics..."
+                  placeholder={t.admin.xCampaigns.grok.placeholder}
                   className="flex-1 px-3 py-2 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:border-pnp-accent focus:outline-none resize-none min-h-[38px] max-h-[120px]" style={{ fontSize: "16px" }}
                   rows={1}
                   disabled={grokLoading}
@@ -1348,7 +1328,7 @@ export default function XAutoCampaigns() {
                   disabled={!grokInput.trim() || grokLoading}
                   className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm font-medium hover:bg-pnp-accent/80 disabled:opacity-40 transition-colors flex-shrink-0"
                 >
-                  Send
+                  {t.admin.xCampaigns.grok.send}
                 </button>
               </div>
               <div className="flex justify-end mt-1">
@@ -1356,7 +1336,7 @@ export default function XAutoCampaigns() {
                   onClick={resetGrokChat}
                   className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
                 >
-                  Clear conversation
+                  {t.admin.xCampaigns.grok.clear}
                 </button>
               </div>
             </div>
@@ -1370,7 +1350,7 @@ export default function XAutoCampaigns() {
           <div className="bg-pnp-surface border border-pnp-border rounded-xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-pnp-border">
               <div>
-                <h3 className="text-sm font-semibold text-pnp-textPrimary">Post Preview</h3>
+                <h3 className="text-sm font-semibold text-pnp-textPrimary">{t.admin.xCampaigns.preview.title}</h3>
                 <p className="text-xs text-pnp-textSecondary">{previewTarget.name}</p>
               </div>
               <button
@@ -1384,22 +1364,22 @@ export default function XAutoCampaigns() {
               {previewLoading ? (
                 <div className="flex items-center gap-2 text-pnp-textSecondary text-sm">
                   <div className="w-4 h-4 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
-                  Generating with Grok...
+                  {t.admin.xCampaigns.preview.generating}
                 </div>
               ) : previewOptions.length > 0 ? (
                 <div className="space-y-3">
                   {previewOptions.map((option, i) => (
                     <div key={i} className="p-3 rounded-lg bg-pnp-background border border-pnp-border">
                       <p className="text-xs font-semibold text-pnp-accent mb-1">
-                        {previewOptions.length > 1 ? `Option ${String.fromCharCode(65 + i)}` : "Generated Post"}
+                        {previewOptions.length > 1 ? `${t.admin.xCampaigns.preview.option} ${String.fromCharCode(65 + i)}` : t.admin.xCampaigns.preview.generatedPost}
                       </p>
                       <p className="text-sm text-pnp-textPrimary whitespace-pre-wrap">{option}</p>
-                      <p className="text-xs text-pnp-textSecondary mt-1">{option.length} chars</p>
+                      <p className="text-xs text-pnp-textSecondary mt-1">{option.length} {t.admin.xCampaigns.preview.chars}</p>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-pnp-textSecondary">No options generated.</p>
+                <p className="text-sm text-pnp-textSecondary">{t.admin.xCampaigns.preview.noOptions}</p>
               )}
             </div>
             <div className="p-4 border-t border-pnp-border flex justify-end">
@@ -1407,7 +1387,7 @@ export default function XAutoCampaigns() {
                 onClick={() => setPreviewTarget(null)}
                 className="px-4 py-2 rounded-lg text-sm bg-pnp-background border border-pnp-border text-pnp-textPrimary hover:border-pnp-accent/50 transition-colors"
               >
-                Close
+                {t.common.close}
               </button>
             </div>
           </div>

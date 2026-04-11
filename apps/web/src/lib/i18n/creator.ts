@@ -244,6 +244,131 @@ const strings = {
     // Withdrawal confirmation
     withdrawConfirmTitle: "Confirm Withdrawal",
     withdrawConfirmMsg: (amount: string) => `Withdraw $${amount} to your configured payout method? This action cannot be undone.`,
+
+    // BookCallModal — step titles
+    stepTitleChooseModel: "Choose a Model",
+    stepTitleBookCall: "Book a Call",
+    stepTitleChooseSlot: "Choose a Time Slot",
+    stepTitleCheckout: "Checkout",
+    stepTitleBookingConfirmed: "Booking Confirmed!",
+
+    // BookCallModal — modal aria-labels
+    ariaBookCallWith: (name: string) => `Book a call with ${name}`,
+    ariaBookPrivateCall: "Book a private call",
+    ariaGoBack: "Go back",
+    ariaCloseBookingModal: "Close booking modal",
+    ariaLoadingSlots: "Loading available slots",
+    ariaLoadingPerformers: "Loading performers",
+    ariaAvailablePerformers: "Available performers",
+    ariaAvailableSlots: "Available time slots",
+    ariaRateYourCall: "Rate your call",
+    ariaStar: (n: number) => `${n} star`,
+    ariaStars: (n: number) => `${n} stars`,
+    ariaPostCallSurvey: "Post-call survey",
+
+    // BookCallModal — permission warning banner
+    permBothBlocked: "Camera/mic blocked — allow access in browser settings to take calls",
+    permCameraBlocked: "Camera blocked — allow access in browser settings to take calls",
+    permMicBlocked: "Microphone blocked — allow access in browser settings to take calls",
+
+    // BookCallModal — online / live status
+    onlineNowBanner: "Online Now — call starts in ~15 minutes",
+    onlineIndicator: "Online",
+
+    // BookCallModal — SELECT_MODEL step
+    pickModelHint: (mins: number) => `Pick a model to book your ${mins}-minute private session with.`,
+    noModelsAvailable: "No models available",
+    checkBackSoonPerformers: "Check back soon for available performers.",
+    selectPerformerLive: (name: string) => `Select ${name} — currently live`,
+    selectPerformer: (name: string) => `Select ${name}`,
+    liveLabel: "Live",
+
+    // BookCallModal — SELECT_PACKAGE step
+    selectDurationLabel: "Select Duration",
+    mostPopularBadge: "Most Popular",
+    goToLiveChannel: "Go to Live Channel",
+    nextBtn: "Next →",
+    tryAgain: "Try Again",
+    noPackagesAvailable: "No packages available yet",
+    noPackagesHint: "This creator hasn't set up call packages yet. Check back soon.",
+    selectCallLabel: (mins: number, price: string) => `Select ${mins} min call for $${price}`,
+
+    // BookCallModal — SELECT_SLOT step
+    timesInLocalTz: (tz: string) => `Times shown in your local timezone (${tz})`,
+    noSlotsAvailable: "No available slots right now",
+    noSlotsHint: "Sorry about that! This model doesn't have any open slots in the next 30 days.",
+    viewFullCalendar: "View Full Calendar →",
+    noneWorkQuestion: "None of these slots work?",
+    viewFullCalendarLink: "View Full Calendar",
+    seeMoreSlots: "See More Slots",
+    loadingMore: "Loading more...",
+    callNowBtn: "Call Now →",
+    callNowLabel: "Call Now",
+    callNowStartsIn: (mins: number) => `Starts in ~15 minutes · ${mins} min`,
+    slotDuration: (mins: number) => `${mins} min`,
+
+    // BookCallModal — CHECKOUT step
+    orderSummaryTitle: "Order Summary",
+    orderCreatorLabel: "Creator",
+    orderDurationLabel: "Duration",
+    orderTimeSlotLabel: "Time Slot",
+    orderSlotSoon: "In ~15 minutes",
+    orderTotalLabel: "Total",
+    paymentMethodLabel: "Payment Method",
+    daimoCheckoutHint: "You will be taken to a secure USDC checkout page. Return here after completing payment.",
+    emailForReceiptLabel: "Email for Receipt",
+    emailPlaceholder: "you@example.com",
+    waitingForPayment: "Waiting for payment...",
+    retryPayment: "Retry payment",
+    payWithCrypto: "Pay with Crypto (USDC)",
+    proceedToCheckout: "Proceed to Checkout",
+    couldNotLoadPackage: "Could not load package details.",
+    retryLink: "Retry",
+    checkoutFailed: "Checkout failed. Please try again.",
+    failedLoadPackages: "Failed to load packages.",
+    failedLoadSlots: "Failed to load available slots.",
+    payMethodCard: "Card",
+
+    // BookCallModal — SUCCESS step
+    bookingConfirmedTitle: "Booking Confirmed!",
+    callScheduledFor: (date: string, time: string) => `Your call is scheduled for ${date} at ${time}`,
+    callStartsInFifteen: "Your call will start in approximately 15 minutes.",
+    bookingReceived: "Your booking has been received.",
+    callDetailsTitle: "Call Details",
+    callDetailCreator: "Creator: ",
+    callDetailDuration: "Duration: ",
+    closeBtn: "Close",
+
+    // CallPackageCards — section header & CTA
+    bookPrivateSession: "Book a Private Session",
+    bookNowBtn: "Book Now",
+    bookNowAriaLabel: (name: string, mins: number, price: number) => `Book ${name} — ${mins} minutes for $${price}`,
+    durationPill: (mins: number) => `${mins} minutes`,
+
+    // CallPackageCards — 30-min package strings
+    pkg30Name: "Quick Connection",
+    pkg30Tagline: "A quick, intimate one-on-one session",
+    pkg30Bullet1: "Private video call",
+    pkg30Bullet2: "Undivided attention",
+    pkg30Bullet3: "Perfect for a quick thrill",
+
+    // CallPackageCards — 60-min package strings
+    pkg60Name: "Full Experience",
+    pkg60Tagline: "The full private experience, unrushed",
+    pkg60Bullet1: "Extended private session",
+    pkg60Bullet2: "Deep personal connection",
+    pkg60Bullet3: "The ultimate experience",
+
+    // PostCallSurveyModal
+    surveyHowWasCall: "How was your call?",
+    surveyWith: (name: string) => `with ${name}`,
+    surveyPlaceholder: "Share your experience (optional)",
+    surveySubmitting: "Submitting...",
+    surveySubmit: "Submit",
+    surveySkip: "Skip",
+    surveyThankYou: "Thank you!",
+    surveyFeedbackHelps: "Your feedback helps improve the experience.",
+    surveyFailedToSubmit: "Failed to submit",
   },
   es: {
     signInRequired: "Inicia sesión para acceder al Panel de Creador",
@@ -465,6 +590,131 @@ const strings = {
     // Withdrawal confirmation
     withdrawConfirmTitle: "Confirmar Retiro",
     withdrawConfirmMsg: (amount: string) => `¿Retirar $${amount} a tu método de pago configurado? Esta acción no se puede deshacer.`,
+
+    // BookCallModal — step titles
+    stepTitleChooseModel: "Elige un modelo",
+    stepTitleBookCall: "Reservar llamada",
+    stepTitleChooseSlot: "Elige un horario",
+    stepTitleCheckout: "Pago",
+    stepTitleBookingConfirmed: "¡Reserva confirmada!",
+
+    // BookCallModal — modal aria-labels
+    ariaBookCallWith: (name: string) => `Reservar llamada con ${name}`,
+    ariaBookPrivateCall: "Reservar una llamada privada",
+    ariaGoBack: "Volver",
+    ariaCloseBookingModal: "Cerrar modal de reserva",
+    ariaLoadingSlots: "Cargando horarios disponibles",
+    ariaLoadingPerformers: "Cargando performers",
+    ariaAvailablePerformers: "Performers disponibles",
+    ariaAvailableSlots: "Horarios disponibles",
+    ariaRateYourCall: "Califica tu llamada",
+    ariaStar: (n: number) => `${n} estrella`,
+    ariaStars: (n: number) => `${n} estrellas`,
+    ariaPostCallSurvey: "Encuesta post llamada",
+
+    // BookCallModal — permission warning banner
+    permBothBlocked: "Cámara y micrófono bloqueados — permite el acceso en la configuración del navegador para tomar llamadas",
+    permCameraBlocked: "Cámara bloqueada — permite el acceso en la configuración del navegador para tomar llamadas",
+    permMicBlocked: "Micrófono bloqueado — permite el acceso en la configuración del navegador para tomar llamadas",
+
+    // BookCallModal — online / live status
+    onlineNowBanner: "En línea ahora — la llamada inicia en ~15 minutos",
+    onlineIndicator: "En línea",
+
+    // BookCallModal — SELECT_MODEL step
+    pickModelHint: (mins: number) => `Elige un modelo para tu sesión privada de ${mins} minutos.`,
+    noModelsAvailable: "No hay modelos disponibles",
+    checkBackSoonPerformers: "Vuelve pronto para ver los performers disponibles.",
+    selectPerformerLive: (name: string) => `Seleccionar ${name} — en vivo`,
+    selectPerformer: (name: string) => `Seleccionar ${name}`,
+    liveLabel: "En vivo",
+
+    // BookCallModal — SELECT_PACKAGE step
+    selectDurationLabel: "Seleccionar duración",
+    mostPopularBadge: "Más popular",
+    goToLiveChannel: "Ir al canal en vivo",
+    nextBtn: "Siguiente →",
+    tryAgain: "Intentar de nuevo",
+    noPackagesAvailable: "Sin paquetes disponibles aún",
+    noPackagesHint: "Este creador aún no ha configurado paquetes de llamada. Vuelve pronto.",
+    selectCallLabel: (mins: number, price: string) => `Seleccionar llamada de ${mins} min por $${price}`,
+
+    // BookCallModal — SELECT_SLOT step
+    timesInLocalTz: (tz: string) => `Horarios en tu zona horaria local (${tz})`,
+    noSlotsAvailable: "Sin horarios disponibles ahora",
+    noSlotsHint: "¡Lo sentimos! Este modelo no tiene horarios libres en los próximos 30 días.",
+    viewFullCalendar: "Ver calendario completo →",
+    noneWorkQuestion: "¿Ninguno de estos horarios te funciona?",
+    viewFullCalendarLink: "Ver calendario completo",
+    seeMoreSlots: "Ver más horarios",
+    loadingMore: "Cargando más...",
+    callNowBtn: "Llamar ahora →",
+    callNowLabel: "Llamar ahora",
+    callNowStartsIn: (mins: number) => `Inicia en ~15 minutos · ${mins} min`,
+    slotDuration: (mins: number) => `${mins} min`,
+
+    // BookCallModal — CHECKOUT step
+    orderSummaryTitle: "Resumen del pedido",
+    orderCreatorLabel: "Creador",
+    orderDurationLabel: "Duración",
+    orderTimeSlotLabel: "Horario",
+    orderSlotSoon: "En ~15 minutos",
+    orderTotalLabel: "Total",
+    paymentMethodLabel: "Método de pago",
+    daimoCheckoutHint: "Serás llevado a una página de pago segura en USDC. Regresa aquí al completar el pago.",
+    emailForReceiptLabel: "Email para recibo",
+    emailPlaceholder: "tu@ejemplo.com",
+    waitingForPayment: "Esperando pago...",
+    retryPayment: "Reintentar pago",
+    payWithCrypto: "Pagar con Cripto (USDC)",
+    proceedToCheckout: "Proceder al pago",
+    couldNotLoadPackage: "No se pudieron cargar los detalles del paquete.",
+    retryLink: "Reintentar",
+    checkoutFailed: "Error en el pago. Intenta de nuevo.",
+    failedLoadPackages: "Error al cargar paquetes.",
+    failedLoadSlots: "Error al cargar horarios disponibles.",
+    payMethodCard: "Tarjeta",
+
+    // BookCallModal — SUCCESS step
+    bookingConfirmedTitle: "¡Reserva confirmada!",
+    callScheduledFor: (date: string, time: string) => `Tu llamada está programada para el ${date} a las ${time}`,
+    callStartsInFifteen: "Tu llamada iniciará en aproximadamente 15 minutos.",
+    bookingReceived: "Tu reserva ha sido recibida.",
+    callDetailsTitle: "Detalles de la llamada",
+    callDetailCreator: "Creador: ",
+    callDetailDuration: "Duración: ",
+    closeBtn: "Cerrar",
+
+    // CallPackageCards — section header & CTA
+    bookPrivateSession: "Reservar sesión privada",
+    bookNowBtn: "Reservar ahora",
+    bookNowAriaLabel: (name: string, mins: number, price: number) => `Reservar ${name} — ${mins} minutos por $${price}`,
+    durationPill: (mins: number) => `${mins} minutos`,
+
+    // CallPackageCards — 30-min package strings
+    pkg30Name: "Conexión Rápida",
+    pkg30Tagline: "Una sesión íntima uno a uno, sin apuros",
+    pkg30Bullet1: "Videollamada privada",
+    pkg30Bullet2: "Atención exclusiva",
+    pkg30Bullet3: "Perfecto para un momento especial",
+
+    // CallPackageCards — 60-min package strings
+    pkg60Name: "Experiencia Completa",
+    pkg60Tagline: "La experiencia privada completa, sin apuros",
+    pkg60Bullet1: "Sesión privada extendida",
+    pkg60Bullet2: "Conexión personal profunda",
+    pkg60Bullet3: "La experiencia definitiva",
+
+    // PostCallSurveyModal
+    surveyHowWasCall: "¿Cómo fue tu llamada?",
+    surveyWith: (name: string) => `con ${name}`,
+    surveyPlaceholder: "Comparte tu experiencia (opcional)",
+    surveySubmitting: "Enviando...",
+    surveySubmit: "Enviar",
+    surveySkip: "Omitir",
+    surveyThankYou: "¡Gracias!",
+    surveyFeedbackHelps: "Tu opinión ayuda a mejorar la experiencia.",
+    surveyFailedToSubmit: "Error al enviar",
   },
 };
 

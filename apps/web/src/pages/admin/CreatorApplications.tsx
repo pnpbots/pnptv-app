@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
+import { useI18n } from "@/lib/i18n";
 import {
   getCreatorApplications,
   approveCreatorApplication,
@@ -22,22 +23,25 @@ function resolvePhotoUrl(photo: string | null | undefined): string | null {
   return null;
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  live: "Live Performer",
-  content_creator: "Content Creator",
-  both: "Live + Content",
-  ice: "Ice",
-  crystal: "Crystal",
-  diamond: "Diamond",
-  occasional: "Occasional",
-  full_time: "Full Time",
-};
+function getTypeLabels(t: ReturnType<typeof useI18n>["admin"]): Record<string, string> {
+  return {
+    live: t.creators.livePerformer,
+    content_creator: t.creators.contentCreator,
+    both: t.creators.liveAndContent,
+    ice: "Ice",
+    crystal: "Crystal",
+    diamond: "Diamond",
+    occasional: "Occasional",
+    full_time: "Full Time",
+  };
+}
 
 type MainTab = "applications" | "active" | "enrollments" | "casting";
 
 export default function CreatorApplications() {
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
+  const t = useI18n().admin;
   const [mainTab, setMainTab] = useState<MainTab>("applications");
   const [applications, setApplications] = useState<CreatorApplication[]>([]);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
@@ -128,10 +132,12 @@ export default function CreatorApplications() {
   if (!isAdmin) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
-        <p className="text-white/60">Admin access required</p>
+        <p className="text-white/60">{t.creators.adminRequired}</p>
       </div>
     );
   }
+
+  const TYPE_LABELS = getTypeLabels(t);
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
@@ -143,22 +149,22 @@ export default function CreatorApplications() {
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
         </svg>
-        Admin Dashboard
+        {t.creators.adminDashboard}
       </button>
 
-      <h1 className="text-2xl font-bold text-white mb-1">Creator Management</h1>
+      <h1 className="text-2xl font-bold text-white mb-1">{t.creators.title}</h1>
       <p className="text-sm mb-5" style={{ color: "#8E8E93" }}>
-        Review applications, enrollments, and manage active creator accounts
+        {t.creators.subtitle}
       </p>
 
       {/* Main tabs */}
       <div className="flex gap-1 mb-5 p-1 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }}>
         {(
           [
-            { value: "applications", label: "Applications" },
-            { value: "casting",      label: "Casting" },
-            { value: "active",       label: "Active Creators" },
-            { value: "enrollments",  label: "Enrollments" },
+            { value: "applications", label: t.creators.tabApplications },
+            { value: "casting",      label: t.creators.tabCasting },
+            { value: "active",       label: t.creators.tabActiveCreators },
+            { value: "enrollments",  label: t.creators.tabEnrollments },
           ] as { value: MainTab; label: string }[]
         ).map((tab) => (
           <button
@@ -189,10 +195,10 @@ export default function CreatorApplications() {
           {/* Casting filter tabs */}
           <div className="flex gap-2 mb-4 overflow-x-auto">
             {[
-              { value: "pending", label: "Pending" },
-              { value: "approved", label: "Approved" },
-              { value: "rejected", label: "Rejected" },
-              { value: "", label: "All" },
+              { value: "pending", label: t.shared.pending },
+              { value: "approved", label: t.shared.approve },
+              { value: "rejected", label: t.shared.reject },
+              { value: "", label: t.shared.all },
             ].map((tab) => {
               const count = tab.value ? castingCounts[tab.value] : Object.values(castingCounts).reduce((a, b) => a + b, 0);
               return (
@@ -225,7 +231,7 @@ export default function CreatorApplications() {
             </div>
           ) : castingApps.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-white/40 text-sm">No casting applications found</p>
+              <p className="text-white/40 text-sm">{t.creators.noCasting}</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -271,7 +277,7 @@ export default function CreatorApplications() {
                         <div className="mt-2 space-y-2">
                           <input
                             type="text"
-                            placeholder="Notes (optional)"
+                            placeholder={t.creators.notesPlaceholder}
                             value={castingNotes[app.id] || ""}
                             onChange={(e) => setCastingNotes((prev) => ({ ...prev, [app.id]: e.target.value }))}
                             style={{ fontSize: "16px" }}
@@ -284,7 +290,7 @@ export default function CreatorApplications() {
                               className="flex-1 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
                               style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }}
                             >
-                              {processing === app.id ? "..." : "Approve"}
+                              {processing === app.id ? t.shared.processing : t.shared.approve}
                             </button>
                             <button
                               onClick={() => handleCastingReview(app.id, "rejected")}
@@ -292,7 +298,7 @@ export default function CreatorApplications() {
                               className="flex-1 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
                               style={{ background: "rgba(239,68,68,0.1)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.2)" }}
                             >
-                              {processing === app.id ? "..." : "Reject"}
+                              {processing === app.id ? t.shared.processing : t.shared.reject}
                             </button>
                           </div>
                         </div>
@@ -321,10 +327,10 @@ export default function CreatorApplications() {
           {/* Application status filter tabs */}
           <div className="flex gap-2 mb-4 overflow-x-auto">
             {[
-              { value: "pending", label: "Pending" },
-              { value: "approved", label: "Approved" },
-              { value: "rejected", label: "Rejected" },
-              { value: "", label: "All" },
+              { value: "pending", label: t.shared.pending },
+              { value: "approved", label: t.shared.approve },
+              { value: "rejected", label: t.shared.reject },
+              { value: "", label: t.shared.all },
             ].map((tab) => {
               const count = tab.value ? statusCounts[tab.value] : Object.values(statusCounts).reduce((a, b) => a + b, 0);
               return (
@@ -357,7 +363,7 @@ export default function CreatorApplications() {
             </div>
           ) : applications.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-white/40 text-sm">No applications found</p>
+              <p className="text-white/40 text-sm">{t.creators.noApplications}</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -421,19 +427,19 @@ export default function CreatorApplications() {
                       </div>
 
                       <p className="text-xs mb-1" style={{ color: "#8E8E93" }}>
-                        Type:{" "}
+                        {t.creators.type}{" "}
                         <strong className="text-white">
                           {TYPE_LABELS[app.application_type] || app.application_type}
                         </strong>
                         {app.requested_price_usd != null && (
                           <>
                             {" \u00b7 "}
-                            Price:{" "}
-                            <strong className="text-white">${app.requested_price_usd}/mo</strong>
+                            {t.creators.price}{" "}
+                            <strong className="text-white">${app.requested_price_usd}{t.creators.perMonth}</strong>
                           </>
                         )}
                         {" \u00b7 "}
-                        Submitted: {new Date(app.created_at).toLocaleDateString()}
+                        {t.creators.submitted} {new Date(app.created_at).toLocaleDateString()}
                       </p>
 
                       {app.bio && (
@@ -442,16 +448,16 @@ export default function CreatorApplications() {
 
                       {app.call_scheduled && (
                         <p className="text-xs mb-2" style={{ color: "#5ED1C4" }}>
-                          Call scheduled
+                          {t.creators.callScheduled}
                           {app.call_scheduled_at
-                            ? ` on ${new Date(app.call_scheduled_at).toLocaleDateString()}`
+                            ? ` ${t.creators.onDate.replace("{0}", new Date(app.call_scheduled_at).toLocaleDateString())}`
                             : ""}
                         </p>
                       )}
 
                       {app.admin_notes && (
                         <p className="text-xs text-white/50 italic mb-2">
-                          Admin notes: {app.admin_notes}
+                          {t.creators.adminNotes} {app.admin_notes}
                         </p>
                       )}
 
@@ -460,7 +466,7 @@ export default function CreatorApplications() {
                         <div className="mt-2 space-y-2">
                           <input
                             type="text"
-                            placeholder="Notes (optional)"
+                            placeholder={t.creators.notesPlaceholder}
                             value={actionNotes[app.id] || ""}
                             onChange={(e) =>
                               setActionNotes((prev) => ({ ...prev, [app.id]: e.target.value }))
@@ -479,7 +485,7 @@ export default function CreatorApplications() {
                                 border: "1px solid rgba(94,209,196,0.3)",
                               }}
                             >
-                              {processing === app.id ? "..." : "Approve"}
+                              {processing === app.id ? t.shared.processing : t.shared.approve}
                             </button>
                             <button
                               onClick={() => handleReject(app.id)}
@@ -491,7 +497,7 @@ export default function CreatorApplications() {
                                 border: "1px solid rgba(239,68,68,0.2)",
                               }}
                             >
-                              {processing === app.id ? "..." : "Reject"}
+                              {processing === app.id ? t.shared.processing : t.shared.reject}
                             </button>
                           </div>
                         </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ConfirmModal } from "@/components/admin/ConfirmModal";
+import { useI18n } from "@/lib/i18n";
 import { STATUS_BADGE_VARIANTS, formatDateShort } from "@/components/admin/shared";
 import { Badge } from "@pnptv/ui-kit";
 import { UserEntitlementsSection } from "@/components/admin/UserEntitlementsSection";
@@ -81,6 +82,7 @@ interface EditForm {
 // ---------------------------------------------------------------------------
 
 export default function UserDetail() {
+  const t = useI18n().admin;
   const { id: userId } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -139,7 +141,7 @@ export default function UserDetail() {
       });
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load user");
+      setError(err instanceof Error ? err.message : t.shared.failedToLoad);
     } finally {
       setLoading(false);
     }
@@ -188,7 +190,7 @@ export default function UserDetail() {
       setSaveSuccess(true);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save changes");
+      setError(err instanceof Error ? err.message : t.userDetail.failedToSave);
     } finally {
       setSaveLoading(false);
     }
@@ -209,7 +211,7 @@ export default function UserDetail() {
       setBanConfirmOpen(false);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ban action failed");
+      setError(err instanceof Error ? err.message : t.userDetail.banFailed);
       setBanConfirmOpen(false);
     } finally {
       setBanLoading(false);
@@ -224,7 +226,7 @@ export default function UserDetail() {
       setDeleteConfirmOpen(false);
       navigate("/admin/users");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Delete failed");
+      setError(err instanceof Error ? err.message : t.userDetail.deleteFailed);
       setDeleteConfirmOpen(false);
     } finally {
       setDeleteLoading(false);
@@ -246,9 +248,9 @@ export default function UserDetail() {
   if (!user) {
     return (
       <div className="page-container text-center py-16">
-        <p className="text-pnp-textSecondary">{error || "User not found"}</p>
+        <p className="text-pnp-textSecondary">{error || t.userDetail.userNotFound}</p>
         <Link to="/admin/users" className="mt-4 inline-block text-sm text-pnp-accent hover:underline">
-          Back to Users
+          {t.userDetail.backToUsers}
         </Link>
       </div>
     );
@@ -264,21 +266,21 @@ export default function UserDetail() {
         className="flex items-center gap-1.5 text-sm text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors w-fit"
       >
         <IconChevronLeft />
-        Back to Users
+        {t.userDetail.backToUsers}
       </Link>
 
       {error && (
         <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
           {error}
           <button onClick={() => setError(null)} className="ml-2 text-red-400 hover:text-red-300">
-            Dismiss
+            {t.shared.dismiss}
           </button>
         </div>
       )}
 
       {saveSuccess && (
         <div className="px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/20 text-sm text-green-400">
-          Changes saved successfully.
+          {t.userDetail.changesSaved}
         </div>
       )}
 
@@ -340,16 +342,16 @@ export default function UserDetail() {
 
         {/* Copyable identity fields */}
         <div className="border-t border-pnp-border pt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-          <CopyField label="ID" value={user.id} />
-          <CopyField label="pnptv_id" value={user.pnptv_id} />
-          <CopyField label="Username" value={user.username} />
-          <CopyField label="Email" value={user.email} />
+          <CopyField label={t.userDetail.id} value={user.id} />
+          <CopyField label={t.userDetail.pnptvId} value={user.pnptv_id} />
+          <CopyField label={t.userDetail.username} value={user.username} />
+          <CopyField label={t.userDetail.email} value={user.email} />
           {user.telegram && <CopyField label="Telegram" value={user.telegram} />}
-          {user.twitter && <CopyField label="Twitter/X" value={user.x_username || user.twitter} />}
+          {user.twitter && <CopyField label={t.userDetail.twitterX} value={user.x_username || user.twitter} />}
           {user.last_payment_date && (
-            <CopyField label="Last paid" value={`${formatDateShort(user.last_payment_date)}${user.last_payment_amount ? ` · $${Number(user.last_payment_amount).toFixed(2)}` : ""}${user.last_payment_method ? ` · ${user.last_payment_method}` : ""}`} />
+            <CopyField label={t.userDetail.lastPaid} value={`${formatDateShort(user.last_payment_date)}${user.last_payment_amount ? ` · $${Number(user.last_payment_amount).toFixed(2)}` : ""}${user.last_payment_method ? ` · ${user.last_payment_method}` : ""}`} />
           )}
-          {user.plan_expiry && <CopyField label="Expires" value={formatDateShort(user.plan_expiry)} />}
+          {user.plan_expiry && <CopyField label={t.userDetail.expires} value={formatDateShort(user.plan_expiry)} />}
           <CopyField label="Joined" value={formatDateShort(user.created_at)} />
         </div>
       </div>
@@ -357,13 +359,13 @@ export default function UserDetail() {
       {/* Edit Form */}
       <div className="rounded-xl bg-pnp-surface border border-pnp-border p-5 space-y-4">
         <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">
-          Edit User
+          {t.userDetail.editUser}
         </h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="edit-username">
-              Username
+              {t.userDetail.username}
             </label>
             <input
               id="edit-username"
@@ -375,7 +377,7 @@ export default function UserDetail() {
           </div>
           <div>
             <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="edit-email">
-              Email
+              {t.userDetail.email}
             </label>
             <input
               id="edit-email"
@@ -387,7 +389,7 @@ export default function UserDetail() {
           </div>
           <div>
             <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="edit-sub-status">
-              Subscription Status
+              {t.userDetail.subscriptionStatus}
             </label>
             <select
               id="edit-sub-status"
@@ -402,7 +404,7 @@ export default function UserDetail() {
           </div>
           <div>
             <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="edit-sub-plan">
-              Subscription Plan
+              {t.userDetail.subscriptionPlan}
             </label>
             <select
               id="edit-sub-plan"
@@ -410,7 +412,7 @@ export default function UserDetail() {
               onChange={(e) => handleFormChange("subscriptionPlan", e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
             >
-              <option value="">— None —</option>
+              <option value="">{t.userDetail.noOption}</option>
               {plans.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.display_name} ({p.tier})
@@ -420,7 +422,7 @@ export default function UserDetail() {
           </div>
           <div>
             <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="edit-expiry">
-              Plan Expiry
+              {t.userDetail.planExpiry}
             </label>
             <input
               id="edit-expiry"
@@ -432,7 +434,7 @@ export default function UserDetail() {
           </div>
           <div>
             <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="edit-tier">
-              Tier
+              {t.userDetail.tier}
             </label>
             <select
               id="edit-tier"
@@ -454,7 +456,7 @@ export default function UserDetail() {
             disabled={saveLoading}
             className="px-5 py-2 rounded-lg bg-pnp-accent text-white text-sm font-medium hover:bg-pnp-accent/80 disabled:opacity-50 transition-colors min-h-[44px]"
           >
-            {saveLoading ? "Saving..." : "Save Changes"}
+            {saveLoading ? t.shared.saving : t.userDetail.saveChanges}
           </button>
         </div>
       </div>
@@ -474,29 +476,31 @@ export default function UserDetail() {
       <div className="rounded-xl bg-pnp-surface border border-pnp-border p-5 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">
-            Payment History
+            {t.userDetail.paymentHistory}
           </h2>
           {paymentsTotal > 0 && (
-            <span className="text-xs text-pnp-textSecondary">{paymentsTotal} transaction{paymentsTotal !== 1 ? "s" : ""}</span>
+            <span className="text-xs text-pnp-textSecondary">
+              {t.userDetail.transactionCount.replace("{0}", String(paymentsTotal))}
+            </span>
           )}
         </div>
 
         {paymentsLoading ? (
-          <div className="py-6 text-center text-pnp-textSecondary text-sm">Loading payments…</div>
+          <div className="py-6 text-center text-pnp-textSecondary text-sm">{t.userDetail.loadingPayments}</div>
         ) : payments.length === 0 ? (
-          <p className="text-sm text-pnp-textSecondary py-4 text-center">No payment history found.</p>
+          <p className="text-sm text-pnp-textSecondary py-4 text-center">{t.userDetail.noPayments}</p>
         ) : (
           <>
             <div className="overflow-x-auto -mx-5 px-5">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-pnp-border">
-                    <th className="text-left py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Date</th>
-                    <th className="text-left py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Method</th>
-                    <th className="text-left py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Plan</th>
-                    <th className="text-right py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Amount</th>
-                    <th className="text-left py-2 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Status</th>
-                    <th className="text-left py-2 pl-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">Reference</th>
+                    <th className="text-left py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">{t.userDetail.date}</th>
+                    <th className="text-left py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">{t.userDetail.method}</th>
+                    <th className="text-left py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">{t.shared.plan}</th>
+                    <th className="text-right py-2 pr-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">{t.userDetail.amount}</th>
+                    <th className="text-left py-2 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">{t.shared.status}</th>
+                    <th className="text-left py-2 pl-3 text-pnp-textSecondary font-medium uppercase tracking-wider whitespace-nowrap">{t.userDetail.reference}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-pnp-border/50">
@@ -533,17 +537,17 @@ export default function UserDetail() {
                   disabled={paymentsPage <= 1}
                   className="px-3 py-1.5 text-xs rounded-lg border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface disabled:opacity-40 transition-colors"
                 >
-                  ← Prev
+                  {t.userDetail.prevPage}
                 </button>
                 <span className="text-xs text-pnp-textSecondary">
-                  Page {paymentsPage} of {paymentsTotalPages}
+                  {t.userDetail.pageOf.replace("{0}", String(paymentsPage)).replace("{1}", String(paymentsTotalPages))}
                 </span>
                 <button
                   onClick={() => setPaymentsPage((p) => Math.min(paymentsTotalPages, p + 1))}
                   disabled={paymentsPage >= paymentsTotalPages}
                   className="px-3 py-1.5 text-xs rounded-lg border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface disabled:opacity-40 transition-colors"
                 >
-                  Next →
+                  {t.userDetail.nextPage}
                 </button>
               </div>
             )}
@@ -554,24 +558,24 @@ export default function UserDetail() {
       {/* Ban / Unban Section */}
       <div className="rounded-xl bg-red-500/5 border border-red-500/20 p-5 space-y-3">
         <h2 className="text-sm font-semibold text-red-400 uppercase tracking-wider">
-          {isBanned ? "Unban User" : "Ban User"}
+          {isBanned ? t.userDetail.unbanUser : t.userDetail.banUser}
         </h2>
         <p className="text-xs text-pnp-textSecondary">
           {isBanned
-            ? "This user is currently banned. Unbanning will restore their access."
-            : "Banning a user will immediately revoke their access and set their tier to 'banned'."}
+            ? t.userDetail.bannedText
+            : t.userDetail.banWarning}
         </p>
         {!isBanned && (
           <div>
             <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="ban-reason">
-              Ban Reason (optional)
+              {t.userDetail.banReason}
             </label>
             <textarea
               id="ban-reason"
               value={banReason}
               onChange={(e) => setBanReason(e.target.value)}
               rows={2}
-              placeholder="Reason for banning this user..."
+              placeholder={t.userDetail.banReasonPlaceholder}
               className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-red-500/50 resize-none"
             />
           </div>
@@ -585,7 +589,7 @@ export default function UserDetail() {
                 : "bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20"
             }`}
           >
-            {isBanned ? "Unban User" : "Ban User"}
+            {isBanned ? t.userDetail.unbanUser : t.userDetail.banUser}
           </button>
         </div>
       </div>
@@ -593,30 +597,30 @@ export default function UserDetail() {
       {/* Delete User Section */}
       <div className="rounded-xl bg-red-500/5 border border-red-500/20 p-5 space-y-3">
         <h2 className="text-sm font-semibold text-red-400 uppercase tracking-wider">
-          Delete User
+          {t.userDetail.deleteUser}
         </h2>
         <p className="text-xs text-pnp-textSecondary">
-          Permanently delete this user. Their account will be deactivated, personal data cleared, and all sessions destroyed. This cannot be undone.
+          {t.userDetail.deleteWarning}
         </p>
         <div className="flex justify-end">
           <button
             onClick={() => setDeleteConfirmOpen(true)}
             className="px-4 py-2 rounded-lg text-sm font-medium transition-colors min-h-[44px] bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20"
           >
-            Delete User
+            {t.userDetail.deleteUser}
           </button>
         </div>
       </div>
 
       <ConfirmModal
         open={banConfirmOpen}
-        title={banAction === "ban" ? "Ban User" : "Unban User"}
+        title={banAction === "ban" ? t.userDetail.banUser : t.userDetail.unbanUser}
         message={
           banAction === "ban"
-            ? `Are you sure you want to ban @${user.username || user.id}? They will lose all access immediately.${banReason ? ` Reason: "${banReason}"` : ""}`
-            : `Are you sure you want to unban @${user.username || user.id}? Their access will be restored.`
+            ? `${t.userDetail.banConfirm.replace("{0}", user.username || user.id)}${banReason ? ` Reason: "${banReason}"` : ""}`
+            : t.userDetail.unbanConfirm.replace("{0}", user.username || user.id)
         }
-        confirmLabel={banAction === "ban" ? "Ban User" : "Unban User"}
+        confirmLabel={banAction === "ban" ? t.userDetail.banUser : t.userDetail.unbanUser}
         variant={banAction === "ban" ? "danger" : "default"}
         onConfirm={executeBan}
         onCancel={() => setBanConfirmOpen(false)}
@@ -625,9 +629,9 @@ export default function UserDetail() {
 
       <ConfirmModal
         open={deleteConfirmOpen}
-        title="Delete User"
-        message={`Are you sure you want to permanently delete @${user.username || user.id}? Their data will be cleared and this action cannot be undone.`}
-        confirmLabel="Delete User"
+        title={t.userDetail.deleteUser}
+        message={t.userDetail.deleteConfirm.replace("{0}", user.username || user.id)}
+        confirmLabel={t.userDetail.deleteUser}
         variant="danger"
         onConfirm={executeDelete}
         onCancel={() => setDeleteConfirmOpen(false)}
