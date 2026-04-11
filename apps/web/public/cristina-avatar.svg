@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#D4007A"/>
+      <stop offset="50%" stop-color="#7B61FF"/>
+      <stop offset="100%" stop-color="#E69138"/>
+    </linearGradient>
+    <linearGradient id="skin" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#8B5E3C"/>
+      <stop offset="100%" stop-color="#6B4226"/>
+    </linearGradient>
+    <linearGradient id="hair" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1A0A2E"/>
+      <stop offset="50%" stop-color="#2D1B4E"/>
+      <stop offset="100%" stop-color="#1A0A2E"/>
+    </linearGradient>
+    <linearGradient id="lips" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#D4007A"/>
+      <stop offset="100%" stop-color="#FF3D9A"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.4" r="0.6">
+      <stop offset="0%" stop-color="#1A0A2E"/>
+      <stop offset="100%" stop-color="#0A0A14"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#D4007A"/>
+      <stop offset="35%" stop-color="#7B61FF"/>
+      <stop offset="70%" stop-color="#5ED1C4"/>
+      <stop offset="100%" stop-color="#E69138"/>
+    </linearGradient>
+    <linearGradient id="highlight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7B61FF" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#D4007A" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <circle cx="100" cy="100" r="100" fill="url(#glow)"/>
+
+  <!-- Gradient ring -->
+  <circle cx="100" cy="100" r="96" fill="none" stroke="url(#ring)" stroke-width="3" opacity="0.8"/>
+  <circle cx="100" cy="100" r="93" fill="none" stroke="url(#ring)" stroke-width="0.5" opacity="0.3"/>
+
+  <!-- Subtle glow behind head -->
+  <circle cx="100" cy="82" r="50" fill="url(#highlight)" opacity="0.3"/>
+
+  <!-- Shoulders -->
+  <path d="M58 158 Q65 132, 82 126 L100 124 L118 126 Q135 132, 142 158" fill="url(#skin)"/>
+
+  <!-- Top -->
+  <path d="M78 130 Q82 124, 100 122 Q118 124, 122 130 Q118 138, 100 140 Q82 138, 78 130Z" fill="#1A0A2E"/>
+  <path d="M78 130 Q82 124, 100 122 Q118 124, 122 130 Q118 138, 100 140 Q82 138, 78 130Z" fill="url(#bg)" opacity="0.5"/>
+
+  <!-- Neck -->
+  <path d="M92 108 Q92 118, 90 124 L110 124 Q108 118, 108 108Z" fill="url(#skin)"/>
+
+  <!-- Head shape -->
+  <ellipse cx="100" cy="78" rx="32" ry="36" fill="url(#skin)"/>
+
+  <!-- Hair — voluminous curly afro style -->
+  <path d="M64 72 Q58 42, 72 28 Q82 18, 100 16 Q118 18, 128 28 Q142 42, 136 72
+           Q140 82, 142 92 Q144 102, 138 108 Q134 96, 134 82 Q136 52, 124 36
+           Q116 26, 100 24 Q84 26, 76 36 Q64 52, 66 82 Q66 96, 62 108
+           Q56 102, 58 92 Q60 82, 64 72Z"
+        fill="url(#hair)"/>
+  <!-- Hair volume - sides -->
+  <path d="M62 108 Q56 118, 54 130 Q52 138, 58 134 Q62 126, 64 116Z" fill="url(#hair)" opacity="0.8"/>
+  <path d="M138 108 Q144 118, 146 130 Q148 138, 142 134 Q138 126, 136 116Z" fill="url(#hair)" opacity="0.8"/>
+  <!-- Hair texture curls -->
+  <circle cx="72" cy="38" r="8" fill="#2D1B4E" opacity="0.6"/>
+  <circle cx="88" cy="26" r="9" fill="#2D1B4E" opacity="0.5"/>
+  <circle cx="112" cy="26" r="9" fill="#2D1B4E" opacity="0.5"/>
+  <circle cx="128" cy="38" r="8" fill="#2D1B4E" opacity="0.6"/>
+  <circle cx="64" cy="56" r="7" fill="#2D1B4E" opacity="0.5"/>
+  <circle cx="136" cy="56" r="7" fill="#2D1B4E" opacity="0.5"/>
+  <circle cx="60" cy="78" r="6" fill="#2D1B4E" opacity="0.4"/>
+  <circle cx="140" cy="78" r="6" fill="#2D1B4E" opacity="0.4"/>
+  <!-- Purple highlights in hair -->
+  <circle cx="76" cy="32" r="4" fill="#7B61FF" opacity="0.15"/>
+  <circle cx="124" cy="32" r="4" fill="#D4007A" opacity="0.12"/>
+  <circle cx="100" cy="20" r="5" fill="#7B61FF" opacity="0.1"/>
+
+  <!-- Eyes -->
+  <ellipse cx="86" cy="76" rx="7" ry="6" fill="white"/>
+  <ellipse cx="114" cy="76" rx="7" ry="6" fill="white"/>
+  <ellipse cx="87" cy="77" rx="4" ry="4.5" fill="#1A0A2E"/>
+  <ellipse cx="115" cy="77" rx="4" ry="4.5" fill="#1A0A2E"/>
+  <!-- Iris color — violet AI glow -->
+  <ellipse cx="87" cy="77" rx="3" ry="3.5" fill="#7B61FF" opacity="0.7"/>
+  <ellipse cx="115" cy="77" rx="3" ry="3.5" fill="#7B61FF" opacity="0.7"/>
+  <ellipse cx="87" cy="77" rx="2" ry="2.5" fill="#1A0A2E"/>
+  <ellipse cx="115" cy="77" rx="2" ry="2.5" fill="#1A0A2E"/>
+  <!-- Eye shine -->
+  <circle cx="89" cy="75" r="1.5" fill="white"/>
+  <circle cx="117" cy="75" r="1.5" fill="white"/>
+  <circle cx="86" cy="78.5" r="0.8" fill="white" opacity="0.5"/>
+  <circle cx="114" cy="78.5" r="0.8" fill="white" opacity="0.5"/>
+
+  <!-- Eyelashes — subtle wing -->
+  <path d="M78 73 Q82 70, 86 72" stroke="#1A0A2E" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+  <path d="M114 72 Q118 70, 122 73" stroke="#1A0A2E" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+
+  <!-- Eyebrows — elegant arch -->
+  <path d="M78 68 Q84 63, 93 66" stroke="#1A0A2E" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M107 66 Q116 63, 122 68" stroke="#1A0A2E" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+  <!-- Nose -->
+  <path d="M98 84 Q100 88, 102 84" stroke="#6B4226" stroke-width="1.2" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <circle cx="96" cy="86" r="1.2" fill="#6B4226" opacity="0.3"/>
+  <circle cx="104" cy="86" r="1.2" fill="#6B4226" opacity="0.3"/>
+
+  <!-- Lips — full, with gradient -->
+  <path d="M88 94 Q94 91, 100 93 Q106 91, 112 94" stroke="url(#lips)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <path d="M88 94 Q94 100, 100 101 Q106 100, 112 94" fill="url(#lips)" opacity="0.7"/>
+  <!-- Lip shine -->
+  <ellipse cx="100" cy="96" rx="4" ry="1.5" fill="white" opacity="0.15"/>
+
+  <!-- Subtle blush -->
+  <ellipse cx="78" cy="86" rx="6" ry="3" fill="#D4007A" opacity="0.12"/>
+  <ellipse cx="122" cy="86" rx="6" ry="3" fill="#D4007A" opacity="0.12"/>
+
+  <!-- Earrings — small gradient dots -->
+  <circle cx="67" cy="88" r="3" fill="url(#ring)"/>
+  <circle cx="67" cy="88" r="1.5" fill="white" opacity="0.3"/>
+  <circle cx="133" cy="88" r="3" fill="url(#ring)"/>
+  <circle cx="133" cy="88" r="1.5" fill="white" opacity="0.3"/>
+
+  <!-- AI sparkle accent — subtle -->
+  <path d="M148 28 l2 6 l2 -6 l-4 0Z" fill="#5ED1C4" opacity="0.5"/>
+  <path d="M148 28 l-6 2 l6 2 l0 -4Z" fill="#5ED1C4" opacity="0.5"/>
+  <path d="M52 32 l1.5 4.5 l1.5 -4.5 l-3 0Z" fill="#7B61FF" opacity="0.4"/>
+  <path d="M52 32 l-4.5 1.5 l4.5 1.5 l0 -3Z" fill="#7B61FF" opacity="0.4"/>
+  <circle cx="156" cy="52" r="1.5" fill="#E69138" opacity="0.4"/>
+  <circle cx="44" cy="56" r="1.5" fill="#D4007A" opacity="0.4"/>
+</svg>

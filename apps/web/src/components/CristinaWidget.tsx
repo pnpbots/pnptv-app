@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useLocation } from "react-router-dom";
 import { RadioPanel, EqualizerBars } from "@/components/RadioWidget";
 import { NearbyPanel } from "@/components/NearbyWidget";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
@@ -216,10 +217,142 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
   },
 ];
 
+// ── Contextual suggestions per page ──────────────────────────────────────────
+interface ContextChip { icon: string; en: string; es: string }
+interface PageContext { titleEn: string; titleEs: string; chips: ContextChip[] }
+
+const PAGE_CONTEXT: { match: (p: string) => boolean; ctx: PageContext }[] = [
+  {
+    match: (p) => p.startsWith("/chat") || p === "/",
+    ctx: {
+      titleEn: "Hangouts & Video Rooms",
+      titleEs: "Hangouts y Salas de Video",
+      chips: [
+        { icon: "📹", en: "How do I join a Hangout video call?", es: "¿Cómo me uno a una videollamada de Hangout?" },
+        { icon: "🔒", en: "How do private Hangout rooms work?", es: "¿Cómo funcionan las salas privadas de Hangout?" },
+        { icon: "👥", en: "How do I create my own Hangout group?", es: "¿Cómo creo mi propio grupo de Hangout?" },
+        { icon: "🎙️", en: "Can I share my screen in a Hangout?", es: "¿Puedo compartir pantalla en un Hangout?" },
+      ],
+    },
+  },
+  {
+    match: (p) => p.startsWith("/live") || p === "/main-stage",
+    ctx: {
+      titleEn: "Live Streams",
+      titleEs: "Transmisiones en Vivo",
+      chips: [
+        { icon: "📺", en: "How do I watch a live stream?", es: "¿Cómo veo una transmisión en vivo?" },
+        { icon: "🎬", en: "How do I start streaming on PNPtv?", es: "¿Cómo empiezo a transmitir en PNPtv?" },
+        { icon: "💎", en: "How do tips work during a live stream?", es: "¿Cómo funcionan las propinas durante un stream?" },
+        { icon: "📅", en: "How do I book a streaming time slot?", es: "¿Cómo reservo un horario para transmitir?" },
+      ],
+    },
+  },
+  {
+    match: (p) => p.startsWith("/social"),
+    ctx: {
+      titleEn: "Social Feed",
+      titleEs: "Feed Social",
+      chips: [
+        { icon: "📝", en: "How do I create a post?", es: "¿Cómo creo una publicación?" },
+        { icon: "🔐", en: "How do exclusive/PRIME-only posts work?", es: "¿Cómo funcionan las publicaciones exclusivas PRIME?" },
+        { icon: "🌐", en: "Can I cross-post to X or Bluesky?", es: "¿Puedo publicar en X o Bluesky a la vez?" },
+        { icon: "💬", en: "How do comments and replies work?", es: "¿Cómo funcionan los comentarios y respuestas?" },
+      ],
+    },
+  },
+  {
+    match: (p) => p.startsWith("/nearby") || p.startsWith("/explore"),
+    ctx: {
+      titleEn: "Nearby & Explore",
+      titleEs: "Cercanos y Explorar",
+      chips: [
+        { icon: "📍", en: "How does the Nearby feature work?", es: "¿Cómo funciona la función Cercanos?" },
+        { icon: "🗺️", en: "How do I share my location?", es: "¿Cómo comparto mi ubicación?" },
+        { icon: "🏳️‍🌈", en: "What are Places and how do I find them?", es: "¿Qué son los Lugares y cómo los encuentro?" },
+        { icon: "👁️", en: "Who can see my location?", es: "¿Quién puede ver mi ubicación?" },
+      ],
+    },
+  },
+  {
+    match: (p) => p.startsWith("/dm"),
+    ctx: {
+      titleEn: "Direct Messages",
+      titleEs: "Mensajes Directos",
+      chips: [
+        { icon: "✉️", en: "How do I send a DM?", es: "¿Cómo envío un mensaje directo?" },
+        { icon: "🚫", en: "How do I block someone from messaging me?", es: "¿Cómo bloqueo a alguien para que no me escriba?" },
+        { icon: "📷", en: "Can I send photos or media in DMs?", es: "¿Puedo enviar fotos o media en DMs?" },
+        { icon: "🔔", en: "How do DM notifications work?", es: "¿Cómo funcionan las notificaciones de DMs?" },
+      ],
+    },
+  },
+  {
+    match: (p) => p.startsWith("/profile") || p === "/settings",
+    ctx: {
+      titleEn: "Profile & Settings",
+      titleEs: "Perfil y Configuración",
+      chips: [
+        { icon: "📸", en: "How do I change my profile photo?", es: "¿Cómo cambio mi foto de perfil?" },
+        { icon: "🔗", en: "How do I add my social media links?", es: "¿Cómo agrego mis redes sociales?" },
+        { icon: "🔒", en: "How do privacy settings work?", es: "¿Cómo funcionan los ajustes de privacidad?" },
+        { icon: "✅", en: "How do I verify my age?", es: "¿Cómo verifico mi edad?" },
+      ],
+    },
+  },
+  {
+    match: (p) => p.startsWith("/subscribe"),
+    ctx: {
+      titleEn: "Subscription & Plans",
+      titleEs: "Suscripción y Planes",
+      chips: [
+        { icon: "💳", en: "What are the PRIME plan options?", es: "¿Cuáles son las opciones del plan PRIME?" },
+        { icon: "🪙", en: "How do PNP tokens work?", es: "¿Cómo funcionan los tokens PNP?" },
+        { icon: "💰", en: "What payment methods are accepted?", es: "¿Qué métodos de pago se aceptan?" },
+        { icon: "🔄", en: "How do I cancel or change my plan?", es: "¿Cómo cancelo o cambio mi plan?" },
+      ],
+    },
+  },
+  {
+    match: (p) => p.startsWith("/media") || p.startsWith("/channels"),
+    ctx: {
+      titleEn: "Media & Content",
+      titleEs: "Media y Contenido",
+      chips: [
+        { icon: "🎵", en: "How does the radio/music player work?", es: "¿Cómo funciona el reproductor de música/radio?" },
+        { icon: "🎬", en: "What is Videorama?", es: "¿Qué es Videorama?" },
+        { icon: "📻", en: "How do I request a song?", es: "¿Cómo pido una canción?" },
+        { icon: "📺", en: "What content is available on Channels?", es: "¿Qué contenido hay en Canales?" },
+      ],
+    },
+  },
+  {
+    match: (p) => p.startsWith("/creators") || p.startsWith("/apply") || p.startsWith("/become"),
+    ctx: {
+      titleEn: "Creator Tools",
+      titleEs: "Herramientas de Creador",
+      chips: [
+        { icon: "🎭", en: "How do I become a creator on PNPtv?", es: "¿Cómo me convierto en creador en PNPtv?" },
+        { icon: "💵", en: "How do creator earnings and payouts work?", es: "¿Cómo funcionan las ganancias y pagos de creadores?" },
+        { icon: "📊", en: "Where can I see my analytics?", es: "¿Dónde puedo ver mis estadísticas?" },
+        { icon: "🎥", en: "How do I schedule a live stream?", es: "¿Cómo programo una transmisión en vivo?" },
+      ],
+    },
+  },
+];
+
+function getPageContext(pathname: string): PageContext | null {
+  for (const entry of PAGE_CONTEXT) {
+    if (entry.match(pathname)) return entry.ctx;
+  }
+  return null;
+}
+
 export function CristinaWidget({ mode = "widget", compact = false }: CristinaWidgetProps) {
   const { user, isAdmin } = useAuth();
   const { support: t } = useI18n();
   const { isPlaying: musicIsPlaying } = useMusicPlayer();
+  const location = useLocation();
   const [isOpen, setIsOpen] = useState(mode === "page");
   const [activeTab, setActiveTab] = useState<CristinaTab>("ai");
 
@@ -314,6 +447,17 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   // Compute derived values before hooks that depend on them.
   const isOnboarded = !!(user?.ageVerified && user?.termsAccepted);
   const lang = user?.language === "es" ? "es" : "en";
+
+  // Contextual suggestions based on current page
+  const pageCtx = useMemo(() => getPageContext(location.pathname), [location.pathname]);
+  const contextChips = useMemo(() => {
+    if (!pageCtx) return [];
+    return pageCtx.chips.map((c, i) => ({
+      id: `ctx-${i}`,
+      label: lang === "es" ? c.es : c.en,
+      icon: c.icon,
+    }));
+  }, [pageCtx, lang]);
 
   // Gate ticket creation behind 3 user messages
   const MIN_TURNS_FOR_TICKET = 3;
@@ -590,7 +734,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
         style={{ background: fabGradient }}
         aria-label={t.openWidgetAriaLabel}
       >
-        <span className="relative">🧜‍♀️</span>
+        <span role="img" aria-label="Cristina AI" className="w-full h-full flex items-center justify-center text-lg">🧜‍♀️</span>
         {hasUnreadReply && (
           <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-1 ring-black" />
         )}
@@ -635,7 +779,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
             className="absolute -inset-1 rounded-full"
             style={{ background: fabGradient, opacity: 0.25, filter: "blur(8px)" }}
           />
-          <span className="relative">🧜‍♀️</span>
+          <span role="img" aria-label="Cristina AI" className="w-full h-full flex items-center justify-center text-lg relative">🧜‍♀️</span>
           {/* Unread reply notification dot */}
           {hasUnreadReply && (
             <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5">
@@ -671,11 +815,11 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
         style={{ background: "rgba(30, 30, 45, 0.95)" }}
       >
         <div className="flex items-center gap-2">
-          <span className="text-lg">🧜‍♀️</span>
+          <span role="img" aria-label="Cristina AI" className="text-base">🧜‍♀️</span>
           <div>
             <h3 className="text-sm font-semibold text-pnp-textPrimary">{t.widgetName}</h3>
             <p className="text-[10px] text-pnp-textSecondary">
-              {activeTab === "vj" ? "Your VJ" : activeTab === "nearby" ? "Nearby" : t.widgetSubtitle}
+              {activeTab === "vj" ? "PNP Radio" : activeTab === "nearby" ? "Nearby" : pageCtx ? (lang === "es" ? pageCtx.titleEs : pageCtx.titleEn) : t.widgetSubtitle}
             </p>
           </div>
         </div>
@@ -727,14 +871,14 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           className={`flex-1 py-2 text-[11px] font-semibold text-center transition-colors ${activeTab === "ai" ? "text-cyan-400" : "text-gray-500 hover:text-gray-300"}`}
           style={activeTab === "ai" ? { borderBottom: "2px solid #5BC8F5" } : { borderBottom: "2px solid transparent" }}
         >
-          🧜‍♀️ AI Chat
+          <span className="inline-block mr-1 text-xs">🧜‍♀️</span> AI Chat
         </button>
         <button
           onClick={() => setActiveTab("vj")}
           className={`flex-1 py-2 text-[11px] font-semibold text-center transition-colors ${activeTab === "vj" ? "text-purple-400" : "text-gray-500 hover:text-gray-300"}`}
           style={activeTab === "vj" ? { borderBottom: "2px solid #8B5CF6" } : { borderBottom: "2px solid transparent" }}
         >
-          {musicIsPlaying ? <><EqualizerBars color="#8B5CF6" size="sm" /> VJ</> : "🎧 VJ"}
+          {musicIsPlaying ? <><EqualizerBars color="#8B5CF6" size="sm" /> Radio</> : "🛫 Radio"}
         </button>
         <button
           onClick={() => setActiveTab("nearby")}
@@ -777,10 +921,32 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
 
           {/* Greeting */}
           <div className="text-center mb-5 mt-2">
-            <span className="text-4xl block mb-2">🧜‍♀️</span>
+            <span role="img" aria-label="Cristina AI" className="block text-5xl mx-auto mb-2">🧜‍♀️</span>
             <h4 className="text-sm font-semibold text-white mb-1">{t.helpCenterTitle}</h4>
             <p className="text-xs" style={{ color: "#8E8E93" }}>{t.helpCenterSubtitle}</p>
           </div>
+
+          {/* Contextual suggestions for current page */}
+          {pageCtx && (
+            <div className="mb-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#7B61FF" }}>
+                {pageCtx.titleEn && lang === "es" ? pageCtx.titleEs : pageCtx.titleEn}
+              </p>
+              <div className="flex flex-col gap-1.5">
+                {contextChips.map((chip) => (
+                  <button
+                    key={chip.id}
+                    onClick={() => { setView("chat"); sendMessage(chip.label); }}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-left text-xs transition-all hover:scale-[1.01] active:scale-[0.99]"
+                    style={{ background: "rgba(123,97,255,0.1)", border: "1px solid rgba(123,97,255,0.25)" }}
+                  >
+                    <span className="text-sm shrink-0">{chip.icon}</span>
+                    <span className="text-white/90">{chip.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 2x2 category grid */}
           <div className="grid grid-cols-3 gap-2 mb-4">
@@ -853,9 +1019,9 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
               className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
               style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)" }}
             >
-              <span className="text-xl mb-1.5">🎧</span>
-              <p className="text-xs font-semibold text-white leading-tight">{lang === "es" ? "Musica & VJ" : "Music & VJ"}</p>
-              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{lang === "es" ? "Radio, playlists, pedir canciones" : "Radio, playlists, request songs"}</p>
+              <span className="text-xl mb-1.5">🛫</span>
+              <p className="text-xs font-semibold text-white leading-tight">{lang === "es" ? "PNP Radio" : "PNP Radio"}</p>
+              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{lang === "es" ? "Take Off · Flying · Landing" : "Take Off · Flying · Landing"}</p>
             </button>
 
             {/* Travel / Nearby */}
@@ -1521,7 +1687,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
 
               {/* Welcome message */}
               <div className="text-center mb-6 mt-4">
-                <span className="text-4xl block mb-2">🧜‍♀️</span>
+                <span role="img" aria-label="Cristina AI" className="block text-5xl mx-auto mb-2">🧜‍♀️</span>
                 <h4 className="text-sm font-semibold text-pnp-textPrimary mb-1">
                   {t.welcomeGreeting}
                 </h4>
@@ -1529,7 +1695,30 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
                   {t.welcomeSubtitle}
                 </p>
               </div>
-              {/* Suggestion chips */}
+              {/* Suggestion chips — contextual first, then generic */}
+              {contextChips.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-center" style={{ color: "#7B61FF" }}>
+                    {lang === "es" ? pageCtx!.titleEs : pageCtx!.titleEn}
+                  </p>
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    {contextChips.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => sendMessage(s.label)}
+                        className="px-3 py-1.5 rounded-full text-xs font-medium transition-all hover:scale-105 active:scale-95"
+                        style={{
+                          background: "rgba(123, 97, 255, 0.15)",
+                          border: "1px solid rgba(123, 97, 255, 0.3)",
+                          color: "rgba(255, 255, 255, 0.9)",
+                        }}
+                      >
+                        {s.icon} {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap gap-2 justify-center">
                 {suggestions.map((s) => (
                   <button

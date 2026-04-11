@@ -2,17 +2,11 @@ import React from "react";
 
 export function CristinaAvatar({ size = 36 }: { size?: number }) {
   return (
-    <div
-      className="cristina-avatar-glow rounded-full flex items-center justify-center shrink-0"
-      style={{
-        width: size,
-        height: size,
-        background: "linear-gradient(135deg, #5BC8F5, #00D4E8)",
-      }}
-    >
-      <span style={{ fontSize: size * 0.5 }} role="img" aria-label="Cristina AI">
-        🧜‍♀️
-      </span>
-    </div>
+    <span
+      role="img"
+      aria-label="Cristina AI"
+      className="cristina-avatar-glow shrink-0 flex items-center justify-center"
+      style={{ width: size, height: size, fontSize: size * 0.75, lineHeight: 1 }}
+    >🧜‍♀️</span>
   );
 }

@@ -160,7 +160,28 @@ export async function getPage(slug: string): Promise<Page | null> {
   }
 }
 
+export async function getFeaturedPrimeVideos(limit = 20): Promise<PrimeVideo[]> {
+  try {
+    const items = await directus.request(
+      readItems("prime_videos", {
+        filter: { status: { _eq: "published" } },
+        sort: ["-is_featured", "-date_created"],
+        limit,
+      })
+    );
+    return (items as PrimeVideo[]) || [];
+  } catch {
+    return [];
+  }
+}
+
 export function getAssetUrl(fileId: string | null): string | null {
   if (!fileId) return null;
   return `${DIRECTUS_URL}/assets/${fileId}`;
+}
+
+/** Low-res asset URL for preview/stage playback — prevents screen-recording theft */
+export function getLowResAssetUrl(fileId: string | null): string | null {
+  if (!fileId) return null;
+  return `${DIRECTUS_URL}/assets/${fileId}?quality=35&width=480`;
 }

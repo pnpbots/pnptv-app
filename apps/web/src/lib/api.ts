@@ -229,9 +229,11 @@ export interface MediaTrack {
 
 export function getMediaTracks(
   offset = 0,
-  limit = 20
+  limit = 20,
+  label?: string
 ): Promise<{ success: boolean; tracks: MediaTrack[] }> {
-  return request(`/api/proxy/media/tracks?offset=${offset}&limit=${limit}`);
+  const params = `offset=${offset}&limit=${limit}${label ? `&label=${encodeURIComponent(label)}` : ''}`;
+  return request(`/api/proxy/media/tracks?${params}`);
 }
 
 export function resolveSoundCloud(url: string): Promise<{
@@ -1319,6 +1321,10 @@ export interface HangoutGroup {
   isPaid?: boolean;
   priceUsd?: number;
   rules?: string | null;
+  channelId?: number | null;
+  channelAccessType?: 'free' | 'prime' | 'subscription' | 'paid' | null;
+  channelPriceUsd?: number | null;
+  channelName?: string | null;
 }
 
 export interface MessageReaction {
@@ -1372,11 +1378,12 @@ export function createHangoutGroup(
   isPublic?: boolean,
   isPaid?: boolean,
   priceUsd?: number,
-  rules?: string
+  rules?: string,
+  channelId?: number | null
 ): Promise<{ success: boolean; group: HangoutGroup }> {
   return request("/api/webapp/hangouts/groups", {
     method: "POST",
-    body: { name, description, isPublic, isPaid, priceUsd, rules },
+    body: { name, description, isPublic, isPaid, priceUsd, rules, channelId },
   });
 }
 
@@ -2243,6 +2250,17 @@ export function getPaymentStatus(
   return request(`/api/payment/${encodeURIComponent(paymentId)}/status`);
 }
 
+export function purchaseChannelAccess(
+  channelId: number,
+  provider: 'epayco' | 'daimo',
+  email?: string
+): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
+  return request(`/api/webapp/channels/${channelId}/purchase`, {
+    method: 'POST',
+    body: { provider, email },
+  });
+}
+
 export function createDashSubscription(
   planId: string,
   email?: string
@@ -2705,7 +2723,11 @@ export interface CreatorChannel {
   description: string | null;
   coverImageUrl: string | null;
   tags: string[];
-  isPremium: boolean;
+  isPremium?: boolean;
+  accessType: 'free' | 'prime' | 'subscription' | 'paid';
+  priceUsd: number;
+  hangoutGroupId: number | null;
+  hangoutGroupName?: string | null;
   postCount: number;
   sortOrder: number;
   createdAt: string;
@@ -2732,6 +2754,9 @@ export function createCreatorChannel(data: {
   description?: string;
   tags?: string[];
   isPremium?: boolean;
+  accessType?: 'free' | 'prime' | 'subscription' | 'paid';
+  priceUsd?: number;
+  linkedHangoutGroupId?: number | null;
   telegramChannelId?: string | null;
   bridgeEnabled?: boolean;
 }): Promise<{ success: boolean; channel: CreatorChannel }> {
@@ -2740,7 +2765,20 @@ export function createCreatorChannel(data: {
 
 export function updateCreatorChannel(
   id: number,
-  data: Partial<{ name: string; slug: string; description: string; tags: string[]; isPremium: boolean; sortOrder: number; coverImageUrl: string; telegramChannelId: string | null; bridgeEnabled: boolean }>
+  data: Partial<{
+    name: string;
+    slug: string;
+    description: string;
+    tags: string[];
+    isPremium: boolean;
+    accessType: 'free' | 'prime' | 'subscription' | 'paid';
+    priceUsd: number;
+    linkedHangoutGroupId: number | null;
+    sortOrder: number;
+    coverImageUrl: string;
+    telegramChannelId: string | null;
+    bridgeEnabled: boolean;
+  }>
 ): Promise<{ success: boolean; channel: CreatorChannel }> {
   return request(`/api/webapp/creator/channels/${id}`, { method: "PATCH", body: data });
 }
@@ -3049,6 +3087,109 @@ export function rejectCreatorEnrollment(
     method: "POST",
     body: { notes: notes || null },
   });
+}
+
+// ── Creator Panel: Subscribers ───────────────────────────────────────────────
+
+export function getCreatorMySubscribers(page = 1): Promise<{
+  success: boolean;
+  subscribers: Array<{
+    id: string;
+    subscriber_username: string;
+    subscriber_first_name: string;
+    subscriber_avatar: string | null;
+    started_at: string;
+    expires_at: string;
+    status: string;
+    price_usd: number;
+    auto_renew: boolean;
+    revenue: number;
+  }>;
+  stats: {
+    active_count: number;
+    total_count: number;
+    new_this_month: number;
+    churn_rate: number;
+  };
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+}> {
+  return request(`/api/webapp/creator/subscribers?page=${page}`);
+}
+
+// ── Creator Panel: Consents ──────────────────────────────────────────────────
+
+export function getCreatorConsents(): Promise<{
+  success: boolean;
+  consents: {
+    terms_accepted: boolean;
+    privacy_accepted: boolean;
+    age_verified: boolean;
+    age_verified_at: string | null;
+    wof_photo_consent: boolean;
+    content_disclaimer: boolean;
+    content_disclaimer_accepted_at: string | null;
+    created_at: string;
+  };
+}> {
+  return request("/api/webapp/creator/consents");
+}
+
+// ── Creator Panel: X Account & Campaigns ─────────────────────────────────────
+
+export function getCreatorXAccount(): Promise<{
+  success: boolean;
+  account: { account_id: string; handle: string; display_name: string } | null;
+}> {
+  return request("/api/webapp/creator/x-account");
+}
+
+export function startCreatorXOAuth(): Promise<{ success: boolean; url: string }> {
+  return request("/api/creator/x/oauth/start");
+}
+
+export function getCreatorXCampaigns(): Promise<{
+  success: boolean;
+  campaigns: XAutoCampaign[];
+  campaignLimit: number;
+}> {
+  return request("/api/webapp/creator/x-campaigns");
+}
+
+export function createCreatorXCampaign(data: {
+  name: string;
+  accountId: string;
+  topic: string;
+  grokMode?: string;
+  language?: string;
+  intervalMinutes?: number;
+  activeHoursStart?: number;
+  activeHoursEnd?: number;
+}): Promise<{ success: boolean; campaignId: string }> {
+  return request("/api/webapp/creator/x-campaigns", { method: "POST", body: data });
+}
+
+export function updateCreatorXCampaign(id: string, data: Record<string, unknown>): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/x-campaigns/${id}`, { method: "PUT", body: data });
+}
+
+export function pauseCreatorXCampaign(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/x-campaigns/${id}/pause`, { method: "POST" });
+}
+
+export function resumeCreatorXCampaign(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/x-campaigns/${id}/resume`, { method: "POST" });
+}
+
+export function deleteCreatorXCampaign(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/x-campaigns/${id}`, { method: "DELETE" });
+}
+
+export function getCreatorXCampaignHistory(id: string, page = 1): Promise<{
+  success: boolean;
+  posts: XAutoCampaignPost[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+}> {
+  return request(`/api/webapp/creator/x-campaigns/${id}/history?page=${page}`);
 }
 
 // ============================================================================
@@ -5139,6 +5280,15 @@ export function createCallCheckout(
   });
 }
 
+export function createCallCheckoutDash(
+  packageId: number
+): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; paymentId: string; usdAmount: number }> {
+  return request("/api/webapp/book-call/checkout/dash", {
+    method: "POST",
+    body: { packageId },
+  });
+}
+
 export interface CallBooking {
   id: number;
   creator_id: string;
@@ -5489,6 +5639,17 @@ export function joinHangoutCall(groupId: number): Promise<{ token: string; livek
 
 export function endHangoutCall(groupId: number): Promise<void> {
   return request(`/api/webapp/hangouts/groups/${groupId}/call/end`, { method: "POST" });
+}
+
+// ── Radio / Now Playing ──────────────────────────────────────────────────────
+
+export interface NowPlaying {
+  track: { title: string; artist: string; thumbnailUrl?: string; duration?: number; startedAt?: string } | null;
+  listenerCount: number;
+}
+
+export function getRadioNowPlaying(): Promise<NowPlaying> {
+  return request("/api/radio/now-playing");
 }
 
 // ── Online Users ──────────────────────────────────────────────────────────────

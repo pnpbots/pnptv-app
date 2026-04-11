@@ -1501,6 +1501,19 @@ const startBot = async () => {
       logger.warn(`Cristina onboarding reminders setup failed: ${error.message}`);
     }
 
+    // Initialize Cristina Stage Bot — 24/7 LiveKit presence with radio
+    try {
+      const cristinaStageBot = require('../../services/cristinaStageBot');
+      // Delay 15s to let LiveKit and DB settle
+      setTimeout(() => {
+        cristinaStageBot.start();
+      }, 15_000);
+      global.cristinaStageBot = cristinaStageBot;
+      logger.info('✓ Cristina Stage Bot scheduled (starts in 15s)');
+    } catch (error) {
+      logger.warn(`Cristina Stage Bot initialization failed: ${error.message}`);
+    }
+
     // Register commands with Telegram
     try {
       const commands = [

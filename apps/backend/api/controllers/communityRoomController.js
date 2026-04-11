@@ -429,6 +429,12 @@ const setStageMode = async (req, res) => {
 
     await CommunityRoomService.setStageMode(mode, masterInfo);
 
+    // Instantly switch Cristina bot's track to match the new mode
+    try {
+      const cristinaStageBot = global.cristinaStageBot;
+      if (cristinaStageBot) cristinaStageBot.setMode(mode);
+    } catch {}
+
     const io = socketSingleton.get();
     if (io) {
       io.to('mainstage').emit('mainstage:mode-changed', { mode, master: masterInfo });
