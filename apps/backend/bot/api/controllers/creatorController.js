@@ -1,8 +1,14 @@
 const logger = require('../../../utils/logger');
 const CreatorService = require('../../services/creatorService');
-const { query } = require('../../../config/postgres');
+const { query, getPool } = require('../../../config/postgres');
 const { hasAccess } = require('../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
+const XAutoCampaignService = require('../../../services/xAutoCampaignService');
+const { uploadBufferToCreatorFolder } = require('./cmsCreatorController');
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const VALID_GROK_MODES = new Set(['xPost', 'broadcast', 'salesPost']);
+const VALID_LANGUAGES = new Set(['en', 'es', 'bilingual']);
 
 // GET /api/webapp/creator/eligibility
 const getEligibility = async (req, res) => {
@@ -668,6 +674,286 @@ const removeCollaborator = async (req, res) => {
   }
 };
 
+// ── Creator Panel: subscribers, consents, X campaigns ────────────────────────
+
+const getMySubscribers = async (req, res) => {
+  try {
+    const creatorId = req.session?.user?.id;
+    const page = Math.max(1, parseInt(req.query.page || '1'));
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    const statsResult = await query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'active') as active_count,
+        COUNT(*) as total_count,
+        COUNT(*) FILTER (WHERE started_at >= date_trunc('month', NOW())) as new_this_month,
+        COUNT(*) FILTER (WHERE status IN ('expired', 'cancelled') AND started_at >= NOW() - interval '30 days') as churned_recent,
+        COUNT(*) FILTER (WHERE started_at < NOW() - interval '30 days') as base_for_churn
+      FROM creator_subscriptions WHERE creator_id = $1
+    `, [creatorId]);
+    const s = statsResult.rows[0];
+    const churnRate = Number(s.base_for_churn) > 0 ? Math.round((Number(s.churned_recent) / Number(s.base_for_churn)) * 100) : 0;
+
+    const subsResult = await query(`
+      SELECT cs.id, cs.status, cs.started_at, cs.expires_at, cs.price_usd, cs.auto_renew,
+             u.username as subscriber_username, u.first_name as subscriber_first_name, u.photo_file_id as subscriber_avatar,
+             COALESCE(SUM(ce.amount_creator), 0)::numeric as revenue
+      FROM creator_subscriptions cs
+      JOIN users u ON u.id = cs.subscriber_id
+      LEFT JOIN creator_earnings ce ON ce.subscription_id = cs.id
+      WHERE cs.creator_id = $1
+      GROUP BY cs.id, u.id
+      ORDER BY cs.started_at DESC
+      LIMIT $2 OFFSET $3
+    `, [creatorId, limit, offset]);
+
+    const totalResult = await query('SELECT COUNT(*) FROM creator_subscriptions WHERE creator_id = $1', [creatorId]);
+    const total = parseInt(totalResult.rows[0].count);
+
+    return res.json({
+      success: true,
+      subscribers: subsResult.rows,
+      stats: { active_count: Number(s.active_count), total_count: Number(s.total_count), new_this_month: Number(s.new_this_month), churn_rate: churnRate },
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (err) {
+    logger.error('getMySubscribers error', err);
+    return res.status(500).json({ error: 'Failed to load subscribers' });
+  }
+};
+
+const getMyConsents = async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    const result = await query(`
+      SELECT terms_accepted, privacy_accepted, age_verified, age_verified_at,
+             wof_photo_consent, content_disclaimer, content_disclaimer_accepted_at,
+             created_at
+      FROM users WHERE id = $1
+    `, [userId]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
+    return res.json({ success: true, consents: result.rows[0] });
+  } catch (err) {
+    logger.error('getMyConsents error', err);
+    return res.status(500).json({ error: 'Failed to load consents' });
+  }
+};
+
+const getMyXAccount = async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    const result = await query(`
+      SELECT account_id, handle, display_name FROM x_accounts
+      WHERE created_by = $1 AND is_active = TRUE LIMIT 1
+    `, [String(userId)]);
+    return res.json({ success: true, account: result.rows[0] || null });
+  } catch (err) {
+    logger.error('getMyXAccount error', err);
+    return res.status(500).json({ error: 'Failed to load X account' });
+  }
+};
+
+const CREATOR_CAMPAIGN_LIMIT = 2;
+
+const getMyXCampaigns = async (req, res) => {
+  try {
+    const creatorId = String(req.session?.user?.id);
+    const result = await query(`
+      SELECT c.*, a.handle, a.display_name as account_display_name
+      FROM x_auto_campaigns c
+      LEFT JOIN x_accounts a ON a.account_id = c.account_id
+      WHERE c.created_by = $1
+      ORDER BY c.created_at DESC
+      LIMIT 10
+    `, [creatorId]);
+    return res.json({ success: true, campaigns: result.rows, campaignLimit: CREATOR_CAMPAIGN_LIMIT });
+  } catch (err) {
+    logger.error('getMyXCampaigns error', err);
+    return res.status(500).json({ error: 'Failed to load campaigns' });
+  }
+};
+
+const createMyXCampaign = async (req, res) => {
+  try {
+    const creatorId = String(req.session?.user?.id);
+    const creatorUsername = req.session?.user?.username;
+    const { accountId, name, topic, grokMode, language, intervalMinutes, activeHoursStart, activeHoursEnd } = req.body;
+    if (!name || !accountId || !topic) return res.status(400).json({ error: 'name, accountId, and topic are required' });
+    if (String(name).length > 200) return res.status(400).json({ error: 'name too long (max 200 chars)' });
+    if (String(topic).length > 2000) return res.status(400).json({ error: 'topic too long (max 2000 chars)' });
+    if (grokMode && !VALID_GROK_MODES.has(grokMode)) return res.status(400).json({ error: 'Invalid grokMode' });
+    if (language && !VALID_LANGUAGES.has(language)) return res.status(400).json({ error: 'Invalid language' });
+    const safeStart = Math.max(0, Math.min(23, Number(activeHoursStart) || 9));
+    const safeEnd = Math.max(0, Math.min(23, Number(activeHoursEnd) || 22));
+
+    const acctResult = await query('SELECT 1 FROM x_accounts WHERE account_id = $1 AND created_by = $2 AND is_active = TRUE', [accountId, creatorId]);
+    if (acctResult.rows.length === 0) return res.status(403).json({ error: 'X account not found or not yours' });
+
+    // Enforce campaign limit with advisory lock to prevent TOCTOU race
+    const client = await getPool().connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [creatorId]);
+      const countResult = await client.query("SELECT COUNT(*) FROM x_auto_campaigns WHERE created_by = $1 AND status != 'completed'", [creatorId]);
+      if (parseInt(countResult.rows[0].count) >= CREATOR_CAMPAIGN_LIMIT) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `Campaign limit reached (max ${CREATOR_CAMPAIGN_LIMIT})` });
+      }
+      await client.query('COMMIT');
+    } catch (lockErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw lockErr;
+    } finally {
+      client.release();
+    }
+
+    const campaignId = await XAutoCampaignService.createCampaign({
+      name: String(name).substring(0, 200), accountId, topic: String(topic).substring(0, 2000),
+      grokMode: grokMode || 'xPost', language: language || 'en',
+      intervalMinutes: Math.max(30, Number(intervalMinutes) || 60),
+      activeHoursStart: safeStart, activeHoursEnd: safeEnd,
+      maxPosts: null, createdBy: creatorId, createdByUsername: creatorUsername,
+      mediaFolderId: null, personaType: 'generic',
+    });
+    return res.json({ success: true, campaignId });
+  } catch (err) {
+    logger.error('createMyXCampaign error', err);
+    return res.status(500).json({ error: 'Failed to create campaign' });
+  }
+};
+
+const _verifyCampaignOwnership = async (campaignId, userId) => {
+  if (!UUID_RE.test(campaignId)) return null;
+  const campaign = await XAutoCampaignService.getCampaign(campaignId);
+  if (!campaign || String(campaign.created_by) !== String(userId)) return null;
+  return campaign;
+};
+
+const updateMyXCampaign = async (req, res) => {
+  try {
+    const campaign = await _verifyCampaignOwnership(req.params.id, req.session?.user?.id);
+    if (!campaign) return res.status(403).json({ error: 'Not your campaign' });
+    const allowed = ['name', 'topic', 'grokMode', 'language', 'intervalMinutes', 'activeHoursStart', 'activeHoursEnd'];
+    const updates = {};
+    for (const key of allowed) { if (req.body[key] !== undefined) updates[key] = req.body[key]; }
+    if (updates.intervalMinutes !== undefined) updates.intervalMinutes = Math.max(30, Number(updates.intervalMinutes) || 60);
+    if (updates.grokMode && !VALID_GROK_MODES.has(updates.grokMode)) return res.status(400).json({ error: 'Invalid grokMode' });
+    if (updates.language && !VALID_LANGUAGES.has(updates.language)) return res.status(400).json({ error: 'Invalid language' });
+    await XAutoCampaignService.updateCampaign(req.params.id, updates);
+    return res.json({ success: true });
+  } catch (err) { logger.error('updateMyXCampaign error', err); return res.status(500).json({ error: 'Failed to update campaign' }); }
+};
+
+const pauseMyXCampaign = async (req, res) => {
+  try {
+    const campaign = await _verifyCampaignOwnership(req.params.id, req.session?.user?.id);
+    if (!campaign) return res.status(403).json({ error: 'Not your campaign' });
+    await XAutoCampaignService.pauseCampaign(req.params.id);
+    return res.json({ success: true });
+  } catch (err) { logger.error('pauseMyXCampaign error', err); return res.status(500).json({ error: 'Failed to pause campaign' }); }
+};
+
+const resumeMyXCampaign = async (req, res) => {
+  try {
+    const campaign = await _verifyCampaignOwnership(req.params.id, req.session?.user?.id);
+    if (!campaign) return res.status(403).json({ error: 'Not your campaign' });
+    await XAutoCampaignService.resumeCampaign(req.params.id);
+    return res.json({ success: true });
+  } catch (err) { logger.error('resumeMyXCampaign error', err); return res.status(500).json({ error: 'Failed to resume campaign' }); }
+};
+
+const deleteMyXCampaign = async (req, res) => {
+  try {
+    const campaign = await _verifyCampaignOwnership(req.params.id, req.session?.user?.id);
+    if (!campaign) return res.status(403).json({ error: 'Not your campaign' });
+    await XAutoCampaignService.deleteCampaign(req.params.id);
+    return res.json({ success: true });
+  } catch (err) { logger.error('deleteMyXCampaign error', err); return res.status(500).json({ error: 'Failed to delete campaign' }); }
+};
+
+const getMyXCampaignHistory = async (req, res) => {
+  try {
+    const campaign = await _verifyCampaignOwnership(req.params.campId, req.session?.user?.id);
+    if (!campaign) return res.status(403).json({ error: 'Not your campaign' });
+    const page = Math.max(1, parseInt(req.query.page || '1'));
+    const limit = 20;
+    const { posts, total } = await XAutoCampaignService.getCampaignHistory(req.params.campId, page, limit);
+    return res.json({ success: true, posts, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (err) { logger.error('getMyXCampaignHistory error', err); return res.status(500).json({ error: 'Failed to load history' }); }
+};
+
+// POST /api/webapp/creator/channels/:id/video
+// Owner-only: uploads a video file into the creator's private Directus folder
+// and publishes it as a social_post in this channel in a single round-trip.
+const uploadChannelVideo = async (req, res) => {
+  const channelId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
+
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No video file provided' });
+
+    const chRes = await query(
+      'SELECT id, creator_id FROM creator_channels WHERE id = $1 AND is_active = true',
+      [channelId]
+    );
+    if (!chRes.rows.length || chRes.rows[0].creator_id !== req.user.id) {
+      return res.status(404).json({ error: 'Channel not found or not yours' });
+    }
+
+    const userRes = await query(
+      'SELECT pnptv_id, creator_status FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const user = userRes.rows[0];
+    if (!user || user.creator_status !== 'active') {
+      return res.status(403).json({ error: 'Active creator account required' });
+    }
+    if (!user.pnptv_id) {
+      return res.status(500).json({ error: 'Creator missing pnptv_id — cannot scope CMS folder' });
+    }
+
+    const { fileId, url } = await uploadBufferToCreatorFolder({
+      pnptvId: user.pnptv_id,
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      contentType: req.file.mimetype,
+    });
+
+    if (!fileId || !url) {
+      return res.status(502).json({ error: 'CMS did not return a file id' });
+    }
+
+    const caption = typeof req.body?.caption === 'string'
+      ? req.body.caption.trim().slice(0, 2000)
+      : '';
+    const mediaItems = [{ url, type: 'video', cmsFileId: fileId }];
+
+    const insertRes = await query(
+      `INSERT INTO social_posts
+         (user_id, content, media_url, media_type, media_urls,
+          is_wof, is_exclusive, is_shareable, content_tier, channel_id)
+       VALUES ($1, $2, $3, 'video', $4, false, false, true, 'free', $5)
+       RETURNING id, content, media_url, media_type, media_urls, video_thumbnail_url,
+                 channel_id, likes_count, reposts_count, replies_count,
+                 is_wof, is_exclusive, is_shareable, content_tier, created_at`,
+      [req.user.id, caption, url, JSON.stringify(mediaItems), channelId]
+    );
+
+    await query(
+      `UPDATE creator_channels SET post_count = (
+         SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false
+       ) WHERE id = $1`,
+      [channelId]
+    );
+
+    return res.json({ success: true, post: insertRes.rows[0], fileId });
+  } catch (err) {
+    logger.error('uploadChannelVideo error', err?.response?.data || err);
+    return res.status(500).json({ error: 'Failed to upload channel video' });
+  }
+};
+
 module.exports = {
   getEligibility,
   activateCreator,
@@ -695,6 +981,17 @@ module.exports = {
   createChannel,
   updateChannel,
   deleteChannel,
+  uploadChannelVideo,
   addCollaborator,
   removeCollaborator,
+  getMySubscribers,
+  getMyConsents,
+  getMyXAccount,
+  getMyXCampaigns,
+  createMyXCampaign,
+  updateMyXCampaign,
+  pauseMyXCampaign,
+  resumeMyXCampaign,
+  deleteMyXCampaign,
+  getMyXCampaignHistory,
 };

@@ -12,6 +12,7 @@ const logger = require('../../../utils/logger');
 
 const DIRECTUS_URL = process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
 const DIRECTUS_TOKEN = process.env.DIRECTUS_ADMIN_TOKEN;
+const DIRECTUS_PUBLIC_URL = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
 
 // Multer: memory storage for media uploads (pass-through to Directus)
 const mediaUpload = multer({
@@ -24,7 +25,99 @@ const mediaUpload = multer({
   },
 });
 
+// Video-only upload for direct channel publishing.
+const channelVideoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['video/mp4', 'video/webm', 'video/quicktime'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only mp4, webm, or mov videos are allowed'));
+  },
+});
+
 const directusHeaders = () => ({ Authorization: `Bearer ${DIRECTUS_TOKEN}` });
+
+// ── Per-creator Directus folders ─────────────────────────────────────────────
+// Every creator gets a dedicated folder under "Creators/" keyed by pnptv_id.
+// The creator never browses Directus directly — they only see uploads we route
+// through this folder, so access scoping is enforced by not exposing anything else.
+
+const CREATORS_PARENT_NAME = 'Creators';
+const creatorFolderCache = new Map(); // pnptv_id -> folderId
+let creatorsParentFolderIdPromise = null;
+
+async function getOrCreateCreatorsParentFolder() {
+  if (creatorsParentFolderIdPromise) return creatorsParentFolderIdPromise;
+  creatorsParentFolderIdPromise = (async () => {
+    const listRes = await axios.get(`${DIRECTUS_URL}/folders`, {
+      headers: directusHeaders(),
+      params: {
+        filter: JSON.stringify({ name: { _eq: CREATORS_PARENT_NAME }, parent: { _null: true } }),
+        limit: 1,
+      },
+    });
+    const existing = listRes.data?.data?.[0];
+    if (existing) return existing.id;
+    const createRes = await axios.post(
+      `${DIRECTUS_URL}/folders`,
+      { name: CREATORS_PARENT_NAME },
+      { headers: directusHeaders() }
+    );
+    return createRes.data?.data?.id;
+  })().catch((err) => {
+    creatorsParentFolderIdPromise = null;
+    throw err;
+  });
+  return creatorsParentFolderIdPromise;
+}
+
+async function getOrCreateCreatorFolder(pnptvId) {
+  if (!pnptvId) throw new Error('pnptvId required for creator folder');
+  const cached = creatorFolderCache.get(pnptvId);
+  if (cached) return cached;
+
+  const parentId = await getOrCreateCreatorsParentFolder();
+  const folderName = `creator-${pnptvId}`;
+
+  const listRes = await axios.get(`${DIRECTUS_URL}/folders`, {
+    headers: directusHeaders(),
+    params: {
+      filter: JSON.stringify({ name: { _eq: folderName }, parent: { _eq: parentId } }),
+      limit: 1,
+    },
+  });
+  let folderId = listRes.data?.data?.[0]?.id;
+  if (!folderId) {
+    const createRes = await axios.post(
+      `${DIRECTUS_URL}/folders`,
+      { name: folderName, parent: parentId },
+      { headers: directusHeaders() }
+    );
+    folderId = createRes.data?.data?.id;
+  }
+  if (folderId) creatorFolderCache.set(pnptvId, folderId);
+  return folderId;
+}
+
+// Uploads a buffer into the creator's private Directus folder and returns { fileId, url }.
+async function uploadBufferToCreatorFolder({ pnptvId, buffer, filename, contentType }) {
+  const folderId = await getOrCreateCreatorFolder(pnptvId);
+  const form = new FormData();
+  if (folderId) form.append('folder', folderId);
+  form.append('file', buffer, { filename, contentType });
+
+  const uploadRes = await axios.post(`${DIRECTUS_URL}/files`, form, {
+    headers: { ...directusHeaders(), ...form.getHeaders() },
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+  });
+  const file = uploadRes.data?.data;
+  return {
+    fileId: file?.id,
+    url: `${DIRECTUS_PUBLIC_URL}/assets/${file?.id}`,
+  };
+}
 
 /** Verify caller is an active creator and return their pnptv_id */
 async function requireActiveCreator(req, res) {
@@ -361,27 +454,16 @@ const uploadMedia = [
 
       if (!req.file) return res.status(400).json({ error: 'No file provided' });
 
-      const form = new FormData();
-      form.append('file', req.file.buffer, {
+      // Always route into the creator's private folder. Client-supplied `folder`
+      // values are ignored so a creator can never write into someone else's space.
+      const { fileId, url } = await uploadBufferToCreatorFolder({
+        pnptvId: user.pnptv_id,
+        buffer: req.file.buffer,
         filename: req.file.originalname,
         contentType: req.file.mimetype,
       });
 
-      // Optional folder
-      if (req.body.folder) form.append('folder', req.body.folder);
-
-      const uploadRes = await axios.post(`${DIRECTUS_URL}/files`, form, {
-        headers: { ...directusHeaders(), ...form.getHeaders() },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-      });
-
-      const file = uploadRes.data?.data;
-      return res.json({
-        success: true,
-        fileId: file?.id,
-        url: `${process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app'}/assets/${file?.id}`,
-      });
+      return res.json({ success: true, fileId, url });
     } catch (err) {
       logger.error('cms.uploadMedia error', err?.response?.data || err);
       return res.status(500).json({ error: 'File upload failed' });
@@ -401,4 +483,8 @@ module.exports = {
   updateShow,
   deleteShow,
   uploadMedia,
+  // Exposed for reuse by the channel-video direct-publish flow.
+  getOrCreateCreatorFolder,
+  uploadBufferToCreatorFolder,
+  channelVideoUpload,
 };

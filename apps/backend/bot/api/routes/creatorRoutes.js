@@ -5,6 +5,7 @@ const multer = require('multer');
 const creatorController = require('../controllers/creatorController');
 const cmsCreatorController = require('../controllers/cmsCreatorController');
 const authGuard = require('../middleware/authGuard');
+const creatorGuard = require('../middleware/creatorGuard');
 const roleGuard = require('../middleware/roleGuard');
 const { adminGuard } = require('../../../middleware/guards');
 
@@ -72,6 +73,14 @@ router.post('/channels', authGuard, creatorController.createChannel);
 router.patch('/channels/:id', authGuard, creatorController.updateChannel);
 router.delete('/channels/:id', authGuard, creatorController.deleteChannel);
 
+// Direct video upload: file → creator's private Directus folder → channel post.
+router.post(
+  '/channels/:id/video',
+  authGuard,
+  cmsCreatorController.channelVideoUpload.single('video'),
+  creatorController.uploadChannelVideo,
+);
+
 // ── Channel collaborators (owner-only mutation) ───────────────────────────────
 router.post('/channels/:id/collaborators', authGuard, creatorController.addCollaborator);
 router.delete('/channels/:id/collaborators', authGuard, creatorController.removeCollaborator);
@@ -80,6 +89,18 @@ router.delete('/channels/:id/collaborators', authGuard, creatorController.remove
 // IMPORTANT: must come BEFORE /:creatorId/* param routes
 router.get('/milestones', authGuard, creatorController.getMilestones);
 router.post('/milestones/:id/respond', authGuard, creatorController.respondToMilestone);
+
+// ── Creator panel: subscribers, consents, X campaigns ────────────────────────
+router.get('/subscribers', authGuard, creatorGuard, creatorController.getMySubscribers);
+router.get('/consents', authGuard, creatorGuard, creatorController.getMyConsents);
+router.get('/x-account', authGuard, creatorGuard, creatorController.getMyXAccount);
+router.get('/x-campaigns', authGuard, creatorGuard, creatorController.getMyXCampaigns);
+router.post('/x-campaigns', authGuard, creatorGuard, creatorController.createMyXCampaign);
+router.put('/x-campaigns/:id', authGuard, creatorGuard, creatorController.updateMyXCampaign);
+router.post('/x-campaigns/:id/pause', authGuard, creatorGuard, creatorController.pauseMyXCampaign);
+router.post('/x-campaigns/:id/resume', authGuard, creatorGuard, creatorController.resumeMyXCampaign);
+router.delete('/x-campaigns/:id', authGuard, creatorGuard, creatorController.deleteMyXCampaign);
+router.get('/x-campaigns/:campId/history', authGuard, creatorGuard, creatorController.getMyXCampaignHistory);
 
 // ── Admin routes ──────────────────────────────────────────────────────────────
 // IMPORTANT: static paths must come BEFORE /:creatorId/* param routes
