@@ -231,6 +231,405 @@ class EntitlementAccessService {
       return next();
     };
   }
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Scoped (per-resource) access
+  //
+  // hasResourceAccess(userId, kind, resourceId) is the single entry point for
+  // deciding whether a user can use a specific channel, hangout, or creator.
+  // Scoped access is standalone: a user with channel-access:X keeps access to
+  // channel X for the full paid period regardless of pnp-member state.
+  //
+  // Resolution ladder (fail-open on first match):
+  //   1. banned → deny
+  //   2. admin → allow
+  //   3. direct scope match (channel-access:id, hangout-access:id, creator-subscription:id)
+  //   4. global prime → allow (prime unlocks everything)
+  //   5. kind/access_type specific rules (free / prime / subscription / paid)
+  //   6. otherwise require pnp-member (free-community fallback)
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * Load a resource row (channel / hangout / creator) given its kind + id.
+   * Returns a normalized object with access_type + creator_id where relevant.
+   *
+   * @param {'channel'|'hangout'|'creator'} kind
+   * @param {string} resourceId
+   * @returns {Promise<object|null>}
+   */
+  static async _loadResource(kind, resourceId) {
+    if (!kind || !resourceId) return null;
+    try {
+      if (kind === 'channel') {
+        const { rows } = await query(
+          `SELECT id, creator_id, access_type, price_usd, hangout_group_id, name, cover_image_url
+             FROM creator_channels
+             WHERE id = $1 LIMIT 1`,
+          [String(resourceId)]
+        );
+        return rows[0] || null;
+      }
+      if (kind === 'hangout') {
+        const { rows } = await query(
+          `SELECT id, creator_id, is_paid, price_usd, channel_id, name
+             FROM hangout_groups
+             WHERE id = $1 LIMIT 1`,
+          [String(resourceId)]
+        );
+        return rows[0] || null;
+      }
+      if (kind === 'creator') {
+        const { rows } = await query(
+          `SELECT id FROM users WHERE id = $1 LIMIT 1`,
+          [String(resourceId)]
+        );
+        return rows[0] || null;
+      }
+    } catch (err) {
+      logger.error('EntitlementAccessService._loadResource failed', {
+        kind, resourceId, error: err.message,
+      });
+    }
+    return null;
+  }
+
+  /**
+   * Check whether a user has access to a specific resource.
+   * Returns a structured decision object the caller can turn into JSON / 403.
+   *
+   * @param {string|number} userId
+   * @param {'channel'|'hangout'|'creator'} kind
+   * @param {string} resourceId
+   * @returns {Promise<{allowed: boolean, reason: string, scoped?: boolean,
+   *                    accessType?: string, creatorId?: string, priceUsd?: number,
+   *                    code?: string}>}
+   */
+  static async hasResourceAccess(userId, kind, resourceId) {
+    if (!userId) {
+      return { allowed: false, reason: 'unauthenticated', code: 'AUTH_REQUIRED' };
+    }
+
+    // 1. banned
+    if (await EntitlementAccessService.isBanned(userId)) {
+      return { allowed: false, reason: 'banned', code: 'ACCOUNT_SUSPENDED' };
+    }
+
+    const resource = await EntitlementAccessService._loadResource(kind, resourceId);
+    if (!resource) {
+      return { allowed: false, reason: 'not_found', code: 'NOT_FOUND' };
+    }
+
+    // 3. direct scope match — highest priority because it's what the user paid for
+    if (kind === 'channel') {
+      if (await EntitlementAccessService.hasEntitlement(userId, 'channel-access', { creatorId: String(resource.id) })) {
+        return { allowed: true, reason: 'scoped_channel_access', scoped: true };
+      }
+    }
+    if (kind === 'hangout') {
+      // Standalone paid hangout
+      if (await EntitlementAccessService.hasEntitlement(userId, 'hangout-access', { creatorId: String(resource.id) })) {
+        return { allowed: true, reason: 'scoped_hangout_access', scoped: true };
+      }
+      // If the hangout is linked to a channel, a paid channel-access on that channel grants it.
+      if (resource.channel_id) {
+        if (await EntitlementAccessService.hasEntitlement(userId, 'channel-access', { creatorId: String(resource.channel_id) })) {
+          return { allowed: true, reason: 'scoped_via_channel', scoped: true };
+        }
+      }
+    }
+    if (kind === 'creator') {
+      if (await EntitlementAccessService.hasEntitlement(userId, 'creator-subscription', { creatorId: String(resource.id) })) {
+        return { allowed: true, reason: 'scoped_creator_subscription', scoped: true };
+      }
+    }
+
+    // 4. global PRIME override — prime unlocks everything except banned state
+    if (await EntitlementAccessService.hasEntitlement(userId, 'prime')) {
+      return { allowed: true, reason: 'prime_override' };
+    }
+
+    // 5. kind-specific resolution
+    if (kind === 'channel') {
+      const accessType = resource.access_type || 'free';
+      if (accessType === 'free') {
+        return { allowed: true, reason: 'free' };
+      }
+      if (accessType === 'prime') {
+        return {
+          allowed: false,
+          reason: 'requires_prime',
+          accessType: 'prime',
+          code: 'PRIME_REQUIRED',
+        };
+      }
+      if (accessType === 'subscription') {
+        const creatorId = String(resource.creator_id);
+        if (await EntitlementAccessService.hasEntitlement(userId, 'creator-subscription', { creatorId })) {
+          return { allowed: true, reason: 'creator_subscriber', scoped: true };
+        }
+        return {
+          allowed: false,
+          reason: 'requires_subscription',
+          accessType: 'subscription',
+          creatorId,
+          code: 'CREATOR_SUBSCRIPTION_REQUIRED',
+        };
+      }
+      if (accessType === 'paid') {
+        return {
+          allowed: false,
+          reason: 'requires_payment',
+          accessType: 'paid',
+          creatorId: resource.creator_id ? String(resource.creator_id) : undefined,
+          priceUsd: resource.price_usd ? Number(resource.price_usd) : undefined,
+          code: 'PAYMENT_REQUIRED',
+        };
+      }
+    }
+
+    if (kind === 'hangout') {
+      // Channel-linked hangouts delegate to the channel's access model.
+      if (resource.channel_id) {
+        return EntitlementAccessService.hasResourceAccess(userId, 'channel', resource.channel_id);
+      }
+      // Standalone paid hangout without a direct scope entitlement
+      if (resource.is_paid) {
+        return {
+          allowed: false,
+          reason: 'requires_payment',
+          accessType: 'paid',
+          creatorId: resource.creator_id ? String(resource.creator_id) : undefined,
+          priceUsd: resource.price_usd ? Number(resource.price_usd) : undefined,
+          code: 'PAYMENT_REQUIRED',
+        };
+      }
+      // Free community hangout → require pnp-member
+    }
+
+    if (kind === 'creator') {
+      // Viewing a creator profile itself is public. Callers should only use
+      // hasResourceAccess('creator', id) when gating creator-exclusive content.
+      return {
+        allowed: false,
+        reason: 'requires_subscription',
+        accessType: 'subscription',
+        creatorId: String(resource.id),
+        code: 'CREATOR_SUBSCRIPTION_REQUIRED',
+      };
+    }
+
+    // 6. Free-community fallback: require pnp-member for everything else.
+    if (await EntitlementAccessService.hasEntitlement(userId, 'pnp-member')) {
+      return { allowed: true, reason: 'pnp_member' };
+    }
+    return {
+      allowed: false,
+      reason: 'requires_member',
+      code: 'MEMBER_REQUIRED',
+    };
+  }
+
+  /**
+   * Express middleware factory that requires scoped resource access.
+   * Reads the resource id from req.params[paramName]. On deny, returns a
+   * structured 403 the frontend can use to render the correct payment modal.
+   *
+   * @param {'channel'|'hangout'|'creator'} kind
+   * @param {string} [paramName='id']
+   * @returns {import('express').RequestHandler}
+   */
+  static requireResourceAccess(kind, paramName = 'id') {
+    return async (req, res, next) => {
+      const user = req.session?.user;
+      if (!user?.id) {
+        return res.status(401).json({ success: false, error: 'Authentication required', code: 'AUTH_REQUIRED' });
+      }
+      // Admins bypass
+      const role = (user.role || '').toLowerCase();
+      if (role === 'admin' || role === 'superadmin') return next();
+
+      const resourceId = req.params?.[paramName];
+      if (!resourceId) {
+        return res.status(400).json({ success: false, error: `Missing ${paramName} param` });
+      }
+
+      const decision = await EntitlementAccessService.hasResourceAccess(user.id, kind, resourceId);
+      if (decision.allowed) return next();
+
+      // Map decision to HTTP response
+      const status =
+        decision.code === 'AUTH_REQUIRED' ? 401 :
+        decision.code === 'NOT_FOUND' ? 404 :
+        decision.code === 'ACCOUNT_SUSPENDED' ? 403 :
+        403;
+
+      return res.status(status).json({
+        success: false,
+        error: decision.reason || 'Access denied',
+        code: decision.code || 'ACCESS_DENIED',
+        accessType: decision.accessType,
+        creatorId: decision.creatorId,
+        priceUsd: decision.priceUsd,
+        scoped: decision.scoped === true,
+        kind,
+        resourceId,
+        upgradeUrl: decision.code === 'PRIME_REQUIRED' || decision.code === 'MEMBER_REQUIRED' ? '/subscribe' : undefined,
+      });
+    };
+  }
+
+  /**
+   * Aggregate structured access data for the My Access user page.
+   * Returns a flat object: global membership, paid channels, subscribed creators,
+   * paid hangouts, and private call credit count.
+   *
+   * @param {string|number} userId
+   * @returns {Promise<{
+   *   tier: 'PRIME'|'BASIC'|'FREE',
+   *   global: {primeExpiresAt: string|null, primeLifetime: boolean,
+   *            memberExpiresAt: string|null, memberLifetime: boolean,
+   *            privateCallCredits: number},
+   *   channels: Array<{id, name, coverUrl, creatorId, creatorHandle, expiresAt, isLifetime, url}>,
+   *   hangouts: Array<{id, name, avatarUrl, expiresAt, isLifetime, url}>,
+   *   creators: Array<{id, displayName, handle, avatarUrl, expiresAt, isLifetime, url}>
+   * }>}
+   */
+  static async getUserResourceAccess(userId) {
+    const empty = {
+      tier: 'FREE',
+      global: {
+        primeExpiresAt: null, primeLifetime: false,
+        memberExpiresAt: null, memberLifetime: false,
+        privateCallCredits: 0,
+      },
+      channels: [],
+      hangouts: [],
+      creators: [],
+    };
+    if (!userId) return empty;
+
+    try {
+      const [entRes, tier] = await Promise.all([
+        query(`
+          SELECT ue.id, ue.add_on_id, ue.creator_id, ue.is_lifetime, ue.expires_at,
+                 ue.is_consumed, ue.granted_at
+            FROM user_entitlements ue
+            WHERE ue.user_id = $1
+              AND ue.is_consumed = false
+              AND (ue.is_lifetime = true OR (ue.expires_at IS NOT NULL AND ue.expires_at > NOW()))
+            ORDER BY ue.granted_at DESC
+        `, [String(userId)]),
+        EntitlementAccessService.getUserLabel(userId),
+      ]);
+
+      const rows = entRes.rows;
+      const result = { ...empty, tier, channels: [], hangouts: [], creators: [] };
+
+      // Partition rows by add_on_id
+      const channelRows = [];
+      const hangoutRows = [];
+      const creatorRows = [];
+      let privateCallCredits = 0;
+
+      for (const r of rows) {
+        if (r.add_on_id === 'prime') {
+          result.global.primeExpiresAt = r.expires_at;
+          result.global.primeLifetime = !!r.is_lifetime;
+        } else if (r.add_on_id === 'pnp-member') {
+          result.global.memberExpiresAt = r.expires_at;
+          result.global.memberLifetime = !!r.is_lifetime;
+        } else if (r.add_on_id === 'private-calls') {
+          privateCallCredits += 1;
+        } else if (r.add_on_id === 'channel-access' && r.creator_id) {
+          channelRows.push(r);
+        } else if (r.add_on_id === 'hangout-access' && r.creator_id) {
+          hangoutRows.push(r);
+        } else if (r.add_on_id === 'creator-subscription' && r.creator_id) {
+          creatorRows.push(r);
+        }
+      }
+      // Also count unconsumed private-calls credits
+      // (we already counted above; include legacy consumed=false rows that are lifetime)
+      result.global.privateCallCredits = privateCallCredits;
+
+      // Resolve display metadata in parallel.
+      // Note: creator_id in a user_entitlements row is the SCOPE id for that
+      // add-on — a channel id, hangout id, or user id depending on the add_on_id.
+      const [channelMeta, hangoutMeta, creatorMeta] = await Promise.all([
+        channelRows.length > 0
+          ? query(
+              `SELECT id, name, cover_image_url, creator_id FROM creator_channels WHERE id::text = ANY($1::text[])`,
+              [channelRows.map((r) => String(r.creator_id))]
+            ).then((x) => x.rows).catch(() => [])
+          : Promise.resolve([]),
+        hangoutRows.length > 0
+          ? query(
+              `SELECT id, name, avatar_url FROM hangout_groups WHERE id::text = ANY($1::text[])`,
+              [hangoutRows.map((r) => String(r.creator_id))]
+            ).then((x) => x.rows).catch(() => [])
+          : Promise.resolve([]),
+        creatorRows.length > 0
+          ? query(
+              `SELECT id, first_name, last_name, username, photo_file_id FROM users WHERE id = ANY($1::text[])`,
+              [creatorRows.map((r) => String(r.creator_id))]
+            ).then((x) => x.rows).catch(() => [])
+          : Promise.resolve([]),
+      ]);
+
+      const chById = new Map(channelMeta.map((c) => [String(c.id), c]));
+      const hgById = new Map(hangoutMeta.map((h) => [String(h.id), h]));
+      const crById = new Map(creatorMeta.map((u) => [String(u.id), u]));
+
+      result.channels = channelRows.map((r) => {
+        const meta = chById.get(String(r.creator_id)) || {};
+        return {
+          id: String(r.creator_id),
+          name: meta.name || 'Channel',
+          coverUrl: meta.cover_image_url || null,
+          creatorId: meta.creator_id ? String(meta.creator_id) : null,
+          expiresAt: r.expires_at,
+          isLifetime: !!r.is_lifetime,
+          url: `/channels/${r.creator_id}`,
+        };
+      });
+
+      result.hangouts = hangoutRows.map((r) => {
+        const meta = hgById.get(String(r.creator_id)) || {};
+        return {
+          id: String(r.creator_id),
+          name: meta.name || 'Hangout',
+          avatarUrl: meta.avatar_url || null,
+          expiresAt: r.expires_at,
+          isLifetime: !!r.is_lifetime,
+          url: `/chat/${r.creator_id}`,
+        };
+      });
+
+      result.creators = creatorRows.map((r) => {
+        const meta = crById.get(String(r.creator_id)) || {};
+        const displayName =
+          [meta.first_name, meta.last_name].filter(Boolean).join(' ').trim()
+          || meta.username
+          || 'Creator';
+        return {
+          id: String(r.creator_id),
+          displayName,
+          handle: meta.username || null,
+          avatarUrl: meta.photo_file_id || null,
+          expiresAt: r.expires_at,
+          isLifetime: !!r.is_lifetime,
+          url: `/profile/${r.creator_id}`,
+        };
+      });
+
+      return result;
+    } catch (err) {
+      logger.error('EntitlementAccessService.getUserResourceAccess failed', {
+        userId, error: err.message,
+      });
+      return empty;
+    }
+  }
 }
 
 module.exports = EntitlementAccessService;

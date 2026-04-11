@@ -82,13 +82,29 @@ class Plan {
   }
 
   /**
-   * Get public plans (exclude promo/hidden plans)
+   * Get public subscription plans (member/PRIME tiers only).
+   * Excludes promo plans, creator-only plans, per-resource plans (channel/hangout),
+   * and any plan whose only add-ons are scoped (channel-access, hangout-access,
+   * creator-subscription). Those should be purchased in-context from the resource
+   * itself, not from the generic /subscribe page.
    * @returns {Promise<Array>} Public subscription plans
    */
   static async getPublicPlans() {
     const plans = await this.getAll();
     const hiddenIds = new Set(this.getPromotionalPlans().map((plan) => plan.id));
-    return plans.filter((plan) => !hiddenIds.has(plan.id) && plan.tier !== 'creator');
+    const SCOPED_ADD_ONS = new Set(['channel-access', 'hangout-access', 'creator-subscription']);
+    const EXCLUDED_TIERS = new Set(['creator', 'channel', 'hangout']);
+    return plans.filter((plan) => {
+      if (hiddenIds.has(plan.id)) return false;
+      if (EXCLUDED_TIERS.has(plan.tier)) return false;
+      // If the plan has add-ons and every add-on is scoped, it's a per-resource
+      // purchase masquerading as a subscription plan — hide it from /subscribe.
+      const addOns = Array.isArray(plan.addOns) ? plan.addOns : [];
+      if (addOns.length > 0 && addOns.every((a) => SCOPED_ADD_ONS.has(a.id))) {
+        return false;
+      }
+      return true;
+    });
   }
 
   /**

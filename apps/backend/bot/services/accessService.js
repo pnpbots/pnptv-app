@@ -236,6 +236,67 @@ async function hasEntitlement(userId, addOnId, { creatorId = null } = {}) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Channel access gate — evaluates creator_channels.access_type for a user.
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine whether a user may access a creator channel (or a hangout linked
+ * to that channel).
+ *
+ * @param {string|number|null} userId
+ * @param {{ id?: number, access_type: string, price_usd: number|string, creator_id: string }} channel
+ * @returns {Promise<{
+ *   allowed: boolean,
+ *   reason: string,
+ *   requiresPayment?: boolean,
+ *   priceUsd?: number,
+ *   accessType?: string,
+ *   creatorId?: string,
+ * }>}
+ */
+async function checkChannelAccess(userId, channel) {
+  // Thin compatibility wrapper around EntitlementAccessService.hasResourceAccess.
+  // Keeps the legacy response shape so existing callers
+  // (hangoutGroupController.joinGroup, etc.) do not need to change.
+  const EntitlementAccessService = require('./entitlementAccessService');
+  const { access_type } = channel || {};
+  const channelId = channel?.id || channel?.creator_id;
+
+  // Free channels are always accessible — preserve fast path for unauthenticated callers too.
+  if (access_type === 'free') {
+    return { allowed: true, reason: 'free' };
+  }
+  if (!userId) {
+    return { allowed: false, reason: 'unauthenticated', accessType: access_type };
+  }
+  if (!channelId) {
+    return { allowed: false, reason: 'not_found' };
+  }
+
+  // Channel owner always has access.
+  if (String(userId) === String(channel.creator_id)) {
+    return { allowed: true, reason: 'owner' };
+  }
+
+  try {
+    const decision = await EntitlementAccessService.hasResourceAccess(userId, 'channel', String(channelId));
+    return {
+      allowed: decision.allowed,
+      reason: decision.reason || (decision.allowed ? 'allowed' : 'denied'),
+      accessType: decision.accessType || access_type,
+      creatorId: decision.creatorId || channel?.creator_id,
+      priceUsd: decision.priceUsd ?? (channel?.price_usd != null ? Number(channel.price_usd) : undefined),
+      requiresPayment: decision.code === 'PAYMENT_REQUIRED',
+      scoped: decision.scoped === true,
+      code: decision.code,
+    };
+  } catch (err) {
+    logger.error('checkChannelAccess error', { userId, channelId, error: err.message });
+    return { allowed: false, reason: 'error', accessType: access_type };
+  }
+}
+
 module.exports = {
   TIER,
   TIER_LEVEL,
@@ -251,4 +312,5 @@ module.exports = {
   validateTierFresh,
   requireTier,
   hasEntitlement,
+  checkChannelAccess,
 };

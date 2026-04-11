@@ -17,8 +17,8 @@ const Channels = lazy(() => import("@/pages/Channels"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Social = lazy(() => import("@/pages/Social"));
 const Profile = lazy(() => import("@/pages/Profile"));
-const CreatorDashboard = lazy(() => import("@/pages/CreatorDashboard"));
 const Subscribe = lazy(() => import("@/pages/Subscribe"));
+const MyAccess = lazy(() => import("@/pages/MyAccess"));
 const DirectMessages = lazy(() => import("@/pages/DirectMessages"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
 const DaimoCheckout = lazy(() => import("@/pages/DaimoCheckout"));
@@ -77,6 +77,9 @@ const CreatorAvailability = lazy(() => import("@/pages/creators/CreatorAvailabil
 const CreatorAnalytics = lazy(() => import("@/pages/creators/CreatorAnalytics"));
 const CreatorSettings = lazy(() => import("@/pages/creators/CreatorSettings"));
 const CreatorApply = lazy(() => import("@/pages/creators/CreatorApply"));
+const CreatorSubscribers = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorSubscribers })));
+const CreatorConsents = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorConsents })));
+const CreatorXCampaignsPage = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorXCampaigns })));
 
 export const router = createBrowserRouter([
   {
@@ -273,6 +276,16 @@ export const router = createBrowserRouter([
           <ModuleLoader>
             <VerificationGate>
               <Subscribe />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "my-access",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <MyAccess />
             </VerificationGate>
           </ModuleLoader>
         ),
@@ -510,6 +523,9 @@ export const router = createBrowserRouter([
       { path: "analytics", element: <ModuleLoader><CreatorAnalytics /></ModuleLoader> },
       { path: "settings", element: <ModuleLoader><CreatorSettings /></ModuleLoader> },
       { path: "apply", element: <ModuleLoader><CreatorApply /></ModuleLoader> },
+      { path: "subscribers", element: <ModuleLoader><CreatorSubscribers /></ModuleLoader> },
+      { path: "consents", element: <ModuleLoader><CreatorConsents /></ModuleLoader> },
+      { path: "x-campaigns", element: <ModuleLoader><CreatorXCampaignsPage /></ModuleLoader> },
     ],
   },
   {

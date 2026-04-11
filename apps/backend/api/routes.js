@@ -98,7 +98,7 @@ const requirePageAuth = (req, res, next) => {
 // Soft & Tier Authentication Middleware
 // ==========================================
 
-const { requireTier, isMemberOrAbove, isAdmin: isAdminTier } = require('../services/accessService');
+const { requireTier, isMemberOrAbove, isAdmin: isAdminTier, checkChannelAccess } = require('../services/accessService');
 
 // Entitlement-based access control — replaces requireTier for all route middleware
 const EntitlementAccessService = require('../services/entitlementAccessService');
@@ -133,6 +133,10 @@ const softAuth = (req, res, next) => {
 // Admins (role=admin|superadmin) always bypass. Banned users get 403 before the check.
 const requirePrimeTier = EntitlementAccessService.requireEntitlement('prime');
 const requireMemberTier = EntitlementAccessService.requireEntitlement('pnp-member');
+// Scoped resource gates — reach into req.params to resolve the target resource
+// and allow users who have a scoped entitlement for it, even without pnp-member.
+const requireHangoutAccess = EntitlementAccessService.requireResourceAccess('hangout', 'id');
+const requireChannelAccess = EntitlementAccessService.requireResourceAccess('channel', 'channelId');
 
 /**
  * DM rate limit for free tier users — uses Redis daily counter
@@ -1503,6 +1507,10 @@ app.get('/api/admin/check', adminCheckLimiter, creatorAdminGuard, (req, res) => 
 // X OAuth routes (admin-guarded for account management, public alias for callback)
 app.use('/api/admin/x/oauth', adminGuard, xOAuthRoutes);
 app.use('/api/auth/x', xOAuthRoutes);
+
+// Creator X OAuth (requires active creator, not admin)
+const creatorGuardForOAuth = require('./middleware/creatorGuard');
+app.use('/api/creator/x/oauth', requireSessionAuth, creatorGuardForOAuth, xOAuthRoutes);
 
 // Audit log middleware — registered here so it covers ALL /api/admin/* routes,
 // including those defined before the RBAC block further down the file.
@@ -3351,24 +3359,39 @@ async function ensureEmailCredentials(userId, email, language) {
 }
 
 // Get a random available Meru link for a product
+// Verifies the link is actually unpaid on Meru before serving it
 app.get('/api/meru/random-link', requireSessionAuth, asyncHandler(async (req, res) => {
   const { product = 'lifetime-pass' } = req.query;
   const meruLinkService = require('../services/meruLinkService');
-  
+  const meruPaymentService = require('../services/meruPaymentService');
+
   try {
-    const link = await meruLinkService.getRandomAvailableLink(product);
-    
-    if (!link) {
-      return res.status(404).json({ 
-        success: false, 
-        error: `No active Meru links found for product: ${product}` 
-      });
+    // Try up to 5 random links to find one that's genuinely unpaid on Meru
+    const MAX_ATTEMPTS = 5;
+    const triedCodes = new Set();
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const link = await meruLinkService.getRandomAvailableLink(product);
+
+      if (!link) break;
+      if (triedCodes.has(link.code)) continue;
+      triedCodes.add(link.code);
+
+      // Verify link is not already paid on Meru
+      const verification = await meruPaymentService.verifyPayment(link.code);
+      if (!verification.isPaid) {
+        // Fresh link — serve it
+        return res.json({ success: true, code: link.code, url: link.meru_link });
+      }
+
+      // Already paid on Meru — mark as used so it won't be picked again
+      logger.warn('Meru link already paid but was active in DB, marking as used', { code: link.code, paidAt: verification.paidAt });
+      await meruLinkService.invalidateLinkAfterActivation(link.code, 'unknown', 'paid-on-meru-no-activation');
     }
-    
-    res.json({
-      success: true,
-      code: link.code,
-      url: link.meru_link
+
+    return res.status(404).json({
+      success: false,
+      error: `No active Meru links found for product: ${product}`
     });
   } catch (error) {
     logger.error('Error in /api/meru/random-link:', error);
@@ -4300,7 +4323,7 @@ app.get('/api/webapp/hangouts/groups/discover', requireSessionAuth, asyncHandler
 // join-by-invite must be before /:id to avoid :code being captured as :id
 app.post('/api/webapp/hangouts/groups/join-by-invite/:code', requireSessionAuth, asyncHandler(hangoutGroupController.joinByInvite));
 app.get('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.getGroup));
-app.post('/api/webapp/hangouts/groups/:id/join', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.joinGroup));
+app.post('/api/webapp/hangouts/groups/:id/join', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.joinGroup));
 app.post('/api/webapp/hangouts/groups/:id/leave', requireSessionAuth, asyncHandler(hangoutGroupController.leaveGroup));
 app.delete('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.deleteGroup));
 app.patch('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.updateGroup));
@@ -4312,28 +4335,31 @@ app.get('/api/webapp/hangouts/groups/:id/requests', requireSessionAuth, asyncHan
 app.post('/api/webapp/hangouts/groups/:id/requests/:requestId/:action', requireSessionAuth, asyncHandler(hangoutGroupController.handleJoinRequest));
 
 // ── Hangout Group Chat ───────────────────────────────────────────────────────
-app.get('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.getMessages));
+// All chat/message/media/read operations on a specific hangout use
+// requireHangoutAccess — this lets users with a scoped entitlement
+// (channel-access or hangout-access) use chat even without pnp-member.
+app.get('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.getMessages));
 // search MUST be registered before /:msgId routes so "search" is not parsed as a msgId
-app.get('/api/webapp/hangouts/groups/:id/messages/search', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.searchMessages));
-app.patch('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.editMessage));
-app.delete('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.deleteMessage));
-app.post('/api/webapp/hangouts/groups/:id/messages/:msgId/react', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.toggleReaction));
+app.get('/api/webapp/hangouts/groups/:id/messages/search', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.searchMessages));
+app.patch('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.editMessage));
+app.delete('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.deleteMessage));
+app.post('/api/webapp/hangouts/groups/:id/messages/:msgId/react', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.toggleReaction));
 app.post('/api/webapp/hangouts/groups/:id/link-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.linkTelegramGroup));
 app.post('/api/webapp/hangouts/groups/:id/unlink-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.unlinkTelegramGroup));
 app.get('/api/webapp/hangouts/groups/:id/video-chat-status', requireSessionAuth, asyncHandler(hangoutGroupController.getVideoChatStatus));
-app.get('/api/webapp/hangouts/groups/:id/messages/:msgId/reactions', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.getReactions));
-app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.sendMessage));
+app.get('/api/webapp/hangouts/groups/:id/messages/:msgId/reactions', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.getReactions));
+app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.sendMessage));
 // Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
 app.post(
   '/api/webapp/hangouts/groups/:id/media',
   requireSessionAuth,
-  requireMemberTier,
+  requireHangoutAccess,
   uploadLimiter,
   uploadHangoutMedia,
   asyncHandler(hangoutMediaController.uploadHangoutMedia)
 );
 // Mark group messages as read
-app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, requireMemberTier, asyncHandler(hangoutGroupController.markAsRead));
+app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.markAsRead));
 // Hangout group management
 app.post('/api/webapp/hangouts/groups/:id/kick', requireSessionAuth, asyncHandler(hangoutGroupController.kickMember));
 app.post('/api/webapp/hangouts/groups/:id/ban', requireSessionAuth, asyncHandler(hangoutGroupController.banMember));
@@ -4475,7 +4501,7 @@ app.get('/api/webapp/me/referral', asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   const stats = await referralService.getReferralStats(user.id);
-  return res.json({ ...stats, link: `https://pnptv.app/join?ref=${stats.code}` });
+  return res.json({ ...stats, link: `https://app.pnptv.app/join?ref=${stats.code}` });
 }));
 
 // Referral: redeem a code (called on register)
@@ -4776,7 +4802,7 @@ app.put('/api/webapp/admin/radio/requests/:requestId', adminGuard, asyncHandler(
 }));
 
 // Request SoundCloud track
-app.post('/api/webapp/radio/request-soundcloud', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/webapp/radio/request-soundcloud', requireSessionAuth, adminGuard, asyncHandler(async (req, res) => {
   const { url } = req.body;
   const userId = req.user.id;
 
@@ -4797,11 +4823,22 @@ app.post('/api/webapp/radio/request-soundcloud', requireSessionAuth, asyncHandle
 
 app.get('/api/proxy/media/tracks', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
-    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 100);
+    const label = req.query.label ? String(req.query.label).toLowerCase() : null;
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), label ? 500 : 100);
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
 
-    // Fetch from media_library (SoundCloud etc.)
-    const dbMedia = await MediaPlayerModel.getMediaLibrary('audio', limit, offset);
+    let dbMedia;
+    if (label) {
+      // Direct label-filtered query for flight mode radio
+      const result = await getPool().query(
+        `SELECT * FROM media_library WHERE is_public = true AND type = 'audio' AND LOWER(label) = $1 ORDER BY RANDOM() LIMIT $2 OFFSET $3`,
+        [label, limit, offset]
+      );
+      dbMedia = result.rows;
+    } else {
+      // Fetch from media_library (SoundCloud etc.)
+      dbMedia = await MediaPlayerModel.getMediaLibrary('audio', limit, offset);
+    }
     const tracks = (dbMedia || []).map(m => ({
       id: `db_${m.id}`,
       title: m.title,
@@ -4971,7 +5008,7 @@ async function fetchPerformerPhotos(performers) {
   }
 }
 
-app.get('/api/performers/featured', asyncHandler(async (req, res) => {
+app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   try {
     const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
@@ -5125,7 +5162,13 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
       return 0;
     });
 
-    res.json({ success: true, performers: mapped });
+    // Strip HLS stream URLs for unauthenticated users — prevents public access to stream links.
+    const isAuthenticated = !!req.user?.id;
+    const safePerformers = isAuthenticated
+      ? mapped
+      : mapped.map(({ hlsUrl, ...rest }) => rest);
+
+    res.json({ success: true, performers: safePerformers });
   } catch (error) {
     logger.error(`Performers featured error: ${error.message}`);
     res.json({ success: true, performers: [] });
@@ -5357,6 +5400,61 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
   }
 }));
 
+// Purchase access to a paid channel (and its linked hangout)
+app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.user;
+  const channelId = parseInt(req.params.channelId, 10);
+  const { provider, email } = req.body;
+
+  if (!['epayco', 'daimo'].includes(provider)) {
+    return res.status(400).json({ error: 'Provider must be epayco or daimo' });
+  }
+
+  const { rows: channels } = await getPool().query(
+    'SELECT id, creator_id, access_type, price_usd, hangout_group_id, name FROM creator_channels WHERE id = $1 AND is_active = true',
+    [channelId]
+  );
+  if (channels.length === 0) return res.status(404).json({ error: 'Channel not found' });
+  const channel = channels[0];
+
+  if (channel.access_type !== 'paid' || !channel.price_usd || Number(channel.price_usd) <= 0) {
+    return res.status(400).json({ error: 'This channel does not require payment' });
+  }
+
+  // Check if user already has access
+  const { checkChannelAccess } = require('../services/accessService');
+  const access = await checkChannelAccess(user.id, channel);
+  if (access.allowed) {
+    return res.status(400).json({ error: 'You already have access to this channel' });
+  }
+
+  // Create payment — creatorId carries channelId for price lookup + entitlement scoping
+  const PaymentService = require('../services/paymentService');
+  const payment = await PaymentService.createPayment({
+    userId: user.id,
+    planId: 'channel_access',
+    provider,
+    creatorId: String(channel.id),
+  });
+
+  // Store channel metadata on the payment record for webhook processing
+  await getPool().query(
+    `UPDATE payments SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
+    [JSON.stringify({ channelId: channel.id, hangoutGroupId: channel.hangout_group_id, channelName: channel.name }), payment.id]
+  );
+
+  if (email) {
+    await getPool().query('UPDATE payments SET metadata = metadata || $1::jsonb WHERE id = $2', [JSON.stringify({ email }), payment.id]);
+  }
+
+  return res.json({
+    success: true,
+    paymentId: payment.id,
+    paymentUrl: payment.paymentUrl || `/payment/${payment.id}`,
+    checkoutUrl: payment.checkoutUrl || `/checkout/${payment.id}`,
+  });
+}));
+
 app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, res) => {
   const channelId = parseInt(req.params.channelId, 10);
   if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
@@ -5381,6 +5479,8 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
     const isOwner = viewerId !== null && String(viewerId) === String(ch.creator_id);
     const isCollaborator = !isOwner && Array.isArray(ch.collaborators) && ch.collaborators.includes(String(viewerId));
 
+    const accessType = ch.access_type || (ch.is_premium ? 'subscription' : 'free');
+
     const channel = {
       id: ch.id,
       creatorId: ch.creator_id,
@@ -5390,6 +5490,9 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       coverImageUrl: ch.cover_image_url,
       tags: ch.tags || [],
       isPremium: ch.is_premium,
+      accessType,
+      priceUsd: Number(ch.price_usd) || 0,
+      hangoutGroupId: ch.hangout_group_id || null,
       postCount: ch.post_count,
       createdAt: ch.created_at,
       creatorName: [ch.first_name, ch.last_name].filter(Boolean).join(' ') || ch.username || 'Creator',
@@ -5402,19 +5505,20 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       isCollaborator,
     };
 
-    // Check premium access
+    // Check channel access using unified access gate
     let locked = false;
-    if (ch.is_premium) {
-      if (!viewerId || !isOwner) {
-        if (viewerId) {
-          const subRes = await getPool().query(
-            `SELECT id FROM creator_subscriptions WHERE creator_id = $1 AND subscriber_id = $2 AND expires_at > NOW()`,
-            [ch.creator_id, viewerId]
-          );
-          if (!subRes.rows.length) locked = true;
-        } else {
-          locked = true;
-        }
+    let lockedReason = null;
+    if (!isOwner) {
+      const channelForCheck = {
+        id: ch.id,
+        access_type: accessType,
+        price_usd: ch.price_usd || 0,
+        creator_id: ch.creator_id,
+      };
+      const access = await checkChannelAccess(viewerId, channelForCheck);
+      if (!access.allowed) {
+        locked = true;
+        lockedReason = access.reason;
       }
     }
 
@@ -5436,7 +5540,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       posts = postsRes.rows;
     }
 
-    res.json({ success: true, channel, posts, locked });
+    res.json({ success: true, channel, posts, locked, lockedReason });
   } catch (err) {
     logger.error('Channel detail error:', err);
     res.status(500).json({ error: 'Failed to load channel' });
@@ -7269,6 +7373,73 @@ const callBookingController = require('./controllers/callBookingController');
 app.post('/api/webapp/book-call/checkout',
   requireSessionAuth,
   asyncHandler(callBookingController.createCheckout));
+
+// Dash (BTCPay) checkout for call packages
+app.post('/api/webapp/book-call/checkout/dash', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const { packageId } = req.body;
+  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
+
+  const pkgResult = await getPool().query(
+    'SELECT * FROM call_packages WHERE id = $1 AND is_active = true', [packageId]
+  );
+  const pkg = pkgResult.rows[0];
+  if (!pkg) return res.status(404).json({ success: false, error: 'Package not found' });
+
+  const userId = String(user.telegram_id || user.id);
+  const orderId = `pnptv-call-${userId}-${Date.now()}`;
+  const usdAmount = parseFloat(pkg.price_usd);
+
+  try {
+    const invoice = await createDashInvoice({
+      usdAmount,
+      userId,
+      orderId,
+      description: `PNPtv Private Call — ${pkg.title || pkg.sku}`,
+      redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/live`,
+    });
+
+    // Create a payment record so the webhook can find it
+    const PaymentModel = require('../models/paymentModel');
+    const payment = await PaymentModel.create({
+      userId,
+      planId: null,
+      provider: 'dash',
+      sku: pkg.sku,
+      amount: usdAmount,
+      currency: 'USD',
+      status: 'pending',
+      metadata: {
+        type: 'call_package',
+        packageId: pkg.id,
+        packageSku: pkg.sku,
+        creatorId: pkg.creator_id,
+        btcpay_invoice_id: invoice.invoiceId,
+      },
+    });
+
+    // Store in dash_subscription_orders for the existing Dash webhook handler
+    await getPool().query(
+      `INSERT INTO dash_subscription_orders (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')`,
+      [userId, pkg.sku, null, usdAmount, invoice.invoiceId]
+    );
+
+    return res.json({
+      success: true,
+      invoiceId: invoice.invoiceId,
+      checkoutUrl: invoice.checkoutUrl,
+      paymentId: payment.id,
+      usdAmount,
+    });
+  } catch (err) {
+    logger.error(`Dash call package invoice error: ${err.message}`);
+    if (err.message?.includes('not configured')) {
+      return res.status(503).json({ success: false, error: 'Crypto payments unavailable.' });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to create Dash invoice.' });
+  }
+}));
 
 app.get('/api/webapp/bookings/:bookingId',
   requireSessionAuth,

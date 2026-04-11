@@ -448,6 +448,17 @@ class PaymentService {
         }
       }
 
+      // For channel access, use the channel's price
+      if (planId === 'channel_access' && creatorId) {
+        const channelRes = await query(
+          'SELECT price_usd FROM creator_channels WHERE id = $1 AND is_active = true',
+          [creatorId]  // creatorId is overloaded to carry channelId for channel_access
+        );
+        if (channelRes.rows[0]) {
+          paymentAmount = parseFloat(channelRes.rows[0].price_usd);
+        }
+      }
+
       const payment = await PaymentModel.create({
         userId,
         planId,
@@ -1298,7 +1309,7 @@ class PaymentService {
             // Grant entitlements based on plan_add_ons mapping
             let grantResult;
             try {
-              grantResult = await PaymentService.grantEntitlementsForPlan(userId, planIdOrBookingId, 'epayco');
+              grantResult = await PaymentService.grantEntitlementsForPlan(userId, planIdOrBookingId, 'epayco', payment?.metadata);
             } catch (entitlementErr) {
               logger.error('grantEntitlementsForPlan threw unexpectedly — ePayco will retry', {
                 error: entitlementErr.message, userId, planId: planIdOrBookingId,
@@ -2108,8 +2119,8 @@ class PaymentService {
             try {
               const tipAmount = parseFloat(tipPayment?.amount || source?.amountUnits || '0');
               if (tipAmount > 0) {
-                const creatorShare = parseFloat((tipAmount * 0.85).toFixed(2));
-                const platformShare = parseFloat((tipAmount * 0.15).toFixed(2));
+                const creatorShare = parseFloat((tipAmount * 0.70).toFixed(2));
+                const platformShare = parseFloat((tipAmount * 0.30).toFixed(2));
                 const { query } = require('../config/postgres');
                 await query(`
                   INSERT INTO creator_earnings (creator_id, source_type, source_id, amount_total, amount_creator, amount_platform, status)
@@ -2323,7 +2334,7 @@ class PaymentService {
             // Daimo webhook handler returns { success: false } and Daimo can retry.
             let daimoGrantResult;
             try {
-              daimoGrantResult = await PaymentService.grantEntitlementsForPlan(userId, planId, 'daimo');
+              daimoGrantResult = await PaymentService.grantEntitlementsForPlan(userId, planId, 'daimo', payment?.metadata);
             } catch (entitlementErr) {
               logger.error('grantEntitlementsForPlan threw unexpectedly — Daimo will retry', {
                 error: entitlementErr.message, userId, planId,
@@ -4318,7 +4329,7 @@ class PaymentService {
    * @param {string} [source='payment'] - Source for audit log
    * @returns {Promise<{granted: number, errors: number}>}
    */
-  static async grantEntitlementsForPlan(userId, planId, source = 'payment') {
+  static async grantEntitlementsForPlan(userId, planId, source = 'payment', paymentMetadata = null) {
     const result = { granted: 0, errors: 0 };
     try {
       // Look up what add-ons this plan grants, with per-add-on duration overrides
@@ -4345,36 +4356,85 @@ class PaymentService {
           // Per-add-on duration takes priority, then fall back to plan's duration
           const durationDays = row.addon_duration_days || row.plan_duration_days || 30;
 
+          // Per-resource scoping: which add-ons are scoped, and which metadata
+          // field supplies the resource id.
+          //   channel-access        → paymentMetadata.channelId
+          //   hangout-access        → paymentMetadata.hangoutGroupId
+          //   creator-subscription  → paymentMetadata.creatorId
+          let scopeCreatorId = null;
+          if (row.add_on_id === 'channel-access' && paymentMetadata?.channelId) {
+            scopeCreatorId = String(paymentMetadata.channelId);
+          } else if (row.add_on_id === 'hangout-access' && paymentMetadata?.hangoutGroupId) {
+            scopeCreatorId = String(paymentMetadata.hangoutGroupId);
+          } else if (row.add_on_id === 'creator-subscription' && paymentMetadata?.creatorId) {
+            scopeCreatorId = String(paymentMetadata.creatorId);
+          }
+
           if (isLifetime) {
             // Lifetime: upsert with no expiry
             await txClient.query(`
-              INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, source_plan_id)
-              VALUES ($1, $2, true, $3)
+              INSERT INTO user_entitlements (user_id, add_on_id, creator_id, is_lifetime, source_plan_id)
+              VALUES ($1, $2, $3, true, $4)
               ON CONFLICT (user_id, add_on_id, creator_id)
               DO UPDATE SET is_lifetime = true, is_consumed = false, updated_at = NOW()
-            `, [userId, row.add_on_id, planId]);
+            `, [userId, row.add_on_id, scopeCreatorId, planId]);
           } else {
-            // Time-limited: extend from current expiry if still active, else from now
+            // Time-limited: extend from current expiry if still active, else from now.
+            // For scoped add-ons we MUST pass creator_id so the ON CONFLICT clause
+            // matches the (user_id, add_on_id, creator_id) unique key correctly and
+            // we don't stomp on a global row of the same add_on_id.
             await txClient.query(`
-              INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id)
-              VALUES ($1, $2, NOW() + ($3::integer * INTERVAL '1 day'), $4)
+              INSERT INTO user_entitlements (user_id, add_on_id, creator_id, expires_at, source_plan_id)
+              VALUES ($1, $2, $3, NOW() + ($4::integer * INTERVAL '1 day'), $5)
               ON CONFLICT (user_id, add_on_id, creator_id)
               DO UPDATE SET
                 expires_at = CASE
                   WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
                   WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
-                    THEN user_entitlements.expires_at + ($3::integer * INTERVAL '1 day')
-                  ELSE NOW() + ($3::integer * INTERVAL '1 day')
+                    THEN user_entitlements.expires_at + ($4::integer * INTERVAL '1 day')
+                  ELSE NOW() + ($4::integer * INTERVAL '1 day')
                 END,
                 is_consumed = false,
                 updated_at = NOW()
               WHERE NOT user_entitlements.is_lifetime
-            `, [userId, row.add_on_id, parseInt(durationDays, 10), planId]);
+            `, [userId, row.add_on_id, scopeCreatorId, parseInt(durationDays, 10), planId]);
+          }
+
+          // Dual-write to legacy creator_subscriptions so old read paths stay working.
+          // Phase-out happens in a later PR after monitoring shows no legacy reads.
+          if (row.add_on_id === 'creator-subscription' && scopeCreatorId) {
+            try {
+              const durationSql = isLifetime
+                ? null // legacy table has no lifetime flag; use a far-future expiry
+                : parseInt(durationDays, 10);
+              await txClient.query(`
+                INSERT INTO creator_subscriptions (creator_id, subscriber_id, status, started_at, expires_at)
+                VALUES ($1, $2, 'active', NOW(),
+                        CASE WHEN $3::integer IS NULL
+                             THEN NOW() + INTERVAL '100 years'
+                             ELSE NOW() + ($3::integer * INTERVAL '1 day')
+                        END)
+                ON CONFLICT (creator_id, subscriber_id) DO UPDATE SET
+                  status = 'active',
+                  expires_at = CASE
+                    WHEN $3::integer IS NULL THEN NOW() + INTERVAL '100 years'
+                    WHEN creator_subscriptions.expires_at > NOW()
+                      THEN creator_subscriptions.expires_at + ($3::integer * INTERVAL '1 day')
+                    ELSE NOW() + ($3::integer * INTERVAL '1 day')
+                  END,
+                  updated_at = NOW()
+              `, [scopeCreatorId, userId, durationSql]);
+            } catch (dualWriteErr) {
+              logger.warn('Creator subscription dual-write failed (non-critical)', {
+                userId, creatorId: scopeCreatorId, error: dualWriteErr.message,
+              });
+            }
           }
 
           result.granted++;
           logger.info('Entitlement granted', {
-            userId, addOn: row.add_on_name, planId, isLifetime, durationDays
+            userId, addOn: row.add_on_name, planId, isLifetime, durationDays,
+            scopeCreatorId: scopeCreatorId || null,
           });
         }
 
@@ -4389,6 +4449,46 @@ class PaymentService {
         throw txErr;
       } finally {
         txClient.release();
+      }
+
+      // Auto-join hangout group for channel-access payments
+      if (planId === 'channel_access' && paymentMetadata?.hangoutGroupId) {
+        try {
+          await query(
+            'INSERT INTO hangout_group_members (group_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+            [paymentMetadata.hangoutGroupId, userId, 'member']
+          );
+          logger.info('Auto-joined hangout after channel access payment', {
+            userId, groupId: paymentMetadata.hangoutGroupId, channelId: paymentMetadata.channelId,
+          });
+        } catch (joinErr) {
+          logger.warn('Failed to auto-join hangout after channel access', { error: joinErr.message });
+        }
+      }
+
+      // Record 70/30 earnings split for channel access payments
+      if (planId === 'channel_access' && paymentMetadata?.channelId) {
+        try {
+          const channelRes = await query(
+            'SELECT creator_id, price_usd FROM creator_channels WHERE id = $1',
+            [paymentMetadata.channelId]
+          );
+          if (channelRes.rows[0]) {
+            const grossAmount = parseFloat(channelRes.rows[0].price_usd);
+            const amountCreator = Math.round(grossAmount * 0.70 * 100) / 100;
+            const amountPlatform = Math.round(grossAmount * 0.30 * 100) / 100;
+            await query(
+              `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, period_month)
+               VALUES ($1, $2, $3, $4, 'available', date_trunc('month', CURRENT_DATE))`,
+              [channelRes.rows[0].creator_id, grossAmount, amountCreator, amountPlatform]
+            );
+            logger.info('Channel access earnings recorded (70/30)', {
+              creatorId: channelRes.rows[0].creator_id, channelId: paymentMetadata.channelId, grossAmount, amountCreator,
+            });
+          }
+        } catch (earningsErr) {
+          logger.warn('Failed to record channel access earnings (non-critical)', { error: earningsErr.message });
+        }
       }
 
       // Audit log written outside the transaction — non-critical, must not block payment flow

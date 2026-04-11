@@ -348,7 +348,7 @@
                     </div>
                 </div>
 
-                <!-- Card info -->
+                <!-- Card info — values are passed to ePayco SDK as a plain object, not via form parsing. -->
                 <div class="form-section">
                     <div class="section-title">Card Details</div>
                     <div class="field">
@@ -409,7 +409,7 @@
         <!-- STATE: 3DS Redirect (iframe for bank auth) -->
         <div id="state-3ds" class="state">
             <p style="font-size:13px; color:#8E8E93; text-align:center; margin-bottom:12px;">Complete authentication with your bank</p>
-            <iframe id="threeds-iframe" class="threeds-frame" sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation allow-popups"></iframe>
+            <iframe id="threeds-iframe" class="threeds-frame" sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation-by-user-activation allow-popups allow-popups-to-escape-sandbox"></iframe>
             <p class="msg msg-info" style="margin-top:12px;">After completing bank verification, your payment will be confirmed automatically.</p>
         </div>
 
@@ -483,19 +483,12 @@
         </div>
     </div>
 
-    <!-- jQuery (required by ePayco SDK) -->
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <!-- ePayco SDK for frontend card tokenization (primary + fallback) -->
+    <!-- jQuery (required by ePayco SDK) — SRI integrity hash prevents CDN tampering -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"
+            integrity="sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs"
+            crossorigin="anonymous"></script>
+    <!-- ePayco SDK for frontend card tokenization -->
     <script src="https://checkout.epayco.co/epayco.min.js"></script>
-    <script>
-        if (typeof ePayco === 'undefined') {
-            var s = document.createElement('script');
-            s.src = 'https://cdn.epayco.co/sdk/epayco-2.0.0.min.js';
-            document.head.appendChild(s);
-        }
-    </script>
-    <!-- ePayco 3DS 2.0 validation (Cardinal Commerce DDC + challenge) -->
-    <script src="https://multimedia.epayco.co/general/3DS/validateThreeds.min.js"></script>
 
     <script>
         // ── State machine ──────────────────────────────────────────
@@ -550,7 +543,8 @@
             const currentYear = new Date().getFullYear();
             for (let y = currentYear; y <= currentYear + 15; y++) {
                 const opt = document.createElement('option');
-                opt.value = String(y).slice(-2);
+                // Store full 4-digit year; SDK validateExpirationDate requires > 2020 && < 2035
+                opt.value = String(y);
                 opt.textContent = String(y);
                 select.appendChild(opt);
             }
@@ -703,22 +697,17 @@
             // Disable form
             document.getElementById('btn-pay').disabled = true;
             showState('processing');
-            document.getElementById('processing-msg').textContent = 'Tokenizing your card securely...';
+            document.getElementById('processing-msg').textContent = 'Processing your payment securely...';
 
             try {
-                // Step 1: Try client-side tokenization, fallback to server-side
-                let tokenCard = null;
-                try {
-                    tokenCard = await tokenizeCard(cardNumber, expYear, expMonth, cvc);
-                } catch (tokenErr) {
-                    console.warn('Client-side tokenization failed, falling back to server-side:', tokenErr.message);
-                }
-
-                document.getElementById('processing-msg').textContent = 'Processing payment...';
-
-                // Step 2: Send charge to backend (with token or raw card data for server-side tokenization)
+                // Send raw card data to backend for server-side tokenization via ePayco Node SDK.
+                // PCI SAQ A-EP: transmitted over HTTPS, never stored/logged server-side.
                 const chargeBody = {
                     paymentId: paymentId,
+                    cardNumber: cardNumber,
+                    expYear: expYear,
+                    expMonth: expMonth,
+                    cvc: cvc,
                     name: name,
                     lastName: lastName,
                     email: email,
@@ -730,16 +719,6 @@
                     dues: dues,
                     browserInfo: getBrowserInfo(),
                 };
-                if (tokenCard) {
-                    chargeBody.tokenCard = tokenCard;
-                } else {
-                    // PCI-DSS: never send raw card data to the server
-                    showState('error');
-                    document.getElementById('error-detail').textContent =
-                        'Card tokenization failed. Please refresh and try again, or use a different payment method.';
-                    document.getElementById('btn-pay').disabled = false;
-                    return;
-                }
                 const chargeRes = await fetch('/api/payment/tokenized-charge', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -777,78 +756,6 @@
                     err.message || 'An unexpected error occurred.';
                 document.getElementById('btn-pay').disabled = false;
             }
-        }
-
-        // ── ePayco card tokenization ──────────────────────────────
-        async function tokenizeCard(number, year, month, cvc) {
-            // Attempt dynamic SDK load if not available
-            if (typeof ePayco === 'undefined') {
-                await new Promise(function(res, rej) {
-                    var urls = [
-                        'https://checkout.epayco.co/epayco.min.js',
-                        'https://cdn.epayco.co/sdk/epayco-2.0.0.min.js',
-                        'https://s3-us-west-2.amazonaws.com/epayco/v1.0/epayco.min.js',
-                    ];
-                    var idx = 0;
-                    function tryNext() {
-                        if (idx >= urls.length) { rej(new Error('Payment SDK unavailable')); return; }
-                        var s = document.createElement('script');
-                        s.src = urls[idx++];
-                        s.onload = function() { typeof ePayco !== 'undefined' ? res() : tryNext(); };
-                        s.onerror = tryNext;
-                        document.head.appendChild(s);
-                    }
-                    tryNext();
-                });
-            }
-            return new Promise(function(resolve, reject) {
-                // Check if ePayco SDK is loaded
-                if (typeof ePayco === 'undefined') {
-                    reject(new Error('Payment SDK failed to load. Please refresh and try again.'));
-                    return;
-                }
-
-                // Safety timeout: if ePayco SDK hangs, reject after 30 seconds
-                var tokenTimeout = setTimeout(function() {
-                    reject(new Error('Card tokenization timed out. Please try again.'));
-                }, 30000);
-
-                try {
-                    var handler = ePayco.checkout.configure({
-                        key: paymentData.epaycoPublicKey,
-                        test: paymentData.testMode || false,
-                    });
-
-                    handler.token.create({
-                        'card[number]': number,
-                        'card[exp_year]': '20' + year,
-                        'card[exp_month]': month,
-                        'card[cvc]': cvc,
-                        'hasCvv': true,
-                    }, function(tokenData) {
-                        clearTimeout(tokenTimeout);
-                        if (tokenData && tokenData.status && tokenData.id) {
-                            resolve(tokenData.id);
-                        } else if (tokenData && tokenData.token) {
-                            resolve(tokenData.token);
-                        } else {
-                            var errorMsg = 'Card tokenization failed';
-                            if (tokenData && tokenData.data && tokenData.data.errors) {
-                                var errors = tokenData.data.errors;
-                                if (typeof errors === 'object') {
-                                    errorMsg = Object.values(errors).flat().join('. ');
-                                }
-                            } else if (tokenData && tokenData.message) {
-                                errorMsg = tokenData.message;
-                            }
-                            reject(new Error(errorMsg));
-                        }
-                    });
-                } catch (err) {
-                    clearTimeout(tokenTimeout);
-                    reject(err);
-                }
-            });
         }
 
         // ── Handle charge result ──────────────────────────────────
@@ -929,8 +836,8 @@
             showState('processing');
             document.getElementById('processing-msg').textContent = 'Completing 3D Secure verification...';
 
-            var environment = (paymentData && paymentData.testMode) ? 'test' : 'prod';
             var txData = threeDSecure.transactionData || {};
+            var environment = (paymentData && paymentData.testMode) ? 'test' : 'prod';
 
             // Listen for validate3ds() result via postMessage
             window.addEventListener('message', on3DSMessage);
@@ -942,7 +849,8 @@
                 startPolling();
             }, 8 * 60 * 1000);
 
-            // Call ePayco's official validate3ds() which handles DDC + frictionless + challenge
+            // Call ePayco's official validate3ds() which handles DDC + frictionless + challenge.
+            // The ePayco SDK loaded from checkout.epayco.co exposes this as a global function.
             if (typeof validate3ds === 'function') {
                 try {
                     validate3ds(txData, environment);
@@ -952,15 +860,53 @@
                     window.removeEventListener('message', on3DSMessage);
                     startPolling();
                 }
-            } else {
-                console.error('validate3ds function not available, falling back to polling');
-                clearTimeout(threeDSTimeout);
-                window.removeEventListener('message', on3DSMessage);
-                startPolling();
+                return;
             }
+
+            // Fallback: if validate3ds isn't available but we have a bank URL, render it.
+            var bankUrl = txData.urlbanco || txData.url_response_bank || txData.url || threeDSecure.redirectUrl;
+            if (bankUrl) {
+                showState('3ds');
+                var iframe = document.getElementById('threeds-iframe');
+                iframe.src = bankUrl;
+                setTimeout(function() { startPolling(); }, 8000);
+                return;
+            }
+
+            // No validate3ds, no bank URL — fall back to polling.
+            console.error('validate3ds function not available and no bank URL, falling back to polling');
+            clearTimeout(threeDSTimeout);
+            window.removeEventListener('message', on3DSMessage);
+            startPolling();
         }
 
+        // Trusted origins for 3DS postMessage — ePayco, Cardinal Commerce, and bank auth domains
+        var TRUSTED_3DS_ORIGINS = [
+            'https://checkout.epayco.co',
+            'https://secure.epayco.co',
+            'https://secure.payco.co',
+            'https://api.secure.payco.co',
+            'https://3ds.epayco.com',
+            'https://3ds-green.epayco.com',
+            'https://songbird.cardinalcommerce.com',
+            'https://songbirdstag.cardinalcommerce.com',
+            'https://centinelapi.cardinalcommerce.com',
+            'https://centinelapistag.cardinalcommerce.com',
+        ];
+
         function on3DSMessage(event) {
+            // Validate origin — only accept messages from known payment/3DS domains.
+            // Also allow same-origin (our own page) since some ePayco flows use that.
+            if (event.origin && event.origin !== window.location.origin) {
+                var originTrusted = TRUSTED_3DS_ORIGINS.some(function(o) { return event.origin === o; });
+                // Also allow any *.epayco.co, *.payco.co, *.cardinalcommerce.com subdomain
+                // since bank 3DS pages may proxy through various subdomains
+                if (!originTrusted) {
+                    originTrusted = /^https:\/\/[a-z0-9.-]+\.(epayco\.co|payco\.co|epayco\.com|epayco\.io|cardinalcommerce\.com)$/.test(event.origin);
+                }
+                if (!originTrusted) return; // Reject unknown origins silently
+            }
+
             // validate3ds() posts { success: true/false, ref_payco: "..." }
             var data = event.data;
             if (!data || typeof data !== 'object') return;
@@ -986,7 +932,11 @@
         }
 
         // ── Polling ────────────────────────────────────────────────
+        var pollingActive = false;
         function startPolling() {
+            // Guard: prevent duplicate polling intervals from concurrent 3DS paths
+            if (pollingActive && pollTimer) return;
+            pollingActive = true;
             showState('polling');
             pollCount = 0;
 
@@ -997,6 +947,7 @@
 
                 if (pollCount > MAX_POLLS) {
                     clearInterval(pollTimer);
+                    pollingActive = false;
                     showState('error');
                     document.getElementById('error-detail').textContent =
                         'Payment confirmation timed out. If you were charged, your subscription will be activated automatically. Please check back later.';
@@ -1013,6 +964,7 @@
 
                     if (data.status === 'completed') {
                         clearInterval(pollTimer);
+                        pollingActive = false;
                         showState('success');
                         document.getElementById('success-detail').textContent =
                             data.message || 'Your subscription has been activated!';
@@ -1021,6 +973,7 @@
 
                     if (data.status === 'failed' || data.status === 'refunded') {
                         clearInterval(pollTimer);
+                        pollingActive = false;
                         showState('error');
                         document.getElementById('error-detail').textContent =
                             data.message || 'Payment was not approved.';

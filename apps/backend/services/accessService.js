@@ -236,6 +236,47 @@ async function hasEntitlement(userId, addOnId, { creatorId = null } = {}) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Channel access gate — evaluates creator_channels.access_type for a user.
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine whether a user may access a creator channel (or a hangout linked
+ * to that channel).
+ *
+ * @param {string} userId
+ * @param {{ id?: number, access_type: string, price_usd: number|string, creator_id: string }} channel
+ * @returns {Promise<{
+ *   allowed: boolean,
+ *   reason: string,
+ *   requiresPayment?: boolean,
+ *   priceUsd?: number,
+ *   accessType?: string,
+ *   creatorId?: string,
+ * }>}
+ */
+async function checkChannelAccess(userId, channel) {
+  // Thin compatibility wrapper around EntitlementAccessService.hasResourceAccess.
+  // Keeps the legacy response shape so existing callers
+  // (hangoutGroupController.joinGroup, etc.) do not need to change.
+  const EntitlementAccessService = require('./entitlementAccessService');
+  const channelId = channel?.id || channel?.creator_id;
+  if (!channelId) {
+    return { allowed: false, reason: 'not_found' };
+  }
+  const decision = await EntitlementAccessService.hasResourceAccess(userId, 'channel', String(channelId));
+  return {
+    allowed: decision.allowed,
+    reason: decision.reason || (decision.allowed ? 'allowed' : 'denied'),
+    accessType: decision.accessType,
+    creatorId: decision.creatorId || channel?.creator_id,
+    priceUsd: decision.priceUsd ?? (channel?.price_usd != null ? Number(channel.price_usd) : undefined),
+    requiresPayment: decision.code === 'PAYMENT_REQUIRED',
+    scoped: decision.scoped === true,
+    code: decision.code,
+  };
+}
+
 module.exports = {
   TIER,
   TIER_LEVEL,
@@ -251,4 +292,5 @@ module.exports = {
   validateTierFresh,
   requireTier,
   hasEntitlement,
+  checkChannelAccess,
 };

@@ -877,6 +877,23 @@ export function Layout() {
             </div>
           )}
 
+          {user?.creator_status === "active" && (
+            <div className="mt-2">
+              <NavLink
+                to="/creators"
+                className={({ isActive }: { isActive: boolean }) =>
+                  `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    isActive
+                      ? "nav-active"
+                      : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                  }`
+                }
+              >
+                {t.nav.creatorStudio || "Creator Studio"}
+              </NavLink>
+            </div>
+          )}
+
           {/* Divider before secondary links */}
           <div className="pt-3 pb-1">
             <div className="h-px bg-pnp-border" />
@@ -1065,6 +1082,7 @@ export function Layout() {
                 <div>
                   <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Account</p>
                   {[
+                    { to: "/my-access", label: "My Access" },
                     { to: "/settings", label: t.nav.settings || "Settings" },
                     { to: "/support", label: t.nav.help || "Help & Support" },
                   ].map((link) => (
@@ -1148,6 +1166,23 @@ export function Layout() {
                       }
                     >
                       {t.nav.admin}
+                    </NavLink>
+                  </div>
+                )}
+
+                {user?.creator_status === "active" && (
+                  <div>
+                    <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Creator</p>
+                    <NavLink
+                      to="/creators"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={({ isActive }: { isActive: boolean }) =>
+                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                        }`
+                      }
+                    >
+                      {t.nav.creatorStudio || "Creator Studio"}
                     </NavLink>
                   </div>
                 )}

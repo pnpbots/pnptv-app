@@ -1415,11 +1415,22 @@ const getUserEntitlements = async (req, res) => {
  */
 const MAX_GRANT_DAYS = 3650;
 
+const SCOPED_ADD_ONS = new Set(['channel-access', 'hangout-access', 'creator-subscription']);
+
 const grantUserEntitlement = async (req, res) => {
   try {
-    const { addOnId, durationDays, isLifetime, reason } = req.body;
+    const { addOnId, durationDays, isLifetime, reason, resourceId } = req.body;
     if (!addOnId) {
       return res.status(400).json({ success: false, error: 'addOnId is required' });
+    }
+    // Scoped add-ons require a resourceId; global add-ons must not have one.
+    if (SCOPED_ADD_ONS.has(String(addOnId))) {
+      if (!resourceId) {
+        return res.status(400).json({
+          success: false,
+          error: `${addOnId} is a scoped entitlement and requires resourceId`,
+        });
+      }
     }
     if (!isLifetime) {
       const parsedDays = durationDays ? parseInt(durationDays, 10) : 30;
@@ -1436,14 +1447,89 @@ const grantUserEntitlement = async (req, res) => {
         source: 'admin',
         actorId: String(req.user?.id ?? 'admin'),
         reason: reason || '',
+        // EntitlementModel.grantEntitlement accepts creatorId as the scope id;
+        // we use it for channels, hangouts, and creators uniformly.
+        creatorId: resourceId ? String(resourceId) : null,
       }
     );
-    logger.info('Admin granted entitlement', { adminId: req.user?.id, userId: req.params.userId, addOnId });
+    logger.info('Admin granted entitlement', {
+      adminId: req.user?.id,
+      userId: req.params.userId,
+      addOnId,
+      resourceId: resourceId || null,
+    });
     return res.json({ success: true, entitlement: row });
   } catch (error) {
     logger.error('grantUserEntitlement error:', error);
     const status = error.status || 500;
     return res.status(status).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * GET /api/webapp/admin/resources?kind=channel|hangout|creator&q=<search>
+ * Async-searchable resource picker for the admin scoped grant form.
+ * Returns a flat array of {id, name, thumbnailUrl, meta} for the selected kind.
+ */
+const searchResources = async (req, res) => {
+  try {
+    const kind = String(req.query.kind || '');
+    const q = String(req.query.q || '').trim();
+    if (!['channel', 'hangout', 'creator'].includes(kind)) {
+      return res.status(400).json({ success: false, error: 'kind must be channel, hangout, or creator' });
+    }
+    // Load query helper lazily to avoid circular requires at module init
+    const { query } = require('../../../config/postgres');
+    const like = q ? `%${q.toLowerCase()}%` : '%';
+    let rows = [];
+    if (kind === 'channel') {
+      const result = await query(
+        `SELECT id::text, name, cover_image_url AS "thumbnailUrl", creator_id::text AS "creatorId",
+                access_type AS "accessType", price_usd AS "priceUsd"
+           FROM creator_channels
+           WHERE is_active = true
+             AND ($1 = '%' OR LOWER(name) LIKE $1)
+           ORDER BY name ASC
+           LIMIT 25`,
+        [like]
+      );
+      rows = result.rows;
+    } else if (kind === 'hangout') {
+      const result = await query(
+        `SELECT id::text, name, avatar_url AS "thumbnailUrl", is_paid AS "isPaid",
+                price_usd AS "priceUsd", creator_id::text AS "creatorId"
+           FROM hangout_groups
+           WHERE ($1 = '%' OR LOWER(name) LIKE $1)
+           ORDER BY name ASC
+           LIMIT 25`,
+        [like]
+      );
+      rows = result.rows;
+    } else if (kind === 'creator') {
+      const result = await query(
+        `SELECT id::text,
+                TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) AS name,
+                photo_file_id AS "thumbnailUrl",
+                username AS handle
+           FROM users
+           WHERE creator_status = 'active'
+             AND ($1 = '%' OR
+                  LOWER(COALESCE(first_name, '')) LIKE $1 OR
+                  LOWER(COALESCE(last_name, '')) LIKE $1 OR
+                  LOWER(COALESCE(username, '')) LIKE $1)
+           ORDER BY first_name ASC NULLS LAST
+           LIMIT 25`,
+        [like]
+      );
+      rows = result.rows.map((r) => ({
+        ...r,
+        name: r.name && r.name.length > 0 ? r.name : (r.handle || 'Creator'),
+      }));
+    }
+    return res.json({ success: true, kind, results: rows });
+  } catch (error) {
+    logger.error('searchResources error:', error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 };
 
@@ -1525,6 +1611,27 @@ const getMyEntitlements = async (req, res) => {
     });
   } catch (error) {
     logger.error('getMyEntitlements error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * GET /api/me/access
+ * Returns the authenticated user's structured access map for the My Access page:
+ * global membership, per-channel scoped access, per-creator subscriptions,
+ * per-hangout scoped access, and remaining private-call credits. Each scoped
+ * entry is already joined with the resource's display name and thumbnail.
+ */
+const getMyAccess = async (req, res) => {
+  try {
+    const userId = String(req.user?.id ?? req.session?.user?.id ?? '');
+    if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+    const EntitlementAccessService = require('../../services/entitlementAccessService');
+    const access = await EntitlementAccessService.getUserResourceAccess(userId);
+    return res.json({ success: true, ...access });
+  } catch (error) {
+    logger.error('getMyAccess error:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -1959,7 +2066,9 @@ module.exports = {
   getPlanAddOns,
   setPlanAddOns,
   getUserEntitlements,
+  getMyAccess,
   grantUserEntitlement,
+  searchResources,
   revokeUserEntitlement,
   extendUserEntitlement,
   getMyEntitlements,

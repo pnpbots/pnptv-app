@@ -74,10 +74,18 @@ jest.mock('../utils/logger', () => ({
   stream: { write: jest.fn() },
 }));
 
-// Stub heavy services
-jest.mock('../bot/services/PDSProvisioningService', () => ({
-  createOrLinkPDS: jest.fn(async () => ({ success: true, status: 'existing' })),
-}));
+// Stub heavy services.
+// PDSProvisioningService no longer exists as a standalone file — production code
+// at api/handlers/telegramAuthHandler.js soft-loads it via require.resolve + try/catch
+// so its absence is expected. We mock it as `virtual` so jest doesn't require a
+// real file on disk to attach the mock to.
+jest.mock(
+  '../bot/services/PDSProvisioningService',
+  () => ({
+    createOrLinkPDS: jest.fn(async () => ({ success: true, status: 'existing' })),
+  }),
+  { virtual: true }
+);
 jest.mock('../bot/services/platformBanService', () => ({
   isBanned: jest.fn(async () => null),
 }));

@@ -6,10 +6,19 @@ import {
   revokeAdminUserEntitlement,
   extendAdminUserEntitlement,
   getAddOns,
+  searchAdminResources,
   type AdminEntitlement,
   type EntitlementAuditEntry,
   type AddOn,
+  type AdminResourceResult,
 } from "@/lib/api";
+
+// Which add-on ids require a scoped resource, and what kind to pick.
+const SCOPED_ADD_ON_KIND: Record<string, "channel" | "hangout" | "creator"> = {
+  "channel-access": "channel",
+  "hangout-access": "hangout",
+  "creator-subscription": "creator",
+};
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -238,9 +247,44 @@ function GrantEntitlementForm({ userId, availableAddOns, onGranted }: GrantFormP
   const [err, setErr] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Scoped-resource picker state
+  const scopedKind = SCOPED_ADD_ON_KIND[selectedAddOnId] || null;
+  const [resourceQuery, setResourceQuery] = useState<string>("");
+  const [resourceResults, setResourceResults] = useState<AdminResourceResult[]>([]);
+  const [selectedResource, setSelectedResource] = useState<AdminResourceResult | null>(null);
+  const [resourceSearching, setResourceSearching] = useState(false);
+
+  // Reset resource picker when switching add-ons
+  useEffect(() => {
+    setSelectedResource(null);
+    setResourceResults([]);
+    setResourceQuery("");
+  }, [selectedAddOnId]);
+
+  // Debounced async search
+  useEffect(() => {
+    if (!scopedKind) return;
+    const timer = setTimeout(async () => {
+      setResourceSearching(true);
+      try {
+        const res = await searchAdminResources(scopedKind, resourceQuery);
+        setResourceResults(res.results || []);
+      } catch {
+        setResourceResults([]);
+      } finally {
+        setResourceSearching(false);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [scopedKind, resourceQuery]);
+
   const handleGrant = async () => {
     if (!selectedAddOnId) {
       setErr("Please select an add-on.");
+      return;
+    }
+    if (scopedKind && !selectedResource) {
+      setErr(`Please pick a ${scopedKind} to scope this entitlement to.`);
       return;
     }
     const days = isLifetime ? undefined : parseInt(durationDays, 10);
@@ -257,13 +301,18 @@ function GrantEntitlementForm({ userId, availableAddOns, onGranted }: GrantFormP
         durationDays: isLifetime ? undefined : days,
         isLifetime,
         reason: reason || undefined,
+        resourceId: selectedResource?.id,
       });
       const addOnName = availableAddOns.find((a) => a.id === selectedAddOnId)?.name ?? selectedAddOnId;
-      setSuccessMsg(`"${addOnName}" granted successfully.`);
+      const resourceLabel = selectedResource ? ` → ${selectedResource.name}` : "";
+      setSuccessMsg(`"${addOnName}${resourceLabel}" granted successfully.`);
       setSelectedAddOnId("");
       setIsLifetime(false);
       setDurationDays("30");
       setReason("");
+      setSelectedResource(null);
+      setResourceResults([]);
+      setResourceQuery("");
       onGranted();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to grant entitlement.");
@@ -312,6 +361,74 @@ function GrantEntitlementForm({ userId, availableAddOns, onGranted }: GrantFormP
           />
         </div>
       </div>
+
+      {/* Scoped resource picker — shown only for scoped add-ons */}
+      {scopedKind && (
+        <div className="space-y-2">
+          <label className="block text-xs text-pnp-textSecondary" htmlFor="grant-resource">
+            {scopedKind === "channel" ? "Select channel" : scopedKind === "hangout" ? "Select hangout" : "Select creator"}
+          </label>
+          {selectedResource ? (
+            <div className="flex items-center gap-3 p-3 rounded-lg border border-pnp-accent bg-pnp-accent/10">
+              {selectedResource.thumbnailUrl ? (
+                <img src={selectedResource.thumbnailUrl} alt="" className="w-10 h-10 rounded object-cover" />
+              ) : (
+                <div className="w-10 h-10 rounded bg-pnp-surface flex items-center justify-center text-pnp-textSecondary text-xs">—</div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-pnp-textPrimary truncate">{selectedResource.name}</p>
+                <p className="text-[11px] text-pnp-textSecondary truncate">ID: {selectedResource.id}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedResource(null)}
+                className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary px-2 py-1"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <>
+              <input
+                id="grant-resource"
+                type="text"
+                value={resourceQuery}
+                onChange={(e) => setResourceQuery(e.target.value)}
+                placeholder={`Search ${scopedKind}s by name…`}
+                style={{ fontSize: "16px" }} className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+              />
+              {resourceSearching && (
+                <p className="text-xs text-pnp-textSecondary">Searching…</p>
+              )}
+              {!resourceSearching && resourceResults.length > 0 && (
+                <div className="max-h-56 overflow-y-auto rounded-lg border border-pnp-border bg-pnp-background divide-y divide-pnp-border">
+                  {resourceResults.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => setSelectedResource(r)}
+                      className="w-full flex items-center gap-3 p-2 hover:bg-pnp-surface text-left"
+                    >
+                      {r.thumbnailUrl ? (
+                        <img src={r.thumbnailUrl} alt="" className="w-8 h-8 rounded object-cover" />
+                      ) : (
+                        <div className="w-8 h-8 rounded bg-pnp-surface flex items-center justify-center text-pnp-textSecondary text-xs">—</div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-pnp-textPrimary truncate">{r.name}</p>
+                        {r.handle && <p className="text-[11px] text-pnp-textSecondary truncate">@{r.handle}</p>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!resourceSearching && resourceQuery && resourceResults.length === 0 && (
+                <p className="text-xs text-pnp-textSecondary">No results.</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2 cursor-pointer select-none min-h-[44px]">

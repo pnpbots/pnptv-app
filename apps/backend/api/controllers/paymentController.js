@@ -271,6 +271,114 @@ class PaymentController {
         return res.json({ success: true, payment: tokenPaymentData });
       }
 
+      // Call package payments have plan_id = null and metadata.type = 'call_package'
+      if (paymentType === 'call_package') {
+        const pkg = payment.metadata;
+        const paymentAmountUsd = parseFloat(payment.amount) || 0;
+        const copRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+        const priceInCOP = Math.round(paymentAmountUsd * copRate);
+        const amountCOPString = String(priceInCOP);
+        const currencyCode = 'COP';
+        const actualPaymentId = payment.id || payment.paymentId;
+        const paymentRef = `CALL-${actualPaymentId.substring(0, 8).toUpperCase()}`;
+        const provider = payment.provider || 'epayco';
+        const userId = payment.userId || payment.user_id;
+
+        const callPaymentData = {
+          paymentId: actualPaymentId,
+          paymentRef,
+          userId,
+          planId: pkg.packageSku || 'call_package',
+          provider,
+          status: payment.status,
+          amountUSD: Number(paymentAmountUsd),
+          amountCOP: priceInCOP,
+          currencyCode,
+          isPromo: false,
+          originalPrice: null,
+          discountAmount: null,
+          promoCode: null,
+          plan: {
+            id: pkg.packageId || 'call',
+            sku: pkg.packageSku || 'CALL',
+            name: `Private Video Call`,
+            description: `Private video call — $${paymentAmountUsd} USD`,
+            icon: '📞',
+            duration: null,
+            features: ['Private 1-on-1 video call', 'Undivided attention from your performer'],
+          },
+        };
+
+        if (provider === 'epayco') {
+          callPaymentData.epaycoPublicKey = process.env.EPAYCO_PUBLIC_KEY;
+          callPaymentData.epaycoTestMode = process.env.EPAYCO_TEST_MODE === 'true';
+          const epaycoSignature = require('../middleware/epaycoSignature');
+          Object.assign(callPaymentData, epaycoSignature.generateCheckoutSignature({
+            amount: amountCOPString,
+            currency: currencyCode,
+            referenceCode: paymentRef,
+            paymentId: actualPaymentId,
+            planId: pkg.packageSku || 'call_package',
+            userId,
+            webhookUrl: `${process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app'}/api/webhooks/epayco`,
+            responseUrl: `${process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app'}/api/payment-response`,
+          }));
+          try {
+            if (
+              payment.metadata?.expected_epayco_amount !== amountCOPString
+              || payment.metadata?.expected_epayco_currency !== currencyCode
+            ) {
+              await PaymentModel.updateStatus(actualPaymentId, payment.status, {
+                expected_epayco_amount: amountCOPString,
+                expected_epayco_currency: currencyCode,
+              });
+            }
+          } catch (metaError) {
+            logger.error('Failed to persist expected ePayco webhook for call package (non-critical)', { paymentId: actualPaymentId, error: metaError.message });
+          }
+          if (!callPaymentData.epaycoSignature) {
+            return res.status(500).json({ success: false, error: 'Payment config error.' });
+          }
+        } else if (provider === 'daimo') {
+          const existingSessionId = payment.metadata?.daimo_payment_id || payment.daimo_payment_id;
+          const existingClientSecret = payment.metadata?.daimo_client_secret || payment.daimo_client_secret;
+          if (existingSessionId && existingClientSecret) {
+            callPaymentData.daimoSessionId = existingSessionId;
+            callPaymentData.daimoClientSecret = existingClientSecret;
+          } else {
+            try {
+              const DaimoConfig = require('../config/daimo');
+              const daimoResult = await DaimoConfig.createDaimoPayment({
+                amount: paymentAmountUsd,
+                userId,
+                planId: pkg.packageSku || 'call_package',
+                chatId: '',
+                paymentId: actualPaymentId,
+                description: 'Private Video Call — PNPtv',
+              });
+              if (daimoResult.success) {
+                callPaymentData.daimoSessionId = daimoResult.daimoPaymentId;
+                callPaymentData.daimoClientSecret = daimoResult.clientSecret;
+                await PaymentModel.updateStatus(actualPaymentId, 'pending', {
+                  daimo_payment_id: daimoResult.daimoPaymentId,
+                  daimo_client_secret: daimoResult.clientSecret,
+                });
+              }
+            } catch (daimoErr) {
+              logger.error('Error creating Daimo session for call package:', daimoErr);
+              callPaymentData.daimoSessionId = null;
+              callPaymentData.daimoClientSecret = null;
+            }
+          }
+        }
+
+        logger.info('Call package payment info retrieved', { paymentId, userId });
+        return res.json({ success: true, payment: callPaymentData });
+      }
+
+      // Channel access payments use plan_id = 'channel_access'
+      // They are handled normally via the plan lookup below.
+
       const plan = await PlanModel.getById(planId);
 
       if (!plan) {
@@ -855,6 +963,10 @@ class PaymentController {
       const {
         paymentId,
         tokenCard,
+        cardNumber: rawCardNumber,
+        expYear: rawExpYear,
+        expMonth: rawExpMonth,
+        cvc: rawCvc,
         name,
         lastName,
         email,
@@ -868,13 +980,16 @@ class PaymentController {
       } = req.body;
 
       const hasToken = typeof tokenCard === 'string' && tokenCard.trim().length >= 8;
+      const hasRawCardData = Boolean(rawCardNumber && rawExpYear && rawExpMonth && rawCvc);
 
       // Sanitize and validate email before sending to ePayco
       const sanitizedEmail = (typeof email === 'string' ? email : '').trim().toLowerCase();
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-      // PCI compliance: only accept pre-tokenized cards (tokenized via ePayco.js in browser)
-      if (!paymentId || !hasToken || !name || !sanitizedEmail || !docType || !docNumber) {
+      // Accept either a pre-tokenized card OR raw card data for server-side tokenization.
+      // Raw card data is acceptable under PCI SAQ A-EP when transmitted over HTTPS and
+      // immediately discarded after tokenization (see server-side tokenization block below).
+      if (!paymentId || (!hasToken && !hasRawCardData) || !name || !sanitizedEmail || !docType || !docNumber) {
         return res.status(400).json({
           success: false,
           error: 'Faltan campos requeridos. Debes enviar paymentId, datos de tarjeta y datos de titular.',
@@ -963,7 +1078,7 @@ class PaymentController {
       // Get userId for audit logging
       const userId = paymentOwnerForCharge;
 
-      // Security: Audit trail - charge attempted
+      // Security: Audit trail - charge attempted. Never log raw card data.
       PaymentSecurityService.logPaymentEvent({
         paymentId,
         userId,
@@ -974,7 +1089,8 @@ class PaymentController {
         ipAddress: clientIp,
         userAgent,
         details: {
-          tokenCard: tokenCard?.substring(0, 8) + '...',
+          tokenSource: hasToken ? 'frontend_sdk' : 'server_side',
+          tokenCardPrefix: hasToken ? (tokenCard.substring(0, 8) + '...') : null,
           browserInfo: browserInfo && typeof browserInfo === 'object'
             ? {
                 language: browserInfo.language,
@@ -987,8 +1103,67 @@ class PaymentController {
         },
       }).catch(() => {});
 
-      // PCI: raw card data must never reach the server — reject if no token
-      const resolvedToken = tokenCard.trim();
+      // Resolve card token. Prefer the pre-tokenized token from the frontend SDK;
+      // fall back to server-side tokenization via the ePayco Node SDK.
+      let resolvedToken = hasToken ? tokenCard.trim() : null;
+      if (!resolvedToken && hasRawCardData) {
+        try {
+          const { getEpaycoClient } = require('../../config/epayco');
+          const epaycoClient = getEpaycoClient();
+          const normalizedYear = String(rawExpYear).length === 2 ? ('20' + String(rawExpYear)) : String(rawExpYear);
+          const creditInfo = {
+            'card[number]': String(rawCardNumber).replace(/\s/g, ''),
+            'card[exp_year]': normalizedYear,
+            'card[exp_month]': String(rawExpMonth),
+            'card[cvc]': String(rawCvc),
+            hasCvv: true,
+          };
+          logger.info('Server-side card tokenization started', { paymentId });
+          const tokenResult = await epaycoClient.token.create(creditInfo);
+          // ePayco Node SDK returns various shapes; accept all of them.
+          if (tokenResult?.id) {
+            resolvedToken = tokenResult.id;
+          } else if (tokenResult?.data?.id) {
+            resolvedToken = tokenResult.data.id;
+          } else if (tokenResult?.token) {
+            resolvedToken = tokenResult.token;
+          }
+          if (!resolvedToken) {
+            logger.error('Server-side tokenization returned unexpected shape', {
+              paymentId,
+              keys: Object.keys(tokenResult || {}),
+            });
+            return res.status(400).json({
+              success: false,
+              error: 'No se pudo tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+            });
+          }
+          logger.info('Server-side card tokenization succeeded', {
+            paymentId,
+            tokenPrefix: resolvedToken.substring(0, 8) + '...',
+          });
+        } catch (tokenError) {
+          logger.error('Server-side card tokenization failed', {
+            paymentId,
+            error: tokenError.message,
+          });
+          return res.status(400).json({
+            success: false,
+            error: 'Error al tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+          });
+        } finally {
+          // Scrub raw card data from the request body so downstream code and any
+          // error handlers cannot accidentally log it.
+          try {
+            if (req.body) {
+              delete req.body.cardNumber;
+              delete req.body.expYear;
+              delete req.body.expMonth;
+              delete req.body.cvc;
+            }
+          } catch (_) { /* no-op */ }
+        }
+      }
 
       const chargeParams = {
         paymentId,

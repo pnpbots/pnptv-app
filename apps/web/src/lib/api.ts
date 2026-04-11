@@ -15,14 +15,27 @@ interface ApiOptions {
 }
 
 /** API error that preserves a machine-readable code from the backend response body. */
+/** Structured details returned by the scoped-access middleware on 403. */
+export interface ApiAccessDetails {
+  scoped?: boolean;
+  kind?: "channel" | "hangout" | "creator";
+  resourceId?: string;
+  accessType?: string;
+  creatorId?: string;
+  priceUsd?: number;
+  upgradeUrl?: string;
+}
+
 export class ApiError extends Error {
   public readonly code: string | undefined;
   public readonly status: number;
-  constructor(message: string, status: number, code?: string) {
+  public readonly details: ApiAccessDetails;
+  constructor(message: string, status: number, code?: string, details: ApiAccessDetails = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -69,7 +82,19 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
                 ? error.message
                 : friendlyHttpError(res.status, `API error ${res.status}`);
         const errorCode = typeof error.code === "string" ? error.code : undefined;
-        throw new ApiError(errorMessage, res.status, errorCode);
+        // Extract structured access details for scoped-resource 403 responses so
+        // callers can render the right in-context purchase modal instead of
+        // bouncing to /subscribe.
+        const details: ApiAccessDetails = {
+          scoped: error.scoped === true ? true : undefined,
+          kind: typeof error.kind === "string" ? error.kind : undefined,
+          resourceId: typeof error.resourceId === "string" ? error.resourceId : undefined,
+          accessType: typeof error.accessType === "string" ? error.accessType : undefined,
+          creatorId: typeof error.creatorId === "string" ? error.creatorId : undefined,
+          priceUsd: typeof error.priceUsd === "number" ? error.priceUsd : undefined,
+          upgradeUrl: typeof error.upgradeUrl === "string" ? error.upgradeUrl : undefined,
+        };
+        throw new ApiError(errorMessage, res.status, errorCode, details);
       }
 
       return res.json();
@@ -677,36 +702,6 @@ export function getMyChannel(): Promise<{
 
 // ── WebRTC Streaming (JaaS) ───────────────────────────────────────────────────
 
-export interface WebRTCStreamConfig {
-  token: string;
-  meetingUrl: string;
-  roomName: string;
-  channelRef: string;
-  error?: string;
-}
-
-export function getWebRTCStreamerConfig(): Promise<{ success: boolean; error?: string } & WebRTCStreamConfig> {
-  return request("/api/webapp/live/webrtc/config");
-}
-
-
-export function getWebRTCViewerToken(channelRef: string): Promise<{
-  success: boolean;
-  token: string;
-  meetingUrl: string;
-  roomName: string;
-  error?: string;
-}> {
-  return request(`/api/webapp/live/webrtc/viewer-token/${encodeURIComponent(channelRef)}`);
-}
-
-export function streamHeartbeat(channelRef: string): Promise<{ success: boolean; newBalance?: number }> {
-  return request("/api/webapp/live/webrtc/heartbeat", {
-    method: "POST",
-    body: JSON.stringify({ channelRef }),
-  });
-}
-
 export function getWebRTCStreams(): Promise<{
   success: boolean;
   streams: Array<{
@@ -1008,15 +1003,6 @@ export function getSocialFeedPosts(
   return request(`/api/webapp/social/feed?${params}`);
 }
 
-export function getWofFeedPosts(
-  cursor?: string,
-  limit = 20
-): Promise<{ success: boolean; posts: SocialPostItem[]; nextCursor: string | null }> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (cursor) params.set("cursor", cursor);
-  return request(`/api/webapp/social/wof-feed?${params}`);
-}
-
 export function getPostsByHashtag(
   tag: string,
   cursor?: string,
@@ -1225,18 +1211,6 @@ export function getOrCreateHangoutRoom(groupId: number): Promise<{
   return request(`/api/webapp/matrix/hangout-room/${groupId}`, { method: "POST" });
 }
 
-export function sendHangoutMessage(
-  groupId: number,
-  content: string,
-  replyToId?: number | null
-): Promise<{ success: boolean; message: GroupMessage; matrixEventId?: string }> {
-  return request(`/api/webapp/matrix/hangout/${groupId}/message`, {
-    method: "POST",
-    body: { content, replyToId: replyToId || undefined },
-  });
-}
-
-
 export function getWofStats(): Promise<{ total_posts: number; total_likes: number; unique_contributors: number }> {
   return request("/api/webapp/social/wof/stats");
 }
@@ -1274,15 +1248,6 @@ export function searchMentions(
   return request(
     `/api/webapp/social/mentions/search?q=${encodeURIComponent(q)}`
   );
-}
-
-// Aliases used by Home.tsx internal feed
-export type InternalPost = SocialPostItem;
-
-export function getInternalFeed(
-  limit = 20
-): Promise<{ success: boolean; posts: InternalPost[] }> {
-  return getSocialFeedPosts(undefined, limit);
 }
 
 /**
@@ -1628,23 +1593,6 @@ export function demoteHangoutMember(groupId: number, userId: string): Promise<{ 
   });
 }
 
-export function pinHangoutMessage(groupId: number, eventId: string, body?: string): Promise<{ success: boolean }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/pin`, {
-    method: "POST",
-    body: { eventId, body },
-  });
-}
-
-export function unpinHangoutMessage(groupId: number, eventId: string): Promise<{ success: boolean }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/pin/${encodeURIComponent(eventId)}`, {
-    method: "DELETE",
-  });
-}
-
-export function getHangoutPins(groupId: number): Promise<{ success: boolean; pins: Array<{ id: number; matrix_event_id: string; message_body: string; pinned_by: string; pinned_by_name: string; pinned_at: string }> }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/pins`);
-}
-
 export function updateHangoutSettings(groupId: number, settings: {
   slowModeSeconds?: number;
   isReadOnly?: boolean;
@@ -1672,10 +1620,6 @@ export function transferHangoutOwnership(groupId: number, userId: string): Promi
 
 export function getHangoutInviteLink(groupId: number): Promise<{ success: boolean; inviteCode: string; inviteUrl: string }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/invite-link`);
-}
-
-export function joinHangoutByInvite(code: string): Promise<{ success: boolean; groupId: number }> {
-  return request(`/api/webapp/hangouts/groups/join-by-invite/${code}`, { method: "POST" });
 }
 
 export function updateHangoutNotification(groupId: number, mode: "all" | "mentions" | "muted"): Promise<{ success: boolean }> {
@@ -2189,6 +2133,53 @@ export function getSubscriptionPlans(): Promise<{
   plans: SubscriptionPlan[];
 }> {
   return request("/api/subscription/plans");
+}
+
+// ── My Access ───────────────────────────────────────────────────────────────
+// Structured access map for the user's current entitlements, with channel/
+// hangout/creator metadata already joined. Backed by /api/me/access.
+export interface MyAccessChannel {
+  id: string;
+  name: string;
+  coverUrl: string | null;
+  creatorId: string | null;
+  expiresAt: string | null;
+  isLifetime: boolean;
+  url: string;
+}
+export interface MyAccessHangout {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  expiresAt: string | null;
+  isLifetime: boolean;
+  url: string;
+}
+export interface MyAccessCreator {
+  id: string;
+  displayName: string;
+  handle: string | null;
+  avatarUrl: string | null;
+  expiresAt: string | null;
+  isLifetime: boolean;
+  url: string;
+}
+export interface MyAccessResponse {
+  success: boolean;
+  tier: "PRIME" | "BASIC" | "FREE";
+  global: {
+    primeExpiresAt: string | null;
+    primeLifetime: boolean;
+    memberExpiresAt: string | null;
+    memberLifetime: boolean;
+    privateCallCredits: number;
+  };
+  channels: MyAccessChannel[];
+  hangouts: MyAccessHangout[];
+  creators: MyAccessCreator[];
+}
+export function getMyAccess(): Promise<MyAccessResponse> {
+  return request("/api/me/access");
 }
 
 export function createPayment(
@@ -3272,11 +3263,6 @@ export function getWithdrawalHistory(
   return request(`/api/model/withdrawal/history${params}`);
 }
 
-// Health check
-export function healthCheck(): Promise<{ status: string }> {
-  return request("/health");
-}
-
 // ---------------------------------------------------------------------------
 // Canva Connect API
 // ---------------------------------------------------------------------------
@@ -3953,12 +3939,31 @@ export function getAdminUserEntitlements(userId: string): Promise<{
 
 export function grantAdminUserEntitlement(
   userId: string,
-  data: { addOnId: string; durationDays?: number; isLifetime?: boolean; reason?: string }
+  data: { addOnId: string; durationDays?: number; isLifetime?: boolean; reason?: string; resourceId?: string }
 ): Promise<{ success: boolean }> {
   return request(`/api/webapp/admin/users/${userId}/entitlements`, {
     method: "POST",
     body: data,
   });
+}
+
+// Resource picker for the scoped-entitlement admin form.
+export interface AdminResourceResult {
+  id: string;
+  name: string;
+  thumbnailUrl: string | null;
+  creatorId?: string | null;
+  accessType?: string | null;
+  priceUsd?: number | null;
+  isPaid?: boolean | null;
+  handle?: string | null;
+}
+export function searchAdminResources(
+  kind: "channel" | "hangout" | "creator",
+  q: string
+): Promise<{ success: boolean; kind: string; results: AdminResourceResult[] }> {
+  const params = new URLSearchParams({ kind, q });
+  return request(`/api/webapp/admin/resources?${params.toString()}`);
 }
 
 export function revokeAdminUserEntitlement(
@@ -4544,13 +4549,6 @@ export function denyKnock(targetUserId: string): Promise<{ success: boolean }> {
   return request("/api/community-room/knock/deny", {
     method: "POST",
     body: { targetUserId },
-  });
-}
-
-export function clipMoment(caption: string): Promise<{ success: boolean; postId?: number }> {
-  return request("/api/community-room/clip", {
-    method: "POST",
-    body: { caption },
   });
 }
 

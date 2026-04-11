@@ -1295,10 +1295,17 @@ class PaymentService {
               expiry: expiryDate,
             });
 
-            // Grant entitlements based on plan_add_ons mapping
+            // Grant entitlements based on plan_add_ons mapping.
+            // Pass the payment row's metadata (creatorId / channelId / hangoutGroupId)
+            // so scoped add-ons land with the correct creator_id scope.
             let grantResult;
             try {
-              grantResult = await PaymentService.grantEntitlementsForPlan(userId, planIdOrBookingId, 'epayco');
+              grantResult = await PaymentService.grantEntitlementsForPlan(
+                userId,
+                planIdOrBookingId,
+                'epayco',
+                payment?.metadata || null,
+              );
             } catch (entitlementErr) {
               logger.error('grantEntitlementsForPlan threw unexpectedly — ePayco will retry', {
                 error: entitlementErr.message, userId, planId: planIdOrBookingId,
@@ -2321,9 +2328,17 @@ class PaymentService {
             // Grant entitlements based on plan_add_ons mapping.
             // C-01: Mirror the ePayco pattern — surface entitlement failures so the
             // Daimo webhook handler returns { success: false } and Daimo can retry.
+            // Pass the payment row's metadata so scoped add-ons land with the
+            // correct creator_id / channel_id / hangout_group_id scope.
+            const daimoPaymentMetadata = payment?.metadata || normalized?.metadata || null;
             let daimoGrantResult;
             try {
-              daimoGrantResult = await PaymentService.grantEntitlementsForPlan(userId, planId, 'daimo');
+              daimoGrantResult = await PaymentService.grantEntitlementsForPlan(
+                userId,
+                planId,
+                'daimo',
+                daimoPaymentMetadata,
+              );
             } catch (entitlementErr) {
               logger.error('grantEntitlementsForPlan threw unexpectedly — Daimo will retry', {
                 error: entitlementErr.message, userId, planId,
@@ -4318,7 +4333,7 @@ class PaymentService {
    * @param {string} [source='payment'] - Source for audit log
    * @returns {Promise<{granted: number, errors: number}>}
    */
-  static async grantEntitlementsForPlan(userId, planId, source = 'payment') {
+  static async grantEntitlementsForPlan(userId, planId, source = 'payment', paymentMetadata = null) {
     const result = { granted: 0, errors: 0 };
     try {
       // Look up what add-ons this plan grants, with per-add-on duration overrides
@@ -4345,36 +4360,82 @@ class PaymentService {
           // Per-add-on duration takes priority, then fall back to plan's duration
           const durationDays = row.addon_duration_days || row.plan_duration_days || 30;
 
+          // Per-resource scoping: which add-ons are scoped, and which metadata
+          // field supplies the resource id.
+          //   channel-access        → paymentMetadata.channelId
+          //   hangout-access        → paymentMetadata.hangoutGroupId
+          //   creator-subscription  → paymentMetadata.creatorId
+          let scopeCreatorId = null;
+          if (row.add_on_id === 'channel-access' && paymentMetadata?.channelId) {
+            scopeCreatorId = String(paymentMetadata.channelId);
+          } else if (row.add_on_id === 'hangout-access' && paymentMetadata?.hangoutGroupId) {
+            scopeCreatorId = String(paymentMetadata.hangoutGroupId);
+          } else if (row.add_on_id === 'creator-subscription' && paymentMetadata?.creatorId) {
+            scopeCreatorId = String(paymentMetadata.creatorId);
+          }
+
           if (isLifetime) {
             // Lifetime: upsert with no expiry
             await txClient.query(`
-              INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, source_plan_id)
-              VALUES ($1, $2, true, $3)
+              INSERT INTO user_entitlements (user_id, add_on_id, creator_id, is_lifetime, source_plan_id)
+              VALUES ($1, $2, $3, true, $4)
               ON CONFLICT (user_id, add_on_id, creator_id)
               DO UPDATE SET is_lifetime = true, is_consumed = false, updated_at = NOW()
-            `, [userId, row.add_on_id, planId]);
+            `, [userId, row.add_on_id, scopeCreatorId, planId]);
           } else {
-            // Time-limited: extend from current expiry if still active, else from now
+            // Time-limited: extend from current expiry if still active, else from now.
+            // For scoped add-ons we MUST pass creator_id so the ON CONFLICT clause
+            // matches the (user_id, add_on_id, creator_id) unique key correctly and
+            // we don't stomp on a global row of the same add_on_id.
             await txClient.query(`
-              INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id)
-              VALUES ($1, $2, NOW() + ($3::integer * INTERVAL '1 day'), $4)
+              INSERT INTO user_entitlements (user_id, add_on_id, creator_id, expires_at, source_plan_id)
+              VALUES ($1, $2, $3, NOW() + ($4::integer * INTERVAL '1 day'), $5)
               ON CONFLICT (user_id, add_on_id, creator_id)
               DO UPDATE SET
                 expires_at = CASE
                   WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
                   WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
-                    THEN user_entitlements.expires_at + ($3::integer * INTERVAL '1 day')
-                  ELSE NOW() + ($3::integer * INTERVAL '1 day')
+                    THEN user_entitlements.expires_at + ($4::integer * INTERVAL '1 day')
+                  ELSE NOW() + ($4::integer * INTERVAL '1 day')
                 END,
                 is_consumed = false,
                 updated_at = NOW()
               WHERE NOT user_entitlements.is_lifetime
-            `, [userId, row.add_on_id, parseInt(durationDays, 10), planId]);
+            `, [userId, row.add_on_id, scopeCreatorId, parseInt(durationDays, 10), planId]);
+          }
+
+          // Dual-write to legacy creator_subscriptions so old read paths stay working.
+          if (row.add_on_id === 'creator-subscription' && scopeCreatorId) {
+            try {
+              const durationSql = isLifetime ? null : parseInt(durationDays, 10);
+              await txClient.query(`
+                INSERT INTO creator_subscriptions (creator_id, subscriber_id, status, started_at, expires_at)
+                VALUES ($1, $2, 'active', NOW(),
+                        CASE WHEN $3::integer IS NULL
+                             THEN NOW() + INTERVAL '100 years'
+                             ELSE NOW() + ($3::integer * INTERVAL '1 day')
+                        END)
+                ON CONFLICT (creator_id, subscriber_id) DO UPDATE SET
+                  status = 'active',
+                  expires_at = CASE
+                    WHEN $3::integer IS NULL THEN NOW() + INTERVAL '100 years'
+                    WHEN creator_subscriptions.expires_at > NOW()
+                      THEN creator_subscriptions.expires_at + ($3::integer * INTERVAL '1 day')
+                    ELSE NOW() + ($3::integer * INTERVAL '1 day')
+                  END,
+                  updated_at = NOW()
+              `, [scopeCreatorId, userId, durationSql]);
+            } catch (dualWriteErr) {
+              logger.warn('Creator subscription dual-write failed (non-critical)', {
+                userId, creatorId: scopeCreatorId, error: dualWriteErr.message,
+              });
+            }
           }
 
           result.granted++;
           logger.info('Entitlement granted', {
-            userId, addOn: row.add_on_name, planId, isLifetime, durationDays
+            userId, addOn: row.add_on_name, planId, isLifetime, durationDays,
+            scopeCreatorId: scopeCreatorId || null,
           });
         }
 

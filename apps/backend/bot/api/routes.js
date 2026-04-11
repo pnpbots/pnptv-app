@@ -133,6 +133,10 @@ const softAuth = (req, res, next) => {
 // Admins (role=admin|superadmin) always bypass. Banned users get 403 before the check.
 const requirePrimeTier = EntitlementAccessService.requireEntitlement('prime');
 const requireMemberTier = EntitlementAccessService.requireEntitlement('pnp-member');
+// Scoped resource gates — resolve the target resource from req.params and allow
+// users who have a scoped entitlement for it, even without pnp-member.
+const requireHangoutAccess = EntitlementAccessService.requireResourceAccess('hangout', 'id');
+const requireChannelAccess = EntitlementAccessService.requireResourceAccess('channel', 'channelId');
 
 /**
  * DM rate limit for free tier users — uses Redis daily counter
@@ -1519,6 +1523,9 @@ app.get('/api/admin/check', adminCheckLimiter, adminGuard, (req, res) => {
 // X OAuth routes (admin-guarded for account management, public alias for callback)
 app.use('/api/admin/x/oauth', adminGuard, xOAuthRoutes);
 app.use('/api/auth/x', xOAuthRoutes);
+// Creator X OAuth (requires active creator, not admin)
+const creatorGuardForOAuth = require('./middleware/creatorGuard');
+app.use('/api/creator/x/oauth', requireSessionAuth, creatorGuardForOAuth, xOAuthRoutes);
 
 // Audit log middleware — registered here so it covers ALL /api/admin/* routes,
 // including those defined before the RBAC block further down the file.
@@ -1627,6 +1634,14 @@ app.post('/checkout/pnp/confirmation', webhookLimiter, webhookController.handleE
 
 // Main Daimo webhook handler
 app.post('/api/webhooks/daimo', webhookLimiter, webhookController.handleDaimoWebhook);
+// LiveKit webhook — participant_joined, participant_left, room_finished
+// express.raw() is required — livekit-server-sdk verifies the raw body signature
+app.post(
+  '/api/webhooks/livekit',
+  webhookLimiter,
+  express.raw({ type: 'application/webhook+json' }),
+  webhookController.handleLiveKitWebhook
+);
 app.post('/api/webhooks/visa-cybersource', webhookLimiter, require('./controllers/visaCybersourceWebhookController').handleWebhook);
 app.get('/api/webhooks/visa-cybersource/health', adminGuard, require('./controllers/visaCybersourceWebhookController').healthCheck);
 app.get('/api/payment-response', webhookController.handlePaymentResponse);
@@ -3358,24 +3373,39 @@ async function ensureEmailCredentials(userId, email, language) {
 }
 
 // Get a random available Meru link for a product
+// Verifies the link is actually unpaid on Meru before serving it
 app.get('/api/meru/random-link', asyncHandler(async (req, res) => {
   const { product = 'lifetime-pass' } = req.query;
   const meruLinkService = require('../../services/meruLinkService');
-  
+  const meruPaymentService = require('../../services/meruPaymentService');
+
   try {
-    const link = await meruLinkService.getRandomAvailableLink(product);
-    
-    if (!link) {
-      return res.status(404).json({ 
-        success: false, 
-        error: `No active Meru links found for product: ${product}` 
-      });
+    // Try up to 5 random links to find one that's genuinely unpaid on Meru
+    const MAX_ATTEMPTS = 5;
+    const triedCodes = new Set();
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const link = await meruLinkService.getRandomAvailableLink(product);
+
+      if (!link) break;
+      if (triedCodes.has(link.code)) continue;
+      triedCodes.add(link.code);
+
+      // Verify link is not already paid on Meru
+      const verification = await meruPaymentService.verifyPayment(link.code);
+      if (!verification.isPaid) {
+        // Fresh link — serve it
+        return res.json({ success: true, code: link.code, url: link.meru_link });
+      }
+
+      // Already paid on Meru — mark as used so it won't be picked again
+      logger.warn('Meru link already paid but was active in DB, marking as used', { code: link.code, paidAt: verification.paidAt });
+      await meruLinkService.invalidateLinkAfterActivation(link.code, 'unknown', 'paid-on-meru-no-activation');
     }
-    
-    res.json({
-      success: true,
-      code: link.code,
-      url: link.meru_link
+
+    return res.status(404).json({
+      success: false,
+      error: `No active Meru links found for product: ${product}`
     });
   } catch (error) {
     logger.error('Error in /api/meru/random-link:', error);
@@ -4128,6 +4158,8 @@ app.put('/api/webapp/admin/plans/:planId/add-ons', adminGuard, asyncHandler(weba
 // User entitlement management
 app.get('/api/webapp/admin/users/:userId/entitlements', adminGuard, asyncHandler(webappAdminController.getUserEntitlements));
 app.post('/api/webapp/admin/users/:userId/entitlements', adminGuard, asyncHandler(webappAdminController.grantUserEntitlement));
+// Resource picker for the admin scoped grant form. Returns channels, hangouts, or creators.
+app.get('/api/webapp/admin/resources', adminGuard, asyncHandler(webappAdminController.searchResources));
 app.delete('/api/webapp/admin/users/:userId/entitlements/:addOnId', adminGuard, asyncHandler(webappAdminController.revokeUserEntitlement));
 app.put('/api/webapp/admin/users/:userId/entitlements/:addOnId/extend', adminGuard, asyncHandler(webappAdminController.extendUserEntitlement));
 // Creator / Live Performer promotion
@@ -4140,9 +4172,45 @@ app.post('/api/webapp/admin/meru-links', requireSessionAuth, adminGuard, asyncHa
 app.delete('/api/webapp/admin/meru-links/:id', requireSessionAuth, adminGuard, asyncHandler(webappAdminController.deleteMeruLink));
 // User-facing entitlements
 app.get('/api/webapp/my-entitlements', requireSessionAuth, asyncHandler(webappAdminController.getMyEntitlements));
+// Structured access map for the My Access page (joined with channel/hangout/creator metadata)
+app.get('/api/me/access', requireSessionAuth, asyncHandler(webappAdminController.getMyAccess));
 
 // Admin push broadcast
 app.post('/api/webapp/admin/notifications/push', adminGuard, asyncHandler(webappAdminController.sendPushNotification));
+
+// Admin Telegram broadcast — send a message to all bot users
+// Body: { message: string, messageEs?: string }
+// messageEs is optional; if provided, users with language='es' get the Spanish version
+app.post('/api/webapp/admin/broadcast/telegram', adminGuard, asyncHandler(async (req, res) => {
+  const { message, messageEs } = req.body;
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'message is required' });
+  }
+
+  const bot = require('../core/bot');
+  if (!bot?.telegram) {
+    return res.status(503).json({ error: 'Bot not available' });
+  }
+
+  const pool = getPool();
+  const result = await pool.query("SELECT id, language FROM users WHERE id != '1087968824'");
+  const users = result.rows;
+
+  let sent = 0, failed = 0;
+  for (const user of users) {
+    try {
+      const text = (messageEs && user.language === 'es') ? messageEs : message;
+      await bot.telegram.sendMessage(user.id, text, { parse_mode: 'Markdown' });
+      sent++;
+      await new Promise(r => setTimeout(r, 50));
+    } catch (e) {
+      failed++;
+    }
+  }
+
+  logger.info(`Telegram broadcast completed: ${sent} sent, ${failed} failed`);
+  res.json({ success: true, total: users.length, sent, failed });
+}));
 
 // POST /api/webapp/admin/notifications/digest/test — trigger digest email for a user (SMTP test)
 app.post('/api/webapp/admin/notifications/digest/test', adminGuard, asyncHandler(async (req, res) => {
@@ -4310,7 +4378,7 @@ app.get('/api/webapp/hangouts/groups/discover', requireSessionAuth, asyncHandler
 // join-by-invite must be before /:id to avoid :code being captured as :id
 app.post('/api/webapp/hangouts/groups/join-by-invite/:code', requireSessionAuth, asyncHandler(hangoutGroupController.joinByInvite));
 app.get('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.getGroup));
-app.post('/api/webapp/hangouts/groups/:id/join', requireSessionAuth, asyncHandler(hangoutGroupController.joinGroup));
+app.post('/api/webapp/hangouts/groups/:id/join', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.joinGroup));
 app.post('/api/webapp/hangouts/groups/:id/leave', requireSessionAuth, asyncHandler(hangoutGroupController.leaveGroup));
 app.delete('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.deleteGroup));
 app.patch('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.updateGroup));
@@ -4323,7 +4391,7 @@ app.get('/api/webapp/hangouts/groups/:id/requests', requireSessionAuth, asyncHan
 app.post('/api/webapp/hangouts/groups/:id/requests/:requestId/:action', requireSessionAuth, asyncHandler(hangoutGroupController.handleJoinRequest));
 
 // ── Hangout Group Chat — open to all authenticated users ─────────────────────
-app.get('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, asyncHandler(hangoutGroupController.getMessages));
+app.get('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.getMessages));
 // search MUST be registered before /:msgId routes so "search" is not parsed as a msgId
 app.get('/api/webapp/hangouts/groups/:id/messages/search', requireSessionAuth, asyncHandler(hangoutGroupController.searchMessages));
 app.patch('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, asyncHandler(hangoutGroupController.editMessage));
@@ -4333,7 +4401,7 @@ app.post('/api/webapp/hangouts/groups/:id/link-telegram', requireSessionAuth, as
 app.post('/api/webapp/hangouts/groups/:id/unlink-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.unlinkTelegramGroup));
 app.get('/api/webapp/hangouts/groups/:id/video-chat-status', requireSessionAuth, asyncHandler(hangoutGroupController.getVideoChatStatus));
 app.get('/api/webapp/hangouts/groups/:id/messages/:msgId/reactions', requireSessionAuth, asyncHandler(hangoutGroupController.getReactions));
-app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, asyncHandler(hangoutGroupController.sendMessage));
+app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.sendMessage));
 // Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
 app.post(
   '/api/webapp/hangouts/groups/:id/media',
@@ -4343,7 +4411,7 @@ app.post(
   asyncHandler(hangoutMediaController.uploadHangoutMedia)
 );
 // Mark group messages as read
-app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, asyncHandler(hangoutGroupController.markAsRead));
+app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.markAsRead));
 // Hangout group management (kick is registered above at line 4268 — duplicate removed)
 app.post('/api/webapp/hangouts/groups/:id/ban', requireSessionAuth, asyncHandler(hangoutGroupController.banMember));
 app.post('/api/webapp/hangouts/groups/:id/unban', requireSessionAuth, asyncHandler(hangoutGroupController.unbanMember));
@@ -4483,7 +4551,7 @@ app.get('/api/webapp/me/referral', asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   const stats = await referralService.getReferralStats(user.id);
-  return res.json({ ...stats, link: `https://pnptv.app/join?ref=${stats.code}` });
+  return res.json({ ...stats, link: `https://app.pnptv.app/join?ref=${stats.code}` });
 }));
 
 // Referral: redeem a code (called on register)
@@ -4910,7 +4978,7 @@ async function fetchPerformerPhotos(performers) {
   }
 }
 
-app.get('/api/performers/featured', asyncHandler(async (req, res) => {
+app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   try {
     const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
@@ -5064,7 +5132,13 @@ app.get('/api/performers/featured', asyncHandler(async (req, res) => {
       return 0;
     });
 
-    res.json({ success: true, performers: mapped });
+    // Strip HLS stream URLs for unauthenticated users — prevents public access to stream links.
+    const isAuthenticated = !!req.user?.id;
+    const safePerformers = isAuthenticated
+      ? mapped
+      : mapped.map(({ hlsUrl, ...rest }) => rest);
+
+    res.json({ success: true, performers: safePerformers });
   } catch (error) {
     logger.error(`Performers featured error: ${error.message}`);
     res.json({ success: true, performers: [] });
@@ -5294,6 +5368,80 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
     logger.error(`Channels list error: ${error.message}`);
     res.json({ success: true, channels: [], nextPage: null, total: 0 });
   }
+}));
+
+// Purchase access to a paid channel (and its linked hangout).
+// Creates a channel_access payment with channelId + hangoutGroupId in metadata
+// so the webhook handler can scope the channel-access entitlement.
+app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user || req.user;
+  const channelId = parseInt(req.params.channelId, 10);
+  const { provider, email } = req.body || {};
+
+  if (!Number.isFinite(channelId)) {
+    return res.status(400).json({ error: 'Invalid channel ID' });
+  }
+  if (!['epayco', 'daimo'].includes(provider)) {
+    return res.status(400).json({ error: 'Provider must be epayco or daimo' });
+  }
+
+  const { rows: channels } = await getPool().query(
+    'SELECT id, creator_id, access_type, price_usd, hangout_group_id, name FROM creator_channels WHERE id = $1 AND is_active = true',
+    [channelId]
+  );
+  if (channels.length === 0) return res.status(404).json({ error: 'Channel not found' });
+  const channel = channels[0];
+
+  if (channel.access_type !== 'paid' || !channel.price_usd || Number(channel.price_usd) <= 0) {
+    return res.status(400).json({ error: 'This channel does not require payment' });
+  }
+
+  // Check if user already has access
+  const { checkChannelAccess } = require('../../services/accessService');
+  const access = await checkChannelAccess(user.id, channel);
+  if (access.allowed) {
+    return res.status(400).json({ error: 'You already have access to this channel' });
+  }
+
+  // Create payment. creatorId is overloaded in createPayment to carry the
+  // channelId so the price lookup in paymentService.createPayment works.
+  // Actual entitlement scoping is driven by the metadata we write below.
+  const PaymentService = require('../../services/paymentService');
+  const payment = await PaymentService.createPayment({
+    userId: user.id,
+    planId: 'channel_access',
+    provider,
+    creatorId: String(channel.id),
+  });
+
+  // Store channel metadata on the payment record for webhook processing.
+  // The grantEntitlementsForPlan webhook handler reads paymentMetadata.channelId
+  // (and hangoutGroupId) to scope the channel-access entitlement correctly.
+  await getPool().query(
+    `UPDATE payments SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
+    [
+      JSON.stringify({
+        channelId: channel.id,
+        hangoutGroupId: channel.hangout_group_id,
+        channelName: channel.name,
+      }),
+      payment.id,
+    ]
+  );
+
+  if (email) {
+    await getPool().query(
+      `UPDATE payments SET metadata = metadata || $1::jsonb WHERE id = $2`,
+      [JSON.stringify({ email }), payment.id]
+    );
+  }
+
+  return res.json({
+    success: true,
+    paymentId: payment.id,
+    paymentUrl: payment.paymentUrl || `/payment/${payment.id}`,
+    checkoutUrl: payment.checkoutUrl || `/checkout/${payment.id}`,
+  });
 }));
 
 app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, res) => {

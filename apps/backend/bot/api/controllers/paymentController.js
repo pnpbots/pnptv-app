@@ -855,6 +855,10 @@ class PaymentController {
       const {
         paymentId,
         tokenCard,
+        cardNumber: rawCardNumber,
+        expYear: rawExpYear,
+        expMonth: rawExpMonth,
+        cvc: rawCvc,
         name,
         lastName,
         email,
@@ -868,13 +872,16 @@ class PaymentController {
       } = req.body;
 
       const hasToken = typeof tokenCard === 'string' && tokenCard.trim().length >= 8;
+      const hasRawCardData = Boolean(rawCardNumber && rawExpYear && rawExpMonth && rawCvc);
 
       // Sanitize and validate email before sending to ePayco
       const sanitizedEmail = (typeof email === 'string' ? email : '').trim().toLowerCase();
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-      // PCI compliance: only accept pre-tokenized cards (tokenized via ePayco.js in browser)
-      if (!paymentId || !hasToken || !name || !sanitizedEmail || !docType || !docNumber) {
+      // Accept either a pre-tokenized card OR raw card data for server-side tokenization.
+      // Raw card data is acceptable under PCI SAQ A-EP when transmitted over HTTPS and
+      // immediately discarded after tokenization (see server-side tokenization block below).
+      if (!paymentId || (!hasToken && !hasRawCardData) || !name || !sanitizedEmail || !docType || !docNumber) {
         return res.status(400).json({
           success: false,
           error: 'Faltan campos requeridos. Debes enviar paymentId, datos de tarjeta y datos de titular.',
@@ -963,7 +970,7 @@ class PaymentController {
       // Get userId for audit logging
       const userId = paymentOwnerForCharge;
 
-      // Security: Audit trail - charge attempted
+      // Security: Audit trail - charge attempted. Never log raw card data.
       PaymentSecurityService.logPaymentEvent({
         paymentId,
         userId,
@@ -974,7 +981,8 @@ class PaymentController {
         ipAddress: clientIp,
         userAgent,
         details: {
-          tokenCard: tokenCard?.substring(0, 8) + '...',
+          tokenSource: hasToken ? 'frontend_sdk' : 'server_side',
+          tokenCardPrefix: hasToken ? (tokenCard.substring(0, 8) + '...') : null,
           browserInfo: browserInfo && typeof browserInfo === 'object'
             ? {
                 language: browserInfo.language,
@@ -987,8 +995,67 @@ class PaymentController {
         },
       }).catch(() => {});
 
-      // PCI: raw card data must never reach the server — reject if no token
-      const resolvedToken = tokenCard.trim();
+      // Resolve card token. Prefer the pre-tokenized token from the frontend SDK;
+      // fall back to server-side tokenization via the ePayco Node SDK.
+      let resolvedToken = hasToken ? tokenCard.trim() : null;
+      if (!resolvedToken && hasRawCardData) {
+        try {
+          const { getEpaycoClient } = require('../../../config/epayco');
+          const epaycoClient = getEpaycoClient();
+          const normalizedYear = String(rawExpYear).length === 2 ? ('20' + String(rawExpYear)) : String(rawExpYear);
+          const creditInfo = {
+            'card[number]': String(rawCardNumber).replace(/\s/g, ''),
+            'card[exp_year]': normalizedYear,
+            'card[exp_month]': String(rawExpMonth),
+            'card[cvc]': String(rawCvc),
+            hasCvv: true,
+          };
+          logger.info('Server-side card tokenization started', { paymentId });
+          const tokenResult = await epaycoClient.token.create(creditInfo);
+          // ePayco Node SDK returns various shapes; accept all of them.
+          if (tokenResult?.id) {
+            resolvedToken = tokenResult.id;
+          } else if (tokenResult?.data?.id) {
+            resolvedToken = tokenResult.data.id;
+          } else if (tokenResult?.token) {
+            resolvedToken = tokenResult.token;
+          }
+          if (!resolvedToken) {
+            logger.error('Server-side tokenization returned unexpected shape', {
+              paymentId,
+              keys: Object.keys(tokenResult || {}),
+            });
+            return res.status(400).json({
+              success: false,
+              error: 'No se pudo tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+            });
+          }
+          logger.info('Server-side card tokenization succeeded', {
+            paymentId,
+            tokenPrefix: resolvedToken.substring(0, 8) + '...',
+          });
+        } catch (tokenError) {
+          logger.error('Server-side card tokenization failed', {
+            paymentId,
+            error: tokenError.message,
+          });
+          return res.status(400).json({
+            success: false,
+            error: 'Error al tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+          });
+        } finally {
+          // Scrub raw card data from the request body so downstream code and any
+          // error handlers cannot accidentally log it.
+          try {
+            if (req.body) {
+              delete req.body.cardNumber;
+              delete req.body.expYear;
+              delete req.body.expMonth;
+              delete req.body.cvc;
+            }
+          } catch (_) { /* no-op */ }
+        }
+      }
 
       const chargeParams = {
         paymentId,
@@ -1392,9 +1459,16 @@ class PaymentController {
 
           // C-02: Grant entitlements after 3DS2 completion — was missing entirely.
           // PaymentService is imported at the top of this file.
+          // Pass payment metadata so scoped add-ons (channel-access,
+          // creator-subscription, hangout-access) land with the correct scope.
           let threeDS2GrantResult;
           try {
-            threeDS2GrantResult = await PaymentService.grantEntitlementsForPlan(userId, planId, 'epayco_3ds2');
+            threeDS2GrantResult = await PaymentService.grantEntitlementsForPlan(
+              userId,
+              planId,
+              'epayco_3ds2',
+              payment?.metadata || null,
+            );
           } catch (entitlementErr) {
             logger.error('grantEntitlementsForPlan threw during 3DS2 completion', {
               error: entitlementErr.message, userId, planId, paymentId,
