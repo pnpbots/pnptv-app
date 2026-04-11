@@ -237,7 +237,7 @@ function buildTestApp() {
   }));
 
   // Load the handlers under test
-  const { handleTelegramAuth, handleAcceptTerms, checkAuthStatus } = require('../api/handlers/telegramAuthHandler');
+  const { handleTelegramAuth, handleAcceptTerms, checkAuthStatus } = require('../bot/api/handlers/telegramAuthHandler');
   const webAppController = require('../bot/api/controllers/webAppController');
   const rateLimit = require('express-rate-limit');
 

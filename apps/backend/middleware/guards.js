@@ -92,7 +92,7 @@ const superadminGuard = async (req, res, next) => {
 // support, notifications, creator subscriptions, creator applications).
 // Uses the list-based API roleGuard (not rank-based) to avoid unintentionally
 // granting access to future roles added at rank >= 2.
-const _apiRoleGuard = require('../api/middleware/roleGuard');
+const _apiRoleGuard = require('../bot/api/middleware/roleGuard');
 const creatorAdminGuard = _apiRoleGuard('creator', 'admin', 'superadmin');
 
 module.exports = {

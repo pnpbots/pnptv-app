@@ -75,7 +75,7 @@ let webAppController;
 
 beforeAll(() => {
   socialController = require('../bot/api/controllers/socialController');
-  directMessagesController = require('../api/controllers/directMessagesController');
+  directMessagesController = require('../bot/api/controllers/directMessagesController');
   webAppController = require('../bot/api/controllers/webAppController');
 });
 

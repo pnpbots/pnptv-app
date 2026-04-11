@@ -125,9 +125,9 @@ let requireFreeTierDmLimit;
 
 beforeAll(() => {
   // Load controllers after mocks are in place
-  directMessagesController = require('../api/controllers/directMessagesController');
+  directMessagesController = require('../bot/api/controllers/directMessagesController');
   dmController             = require('../bot/api/controllers/dmController');
-  notificationsController  = require('../api/controllers/notificationsController');
+  notificationsController  = require('../bot/api/controllers/notificationsController');
 
   // Load the middleware in isolation
   // We inline a copy of requireFreeTierDmLimit here because it is defined
