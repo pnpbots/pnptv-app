@@ -278,6 +278,43 @@ describe('hasResourceAccess — hangout', () => {
     expect(result.allowed).toBe(true);
     expect(result.reason).toBe('existing_member');
   });
+
+  it('does NOT grandfather existing members of a paid hangout (scope required)', async () => {
+    // When scoped access expires, hangout_group_members rows persist — the
+    // resolver must enforce the scope entitlement, not fall back to member status.
+    queueDb(
+      [],                                                      // isBanned
+      [{ id: 'h-4', is_paid: true, channel_id: null, creator_id: 'u-1', price_usd: 10 }],
+      [],                                                      // no hangout-access (expired)
+      [],                                                      // no prime
+    );
+    const result = await EntitlementAccessService.hasResourceAccess('42', 'hangout', 'h-4');
+    expect(result.allowed).toBe(false);
+    expect(result.code).toBe('PAYMENT_REQUIRED');
+  });
+
+  it('does NOT grandfather existing members of a channel-linked hangout (scope required)', async () => {
+    // For channel-linked hangouts, the channel-access scope is authoritative.
+    // When it expires, a lingering hangout_group_members row must not keep the user in.
+    // The hangout kind delegates to the channel kind when channel_id is set, which
+    // re-runs the full ladder (isBanned + loadResource + scope + prime + kind rules).
+    queueDb(
+      [],                                                      // isBanned (hangout call)
+      [{ id: 'h-5', is_paid: false, channel_id: 'c-linked' }], // loadResource hangout
+      [],                                                      // no hangout-access
+      [],                                                      // no channel-access on linked channel (pre-delegation shortcut)
+      [],                                                      // no prime (global override — hangout path)
+      // Hangout kind is_paid=false so PAYMENT_REQUIRED branch is skipped.
+      // Delegates to channel kind → recursive hasResourceAccess('channel', 'c-linked').
+      [],                                                      // recursive isBanned
+      [{ id: 'c-linked', access_type: 'paid', creator_id: 'u-1', price_usd: 10 }], // recursive loadResource channel
+      [],                                                      // recursive no channel-access
+      [],                                                      // recursive no prime
+    );
+    const result = await EntitlementAccessService.hasResourceAccess('42', 'hangout', 'h-5');
+    expect(result.allowed).toBe(false);
+    expect(result.code).toBe('PAYMENT_REQUIRED');
+  });
 });
 
 // ── Standalone policy: scoped access survives pnp-member expiry ─────────────
