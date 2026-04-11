@@ -1477,6 +1477,49 @@ app.get('/health', healthLimiter, async (req, res) => {
   }
 });
 
+// Cristina stage bot health — green/yellow/red based on Redis heartbeat.
+// Public (no auth) so external monitoring can hit it. The heartbeat is written
+// by services/cristinaStageBot.js after each successful captureFrame, debounced
+// to ~once per 10s. Key expires at 60s TTL so if the bot dies the endpoint
+// flips to red within a minute regardless of staleness checks.
+app.get('/api/health/cristina', asyncHandler(async (req, res) => {
+  const redis = getRedis();
+  const raw = await redis.get('cristina:heartbeat');
+  if (!raw) {
+    return res.status(503).json({
+      status: 'red',
+      reason: 'no heartbeat — bot not publishing',
+      ageSeconds: null,
+    });
+  }
+  let hb;
+  try {
+    hb = JSON.parse(raw);
+  } catch {
+    return res.status(503).json({
+      status: 'red',
+      reason: 'corrupt heartbeat payload',
+      ageSeconds: null,
+    });
+  }
+  const ageMs = Date.now() - hb.at;
+  const ageSeconds = Math.floor(ageMs / 1000);
+  let status = 'green';
+  let reason = 'healthy';
+  if (ageMs > 30_000) { status = 'yellow'; reason = 'heartbeat stale (>30s)'; }
+  if (ageMs > 60_000) { status = 'red'; reason = 'heartbeat expired (>60s)'; }
+  const httpStatus = status === 'red' ? 503 : 200;
+  return res.status(httpStatus).json({
+    status,
+    reason,
+    ageSeconds,
+    mode: hb.mode,
+    room: hb.room,
+    track: hb.track,
+    trackStartedAt: hb.trackStartedAt,
+  });
+}));
+
 // API routes
 // Authentication API endpoints
 app.post('/api/telegram-auth', authLimiter, handleTelegramAuth);
@@ -2053,7 +2096,7 @@ app.get('/api/media/prime', softAuth, requirePrimeTier, asyncHandler(async (req,
 app.get('/api/radio/now-playing', asyncHandler(async (req, res) => {
   try {
     const result = await getPool().query(
-      'SELECT * FROM radio_now_playing WHERE id = 1'
+      `SELECT * FROM radio_now_playing WHERE id = 1 AND updated_at > NOW() - INTERVAL '5 minutes'`
     );
 
     const nowPlaying = result.rows[0];
@@ -4622,7 +4665,7 @@ app.delete('/api/users/me/erase', requireSessionAuth, deleteAccountLimiter, asyn
 
 // --- Media Proxy ---
 // Resolve SoundCloud track metadata
-app.post('/api/proxy/media/resolve-soundcloud', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/proxy/media/resolve-soundcloud', requireSessionAuth, adminGuard, asyncHandler(async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ success: false, error: 'URL is required' });
 

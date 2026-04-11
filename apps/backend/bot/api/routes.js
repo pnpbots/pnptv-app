@@ -46,8 +46,8 @@ const PermissionService = require('../services/permissionService');
 const referralService = require('../services/referralService');
 
 // Authentication middleware and handlers
-const { telegramAuth, checkTermsAccepted } = require('../../api/middleware/telegramAuth');
-const { handleTelegramAuth, handleAcceptTerms, checkAuthStatus } = require('../../api/handlers/telegramAuthHandler');
+const { telegramAuth, checkTermsAccepted } = require('./middleware/telegramAuth');
+const { handleTelegramAuth, handleAcceptTerms, checkAuthStatus } = require('./handlers/telegramAuthHandler');
 
 // New route imports for auth, subscriptions, monetization
 const authRoutes = require('./routes/authRoutes');
@@ -1493,6 +1493,49 @@ app.get('/health', healthLimiter, async (req, res) => {
   }
 });
 
+// Cristina stage bot health — green/yellow/red based on Redis heartbeat.
+// Public (no auth) so external monitoring can hit it. The heartbeat is written
+// by services/cristinaStageBot.js after each successful captureFrame, debounced
+// to ~once per 10s. Key expires at 60s TTL so if the bot dies the endpoint
+// flips to red within a minute regardless of staleness checks.
+app.get('/api/health/cristina', asyncHandler(async (req, res) => {
+  const redis = getRedis();
+  const raw = await redis.get('cristina:heartbeat');
+  if (!raw) {
+    return res.status(503).json({
+      status: 'red',
+      reason: 'no heartbeat — bot not publishing',
+      ageSeconds: null,
+    });
+  }
+  let hb;
+  try {
+    hb = JSON.parse(raw);
+  } catch {
+    return res.status(503).json({
+      status: 'red',
+      reason: 'corrupt heartbeat payload',
+      ageSeconds: null,
+    });
+  }
+  const ageMs = Date.now() - hb.at;
+  const ageSeconds = Math.floor(ageMs / 1000);
+  let status = 'green';
+  let reason = 'healthy';
+  if (ageMs > 30_000) { status = 'yellow'; reason = 'heartbeat stale (>30s)'; }
+  if (ageMs > 60_000) { status = 'red'; reason = 'heartbeat expired (>60s)'; }
+  const httpStatus = status === 'red' ? 503 : 200;
+  return res.status(httpStatus).json({
+    status,
+    reason,
+    ageSeconds,
+    mode: hb.mode,
+    room: hb.room,
+    track: hb.track,
+    trackStartedAt: hb.trackStartedAt,
+  });
+}));
+
 // API routes
 // Authentication API endpoints
 app.post('/api/telegram-auth', authLimiter, handleTelegramAuth);
@@ -2067,7 +2110,7 @@ app.get('/api/media/prime', softAuth, requirePrimeTier, asyncHandler(async (req,
 app.get('/api/radio/now-playing', asyncHandler(async (req, res) => {
   try {
     const result = await getPool().query(
-      'SELECT * FROM radio_now_playing WHERE id = 1'
+      `SELECT * FROM radio_now_playing WHERE id = 1 AND updated_at > NOW() - INTERVAL '5 minutes'`
     );
 
     const nowPlaying = result.rows[0];
@@ -2288,10 +2331,10 @@ app.post('/api/metrics/reset', healthLimiter, adminGuard, asyncHandler(healthCon
 // ==========================================
 const webAppController = require('./controllers/webAppController');
 // Phase 1 controllers:
-const userLocationController = require('../../api/controllers/userLocationController');
-const blockedUsersController = require('../../api/controllers/blockedUsersController');
-const directMessagesController = require('../../api/controllers/directMessagesController');
-const notificationsController = require('../../api/controllers/notificationsController');
+const userLocationController = require('./controllers/userLocationController');
+const blockedUsersController = require('./controllers/blockedUsersController');
+const directMessagesController = require('./controllers/directMessagesController');
+const notificationsController = require('./controllers/notificationsController');
 
 // Rate limiter for the Telegram Login Widget endpoint — 5 attempts/min per IP
 const telegramWidgetLimiter = rateLimit({
@@ -4663,12 +4706,38 @@ app.get('/api/webapp/admin/radio/requests', adminGuard, asyncHandler(async (req,
 }));
 
 // Admin: approve/reject radio request (webapp session auth)
+// On approval, the stored URL is re-validated via SoundCloudService.resolveTrack()
+// so a previously-accepted URL cannot slip through if the allowlist or resolver
+// rules have tightened since the user submitted the request.
 app.put('/api/webapp/admin/radio/requests/:requestId', adminGuard, asyncHandler(async (req, res) => {
   const { requestId } = req.params;
   const { status } = req.body;
   if (!['approved', 'rejected'].includes(status)) {
     return res.status(400).json({ success: false, error: 'Invalid status' });
   }
+
+  if (status === 'approved') {
+    const existing = await getPool().query(
+      'SELECT url FROM radio_requests WHERE id = $1',
+      [parseInt(requestId, 10)]
+    );
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Request not found' });
+    }
+    const storedUrl = existing.rows[0].url;
+    try {
+      const revalidated = await SoundCloudService.resolveTrack(storedUrl);
+      if (!revalidated) {
+        return res.status(400).json({ success: false, error: 'Stored URL failed re-validation' });
+      }
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: `Stored URL rejected by domain allowlist: ${err.message}`,
+      });
+    }
+  }
+
   const result = await getPool().query(
     'UPDATE radio_requests SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
     [status, parseInt(requestId, 10)]

@@ -14,7 +14,7 @@
  *   - ffmpeg decodes to 48 kHz stereo s16le PCM (required by LiveKit)
  *   - LiveKit's built-in Opus encoder compresses for WebRTC (~64-128 kbps)
  *   - ffmpeg applies loudnorm filter for consistent volume across tracks
- *   - Volume normalization + limiter prevents clipping
+ *   - Volume normalization + limiter prevents pre-encoder digital clipping
  *   - Ring buffer caps at 2s of audio to bound memory and latency
  *   - Real-time pacing via captureFrame backpressure (no busy loops)
  */
@@ -39,7 +39,9 @@ const MAX_QUEUE_FRAMES = 100;
 
 const BOT_IDENTITY = 'cristina-ai';
 const BOT_DISPLAY_NAME = 'Cristina AI';
-const RECONNECT_DELAY_MS = 10_000;
+// Base reconnect delay — exponential backoff resets to this on successful connect
+const BASE_RECONNECT_DELAY_MS = 2_000;
+const MAX_RECONNECT_DELAY_MS = 60_000;
 const BOT_LIVEKIT_URL = process.env.LIVEKIT_INTERNAL_WS_URL || 'ws://livekit-pnptv:7880';
 
 const MODE_LABEL_MAP = {
@@ -53,6 +55,71 @@ let _room = null;
 let _ffmpeg = null;
 let _currentMode = 'ambient';
 let _modeChanged = false;
+// Atomic generation counter — increments on every mode change so inner loops
+// can detect a stale generation and break immediately.
+let _generation = 0;
+// Consecutive yt-dlp resolve failures — drives exponential backoff
+let _consecutiveFailures = 0;
+// Reconnect backoff state
+let _reconnectDelay = BASE_RECONNECT_DELAY_MS;
+
+// ─── Observability state ────────────────────────────────────────────────────
+// Heartbeat debounce — at most one Redis write per 10s to avoid hammering.
+const HEARTBEAT_DEBOUNCE_MS = 10_000;
+const HEARTBEAT_TTL_SEC = 60;
+// Short-track guard — tracks shorter than this are treated as suspicious (ffmpeg
+// dying immediately rather than actual playback). This catches failure modes
+// like filter-chain errors where ffmpeg exits ~instantly.
+const MIN_HEALTHY_TRACK_MS = 10_000;
+let _lastHeartbeatAt = 0;
+let _currentRoomName = null;
+let _currentTrackTitle = null;
+let _currentTrackStartedAt = null;
+
+async function _writeHeartbeat(force = false) {
+  const now = Date.now();
+  if (!force && now - _lastHeartbeatAt < HEARTBEAT_DEBOUNCE_MS) return;
+  _lastHeartbeatAt = now;
+  try {
+    const { getRedis } = require('../config/redis');
+    await getRedis().set(
+      'cristina:heartbeat',
+      JSON.stringify({
+        at: now,
+        mode: _currentMode,
+        room: _currentRoomName,
+        track: _currentTrackTitle,
+        trackStartedAt: _currentTrackStartedAt,
+      }),
+      'EX',
+      HEARTBEAT_TTL_SEC,
+    );
+  } catch {
+    // Redis unavailable — heartbeat fails silently. Intentional: bot must
+    // not crash on transient Redis issues. Health endpoint will show red
+    // when the key expires, which is the correct signal.
+  }
+}
+
+// ─── Mode switch serializer ─────────────────────────────────────────────────
+
+/**
+ * _switchMode — single serialized path for all mode changes.
+ * Both the poll interval and setMode() must call this instead of duplicating
+ * the SIGKILL logic, preventing races where two callers both touch _ffmpeg.
+ */
+function _switchMode(newMode) {
+  if (newMode === _currentMode) return;
+  const oldMode = _currentMode;
+  _currentMode = newMode;
+  _modeChanged = true;
+  _generation += 1;
+  logger.info('[CristinaBot] Mode changed', { from: oldMode, to: newMode, generation: _generation });
+  if (_ffmpeg) {
+    try { _ffmpeg.kill('SIGKILL'); } catch {}
+    _ffmpeg = null;
+  }
+}
 
 // ─── Mode change listener ───────────────────────────────────────────────────
 
@@ -62,13 +129,7 @@ function setupModeListener() {
     try {
       const { getRedis } = require('../config/redis');
       const mode = await getRedis().get('mainstage:mode') || 'ambient';
-      if (mode !== _currentMode) {
-        const oldMode = _currentMode;
-        _currentMode = mode;
-        _modeChanged = true;
-        logger.info('[CristinaBot] Mode changed', { from: oldMode, to: mode });
-        if (_ffmpeg) { try { _ffmpeg.kill('SIGKILL'); } catch {} _ffmpeg = null; }
-      }
+      _switchMode(mode);
     } catch {}
   }, 2000);
   return interval;
@@ -148,7 +209,11 @@ async function connectAndStream() {
   const room = new LKRoom();
   _room = room;
   await room.connect(BOT_LIVEKIT_URL, token, { autoSubscribe: false });
+  _currentRoomName = roomName;
   logger.info('[CristinaBot] Connected', { roomName, mode: _currentMode });
+
+  // Successful connect — reset reconnect backoff
+  _reconnectDelay = BASE_RECONNECT_DELAY_MS;
 
   const audioSource = new AudioSource(SAMPLE_RATE, NUM_CHANNELS);
   const track = LocalAudioTrack.createAudioTrack('cristina-radio', audioSource);
@@ -164,7 +229,18 @@ async function connectAndStream() {
   const modeInterval = setupModeListener();
   try {
     while (_running && room.isConnected) {
+      // Capture the current generation at the start of this playlist cycle
+      const cycleGeneration = _generation;
       _modeChanged = false;
+
+      // Read mode fresh from Redis at playlist-reload time (not from stale local)
+      let currentMode = _currentMode;
+      try {
+        const { getRedis } = require('../config/redis');
+        currentMode = await getRedis().get('mainstage:mode') || _currentMode;
+        if (currentMode !== _currentMode) _switchMode(currentMode);
+      } catch {}
+
       const playlist = await loadPlaylist(_currentMode);
       if (!playlist.length) {
         logger.warn('[CristinaBot] No tracks, waiting 30s', { mode: _currentMode });
@@ -175,10 +251,18 @@ async function connectAndStream() {
       const modeLabel = MODE_LABEL_MAP[_currentMode] || 'flying';
       logger.info('[CristinaBot] Playlist loaded', { mode: _currentMode, label: modeLabel, tracks: playlist.length });
 
-      for (const entry of playlist) {
-        if (!_running || !room.isConnected || _modeChanged) break;
+      let successfulStreams = 0;
 
+      for (const entry of playlist) {
+        // Check both _modeChanged flag AND generation counter for early exit
+        if (!_running || !room.isConnected || _modeChanged || _generation !== cycleGeneration) break;
+
+        _currentTrackTitle = entry.title;
+        _currentTrackStartedAt = Date.now();
         logger.info('[CristinaBot] Now playing', { title: entry.title, mode: _currentMode });
+        // Force heartbeat on each track advance so monitoring sees liveness
+        // even if the previous track was >10s ago.
+        _writeHeartbeat(true);
         await query(
           `INSERT INTO radio_now_playing (id, title, artist, started_at, updated_at)
            VALUES (1, $1, $2, NOW(), NOW())
@@ -188,13 +272,52 @@ async function connectAndStream() {
 
         const streamUrl = await resolveStreamUrl(entry.url);
         if (!streamUrl) {
-          logger.warn('[CristinaBot] Resolve failed, skipping', { title: entry.title });
+          _consecutiveFailures += 1;
+          logger.warn('[CristinaBot] Resolve failed, skipping', {
+            title: entry.title,
+            consecutiveFailures: _consecutiveFailures,
+          });
+          // Exponential backoff after 3 consecutive failures
+          if (_consecutiveFailures >= 3) {
+            const backoffMs = Math.min(MAX_RECONNECT_DELAY_MS, 1000 * Math.pow(2, _consecutiveFailures));
+            logger.warn('[CristinaBot] Entering resolve backoff', {
+              consecutiveFailures: _consecutiveFailures,
+              backoffMs,
+            });
+            await sleep(backoffMs);
+          }
           continue;
         }
 
-        await streamTrack(audioSource, streamUrl);
-        if (_modeChanged) break;
+        // Successful resolve — reset failure counter
+        _consecutiveFailures = 0;
+
+        await streamTrack(audioSource, streamUrl, cycleGeneration);
+        successfulStreams += 1;
+
+        // Minimum inter-track gap — avoids hammering SoundCloud CDN back-to-back
+        if (_running && !_modeChanged && _generation === cycleGeneration) {
+          await sleep(500);
+        }
+
+        if (_modeChanged || _generation !== cycleGeneration) break;
       }
+
+      // If an entire playlist completed with zero successful streams, back off before
+      // reloading to avoid hammering the DB and SoundCloud in a tight spin loop.
+      if (successfulStreams === 0 && !_modeChanged && _generation === cycleGeneration) {
+        logger.warn('[CristinaBot] Playlist completed with zero successful streams, sleeping 60s');
+        await sleep(60_000);
+      }
+    }
+
+    // Room disconnected — update observable state
+    if (_running && !room.isConnected) {
+      logger.warn('[CristinaBot] Room disconnected, will reconnect');
+      try {
+        const { getRedis } = require('../config/redis');
+        await getRedis().set('mainstage:state', 'reconnecting', 'EX', 120);
+      } catch {}
     }
   } finally {
     clearInterval(modeInterval);
@@ -207,16 +330,27 @@ async function connectAndStream() {
  * Stream a track through ffmpeg with audio normalization into the AudioSource.
  *
  * ffmpeg pipeline:
- *   Input → loudnorm (volume normalize) → aresample (48kHz) → limiter → s16le PCM
+ *   Input → loudnorm (volume normalize) → alimiter (clip prevention)
+ *     → aresample (48kHz) → aformat (s16le stereo) → s16le PCM
  *
- * The loudnorm filter uses EBU R128 two-pass loudness normalization.
- * Single-pass mode (linear=false) works in real-time and targets -16 LUFS
- * which is the standard for music streaming (Spotify/YouTube level).
+ * The loudnorm filter uses EBU R128 single-pass loudness normalization targeting
+ * -14 LUFS (Spotify/YouTube streaming standard) with -1 dBTP true-peak ceiling.
  *
- * The alimiter prevents clipping on loud transients.
+ * NOTE: Opus does NOT handle pre-encoder digital clipping — it encodes whatever
+ * PCM it receives. The alimiter here is essential: it catches transients that
+ * loudnorm's look-ahead misses and prevents hard clipping before the Opus encoder.
+ * attack=5ms, release=50ms, asc=1 (auto-level) keeps dynamics natural.
+ *
+ * cycleGeneration is checked on close — if the generation has changed by the time
+ * ffmpeg exits, the track was killed mid-play by a mode switch (expected).
  */
-function streamTrack(audioSource, streamUrl) {
+function streamTrack(audioSource, streamUrl, cycleGeneration) {
   return new Promise((resolve) => {
+    const trackStartMs = Date.now();
+    // Rolling tail of ffmpeg stderr so we can attach the last 100 chars to an
+    // error log when ffmpeg exits non-zero or dies immediately.
+    let stderrTail = '';
+    let firstFrameSeen = false;
     const ffmpeg = spawn('ffmpeg', [
       // Input with reconnect for network resilience
       '-reconnect', '1',
@@ -224,16 +358,16 @@ function streamTrack(audioSource, streamUrl) {
       '-reconnect_delay_max', '5',
       '-i', streamUrl,
 
-      // Audio filter chain: gentle normalization → high-quality resample → format guard
-      // Less aggressive than before: louder target (-14 LUFS), more headroom, no hard limiter
-      // (the previous alimiter was coloring transients — Opus handles clipping gracefully on its own).
+      // Audio filter chain:
+      //   1. EBU R128 loudness normalization — -14 LUFS, -1 dBTP true-peak ceiling
+      //   2. alimiter — prevents pre-encoder digital clipping on loud transients
+      //      (Opus does NOT handle clipping — it encodes whatever PCM it receives)
+      //   3. High-quality SoX resampling to 48 kHz
+      //   4. Lock channel layout & sample format for stable Opus encoder input
       '-af', [
-        // EBU R128 loudness normalization — -14 LUFS (Spotify/YouTube streaming standard)
-        // -1 dB true-peak headroom leaves room for Opus encoder without audible clipping
         'loudnorm=I=-14:TP=-1:LRA=11:print_format=none',
-        // High-quality resampling to target rate via SoX resampler
+        'alimiter=level_in=1:level_out=0.891:limit=0.891:attack=5:release=50:asc=1',
         `aresample=${SAMPLE_RATE}:resampler=soxr:precision=28`,
-        // Lock channel layout & sample format so Opus encoder has stable input
         'aformat=channel_layouts=stereo:sample_fmts=s16:sample_rates=48000',
       ].join(','),
 
@@ -276,6 +410,16 @@ function streamTrack(audioSource, streamUrl) {
         const audioFrame = new AudioFrame(samples, SAMPLE_RATE, NUM_CHANNELS, SAMPLES_PER_FRAME);
         try {
           await audioSource.captureFrame(audioFrame);
+          if (!firstFrameSeen) {
+            firstFrameSeen = true;
+            // First real audio frame of this track — force a heartbeat now
+            // so "bot is actually publishing audio" is proven, not assumed.
+            _writeHeartbeat(true);
+          } else {
+            // Debounced heartbeat on every subsequent frame; the helper
+            // self-limits to ~1 write per HEARTBEAT_DEBOUNCE_MS.
+            _writeHeartbeat(false);
+          }
         } catch {
           // Frame dropped — non-fatal (room disconnected etc.)
         }
@@ -313,10 +457,38 @@ function streamTrack(audioSource, streamUrl) {
     ffmpeg.stderr.on('data', (d) => {
       const msg = d.toString().trim();
       if (msg) logger.warn('[CristinaBot] ffmpeg:', msg);
+      // Keep a rolling ~400-char tail for post-mortem attach on close.
+      stderrTail = (stderrTail + d.toString()).slice(-400);
     });
 
-    ffmpeg.on('close', () => { _ffmpeg = null; resolve(); });
-    ffmpeg.on('error', () => { _ffmpeg = null; resolve(); });
+    ffmpeg.on('close', (code) => {
+      _ffmpeg = null;
+      const elapsedMs = Date.now() - trackStartMs;
+      // Silent-failure guard: ffmpeg exited non-zero, OR the "track" was
+      // unrealistically short (indicates ffmpeg died on startup, e.g. bad
+      // filter chain). This is the failure mode where the bot *looks* running
+      // but actually advances tracks every 1-2s and publishes nothing.
+      const nonZeroExit = code !== 0 && code !== null;
+      const suspiciouslyShort = elapsedMs < MIN_HEALTHY_TRACK_MS;
+      if (nonZeroExit || suspiciouslyShort) {
+        logger.error('[CristinaBot] ffmpeg exited abnormally', {
+          exitCode: code,
+          elapsedMs,
+          track: _currentTrackTitle,
+          firstFrameSeen,
+          stderrTail: stderrTail.slice(-100),
+        });
+      }
+      resolve();
+    });
+    ffmpeg.on('error', (err) => {
+      _ffmpeg = null;
+      logger.error('[CristinaBot] ffmpeg spawn error', {
+        error: err?.message,
+        track: _currentTrackTitle,
+      });
+      resolve();
+    });
   });
 }
 
@@ -329,20 +501,28 @@ function start() {
   runLoop();
 }
 
-function stop() {
+async function stop() {
   _running = false;
   if (_ffmpeg) { try { _ffmpeg.kill('SIGKILL'); } catch {} }
   if (_room) { try { _room.disconnect(); } catch {} }
   _room = null;
   _ffmpeg = null;
+  _currentRoomName = null;
+  _currentTrackTitle = null;
+  _currentTrackStartedAt = null;
+
+  // Clear stale now-playing row so frontend doesn't show stale track info
+  try {
+    await query(
+      `UPDATE radio_now_playing SET title = NULL, artist = NULL, updated_at = NOW() WHERE id = 1`
+    );
+  } catch {}
+
   logger.info('[CristinaBot] Stopped');
 }
 
 function setMode(mode) {
-  if (mode === _currentMode) return;
-  _currentMode = mode;
-  _modeChanged = true;
-  if (_ffmpeg) { try { _ffmpeg.kill('SIGKILL'); } catch {} _ffmpeg = null; }
+  _switchMode(mode);
   logger.info('[CristinaBot] Mode set externally', { mode });
 }
 
@@ -359,8 +539,15 @@ async function runLoop() {
       logger.error('[CristinaBot] Error in main loop', { error: err.message });
     }
     if (_running) {
-      logger.info(`[CristinaBot] Reconnecting in ${RECONNECT_DELAY_MS / 1000}s`);
-      await sleep(RECONNECT_DELAY_MS);
+      logger.info(`[CristinaBot] Reconnecting in ${_reconnectDelay / 1000}s`);
+      // Publish reconnecting state to Redis so frontend can react
+      try {
+        const { getRedis } = require('../config/redis');
+        await getRedis().set('mainstage:state', 'reconnecting', 'EX', 120);
+      } catch {}
+      await sleep(_reconnectDelay);
+      // Exponential backoff: double delay up to max, reset happens on successful connect
+      _reconnectDelay = Math.min(MAX_RECONNECT_DELAY_MS, _reconnectDelay * 2);
     }
   }
 }
