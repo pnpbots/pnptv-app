@@ -184,10 +184,26 @@ async function sendMessage(req, res) {
 
     const { recipientId, content } = req.body;
 
-    if (!recipientId || !content) {
+    // Pre-validation: fail fast before touching DmService.
+    // These checks exist at the service layer too, but enforcing them here
+    // gives callers clean 400 responses instead of generic 500s when the
+    // service throws and also caps payload size at the API boundary.
+    if (!recipientId || typeof content !== 'string' || !content.trim()) {
       return res.status(400).json({
         success: false,
         error: 'recipientId and content are required'
+      });
+    }
+    if (content.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        error: 'Message too long (max 1000 characters)'
+      });
+    }
+    if (String(recipientId) === String(userId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot message yourself'
       });
     }
 

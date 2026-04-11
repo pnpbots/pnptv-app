@@ -259,6 +259,17 @@ const sendMessage = async (req, res) => {
   const requestedRecipientId = req.params.recipientId;
   const { content } = req.body;
 
+  // Pre-validation: fail fast before touching DmService.
+  if (typeof content !== 'string' || !content.trim()) {
+    return res.status(400).json({ error: 'Content is required' });
+  }
+  if (content.length > 1000) {
+    return res.status(400).json({ error: 'Message too long (max 1000 characters)' });
+  }
+  if (String(requestedRecipientId) === String(user.id)) {
+    return res.status(400).json({ error: 'Cannot message yourself' });
+  }
+
   try {
     const senderRole = user.role || '';
     const isAdminSender = senderRole === 'admin' || senderRole === 'superadmin';
