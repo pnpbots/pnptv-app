@@ -34,6 +34,7 @@ interface MusicPlayerActions {
   toggleShuffle: () => void;
   toggleRepeat: () => void;
   loadMore: () => void;
+  retryLoad: () => void;
 }
 
 type MusicPlayerContextType = MusicPlayerState & MusicPlayerActions;
@@ -45,8 +46,11 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   const soundcloudPlayerRef = useRef<any>(null);
   const scIframeRef = useRef<HTMLIFrameElement | null>(null);
   const nextRef = useRef<() => void>(() => {});
+  const prevRef = useRef<() => void>(() => {});
   const playGenRef = useRef(0);
   const loadingRef = useRef(false);
+  const handleTrackEndRef = useRef<() => void>(() => {});
+  const currentTrackRef = useRef<MediaTrack | null>(null);
 
   const [tracks, setTracks] = useState<MediaTrack[]>([]);
   const [currentTrack, setCurrentTrack] = useState<MediaTrack | null>(null);
@@ -55,10 +59,14 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(() => {
-    const saved = localStorage.getItem("pnp:music:volume");
-    if (saved) {
-      const parsed = parseFloat(saved);
-      return isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 0.7;
+    try {
+      const saved = localStorage.getItem("pnp:music:volume");
+      if (saved) {
+        const parsed = parseFloat(saved);
+        return isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 0.7;
+      }
+    } catch {
+      // Telegram in-app browsers can throw SecurityError on localStorage access
     }
     return 0.7;
   });
@@ -71,19 +79,19 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   const offsetRef = useRef(0);
   const shuffleHistoryRef = useRef<number[]>([]);
 
-  // Local audio element effects
+  // Audio element singleton — created once, never torn down until unmount
   useEffect(() => {
     const audio = new Audio();
     audio.volume = volume;
     audioRef.current = audio;
 
     const onTimeUpdate = () => {
-      if (currentTrack?.provider !== "soundcloud") {
+      if (currentTrackRef.current?.provider !== "soundcloud") {
         setProgress(audio.currentTime);
       }
     };
     const onDurationChange = () => {
-      if (currentTrack?.provider !== "soundcloud") {
+      if (currentTrackRef.current?.provider !== "soundcloud") {
         setDuration(audio.duration || 0);
       }
     };
@@ -91,6 +99,8 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     const onWaiting = () => setIsLoading(true);
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
+    // Use ref to avoid stale closure on ended
+    const onEnded = () => handleTrackEndRef.current();
 
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("durationchange", onDurationChange);
@@ -98,6 +108,7 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     audio.addEventListener("waiting", onWaiting);
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onEnded);
 
     return () => {
       audio.pause();
@@ -107,8 +118,15 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
       audio.removeEventListener("waiting", onWaiting);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onEnded);
     };
-  }, [currentTrack]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sync volume to audio element when it changes
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume]);
 
   // Handle track ended
   const handleTrackEnd = useCallback(() => {
@@ -128,14 +146,11 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     nextRef.current();
   }, [repeat, currentTrack]);
 
-  // Audio element ended event
+  // Keep refs current (runs after every render with no dep array)
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onEnded = () => handleTrackEnd();
-    audio.addEventListener("ended", onEnded);
-    return () => audio.removeEventListener("ended", onEnded);
-  }, [handleTrackEnd]);
+    handleTrackEndRef.current = handleTrackEnd;
+    currentTrackRef.current = currentTrack;
+  });
 
   // Load initial tracks
   useEffect(() => {
@@ -151,6 +166,31 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
       .catch(() => { setLoadError("Music service unavailable"); })
       .finally(() => setIsLoadingTracks(false));
   }, []);
+
+  // MediaSession API — update lock-screen controls when track changes
+  useEffect(() => {
+    if (!currentTrack || !("mediaSession" in navigator)) return;
+    const artistName = typeof currentTrack.artist === "string"
+      ? currentTrack.artist
+      : (currentTrack.artist as { name: string } | undefined)?.name ?? "";
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: currentTrack.title ?? "",
+      artist: artistName,
+      artwork: currentTrack.art ? [{ src: currentTrack.art, sizes: "256x256", type: "image/png" }] : [],
+    });
+    navigator.mediaSession.setActionHandler("play", () => { audioRef.current?.play().catch(() => {}); });
+    navigator.mediaSession.setActionHandler("pause", () => { audioRef.current?.pause(); });
+    navigator.mediaSession.setActionHandler("previoustrack", () => { prevRef.current(); });
+    navigator.mediaSession.setActionHandler("nexttrack", () => { nextRef.current(); });
+    navigator.mediaSession.setActionHandler("seekbackward", (d) => {
+      const audio = audioRef.current;
+      if (audio) audio.currentTime = Math.max(0, audio.currentTime - (d.seekOffset ?? 10));
+    });
+    navigator.mediaSession.setActionHandler("seekforward", (d) => {
+      const audio = audioRef.current;
+      if (audio) audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + (d.seekOffset ?? 10));
+    });
+  }, [currentTrack]);
 
   // Hidden SoundCloud iframe — created on first use only, not on mount.
   // The iframe is injected the first time a SoundCloud track is played,
@@ -390,6 +430,7 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   }, [tracks, currentIndex, repeat, playTrack, currentTrack]);
 
   useEffect(() => { nextRef.current = next; }, [next]);
+  useEffect(() => { prevRef.current = prev; }, [prev]);
 
   const seek = useCallback((time: number) => {
     if (currentTrack?.provider === "soundcloud") {
@@ -407,7 +448,7 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     if (soundcloudPlayerRef.current) {
       soundcloudPlayerRef.current.setVolume(clamped * 100);
     }
-    localStorage.setItem("pnp:music:volume", String(clamped));
+    try { localStorage.setItem("pnp:music:volume", String(clamped)); } catch { /* SecurityError in Telegram browsers */ }
   }, []);
 
   const toggleShuffle = useCallback(() => {
@@ -444,11 +485,29 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
       });
   }, [hasMore]);
 
+  const retryLoad = useCallback(() => {
+    setLoadError(null);
+    setTracks([]);
+    offsetRef.current = 0;
+    setHasMore(true);
+    setIsLoadingTracks(true);
+    getMediaTracks(0, 30)
+      .then((res) => {
+        if (res.success && res.tracks?.length) {
+          setTracks(res.tracks);
+          offsetRef.current = res.tracks.length;
+          setHasMore(res.tracks.length >= 30);
+        }
+      })
+      .catch(() => { setLoadError("Music service unavailable"); })
+      .finally(() => setIsLoadingTracks(false));
+  }, []);
+
   const value: MusicPlayerContextType = {
     tracks, currentTrack, currentIndex, isPlaying, progress, duration,
     volume, shuffle, repeat, isLoading, isLoadingTracks, hasMore, loadError,
     play, pause, togglePlay, next, prev, seek, setVolume,
-    toggleShuffle, toggleRepeat, loadMore,
+    toggleShuffle, toggleRepeat, loadMore, retryLoad,
   };
 
   return (

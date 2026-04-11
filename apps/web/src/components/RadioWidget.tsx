@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
-import { resolveSoundCloud, importSoundCloud, requestSoundCloud, getRadioRequests, updateRadioRequest, getSoundCloudArtistTracks, type MediaTrack, type RadioRequest } from "@/lib/api";
+import { resolveSoundCloud, importSoundCloud, getRadioRequests, updateRadioRequest, getSoundCloudArtistTracks, getMediaTracks, type MediaTrack, type RadioRequest } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -43,13 +43,6 @@ function CloseIcon({ className }: { className?: string }) {
   );
 }
 
-function ShuffleIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" />
-    </svg>
-  );
-}
 
 function PrevIcon({ className }: { className?: string }) {
   return (
@@ -67,13 +60,6 @@ function NextIcon({ className }: { className?: string }) {
   );
 }
 
-function RepeatIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z" />
-    </svg>
-  );
-}
 
 function PlayIcon({ className }: { className?: string }) {
   return (
@@ -105,13 +91,6 @@ function VolumeIcon({ level, className }: { level: number; className?: string })
   );
 }
 
-function MusicNoteIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-    </svg>
-  );
-}
 
 function AlertTriangleIcon({ className }: { className?: string }) {
   return (
@@ -145,91 +124,6 @@ export function EqualizerBars({ color = "#fff", size = "sm" }: { color?: string;
   );
 }
 
-// ── Playlist row ──────────────────────────────────────────────────────────────
-
-interface PlaylistRowProps {
-  track: MediaTrack;
-  isActive: boolean;
-  isPlaying: boolean;
-  onPlay: (track: MediaTrack) => void;
-}
-
-const PlaylistRow = React.memo(function PlaylistRow({ track, isActive, isPlaying, onPlay }: PlaylistRowProps) {
-  const artistName = getArtistName(track.artist);
-  return (
-    <button
-      onClick={() => onPlay(track)}
-      className={[
-        "w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors",
-        "hover:bg-white/5 active:bg-white/10",
-        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-purple-400/60",
-        isActive ? "bg-white/8" : "",
-      ].join(" ")}
-      aria-label={`Play ${track.title}`}
-      aria-current={isActive ? "true" : undefined}
-    >
-      {/* Art or placeholder */}
-      <div className="w-8 h-8 rounded flex-shrink-0 overflow-hidden">
-        {track.art ? (
-          <img src={track.art} alt="" className="w-full h-full object-cover" style={{ pointerEvents: "none" }} />
-        ) : (
-          <div
-            className="w-full h-full flex items-center justify-center"
-            style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.35), rgba(217,70,239,0.35))" }}
-          >
-            <span style={{ color: "rgba(217,70,239,0.9)" }}><MusicNoteIcon className="w-3.5 h-3.5" /></span>
-          </div>
-        )}
-      </div>
-
-      {/* Title + artist */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <p
-            className={[
-              "text-xs truncate leading-tight",
-              isActive ? "font-semibold" : "text-pnp-textPrimary",
-            ].join(" ")}
-            style={isActive ? { color: "#D946EF" } : undefined}
-          >
-            {track.title}
-          </p>
-          {track.provider === "soundcloud" && track.soundcloud_url ? (
-            <a
-              href={track.soundcloud_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              title="Open on SoundCloud"
-              className="flex-shrink-0"
-            >
-              <SoundCloudIcon className="w-3 h-3 text-[#ff5500] hover:text-[#ff7733] transition-colors" />
-            </a>
-          ) : track.provider === "soundcloud" ? (
-            <SoundCloudIcon className="w-3 h-3 text-[#ff5500] flex-shrink-0" />
-          ) : null}
-          {track.label && (
-            <span className="text-[8px] px-1 py-px rounded-full bg-purple-500/20 text-purple-300 font-medium flex-shrink-0 leading-tight">
-              {track.label}
-            </span>
-          )}
-        </div>
-        {artistName && (
-          <p className="text-[10px] text-pnp-textSecondary truncate leading-tight mt-0.5">{artistName}</p>
-        )}
-      </div>
-
-      {/* Duration or equalizer */}
-      <div className="flex-shrink-0 flex items-center justify-end w-8">
-        {isActive && isPlaying ? (
-          <EqualizerBars color="#D946EF" size="xs" />
-        ) : (
-          <span className="text-[10px] text-pnp-textSecondary/60">{formatTime(track.time)}</span>
-        )}
-      </div>
-    </button>
-  );
-});
 
 // ── Pending Requests Panel (Admin) ────────────────────────────────────────────
 
@@ -353,6 +247,7 @@ function PendingRequestsPanel({ onAutoImport }: { onAutoImport: (url: string) =>
                         className="flex-shrink-0"
                         onClick={(e) => e.stopPropagation()}
                         title="Open on SoundCloud"
+                        aria-label="Open on SoundCloud"
                       >
                         <SoundCloudIcon className="w-3 h-3 text-[#ff5500] hover:text-[#ff7733] transition-colors" />
                       </a>
@@ -370,7 +265,8 @@ function PendingRequestsPanel({ onAutoImport }: { onAutoImport: (url: string) =>
                       <button
                         onClick={() => handleApprove(req)}
                         disabled={acting === req.id}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 active:scale-95 transition-all disabled:opacity-40"
+                        className="w-11 h-11 flex items-center justify-center rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 active:scale-95 transition-all disabled:opacity-40"
+                        aria-label="Approve and import track"
                         title="Approve & import"
                       >
                         <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -381,7 +277,8 @@ function PendingRequestsPanel({ onAutoImport }: { onAutoImport: (url: string) =>
                       <button
                         onClick={() => handleReject(req.id)}
                         disabled={acting === req.id}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-red-500/20 hover:bg-red-500/40 active:scale-95 transition-all disabled:opacity-40"
+                        className="w-11 h-11 flex items-center justify-center rounded-lg bg-red-500/20 hover:bg-red-500/40 active:scale-95 transition-all disabled:opacity-40"
+                        aria-label="Reject track request"
                         title="Reject"
                       >
                         <svg className="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -400,23 +297,27 @@ function PendingRequestsPanel({ onAutoImport }: { onAutoImport: (url: string) =>
   );
 }
 
+// ── Flight Mode definitions ──────────────────────────────────────────────────
+
+type FlightMode = "takeoff" | "flying" | "landing";
+
+const FLIGHT_MODES: { id: FlightMode; emoji: string; label: string; labelEs: string; desc: string; descEs: string; gradient: string; color: string }[] = [
+  { id: "takeoff", emoji: "🛫", label: "Take Off", labelEs: "Despegue", desc: "Warm up & get ready", descEs: "Calentando motores", gradient: "linear-gradient(135deg, #F59E0B, #EF4444)", color: "#F59E0B" },
+  { id: "flying",  emoji: "🚀", label: "Flying",   labelEs: "Volando",  desc: "Peak energy",        descEs: "Energia al maximo",   gradient: "linear-gradient(135deg, #8B5CF6, #D946EF)", color: "#D946EF" },
+  { id: "landing", emoji: "🛬", label: "Landing",  labelEs: "Aterrizaje", desc: "Chill & decompress", descEs: "Relax y a dormir",   gradient: "linear-gradient(135deg, #06B6D4, #3B82F6)", color: "#06B6D4" },
+];
+
 // ── RadioPanel ────────────────────────────────────────────────────────────────
-// Inner panel content only — no FAB, no modal overlay shell.
-// Parent is responsible for the modal wrapper / backdrop.
+// Flight Mode Radio — 3 simple modes: Take Off, Flying, Landing.
 
 export function RadioPanel({ onClose }: { onClose: () => void }) {
   const {
-    tracks,
     currentTrack,
     isPlaying,
     progress,
     duration,
     volume,
-    shuffle,
-    repeat,
     isLoading,
-    isLoadingTracks,
-    hasMore,
     loadError,
     play,
     togglePlay,
@@ -424,53 +325,30 @@ export function RadioPanel({ onClose }: { onClose: () => void }) {
     prev,
     seek,
     setVolume,
-    toggleShuffle,
-    toggleRepeat,
     loadMore,
+    retryLoad,
   } = useMusicPlayer();
 
   const { isAdmin } = useAuth();
+  const [activeMode, setActiveMode] = useState<FlightMode | null>(null);
+
+  // Admin import state
   const [scUrl, setScUrl] = useState("");
   const [isResolving, setIsResolving] = useState(false);
   const [importLabel, setImportLabel] = useState("");
   const [importFeedback, setImportFeedback] = useState<string | null>(null);
-
-  // Artist catalog state (admin)
   const [artistTracks, setArtistTracks] = useState<Array<{ title: string; artist: string; coverUrl: string; url: string; externalId: string }>>([]);
   const [showArtistCatalog, setShowArtistCatalog] = useState(false);
   const [fetchingCatalog, setFetchingCatalog] = useState(false);
 
-  // User Request State
-  const [reqUrl, setReqUrl] = useState("");
-  const [isRequesting, setIsRequesting] = useState(false);
-
-  const handleRequestSC = async () => {
-    if (!reqUrl.trim()) return;
-    setIsRequesting(true);
-    try {
-      const res = await requestSoundCloud(reqUrl);
-      if (res.success) {
-        alert("Request sent successfully! An admin will review it.");
-        setReqUrl("");
-      }
-    } catch (err: any) {
-      alert(err.message || "Failed to send request");
-    } finally {
-      setIsRequesting(false);
-    }
-  };
-
-  // Auto-import: resolve + import in one step (used by approve button)
   const autoImportSC = useCallback(async (url: string) => {
     try {
       const res = await resolveSoundCloud(url);
       if (res.success && res.metadata) {
         const importRes = await importSoundCloud(res.metadata, importLabel || undefined);
-        if (importRes.success) {
-          loadMore();
-        }
+        if (importRes.success) loadMore();
       }
-    } catch { /* silent — feedback already shown in panel */ }
+    } catch { /* silent */ }
   }, [importLabel, loadMore]);
 
   const handleImportSC = async () => {
@@ -485,7 +363,6 @@ export function RadioPanel({ onClose }: { onClose: () => void }) {
           setImportFeedback("Track imported!");
           setScUrl("");
           loadMore();
-          // Fetch artist catalog
           const artistUrl = extractArtistUrl(res.metadata.url);
           if (artistUrl) {
             setFetchingCatalog(true);
@@ -519,17 +396,29 @@ export function RadioPanel({ onClose }: { onClose: () => void }) {
     } catch { /* silent */ }
   };
 
-  // Playlist infinite scroll
-  const playlistRef = useRef<HTMLDivElement>(null);
-  const handlePlaylistScroll = useCallback(() => {
-    const el = playlistRef.current;
-    if (!el || !hasMore || isLoadingTracks) return;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 48) {
-      loadMore();
-    }
-  }, [hasMore, isLoadingTracks, loadMore]);
+  const [loadingMode, setLoadingMode] = useState<FlightMode | null>(null);
+  // Cache loaded tracks per mode so we don't re-fetch
+  const modeCacheRef = useRef<Record<string, MediaTrack[]>>({});
 
-  // Progress bar click/seek
+  // Handle mode selection — fetch mode tracks from API and play
+  const handleModeSelect = useCallback(async (mode: FlightMode) => {
+    setActiveMode(mode);
+    setLoadingMode(mode);
+    try {
+      let modeTracks = modeCacheRef.current[mode];
+      if (!modeTracks) {
+        const res = await getMediaTracks(0, 500, mode);
+        modeTracks = res.success ? res.tracks : [];
+        modeCacheRef.current[mode] = modeTracks;
+      }
+      if (modeTracks.length > 0) {
+        play(modeTracks[Math.floor(Math.random() * modeTracks.length)], modeTracks);
+      }
+    } catch { /* silent */ }
+    setLoadingMode(null);
+  }, [play]);
+
+  // Progress bar
   const progressBarRef = useRef<HTMLDivElement>(null);
   const handleProgressClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -544,6 +433,7 @@ export function RadioPanel({ onClose }: { onClose: () => void }) {
   const hasTrack = !!currentTrack;
   const progressPct = duration ? (progress / duration) * 100 : 0;
   const artistName = getArtistName(currentTrack?.artist);
+  const activeModeConfig = FLIGHT_MODES.find((m) => m.id === activeMode);
 
   return (
     <div className="flex flex-col" style={{ maxHeight: "calc(85vh - 6rem)" }}>
@@ -556,26 +446,21 @@ export function RadioPanel({ onClose }: { onClose: () => void }) {
         <div className="flex items-center gap-2">
           <div
             className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
+            style={{ background: activeModeConfig?.gradient || "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
             aria-hidden="true"
           >
-            <span className="text-sm">🎧</span>
+            <span className="text-sm">{activeModeConfig?.emoji || "🎧"}</span>
           </div>
           <div>
             <h3 className="text-sm font-bold text-pnp-textPrimary leading-tight">PNP Radio</h3>
             <p className="text-[10px] text-pnp-textSecondary leading-tight">
-              {tracks.length > 0 ? `${tracks.length} tracks` : "Loading library..."}
+              {activeModeConfig ? activeModeConfig.label : "Choose your flight mode"}
             </p>
           </div>
         </div>
         <button
           onClick={onClose}
-          className={[
-            "p-1.5 rounded-lg transition-colors",
-            "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-purple-400/60",
-            "active:scale-95",
-          ].join(" ")}
+          className="p-1.5 rounded-lg transition-colors text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10 active:scale-95"
           aria-label="Close radio player"
         >
           <CloseIcon className="w-4 h-4" />
@@ -583,9 +468,9 @@ export function RadioPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-hidden flex flex-col">
+      <div className="flex-1 overflow-y-auto flex flex-col">
 
-        {/* SoundCloud Import Bar (Admin Only) */}
+        {/* Admin Import Bar */}
         {isAdmin && (
           <div className="px-4 py-2 bg-white/5 border-b border-white/5 space-y-1.5">
             <div className="flex gap-2">
@@ -605,16 +490,16 @@ export function RadioPanel({ onClose }: { onClose: () => void }) {
               </button>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[9px] text-pnp-textSecondary">Label:</span>
+              <span className="text-[9px] text-pnp-textSecondary">Mode:</span>
               <select
                 value={importLabel}
                 onChange={(e) => setImportLabel(e.target.value)}
                 className="bg-black/40 border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white focus:outline-none focus:border-purple-500"
               >
                 <option value="">None</option>
-                <option value="Label 1">Label 1</option>
-                <option value="Label 2">Label 2</option>
-                <option value="Label 3">Label 3</option>
+                <option value="takeoff">🛫 Take Off</option>
+                <option value="flying">🚀 Flying</option>
+                <option value="landing">🛬 Landing</option>
               </select>
               {importFeedback && (
                 <span className={`text-[10px] font-semibold ${importFeedback.includes("Failed") ? "text-red-400" : "text-emerald-400"}`}>
@@ -626,33 +511,18 @@ export function RadioPanel({ onClose }: { onClose: () => void }) {
               )}
             </div>
 
-            {/* Artist Catalog Panel */}
             {showArtistCatalog && artistTracks.length > 0 && (
               <div className="bg-black/30 rounded-lg border border-white/5 p-2 space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold text-[#ff5500]">
-                    Artist Catalog ({artistTracks.length} tracks)
-                  </span>
-                  <button
-                    onClick={() => { setShowArtistCatalog(false); setArtistTracks([]); }}
-                    className="text-[9px] text-pnp-textSecondary hover:text-white transition-colors"
-                  >
-                    Dismiss
-                  </button>
+                  <span className="text-[10px] font-semibold text-[#ff5500]">Artist Catalog ({artistTracks.length})</span>
+                  <button onClick={() => { setShowArtistCatalog(false); setArtistTracks([]); }} className="text-[9px] text-pnp-textSecondary hover:text-white transition-colors">Dismiss</button>
                 </div>
                 <div className="max-h-28 overflow-y-auto space-y-0.5">
                   {artistTracks.map((t) => (
                     <div key={t.url} className="flex items-center gap-1.5 py-0.5">
-                      {t.coverUrl && (
-                        <img src={t.coverUrl} alt="" className="w-5 h-5 rounded flex-shrink-0 object-cover" />
-                      )}
+                      {t.coverUrl && <img src={t.coverUrl} alt="" className="w-5 h-5 rounded flex-shrink-0 object-cover" />}
                       <span className="text-[10px] text-pnp-textPrimary truncate flex-1">{t.title}</span>
-                      <button
-                        onClick={() => handleImportCatalogTrack(t)}
-                        className="text-[9px] text-purple-400 hover:text-purple-300 font-semibold flex-shrink-0 transition-colors"
-                      >
-                        +Add
-                      </button>
+                      <button onClick={() => handleImportCatalogTrack(t)} className="text-[9px] text-purple-400 hover:text-purple-300 font-semibold flex-shrink-0 transition-colors">+Add</button>
                     </div>
                   ))}
                 </div>
@@ -661,313 +531,178 @@ export function RadioPanel({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* Pending Requests (Admin Only) */}
         {isAdmin && <PendingRequestsPanel onAutoImport={autoImportSC} />}
-
-        {/* Request Song Bar removed — users request via support ticket */}
-
-        {/* Loading tracks state (initial) */}
-        {isLoadingTracks && !hasTrack && tracks.length === 0 && !loadError && (
-          <div className="flex flex-col items-center justify-center gap-3 py-10 px-4">
-            <div
-              className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin"
-              style={{ borderColor: "rgba(217,70,239,0.6)", borderTopColor: "transparent" }}
-              aria-label="Loading tracks"
-            />
-            <p className="text-xs text-pnp-textSecondary text-center">Loading radio stations...</p>
-          </div>
-        )}
 
         {/* Error state */}
         {loadError && (
           <div className="flex flex-col items-center justify-center gap-3 py-10 px-4">
             <AlertTriangleIcon className="w-8 h-8 text-pnp-error" />
-            <p className="text-xs text-pnp-textPrimary text-center font-medium">Radio unavailable</p>
+            <p className="text-xs text-pnp-textPrimary text-center font-medium">Couldn't load tracks</p>
             <p className="text-[11px] text-pnp-textSecondary text-center">{loadError}</p>
-          </div>
-        )}
-
-        {/* Empty state — tracks loaded but none found */}
-        {!isLoadingTracks && !loadError && tracks.length === 0 && (
-          <div className="flex flex-col items-center justify-center gap-3 py-10 px-4">
-            <div
-              className="w-12 h-12 rounded-full flex items-center justify-center"
-              style={{ background: "rgba(139,92,246,0.15)" }}
-              aria-hidden="true"
+            <button
+              onClick={retryLoad}
+              className="px-4 py-2 rounded-lg text-xs font-semibold text-white btn-gradient min-h-[44px] min-w-[44px] flex items-center justify-center"
             >
-              <span className="text-2xl">🎧</span>
-            </div>
-            <p className="text-sm font-semibold text-pnp-textPrimary text-center">No tracks found</p>
-            <p className="text-xs text-pnp-textSecondary text-center">The radio library appears to be empty.</p>
+              Retry
+            </button>
           </div>
         )}
 
-        {/* Now playing + controls */}
-        {tracks.length > 0 && (
-          <>
-            {/* Album art */}
-            <div className="px-4 pt-4 pb-3 flex-shrink-0">
-              {hasTrack && currentTrack.art ? (
-                <div className="w-full aspect-video rounded-xl overflow-hidden">
-                  <img
-                    src={currentTrack.art}
-                    alt={currentTrack.title}
-                    className="w-full h-full object-cover"
-                    style={{ pointerEvents: "none" }}
-                  />
-                </div>
-              ) : (
-                <div
-                  className="w-full aspect-video rounded-xl flex items-center justify-center"
-                  style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.3) 0%, rgba(217,70,239,0.3) 100%)" }}
-                  aria-hidden="true"
-                >
-                  {isLoading && hasTrack ? (
-                    <div
-                      className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin"
-                      style={{ borderColor: "rgba(217,70,239,0.6)", borderTopColor: "transparent" }}
-                    />
-                  ) : (
-                    <span className="text-4xl">🎧</span>
-                  )}
-                </div>
-              )}
-
-              {/* Track title + artist */}
-              <div className="mt-3">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-pnp-textPrimary truncate leading-tight">
-                    {hasTrack ? currentTrack.title : "Select a track"}
-                  </p>
-                  {currentTrack?.provider === "soundcloud" && currentTrack.soundcloud_url ? (
-                    <a href={currentTrack.soundcloud_url} target="_blank" rel="noopener noreferrer" title="Open on SoundCloud">
-                      <SoundCloudIcon className="w-4 h-4 text-[#ff5500] hover:text-[#ff7733] transition-colors" />
-                    </a>
-                  ) : currentTrack?.provider === "soundcloud" ? (
-                    <SoundCloudIcon className="w-4 h-4 text-[#ff5500]" />
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  {artistName ? (
-                    currentTrack?.provider === "soundcloud" && currentTrack.soundcloud_url ? (
-                      <a
-                        href={extractArtistUrl(currentTrack.soundcloud_url) || currentTrack.soundcloud_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-[#ff5500] hover:text-[#ff7733] truncate transition-colors"
-                      >
-                        {artistName}
-                      </a>
-                    ) : (
-                      <p className="text-xs text-pnp-textSecondary truncate">{artistName}</p>
-                    )
-                  ) : !hasTrack ? (
-                    <p className="text-xs text-pnp-textSecondary">PNP Radio</p>
-                  ) : null}
-                  {currentTrack?.label && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-medium flex-shrink-0">
-                      {currentTrack.label}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Progress bar */}
-              {hasTrack && (
-                <div className="mt-3">
-                  <div
-                    ref={progressBarRef}
-                    className="h-1.5 bg-white/10 rounded-full cursor-pointer group relative"
-                    onClick={handleProgressClick}
-                    role="slider"
-                    aria-label="Seek"
-                    aria-valuemin={0}
-                    aria-valuemax={duration || 0}
-                    aria-valuenow={Math.round(progress)}
+        {/* ── Flight Mode Selector ─────────────────────────────────────────── */}
+        {!loadError && (
+          <div className="px-4 pt-4 pb-2">
+            <div className="grid grid-cols-3 gap-2">
+              {FLIGHT_MODES.map((mode) => {
+                const isActive = activeMode === mode.id;
+                const isModeLoading = loadingMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    onClick={() => handleModeSelect(mode.id)}
+                    disabled={isModeLoading}
+                    className={[
+                      "relative flex flex-col items-center justify-center rounded-2xl py-4 px-2 transition-all",
+                      "active:scale-95 disabled:opacity-60",
+                      isActive
+                        ? "ring-2 ring-[var(--pnp-ring-color)] shadow-lg"
+                        : "bg-white/5 hover:bg-white/10",
+                    ].join(" ")}
+                    style={isActive ? {
+                      background: mode.gradient,
+                      ["--pnp-ring-color" as any]: mode.color,
+                      boxShadow: `0 0 24px ${mode.color}40`,
+                    } as React.CSSProperties : undefined}
                   >
-                    <div
-                      className="h-full rounded-full relative transition-all duration-150"
-                      style={{
-                        width: `${progressPct}%`,
-                        background: "linear-gradient(90deg, #8B5CF6, #D946EF)",
-                      }}
-                    >
-                      {/* Scrubber thumb — visible on hover */}
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm" />
-                    </div>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-[10px] text-pnp-textSecondary/60">{formatTime(progress)}</span>
-                    <span className="text-[10px] text-pnp-textSecondary/60">{formatTime(duration)}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Controls row */}
-              <div className="flex items-center justify-between mt-2">
-                {/* Shuffle */}
-                <button
-                  onClick={toggleShuffle}
-                  className={[
-                    "p-2 rounded-lg transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center",
-                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-purple-400/60",
-                    "active:scale-95",
-                    shuffle
-                      ? "text-purple-400 bg-purple-400/10"
-                      : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5",
-                  ].join(" ")}
-                  aria-label={shuffle ? "Disable shuffle" : "Enable shuffle"}
-                  aria-pressed={shuffle}
-                >
-                  <ShuffleIcon className="w-4 h-4" />
-                </button>
-
-                {/* Prev */}
-                <button
-                  onClick={prev}
-                  disabled={tracks.length === 0}
-                  className={[
-                    "p-2 rounded-lg transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center",
-                    "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5",
-                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-purple-400/60",
-                    "active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed",
-                  ].join(" ")}
-                  aria-label="Previous track"
-                >
-                  <PrevIcon className="w-5 h-5" />
-                </button>
-
-                {/* Play / Pause — larger tap target */}
-                <button
-                  onClick={hasTrack ? togglePlay : () => tracks.length > 0 && play(tracks[0])}
-                  disabled={isLoading && hasTrack}
-                  className={[
-                    "w-12 h-12 rounded-full flex items-center justify-center text-white shadow-md",
-                    "transition-all hover:brightness-110 active:scale-95",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2",
-                    "disabled:opacity-50 disabled:cursor-not-allowed",
-                  ].join(" ")}
-                  style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
-                  aria-label={isPlaying ? "Pause" : "Play"}
-                >
-                  {isLoading && hasTrack ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : isPlaying ? (
-                    <PauseIcon className="w-5 h-5" />
-                  ) : (
-                    <PlayIcon className="w-5 h-5 ml-0.5" />
-                  )}
-                </button>
-
-                {/* Next */}
-                <button
-                  onClick={next}
-                  disabled={tracks.length === 0}
-                  className={[
-                    "p-2 rounded-lg transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center",
-                    "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5",
-                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-purple-400/60",
-                    "active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed",
-                  ].join(" ")}
-                  aria-label="Next track"
-                >
-                  <NextIcon className="w-5 h-5" />
-                </button>
-
-                {/* Repeat */}
-                <button
-                  onClick={toggleRepeat}
-                  className={[
-                    "relative p-2 rounded-lg transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center",
-                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-purple-400/60",
-                    "active:scale-95",
-                    repeat !== "off"
-                      ? "text-purple-400 bg-purple-400/10"
-                      : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5",
-                  ].join(" ")}
-                  aria-label={`Repeat: ${repeat}`}
-                  aria-pressed={repeat !== "off"}
-                >
-                  <RepeatIcon className="w-4 h-4" />
-                  {repeat === "one" && (
-                    <span
-                      className="absolute -top-0.5 -right-0.5 text-[7px] font-bold"
-                      style={{ color: "#D946EF" }}
-                      aria-hidden="true"
-                    >
-                      1
+                    {isModeLoading ? (
+                      <div className="w-6 h-6 border-2 border-white/40 border-t-white rounded-full animate-spin mb-1.5" />
+                    ) : (
+                      <span className="text-3xl mb-1.5">{mode.emoji}</span>
+                    )}
+                    <span className={`text-xs font-bold leading-tight ${isActive ? "text-white" : "text-pnp-textPrimary"}`}>
+                      {mode.label}
                     </span>
-                  )}
-                </button>
-              </div>
-
-              {/* Volume control */}
-              <div className="flex items-center gap-2 mt-3">
-                <VolumeIcon level={volume} className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" />
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={volume}
-                  onChange={(e) => setVolume(parseFloat(e.target.value))}
-                  className="flex-1 h-1.5 rounded-full cursor-pointer appearance-none radio-volume-slider"
-                  style={{
-                    accentColor: "#D946EF",
-                    background: `linear-gradient(to right, #8B5CF6 ${volume * 100}%, rgba(255,255,255,0.1) ${volume * 100}%)`,
-                  }}
-                  aria-label="Volume"
-                />
-                <span className="text-[10px] text-pnp-textSecondary/60 w-6 text-right flex-shrink-0">
-                  {Math.round(volume * 100)}
-                </span>
-              </div>
+                    <span className={`text-[9px] mt-0.5 leading-tight ${isActive ? "text-white/80" : "text-pnp-textSecondary"}`}>
+                      {mode.desc}
+                    </span>
+                    {isActive && isPlaying && !isModeLoading && (
+                      <div className="absolute top-2 right-2">
+                        <EqualizerBars color="#fff" size="xs" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
+          </div>
+        )}
 
-            {/* ── Playlist section ──────────────────────────────────────────── */}
-            <div className="border-t border-white/8 flex-shrink-0" style={{ borderTopColor: "rgba(255,255,255,0.08)" }}>
-              <div className="flex items-center justify-between px-4 py-2">
-                <span className="text-[10px] font-semibold text-pnp-textSecondary uppercase tracking-wider">
-                  Playlist
-                </span>
-                <span className="text-[10px] text-pnp-textSecondary/60">{tracks.length} tracks</span>
-              </div>
-
-              <div
-                ref={playlistRef}
-                onScroll={handlePlaylistScroll}
-                className="max-h-[180px] overflow-y-auto"
-              >
-                {tracks.map((track) => (
-                  <PlaylistRow
-                    key={track.id}
-                    track={track}
-                    isActive={currentTrack?.id === track.id}
-                    isPlaying={isPlaying}
-                    onPlay={play}
-                  />
-                ))}
-
-                {/* Load more spinner */}
-                {isLoadingTracks && (
-                  <div className="flex items-center justify-center py-3">
-                    <div
-                      className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin"
-                      style={{ borderColor: "rgba(217,70,239,0.5)", borderTopColor: "transparent" }}
-                      aria-label="Loading more tracks"
-                    />
+        {/* ── Now Playing Bar ──────────────────────────────────────────────── */}
+        {hasTrack && activeModeConfig && (
+          <div className="px-4 pt-2 pb-3 flex-shrink-0">
+            {/* Track info + art */}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0">
+                {currentTrack.art ? (
+                  <img src={currentTrack.art} alt={currentTrack.title} className="w-full h-full object-cover" style={{ pointerEvents: "none" }} />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center" style={{ background: activeModeConfig.gradient }}>
+                    <span className="text-xl">{activeModeConfig.emoji}</span>
                   </div>
                 )}
-
-                {/* End of list */}
-                {!hasMore && tracks.length > 0 && (
-                  <p className="text-center text-[10px] text-pnp-textSecondary/40 py-2 pb-3">
-                    End of playlist
-                  </p>
-                )}
+              </div>
+              <div role="status" aria-live="polite" className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-pnp-textPrimary truncate">{currentTrack.title}</p>
+                {artistName && <p className="text-[10px] text-pnp-textSecondary truncate">{artistName}</p>}
               </div>
             </div>
-          </>
+
+            {/* Progress bar */}
+            <div
+              ref={progressBarRef}
+              className="h-1.5 bg-white/10 rounded-full cursor-pointer group relative"
+              onClick={handleProgressClick}
+              role="slider"
+              aria-label="Seek"
+              aria-valuemin={0}
+              aria-valuemax={duration || 0}
+              aria-valuenow={Math.round(progress)}
+            >
+              <div
+                className="h-full rounded-full relative transition-all duration-150"
+                style={{ width: `${progressPct}%`, background: activeModeConfig.gradient }}
+              >
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm" />
+              </div>
+            </div>
+            <div className="flex justify-between mt-1">
+              <span className="text-[10px] text-pnp-textSecondary/60">{formatTime(progress)}</span>
+              <span className="text-[10px] text-pnp-textSecondary/60">{formatTime(duration)}</span>
+            </div>
+
+            {/* Controls: prev, play/pause, next */}
+            <div className="flex items-center justify-center gap-4 mt-3">
+              <button
+                onClick={prev}
+                className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 active:scale-95 transition-colors"
+                aria-label="Previous track"
+              >
+                <PrevIcon className="w-5 h-5" />
+              </button>
+
+              <button
+                onClick={togglePlay}
+                disabled={isLoading}
+                className="w-12 h-12 rounded-full flex items-center justify-center text-white shadow-md transition-all hover:brightness-110 active:scale-95 disabled:opacity-50"
+                style={{ background: activeModeConfig.gradient }}
+                aria-label={isPlaying ? "Pause" : "Play"}
+              >
+                {isLoading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : isPlaying ? (
+                  <PauseIcon className="w-5 h-5" />
+                ) : (
+                  <PlayIcon className="w-5 h-5 ml-0.5" />
+                )}
+              </button>
+
+              <button
+                onClick={next}
+                className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 active:scale-95 transition-colors"
+                aria-label="Next track"
+              >
+                <NextIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Volume */}
+            <div className="flex items-center gap-2 mt-3">
+              <VolumeIcon level={volume} className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" />
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={volume}
+                onChange={(e) => setVolume(parseFloat(e.target.value))}
+                className="flex-1 h-1.5 rounded-full cursor-pointer appearance-none radio-volume-slider"
+                style={{
+                  accentColor: activeModeConfig.color,
+                  background: `linear-gradient(to right, ${activeModeConfig.color} ${volume * 100}%, rgba(255,255,255,0.1) ${volume * 100}%)`,
+                }}
+                aria-label="Volume"
+              />
+              <span className="text-[10px] text-pnp-textSecondary/60 w-6 text-right flex-shrink-0">{Math.round(volume * 100)}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Empty state — no mode selected yet, show instruction */}
+        {!hasTrack && !loadError && !loadingMode && (
+          <div className="flex flex-col items-center justify-center py-6 px-4">
+            <p className="text-[11px] text-pnp-textSecondary text-center">
+              Tap a flight mode to start the music
+            </p>
+          </div>
         )}
       </div>
     </div>
