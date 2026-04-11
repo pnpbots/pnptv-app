@@ -57,16 +57,17 @@ class CallSessionModel {
         RETURNING *
       `;
 
+      // Tokens are regenerated on demand at join time — never persisted.
       const result = await query(sql, [
         id,
         data.bookingId,
-        data.roomProvider || 'jitsi',
+        data.roomProvider || 'livekit',
         roomId,
         roomName,
         data.joinUrlUser || null,
         data.joinUrlPerformer || null,
-        data.tokenUser || null,
-        data.tokenPerformer || null,
+        null, // token_user — never stored; regenerated at join time
+        null, // token_performer — never stored; regenerated at join time
         data.maxParticipants || 2,
         data.recordingDisabled !== false,
       ]);
@@ -84,7 +85,12 @@ class CallSessionModel {
    */
   static async getById(sessionId) {
     try {
-      const sql = `SELECT * FROM ${TABLE} WHERE id = $1`;
+      // Explicit column list — token_user/token_performer are intentionally excluded (never persisted)
+      const sql = `SELECT id, booking_id, room_provider, room_id, room_name,
+                          join_url_user, join_url_performer,
+                          max_participants, recording_disabled, status,
+                          started_at, ended_at, actual_duration_seconds, created_at
+                   FROM ${TABLE} WHERE id = $1`;
       const result = await query(sql, [sessionId]);
       return this.mapRowToSession(result.rows[0]);
     } catch (error) {
@@ -244,8 +250,12 @@ class CallSessionModel {
    */
   static async getActiveSessions() {
     try {
+      // Explicit column list — token_user/token_performer are intentionally excluded (never persisted)
       const sql = `
-        SELECT s.*,
+        SELECT s.id, s.booking_id, s.room_provider, s.room_id, s.room_name,
+               s.join_url_user, s.join_url_performer,
+               s.max_participants, s.recording_disabled, s.status,
+               s.started_at, s.ended_at, s.actual_duration_seconds, s.created_at,
                b.user_id, b.performer_id, b.start_time_utc, b.end_time_utc
         FROM ${TABLE} s
         LEFT JOIN bookings b ON s.booking_id = b.id
@@ -296,14 +306,19 @@ class CallSessionModel {
    */
   static async getUpcomingSessions(minutesAhead = 5) {
     try {
+      // Explicit column list — token_user/token_performer are intentionally excluded (never persisted)
+      // Parameterized interval: use $1 * INTERVAL '1 minute' to avoid string concatenation injection
       const sql = `
-        SELECT s.*,
+        SELECT s.id, s.booking_id, s.room_provider, s.room_id, s.room_name,
+               s.join_url_user, s.join_url_performer,
+               s.max_participants, s.recording_disabled, s.status,
+               s.started_at, s.ended_at, s.actual_duration_seconds, s.created_at,
                b.user_id, b.performer_id, b.start_time_utc
         FROM ${TABLE} s
         LEFT JOIN bookings b ON s.booking_id = b.id
         WHERE s.status = 'scheduled'
           AND b.status = 'confirmed'
-          AND b.start_time_utc <= NOW() + ($1 || ' minutes')::INTERVAL
+          AND b.start_time_utc <= NOW() + ($1 * INTERVAL '1 minute')
           AND b.start_time_utc > NOW() - INTERVAL '5 minutes'
         ORDER BY b.start_time_utc ASC
       `;

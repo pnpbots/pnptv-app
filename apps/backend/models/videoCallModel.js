@@ -6,7 +6,17 @@
 const { query, getClient } = require('../config/postgres');
 const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid');
-const agoraTokenService = require('../services/agora/agoraTokenService');
+// agoraTokenService removed — Agora replaced by JaaS/LiveKit.
+// generateVideoCallTokens returns a stub shape so existing callers don't crash.
+const agoraTokenService = {
+  generateVideoCallTokens: (channelName, userId, isHost = false) => ({
+    rtcToken: null,
+    rtmToken: null,
+    appId: null,
+    channelName,
+    userId: String(userId),
+  }),
+};
 
 class VideoCallModel {
   /**
@@ -110,6 +120,11 @@ class VideoCallModel {
    * @param {string} userName - User name
    * @param {boolean} isGuest - Is guest user
    * @returns {Promise<Object>} Tokens and call info
+   *
+   * SECURITY: Caller MUST verify group membership and subscription tier before
+   * calling this method. This model does not enforce access control — it only
+   * checks capacity, call status, and duplicate joins. All authz decisions must
+   * be made at the controller/route layer before this method is invoked.
    */
   static async joinCall(callId, userId, userName, isGuest = false) {
     const client = await getClient();

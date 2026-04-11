@@ -5,7 +5,18 @@
 
 const { query, getClient } = require('../config/postgres');
 const logger = require('../utils/logger');
-const agoraTokenService = require('../services/agora/agoraTokenService');
+// agoraTokenService removed — Agora replaced by JaaS/LiveKit.
+// generateMainRoomTokens returns a stub shape so existing callers don't crash.
+const agoraTokenService = {
+  generateMainRoomTokens: (channelName, userId, canPublish = false) => ({
+    rtcToken: null,
+    rtmToken: null,
+    appId: null,
+    channelName,
+    userId: String(userId),
+    role: canPublish ? 'publisher' : 'subscriber',
+  }),
+};
 
 class MainRoomModel {
   /**
