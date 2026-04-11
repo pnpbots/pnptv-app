@@ -333,29 +333,56 @@ const renderVideoPreview = async (req, res) => {
       ? await ogService.getVideoPreviewOG(postId)
       : ogService.getDefaultOG();
 
-    // Fetch the actual video URL for the player
+    // Fetch the post so we can render an appropriate body:
+    //   video → <video>, image → <img>, text → styled content card
     let videoUrl = null;
     let thumbUrl = null;
+    let imageUrl = null;
+    let mediaKind = null; // 'video' | 'image' | 'text'
+    let postContent = '';
+    let postAuthor = '';
     if (Number.isFinite(postId) && postId > 0) {
       const result = await query(
-        `SELECT media_url, media_type, video_thumbnail_url
-         FROM social_posts
-         WHERE id = $1
-           AND is_deleted = false
-           AND (is_exclusive IS NOT TRUE)
+        `SELECT sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url,
+                sp.content, sp.video_title, sp.video_description,
+                u.username, u.first_name
+         FROM social_posts sp
+         JOIN users u ON sp.user_id = u.id
+         WHERE sp.id = $1
+           AND sp.is_deleted = false
+           AND (sp.is_exclusive IS NOT TRUE)
          LIMIT 1`,
         [postId]
       );
       const post = result.rows[0];
-      if (post && post.media_type === 'video' && post.media_url) {
-        videoUrl = post.media_url.startsWith('http')
-          ? post.media_url
-          : `${APP_BASE_URL}${post.media_url}`;
-        thumbUrl = post.video_thumbnail_url
-          ? (post.video_thumbnail_url.startsWith('http')
-              ? post.video_thumbnail_url
-              : `${APP_BASE_URL}${post.video_thumbnail_url}`)
-          : null;
+      if (post) {
+        const absolutize = (u) => (u && u.startsWith('http') ? u : (u ? `${APP_BASE_URL}${u}` : null));
+
+        // Resolve a fallback media URL from media_urls jsonb if media_url is missing
+        let firstMedia = null;
+        if (post.media_urls) {
+          try {
+            const parsed = typeof post.media_urls === 'string' ? JSON.parse(post.media_urls) : post.media_urls;
+            firstMedia = Array.isArray(parsed) ? parsed[0] : null;
+          } catch (_) { /* ignore */ }
+        }
+        const rawMedia = post.media_url || firstMedia?.url || null;
+        const rawThumb = post.video_thumbnail_url || firstMedia?.thumbnail_url || null;
+
+        postAuthor = post.first_name || post.username || '';
+        postContent = (post.video_description || post.content || '').trim();
+
+        if (post.media_type === 'video' && rawMedia) {
+          mediaKind = 'video';
+          videoUrl = absolutize(rawMedia);
+          thumbUrl = absolutize(rawThumb);
+        } else if (rawMedia) {
+          // image (or any non-video media) — render as <img>
+          mediaKind = 'image';
+          imageUrl = absolutize(rawMedia);
+        } else {
+          mediaKind = 'text';
+        }
       }
     }
 
@@ -375,18 +402,48 @@ const renderVideoPreview = async (req, res) => {
     <meta property="og:video:height" content="${escAttr(String(og.videoHeight || 720))}" />`
       : '';
 
-    const videoPlayerHtml = videoUrl
-      ? `<video
+    // Escape post content for HTML body usage (newlines → <br>)
+    const escHtml = (s = '') => String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+    const contentHtml = escHtml(postContent).replace(/\n/g, '<br />');
+
+    let mediaPlayerHtml;
+    if (mediaKind === 'video' && videoUrl) {
+      mediaPlayerHtml = `<video
           src="${escAttr(videoUrl)}"
           controls
           playsinline
           preload="metadata"
           ${thumbUrl ? `poster="${escAttr(thumbUrl)}"` : ''}
           style="width:100%;max-height:70vh;border-radius:16px;background:#000;object-fit:contain;"
-        >Your browser does not support the video tag.</video>`
-      : `<div style="width:100%;height:300px;border-radius:16px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
-          <p style="color:#8E8E93;font-size:14px;">Video not available</p>
+        >Your browser does not support the video tag.</video>`;
+    } else if (mediaKind === 'image' && imageUrl) {
+      mediaPlayerHtml = `<img
+          src="${escAttr(imageUrl)}"
+          alt="${escAttr(og.title)}"
+          style="width:100%;max-height:70vh;border-radius:16px;background:#000;object-fit:contain;display:block;"
+        />`;
+    } else if (mediaKind === 'text' && postContent) {
+      mediaPlayerHtml = `<div style="width:100%;padding:32px 24px;border-radius:16px;background:linear-gradient(135deg,rgba(212,0,122,0.15),rgba(230,145,56,0.12));color:#fff;font-size:18px;line-height:1.5;text-align:center;min-height:200px;display:flex;align-items:center;justify-content:center;">
+          <p>${contentHtml}</p>
         </div>`;
+    } else {
+      mediaPlayerHtml = `<div style="width:100%;height:300px;border-radius:16px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+          <p style="color:#8E8E93;font-size:14px;">Post not available</p>
+        </div>`;
+    }
+
+    // Body title / caption (falls back to og.title which is already author-aware)
+    const bodyTitle = postAuthor
+      ? `${postAuthor} on PNPtv!`
+      : 'Clouds &amp; Rush Network';
+    const bodyCaption = postContent && mediaKind !== 'text'
+      ? escHtml(postContent.length > 220 ? postContent.slice(0, 219) + '\u2026' : postContent)
+      : 'Exclusive community content. Stream, connect, and vibe with the hottest PNP creators.';
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -515,12 +572,12 @@ const renderVideoPreview = async (req, res) => {
     </div>
 
     <div class="video-wrapper">
-      ${videoPlayerHtml}
+      ${mediaPlayerHtml}
     </div>
 
     <div class="info">
-      <h1>Clouds &amp; Rush Network</h1>
-      <p>Exclusive community content. Stream, connect, and vibe with the hottest PNP creators.</p>
+      <h1>${bodyTitle}</h1>
+      <p>${bodyCaption}</p>
     </div>
 
     <a href="${APP_BASE_URL}" class="cta-btn">

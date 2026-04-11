@@ -415,9 +415,9 @@ const shareToX = async (req, res) => {
     // ── 7. Build tweet text ────────────────────────────────────────────────
     // Reserve 24 chars for the PNPtv link (23 T.co-shortened + 1 space),
     // leaving 256 chars for the post content.
-    const postLink = post.media_type === 'video'
-      ? `${PNPTV_APP_URL}/v/${postId}`
-      : `${PNPTV_APP_URL}/social/post/${postId}`;
+    // Always use /v/:id — the backend renders post-specific OG tags (rich X cards)
+    // for all post types (video → player card, image/text → summary_large_image).
+    const postLink = `${PNPTV_APP_URL}/v/${postId}`;
     const linkLength = 24; // T.co wraps all links to 23 chars + 1 space separator
     const maxContent = X_MAX_TEXT_LENGTH - linkLength;
 
