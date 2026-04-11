@@ -279,21 +279,14 @@ const validateWebhookPayload = (payload) => {
     ? payload.payment
     : payload;
 
-  const requiredFields = ['id', 'status'];
-  const missingFields = requiredFields.filter((field) => !data[field]);
-
-  if (missingFields.length > 0) {
-    return {
-      valid: false,
-      error: `Missing required fields: ${missingFields.join(', ')}`,
-    };
+  // v3 sessions expose the identifier as `sessionId`; legacy/v2 used `id`.
+  if (!(data.id || data.sessionId) || !data.status) {
+    return { valid: false, error: 'Missing required fields: id or sessionId, status' };
   }
 
-  if (data.source && (!data.source.payerAddress && !data.source.txHash)) {
-    return {
-      valid: false,
-      error: 'Invalid source structure',
-    };
+  if (data.source && typeof data.source === 'object' && !Array.isArray(data.source)
+      && !data.source.payerAddress && !data.source.txHash) {
+    return { valid: false, error: 'Invalid source structure' };
   }
 
   if (!data.metadata?.userId && !data.metadata?.paymentId) {
@@ -424,7 +417,7 @@ const normalizeDaimoPayload = (payload) => {
   if (format === 'v3') {
     const session = payload.data.session;
     // Use raw session.status directly — avoid double-mapping via event type
-    const status = session.status || normalizeSessionStatus(session.status);
+    const status = session.status;
     const normalized = {
       format,
       eventId: payload.id,

@@ -116,20 +116,8 @@ const validateDaimoPayload = (payload) => {
     return { valid: true, isTestEvent: true };
   }
 
-  // Normalize using the unified normalizer (handles v3, v2, and legacy)
-  const normalized = DaimoConfig.normalizeDaimoPayload(payload);
-
-  // Require eventId and status
-  if (!normalized.eventId || !normalized.status) {
-    return { valid: false, error: 'Missing required fields' };
-  }
-
-  // Require metadata with userId or paymentId
-  if (!normalized.metadata?.userId && !normalized.metadata?.paymentId) {
-    return { valid: false, error: 'Invalid metadata structure' };
-  }
-
   // Support simplified test-friendly shape (transaction_id, status, metadata)
+  // — used by integration tests, not real Daimo events.
   if (payload && payload.transaction_id && payload.status && payload.metadata) {
     if (typeof payload.metadata !== 'object' || payload.metadata === null) {
       return { valid: false, error: 'Invalid metadata structure' };
@@ -141,35 +129,18 @@ const validateDaimoPayload = (payload) => {
     return { valid: true };
   }
 
-  // Validate using DaimoConfig.validateWebhookPayload for deeper checks
-  try {
-    // For v3 format, pass the session object; for others, pass as-is
-    const dataToValidate = normalized.format === 'v3'
-      ? payload.data.session
-      : (payload?.payment && typeof payload.payment === 'object') ? payload.payment : payload;
+  // Normalize using the unified normalizer (handles v3, v2, and legacy)
+  const normalized = DaimoConfig.normalizeDaimoPayload(payload);
 
-    const result = DaimoConfig.validateWebhookPayload(dataToValidate);
-    if (result && typeof result === 'object') {
-      if (result.error) {
-        const errorMsg = result.error.toLowerCase();
-        if (errorMsg.includes('missing required fields')) {
-          return { valid: false, error: 'Missing required fields' };
-        }
-        const metadataErrors = ['metadata', 'source', 'destination'];
-        if (metadataErrors.some((term) => errorMsg.includes(term))) {
-          return { valid: false, error: 'Invalid metadata structure' };
-        }
-      }
-      return result;
-    }
-    return { valid: false, error: 'Invalid metadata structure' };
-  } catch (err) {
-    const errMsg = (err?.message || '').toLowerCase();
-    if (errMsg.includes('missing required fields')) {
-      return { valid: false, error: 'Missing required fields' };
-    }
+  if (!normalized.eventId || !normalized.status) {
+    return { valid: false, error: 'Missing required fields' };
+  }
+
+  if (!normalized.metadata?.userId && !normalized.metadata?.paymentId) {
     return { valid: false, error: 'Invalid metadata structure' };
   }
+
+  return { valid: true };
 };
 
 /**
