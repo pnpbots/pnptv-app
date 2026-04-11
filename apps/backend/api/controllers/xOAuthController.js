@@ -101,6 +101,11 @@ const startOAuth = async (req, res) => {
     const adminId = req.session?.user?.id ? Number(req.session.user.id) : null;
     const adminUsername = req.session?.user?.username || null;
     const url = await XOAuthService.createAuthUrl({ adminId, adminUsername });
+    // If the request came from the creator route, set a return_to so the callback redirects to the webapp
+    if (req.originalUrl.includes('/creator/')) {
+      req.session.xOAuthReturnTo = '/creators/x-campaigns';
+      await new Promise((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
+    }
     res.json({ success: true, url });
   } catch (error) {
     logger.error('Error starting X OAuth via API:', error);
@@ -402,6 +407,14 @@ const handleCallback = async (req, res) => {
     }
 
     const account = await XOAuthService.handleOAuthCallback({ code, state });
+    // Redirect to webapp if the OAuth was initiated from the creator panel
+    const returnTo = req.session?.xOAuthReturnTo;
+    if (returnTo) {
+      delete req.session.xOAuthReturnTo;
+      await new Promise((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
+      const appUrl = (process.env.WEBAPP_ORIGIN || 'https://app.pnptv.app').replace(/\/+$/, '');
+      return res.redirect(appUrl + returnTo);
+    }
     return res.send(buildRedirectPage(
       'Cuenta conectada',
       `La cuenta @${account.handle} fue conectada correctamente. Puedes regresar al bot.`,

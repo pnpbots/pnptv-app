@@ -32,6 +32,29 @@ class DmService {
       throw { statusCode: 400, message: 'Cannot message yourself' };
     }
 
+    // Intercept DMs to Cristina AI → create support ticket instead
+    if (String(resolvedRecipientId) === 'cristina-ai') {
+      const text = content ? String(content).trim().slice(0, 2000) : '';
+      if (!text) {
+        throw { statusCode: 400, message: 'Please describe your issue in a text message' };
+      }
+      await query(
+        `INSERT INTO support_ticket_messages (user_id, sender_type, sender_name, content)
+         VALUES ($1, 'user', (SELECT COALESCE(first_name, username, 'User') FROM users WHERE id = $1), $2)`,
+        [senderId, text]
+      );
+      return {
+        id: Date.now(),
+        sender_id: senderId,
+        recipient_id: resolvedRecipientId,
+        content: text,
+        is_read: true,
+        created_at: new Date().toISOString(),
+        _ticket: true,
+        _ticketNotice: 'Your message has been sent to our support team. Open the Cristina AI widget (🧜‍♀️) for real-time help!',
+      };
+    }
+
     // 1. Block check (bidirectional)
     const blockCheck = await query(
       `SELECT 1 FROM blocked_users

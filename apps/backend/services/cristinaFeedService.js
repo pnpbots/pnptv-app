@@ -73,6 +73,37 @@ const CATEGORIES = {
   },
 };
 
+// ── Prompt injection sanitization ────────────────────────────────────────────
+
+const INJECTION_PHRASES = [
+  /ignore\s+previous/gi,
+  /system\s*:/gi,
+  /you\s+are\s+now/gi,
+  /new\s+instructions/gi,
+  /disregard\s+all/gi,
+  /forget\s+everything/gi,
+];
+
+/**
+ * Sanitize a user-supplied string before interpolating it into a Grok prompt.
+ * - Strips control characters
+ * - Collapses newlines to spaces
+ * - Truncates to 80 chars
+ * - Removes known prompt-injection phrases
+ */
+function sanitizeForPrompt(str) {
+  if (!str || typeof str !== 'string') return '';
+  let s = str
+    .replace(/[\x00-\x1F\x7F]/g, ' ')  // strip control chars
+    .replace(/\n|\r/g, ' ')             // collapse newlines
+    .trim()
+    .slice(0, 80);                       // truncate
+  for (const pattern of INJECTION_PHRASES) {
+    s = s.replace(pattern, '');
+  }
+  return s.trim();
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -226,17 +257,25 @@ async function shoutoutNewContent(creatorId, creatorName, mediaType, postId) {
   try {
     if (!creatorId || String(creatorId) === CRISTINA_USER_ID) return;
 
-    // Rate limit: 1 shoutout per creator per 6h
+    // Rate limit: 1 shoutout per creator per 6h — fail-closed if Redis unavailable
     const redis = getRedis();
-    if (redis) {
+    if (!redis) {
+      logger.warn('CristinaFeed: Redis unavailable, skipping shoutout to avoid amplification', { creatorId });
+      return;
+    }
+    try {
       const key = `${REDIS_PREFIX}shoutout:${creatorId}`;
       const exists = await redis.get(key);
       if (exists) return; // Already shouted out recently
       await redis.set(key, '1', 'EX', CREATOR_SHOUTOUT_TTL);
+    } catch (redisErr) {
+      logger.warn('CristinaFeed: Redis error in shoutout rate-limit check, skipping to avoid amplification', { creatorId, error: redisErr.message });
+      return;
     }
 
+    const safeCreatorName = sanitizeForPrompt(creatorName);
     const mediaLabel = mediaType === 'video' ? 'a new video' : 'new content';
-    const prompt = `Write a very short, enthusiastic shoutout (2-3 sentences max) announcing that @${creatorName} just posted ${mediaLabel} on pnptv.app. Encourage the community to check it out and follow them. Be warm and celebratory. Do NOT include any URLs.`;
+    const prompt = `Write a very short, enthusiastic shoutout (2-3 sentences max) announcing that @"${safeCreatorName}" just posted ${mediaLabel} on pnptv.app. Encourage the community to check it out and follow them. Be warm and celebratory. Do NOT include any URLs.`;
 
     const lang = Math.random() > 0.5 ? 'English' : 'Spanish';
     const content = await GrokService.chat({
@@ -281,17 +320,26 @@ async function announceLiveStream(creatorId, creatorName, streamTitle) {
   try {
     if (!creatorId || String(creatorId) === CRISTINA_USER_ID) return;
 
-    // Rate limit
+    // Rate limit — fail-closed if Redis unavailable
     const redis = getRedis();
-    if (redis) {
+    if (!redis) {
+      logger.warn('CristinaFeed: Redis unavailable, skipping live announcement to avoid amplification', { creatorId });
+      return;
+    }
+    try {
       const key = `${REDIS_PREFIX}live:${creatorId}`;
       const exists = await redis.get(key);
       if (exists) return;
       await redis.set(key, '1', 'EX', CREATOR_SHOUTOUT_TTL);
+    } catch (redisErr) {
+      logger.warn('CristinaFeed: Redis error in live announcement rate-limit check, skipping to avoid amplification', { creatorId, error: redisErr.message });
+      return;
     }
 
-    const titlePart = streamTitle ? ` titled "${streamTitle}"` : '';
-    const prompt = `Write a very short, exciting announcement (2-3 sentences max) that @${creatorName} just went LIVE on PNP Television${titlePart}! Encourage everyone to tune in now. Be enthusiastic and use the energy of a live event. Do NOT include any URLs.`;
+    const safeCreatorName = sanitizeForPrompt(creatorName);
+    const safeStreamTitle = streamTitle ? sanitizeForPrompt(streamTitle) : null;
+    const titlePart = safeStreamTitle ? ` titled "${safeStreamTitle}"` : '';
+    const prompt = `Write a very short, exciting announcement (2-3 sentences max) that @"${safeCreatorName}" just went LIVE on PNP Television${titlePart}! Encourage everyone to tune in now. Be enthusiastic and use the energy of a live event. Do NOT include any URLs.`;
 
     const lang = Math.random() > 0.5 ? 'English' : 'Spanish';
     const content = await GrokService.chat({

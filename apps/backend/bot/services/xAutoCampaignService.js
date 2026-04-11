@@ -235,9 +235,27 @@ class XAutoCampaignService {
   }
 
   /**
+   * Resolve the X account handle for a campaign (cached on the campaign object).
+   */
+  static async _getAccountHandle(campaign) {
+    if (campaign._handle) return campaign._handle;
+    const result = await db.query(
+      'SELECT handle FROM x_accounts WHERE account_id = $1',
+      [campaign.account_id]
+    );
+    campaign._handle = result.rows[0]?.handle?.toLowerCase() || '';
+    return campaign._handle;
+  }
+
+  /**
    * Core: generate content via Grok and queue into x_post_jobs.
+   * Only creates an in-app social_post for @PNPTelevision campaigns (Cristina AI).
+   * Other X accounts get X-only posts with no app feed entry.
    */
   static async generateAndQueue(campaign) {
+    const handle = await this._getAccountHandle(campaign);
+    const isPnpTelevision = handle === 'pnptelevision';
+
     const prompt = campaign.custom_prompt
       ? `${campaign.topic}\n\nAdditional instructions: ${campaign.custom_prompt}`
       : campaign.topic;
@@ -246,11 +264,12 @@ class XAutoCampaignService {
     const grokLanguage = langMap[campaign.language] || 'Spanish';
 
     // Generate text via Grok (with persona routing)
+    // PNPTelevision campaigns always use the cristina persona
     const grokResponse = await GrokService.chat({
       mode: campaign.grok_mode,
       language: grokLanguage,
       prompt,
-      personaType: campaign.persona_type || 'generic',
+      personaType: isPnpTelevision ? 'cristina' : (campaign.persona_type || 'generic'),
     });
 
     // Attach a random video if campaign has media folder
@@ -281,31 +300,8 @@ class XAutoCampaignService {
       postText = this._stripOptionLabel(grokResponse);
     }
 
-    // Create a social_posts record so the tweet link shows rich Twitter cards
-    let socialPostLink = 'https://pnptv.app';
-    try {
-      const socialResult = await db.query(
-        `INSERT INTO social_posts (user_id, content, media_url, media_type, video_title, video_description, video_thumbnail_url, is_shareable)
-         VALUES ($1, $2, $3, 'video', $4, $5, $6, true)
-         RETURNING id`,
-        [
-          'SYSTEM',
-          postText,
-          mediaUrl,
-          media?.title || null,
-          media?.description || postText.slice(0, 300),
-          media?.thumbnailUrl || null,
-        ]
-      );
-      const socialPostId = socialResult.rows[0].id;
-      socialPostLink = mediaUrl
-        ? `https://pnptv.app/v/${socialPostId}`
-        : `https://pnptv.app/social/post/${socialPostId}`;
-    } catch (err) {
-      logger.warn('Failed to create social_post for campaign tweet', {
-        campaignId: campaign.campaign_id, error: err.message,
-      });
-    }
+    // X campaigns post to X only — no in-app social feed entry.
+    const socialPostLink = 'https://pnptv.app';
 
     // Smart truncation: X allows 280 chars, URLs count as 23 via t.co.
     // Reserve 24 chars (23 for link + 1 newline) for the link.
@@ -401,31 +397,8 @@ class XAutoCampaignService {
     for (let i = 0; i < Math.min(options.length, 3); i++) {
       let postText = options[i];
 
-      // Create social_post for rich Twitter card
-      let socialPostLink = 'https://pnptv.app';
-      try {
-        const socialResult = await db.query(
-          `INSERT INTO social_posts (user_id, content, media_url, media_type, video_title, video_description, video_thumbnail_url, is_shareable)
-           VALUES ($1, $2, $3, 'video', $4, $5, $6, true)
-           RETURNING id`,
-          [
-            'SYSTEM',
-            postText,
-            mediaUrl,
-            media?.title || null,
-            media?.description || postText.slice(0, 300),
-            media?.thumbnailUrl || null,
-          ]
-        );
-        const abPostId = socialResult.rows[0].id;
-        socialPostLink = mediaUrl
-          ? `https://pnptv.app/v/${abPostId}`
-          : `https://pnptv.app/social/post/${abPostId}`;
-      } catch (err) {
-        logger.warn('Failed to create social_post for A/B variant', {
-          campaignId: campaign.campaign_id, variant: i, error: err.message,
-        });
-      }
+      // X campaigns post to X only — no in-app social feed entry.
+      const socialPostLink = 'https://pnptv.app';
 
       if (postText.length > X_TEXT_BUDGET) postText = this._smartTruncate(postText, X_TEXT_BUDGET);
       const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, [socialPostLink]);
@@ -775,6 +748,17 @@ class XAutoCampaignService {
       return matches[Math.floor(Math.random() * matches.length)];
     }
 
+    // Fallback: bare "A" / "B:" / "C" labels on their own line
+    const bareRegex = /(?:^|\n)\s*[ABC]\s*:?\s*\n([\s\S]*?)(?=(?:^|\n)\s*[ABC]\s*:?\s*\n|$)/gi;
+    const bareMatches = [];
+    while ((match = bareRegex.exec(text)) !== null) {
+      const cleaned = this._stripOptionLabel(match[1].trim());
+      if (cleaned) bareMatches.push(cleaned);
+    }
+    if (bareMatches.length > 1) {
+      return bareMatches[Math.floor(Math.random() * bareMatches.length)];
+    }
+
     // Fallback: try splitting by "Post 1 (Focus: ...)" / "Post 2 —" patterns
     const postSections = text.split(/\n(?=Post\s+\d+[\s(—\-:])/i).filter(Boolean);
     if (postSections.length > 1) {
@@ -805,6 +789,8 @@ class XAutoCampaignService {
     return text
       // "OPCIÓN A / OPTION A ..." at line start (with or without trailing newline)
       .replace(/^[\s]*(?:OPCI[OÓ]N|OPTION)\s+[ABC][^\n]*\n?/gim, '')
+      // Bare "A" / "A:" / "B" / "C:" on their own line (single letter labels from Grok)
+      .replace(/^\s*[ABC]\s*:?\s*\n/gm, '')
       // "(El Gancho Directo):" or "(El Aportador de Valor):" — parenthesized label lines
       .replace(/^\s*\([^)\n]{2,60}\)\s*:?\s*\n?/gim, '')
       // "El Gancho Directo:" / "El Aportador de Valor:" bare label lines

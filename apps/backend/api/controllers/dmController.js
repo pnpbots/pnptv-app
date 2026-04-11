@@ -295,6 +295,11 @@ const sendMessage = async (req, res) => {
       { isAdmin: isAdminSender }
     );
 
+    // Cristina AI ticket intercept — skip socket/push, return ticket notice
+    if (message._ticket) {
+      return res.json({ success: true, message, ticketNotice: message._ticketNotice, remaining: req.dmLimit?.remaining ?? null });
+    }
+
     // Deliver to recipient via Socket.IO if available
     const io = req.app.get('io');
     const senderName = user.firstName || user.first_name || user.username || 'User';
