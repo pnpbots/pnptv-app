@@ -4,7 +4,7 @@ const { getPool, query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 
 // Accounts every user must follow — cannot be unfollowed
-const ENFORCED_FOLLOW_IDS = ['8552451957', '8599671840']; // @pnptvadmin, @SantinoFurioso
+const ENFORCED_FOLLOW_IDS = ['8552451957', '8599671840', 'cristina-ai', '66127d88-817a-445b-a398-81d22d2587c1']; // @pnptvadmin, @SantinoFurioso, Cristina AI, @PNPLATINOBOY
 
 /**
  * Check if a target user ID is an enforced-follow account.
