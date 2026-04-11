@@ -33,6 +33,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tini curl \
     && rm -rf /var/lib/apt/lists/*
 
+# yt-dlp standalone binary (pre-downloaded on host)
+COPY apps/backend/yt-dlp_linux /usr/local/bin/yt-dlp
+RUN chmod +x /usr/local/bin/yt-dlp
+
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 
