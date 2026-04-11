@@ -385,8 +385,10 @@ export default function PostCard({
                   controls
                   controlsList="nodownload"
                   onContextMenu={(e) => e.preventDefault()}
-                  className="w-full max-h-80 rounded-lg object-cover"
+                  playsInline
+                  className="w-full max-h-[480px] rounded-lg object-contain bg-black"
                   preload="metadata"
+                  poster={post.video_thumbnail_url || undefined}
                 />
               ) : (
                 <img

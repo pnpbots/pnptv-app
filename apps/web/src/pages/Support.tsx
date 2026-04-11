@@ -371,7 +371,7 @@ function TicketChat({ userId }: { userId: string }) {
                       {!isMe && isLastInGroup && (
                         <div className="w-7 flex-shrink-0 self-end">
                           <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: "rgba(94,209,196,0.2)", color: "#5ED1C4" }}>
-                            {msg.sender_name === "Cristina AI" ? "AI" : "S"}
+                            {msg.sender_name === "Cristina AI" ? "🧜‍♀️" : "S"}
                           </div>
                         </div>
                       )}

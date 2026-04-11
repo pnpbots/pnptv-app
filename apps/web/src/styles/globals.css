@@ -191,19 +191,20 @@
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
   }
 
-  /* Chat overlay: fills viewport above the bottom nav on mobile, flush on desktop.
-     Uses --app-vh (JS-driven) so it's correct in Telegram WebView, iOS Safari, etc. */
+  /* Chat overlay: fixed panel that fills viewport above the bottom nav on mobile,
+     and the full viewport on desktop (where BottomNav is lg:hidden).
+     z-index 50 sits above all Layout chrome (mobile header z-40, sidebar z-50 on lg). */
   .chat-overlay-safe {
-    height: calc(var(--app-vh, 1vh) * 100 - 4rem);
-    top: auto;
+    position: fixed;
+    top: 0;
     bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+    height: auto;
+    z-index: 50;
   }
   @media (min-width: 1024px) {
     .chat-overlay-safe {
-      height: 100vh;
-      height: 100dvh;
-      top: 0;
       bottom: 0;
+      height: auto;
     }
   }
 
@@ -245,6 +246,24 @@
 
 .radio-eq-bar-3 {
   animation: radio-eq-bar 0.8s ease-in-out infinite 0.4s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radio-eq-bar-1,
+  .radio-eq-bar-2,
+  .radio-eq-bar-3 {
+    animation: none;
+    transform: scaleY(0.7);
+  }
+}
+
+/* ── HangoutMusicBar — Equalizer bounce animation ────────────────────── */
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes pnp-eq-bounce {
+    from { transform: scaleY(0.4); }
+    to   { transform: scaleY(1); }
+  }
 }
 
 /* Volume slider track fill (WebKit) */

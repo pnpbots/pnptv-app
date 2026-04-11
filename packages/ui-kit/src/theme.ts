@@ -20,6 +20,7 @@ export const colors = {
   error: "#FF453A",
   warning: "#FFD60A",
   border: "#2A2A2A",
+  purple: "#A78BFA",
 } as const;
 
 export type ColorToken = keyof typeof colors;

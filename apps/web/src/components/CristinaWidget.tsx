@@ -365,6 +365,8 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   const [fabColorIdx, setFabColorIdx] = useState(0);
   useEffect(() => {
     if (isOpen) return;
+    // Skip animation cycling if user prefers reduced motion
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const timer = setInterval(() => setFabColorIdx((i) => (i + 1) % 3), 3000);
     return () => clearInterval(timer);
   }, [isOpen]);
@@ -470,6 +472,18 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   // Keep refs in sync with state so socket listeners avoid stale closures
   useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
   useEffect(() => { viewRef.current = view; }, [view]);
+
+  // Escape key closes the widget (unless focus is inside the chat input)
+  useEffect(() => {
+    if (!isOpen || mode !== "widget") return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (inputRef.current && document.activeElement === inputRef.current) return;
+      setIsOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, mode]);
 
   // Load suggestions on first open
   useEffect(() => {
@@ -865,8 +879,29 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
       </div>
 
       {/* ── Tab bar ────────────────────────────────────────────────────── */}
-      <div className="flex border-b flex-shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(25,25,38,0.95)" }}>
+      <div
+        role="tablist"
+        aria-label="Widget tabs"
+        className="flex border-b flex-shrink-0"
+        style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(25,25,38,0.95)" }}
+        onKeyDown={(e) => {
+          const tabs: CristinaTab[] = ["ai", "vj", "nearby"];
+          const idx = tabs.indexOf(activeTab);
+          if (e.key === "ArrowRight") {
+            e.preventDefault();
+            setActiveTab(tabs[(idx + 1) % tabs.length]);
+          } else if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            setActiveTab(tabs[(idx - 1 + tabs.length) % tabs.length]);
+          }
+        }}
+      >
         <button
+          id="tab-ai"
+          role="tab"
+          aria-selected={activeTab === "ai"}
+          aria-controls="tabpanel-ai"
+          tabIndex={activeTab === "ai" ? 0 : -1}
           onClick={() => setActiveTab("ai")}
           className={`flex-1 py-2 text-[11px] font-semibold text-center transition-colors ${activeTab === "ai" ? "text-cyan-400" : "text-gray-500 hover:text-gray-300"}`}
           style={activeTab === "ai" ? { borderBottom: "2px solid #5BC8F5" } : { borderBottom: "2px solid transparent" }}
@@ -874,6 +909,11 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           <span className="inline-block mr-1 text-xs">🧜‍♀️</span> AI Chat
         </button>
         <button
+          id="tab-vj"
+          role="tab"
+          aria-selected={activeTab === "vj"}
+          aria-controls="tabpanel-vj"
+          tabIndex={activeTab === "vj" ? 0 : -1}
           onClick={() => setActiveTab("vj")}
           className={`flex-1 py-2 text-[11px] font-semibold text-center transition-colors ${activeTab === "vj" ? "text-purple-400" : "text-gray-500 hover:text-gray-300"}`}
           style={activeTab === "vj" ? { borderBottom: "2px solid #8B5CF6" } : { borderBottom: "2px solid transparent" }}
@@ -881,6 +921,11 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           {musicIsPlaying ? <><EqualizerBars color="#8B5CF6" size="sm" /> Radio</> : "🛫 Radio"}
         </button>
         <button
+          id="tab-nearby"
+          role="tab"
+          aria-selected={activeTab === "nearby"}
+          aria-controls="tabpanel-nearby"
+          tabIndex={activeTab === "nearby" ? 0 : -1}
           onClick={() => setActiveTab("nearby")}
           className={`flex-1 py-2 text-[11px] font-semibold text-center transition-colors ${activeTab === "nearby" ? "text-yellow-400" : "text-gray-500 hover:text-gray-300"}`}
           style={activeTab === "nearby" ? { borderBottom: "2px solid #FBFF00" } : { borderBottom: "2px solid transparent" }}
@@ -890,17 +935,17 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
       </div>
 
       {/* ── VJ Tab (Radio Panel) ──────────────────────────────────────── */}
-      <div style={{ display: activeTab === "vj" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <div id="tabpanel-vj" role="tabpanel" aria-labelledby="tab-vj" style={{ display: activeTab === "vj" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
         <RadioPanel onClose={() => setIsOpen(false)} />
       </div>
 
       {/* ── Travel Tab (Nearby Panel) ─────────────────────────────────── */}
-      <div style={{ display: activeTab === "nearby" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <div id="tabpanel-nearby" role="tabpanel" aria-labelledby="tab-nearby" style={{ display: activeTab === "nearby" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
         <NearbyPanel onClose={() => setIsOpen(false)} />
       </div>
 
       {/* ── AI Chat Tab ───────────────────────────────────────────────── */}
-      <div style={{ display: activeTab === "ai" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <div id="tabpanel-ai" role="tabpanel" aria-labelledby="tab-ai" style={{ display: activeTab === "ai" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
       {/* ------------------------------------------------------------------ */}
       {/* HELP CENTER VIEW                                                     */}
       {/* ------------------------------------------------------------------ */}
@@ -1827,20 +1872,32 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
             paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
           }}
         >
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={
-              view === "ticketView"
-                ? t.inputPlaceholderTicket
-                : t.inputPlaceholderChat
-            }
-            maxLength={1000}
-            disabled={isLoading}
-            className="flex-1 bg-white/5 border border-pnp-border rounded-xl px-3 py-2 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-cyan-400/50 disabled:opacity-50"
-          />
+          <div className="flex-1 relative">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={
+                view === "ticketView"
+                  ? t.inputPlaceholderTicket
+                  : t.inputPlaceholderChat
+              }
+              maxLength={2000}
+              disabled={isLoading}
+              className="w-full bg-white/5 border border-pnp-border rounded-xl px-3 py-2 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-cyan-400/50 disabled:opacity-50"
+              aria-describedby={input.length >= 1600 ? "chat-char-count" : undefined}
+            />
+            {input.length >= 1600 && (
+              <span
+                id="chat-char-count"
+                className={`absolute right-2 bottom-2 text-[10px] font-medium ${input.length >= 1900 ? "text-red-400" : "text-yellow-400"}`}
+                aria-live="polite"
+              >
+                {2000 - input.length}
+              </span>
+            )}
+          </div>
           <button
             type="submit"
             disabled={!input.trim() || isLoading}

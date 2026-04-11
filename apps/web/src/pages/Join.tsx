@@ -3,7 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { getSubscriptionPlans, getFeaturedPerformers, type SubscriptionPlan, type FeaturedPerformer } from "@/lib/api";
+import { getSubscriptionPlans, getFeaturedPerformers, redeemReferralCode, type SubscriptionPlan, type FeaturedPerformer } from "@/lib/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -44,13 +44,19 @@ export default function Join() {
   const [primePlan, setPrimePlan] = useState<SubscriptionPlan | null>(null);
   const [stats, setStats] = useState<{ totalUsers: number; newUsersLast30Days: number } | null>(null);
 
-  // Capture referral code from URL and persist for post-auth redemption
+  // Capture referral code from URL and persist for post-auth redemption.
+  // If the user is already authenticated, redeem immediately.
   useEffect(() => {
     const ref = searchParams.get("ref");
     if (ref) {
-      localStorage.setItem("pnptv:pendingRef", ref.toUpperCase());
+      const code = ref.toUpperCase();
+      if (isAuthenticated) {
+        redeemReferralCode(code).catch(() => {});
+      } else {
+        localStorage.setItem("pnptv:pendingRef", code);
+      }
     }
-  }, [searchParams]);
+  }, [searchParams, isAuthenticated]);
 
   useEffect(() => {
     getFeaturedPerformers().catch(() => null).then((res) => {

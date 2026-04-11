@@ -1150,9 +1150,7 @@ export default function Profile() {
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
             <div className="flex items-start gap-3">
-              <div className="cristina-avatar-glow rounded-full flex items-center justify-center shrink-0" style={{ width: 40, height: 40, background: "linear-gradient(135deg, #5BC8F5, #00D4E8)" }}>
-                <span style={{ fontSize: 20 }} role="img" aria-label="Cristina">&#x1F9DC;&#x200D;&#x2640;&#xFE0F;</span>
-              </div>
+              <span role="img" aria-label="Cristina AI" className="cristina-avatar-glow shrink-0 flex items-center justify-center" style={{ width: 40, height: 40, fontSize: 30 }}>🧜‍♀️</span>
               <div className="flex-1 min-w-0 pr-4">
                 <p className="text-sm font-semibold" style={{ color: "#5BC8F5" }}>{p.cristinaHeadline}</p>
                 <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.7)" }}>

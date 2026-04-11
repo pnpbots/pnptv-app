@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { useOrientation } from "@/hooks/useOrientation";
-import { CristinaWidget } from "@/components/CristinaWidget";
+const CristinaWidget = lazy(() => import("@/components/CristinaWidget").then((m) => ({ default: m.CristinaWidget })));
 
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
@@ -1203,11 +1203,15 @@ export function Layout() {
         <BottomNav />
       </div>
 
-      {/* Unified Cristina widget: AI Chat + VJ + Travel Agent */}
+      {/* Unified Cristina widget: AI Chat + VJ + Travel Agent — code-split to remove from initial bundle */}
       {isAuthenticated && (() => {
         const inVideoCall = location.pathname.startsWith("/chat/") || location.pathname === "/main-stage";
         const showCompact = isLandscape && isMobile && inVideoCall;
-        return <CristinaWidget compact={showCompact} />;
+        return (
+          <Suspense fallback={null}>
+            <CristinaWidget compact={showCompact} />
+          </Suspense>
+        );
       })()}
 
       {/* Toast notifications */}

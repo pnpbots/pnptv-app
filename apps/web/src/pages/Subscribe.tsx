@@ -23,9 +23,9 @@ import { useI18n } from "@/lib/i18n";
 
 type Provider = "epayco" | "daimo" | "dash";
 
-const MEMBER_PLAN_IDS = new Set(["member-monthly"]);
+const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
-const RECOMMENDED_PLAN = "yearly_pass";
+const RECOMMENDED_PLAN = "prime-diamond-pass-365d";
 
 function formatPrice(amount: number, currency: string): string {
   if (currency === "COP") {
@@ -36,9 +36,11 @@ function formatPrice(amount: number, currency: string): string {
 
 function durationLabel(days: number): string {
   if (days >= 36500) return "Lifetime";
-  if (days >= 365) return `${Math.round(days / 365)} Year`;
-  if (days >= 30) return `${Math.round(days / 30)} Months`;
-  return `${days} Days`;
+  const years = Math.round(days / 365);
+  if (days >= 365) return `${years} ${years === 1 ? "Year" : "Years"}`;
+  const months = Math.round(days / 30);
+  if (days >= 30) return `${months} ${months === 1 ? "Month" : "Months"}`;
+  return `${days} ${days === 1 ? "Day" : "Days"}`;
 }
 
 function getPlanLabel(plan: SubscriptionPlan, isMemberPlan: boolean): 'PRIME' | 'BASIC' | 'FREE' {
@@ -406,24 +408,8 @@ export default function Subscribe() {
     return name || addOnId;
   }
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="page-container py-6 px-4 max-w-2xl mx-auto">
-        <div className="text-center mb-8">
-          <Skeleton className="h-8 w-48 mx-auto mb-2" />
-          <Skeleton className="h-4 w-64 mx-auto" />
-        </div>
-        <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-32 w-full rounded-xl" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   // Newsletter opt-in state (shown after payment success)
+  // IMPORTANT: hooks must be before any early returns to satisfy React's rules of hooks
   const [newsletterDismissed, setNewsletterDismissed] = useState(() => {
     try { return localStorage.getItem("pnp_newsletter_dismissed") === "1"; } catch { return false; }
   });
@@ -448,6 +434,23 @@ export default function Subscribe() {
     try { localStorage.setItem("pnp_newsletter_dismissed", "1"); } catch { /* noop */ }
     setNewsletterDismissed(true);
   }, []);
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="page-container py-6 px-4 max-w-2xl mx-auto">
+        <div className="text-center mb-8">
+          <Skeleton className="h-8 w-48 mx-auto mb-2" />
+          <Skeleton className="h-4 w-64 mx-auto" />
+        </div>
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-32 w-full rounded-xl" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   // Payment success state
   if (paymentSuccess) {

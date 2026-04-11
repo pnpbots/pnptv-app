@@ -456,10 +456,35 @@ export default function Settings() {
 
   const handleCopyReferral = useCallback(() => {
     if (!referralStats?.link) return;
-    navigator.clipboard.writeText(referralStats.link).then(() => {
+    const text = referralStats.link;
+    const onSuccess = () => {
       setReferralCopied(true);
       setTimeout(() => setReferralCopied(false), 2000);
-    });
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(onSuccess).catch(() => {
+        // Fallback for in-app browsers that block clipboard API
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        onSuccess();
+      });
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      onSuccess();
+    }
   }, [referralStats]);
 
   const handleNewsletterToggle = useCallback(async () => {

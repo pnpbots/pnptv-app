@@ -273,8 +273,7 @@ export default function PostDetail() {
                             controlsList="nodownload"
                             onContextMenu={(e) => e.preventDefault()}
                             playsInline
-                            muted
-                            className="w-full max-h-80 rounded-lg object-cover"
+                            className="w-full max-h-[480px] rounded-lg object-contain bg-black"
                             preload="metadata"
                             poster={m.thumbnail_url}
                           />
@@ -309,8 +308,7 @@ export default function PostDetail() {
                           controlsList="nodownload"
                           onContextMenu={(e) => e.preventDefault()}
                           playsInline
-                          muted
-                          className="w-full max-h-96 rounded-xl object-cover"
+                          className="w-full max-h-[480px] rounded-xl object-contain bg-black"
                           preload="metadata"
                           poster={post.video_thumbnail_url ?? undefined}
                         />
