@@ -336,6 +336,27 @@ class EntitlementAccessService {
           return { allowed: true, reason: 'scoped_via_channel', scoped: true };
         }
       }
+      // Existing membership grandfather: if the user is already in
+      // hangout_group_members for this hangout, let them in regardless of
+      // tier. This preserves pre-refactor behavior where joining a hangout
+      // gave permanent chat access until they left. Free community hangouts
+      // especially depend on this — their members may not have pnp-member.
+      try {
+        const membership = await query(
+          `SELECT 1 FROM hangout_group_members
+             WHERE group_id = $1 AND user_id = $2
+               AND (is_banned = false OR is_banned IS NULL)
+             LIMIT 1`,
+          [String(resource.id), String(userId)]
+        );
+        if (membership.rows.length > 0) {
+          return { allowed: true, reason: 'existing_member' };
+        }
+      } catch (memberErr) {
+        logger.warn('hasResourceAccess: hangout_group_members check failed', {
+          userId, hangoutId: resource.id, error: memberErr.message,
+        });
+      }
     }
     if (kind === 'creator') {
       if (await EntitlementAccessService.hasEntitlement(userId, 'creator-subscription', { creatorId: String(resource.id) })) {

@@ -249,17 +249,34 @@ describe('hasResourceAccess — hangout', () => {
     expect(result.reason).toBe('scoped_via_channel');
   });
 
-  it('falls back to pnp-member for free community hangout', async () => {
+  it('falls back to pnp-member for free community hangout (non-member)', async () => {
+    // For free community hangouts without an existing hangout_group_members row,
+    // fall through to the pnp-member gate.
     queueDb(
       [],                                                      // isBanned
       [{ id: 'h-3', is_paid: false, channel_id: null }],      // standalone free
       [],                                                      // no hangout-access
+      [],                                                      // no membership row
       [],                                                      // no prime
       [{ 1: 1 }],                                              // pnp-member YES
     );
     const result = await EntitlementAccessService.hasResourceAccess('42', 'hangout', 'h-3');
     expect(result.allowed).toBe(true);
     expect(result.reason).toBe('pnp_member');
+  });
+
+  it('allows existing hangout members regardless of tier (grandfather rule)', async () => {
+    // A free user who previously joined a free community hangout must keep
+    // chat access — pre-refactor behaviour that the unified resolver must preserve.
+    queueDb(
+      [],                                                      // isBanned
+      [{ id: 'h-3', is_paid: false, channel_id: null }],      // free community
+      [],                                                      // no hangout-access
+      [{ 1: 1 }],                                              // hangout_group_members MATCH
+    );
+    const result = await EntitlementAccessService.hasResourceAccess('42', 'hangout', 'h-3');
+    expect(result.allowed).toBe(true);
+    expect(result.reason).toBe('existing_member');
   });
 });
 
