@@ -487,8 +487,16 @@
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"
             integrity="sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs"
             crossorigin="anonymous"></script>
-    <!-- ePayco SDK for frontend card tokenization -->
+    <!-- ePayco SDK for frontend card tokenization (ePayco.token, ePayco.card) -->
     <script src="https://checkout.epayco.co/epayco.min.js"></script>
+    <!--
+      ePayco 3DS 2.0 validator (Cardinal Commerce DDC + bank challenge).
+      This is a SEPARATE script from epayco.min.js — it exposes window.validate3ds()
+      which handles the full 3DS 2.0 lifecycle. Removing this script is the regression
+      from commit feaf61c that broke every 3DS-required ePayco card payment for ~6 weeks.
+      Do NOT delete it: epayco.min.js by itself does NOT export validate3ds.
+    -->
+    <script src="https://multimedia.epayco.co/general/3DS/validateThreeds.min.js"></script>
 
     <script>
         // ── State machine ──────────────────────────────────────────
