@@ -10,6 +10,7 @@ const LiveStreamModel = require('../models/liveStreamModel');
 const BlockedUser = require('../models/blockedUser');
 const DmService = require('../services/dmService');
 const matrixService = require('../services/matrixService');
+const CristinaFeedService = require('../services/cristinaFeedService');
 
 // ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
 // H4: Replaces the non-atomic decr + conditional set(0) pattern.
@@ -402,25 +403,46 @@ function initSocketIO(io) {
           }
         }
 
-        // N3: Block check — reject messages between mutually blocked users.
-        // Fetch all other members of the group and check for any block relationship
-        // between the sender and any member; a simpler and cheaper check is to
-        // verify that the group owner or any admin has not blocked the sender.
-        // We use the same bidirectional query pattern as hangout:invite.
-        const { rows: hangoutBlockRows } = await query(
-          `SELECT 1 FROM blocked_users bu
-           JOIN hangout_group_members hgm
-             ON hgm.group_id = $2
-            AND (
-                  (bu.user_id = $1 AND bu.blocked_user_id = hgm.user_id)
-               OR (bu.user_id = hgm.user_id AND bu.blocked_user_id = $1)
-            )
-           LIMIT 1`,
-          [user.id, gid]
+        // Block check: only check against the group creator (matches REST endpoint behavior).
+        // Checking all members would let any single block prevent messaging the entire group.
+        const { rows: hangoutCreatorRows } = await query(
+          'SELECT creator_id FROM hangout_groups WHERE id = $1',
+          [gid]
         );
-        if (hangoutBlockRows.length > 0) {
-          socket.emit('hangout:error', { message: 'Cannot send message', code: 'BLOCKED' });
-          return;
+        const hangoutCreatorId = hangoutCreatorRows[0]?.creator_id;
+        if (hangoutCreatorId && String(hangoutCreatorId) !== String(user.id)) {
+          const { rows: hangoutBlockRows } = await query(
+            `SELECT 1 FROM blocked_users
+             WHERE (user_id = $1 AND blocked_user_id = $2)
+                OR (user_id = $2 AND blocked_user_id = $1)
+             LIMIT 1`,
+            [user.id, hangoutCreatorId]
+          );
+          if (hangoutBlockRows.length > 0) {
+            socket.emit('hangout:error', { message: 'Cannot send message', code: 'BLOCKED' });
+            return;
+          }
+        }
+
+        // Slow mode enforcement (matches REST sendMessage behavior)
+        const slowModeSeconds = groupSettings[0]?.slow_mode_seconds || 0;
+        if (slowModeSeconds > 0) {
+          const memberRole = memberInfo[0].role;
+          const isModOrOwner = memberRole === 'owner' || memberRole === 'moderator';
+          const isAdminRole = (user.role || '').toLowerCase() === 'admin' || (user.role || '').toLowerCase() === 'superadmin';
+          if (!isModOrOwner && !isAdminRole) {
+            const { rows: lastMsgRows } = await query(
+              `SELECT created_at FROM chat_messages WHERE room = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1`,
+              [`hangout:${gid}`, user.id]
+            );
+            if (lastMsgRows.length > 0) {
+              const elapsed = (Date.now() - new Date(lastMsgRows[0].created_at).getTime()) / 1000;
+              if (elapsed < slowModeSeconds) {
+                socket.emit('hangout:error', { message: `Slow mode: wait ${Math.ceil(slowModeSeconds - elapsed)}s`, code: 'SLOW_MODE' });
+                return;
+              }
+            }
+          }
         }
 
         // ── PG insert + Socket.IO broadcast ──
@@ -454,6 +476,12 @@ function initSocketIO(io) {
 
         // Broadcast to all users in the hangout room
         io.to(room).emit('chat:message', msg);
+
+        // Auto-drop feed-worthy messages to the hangout feed (non-blocking)
+        setImmediate(() => {
+          const SocialPostService = require('../services/socialPostService');
+          SocialPostService.autoDropToFeed(msg, gid, io).catch(() => {});
+        });
 
         // Touch activity timestamp for 72h inactivity cleanup
         await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [gid]);
@@ -1738,6 +1766,16 @@ function initSocketIO(io) {
             }
           ).catch(err => logger.error('Error notifying followers:', err));
         }
+
+        // Cristina AI live stream announcement in social feed (non-blocking)
+        setImmediate(() => {
+          const safeTitle = (typeof title === 'string' ? title : '').slice(0, 100).trim();
+          CristinaFeedService.announceLiveStream(
+            user.id,
+            user.first_name || user.username,
+            safeTitle
+          ).catch(() => {});
+        });
       } catch (err) {
         logger.error('stream:start error', { userId: user.id, channelRef, err });
         socket.emit('stream:error', { message: 'Failed to start stream. Please try again.' });
@@ -1900,8 +1938,8 @@ function initSocketIO(io) {
           const primeSet = new Set(primeRes.rows.map(r => String(r.id)));
           primeUsers = eligible.filter(c => primeSet.has(c.userId));
         } catch (e) {
-          logger.warn('[RandomCall] Prime filter failed:', e.message);
-          primeUsers = eligible; // fallback: allow all if query fails
+          logger.warn('[RandomCall] Prime filter DB query failed — emitting no-match (fail-closed):', e.message);
+          return socket.emit('randomcall:no-match', {});
         }
 
         if (primeUsers.length === 0) {
@@ -1952,7 +1990,7 @@ function initSocketIO(io) {
         }
 
         // Generate call ID
-        const callId = `rc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const callId = `rc_${Date.now()}_${require('crypto').randomBytes(8).toString('hex')}`;
 
         // Store pending call with 30s timeout
         const timeoutHandle = setTimeout(() => {

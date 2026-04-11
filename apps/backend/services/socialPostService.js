@@ -485,6 +485,82 @@ class SocialPostService {
   }
 
   /**
+   * Auto-drop a hangout chat message to the hangout feed.
+   * Only syncs messages that are "feed-worthy":
+   *   - Text content >= 50 chars  OR  has media attached
+   *   - Not a reply (conversational noise)
+   *   - Group's feed_visibility is not 'ghost'
+   *   - Not already dropped (source_message_id unique constraint)
+   *
+   * @param {Object}  msg      - The chat_messages row (from INSERT RETURNING)
+   * @param {number}  groupId  - Hangout group ID
+   * @param {Object}  io       - Socket.IO instance (optional, for real-time broadcast)
+   * @returns {Object|null}    - The created post, or null if skipped
+   */
+  static async autoDropToFeed(msg, groupId, io) {
+    try {
+      if (!msg || !groupId) return null;
+
+      // Skip replies — they're conversational, not feed-worthy
+      if (msg.reply_to_id) return null;
+
+      const hasMedia = !!msg.media_url;
+      const textLength = (msg.content || '').trim().length;
+
+      // Only sync meaningful messages: 50+ chars or has media
+      if (!hasMedia && textLength < 50) return null;
+
+      // Check feed_visibility
+      const { rows: groupRows } = await query(
+        'SELECT feed_visibility, name FROM hangout_groups WHERE id = $1',
+        [groupId]
+      );
+      if (!groupRows.length || groupRows[0].feed_visibility === 'ghost') return null;
+
+      // Check not already dropped (avoids unique constraint violation)
+      const { rows: existing } = await query(
+        'SELECT id FROM social_posts WHERE source_message_id = $1',
+        [msg.id]
+      );
+      if (existing.length) return null;
+
+      // Create the feed post
+      const post = await SocialPostService.createPost(
+        msg.user_id,
+        msg.content || '',
+        msg.media_url || null,
+        msg.media_type || null,
+        null, null, false, false, true,
+        msg.media_thumb_url || null,
+        null, null,
+        groupId,
+        msg.id  // source_message_id
+      );
+
+      // Broadcast to hangout feed room
+      if (io && post) {
+        const fullPost = {
+          ...post,
+          author_id: msg.user_id,
+          author_username: msg.username || '',
+          author_first_name: msg.first_name || '',
+          author_photo: msg.photo_url || null,
+          liked_by_me: false,
+          hangout_group_id: groupId,
+          hangout_group_name: groupRows[0].name,
+        };
+        io.to(`hangout:${groupId}`).emit('hangout:feed:new_post', fullPost);
+      }
+
+      return post;
+    } catch (err) {
+      // Log but don't throw — auto-drop is non-critical
+      logger.error('autoDropToFeed error', { messageId: msg?.id, groupId, error: err.message });
+      return null;
+    }
+  }
+
+  /**
    * Insert a post migrated/mirrored from a Telegram channel.
    * Accepts a custom created_at and telegram_message_id for deduplication.
    * Returns the new row, or null if it already existed (ON CONFLICT).

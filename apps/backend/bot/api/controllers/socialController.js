@@ -5,6 +5,9 @@ const FileType = require('file-type');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 const logger = require('../../../utils/logger');
 const SocialPostService = require('../../services/socialPostService');
 const axios = require('axios');
@@ -14,6 +17,20 @@ const NotificationEmitter = require('../../services/notificationEmitter');
 const mentionService = require('../../services/mentionService');
 const { validateTierFresh } = require('../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
+
+async function extractVideoThumbnail(videoPath, thumbPath) {
+  try {
+    await execFileAsync('ffmpeg', [
+      '-y', '-ss', '00:00:01', '-i', videoPath,
+      '-frames:v', '1', '-vf', 'scale=400:-2', '-q:v', '2', thumbPath,
+    ], { timeout: 30000 });
+    return true;
+  } catch (err) {
+    logger.warn('socialController: ffmpeg thumbnail extraction failed', { videoPath, error: err.message });
+    await fs.unlink(thumbPath).catch(() => {});
+    return false;
+  }
+}
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -585,6 +602,15 @@ const createPostWithMedia = async (req, res) => {
       }
     }
 
+    // Extract video thumbnail if we have a video
+    let videoThumbnailUrl = null;
+    if (mediaType === 'video' && finalFilePath) {
+      const thumbFilename = `thumb-${path.basename(finalFilePath, path.extname(finalFilePath))}.jpg`;
+      const thumbPath = path.join(path.dirname(finalFilePath), thumbFilename);
+      const ok = await extractVideoThumbnail(finalFilePath, thumbPath);
+      if (ok) videoThumbnailUrl = `/uploads/posts/${thumbFilename}`;
+    }
+
     const exclusive = isExclusive === 'true' || isExclusive === true;
     const shareable = isShareable !== 'false' && isShareable !== false;
     const vTitle = (mediaType === 'video' && videoTitle) ? videoTitle.toString().trim().slice(0, 150) : null;
@@ -640,7 +666,7 @@ const createPostWithMedia = async (req, res) => {
     }
 
     const post = await SocialPostService.createPost(
-      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, null, vTitle, vDesc, hangoutGroupId
+      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, videoThumbnailUrl, vTitle, vDesc, hangoutGroupId
     );
 
     // Assign to channel and update post_count
@@ -840,7 +866,10 @@ const createPostWithMultiMedia = async (req, res) => {
           await fs.writeFile(destPath, file.buffer);
         }
         writtenFilePaths.push(destPath);
-        mediaItems.push({ url: `/uploads/posts/${filename}`, type: 'video' });
+        const thumbFilename = `thumb-${path.basename(filename, path.extname(filename))}.jpg`;
+        const thumbPath = path.join(uploadDir, thumbFilename);
+        const thumbOk = await extractVideoThumbnail(destPath, thumbPath);
+        mediaItems.push({ url: `/uploads/posts/${filename}`, type: 'video', thumbUrl: thumbOk ? `/uploads/posts/${thumbFilename}` : null });
       }
     }
 
@@ -898,6 +927,13 @@ const createPostWithMultiMedia = async (req, res) => {
     );
 
     const post = result.rows[0];
+
+    // Set video_thumbnail_url from the first video item that has a thumbnail
+    const firstVideoThumb = mediaItems.find(m => m.type === 'video' && m.thumbUrl)?.thumbUrl || null;
+    if (firstVideoThumb) {
+      await dbQuery('UPDATE social_posts SET video_thumbnail_url = $1 WHERE id = $2', [firstVideoThumb, post.id]);
+      post.video_thumbnail_url = firstVideoThumb;
+    }
 
     if (replyToId) {
       await dbQuery('UPDATE social_posts SET replies_count = replies_count + 1 WHERE id = $1 AND is_deleted = false', [replyToId]);

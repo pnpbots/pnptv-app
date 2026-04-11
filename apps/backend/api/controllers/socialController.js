@@ -5,6 +5,9 @@ const FileType = require('file-type');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 const logger = require('../../utils/logger');
 const SocialPostService = require('../../services/socialPostService');
 const MeilisearchService = require('../../services/meilisearchService');
@@ -15,6 +18,32 @@ const NotificationEmitter = require('../../services/notificationEmitter');
 const mentionService = require('../../services/mentionService');
 const { validateTierFresh } = require('../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
+const CristinaFeedService = require('../../services/cristinaFeedService');
+
+/**
+ * Extract a poster-frame thumbnail from a video file using ffmpeg.
+ * @param {string} videoPath  Absolute path to the video file
+ * @param {string} thumbPath  Absolute path for the output thumbnail (jpg)
+ * @returns {Promise<boolean>} true if thumbnail was created successfully
+ */
+async function extractVideoThumbnail(videoPath, thumbPath) {
+  try {
+    await execFileAsync('ffmpeg', [
+      '-y',
+      '-ss', '00:00:01',
+      '-i', videoPath,
+      '-frames:v', '1',
+      '-vf', 'scale=400:-2',
+      '-q:v', '2',
+      thumbPath,
+    ], { timeout: 30000 });
+    return true;
+  } catch (err) {
+    logger.warn('socialController: ffmpeg thumbnail extraction failed', { videoPath, error: err.message });
+    await fs.unlink(thumbPath).catch(() => {});
+    return false;
+  }
+}
 
 const authGuard = (req, res) => {
   const user = req.session?.user;
@@ -588,6 +617,15 @@ const createPostWithMedia = async (req, res) => {
       }
     }
 
+    // Extract video thumbnail if we have a video
+    let videoThumbnailUrl = null;
+    if (mediaType === 'video' && finalFilePath) {
+      const thumbFilename = `thumb-${path.basename(finalFilePath, path.extname(finalFilePath))}.jpg`;
+      const thumbPath = path.join(path.dirname(finalFilePath), thumbFilename);
+      const ok = await extractVideoThumbnail(finalFilePath, thumbPath);
+      if (ok) videoThumbnailUrl = `/uploads/posts/${thumbFilename}`;
+    }
+
     const exclusive = isExclusive === 'true' || isExclusive === true;
     const shareable = isShareable !== 'false' && isShareable !== false;
     const vTitle = (mediaType === 'video' && videoTitle) ? videoTitle.toString().trim().slice(0, 150) : null;
@@ -643,7 +681,7 @@ const createPostWithMedia = async (req, res) => {
     }
 
     const post = await SocialPostService.createPost(
-      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, null, vTitle, vDesc, hangoutGroupId
+      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, videoThumbnailUrl, vTitle, vDesc, hangoutGroupId
     );
 
     // Assign to channel and update post_count
@@ -692,6 +730,15 @@ const createPostWithMedia = async (req, res) => {
     const io = req.app.get('io');
     emitNewPost(io, fullPost, user.id);
     setImmediate(() => { MeilisearchService.upsertPost(post.id).catch(() => {}); });
+
+    // Cristina AI shoutout for creator media posts (non-blocking)
+    if (user.creator_status === 'approved' && !replyToId && !repostOfId) {
+      setImmediate(() => {
+        CristinaFeedService.shoutoutNewContent(
+          user.id, user.username || user.first_name, mediaType, post.id
+        ).catch(() => {});
+      });
+    }
 
     return res.json({ success: true, post: fullPost });
   } catch (err) {
@@ -844,7 +891,11 @@ const createPostWithMultiMedia = async (req, res) => {
           await fs.writeFile(destPath, file.buffer);
         }
         writtenFilePaths.push(destPath);
-        mediaItems.push({ url: `/uploads/posts/${filename}`, type: 'video' });
+        // Extract thumbnail for this video
+        const thumbFilename = `thumb-${path.basename(filename, path.extname(filename))}.jpg`;
+        const thumbPath = path.join(uploadDir, thumbFilename);
+        const thumbOk = await extractVideoThumbnail(destPath, thumbPath);
+        mediaItems.push({ url: `/uploads/posts/${filename}`, type: 'video', thumbUrl: thumbOk ? `/uploads/posts/${thumbFilename}` : null });
       }
     }
 
@@ -903,6 +954,13 @@ const createPostWithMultiMedia = async (req, res) => {
 
     const post = result.rows[0];
 
+    // Set video_thumbnail_url from the first video item that has a thumbnail
+    const firstVideoThumb = mediaItems.find(m => m.type === 'video' && m.thumbUrl)?.thumbUrl || null;
+    if (firstVideoThumb) {
+      await dbQuery('UPDATE social_posts SET video_thumbnail_url = $1 WHERE id = $2', [firstVideoThumb, post.id]);
+      post.video_thumbnail_url = firstVideoThumb;
+    }
+
     if (replyToId) {
       await dbQuery('UPDATE social_posts SET replies_count = replies_count + 1 WHERE id = $1 AND is_deleted = false', [replyToId]);
     }
@@ -954,6 +1012,15 @@ const createPostWithMultiMedia = async (req, res) => {
     const io = req.app.get('io');
     emitNewPost(io, fullPost, user.id);
     setImmediate(() => { MeilisearchService.upsertPost(post.id).catch(() => {}); });
+
+    // Cristina AI shoutout for creator media posts (non-blocking)
+    if (user.creator_status === 'approved' && !replyToId && !repostOfId) {
+      setImmediate(() => {
+        CristinaFeedService.shoutoutNewContent(
+          user.id, user.username || user.first_name, 'image', post.id
+        ).catch(() => {});
+      });
+    }
 
     return res.json({ success: true, post: fullPost });
   } catch (err) {

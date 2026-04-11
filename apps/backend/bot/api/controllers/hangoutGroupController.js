@@ -68,7 +68,7 @@ async function sendHangoutWelcome(groupId, groupName, groupRules, userId, firstN
     // Insert into chat_messages for the in-app chat feed
     await query(
       `INSERT INTO chat_messages (room, user_id, username, first_name, content)
-       VALUES ($1, 'cristina-system', 'cristina', 'Cristina', $2)`,
+       VALUES ($1, 'cristina-ai', 'cristina', 'Cristina', $2)`,
       [`hangout:${groupId}`, welcomeText]
     );
 
@@ -77,7 +77,7 @@ async function sendHangoutWelcome(groupId, groupName, groupRules, userId, firstN
     if (io) {
       io.to(`hangout:${groupId}`).emit('chat:message', {
         room: `hangout:${groupId}`,
-        user_id: 'cristina-system',
+        user_id: 'cristina-ai',
         username: 'cristina',
         first_name: 'Cristina',
         content: welcomeText,
@@ -118,14 +118,19 @@ const listGroups = async (req, res) => {
     const { rows } = await query(
       `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
               g.is_main, g.is_wall_of_fame, g.is_public, g.max_members, g.created_at, g.feed_visibility,
-              g.telegram_chat_id, g.telegram_invite_link, g.is_paid, g.price_usd,
+              g.is_read_only, g.slow_mode_seconds, g.tags, g.rules,
+              g.telegram_chat_id, g.telegram_invite_link, g.is_paid, g.price_usd, g.channel_id,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
               (
                 (SELECT COUNT(*)::int FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active') > 0
               ) as has_active_call,
-              (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1) as active_call_id
+              (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1) as active_call_id,
+              cc.access_type as channel_access_type,
+              cc.price_usd as channel_price_usd,
+              cc.name as channel_name
        FROM hangout_groups g
        JOIN hangout_group_members gm ON gm.group_id = g.id AND gm.user_id = $1
+       LEFT JOIN creator_channels cc ON cc.id = g.channel_id
        ORDER BY g.is_main DESC, g.created_at DESC`,
       [user.id]
     );
@@ -154,10 +159,18 @@ const listGroups = async (req, res) => {
       lastMessage: null, // Messages live in Matrix; frontend renders from Matrix SDK
       unreadCount: parseInt(unreadCounts[i], 10) || 0,
       feedVisibility: r.feed_visibility || 'public',
+      isReadOnly: !!r.is_read_only,
+      slowModeSeconds: r.slow_mode_seconds || 0,
+      tags: r.tags || [],
+      rules: r.rules || null,
       telegramChatId: r.telegram_chat_id || null,
       telegramInviteLink: r.telegram_invite_link || null,
       isPaid: !!r.is_paid,
       priceUsd: Number(r.price_usd) || 0,
+      channelId: r.channel_id || null,
+      channelAccessType: r.channel_access_type || null,
+      channelPriceUsd: r.channel_price_usd != null ? Number(r.channel_price_usd) : null,
+      channelName: r.channel_name || null,
     }));
 
     return res.json({ success: true, groups });
@@ -170,21 +183,54 @@ const listGroups = async (req, res) => {
 // POST /api/webapp/hangouts/groups
 const createGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { name, description = '', isPublic = true, isPaid = false, priceUsd = 0, rules } = req.body;
+  const { name, description = '', isPublic = true, isPaid = false, priceUsd = 0, rules, channelId: rawChannelId } = req.body;
 
   if (!name?.trim()) return res.status(400).json({ error: 'Group name is required' });
 
-  // Validate price
-  const sanitizedPrice = isPaid ? Math.max(0, Math.min(9999.99, Number(priceUsd) || 0)) : 0;
   const sanitizedRules = rules ? String(rules).trim().slice(0, 1000) || null : null;
+  const channelId = rawChannelId ? parseInt(rawChannelId, 10) : null;
 
   try {
+    // If linking to a channel, validate it first — pricing rules come from the channel
+    let linkedChannel = null;
+    if (channelId && Number.isFinite(channelId)) {
+      const chRes = await query(
+        `SELECT id, creator_id, access_type, price_usd, is_active, hangout_group_id FROM creator_channels WHERE id = $1`,
+        [channelId]
+      );
+      if (!chRes.rows.length || !chRes.rows[0].is_active) {
+        return res.status(404).json({ error: 'Channel not found' });
+      }
+      if (String(chRes.rows[0].creator_id) !== String(user.id)) {
+        return res.status(403).json({ error: 'You do not own that channel' });
+      }
+      if (chRes.rows[0].hangout_group_id !== null) {
+        return res.status(409).json({ error: 'That channel is already linked to a hangout group' });
+      }
+      linkedChannel = chRes.rows[0];
+    }
+
+    // Standalone hangout price validation: only free or $5 allowed
+    let sanitizedPrice = 0;
+    if (!linkedChannel) {
+      if (isPaid) {
+        const parsedPrice = Number(priceUsd) || 0;
+        if (parsedPrice !== 0 && parsedPrice !== 5) {
+          return res.status(400).json({ error: 'Standalone hangout price must be $0 or $5' });
+        }
+        sanitizedPrice = parsedPrice;
+      }
+    }
+    // Linked hangouts inherit channel pricing — don't store redundant price
+    const finalIsPaid = linkedChannel ? false : !!isPaid;
+    const finalPrice = linkedChannel ? 0 : sanitizedPrice;
+
     // Hangout creation is open to all authenticated users
     const { rows } = await query(
       `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, rules, is_paid, price_usd)
        VALUES ($1, $2, $3, false, $4, 200000, $5, $6, $7)
        RETURNING *`,
-      [name.trim().slice(0, 100), description.trim().slice(0, 500), user.id, isPublic !== false, sanitizedRules, !!isPaid, sanitizedPrice]
+      [name.trim().slice(0, 100), description.trim().slice(0, 500), user.id, isPublic !== false, sanitizedRules, finalIsPaid, finalPrice]
     );
 
     const group = rows[0];
@@ -195,6 +241,15 @@ const createGroup = async (req, res) => {
        VALUES ($1, $2, 'owner')`,
       [group.id, user.id]
     );
+
+    // Link to channel if requested (update both FKs)
+    if (linkedChannel) {
+      await Promise.all([
+        query(`UPDATE hangout_groups SET channel_id = $1 WHERE id = $2`, [channelId, group.id]),
+        query(`UPDATE creator_channels SET hangout_group_id = $1 WHERE id = $2`, [group.id, channelId]),
+      ]);
+      group.channel_id = channelId;
+    }
 
     // Eagerly create Matrix room so it's ready when the user opens chat
     try {
@@ -231,6 +286,7 @@ const createGroup = async (req, res) => {
         telegramChatId: null,
         telegramInviteLink: null,
         rules: group.rules || null,
+        channelId: group.channel_id || null,
       },
     });
   } catch (err) {
@@ -251,7 +307,7 @@ const getGroup = async (req, res) => {
     const { rows: groupRows } = await query(
       `SELECT g.*,
               g.slow_mode_seconds, g.is_read_only, g.allow_media, g.allow_member_invites,
-              g.auto_delete_hours, g.tags, g.invite_code,
+              g.auto_delete_hours, g.tags, g.invite_code, g.channel_id,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
               (
                 (SELECT COUNT(*)::int FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true) > 0
@@ -261,8 +317,13 @@ const getGroup = async (req, res) => {
               COALESCE(
                 (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1),
                 (SELECT v.id::text FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
-              ) as active_call_id
-       FROM hangout_groups g WHERE g.id = $1`,
+              ) as active_call_id,
+              cc.access_type as channel_access_type,
+              cc.price_usd as channel_price_usd,
+              cc.name as channel_name
+       FROM hangout_groups g
+       LEFT JOIN creator_channels cc ON cc.id = g.channel_id
+       WHERE g.id = $1`,
       [groupId]
     );
 
@@ -315,6 +376,10 @@ const getGroup = async (req, res) => {
         isPaid: !!g.is_paid,
         priceUsd: Number(g.price_usd) || 0,
         rules: g.rules || null,
+        channelId: g.channel_id || null,
+        channelAccessType: g.channel_access_type || null,
+        channelPriceUsd: g.channel_price_usd != null ? Number(g.channel_price_usd) : null,
+        channelName: g.channel_name || null,
       },
       members: members.map(m => ({ ...m, photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null })),
     });
@@ -331,24 +396,55 @@ const joinGroup = async (req, res) => {
   if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
-    const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
+    const { rows } = await query(
+      `SELECT g.*, cc.access_type as channel_access_type, cc.price_usd as channel_price_usd, cc.creator_id as channel_creator_id
+       FROM hangout_groups g
+       LEFT JOIN creator_channels cc ON cc.id = g.channel_id
+       WHERE g.id = $1`,
+      [groupId]
+    );
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
     if (!rows[0].is_public) return res.status(403).json({ error: 'This group is invite-only' });
 
-    // Paid hangout gate — owner can always join, others need payment confirmation
-    if (rows[0].is_paid && Number(rows[0].price_usd) > 0 && String(rows[0].creator_id) !== String(user.id)) {
-      // Check if user already paid (exists as non-banned member = paid)
-      const { rows: existingMember } = await query(
-        'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND is_banned = false',
-        [groupId, user.id]
-      );
-      if (existingMember.length === 0) {
-        return res.status(402).json({
-          error: 'Payment required',
-          isPaid: true,
-          priceUsd: Number(rows[0].price_usd),
-          groupName: rows[0].name,
-        });
+    const group = rows[0];
+    const isOwner = String(group.creator_id) === String(user.id);
+
+    // Access gate — channel-linked hangouts use channel access rules; standalone use is_paid
+    if (!isOwner) {
+      if (group.channel_id) {
+        // Channel-linked: delegate to checkChannelAccess
+        const { checkChannelAccess } = require('../../services/accessService');
+        const channelObj = {
+          id: group.channel_id,
+          access_type: group.channel_access_type || 'free',
+          price_usd: group.channel_price_usd || 0,
+          creator_id: group.channel_creator_id || group.creator_id,
+        };
+        const access = await checkChannelAccess(user.id, channelObj);
+        if (!access.allowed) {
+          return res.status(402).json({
+            error: 'Access required',
+            accessType: access.accessType || channelObj.access_type,
+            requiresPayment: access.requiresPayment || false,
+            priceUsd: access.priceUsd ?? Number(channelObj.price_usd),
+            groupName: group.name,
+            channelId: group.channel_id,
+          });
+        }
+      } else if (group.is_paid && Number(group.price_usd) > 0) {
+        // Standalone paid hangout — check membership (paid = already in members table)
+        const { rows: existingMember } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND is_banned = false',
+          [groupId, user.id]
+        );
+        if (existingMember.length === 0) {
+          return res.status(402).json({
+            error: 'Payment required',
+            isPaid: true,
+            priceUsd: Number(group.price_usd),
+            groupName: group.name,
+          });
+        }
       }
     }
 
@@ -360,7 +456,6 @@ const joinGroup = async (req, res) => {
     if (banCheck.length > 0) return res.status(403).json({ error: 'You are banned from this group' });
 
     // Block check: creator blocked joiner OR joiner blocked creator
-    const group = rows[0];
     if (group.creator_id && String(group.creator_id) !== String(user.id)) {
       const [blockedByCreator, blockedByUser] = await Promise.all([
         BlockedUser.isBlocked(group.creator_id, user.id),
@@ -2047,10 +2142,20 @@ async function startCall(req, res) {
   if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
+    await ensureMainGroupMembership(user.id);
     const member = await isMember(groupId, user.id);
     if (!member) return res.status(403).json({ error: 'Not a member of this group' });
 
     const roomName = `hangout-${groupId}`;
+
+    // Clean up stale "active" calls older than 6 hours — LiveKit rooms don't persist that long.
+    // Never touch persistent calls (is_persistent=true) — those are managed by cristinaStageBot.
+    await query(
+      `UPDATE hangout_video_calls SET status = 'ended', ended_at = NOW()
+       WHERE group_id = $1 AND status = 'active' AND is_persistent = false
+         AND created_at < NOW() - INTERVAL '6 hours'`,
+      [groupId]
+    );
 
     // If an active call already exists, join it instead of creating a new one
     const { rows: existing } = await query(
@@ -2062,17 +2167,26 @@ async function startCall(req, res) {
       const activeRoomName = existing[0].room_name;
       const displayName = user.firstName || user.first_name || user.username || 'User';
       const token = await livekitService.generateToken(activeRoomName, String(user.id), displayName, false);
+      // Track participant (upsert) and update count from actual participants
       await query(
-        `UPDATE hangout_video_calls SET participant_count = participant_count + 1 WHERE id=$1`,
+        `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (call_id, user_id) DO UPDATE SET joined_at = NOW(), left_at = NULL`,
+        [existing[0].id, user.id, displayName]
+      );
+      await query(
+        `UPDATE hangout_video_calls SET participant_count = (
+           SELECT COUNT(*) FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL
+         ) WHERE id = $1`,
         [existing[0].id]
       );
       return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName: activeRoomName });
     }
 
-    // Create a new call record
+    // Create a new call record — only include columns that exist in the schema
     const { rows: created } = await query(
-      `INSERT INTO hangout_video_calls (group_id, creator_id, room_name, status, jaas_room_name, jitsi_domain, participant_count)
-       VALUES ($1, $2, $3, 'active', NULL, 'livekit.pnptv.app', 1)
+      `INSERT INTO hangout_video_calls (group_id, creator_id, room_name, status, participant_count)
+       VALUES ($1, $2, $3, 'active', 1)
        RETURNING id`,
       [groupId, user.id, roomName]
     );
@@ -2105,6 +2219,7 @@ async function joinCall(req, res) {
   if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
+    await ensureMainGroupMembership(user.id);
     const member = await isMember(groupId, user.id);
     if (!member) return res.status(403).json({ error: 'Not a member of this group' });
 
@@ -2156,8 +2271,10 @@ async function endCall(req, res) {
     if (rows.length === 0) return res.status(404).json({ error: 'No active call to end' });
 
     const { id: callId, creator_id } = rows[0];
-    if (!isAdminRole && creator_id !== user.id) {
-      return res.status(403).json({ error: 'Only the call creator or an admin can end the call' });
+    const isCallCreator = String(creator_id) === String(user.id);
+    const isGroupOwnerOrMod = await isOwnerOrMod(groupId, user.id);
+    if (!isAdminRole && !isCallCreator && !isGroupOwnerOrMod) {
+      return res.status(403).json({ error: 'Only the call creator, group owner/moderator, or an admin can end the call' });
     }
 
     await query(
