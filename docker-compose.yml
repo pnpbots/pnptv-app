@@ -62,12 +62,15 @@ volumes:
       type: none
       o: bind
       device: /opt/pnptvapp/infrastructure/data/directus/postgres
-  vol_mariadb_ampache:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /opt/pnptvapp/infrastructure/data/ampache/mariadb
+  # vol_mariadb_ampache — REMOVED 2026-04-11: Ampache decommissioned (zero code wiring)
+  # Data preserved at: /opt/pnptvapp/infrastructure/data/ampache/mariadb
+  # To permanently delete: docker volume rm pnptvapp_vol_mariadb_ampache && rm -rf /opt/pnptvapp/infrastructure/data/ampache
+  # vol_mariadb_ampache:
+  #   driver: local
+  #   driver_opts:
+  #     type: none
+  #     o: bind
+  #     device: /opt/pnptvapp/infrastructure/data/ampache/mariadb
   vol_pg_calcom:
     driver: local
     driver_opts:
@@ -497,58 +500,12 @@ services:
       start_period: 30s
 
   # ===========================================
-  # BLOCK D - Multimedia VOD/Radio (Ampache)
+  # BLOCK D - REMOVED 2026-04-11: Ampache decommissioned
+  # Had zero active code wiring (no service imports, no API calls, no env var consumers)
+  # DNS record media.pnptv.app should be removed from Hostinger DNS panel
+  # NPM proxy_host 3.conf (media.pnptv.app → ampache:80) should be deleted via NPM UI
+  # To stop and remove containers: docker compose stop ampache mariadb-ampache && docker compose rm -f ampache mariadb-ampache
   # ===========================================
-
-  mariadb-ampache:
-    image: mariadb:10.11
-    container_name: mariadb-ampache
-    restart: unless-stopped
-    volumes:
-      - vol_mariadb_ampache:/var/lib/mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_AMPACHE_DB}
-      MYSQL_USER: ${MYSQL_AMPACHE_USER}
-      MYSQL_PASSWORD: ${MYSQL_AMPACHE_PASSWORD}
-    networks:
-      - pnptvapp_net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512m
-    healthcheck:
-      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  ampache:
-    image: ampache/ampache:latest
-    container_name: ampache
-    restart: unless-stopped
-    volumes:
-      - ./infrastructure/data/ampache/config:/var/www/config
-      - ./infrastructure/data/ampache/log:/var/log/ampache
-      - /var/www/pnptvbot-sandbox/public/media:/media:ro
-    networks:
-      - pnptvapp_net
-    depends_on:
-      mariadb-ampache:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512m
-    healthcheck:
-      test: ["CMD-SHELL", "php -r 'exit(file_get_contents(\"http://127.0.0.1/\") === false ? 1 : 0);' || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
 
   # ===========================================
   # BLOCK E - Booking (Cal.com)
