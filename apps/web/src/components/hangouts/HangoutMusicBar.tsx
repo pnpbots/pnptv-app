@@ -46,9 +46,11 @@ function TrackPicker({
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [search, setSearch] = useState("");
+  const [trackLoadError, setTrackLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadTracks = useCallback(() => {
     setLoading(true);
+    setTrackLoadError(null);
     getMediaTracks(0, 20)
       .then((res) => {
         if (res.success) {
@@ -57,9 +59,11 @@ function TrackPicker({
           setHasMore((res.tracks?.length || 0) >= 20);
         }
       })
-      .catch(() => {})
+      .catch(() => { setTrackLoadError("Couldn't load tracks"); })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { loadTracks(); }, [loadTracks]);
 
   const loadMore = useCallback(() => {
     if (!hasMore || loading) return;
@@ -101,7 +105,7 @@ function TrackPicker({
         </span>
         <button
           onClick={onClose}
-          className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 active:scale-95 transition-all"
+          className="w-11 h-11 flex items-center justify-center rounded hover:bg-white/10 active:scale-95 transition-all"
           aria-label="Close track picker"
         >
           <svg
@@ -133,13 +137,25 @@ function TrackPicker({
 
       {/* Track list */}
       <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1 scrollbar-thin">
-        {loading && tracks.length === 0 && (
+        {trackLoadError && (
+          <div className="flex flex-col items-center gap-2 py-8 px-4 text-center">
+            <p className="text-[11px] text-pnp-textSecondary">{trackLoadError}</p>
+            <button
+              onClick={loadTracks}
+              className="px-4 py-2 rounded-lg text-[11px] font-semibold text-pnp-accent border border-pnp-accent/30 hover:bg-pnp-accent/10 active:scale-95 transition-all min-h-[44px] min-w-[88px]"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!trackLoadError && loading && tracks.length === 0 && (
           <div className="flex items-center justify-center py-8">
             <div className="w-4 h-4 rounded-full border-2 border-pnp-accent/30 border-t-pnp-accent animate-spin" />
           </div>
         )}
 
-        {!loading && filtered.length === 0 && (
+        {!loading && !trackLoadError && filtered.length === 0 && (
           <p className="text-[10px] text-pnp-textSecondary text-center py-6">
             {search.trim() ? "No tracks match your search" : "No tracks available"}
           </p>
@@ -348,14 +364,6 @@ export function HangoutMusicBar({
 
   return (
     <>
-      {/* Keyframe for equalizer animation — injected once via a style tag */}
-      <style>{`
-        @keyframes pnp-eq-bounce {
-          from { transform: scaleY(0.4); }
-          to   { transform: scaleY(1); }
-        }
-      `}</style>
-
       {/* Now-playing bar */}
       <div className="flex items-center gap-2 px-2.5 py-2 rounded-xl bg-pnp-surface/40 border border-white/5">
         {/* Album art / eq overlay */}
@@ -395,7 +403,7 @@ export function HangoutMusicBar({
         </div>
 
         {/* Track info */}
-        <div className="flex-1 min-w-0">
+        <div role="status" aria-live="polite" className="flex-1 min-w-0">
           {isMainStage && (
             <span
               className="text-[8px] font-bold px-1 py-0.5 rounded"
@@ -555,10 +563,10 @@ export function HangoutMusicBar({
           <input
             type="range"
             min={0}
-            max={1}
-            step={0.05}
-            value={localVolume}
-            onChange={(e) => setLocalVolume(parseFloat(e.target.value))}
+            max={100}
+            step={5}
+            value={Math.round(localVolume * 100)}
+            onChange={(e) => setLocalVolume(parseFloat(e.target.value) / 100)}
             className="flex-1 h-1.5 appearance-none rounded-full cursor-pointer accent-pnp-accent"
             style={{
               background: `linear-gradient(to right, var(--pnp-accent, #5ED1C4) 0%, var(--pnp-accent, #5ED1C4) ${
@@ -566,6 +574,7 @@ export function HangoutMusicBar({
               }%, rgba(255,255,255,0.1) ${localVolume * 100}%, rgba(255,255,255,0.1) 100%)`,
             }}
             aria-label="Music volume"
+            aria-valuetext={`${Math.round(localVolume * 100)}%`}
           />
           <span className="text-[9px] text-pnp-textSecondary/70 w-6 text-right">
             {Math.round(localVolume * 100)}

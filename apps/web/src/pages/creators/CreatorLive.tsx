@@ -1,33 +1,312 @@
-import React from "react";
+import React, { useState, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
+import { Card, Button } from "@pnptv/ui-kit";
+import { useAuth } from "@/hooks/useAuth";
+import { useI18n } from "@/lib/i18n";
 
-const STUDIO_URL = import.meta.env.VITE_STUDIO_URL || "https://studio.pnptv.app";
+const API_BASE = "";
+
+async function getRtmpKey(): Promise<{ success: boolean; rtmpUrl?: string; streamKey?: string; error?: string }> {
+  const res = await fetch(`${API_BASE}/api/webapp/live/rtmp-key`, { credentials: "include" });
+  return res.json();
+}
 
 export default function CreatorLive() {
+  const { user } = useAuth();
+  const t = useI18n().creator;
+
+  const [rtmpInfo, setRtmpInfo] = useState<{ rtmpUrl: string; streamKey: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showKey, setShowKey] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const loadCredentials = useCallback(async () => {
+    if (rtmpInfo) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await getRtmpKey();
+      if (result.success && result.rtmpUrl && result.streamKey) {
+        setRtmpInfo({ rtmpUrl: result.rtmpUrl, streamKey: result.streamKey });
+      } else {
+        setError(result.error || "Could not load streaming credentials");
+      }
+    } catch {
+      setError("Network error — please try again");
+    } finally {
+      setLoading(false);
+    }
+  }, [rtmpInfo]);
+
+  const copy = (text: string, field: string) => {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(field);
+        setTimeout(() => setCopied(null), 2000);
+      });
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(field);
+      setTimeout(() => setCopied(null), 2000);
+    }
+  };
+
   return (
     <>
       <Helmet>
         <title>Go Live — PNPtv!</title>
       </Helmet>
-      <div className="p-4 lg:p-6">
-        <div className="glass-card-sm p-6 text-center space-y-4">
-          <h2 className="text-lg font-bold text-pnp-textPrimary">Streaming has moved!</h2>
-          <p className="text-sm text-pnp-textSecondary">
-            Live streaming is now available in the dedicated PNPtv! Studio app.
-          </p>
-          <a
-            href={STUDIO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm text-white transition-all hover:brightness-110 active:scale-[0.98]"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-          >
-            Open PNPtv! Studio
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-            </svg>
-          </a>
+      <div className="p-4 lg:p-6 space-y-5 max-w-2xl mx-auto">
+
+        {/* Hero */}
+        <div
+          className="relative rounded-2xl overflow-hidden p-6"
+          style={{
+            background: "linear-gradient(135deg, #0D2030 0%, #1A0A2E 50%, #2C0A18 100%)",
+          }}
+        >
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 mb-3">
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center"
+                style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)" }}
+              >
+                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-white">{t.tabGoLive}</h1>
+                <p className="text-xs text-white/50">Stream live to your audience on PNPtv</p>
+              </div>
+            </div>
+            <p className="text-sm text-white/60 leading-relaxed">
+              Use OBS Studio, Streamlabs, or any RTMP-compatible app to stream directly to PNPtv.
+              Your stream will appear on the Live page for all members.
+            </p>
+          </div>
+          {/* Decorative grid */}
+          <div className="absolute inset-0 opacity-5" style={{
+            backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.3) 1px, transparent 1px)",
+            backgroundSize: "20px 20px",
+          }} />
         </div>
+
+        {/* Quick Setup Guide */}
+        <Card className="p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <svg className="w-4 h-4 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            Quick Setup
+          </h2>
+          <div className="space-y-3">
+            {[
+              { step: 1, title: "Get your stream key", desc: "Click below to reveal your unique RTMP credentials" },
+              { step: 2, title: "Open OBS Studio", desc: "Go to Settings → Stream → Service: Custom" },
+              { step: 3, title: "Paste credentials", desc: "Set the Server URL and Stream Key from below" },
+              { step: 4, title: "Start streaming!", desc: "Click 'Start Streaming' in OBS — you're live!" },
+            ].map(({ step, title, desc }) => (
+              <div key={step} className="flex items-start gap-3">
+                <div
+                  className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)", color: "#fff" }}
+                >
+                  {step}
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-white">{title}</p>
+                  <p className="text-xs text-pnp-textSecondary">{desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* RTMP Credentials */}
+        <Card className="p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+              </svg>
+              Stream Credentials
+            </h2>
+            {rtmpInfo && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 font-semibold">
+                Ready
+              </span>
+            )}
+          </div>
+
+          {!rtmpInfo ? (
+            <Button
+              onClick={loadCredentials}
+              disabled={loading}
+              className="w-full"
+            >
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Loading...
+                </span>
+              ) : (
+                "Reveal Stream Credentials"
+              )}
+            </Button>
+          ) : (
+            <div className="space-y-3">
+              {/* Server URL */}
+              <div>
+                <label className="text-[10px] text-pnp-textSecondary uppercase tracking-wider font-semibold block mb-1">
+                  RTMP Server URL
+                </label>
+                <div
+                  className="flex items-center gap-2 rounded-xl px-3 py-2.5"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  <code className="text-sm text-white flex-1 break-all font-mono">{rtmpInfo.rtmpUrl}</code>
+                  <button
+                    onClick={() => copy(rtmpInfo.rtmpUrl, "url")}
+                    className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors"
+                  >
+                    {copied === "url" ? (
+                      <svg className="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Stream Key */}
+              <div>
+                <label className="text-[10px] text-pnp-textSecondary uppercase tracking-wider font-semibold block mb-1">
+                  Stream Key
+                </label>
+                <div
+                  className="flex items-center gap-2 rounded-xl px-3 py-2.5"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  <code className="text-sm text-white flex-1 font-mono">
+                    {showKey ? rtmpInfo.streamKey : "\u2022".repeat(Math.min(rtmpInfo.streamKey.length, 24))}
+                  </code>
+                  <button
+                    onClick={() => setShowKey(!showKey)}
+                    className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors"
+                  >
+                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      {showKey ? (
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l18 18" />
+                      ) : (
+                        <>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </>
+                      )}
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => copy(rtmpInfo.streamKey, "key")}
+                    className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors"
+                  >
+                    {copied === "key" ? (
+                      <svg className="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <p className="text-[10px] text-red-400/80 mt-1.5 flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  Never share your stream key — anyone with it can stream on your channel
+                </p>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="px-4 py-3 rounded-xl text-xs bg-red-500/10 border border-red-500/20 text-red-300">
+              {error}
+            </div>
+          )}
+        </Card>
+
+        {/* Recommended Settings */}
+        <Card className="p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            Recommended OBS Settings
+          </h2>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: "Resolution", value: "1920×1080" },
+              { label: "FPS", value: "30" },
+              { label: "Encoder", value: "x264 or NVENC" },
+              { label: "Bitrate", value: "4500 kbps" },
+              { label: "Keyframe", value: "2 seconds" },
+              { label: "Audio", value: "AAC 128 kbps" },
+            ].map(({ label, value }) => (
+              <div
+                key={label}
+                className="px-3 py-2 rounded-lg"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+              >
+                <p className="text-[10px] text-pnp-textSecondary uppercase tracking-wider">{label}</p>
+                <p className="text-sm font-semibold text-white">{value}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Tips */}
+        <Card className="p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <svg className="w-4 h-4 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            Pro Tips
+          </h2>
+          <ul className="space-y-2 text-xs text-pnp-textSecondary">
+            <li className="flex items-start gap-2">
+              <span className="text-green-400 mt-0.5">•</span>
+              <span>Test your stream privately first — use the preview in Restreamer before going live</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-green-400 mt-0.5">•</span>
+              <span>Use a wired ethernet connection for the most stable stream</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-green-400 mt-0.5">•</span>
+              <span>Engage with chat — viewers who feel seen are more likely to tip and subscribe</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-green-400 mt-0.5">•</span>
+              <span>Set a schedule — regular streams build a loyal audience</span>
+            </li>
+          </ul>
+        </Card>
       </div>
     </>
   );

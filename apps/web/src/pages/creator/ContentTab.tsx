@@ -55,10 +55,11 @@ export function ContentTab({ t }: ContentTabProps) {
     name: string;
     description: string;
     tags: string;
-    isPremium: boolean;
+    accessType: 'free' | 'prime' | 'subscription' | 'paid';
+    priceUsd: number;
     telegramChannelId: string;
     bridgeEnabled: boolean;
-  }>({ name: "", description: "", tags: "", isPremium: false, telegramChannelId: "", bridgeEnabled: false });
+  }>({ name: "", description: "", tags: "", accessType: "free", priceUsd: 0, telegramChannelId: "", bridgeEnabled: false });
   const [channelFormSaving, setChannelFormSaving] = useState(false);
   const [channelFormError, setChannelFormError] = useState<string | null>(null);
   const [editingChannelId, setEditingChannelId] = useState<number | null>(null);
@@ -280,7 +281,7 @@ export function ContentTab({ t }: ContentTabProps) {
 
   const openChannelCreate = () => {
     setEditingChannelId(null);
-    setChannelForm({ name: "", description: "", tags: "", isPremium: false, telegramChannelId: "", bridgeEnabled: false });
+    setChannelForm({ name: "", description: "", tags: "", accessType: "free", priceUsd: 0, telegramChannelId: "", bridgeEnabled: false });
     setChannelFormError(null);
     setShowChannelForm(true);
   };
@@ -291,7 +292,8 @@ export function ContentTab({ t }: ContentTabProps) {
       name: ch.name,
       description: ch.description || "",
       tags: (ch.tags || []).join(", "),
-      isPremium: ch.isPremium,
+      accessType: ch.accessType ?? (ch.isPremium ? "subscription" : "free"),
+      priceUsd: ch.priceUsd ?? 0,
       telegramChannelId: ch.telegramChannelId || "",
       bridgeEnabled: ch.bridgeEnabled === true,
     });
@@ -316,7 +318,8 @@ export function ContentTab({ t }: ContentTabProps) {
           name: channelForm.name.trim(),
           description: channelForm.description.trim() || undefined,
           tags,
-          isPremium: channelForm.isPremium,
+          accessType: channelForm.accessType,
+          priceUsd: channelForm.accessType === "paid" ? channelForm.priceUsd : 0,
           telegramChannelId: channelForm.telegramChannelId.trim() || null,
           bridgeEnabled: channelForm.bridgeEnabled,
         });
@@ -330,7 +333,8 @@ export function ContentTab({ t }: ContentTabProps) {
           name: channelForm.name.trim(),
           description: channelForm.description.trim() || undefined,
           tags,
-          isPremium: channelForm.isPremium,
+          accessType: channelForm.accessType,
+          priceUsd: channelForm.accessType === "paid" ? channelForm.priceUsd : 0,
           telegramChannelId: channelForm.telegramChannelId.trim() || null,
           bridgeEnabled: channelForm.bridgeEnabled,
         });
@@ -963,15 +967,73 @@ export function ContentTab({ t }: ContentTabProps) {
                 />
               </div>
 
-              <label className="flex items-center gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={channelForm.isPremium}
-                  onChange={(e) => setChannelForm((p) => ({ ...p, isPremium: e.target.checked }))}
-                  className="w-4 h-4 rounded accent-[#D4007A]"
-                />
-                <span className="text-sm text-white/80">Premium channel (subscribers only)</span>
-              </label>
+              {/* Access type selector */}
+              <div>
+                <label className="block text-xs text-white/50 mb-2">Access Type</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { value: "free", label: "Free", color: "#5ED1C4", bg: "rgba(94,209,196,0.15)" },
+                    { value: "prime", label: "Prime", color: "#A78BFA", bg: "rgba(167,139,250,0.15)" },
+                    { value: "subscription", label: "Subscription", color: "#D4007A", bg: "rgba(212,0,122,0.15)" },
+                    { value: "paid", label: "Paid ($)", color: "#E69138", bg: "rgba(230,145,56,0.15)" },
+                  ] as const).map(({ value, label, color, bg }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setChannelForm((p) => ({ ...p, accessType: value, priceUsd: value !== "paid" ? 0 : (p.priceUsd || 5) }))}
+                      className="py-2 px-3 rounded-lg text-sm font-medium transition-all border"
+                      style={channelForm.accessType === value
+                        ? { background: bg, color, borderColor: color }
+                        : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.4)", borderColor: "rgba(255,255,255,0.1)" }
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {channelForm.accessType === "free" && (
+                  <p className="text-[11px] text-white/30 mt-1.5">Visible to all users.</p>
+                )}
+                {channelForm.accessType === "prime" && (
+                  <p className="text-[11px] text-white/30 mt-1.5">Only PRIME subscribers can access.</p>
+                )}
+                {channelForm.accessType === "subscription" && (
+                  <p className="text-[11px] text-white/30 mt-1.5">Only users subscribed to you can access.</p>
+                )}
+                {channelForm.accessType === "paid" && (
+                  <p className="text-[11px] text-white/30 mt-1.5">Users pay a one-time fee to access.</p>
+                )}
+              </div>
+
+              {/* Price picker — only when paid */}
+              {channelForm.accessType === "paid" && (
+                <div>
+                  <label className="block text-xs text-white/50 mb-2">Price (USD)</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {[5, 10, 15, 20, 25].map((price) => (
+                      <button
+                        key={price}
+                        type="button"
+                        onClick={() => setChannelForm((p) => ({ ...p, priceUsd: price }))}
+                        className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-all border"
+                        style={channelForm.priceUsd === price
+                          ? { background: "rgba(230,145,56,0.2)", color: "#E69138", borderColor: "rgba(230,145,56,0.5)" }
+                          : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)", borderColor: "rgba(255,255,255,0.1)" }
+                        }
+                      >
+                        ${price}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Link hangout info note */}
+              <div className="px-3 py-2.5 rounded-lg" style={{ background: "rgba(123,97,255,0.08)", border: "1px solid rgba(123,97,255,0.2)" }}>
+                <p className="text-[11px] text-white/50 leading-relaxed">
+                  <span className="text-white/70 font-medium">Linking a Hangout:</span> You can link a hangout group to this channel from the Hangouts page after creating it. Linked hangouts will inherit this channel's access rules.
+                </p>
+              </div>
 
               {/* Telegram Bridge */}
               <div className="pt-1 border-t border-white/10">

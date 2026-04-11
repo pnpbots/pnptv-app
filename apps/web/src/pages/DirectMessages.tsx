@@ -598,8 +598,14 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
         });
         if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err as { error?: string }).error || "Failed to send"); }
         const data = await res.json();
-        if (data.message) setMessages((prev) => prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]);
-        setMessageInput("");
+        if (data.ticketNotice) {
+          // DM to Cristina AI was redirected to support ticket
+          if (data.message) setMessages((prev) => [...prev, data.message, { id: Date.now(), sender_id: "cristina-ai", recipient_id: userId, content: data.ticketNotice, is_read: true, created_at: new Date().toISOString() } as any]);
+          setMessageInput("");
+        } else {
+          if (data.message) setMessages((prev) => prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]);
+          setMessageInput("");
+        }
       }
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
     } catch (err) {

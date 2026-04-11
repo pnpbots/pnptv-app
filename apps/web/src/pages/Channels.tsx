@@ -10,11 +10,14 @@ import {
   createCreatorChannel,
   updateCreatorChannel,
   deleteCreatorChannel,
+  uploadChannelCover,
+  uploadChannelVideo,
   type Channel,
   type CreatorChannel,
   type SocialPostItem,
 } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
+import { AnimatedVideoThumbnail } from "@/components/AnimatedVideoThumbnail";
 
 // ── Tier badge colors ────────────────────────────────────────────────────────
 const TIER_COLORS: Record<string, { bg: string; text: string; label: string }> = {
@@ -77,19 +80,26 @@ function CreatorChannelCard({
           />
         )}
 
-        {/* Premium badge */}
-        {channel.isPremium && (
-          <span className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
-            style={{ background: "rgba(212,0,122,0.85)", color: "#fff" }}>
-            Premium
-          </span>
-        )}
-        {!channel.isPremium && (
-          <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
-            style={{ background: "rgba(94,209,196,0.85)", color: "#fff" }}>
-            Free
-          </span>
-        )}
+        {/* Access type badge */}
+        {(() => {
+          const at = channel.accessType ?? (channel.isPremium ? "subscription" : "free");
+          let bg = "rgba(94,209,196,0.85)";
+          let label = "Free";
+          if (at === "prime") { bg = "rgba(167,139,250,0.85)"; label = "Prime"; }
+          else if (at === "subscription") { bg = "rgba(212,0,122,0.85)"; label = "Premium"; }
+          else if (at === "paid") { bg = "rgba(230,145,56,0.85)"; label = `$${channel.priceUsd ?? 0}`; }
+          return (
+            <span className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+              style={{ background: bg, color: "#fff" }}>
+              {label}
+              {channel.hangoutGroupId && (
+                <svg className="w-2.5 h-2.5 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              )}
+            </span>
+          );
+        })()}
         {channel.collaborators && channel.collaborators.length > 0 && (
           <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
             style={{ background: "rgba(230,145,56,0.85)", color: "#fff" }}>
@@ -173,11 +183,46 @@ function ChannelDetailView({
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [playingVideo, setPlayingVideo] = useState<{ url: string; title?: string } | null>(null);
+
   // ── Edit ──
   const [showEditForm, setShowEditForm] = useState(false);
-  const [editForm, setEditForm] = useState({ name: "", description: "", tags: "", isPremium: false, telegramChannelId: "", bridgeEnabled: false });
+  const [editForm, setEditForm] = useState<{ name: string; description: string; tags: string; accessType: 'free' | 'prime' | 'subscription' | 'paid'; priceUsd: number; telegramChannelId: string; bridgeEnabled: boolean }>({ name: "", description: "", tags: "", accessType: "free", priceUsd: 0, telegramChannelId: "", bridgeEnabled: false });
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Direct CMS video upload (owner-only) ──
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+
+  const handleVideoFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !channel) return;
+    if (file.size > 500 * 1024 * 1024) {
+      setVideoError("Video must be under 500 MB");
+      return;
+    }
+    setVideoError(null);
+    setVideoUploading(true);
+    try {
+      const res = await uploadChannelVideo(channel.id, file);
+      if (res?.success && res.post) {
+        setPosts((prev) => [res.post, ...prev]);
+        setChannel((prev) =>
+          prev ? { ...prev, postCount: (prev.postCount || 0) + 1 } : prev,
+        );
+      }
+    } catch (err) {
+      setVideoError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setVideoUploading(false);
+    }
+  };
 
   const openEdit = () => {
     if (!channel) return;
@@ -185,11 +230,14 @@ function ChannelDetailView({
       name: channel.name,
       description: channel.description || "",
       tags: (channel.tags || []).join(", "),
-      isPremium: channel.isPremium,
+      accessType: channel.accessType ?? (channel.isPremium ? "subscription" : "free"),
+      priceUsd: channel.priceUsd ?? 0,
       telegramChannelId: channel.telegramChannelId || "",
       bridgeEnabled: channel.bridgeEnabled === true,
     });
     setEditError(null);
+    setCoverPreview(null);
+    setCoverFile(null);
     setShowEditForm(true);
   };
 
@@ -203,14 +251,24 @@ function ChannelDetailView({
         name: editForm.name.trim(),
         description: editForm.description.trim() || undefined,
         tags,
-        isPremium: editForm.isPremium,
+        accessType: editForm.accessType,
+        priceUsd: editForm.accessType === "paid" ? editForm.priceUsd : 0,
         telegramChannelId: editForm.telegramChannelId.trim() || null,
         bridgeEnabled: editForm.bridgeEnabled,
       });
       if (res.success) {
-        setChannel((prev) => prev ? { ...prev, ...res.channel } : res.channel);
+        let updated = res.channel;
+        if (coverFile) {
+          const coverRes = await uploadChannelCover(channel.id, coverFile);
+          if (coverRes.success) {
+            updated = { ...updated, coverImageUrl: coverRes.coverImageUrl };
+          }
+        }
+        setChannel((prev) => prev ? { ...prev, ...updated } : updated);
         setShowEditForm(false);
-        onUpdated?.(res.channel);
+        setCoverPreview(null);
+        setCoverFile(null);
+        onUpdated?.(updated);
       }
     } catch (err: unknown) {
       setEditError(err instanceof Error ? err.message : "Failed to save changes");
@@ -321,12 +379,25 @@ function ChannelDetailView({
               }}
             />
           )}
-          {channel.isPremium && (
-            <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-xs font-bold uppercase"
-              style={{ background: "rgba(212,0,122,0.9)", color: "#fff" }}>
-              Premium
-            </span>
-          )}
+          {(() => {
+            const at = channel.accessType ?? (channel.isPremium ? "subscription" : "free");
+            if (at === "free") return null;
+            let bg = "rgba(212,0,122,0.9)";
+            let label = "Premium";
+            if (at === "prime") { bg = "rgba(167,139,250,0.9)"; label = "Prime"; }
+            else if (at === "paid") { bg = "rgba(230,145,56,0.9)"; label = `$${channel.priceUsd ?? 0}`; }
+            return (
+              <span className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold uppercase"
+                style={{ background: bg, color: "#fff" }}>
+                {label}
+                {channel.hangoutGroupId && (
+                  <svg className="w-3 h-3 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                )}
+              </span>
+            );
+          })()}
         </div>
 
         {/* Meta */}
@@ -344,6 +415,30 @@ function ChannelDetailView({
               </span>
               {channel.isOwner && (
                 <>
+                  <input
+                    ref={videoInputRef}
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime"
+                    className="hidden"
+                    onChange={handleVideoFileSelected}
+                  />
+                  <button
+                    onClick={() => videoInputRef.current?.click()}
+                    disabled={videoUploading}
+                    className="p-1.5 rounded-lg text-pnp-accent hover:text-white hover:bg-pnp-accent/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={videoUploading ? "Uploading video…" : "Upload video via CMS"}
+                  >
+                    {videoUploading ? (
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={3} />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                      </svg>
+                    )}
+                  </button>
                   <button
                     onClick={openEdit}
                     className="p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/8 transition-colors"
@@ -367,10 +462,77 @@ function ChannelDetailView({
             </div>
           </div>
 
+          {/* Video upload feedback (owner-only) */}
+          {channel.isOwner && videoUploading && (
+            <div className="rounded-lg border border-pnp-accent/30 bg-pnp-accent/10 px-3 py-2 text-xs text-pnp-accent">
+              Uploading video to your CMS folder…
+            </div>
+          )}
+          {channel.isOwner && videoError && !videoUploading && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300 flex items-center justify-between">
+              <span>{videoError}</span>
+              <button
+                onClick={() => setVideoError(null)}
+                className="ml-3 text-red-300/70 hover:text-red-200"
+                aria-label="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
           {/* Edit form */}
           {showEditForm && channel.isOwner && (
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
               <p className="text-sm font-semibold text-pnp-textPrimary">Edit Channel</p>
+              {/* Cover image */}
+              <div>
+                <label className="block text-xs text-white/50 mb-1">Channel Picture</label>
+                <div
+                  className="relative w-full rounded-lg overflow-hidden cursor-pointer group border border-white/10 hover:border-pnp-accent/50 transition-colors"
+                  style={{ aspectRatio: "3/1", minHeight: 80 }}
+                  onClick={() => coverInputRef.current?.click()}
+                >
+                  {coverPreview || isValidPhotoUrl(channel.coverImageUrl) ? (
+                    <img
+                      src={coverPreview || channel.coverImageUrl!}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      className="w-full h-full"
+                      style={{
+                        background: `linear-gradient(135deg, hsl(${(channel.id * 47) % 360}, 60%, 20%), hsl(${(channel.id * 47 + 120) % 360}, 60%, 15%))`,
+                      }}
+                    />
+                  )}
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1.5 text-white text-xs font-medium">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
+                      </svg>
+                      Change Picture
+                    </div>
+                  </div>
+                </div>
+                <input
+                  ref={coverInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (file.size > 5 * 1024 * 1024) { setEditError("Image must be under 5MB"); return; }
+                    setCoverFile(file);
+                    setCoverPreview(URL.createObjectURL(file));
+                    setEditError(null);
+                  }}
+                />
+                <p className="text-[10px] text-white/30 mt-1">JPEG, PNG, WebP, GIF — max 5MB</p>
+              </div>
               <div>
                 <label className="block text-xs text-white/50 mb-1">Channel Name *</label>
                 <input
@@ -397,15 +559,52 @@ function ChannelDetailView({
                   className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
                 />
               </div>
-              <label className="flex items-center gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={editForm.isPremium}
-                  onChange={(e) => setEditForm((p) => ({ ...p, isPremium: e.target.checked }))}
-                  className="w-4 h-4 rounded accent-[#D4007A]"
-                />
-                <span className="text-sm text-white/80">Premium channel</span>
-              </label>
+              {/* Access type selector */}
+              <div>
+                <label className="block text-xs text-white/50 mb-2">Access Type</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { value: "free" as const, label: "Free", color: "#5ED1C4", bg: "rgba(94,209,196,0.15)" },
+                    { value: "prime" as const, label: "Prime", color: "#A78BFA", bg: "rgba(167,139,250,0.15)" },
+                    { value: "subscription" as const, label: "Subscription", color: "#D4007A", bg: "rgba(212,0,122,0.15)" },
+                    { value: "paid" as const, label: "Paid ($)", color: "#E69138", bg: "rgba(230,145,56,0.15)" },
+                  ]).map(({ value, label, color, bg }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setEditForm((p) => ({ ...p, accessType: value, priceUsd: value !== "paid" ? 0 : (p.priceUsd || 5) }))}
+                      className="py-2 px-3 rounded-lg text-sm font-medium transition-all border"
+                      style={editForm.accessType === value
+                        ? { background: bg, color, borderColor: color }
+                        : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.4)", borderColor: "rgba(255,255,255,0.1)" }
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {editForm.accessType === "paid" && (
+                <div>
+                  <label className="block text-xs text-white/50 mb-2">Price (USD)</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {[5, 10, 15, 20, 25].map((price) => (
+                      <button
+                        key={price}
+                        type="button"
+                        onClick={() => setEditForm((p) => ({ ...p, priceUsd: price }))}
+                        className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-all border"
+                        style={editForm.priceUsd === price
+                          ? { background: "rgba(230,145,56,0.2)", color: "#E69138", borderColor: "rgba(230,145,56,0.5)" }
+                          : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)", borderColor: "rgba(255,255,255,0.1)" }
+                        }
+                      >
+                        ${price}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {/* Telegram Bridge */}
               <div className="pt-1 border-t border-white/10">
                 <p className="text-xs font-semibold text-white/60 uppercase tracking-wider mb-2">Telegram Bridge</p>
@@ -614,22 +813,33 @@ function ChannelDetailView({
                         ? (isValidPhotoUrl(p.video_thumbnail_url) ? p.video_thumbnail_url : null)
                         : p.media_url;
                       return (
-                        <div key={p.id} className="aspect-square bg-pnp-surfaceHover relative overflow-hidden group">
-                          {thumbSrc ? (
+                        <div
+                          key={p.id}
+                          className="aspect-square bg-pnp-surfaceHover relative overflow-hidden group cursor-pointer"
+                          onClick={() => {
+                            if (isVideo && isValidPhotoUrl(p.media_url)) {
+                              setPlayingVideo({ url: p.media_url!, title: p.video_title || p.content?.slice(0, 60) });
+                            } else if (!isVideo && isValidPhotoUrl(p.media_url)) {
+                              navigate(`/social/post/${p.id}`);
+                            }
+                          }}
+                        >
+                          {isVideo ? (
+                            <AnimatedVideoThumbnail
+                              videoUrl={isValidPhotoUrl(p.media_url) ? p.media_url : null}
+                              posterUrl={thumbSrc}
+                              alt={p.video_title || p.content?.slice(0, 60) || "Video"}
+                            />
+                          ) : thumbSrc ? (
                             <img
                               src={thumbSrc!}
                               alt=""
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                             />
-                          ) : isVideo ? (
-                            <div
-                              className="w-full h-full"
-                              style={{ background: `linear-gradient(135deg, hsl(${(p.id * 53) % 360},50%,15%), hsl(${(p.id * 53 + 120) % 360},50%,10%))` }}
-                            />
                           ) : null}
                           {isVideo && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 group-hover:bg-black/50 transition-colors">
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors pointer-events-none">
                               <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "rgba(255,255,255,0.15)", backdropFilter: "blur(4px)" }}>
                                 <svg className="w-5 h-5 text-white drop-shadow ml-0.5" fill="currentColor" viewBox="0 0 24 24">
                                   <path d="M8 5v14l11-7z" />
@@ -673,6 +883,45 @@ function ChannelDetailView({
               </>
             );
           })()}
+        </div>
+      )}
+      {/* Video Player Modal */}
+      {playingVideo && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={() => setPlayingVideo(null)}
+        >
+          <div
+            className="relative w-full max-w-2xl rounded-2xl overflow-hidden"
+            style={{ background: "#0A0A14" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+              <p className="text-sm font-semibold text-white truncate flex-1 mr-2">
+                {playingVideo.title || "Video"}
+              </p>
+              <button
+                onClick={() => setPlayingVideo(null)}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all flex-shrink-0"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {/* Video */}
+            <video
+              src={playingVideo.url}
+              controls
+              autoPlay
+              playsInline
+              controlsList="nodownload"
+              onContextMenu={(e) => e.preventDefault()}
+              className="w-full max-h-[70vh] object-contain bg-black"
+              preload="auto"
+            />
+          </div>
         </div>
       )}
     </div>
@@ -1032,6 +1281,24 @@ export default function Channels() {
             Discover creators, exclusive content & live streams
           </p>
         </div>
+
+        {/* PNPtv PRIME Telegram banner */}
+        <a
+          href="https://t.me/+EqPmsr1ZeQ5iMzlh"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 px-4 py-3 rounded-xl border transition-all hover:scale-[1.01] active:scale-[0.99]"
+          style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(230,145,56,0.12))", borderColor: "rgba(212,0,122,0.3)" }}
+        >
+          <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+            <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" /></svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-white">PNPtv PRIME on Telegram</p>
+            <p className="text-xs text-pnp-textSecondary">Watch exclusive videos while we migrate content to the app</p>
+          </div>
+          <svg className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+        </a>
 
         {/* View mode toggle */}
         <div className="flex gap-2 p-1 rounded-xl w-fit" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>

@@ -54,6 +54,9 @@ export function useHangoutSocket(
   // Feature 3: Rich participant list (separate from the legacy string[] in CallState)
   const [callParticipants, setCallParticipants] = useState<CallParticipant[]>([]);
 
+  // Read receipts: map of userId → lastReadMessageId
+  const [readReceipts, setReadReceipts] = useState<Record<string, number>>({});
+
   // Refs for debouncing and cleanup
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastTypingEmit = useRef(0);
@@ -67,6 +70,7 @@ export function useHangoutSocket(
       setScreenShareUser(null);
       setCallStartedAt(null);
       setCallParticipants([]);
+      setReadReceipts({});
       return;
     }
 
@@ -78,6 +82,7 @@ export function useHangoutSocket(
     setScreenShareUser(null);
     setCallStartedAt(null);
     setCallParticipants([]);
+    setReadReceipts({});
 
     const socket = connectSocket();
 
@@ -179,6 +184,12 @@ export function useHangoutSocket(
       setScreenShareUser(data.sharing ? String(data.userId).slice(0, 64) : null);
     };
 
+    // Read receipts: another user read up to a certain message
+    const onReadUpdate = (data: { userId: number; lastReadMessageId: number }) => {
+      if (!data.userId || !data.lastReadMessageId) return;
+      setReadReceipts((prev) => ({ ...prev, [String(data.userId)]: data.lastReadMessageId }));
+    };
+
     // Register ALL listeners BEFORE emitting join
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -188,6 +199,7 @@ export function useHangoutSocket(
     socket.on("hangout:call:participant:left", onParticipantLeft);
     socket.on("hangout:call:participants", onCallParticipants);
     socket.on("hangout:call:screenshare", onScreenShare);
+    socket.on("hangout:read:update", onReadUpdate);
 
     // Now emit join — if already connected, emit directly; otherwise onConnect handles it
     // Guard behind userId: an unauthenticated socket must not join a private room
@@ -208,6 +220,7 @@ export function useHangoutSocket(
       socket.off("hangout:call:participant:left", onParticipantLeft);
       socket.off("hangout:call:participants", onCallParticipants);
       socket.off("hangout:call:screenshare", onScreenShare);
+      socket.off("hangout:read:update", onReadUpdate);
 
       // Clear typing timers and map
       typingTimers.current.forEach((t) => clearTimeout(t));
@@ -309,5 +322,6 @@ export function useHangoutSocket(
     emitDeleteMessage,
     emitReaction,
     emitReadMessage,
+    readReceipts,
   };
 }

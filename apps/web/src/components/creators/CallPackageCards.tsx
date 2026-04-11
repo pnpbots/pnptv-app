@@ -11,6 +11,7 @@ import React, { useState } from "react";
 import clsx from "clsx";
 import { BookCallModal } from "./BookCallModal";
 import type { FeaturedPerformer } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,61 +23,56 @@ interface CallPackageCardsProps {
   className?: string;
 }
 
-interface PackageConfig {
+/** Visual-only config (no translatable strings). */
+interface PackageVisuals {
   duration: 30 | 60;
   price: number;
+  gradientStyle: React.CSSProperties;
+  /** Tailwind text color class for price */
+  priceColorClass: string;
+  /** Hex color for SVG fill/stroke (CheckIcon) */
+  priceColorHex: string;
+}
+
+/** Full config including translated strings — resolved at render time. */
+interface PackageConfig extends PackageVisuals {
   name: string;
   tagline: string;
   bullets: string[];
   badge: string | null;
-  /** Tailwind gradient classes for the card background strip */
-  gradientStyle: React.CSSProperties;
-  /** Price accent color */
-  priceColor: string;
+  durationLabel: string;
+  bookNowLabel: string;
+  bookNowAriaLabel: string;
 }
 
-// ─── Package definitions ─────────────────────────────────────────────────────
+// ─── Visual-only package definitions (no strings) ────────────────────────────
 
-const PACKAGES: PackageConfig[] = [
+const PACKAGE_VISUALS: PackageVisuals[] = [
   {
     duration: 30,
     price: 60,
-    name: "Quick Connection",
-    tagline: "A quick, intimate one-on-one session",
-    bullets: [
-      "Private video call",
-      "Undivided attention",
-      "Perfect for a quick thrill",
-    ],
-    badge: "Most Popular",
     gradientStyle: {
       background: "linear-gradient(145deg, rgba(212,0,122,0.22) 0%, rgba(230,145,56,0.14) 100%)",
       border: "1px solid rgba(212,0,122,0.30)",
     },
-    priceColor: "#D4007A",
+    priceColorClass: "text-pnp-accent",
+    priceColorHex: "#D4007A",
   },
   {
     duration: 60,
     price: 100,
-    name: "Full Experience",
-    tagline: "The full private experience, unrushed",
-    bullets: [
-      "Extended private session",
-      "Deep personal connection",
-      "The ultimate experience",
-    ],
-    badge: null,
     gradientStyle: {
       background: "linear-gradient(145deg, rgba(139,92,246,0.22) 0%, rgba(59,130,246,0.14) 100%)",
       border: "1px solid rgba(139,92,246,0.30)",
     },
-    priceColor: "#A78BFA",
+    priceColorClass: "text-pnp-purple",
+    priceColorHex: "#A78BFA",
   },
 ];
 
 // ─── CheckIcon ────────────────────────────────────────────────────────────────
 
-function CheckIcon({ color }: { color: string }) {
+function CheckIcon({ colorHex }: { colorHex: string }) {
   return (
     <svg
       className="w-3.5 h-3.5 flex-shrink-0 mt-0.5"
@@ -84,10 +80,10 @@ function CheckIcon({ color }: { color: string }) {
       fill="none"
       aria-hidden="true"
     >
-      <circle cx="8" cy="8" r="7" fill={color} fillOpacity={0.18} />
+      <circle cx="8" cy="8" r="7" fill={colorHex} fillOpacity={0.18} />
       <path
         d="M5 8l2 2 4-4"
-        stroke={color}
+        stroke={colorHex}
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -114,47 +110,34 @@ function PackageCard({ pkg, onBookNow }: PackageCardProps) {
     >
       {/* Badge */}
       {pkg.badge && (
-        <span
-          className="absolute top-3.5 right-3.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase whitespace-nowrap"
-          style={{
-            background: "linear-gradient(90deg, #D4007A, #E69138)",
-            color: "#fff",
-          }}
-        >
+        <span className="absolute top-3.5 right-3.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase whitespace-nowrap text-white badge-gradient">
           {pkg.badge}
         </span>
       )}
 
       {/* Duration pill */}
-      <span
-        className="self-start px-2.5 py-0.5 rounded-full text-[11px] font-semibold mb-3"
-        style={{
-          background: "rgba(255,255,255,0.09)",
-          color: "rgba(235,235,245,0.70)",
-        }}
-      >
-        {pkg.duration} minutes
+      <span className="self-start px-2.5 py-0.5 rounded-full text-[11px] font-semibold mb-3 bg-white/[0.09] text-pnp-textSecondary">
+        {pkg.durationLabel}
       </span>
 
       {/* Price */}
       <p
-        className="text-4xl font-extrabold leading-none mb-1"
-        style={{ color: pkg.priceColor }}
+        className={clsx(
+          "text-4xl font-extrabold leading-none mb-1",
+          pkg.priceColorClass
+        )}
       >
         ${pkg.price}
-        <span
-          className="text-base font-medium ml-1"
-          style={{ color: "rgba(235,235,245,0.45)" }}
-        >
+        <span className="text-base font-medium ml-1 text-pnp-textSecondary opacity-60">
           USD
         </span>
       </p>
 
       {/* Name + tagline */}
-      <p className="text-sm font-bold mt-2" style={{ color: "#EBEBF5" }}>
+      <p className="text-sm font-bold mt-2 text-pnp-textPrimary">
         {pkg.name}
       </p>
-      <p className="text-xs mt-0.5 mb-4" style={{ color: "rgba(235,235,245,0.55)" }}>
+      <p className="text-xs mt-0.5 mb-4 text-pnp-textSecondary">
         {pkg.tagline}
       </p>
 
@@ -162,8 +145,8 @@ function PackageCard({ pkg, onBookNow }: PackageCardProps) {
       <ul className="space-y-1.5 mb-5">
         {pkg.bullets.map((bullet) => (
           <li key={bullet} className="flex items-start gap-2">
-            <CheckIcon color={pkg.priceColor} />
-            <span className="text-xs" style={{ color: "rgba(235,235,245,0.75)" }}>
+            <CheckIcon colorHex={pkg.priceColorHex} />
+            <span className="text-xs text-pnp-textSecondary">
               {bullet}
             </span>
           </li>
@@ -174,11 +157,14 @@ function PackageCard({ pkg, onBookNow }: PackageCardProps) {
       <button
         type="button"
         onClick={onBookNow}
-        aria-label={`Book ${pkg.name} — ${pkg.duration} minutes for $${pkg.price}`}
+        aria-label={pkg.bookNowAriaLabel}
         className={clsx(
           "w-full min-h-[48px] rounded-xl text-sm font-bold text-white",
           "transition-all duration-150 active:scale-[0.97]",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background",
+          pkg.duration === 30
+            ? "focus-visible:ring-pnp-accent"
+            : "focus-visible:ring-pnp-purple",
           "hover:brightness-110"
         )}
         style={{
@@ -188,7 +174,7 @@ function PackageCard({ pkg, onBookNow }: PackageCardProps) {
               : "linear-gradient(90deg, #7C3AED, #3B82F6)",
         }}
       >
-        Book Now
+        {pkg.bookNowLabel}
       </button>
     </div>
   );
@@ -201,9 +187,34 @@ export function CallPackageCards({
   preselectedPerformer = null,
   className,
 }: CallPackageCardsProps) {
+  const t = useI18n();
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedDuration, setSelectedDuration] = useState<30 | 60>(30);
   const [selectedPerformer, setSelectedPerformer] = useState<FeaturedPerformer | null>(null);
+
+  // Translated package data (resolved here where the hook is available)
+  const PACKAGES: PackageConfig[] = [
+    {
+      ...PACKAGE_VISUALS[0],
+      name: t.creator.pkg30Name,
+      tagline: t.creator.pkg30Tagline,
+      bullets: [t.creator.pkg30Bullet1, t.creator.pkg30Bullet2, t.creator.pkg30Bullet3],
+      badge: t.creator.mostPopularBadge,
+      durationLabel: t.creator.durationPill(30),
+      bookNowLabel: t.creator.bookNowBtn,
+      bookNowAriaLabel: t.creator.bookNowAriaLabel(t.creator.pkg30Name, 30, PACKAGE_VISUALS[0].price),
+    },
+    {
+      ...PACKAGE_VISUALS[1],
+      name: t.creator.pkg60Name,
+      tagline: t.creator.pkg60Tagline,
+      bullets: [t.creator.pkg60Bullet1, t.creator.pkg60Bullet2, t.creator.pkg60Bullet3],
+      badge: null,
+      durationLabel: t.creator.durationPill(60),
+      bookNowLabel: t.creator.bookNowBtn,
+      bookNowAriaLabel: t.creator.bookNowAriaLabel(t.creator.pkg60Name, 60, PACKAGE_VISUALS[1].price),
+    },
+  ];
 
   const handleBookNow = (duration: 30 | 60) => {
     setSelectedDuration(duration);
@@ -234,8 +245,7 @@ export function CallPackageCards({
       {/* Section header */}
       <div className="flex items-center gap-2 mb-3">
         <svg
-          className="w-4 h-4 flex-shrink-0"
-          style={{ color: "#D4007A" }}
+          className="w-4 h-4 flex-shrink-0 text-pnp-accent"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -248,11 +258,8 @@ export function CallPackageCards({
             d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
           />
         </svg>
-        <h2
-          className="text-xs font-semibold uppercase tracking-wider"
-          style={{ color: "#8E8E93" }}
-        >
-          Book a Private Session
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary">
+          {t.creator.bookPrivateSession}
         </h2>
       </div>
 
