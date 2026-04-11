@@ -1,6 +1,55 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 
+// SSRF defense — allowed hostnames for SoundCloud requests
+const ALLOWED_INPUT_HOSTS = new Set(['soundcloud.com', 'www.soundcloud.com', 'm.soundcloud.com', 'on.soundcloud.com', 'snd.sc']);
+const SHORT_URL_HOSTS = new Set(['on.soundcloud.com', 'snd.sc']);
+// RFC1918, link-local, and loopback CIDR ranges (string-prefix checks — no external library needed)
+const PRIVATE_PREFIXES = ['10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.', '127.', '0.', '169.254.', '::1', 'fc', 'fd'];
+
+/**
+ * Reject URLs that resolve to private/loopback IPs.
+ * axios doesn't automatically block RFC1918 destinations; we do it here
+ * as a defensive layer even though the allowlist should catch SSRF first.
+ */
+function isPrivateHostname(hostname) {
+  // Numeric IPv4
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+    return PRIVATE_PREFIXES.some(p => hostname.startsWith(p));
+  }
+  // IPv6
+  if (hostname === '::1' || hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('[::1]')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Parse a URL string and validate it is an allowed SoundCloud host.
+ * Throws if invalid or disallowed.
+ */
+function assertAllowedUrl(rawUrl, allowedHosts = ALLOWED_INPUT_HOSTS) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid URL: ${rawUrl}`);
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`Disallowed protocol: ${parsed.protocol}`);
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (!allowedHosts.has(host)) {
+    throw new Error(`Disallowed hostname: ${host}`);
+  }
+  if (isPrivateHostname(host)) {
+    throw new Error(`Hostname resolves to private IP range: ${host}`);
+  }
+}
+
+// Canonical SoundCloud hostnames allowed after redirect resolution
+const CANONICAL_HOSTS = new Set(['soundcloud.com', 'www.soundcloud.com', 'm.soundcloud.com']);
+
 class SoundCloudService {
   /**
    * Resolve SoundCloud track metadata from URL
@@ -11,8 +60,13 @@ class SoundCloudService {
     try {
       logger.info(`Resolving SoundCloud track: ${trackUrl}`);
 
+      // SSRF fix: validate input URL BEFORE any outbound request
+      assertAllowedUrl(trackUrl, ALLOWED_INPUT_HOSTS);
+
       // Resolve short URLs (on.soundcloud.com, snd.sc) to canonical soundcloud.com URLs
-      if (/^https?:\/\/(on\.soundcloud\.com|snd\.sc)\//i.test(trackUrl)) {
+      let parsedInput;
+      try { parsedInput = new URL(trackUrl); } catch { parsedInput = null; }
+      if (parsedInput && SHORT_URL_HOSTS.has(parsedInput.hostname.toLowerCase())) {
         try {
           const headResp = await axios.head(trackUrl, { maxRedirects: 5, timeout: 10000 });
           if (headResp.request?.res?.responseUrl) {
@@ -41,6 +95,9 @@ class SoundCloudService {
         // Strip query params from resolved URL for cleaner OEmbed lookup
         try { trackUrl = trackUrl.split('?')[0]; } catch { /* keep as-is */ }
         logger.info(`Resolved short URL to: ${trackUrl}`);
+
+        // SSRF fix: re-validate the resolved URL — must be canonical soundcloud.com
+        assertAllowedUrl(trackUrl, CANONICAL_HOSTS);
       }
 
       // Use SoundCloud's OEmbed API (no API key required for basic info)

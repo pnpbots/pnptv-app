@@ -1,3 +1,4 @@
+const moment = require('moment-timezone');
 const logger = require('../utils/logger');
 
 /**
@@ -25,27 +26,26 @@ class PNPLiveTimeSlotService {
         throw new Error('Invalid duration. Must be 30, 60, or 90 minutes.');
       }
 
-      // Get the current date and time
-      const now = new Date();
-      const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-      const currentTime = now.getHours() * 60 + now.getMinutes(); // Time in minutes
+      // All slot times are constructed in UTC via moment-timezone to avoid
+      // DST/local-offset drift from new Date().setHours() which uses local time.
+      const nowUtc = moment.utc();
 
       // Calculate the start and end dates for the time window
       // We want slots from Thursday to Monday (5 days)
       const slots = [];
       const daysToGenerate = 5; // Thursday to Monday
 
-      // Start from the given startDate or today if not provided
-      const generationStartDate = startDate || new Date();
+      // Start from the given startDate or today (UTC) if not provided
+      const generationStartMoment = startDate
+        ? moment.utc(startDate).startOf('day')
+        : moment.utc().startOf('day');
 
       // Generate slots for each day in the window
       for (let dayOffset = 0; dayOffset < daysToGenerate; dayOffset++) {
-        const currentDate = new Date(generationStartDate);
-        currentDate.setDate(generationStartDate.getDate() + dayOffset);
-        const dayOfWeek = currentDate.getDay();
+        const dayMoment = generationStartMoment.clone().add(dayOffset, 'days');
+        const dayOfWeek = dayMoment.day(); // 0=Sunday ... 6=Saturday
 
         // Only generate slots for Thursday (4) to Monday (1)
-        // Note: JavaScript days: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday
         const isValidDay = (dayOfWeek === 4) || // Thursday
                           (dayOfWeek === 5) || // Friday
                           (dayOfWeek === 6) || // Saturday
@@ -56,43 +56,35 @@ class PNPLiveTimeSlotService {
           continue; // Skip days outside Thursday-Monday window
         }
 
-        // Generate slots for this day
-        // PNP Live operates from 10 AM to 10 PM (12 hours)
-        const startHour = 10; // Start at 10 AM
-        const endHour = 22;   // End at 10 PM
+        // PNP Live operates from 10 AM to 10 PM UTC (12 hours)
+        const startHour = 10;
+        const endHour = 22;
 
         // Generate slots every duration + 15 minute buffer
-        const slotDurationWithBuffer = durationMinutes + 15; // Duration + 15 min buffer
+        const slotDurationWithBuffer = durationMinutes + 15;
 
         for (let hour = startHour; hour < endHour; hour++) {
           for (let minute = 0; minute < 60; minute += slotDurationWithBuffer) {
-            // Skip if this slot would end after our end time
-            const slotStart = new Date(currentDate);
-            slotStart.setHours(hour, minute, 0, 0);
+            // Construct slot start in UTC explicitly — avoids local-time drift
+            const slotStart = dayMoment.clone().hour(hour).minute(minute).second(0).millisecond(0);
+            const slotEnd = slotStart.clone().add(durationMinutes, 'minutes');
 
-            const slotEnd = new Date(slotStart);
-            slotEnd.setMinutes(slotEnd.getMinutes() + durationMinutes);
-
-            // Build the hard boundary for this calendar day (22:00:00 UTC)
-            const endBoundary = new Date(currentDate);
-            endBoundary.setHours(endHour, 0, 0, 0);
-            if (slotEnd > endBoundary) {
-              continue; // Skip slots that would end after 22:00
+            // Hard boundary: slot must end by 22:00 UTC
+            const endBoundary = dayMoment.clone().hour(endHour).minute(0).second(0).millisecond(0);
+            if (slotEnd.isAfter(endBoundary)) {
+              continue; // Skip slots that would end after 22:00 UTC
             }
 
             // Only include slots that are in the future
-            const slotStartTime = slotStart.getTime();
-            const nowTime = now.getTime();
-
-            if (slotStartTime < nowTime) {
-              continue; // Skip slots in the past
+            if (slotStart.isSameOrBefore(nowUtc)) {
+              continue;
             }
 
             // Add this slot
             slots.push({
               model_id: modelId,
-              available_from: slotStart,
-              available_to: slotEnd,
+              available_from: slotStart.toDate(),
+              available_to: slotEnd.toDate(),
               duration_minutes: durationMinutes,
               is_booked: false,
               booking_id: null,

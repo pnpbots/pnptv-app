@@ -99,6 +99,15 @@ class PNPLiveTipsService {
 
       const tip = tipResult.rows[0];
 
+      // Record 70/30 earnings split for the performer
+      const amountCreator = Math.round(amount * 0.70 * 100) / 100;
+      const amountPlatform = Math.round(amount * 0.30 * 100) / 100;
+      await client.query(
+        `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, period_month)
+         VALUES ($1, $2, $3, $4, 'available', date_trunc('month', CURRENT_DATE))`,
+        [String(performerId), amount, amountCreator, amountPlatform]
+      );
+
       await client.query('COMMIT');
 
       // Invalidate wallet cache outside the transaction (best-effort)

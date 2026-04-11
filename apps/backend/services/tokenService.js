@@ -14,7 +14,8 @@ const { query, getClient } = require('../config/postgres');
 const { cache } = require('../config/redis');
 
 const STREAM_HEARTBEAT_COST = 1;
-const STREAM_HEARTBEAT_REVENUE = 1; // Assuming 1:1 payout for now
+const STREAM_HEARTBEAT_REVENUE = 0.70; // 70% to creator, 30% platform
+const STREAM_HEARTBEAT_PLATFORM = 0.30;
 
 /**
  * Checks if a user has at least a certain number of tokens.
@@ -182,8 +183,8 @@ async function processStreamHeartbeat(viewerId, channelRef) {
     // exists, it should be used here.
     await client.query(
       `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, period_month)
-       VALUES ($1, $2, $3, 0, 'available', date_trunc('month', CURRENT_DATE))`,
-      [String(streamer.id), STREAM_HEARTBEAT_REVENUE, STREAM_HEARTBEAT_REVENUE]
+       VALUES ($1, $2, $3, $4, 'available', date_trunc('month', CURRENT_DATE))`,
+      [String(streamer.id), STREAM_HEARTBEAT_COST, STREAM_HEARTBEAT_REVENUE, STREAM_HEARTBEAT_PLATFORM]
     );
 
     await client.query('COMMIT');
