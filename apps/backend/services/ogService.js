@@ -168,7 +168,7 @@ const getPostOG = async (postId) => {
         videoWidth: 1280,
         videoHeight: 720,
         twitterCard: 'player',
-        playerUrl: `${APP_BASE_URL.replace('app.', 'api.')}/og/player/${id}`,
+        playerUrl: `${APP_BASE_URL}/og/player/${id}`,
       };
     } else if (isImage && absoluteMediaUrl) {
       ogData = {
@@ -466,10 +466,13 @@ const getVideoPreviewOG = async (postId) => {
   if (cached) return cached;
 
   try {
+    // Join users so we can build a post-specific, author-aware title
     const result = await query(
-      `SELECT sp.id, sp.media_url, sp.media_type, sp.media_urls,
-              sp.video_thumbnail_url
+      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls,
+              sp.video_thumbnail_url, sp.video_title, sp.video_description,
+              u.username, u.first_name
        FROM social_posts sp
+       JOIN users u ON sp.user_id = u.id
        WHERE sp.id = $1
          AND sp.is_deleted = false
          AND (sp.is_exclusive IS NOT TRUE)`,
@@ -498,8 +501,19 @@ const getVideoPreviewOG = async (postId) => {
     const absoluteMediaUrl = toAbsoluteUrl(effectiveMediaUrl);
     const absoluteThumbUrl = toAbsoluteUrl(effectiveThumbUrl);
 
-    const title = 'Watch on PNPtv! — Clouds & Rush Network';
-    const description = 'Exclusive community content on PNPtv! Stream, connect, and vibe with the hottest PNP creators. Join free today.';
+    // Build post-specific title + description so X renders the card with the
+    // actual post metadata (author, content) instead of generic branding.
+    const authorName = post.first_name || post.username || 'PNPtv! user';
+    const handle = post.username ? `@${post.username}` : '';
+    const postTitle = post.video_title ? truncate(post.video_title, 70) : null;
+    const title = postTitle
+      ? `${postTitle} — ${authorName} on PNPtv!`
+      : (handle
+          ? `${authorName} (${handle}) on PNPtv!`
+          : `${authorName} on PNPtv!`);
+    const contentSnippet = truncate((post.video_description || post.content || '').trim(), 200);
+    const description = contentSnippet
+      || `Watch ${authorName}'s latest post on PNPtv! — the queer PNP community streaming platform.`;
 
     let ogData;
     if (isVideo && absoluteMediaUrl) {
@@ -520,7 +534,7 @@ const getVideoPreviewOG = async (postId) => {
         videoWidth: 1280,
         videoHeight: 720,
         twitterCard: 'player',
-        playerUrl: `${APP_BASE_URL.replace('app.', 'api.')}/og/player/${id}`,
+        playerUrl: `${APP_BASE_URL}/og/player/${id}`,
       };
     } else {
       // Image or text post — still use the preview page
