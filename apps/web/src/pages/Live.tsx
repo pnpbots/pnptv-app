@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
-import Cal, { getCalApi } from "@calcom/embed-react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Card, Skeleton, Button } from "@pnptv/ui-kit";
@@ -34,68 +33,10 @@ import {
   type TokenPurchase,
 } from "@/lib/api";
 
-// ── PerformerCard ─────────────────────────────────────────────────────────────
-// Extracted so each card can track its own image loading state independently.
-interface PerformerCardProps {
-  p: FeaturedPerformer;
-  isLive: boolean;
-  watchUrl: string | null;
-  onWatch: () => void;
-  watchLabel: string;
-  profileLabel: string;
-  featuredLabel: string;
-}
 
-function PerformerCard({ p, isLive, watchUrl, onWatch, watchLabel, profileLabel, featuredLabel }: PerformerCardProps) {
-  const [imgLoaded, setImgLoaded] = useState(false);
-
-  return (
-    <div
-      className={`rounded-xl border bg-pnp-surface p-3 flex flex-col items-center text-center ${isLive ? "border-red-500/50 ring-1 ring-red-500/20" : "border-pnp-border"}`}
-    >
-      <div className="relative">
-        {/* Skeleton shown until the image fires onLoad */}
-        {!imgLoaded && (
-          <div className="w-20 h-20 rounded-full mb-2 bg-pnp-surfaceHover animate-pulse" aria-hidden="true" />
-        )}
-        <img
-          src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
-          alt={p.displayName}
-          className={`w-20 h-20 rounded-full object-cover mb-2 border-2 ${isLive ? "border-red-500" : "border-pnp-border"} ${imgLoaded ? "block" : "hidden"}`}
-          onLoad={() => setImgLoaded(true)}
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = "/default-performer.svg";
-            setImgLoaded(true);
-          }}
-        />
-        {isLive && (
-          <span className="absolute -top-1 -right-1 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-            LIVE
-          </span>
-        )}
-      </div>
-      <span className="text-sm font-medium text-pnp-textPrimary truncate max-w-full">{p.displayName}</span>
-      {p.isFeatured && (
-        <span className="text-[10px] mt-0.5 font-semibold" style={{ color: "#5ED1C4" }}>{featuredLabel}</span>
-      )}
-      <button
-        onClick={onWatch}
-        className={`mt-2 w-full py-1.5 rounded-lg font-semibold text-xs active:scale-95 transition-all ${
-          isLive
-            ? "text-white bg-red-500 hover:bg-red-600"
-            : "text-pnp-textPrimary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40"
-        }`}
-      >
-        {isLive ? watchLabel : profileLabel}
-      </button>
-    </div>
-  );
-}
-
-const CALCOM_URL = import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app";
-if (!CALCOM_URL.startsWith("https://")) {
-  throw new Error(`Invalid CALCOM_URL: must start with https:// (got: ${CALCOM_URL})`);
+if (false) {
+  // Cal.com booking removed — kept as dead code guard to avoid import errors
+  console.warn("unused");
 }
 
 const ALLOWED_IMAGE_HOSTS = ["cms.pnptv.app", "app.pnptv.app", "pnptv.app"];
@@ -121,7 +62,6 @@ export default function Live() {
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("live");
   const canCreateLive = isAuthenticated && (user?.role === "model" || user?.role === "creator" || user?.role === "admin" || user?.role === "superadmin");
   const [showCreateEvent, setShowCreateEvent] = useState(false);
-  const [liveEventsKey, setLiveEventsKey] = useState(0);
   const [liveEvents, setLiveEvents] = useState<EventItem[]>([]);
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
 
@@ -129,13 +69,13 @@ export default function Live() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const CATEGORIES = [
     { id: "all", label: "All" },
-    { id: "tagChat", label: t.live.tagChat || "Chat" },
-    { id: "tagMusic", label: t.live.tagMusic || "Music" },
-    { id: "tagGaming", label: t.live.tagGaming || "Gaming" },
-    { id: "tagCooking", label: t.live.tagCooking || "Cooking" },
-    { id: "tagFitness", label: t.live.tagFitness || "Fitness" },
-    { id: "tagArt", label: t.live.tagArt || "Art" },
-    { id: "tagOther", label: t.live.tagOther || "Other" },
+    { id: "clouds", label: t.live.tagClouds || "Clouds" },
+    { id: "slamming", label: t.live.tagSlamming || "Slamming" },
+    { id: "kinks", label: t.live.tagKinks || "Kinks" },
+    { id: "chill", label: t.live.tagChill || "Chill" },
+    { id: "party", label: t.live.tagParty || "Party" },
+    { id: "hookups", label: t.live.tagHookups || "Hookups" },
+    { id: "after-hours", label: t.live.tagAfterHours || "After Hours" },
   ];
 
   // Casting application
@@ -166,9 +106,8 @@ export default function Live() {
   const [walletHistoryLoading, setWalletHistoryLoading] = useState(false);
 
   // Booking
-  const [showBooking, setShowBooking] = useState(false);
-  const [bookingLoaded, setBookingLoaded] = useState(false);
-  const [bookingError, setBookingError] = useState<string | null>(null);
+  const [showBooking] = useState(false);
+  const [bookingLoaded] = useState(false);
 
   // Socket (null stream — connected only for wallet push events)
   const {
@@ -202,6 +141,8 @@ export default function Live() {
       .catch(() => {});
   }, []);
 
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     setPerformersLoading(true);
     setLoadError(false);
@@ -216,14 +157,37 @@ export default function Live() {
     }).finally(() => setPerformersLoading(false));
     loadLiveEvents();
 
-    // Refresh streams periodically
-    const interval = setInterval(() => {
+    // Refresh streams periodically, paused when tab is hidden
+    intervalRef.current = setInterval(() => {
       fetchStreams()
         .then((merged) => setLiveStreams(merged as LiveStream[]))
         .catch(() => {});
     }, 30000);
-    return () => clearInterval(interval);
-  }, [fetchStreams]);
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (intervalRef.current !== null) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      } else {
+        fetchStreams()
+          .then((merged) => setLiveStreams(merged as LiveStream[]))
+          .catch(() => {});
+        intervalRef.current = setInterval(() => {
+          fetchStreams()
+            .then((merged) => setLiveStreams(merged as LiveStream[]))
+            .catch(() => {});
+        }, 30000);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      if (intervalRef.current !== null) clearInterval(intervalRef.current);
+    };
+  }, [fetchStreams, loadLiveEvents]);
 
   // Load wallet balance + packages when authenticated
   useEffect(() => {
@@ -255,15 +219,6 @@ export default function Live() {
     if (!isAuthenticated) return;
     getCastingStatus().then(setCastingStatus).catch(() => {});
   }, [isAuthenticated]);
-
-  // Booking iframe timeout — show error if still not loaded after 15 seconds.
-  // The effect re-runs when bookingLoaded flips true; the cleanup cancels the
-  // pending timer, so setBookingError is never called on a successful load.
-  useEffect(() => {
-    if (!showBooking || bookingLoaded) return;
-    const timer = setTimeout(() => setBookingError(t.live.failedToLoadStreams ?? "The booking calendar failed to load. Please try again."), 15000);
-    return () => clearTimeout(timer);
-  }, [showBooking, bookingLoaded, t.live]);
 
   const handleBuyTokens = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
@@ -467,10 +422,10 @@ export default function Live() {
       {showTutorial && <TutorialOverlay section="live" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-lg font-bold text-pnp-textPrimary">{t.live.liveTitle}</h1>
-          <p className="text-xs text-pnp-textSecondary mt-0.5">{t.live.liveSubtitle}</p>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.live.liveTitle}</h1>
+          <p className="text-sm mt-1 text-pnp-textSecondary">{t.live.liveSubtitle}</p>
         </div>
       </div>
 
@@ -620,13 +575,6 @@ export default function Live() {
       ) : performers.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
           {performers
-            .filter((p) => {
-              if (selectedCategory === "all") return true;
-              const stream = findLiveStream(p);
-              // If live, filter by stream tags. If offline, performers don't have persistent categories in this view yet.
-              // For now, we show all performers in 'all' and only filtered live ones in category tabs.
-              return stream?.tags?.includes(selectedCategory);
-            })
             .map((p) => {
             // Use the backend-supplied isLive flag first (set when the performer
             // is actively streaming via Restreamer). Fall back to matching by name
@@ -717,7 +665,7 @@ export default function Live() {
                   className="rounded-xl border border-red-500/50 ring-1 ring-red-500/20 bg-pnp-surface p-3 flex flex-col items-center text-center"
                 >
                   <div className="relative">
-                    {s.thumbnailUrl ? (
+                    {isValidPhotoUrl(s.thumbnailUrl) ? (
                       <img
                         src={s.thumbnailUrl}
                         alt={s.name}
@@ -815,88 +763,6 @@ export default function Live() {
         </div>
       )}
 
-      {/* Book a Session */}
-      <div className="mt-4">
-        <button
-          onClick={() => isAuthenticated && setShowBooking(!showBooking)}
-          className="w-full flex items-center justify-between py-3 border-t border-white/5"
-        >
-          <div className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            <span className="text-sm font-medium text-pnp-textPrimary">{t.live.bookAPrivateSession}</span>
-          </div>
-          <svg className={`w-4 h-4 text-pnp-textSecondary transition-transform ${showBooking ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {!isAuthenticated ? (
-          <div className="mt-2 flex items-center gap-3 p-4 rounded-xl border border-pnp-border bg-pnp-surface">
-            <svg className="w-5 h-5 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-pnp-textPrimary">Sign in to book a session</p>
-              <p className="text-xs text-pnp-textSecondary mt-0.5">You must be logged in to book a private session with a performer.</p>
-            </div>
-            <button
-              onClick={login}
-              className="flex-shrink-0 px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-semibold"
-            >
-              Sign in
-            </button>
-          </div>
-        ) : showBooking && (
-          <div className="mt-2">
-            <div className="flex gap-2 mb-3">
-              <Button variant="secondary" size="sm" onClick={() => window.open(CALCOM_URL, "_blank")}>
-                {t.live.openFullCalendar}
-              </Button>
-            </div>
-            {bookingError ? (
-              <div className="flex flex-col items-center gap-3 p-6 rounded-xl border border-pnp-error/20 bg-pnp-error/10">
-                <svg className="w-8 h-8 text-pnp-error flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <p className="text-sm text-pnp-error text-center">{bookingError}</p>
-                <button
-                  onClick={() => {
-                    setBookingError(null);
-                    setBookingLoaded(false);
-                  }}
-                  className="px-4 py-2 rounded-lg btn-gradient text-white text-xs font-semibold"
-                >
-                  {t.live.retryLoading}
-                </button>
-              </div>
-            ) : (
-              <div className="embed-frame overflow-hidden" style={{ minHeight: "500px" }}>
-                <Cal
-                  calLink="pnptv/private-session"
-                  config={{ theme: "dark" }}
-                  calOrigin={CALCOM_URL}
-                  embedJsUrl={`${CALCOM_URL}/embed/embed.js`}
-                  style={{ width: "100%", height: "100%", minHeight: "500px" }}
-                />
-              </div>
-            )}
-            {!bookingError && (
-              <Card className="mt-3">
-                <div className="flex items-start gap-3">
-                  <svg className="w-4 h-4 text-pnp-accent flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <p className="text-xs text-pnp-textSecondary">
-                    {t.live.sessionTimezoneNote}
-                  </p>
-                </div>
-              </Card>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* Buy Tokens Modal */}
       <BuyTokensModal
@@ -953,7 +819,6 @@ export default function Live() {
           onClose={() => setShowCreateEvent(false)}
           onCreated={(_event: EventItem) => {
             setShowCreateEvent(false);
-            setLiveEventsKey((k) => k + 1);
             loadLiveEvents();
           }}
         />

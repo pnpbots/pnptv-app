@@ -12,8 +12,9 @@ import {
   AudioTrack,
   VideoTrack,
   RoomAudioRenderer,
+  useConnectionQualityIndicator,
 } from "@livekit/components-react";
-import { Track, RoomEvent, Participant } from "livekit-client";
+import { Track, RoomEvent, Participant, ConnectionQuality } from "livekit-client";
 import {
   getFeaturedPrimeVideos,
   getAssetUrl,
@@ -620,6 +621,85 @@ function StageRoom({
   );
 }
 
+// ─── Reconnect Handler (attaches listeners via room context) ─────────────────
+
+function ReconnectHandler({
+  onReconnecting,
+  onReconnected,
+}: {
+  onReconnecting: () => void;
+  onReconnected: () => void;
+}) {
+  const room = useRoomContext();
+  useEffect(() => {
+    if (!room) return;
+    const handleReconnecting = () => { onReconnecting(); };
+    const handleReconnected = () => { onReconnected(); };
+    room.on(RoomEvent.Reconnecting, handleReconnecting);
+    room.on(RoomEvent.Reconnected, handleReconnected);
+    return () => {
+      room.off(RoomEvent.Reconnecting, handleReconnecting);
+      room.off(RoomEvent.Reconnected, handleReconnected);
+    };
+  }, [room, onReconnecting, onReconnected]);
+  return null;
+}
+
+// ─── Connection Quality Pill ─────────────────────────────────────────────────
+
+function ConnectionQualityPill() {
+  const { quality } = useConnectionQualityIndicator();
+
+  const label =
+    quality === ConnectionQuality.Excellent ? "Excellent" :
+    quality === ConnectionQuality.Good ? "Good" :
+    quality === ConnectionQuality.Poor ? "Poor" :
+    quality === ConnectionQuality.Lost ? "Lost" : null;
+
+  const color =
+    quality === ConnectionQuality.Excellent ? "text-green-400 bg-green-400/15 border-green-400/30" :
+    quality === ConnectionQuality.Good ? "text-yellow-400 bg-yellow-400/15 border-yellow-400/30" :
+    quality === ConnectionQuality.Poor ? "text-orange-400 bg-orange-400/15 border-orange-400/30" :
+    quality === ConnectionQuality.Lost ? "text-red-400 bg-red-400/15 border-red-400/30" : null;
+
+  if (!label || !color) return null;
+
+  return (
+    <>
+      {/* Screen-reader live region for quality changes */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        Connection quality: {label}
+      </div>
+      <div
+        className={`absolute top-3 right-3 z-20 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${color}`}
+        aria-hidden="true"
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+        {label}
+      </div>
+    </>
+  );
+}
+
+// ─── JWT expiry helper ───────────────────────────────────────────────────────
+
+function decodeJwtExp(token: string): number | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof decoded.exp === "number" ? decoded.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+function isTokenNearExpiry(token: string, thresholdSeconds = 300): boolean {
+  const exp = decodeJwtExp(token);
+  if (exp === null) return false;
+  return exp - Math.floor(Date.now() / 1000) < thresholdSeconds;
+}
+
 // ─── Stage Mode Badge ────────────────────────────────────────────────────────
 
 function StageBadge({ mode }: { mode: string }) {
@@ -673,7 +753,30 @@ export default function MainStage() {
   // inCall = user has actively joined as publisher; token presence = ambient listener connected
   const [inCall, setInCall] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
   const autoConnectedRef = useRef(false);
+
+  // Token refresh on reconnect: re-fetch if token is near expiry
+  const handleReconnecting = useCallback(async () => {
+    setReconnecting(true);
+    if (!mainGroup?.id || !callToken) return;
+    if (isTokenNearExpiry(callToken)) {
+      try {
+        let result;
+        try {
+          result = await joinHangoutCall(mainGroup.id);
+        } catch {
+          result = await startHangoutCall(mainGroup.id);
+        }
+        setCallToken(result.token);
+        setCallRoomName(result.roomName);
+        setCallLivekitUrl(result.livekitUrl || "wss://livekit.pnptv.app");
+      } catch {
+        // Reconnect will proceed with existing token
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mainGroup?.id, callToken]);
 
   // Knock
   const [knockStatus, setKnockStatus] = useState<"idle" | "pending" | "approved" | "denied">("idle");
@@ -934,10 +1037,35 @@ export default function MainStage() {
             connect={true}
             audio={false}
             video={false}
+            options={{
+              adaptiveStream: true,
+              dynacast: true,
+              publishDefaults: {
+                simulcast: true,
+                videoCodec: "vp9",
+              },
+            }}
             onDisconnected={handleLeave}
             style={{ display: "contents" }}
           >
+            <ReconnectHandler
+              onReconnecting={handleReconnecting}
+              onReconnected={() => setReconnecting(false)}
+            />
             <RoomAudioRenderer />
+            {/* Reconnecting overlay */}
+            {reconnecting && (
+              <div
+                className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-black/70 backdrop-blur-sm"
+                aria-live="assertive"
+                aria-label="Reconnecting to stage"
+              >
+                <div className="w-8 h-8 border-2 border-pnp-accent/40 border-t-pnp-accent rounded-full animate-spin" />
+                <span className="text-white text-sm font-medium">Reconnecting...</span>
+              </div>
+            )}
+            {/* Connection quality indicator */}
+            <ConnectionQualityPill />
             <StageRoom
               onLeave={handleLeave}
               stageMode={stageMode}

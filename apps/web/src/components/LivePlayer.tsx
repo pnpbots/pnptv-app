@@ -40,7 +40,7 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
+        lowLatencyMode: false,
         // Retry faster on live streams to handle brief RTMP reconnects
         manifestLoadingMaxRetry: 6,
         manifestLoadingRetryDelay: 2000,
@@ -164,6 +164,69 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
+  // Recover from iOS Safari background stalls when tab becomes visible again
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      const video = videoRef.current;
+      if (!video) return;
+      if (hlsRef.current) {
+        hlsRef.current.startLoad();
+        video.play().catch(() => {});
+      } else if (video.src) {
+        // Native Safari HLS path
+        video.load();
+        video.play().catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
+  // MediaSession API — lock-screen metadata + play/pause controls on mobile.
+  // Without this, iOS/Android show no metadata when the stream plays in the
+  // background and users cannot pause from the notification shade.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    const artworkUrl = poster || "/logo.png";
+    try {
+      navigator.mediaSession.metadata = new window.MediaMetadata({
+        title: title || "PNPtv Live",
+        artist: "PNPtv!",
+        album: "Live Stream",
+        artwork: [
+          { src: artworkUrl, sizes: "512x512", type: "image/png" },
+        ],
+      });
+      navigator.mediaSession.setActionHandler("play", () => {
+        video.play().catch(() => {});
+      });
+      navigator.mediaSession.setActionHandler("pause", () => {
+        video.pause();
+      });
+      // Live streams have no seek / skip semantics — explicitly clear them.
+      navigator.mediaSession.setActionHandler("seekbackward", null);
+      navigator.mediaSession.setActionHandler("seekforward", null);
+      navigator.mediaSession.setActionHandler("previoustrack", null);
+      navigator.mediaSession.setActionHandler("nexttrack", null);
+    } catch {
+      // MediaMetadata constructor not available — silently degrade.
+    }
+
+    return () => {
+      try {
+        navigator.mediaSession.metadata = null;
+        navigator.mediaSession.setActionHandler("play", null);
+        navigator.mediaSession.setActionHandler("pause", null);
+      } catch {
+        // no-op
+      }
+    };
+  }, [title, poster]);
+
   const handleRetry = () => {
     const video = videoRef.current;
     if (!video || !src) return;
@@ -202,6 +265,34 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
     );
   }
 
+  if (status === "error") {
+    return (
+      <div className={`relative aspect-video overflow-hidden rounded-xl bg-pnp-surface border border-pnp-border flex items-center justify-center ${className}`}>
+        <div className="text-center px-4">
+          <svg className="w-16 h-16 text-pnp-error mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
+          <p className="text-pnp-textSecondary font-medium">{t.live.streamOffline}</p>
+          <p className="text-sm text-pnp-textSecondary/60 mt-1">{t.live.checkBackLater}</p>
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <button
+              onClick={handleRetry}
+              className="px-4 py-2 rounded-lg text-xs font-semibold text-white btn-gradient"
+            >
+              {t.live.retryLoading}
+            </button>
+            <a
+              href="/live"
+              className="px-4 py-2 rounded-lg text-xs font-semibold text-pnp-textSecondary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40 transition-colors"
+            >
+              {t.live.backToLive}
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (status === "offline") {
     return (
       <div className={`relative aspect-video overflow-hidden rounded-xl bg-pnp-surface border border-pnp-border flex items-center justify-center ${className}`}>
@@ -216,13 +307,13 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
               onClick={handleRetry}
               className="px-4 py-2 rounded-lg text-xs font-semibold text-white btn-gradient"
             >
-              Retry
+              {t.live.retryLoading}
             </button>
             <a
               href="/live"
               className="px-4 py-2 rounded-lg text-xs font-semibold text-pnp-textSecondary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40 transition-colors"
             >
-              Back to Live
+              {t.live.backToLive}
             </a>
           </div>
         </div>
@@ -250,18 +341,14 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
       {status === "live" && isMuted && (
         <button
           onClick={handleUnmute}
-          className="absolute inset-0 z-20 flex items-center justify-center bg-black/20 group hover:bg-black/40 transition-colors"
-          aria-label="Unmute"
+          className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-4 py-2 rounded-full bg-black/80 backdrop-blur-sm border border-white/20 hover:bg-black/90 active:scale-95 transition-all"
+          aria-label="Unmute video"
         >
-          <div className="flex flex-col items-center gap-3 bg-black/60 backdrop-blur-md px-6 py-4 rounded-2xl border border-white/10 transform transition-transform group-hover:scale-105">
-            <div className="w-12 h-12 rounded-full bg-pnp-accent flex items-center justify-center shadow-lg shadow-pnp-accent/20">
-              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-              </svg>
-            </div>
-            <p className="text-white text-xs font-bold uppercase tracking-wider">Tap to Unmute</p>
-          </div>
+          <svg className="w-4 h-4 text-white flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+          </svg>
+          <span className="text-white text-xs font-bold uppercase tracking-wider">Tap to Unmute</span>
         </button>
       )}
       {status === "live" && (

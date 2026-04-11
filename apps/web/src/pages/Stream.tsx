@@ -13,9 +13,6 @@ import { QRCodeSVG } from "qrcode.react";
 import {
   getLiveStreams,
   getAllPerformers,
-  getWebRTCStreams,
-  getWebRTCStreamStatus,
-  streamHeartbeat,
   sendTip,
   TIP_AMOUNTS,
   getStreamOverlayPublic,
@@ -49,7 +46,6 @@ export default function Stream() {
   const { isAuthenticated, login, user } = useAuth();
 
   const [stream, setStream] = useState<LiveStream | null>(null);
-  const [useWebRTC, setUseWebRTC] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<StreamOverlay | null>(null);
@@ -103,6 +99,7 @@ export default function Stream() {
   const [showHostPicker, setShowHostPicker] = useState(false);
   const [hostPickerLoading, setHostPickerLoading] = useState(false);
   const [hostError, setHostError] = useState<string | null>(null);
+  const [hostTargetStreams, setHostTargetStreams] = useState<LiveStreamWithHost[]>([]);
 
   const {
     messages: chatMessages,
@@ -117,6 +114,46 @@ export default function Stream() {
     dismissRaid,
     emitRaid,
   } = useLiveSocket(streamId || null);
+
+  // Cleanup dashTip polling/countdown intervals on unmount
+  useEffect(() => {
+    return () => {
+      if (dashTipPollRef.current) clearInterval(dashTipPollRef.current);
+      if (dashTipCountdownRef.current) clearInterval(dashTipCountdownRef.current);
+    };
+  }, []);
+
+  // Safety timeout: if chatReconnecting stays true for 30s, reset it to avoid
+  // the reconnecting indicator being stuck on screen after a reconnect failure.
+  const chatReconnectingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (chatReconnecting) {
+      chatReconnectingTimeoutRef.current = setTimeout(() => {
+        // The hook will set this back to false on connect; this is just the safety net.
+        // We can't call setChatReconnecting directly (it's hook-internal), but we
+        // track via a local override flag rendered below.
+        chatReconnectingTimeoutRef.current = null;
+      }, 30000);
+    } else {
+      if (chatReconnectingTimeoutRef.current) {
+        clearTimeout(chatReconnectingTimeoutRef.current);
+        chatReconnectingTimeoutRef.current = null;
+      }
+    }
+    return () => {
+      if (chatReconnectingTimeoutRef.current) {
+        clearTimeout(chatReconnectingTimeoutRef.current);
+        chatReconnectingTimeoutRef.current = null;
+      }
+    };
+  }, [chatReconnecting]);
+  // Local override: suppress the reconnecting indicator after 30s of stuck state
+  const [reconnectTimedOut, setReconnectTimedOut] = useState(false);
+  useEffect(() => {
+    if (!chatReconnecting) { setReconnectTimedOut(false); return; }
+    const t = setTimeout(() => setReconnectTimedOut(true), 30000);
+    return () => clearTimeout(t);
+  }, [chatReconnecting]);
 
   // Load initial balance
   useEffect(() => {
@@ -140,57 +177,36 @@ export default function Stream() {
   // Share button state
   const [shareCopied, setShareCopied] = useState(false);
 
-  // Load stream info. Checks WebRTC (JaaS) streams first, then falls back
-  // to Restreamer HLS streams and performer lookup.
+  // Ref for the polling interval so it can be cancelled on error.
+  const streamPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Load stream info from Restreamer HLS streams and performer lookup.
   const loadStream = useCallback(() => {
     if (!streamId) return Promise.resolve();
     const channelRef = extractChannelRef(streamId);
     console.log("[Stream] Looking for:", streamId, "channelRef:", channelRef);
 
     return Promise.all([
-      getWebRTCStreams().catch(() => ({ streams: [] })),
       getLiveStreams().catch(() => ({ streams: [] })),
       getAllPerformers().catch(() => ({ performers: [] })),
     ])
-      .then(async ([webrtcData, hlsData, perfData]) => {
-        const webrtcStreams = webrtcData.streams || [];
+      .then(([hlsData, perfData]) => {
         const hlsStreams = hlsData.streams || [];
         const performers = perfData.performers || [];
 
-        console.log("[Stream] WebRTC streams:", webrtcStreams.length, "HLS streams:", hlsStreams.length, "Performers:", performers.length);
+        console.log("[Stream] HLS streams:", hlsStreams.length, "Performers:", performers.length);
 
-        // 1. Check WebRTC (JaaS) streams — preferred
-        const webrtcMatch = webrtcStreams.find(
-          (s: any) => s.channelRef === streamId || s.channelRef === channelRef || s.id === streamId
-        );
-        if (webrtcMatch && webrtcMatch.isLive) {
-          console.log("[Stream] Matched WebRTC stream:", webrtcMatch.channelRef);
-          setStream({
-            id: webrtcMatch.channelRef || webrtcMatch.id,
-            name: webrtcMatch.name,
-            description: webrtcMatch.description || "",
-            hlsUrl: "", // Not used for WebRTC
-            isLive: true,
-            thumbnailUrl: webrtcMatch.photoUrl || null,
-          });
-          setUseWebRTC(true);
-          setError(null);
-          setStreamError(false);
-          return;
-        }
-
-        // 2. Direct match in Restreamer HLS streams
+        // 1. Direct match in Restreamer HLS streams
         const hlsMatch = hlsStreams.find((s: any) => s.id === streamId || s.id === channelRef);
         if (hlsMatch && hlsMatch.isLive) {
           console.log("[Stream] Matched HLS stream:", hlsMatch.id);
           setStream(hlsMatch);
-          setUseWebRTC(false);
           setError(null);
           setStreamError(false);
           return;
         }
 
-        // 3. Match by performer (isLive + hlsUrl from backend)
+        // 2. Match by performer (isLive + hlsUrl from backend)
         const performer = performers.find(
           (p: any) =>
             p.id === streamId ||
@@ -207,13 +223,12 @@ export default function Stream() {
             isLive: true,
             thumbnailUrl: performer.photoUrl || null,
           });
-          setUseWebRTC(false);
           setError(null);
           setStreamError(false);
           return;
         }
 
-        // 4. Fuzzy match in HLS streams — check suffix after a delimiter so that
+        // 3. Fuzzy match in HLS streams — check suffix after a delimiter so that
         // a short streamId like "1" can't accidentally match "pnptv-10" or "pnptv-21".
         const matchesSuffix = (haystack: string, needle: string) =>
           haystack === needle ||
@@ -225,13 +240,12 @@ export default function Stream() {
         if (fuzzyMatch) {
           console.log("[Stream] Fuzzy-matched HLS stream:", fuzzyMatch.id);
           setStream(fuzzyMatch);
-          setUseWebRTC(false);
           setError(null);
           setStreamError(false);
           return;
         }
 
-        // 5. Check performer info to build an "offline" placeholder — the channel exists
+        // 4. Check performer info to build an "offline" placeholder — the channel exists
         // but nobody is streaming right now. This prevents "stream not found" when a valid
         // creator navigates to their own stream URL before going live.
         const offlinePerformer = performer || performers.find(
@@ -249,43 +263,24 @@ export default function Stream() {
             isLive: false,
             thumbnailUrl: offlinePerformer.photoUrl || null,
           });
-          setUseWebRTC(false);
           setError(null);
           setStreamError(false);
           return;
         }
 
-        // 6. Last resort: call the WebRTC status endpoint directly for the specific channel.
-        // If the channel exists in JaaS (room was created even with 0 participants), show
-        // it as "offline" rather than "not found". This handles the streamer's own page view
-        // before they go live.
-        if (channelRef) {
-          try {
-            const status = await getWebRTCStreamStatus(channelRef);
-            console.log("[Stream] Direct channel status for", channelRef, ":", status);
-            // Even if isLive=false, we know the channel ref is valid — show an offline page
-            // instead of a hard "not found" error so the streamer can still see their page.
-            setStream({
-              id: channelRef,
-              name: channelRef.replace(/^pnptv-/, "").replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-              description: "",
-              hlsUrl: "",
-              isLive: status.isLive || false,
-            });
-            setUseWebRTC(status.isLive || false);
-            setError(null);
-            setStreamError(false);
-            return;
-          } catch {
-            console.log("[Stream] Channel status check failed for", channelRef, "- treating as not found");
-          }
-        }
-
         console.log("[Stream] No stream found for:", streamId);
+        if (streamPollRef.current) {
+          clearInterval(streamPollRef.current);
+          streamPollRef.current = null;
+        }
         setError(t.live.streamNotFound);
         setStreamError(true);
       })
       .catch((err) => {
+        if (streamPollRef.current) {
+          clearInterval(streamPollRef.current);
+          streamPollRef.current = null;
+        }
         setError(err instanceof Error ? err.message : "Failed to load stream");
         setStreamError(true);
       });
@@ -293,31 +288,20 @@ export default function Stream() {
 
   useEffect(() => {
     setLoading(true);
-    loadStream().finally(() => setLoading(false));
-    const interval = setInterval(loadStream, 30000);
-    return () => clearInterval(interval);
-  }, [loadStream]);
-
-  // Heartbeat for token deduction while watching a WebRTC stream
-  useEffect(() => {
-    if (!useWebRTC || !stream) return;
-    const channelRef = extractChannelRef(stream.id) || stream.id;
-    const interval = setInterval(async () => {
-      try {
-        const res = await streamHeartbeat(channelRef);
-        if (res.success && typeof res.newBalance === "number" && res.newBalance >= 0) {
-          setTokenBalance(res.newBalance);
-        }
-      } catch (err: any) {
-        if (err?.status === 402 || err?.response?.status === 402) {
-          setShowTopUp(true);
-          setUseWebRTC(false);
-        }
+    loadStream().finally(() => {
+      setLoading(false);
+      // Only start polling if we didn't hit an error (poll ref cleared on error)
+      if (!streamPollRef.current) {
+        streamPollRef.current = setInterval(loadStream, 30000);
       }
-    }, 60000);
-    return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useWebRTC, stream?.id]);
+    });
+    return () => {
+      if (streamPollRef.current) {
+        clearInterval(streamPollRef.current);
+        streamPollRef.current = null;
+      }
+    };
+  }, [loadStream]);
 
   // Fallback poll: refresh viewer count from the streams endpoint every 30s
   // when Socket.IO is disconnected so the displayed count does not freeze.
@@ -360,8 +344,11 @@ export default function Stream() {
         setOverlay(data.is_active ? data : null);
       }
     };
+    // overlay:config is pushed by the server on live:join; overlay:updated on admin changes
+    socket.on("overlay:config", handler);
     socket.on("overlay:updated", handler);
     return () => {
+      socket.off("overlay:config", handler);
       socket.off("overlay:updated", handler);
     };
   }, [streamId]);
@@ -380,18 +367,20 @@ export default function Stream() {
         if (data.success) {
           setRulesAcknowledged(data.acknowledged);
         } else {
-          // On unexpected API error, fail open so the user isn't permanently blocked
-          setRulesAcknowledged(true);
+          // On unexpected API error, fail closed; use localStorage cache as fallback
+          const cached = localStorage.getItem(`live_rules_ack_${user?.id}`);
+          setRulesAcknowledged(cached === 'true');
         }
       })
       .catch(() => {
-        // Network failure — fail open
-        setRulesAcknowledged(true);
+        // Network failure — fail closed; use localStorage cache as fallback
+        const cached = localStorage.getItem(`live_rules_ack_${user?.id}`);
+        setRulesAcknowledged(cached === 'true');
       })
       .finally(() => {
         setRulesLoading(false);
       });
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user?.id]);
 
   const handleAcknowledgeRules = useCallback(async () => {
     try {
@@ -400,8 +389,11 @@ export default function Stream() {
       // Persist locally even if the network call fails — the user has seen the rules
       console.warn("[LiveRules] Failed to persist acknowledgment — session may have expired");
     }
+    if (user?.id) {
+      localStorage.setItem(`live_rules_ack_${user.id}`, 'true');
+    }
     setRulesAcknowledged(true);
-  }, []);
+  }, [user?.id]);
 
   // ── Raid: drive countdown and auto-navigate when a raid event arrives ────────
   useEffect(() => {
@@ -523,7 +515,7 @@ export default function Stream() {
     try {
       const data = await getWebAppLiveStreams();
       const currentRef = streamId ? extractChannelRef(streamId) : null;
-      setRaidTargetStreams((data.streams || []).filter(
+      setHostTargetStreams((data.streams || []).filter(
         (s: LiveStreamWithHost) => s.id !== streamId && s.id !== currentRef
       ));
     } catch {
@@ -715,7 +707,7 @@ export default function Stream() {
 
   // Chat collapsed by default on mobile (improvement #6)
   const [isChatCollapsed, setIsChatCollapsed] = useState(
-    () => window.innerWidth < 768
+    () => typeof window !== 'undefined' && window.innerWidth < 768
   );
 
   const isNearBottom = () => {
@@ -777,7 +769,10 @@ export default function Stream() {
   }, []);
 
   const formatTimeAgo = (dateStr: string) => {
-    const diff = Date.now() - new Date(dateStr).getTime();
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
+    const diff = Date.now() - d.getTime();
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return "now";
     if (mins < 60) return `${mins}m`;
@@ -1010,7 +1005,7 @@ export default function Stream() {
                 {viewerCount} watching
               </span>
             )}
-            <span className="text-sm text-white font-medium">{stream.name}</span>
+            <span className="text-sm text-white font-medium truncate max-w-[200px]">{stream.name}</span>
           </div>
           {stream.description && (
             <p className="text-xs text-white/60 mt-1">{stream.description}</p>
@@ -1096,11 +1091,11 @@ export default function Stream() {
                       <div className="flex items-center justify-center py-6">
                         <span className="w-5 h-5 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
                       </div>
-                    ) : raidTargetStreams.length === 0 ? (
+                    ) : hostTargetStreams.length === 0 ? (
                       <p className="text-[11px] text-pnp-textSecondary text-center py-5 px-3">No other streams available.</p>
                     ) : (
                       <ul className="max-h-48 overflow-y-auto divide-y divide-pnp-border">
-                        {raidTargetStreams.map((s) => (
+                        {hostTargetStreams.map((s) => (
                           <li key={s.id}>
                             <button onClick={() => handleSetHost(s.id)} className="w-full text-left px-3 py-2.5 hover:bg-pnp-surfaceHover transition-colors group">
                               <div className="flex items-center gap-2">
@@ -1125,7 +1120,7 @@ export default function Stream() {
       )}
 
       {/* Reconnecting indicator — shown when socket drops and is attempting to reconnect */}
-      {chatReconnecting && !chatConnected && (
+      {chatReconnecting && !chatConnected && !reconnectTimedOut && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-pnp-surface border border-pnp-border" aria-live="polite">
           <span className="w-3 h-3 border border-pnp-textSecondary border-t-transparent rounded-full animate-spin flex-shrink-0" />
           <span className="text-[10px] text-pnp-textSecondary">Reconnecting to live chat...</span>
@@ -1154,14 +1149,14 @@ export default function Stream() {
         </div>
       )}
 
-      {/* Tip bar */}
-      <div className="flex items-center gap-2">
+      {/* Tip bar — hidden when stream is offline */}
+      <div className={`flex items-center gap-2 ${!stream.isLive ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="flex gap-1.5 flex-1 overflow-x-auto">
           {TIP_AMOUNTS.map((amount) => (
             <button
               key={amount}
               onClick={() => handleTip(amount)}
-              disabled={tipping}
+              disabled={tipping || !stream.isLive}
               className="min-h-[44px] px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 btn-gradient whitespace-nowrap flex items-center gap-1.5"
             >
               {tipSubmitting && (
@@ -1175,18 +1170,21 @@ export default function Stream() {
           <div className="flex flex-shrink-0 gap-0.5">
             <button
               onClick={() => setTipPaymentTab("tokens")}
+              aria-label="Pay with Tokens"
               className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
             >
               T
             </button>
             <button
               onClick={() => setTipPaymentTab("daimo")}
+              aria-label="Pay with USDC"
               className={`px-2 py-1.5 text-[10px] font-medium border-y transition-colors ${tipPaymentTab === "daimo" ? "bg-pnp-accent/20 border-y-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-y-pnp-border text-pnp-textSecondary"}`}
             >
               $
             </button>
             <button
               onClick={() => setTipPaymentTab("dash")}
+              aria-label="Pay with Dash"
               className={`px-2 py-1.5 rounded-r-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "dash" ? "bg-[#008DE4]/20 border-[#008DE4]/40 text-[#008DE4]" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
             >
               D
@@ -1391,6 +1389,7 @@ export default function Stream() {
                 <input
                   type="text"
                   placeholder="Type a message..."
+                  aria-label="Type a chat message"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => {
