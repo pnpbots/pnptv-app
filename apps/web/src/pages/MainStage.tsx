@@ -11,8 +11,14 @@ import {
   useParticipants,
   AudioTrack,
   VideoTrack,
+  RoomAudioRenderer,
 } from "@livekit/components-react";
 import { Track, RoomEvent, Participant } from "livekit-client";
+import {
+  getFeaturedPrimeVideos,
+  getAssetUrl,
+  type PrimeVideo,
+} from "@/lib/directus";
 
 import {
   getCommunityRoomOccupancy,
@@ -21,7 +27,6 @@ import {
   knockToSpeak,
   approveKnock,
   denyKnock,
-  clipMoment,
   getHangoutGroups,
   startHangoutCall,
   joinHangoutCall,
@@ -32,6 +37,10 @@ import {
 } from "@/lib/api";
 import { UpcomingEvents } from "@/components/events";
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type StageLayout = "video" | "spotlight" | "grid";
+
 // ─── Inline LiveKit Stage Room ──────────────────────────────────────────────
 
 interface StageRoomProps {
@@ -40,9 +49,29 @@ interface StageRoomProps {
   isAdmin: boolean;
   isPrime: boolean;
   isMember: boolean;
+  inCall: boolean;
+  onGoOnStage: () => void;
+  layout: StageLayout;
+  onLayoutChange: (l: StageLayout) => void;
+  primeVideos: PrimeVideo[];
+  nowPlaying: NowPlaying | null;
+  wellnessTip: string;
 }
 
-function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoomProps) {
+function StageRoom({
+  onLeave,
+  stageMode,
+  isAdmin,
+  isPrime,
+  isMember,
+  inCall,
+  onGoOnStage,
+  layout,
+  onLayoutChange,
+  primeVideos,
+  nowPlaying,
+  wellnessTip,
+}: StageRoomProps) {
   const room = useRoomContext();
   const participants = useParticipants();
   const allTracks = useTracks(
@@ -55,12 +84,15 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
   );
   const userVideoTracks = videoTracks.filter((t) => t.participant.identity !== "cristina-ai");
 
-  const [muted, setMuted] = useState(true);
-  const [camOff, setCamOff] = useState(false);
+  // Mic is permanently muted, cam is permanently on when publishing — no toggles
+  const muted = true;
+  const camOff = false;
   const [connected, setConnected] = useState(false);
   const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [showTapOverlay, setShowTapOverlay] = useState(false);
+  const [videoIdx, setVideoIdx] = useState(0);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
 
@@ -74,7 +106,9 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
     if (!room) return;
     const onConnected = () => {
       setConnected(true);
-      room.localParticipant.setMicrophoneEnabled(false);
+      // Listener-only on auto-connect: ensure mic+cam are off
+      room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+      room.localParticipant.setCameraEnabled(false).catch(() => {});
     };
     const onDisconnected = () => setConnected(false);
     const onActiveSpeaker = (speakers: Participant[]) => {
@@ -91,6 +125,19 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
       room.off(RoomEvent.ActiveSpeakersChanged, onActiveSpeaker);
     };
   }, [room]);
+
+  // Autoplay unlock detection — show overlay if browser suspends AudioContext
+  useEffect(() => {
+    if (!connected) return;
+    try {
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AudioContextClass();
+      if (ctx.state === "suspended") setShowTapOverlay(true);
+      ctx.close().catch(() => {});
+    } catch {
+      // AudioContext not supported — no overlay needed
+    }
+  }, [connected]);
 
   // Fullscreen detection
   useEffect(() => {
@@ -117,20 +164,21 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
     else setControlsVisible(true);
   }, [isFullscreen, resetControlsTimer]);
 
-  const toggleMute = async () => {
-    try { await room.localParticipant.setMicrophoneEnabled(muted); setMuted(!muted); } catch {}
-  };
-  const toggleCam = async () => {
-    try { await room.localParticipant.setCameraEnabled(camOff); setCamOff(!camOff); } catch {}
-  };
+  // Enforce: mic always muted; cam on when publishing, off otherwise
+  useEffect(() => {
+    if (!room || !connected) return;
+    room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+    const camOn = inCall && (isAdmin || isPrime);
+    room.localParticipant.setCameraEnabled(camOn).catch(() => {});
+  }, [room, connected, inCall, isAdmin, isPrime]);
   const toggleFullscreen = useCallback(async () => {
     const el = stageRef.current;
     if (!el) return;
     try {
       if (!document.fullscreenElement) {
-        await (el.requestFullscreen?.() || (el as any).webkitRequestFullscreen?.());
+        await (el.requestFullscreen?.() || (el as unknown as { webkitRequestFullscreen: () => Promise<void> }).webkitRequestFullscreen?.());
       } else {
-        await (document.exitFullscreen?.() || (document as any).webkitExitFullscreen?.());
+        await (document.exitFullscreen?.() || (document as unknown as { webkitExitFullscreen: () => Promise<void> }).webkitExitFullscreen?.());
       }
     } catch {}
   }, []);
@@ -142,7 +190,108 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
     return !pub || pub.isMuted;
   };
 
-  const canPublish = isAdmin || isPrime;
+  const canPublish = inCall && (isAdmin || isPrime);
+
+  // ── CMS video background state ──
+  const currentVideoSrc = primeVideos.length > 0
+    ? getAssetUrl(primeVideos[videoIdx % primeVideos.length]?.video_file || null) ?? undefined
+    : undefined;
+  // CMS video is the always-on background for the stage. Spotlight/grid layouts cover it with
+  // webcam tiles; "video" layout shows it through with webcams as an overlay strip. DJ-live mode
+  // hides it entirely so live video takes full priority.
+  const showVideoBackground = stageMode !== "dj-live" && !!currentVideoSrc;
+
+  // Shared tile renderer — used by all layouts
+  const renderTile = (trackRef: typeof userVideoTracks[0], isActive: boolean) => (
+    <div key={trackRef.publication.trackSid} className={`relative w-full h-full rounded-xl overflow-hidden bg-pnp-surface ${isActive ? "ring-2 ring-pnp-accent" : "ring-1 ring-white/10"}`}>
+      <VideoTrack trackRef={trackRef} className="w-full h-full object-cover" />
+      <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-black/60 backdrop-blur-sm">
+        {isMicMuted(trackRef.participant.identity) && (
+          <svg className="w-2.5 h-2.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+          </svg>
+        )}
+        <span className="text-white text-[9px] font-medium truncate max-w-[72px]">
+          {trackRef.participant.isLocal ? "You" : (trackRef.participant.name || trackRef.participant.identity)}
+        </span>
+      </div>
+    </div>
+  );
+
+  // ── Layout-specific video grid ──
+  const renderVideoGrid = () => {
+    const activeTracks = activeSpeakerId
+      ? [...userVideoTracks].sort((a, b) =>
+          a.participant.identity === activeSpeakerId ? -1 :
+          b.participant.identity === activeSpeakerId ? 1 : 0
+        )
+      : userVideoTracks;
+
+    // ── "video" mode — CMS video is the focus; webcams sit as thumbs at the bottom ──
+    if (layout === "video") {
+      if (activeTracks.length === 0) return null; // nothing to overlay
+      return (
+        <div className="absolute inset-x-0 bottom-12 z-[15] px-2 pointer-events-none">
+          <div className="flex gap-1.5 overflow-x-auto scrollbar-none pointer-events-auto">
+            {activeTracks.map((trackRef) => (
+              <div key={trackRef.publication.trackSid} className="shrink-0 w-28 h-20 sm:w-36 sm:h-24">
+                {renderTile(trackRef, trackRef.participant.identity === activeSpeakerId)}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── "spotlight" mode — focus on other webcammers ──
+    // Primary slot = first non-local active speaker; local user sits in the strip
+    if (layout === "spotlight") {
+      const remoteTracks = activeTracks.filter((t) => !t.participant.isLocal);
+      const localTracks = activeTracks.filter((t) => t.participant.isLocal);
+      if (activeTracks.length === 0) return null;
+      if (remoteTracks.length === 0) {
+        // No remotes yet — show local large so user isn't staring at a void
+        return (
+          <div className="w-full h-full p-1">
+            {renderTile(localTracks[0]!, false)}
+          </div>
+        );
+      }
+      const [primary, ...rest] = remoteTracks;
+      const strip = [...rest, ...localTracks];
+      return (
+        <div className="w-full h-full flex flex-col gap-1 p-1">
+          <div className="flex-1 min-h-0 relative">
+            {renderTile(primary, primary.participant.identity === activeSpeakerId)}
+          </div>
+          {strip.length > 0 && (
+            <div className="h-20 sm:h-24 flex gap-1 overflow-x-auto scrollbar-none shrink-0">
+              {strip.map((t) => (
+                <div key={t.publication.trackSid} className="shrink-0 w-28 sm:w-32 aspect-video">
+                  {renderTile(t, t.participant.identity === activeSpeakerId)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── "grid" mode — equal for everyone ──
+    if (activeTracks.length === 0) return null;
+    return (
+      <div className={`w-full h-full grid gap-1 p-1 ${
+        activeTracks.length === 1 ? "grid-cols-1" :
+        activeTracks.length <= 4 ? "grid-cols-2" :
+        "grid-cols-3"
+      }`}>
+        {activeTracks.map((trackRef) =>
+          renderTile(trackRef, trackRef.participant.identity === activeSpeakerId)
+        )}
+      </div>
+    );
+  };
 
   if (!connected) {
     return (
@@ -162,8 +311,53 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
       onMouseMove={isFullscreen ? resetControlsTimer : undefined}
       onTouchStart={isFullscreen ? resetControlsTimer : undefined}
     >
-      {/* ── Video Grid ────────────────────────────────────────────────── */}
+      {/* ── Tap-to-enable-sound overlay ───────────────────────────────── */}
+      {showTapOverlay && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm rounded-2xl">
+          <button
+            onClick={() => {
+              setShowTapOverlay(false);
+              // Resume AudioContext via user gesture
+              try {
+                const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+                const ctx = new AudioContextClass();
+                ctx.resume().then(() => ctx.close()).catch(() => {});
+              } catch {}
+            }}
+            className="flex flex-col items-center gap-3 px-8 py-5 rounded-2xl bg-white/10 border border-white/20 text-white transition-all active:scale-95"
+          >
+            <svg className="w-10 h-10 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+            </svg>
+            <span className="text-sm font-semibold">Tap to enable sound</span>
+            <span className="text-xs text-white/50">Browser blocked autoplay</span>
+          </button>
+        </div>
+      )}
+
+      {/* ── Video area ───────────────────────────────────────────────── */}
       <div className={`relative w-full bg-black overflow-hidden ${isFullscreen ? "flex-1" : "aspect-video rounded-2xl"}`}>
+
+        {/* CMS video background (audio-only state, not dj-live) */}
+        {showVideoBackground && (
+          <video
+            key={currentVideoSrc}
+            className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none"
+            src={currentVideoSrc}
+            autoPlay
+            muted
+            playsInline
+            preload="auto"
+            loop={primeVideos.length === 1}
+            controls={false}
+            controlsList="nodownload"
+            onEnded={() => setVideoIdx((i) => (i + 1) % Math.max(1, primeVideos.length))}
+            onError={() => setVideoIdx((i) => (i + 1) % Math.max(1, primeVideos.length))}
+            onContextMenu={(e) => e.preventDefault()}
+            style={{ zIndex: 0 }}
+          />
+        )}
+
         {/* Mode badge overlay */}
         <div className="absolute top-3 left-3 z-20">
           <StageBadge mode={stageMode} />
@@ -175,41 +369,65 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
           <span className="text-white text-xs font-semibold">{totalInRoom} in room</span>
         </div>
 
+        {/* Layout switcher — always visible, three modes: Video / Spotlight / Grid */}
+        <div className="absolute bottom-16 right-3 z-[35] flex items-center gap-0.5 px-1.5 py-1.5 rounded-full bg-black/60 backdrop-blur-sm border border-white/10">
+          {(["video", "spotlight", "grid"] as StageLayout[]).map((l) => {
+            const labels: Record<StageLayout, string> = {
+              video: "Video focus",
+              spotlight: "Spotlight a webcammer",
+              grid: "Equal grid",
+            };
+            return (
+              <button
+                key={l}
+                onClick={() => onLayoutChange(l)}
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90 ${
+                  layout === l ? "bg-pnp-accent/30 text-pnp-accent" : "text-white/50 hover:text-white/80"
+                }`}
+                title={labels[l]}
+                aria-label={labels[l]}
+              >
+                {l === "video" && (
+                  /* Play-in-frame icon: video is the focus */
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <rect x="3" y="5" width="18" height="14" rx="2" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 9.5v5l4-2.5-4-2.5z" fill="currentColor" />
+                  </svg>
+                )}
+                {l === "spotlight" && (
+                  /* Large tile + strip: focus on a webcammer */
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <rect x="3" y="4" width="18" height="11" rx="1.5" />
+                    <rect x="3" y="17" width="5" height="3" rx="0.5" />
+                    <rect x="10" y="17" width="5" height="3" rx="0.5" />
+                    <rect x="17" y="17" width="4" height="3" rx="0.5" />
+                  </svg>
+                )}
+                {l === "grid" && (
+                  /* 2x2 grid: equal for everyone */
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <rect x="3.5" y="3.5" width="7" height="7" rx="1" />
+                    <rect x="13.5" y="3.5" width="7" height="7" rx="1" />
+                    <rect x="3.5" y="13.5" width="7" height="7" rx="1" />
+                    <rect x="13.5" y="13.5" width="7" height="7" rx="1" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
         {userVideoTracks.length > 0 ? (
-          <div className={`w-full h-full grid gap-1 p-1 ${
-            userVideoTracks.length === 1 ? "grid-cols-1" :
-            userVideoTracks.length <= 4 ? "grid-cols-2" :
-            "grid-cols-3"
-          }`}>
-            {userVideoTracks.map((trackRef) => {
-              const isActive = trackRef.participant.identity === activeSpeakerId;
-              return (
-                <div
-                  key={trackRef.publication.trackSid}
-                  className={`relative rounded-xl overflow-hidden bg-pnp-surface ${isActive ? "ring-2 ring-pnp-accent" : ""}`}
-                >
-                  <VideoTrack trackRef={trackRef} className="w-full h-full object-cover" />
-                  <div className="absolute bottom-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-sm">
-                    {isMicMuted(trackRef.participant.identity) && (
-                      <svg className="w-3 h-3 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-                      </svg>
-                    )}
-                    <span className="text-white text-[10px] font-medium truncate max-w-[80px]">
-                      {trackRef.participant.name || trackRef.participant.identity}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="absolute inset-0 z-10">
+            {renderVideoGrid()}
           </div>
         ) : (
-          /* Audio-only state — show participants as bubbles on ambient bg */
+          /* Audio-only state */
           <div
-            className="w-full h-full flex flex-col items-center justify-center"
+            className="relative w-full h-full flex flex-col items-center justify-center z-10"
             style={{
-              background: stageMode === "dj-live"
+              background: showVideoBackground ? "transparent" :
+                stageMode === "dj-live"
                 ? "linear-gradient(135deg, #1C1C1E 0%, #2C0A18 40%, #5C0A28 70%, #1C1C1E 100%)"
                 : stageMode === "community"
                 ? "linear-gradient(135deg, #1C1C1E 0%, #0A2E1A 40%, #0D3D24 70%, #1C1C1E 100%)"
@@ -225,6 +443,20 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
               </div>
               <div className="absolute inset-0 w-16 h-16 rounded-full border border-white/10 animate-ping" style={{ animationDuration: "2s" }} />
             </div>
+
+            {/* Cristina now-playing card — prominent when no video */}
+            {cristina && nowPlaying?.track && (
+              <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-black/40 border border-white/10 backdrop-blur-sm max-w-[220px]">
+                <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-xs font-bold text-white" style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)" }}>C</div>
+                <div className="min-w-0">
+                  <p className="text-[10px] text-white/50 font-medium">Cristina AI</p>
+                  <p className="text-xs text-white/80 font-semibold truncate">{nowPlaying.track.title}</p>
+                </div>
+                <svg className="w-3 h-3 text-pnp-accent shrink-0 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M9 9l10.5-3v12.553a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66A2.25 2.25 0 0019.5 14.803V5.25L9 8.25v7.303a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 12.553V9z" />
+                </svg>
+              </div>
+            )}
 
             {/* Audio-only participant list */}
             {others.length > 0 && (
@@ -256,9 +488,41 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
               </div>
             )}
 
-            {others.length === 0 && (
+            {others.length === 0 && !cristina && (
               <p className="text-white/40 text-sm">Listening to the stage...</p>
             )}
+          </div>
+        )}
+
+        {/* Cristina wellness tip — fullscreen-only overlay (sits above now-playing strip) */}
+        {isFullscreen && wellnessTip && (
+          <div
+            className="absolute left-3 right-3 z-[55] flex items-start gap-2 px-3 py-2 rounded-xl bg-black/60 backdrop-blur-md border border-white/10 transition-opacity duration-300 pointer-events-none"
+            style={{
+              bottom: nowPlaying?.track ? "48px" : "12px",
+              opacity: controlsVisible ? 1 : 0,
+              maxWidth: "560px",
+              marginLeft: "auto",
+              marginRight: "auto",
+            }}
+          >
+            <div className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)" }}>
+              C
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[9px] uppercase tracking-wider text-white/40 font-semibold mb-0.5">Cristina · wellness</div>
+              <p className="text-[12px] text-white/80 leading-snug line-clamp-2">{wellnessTip}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Now Playing strip */}
+        {nowPlaying?.track && (
+          <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center gap-2 px-4 py-2.5 bg-gradient-to-t from-black/80 to-transparent">
+            <svg className="w-3.5 h-3.5 text-pnp-accent shrink-0" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M9 9l10.5-3v12.553a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66A2.25 2.25 0 0019.5 14.803V5.25L9 8.25v7.303a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 12.553V9z" />
+            </svg>
+            <span className="text-white/60 text-[11px] truncate">{nowPlaying.track.title}</span>
           </div>
         )}
       </div>
@@ -273,52 +537,57 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
       {/* ── Controls Bar ──────────────────────────────────────────────── */}
       <div
         className={`flex items-center justify-center gap-3 py-3 px-4 transition-opacity duration-300 ${
-          isFullscreen ? "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent pb-6 pt-10" : ""
+          isFullscreen ? "absolute bottom-0 left-0 right-0 z-[60] bg-gradient-to-t from-black/80 to-transparent pb-6 pt-10" : "relative z-30"
         }`}
         style={{
           opacity: isFullscreen && !controlsVisible ? 0 : 1,
           pointerEvents: isFullscreen && !controlsVisible ? "none" : "auto",
         }}
       >
-        {/* Mic */}
-        {canPublish && (
+        {/* Go On Stage / listener indicator */}
+        {!inCall && (
           <button
-            onClick={toggleMute}
-            className={`w-11 h-11 rounded-full flex items-center justify-center transition-all active:scale-90 ${
-              muted ? "bg-red-500/20 border border-red-500/40 text-red-400" : "bg-white/10 border border-white/20 text-white"
-            }`}
+            onClick={onGoOnStage}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-pnp-accent/20 border border-pnp-accent/40 text-pnp-accent text-xs font-semibold transition-all active:scale-95"
           >
-            {muted ? (
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-            )}
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+            </svg>
+            Go On Stage
           </button>
         )}
 
-        {/* Camera */}
+        {/* Mic — permanently muted, non-interactive */}
         {canPublish && (
-          <button
-            onClick={toggleCam}
-            className={`w-11 h-11 rounded-full flex items-center justify-center transition-all active:scale-90 ${
-              camOff ? "bg-red-500/20 border border-red-500/40 text-red-400" : "bg-white/10 border border-white/20 text-white"
-            }`}
+          <div
+            title="Microphone is disabled on the main stage"
+            aria-label="Microphone permanently muted"
+            className="relative w-11 h-11 rounded-full flex items-center justify-center bg-red-500/20 border border-red-500/40 text-red-400 cursor-not-allowed opacity-80 select-none"
           >
-            {camOff ? (
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            )}
-          </button>
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+            </svg>
+            <svg className="absolute -bottom-0.5 -right-0.5 w-3 h-3 text-white/70 bg-black/60 rounded-full p-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          </div>
+        )}
+
+        {/* Camera — permanently on, non-interactive */}
+        {canPublish && (
+          <div
+            title="Camera is required on the main stage"
+            aria-label="Camera permanently on"
+            className="relative w-11 h-11 rounded-full flex items-center justify-center bg-white/10 border border-white/20 text-white cursor-not-allowed opacity-80 select-none"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            <svg className="absolute -bottom-0.5 -right-0.5 w-3 h-3 text-white/70 bg-black/60 rounded-full p-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          </div>
         )}
 
         {/* Fullscreen */}
@@ -335,15 +604,17 @@ function StageRoom({ onLeave, stageMode, isAdmin, isPrime, isMember }: StageRoom
           </svg>
         </button>
 
-        {/* Leave */}
-        <button
-          onClick={onLeave}
-          className="w-11 h-11 rounded-full flex items-center justify-center bg-red-500/80 text-white transition-all active:scale-90"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-          </svg>
-        </button>
+        {/* Leave (only shown when in full call mode) */}
+        {inCall && (
+          <button
+            onClick={onLeave}
+            className="w-11 h-11 rounded-full flex items-center justify-center bg-red-500/80 text-white transition-all active:scale-90"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -399,8 +670,10 @@ export default function MainStage() {
   const [callToken, setCallToken] = useState<string | null>(null);
   const [callRoomName, setCallRoomName] = useState<string | null>(null);
   const [callLivekitUrl, setCallLivekitUrl] = useState("wss://livekit.pnptv.app");
+  // inCall = user has actively joined as publisher; token presence = ambient listener connected
   const [inCall, setInCall] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
+  const autoConnectedRef = useRef(false);
 
   // Knock
   const [knockStatus, setKnockStatus] = useState<"idle" | "pending" | "approved" | "denied">("idle");
@@ -408,21 +681,36 @@ export default function MainStage() {
   const [knockQueue, setKnockQueue] = useState<Array<{ userId: string; displayName: string }>>([]);
 
   // Clip
-  const [clipCaption, setClipCaption] = useState("");
-  const [clipSending, setClipSending] = useState(false);
 
   // Now playing
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
 
+  // CMS prime videos
+  const [primeVideos, setPrimeVideos] = useState<PrimeVideo[]>([]);
+
+  // Layout — persisted in localStorage
+  const [layout, setLayout] = useState<StageLayout>(() => {
+    try {
+      const saved = localStorage.getItem("mainstage:layout");
+      if (saved === "video" || saved === "spotlight" || saved === "grid") return saved;
+    } catch {}
+    return "video";
+  });
+
+  const handleLayoutChange = useCallback((l: StageLayout) => {
+    setLayout(l);
+    try { localStorage.setItem("mainstage:layout", l); } catch {}
+  }, []);
+
   // Wellness tips
   const wellnessTips = useMemo(() => [
     "Hydrate, baby. Water is free self-care \u2014 your body deserves it right now.",
-    "Check in with yourself: how's your breathing? Take three slow, deep breaths with me.",
-    "You don't have to be productive to deserve rest. Rest is not a reward \u2014 it's a right.",
-    "If you've been sitting a while, stretch those legs. Your future self will thank you.",
+    "Check in with yourself: how\u2019s your breathing? Take three slow, deep breaths with me.",
+    "You don\u2019t have to be productive to deserve rest. Rest is not a reward \u2014 it\u2019s a right.",
+    "If you\u2019ve been sitting a while, stretch those legs. Your future self will thank you.",
     "Reminder: you are enough exactly as you are, right now, in this moment.",
-    "When's the last time you ate something? Nourish that beautiful body.",
-    "It's okay to step away from the screen. The stage will be here when you come back.",
+    "When\u2019s the last time you ate something? Nourish that beautiful body.",
+    "It\u2019s okay to step away from the screen. The stage will be here when you come back.",
     "Set a boundary today \u2014 even a small one. Boundaries are acts of self-love.",
     "Feeling anxious? Name 5 things you can see, 4 you can touch, 3 you can hear.",
     "Your community is here for you. You are not alone in this \u2014 never forget that.",
@@ -431,11 +719,11 @@ export default function MainStage() {
     "Loneliness is temporary. Connection is a phone call, a message, a knock away.",
     "Sunlight does wonders. Even 10 minutes outside can shift your whole mood.",
     "You showed up today \u2014 that counts. Give yourself credit for being here.",
-    "Sleep isn't optional, love. Your brain heals and resets while you rest.",
+    "Sleep isn\u2019t optional, love. Your brain heals and resets while you rest.",
     "Unclench your jaw. Drop your shoulders. You were holding tension \u2014 now let it go.",
-    "Asking for help is brave, not weak. Reach out if you need to \u2014 we've got you.",
+    "Asking for help is brave, not weak. Reach out if you need to \u2014 we\u2019ve got you.",
     "Move your body in a way that feels good \u2014 dance, walk, stretch. No rules, just movement.",
-    "You are worthy of love and connection exactly as you are. Don't let anyone tell you different.",
+    "You are worthy of love and connection exactly as you are. Don\u2019t let anyone tell you different.",
   ], []);
   const [tipIndex, setTipIndex] = useState(() => Math.floor(Math.random() * 20));
   const [tipFading, setTipFading] = useState(false);
@@ -454,7 +742,7 @@ export default function MainStage() {
     return () => clearInterval(interval);
   }, [wellnessTips.length]);
 
-  // Fetch occupancy, stage state, main group, now playing
+  // Fetch occupancy, stage state, main group, now playing, prime videos
   useEffect(() => {
     const fetchOccupancy = () => {
       getCommunityRoomOccupancy()
@@ -485,8 +773,40 @@ export default function MainStage() {
     fetchNP();
     const npInterval = setInterval(fetchNP, 15000);
 
+    // CMS prime videos for background
+    getFeaturedPrimeVideos(10).then(setPrimeVideos).catch(() => {});
+
     return () => { clearInterval(occupancyInterval); clearInterval(npInterval); };
   }, []);
+
+  // Auto-connect as ambient listener once mainGroup resolves
+  useEffect(() => {
+    if (!mainGroup?.id || autoConnectedRef.current || !isAuthenticated) return;
+    autoConnectedRef.current = true;
+
+    const autoConnect = async () => {
+      try {
+        let result;
+        try {
+          result = await joinHangoutCall(mainGroup.id);
+        } catch (joinErr: unknown) {
+          const err = joinErr as { status?: number; message?: string };
+          if (err?.status === 404 || err?.message?.includes("404")) {
+            result = await startHangoutCall(mainGroup.id);
+          } else throw joinErr;
+        }
+        setCallToken(result.token);
+        setCallRoomName(result.roomName);
+        setCallLivekitUrl(result.livekitUrl || "wss://livekit.pnptv.app");
+        // Do NOT set inCall = true — user is listener-only until they click "Go On Stage"
+      } catch {
+        // Auto-connect failed — silent fallback to static hero UI
+        autoConnectedRef.current = false;
+      }
+    };
+
+    autoConnect();
+  }, [mainGroup?.id, isAuthenticated]);
 
   // Socket events: hangout call + mainstage
   useEffect(() => {
@@ -495,21 +815,16 @@ export default function MainStage() {
     socket.emit("hangout:join", { groupId: mainGroup.id });
     socket.emit("mainstage:join");
 
-    const onCallStarted = (data: { groupId: number }) => {
-      if (data.groupId !== mainGroup.id) return;
-    };
     const onCallEnded = (data: { groupId: number }) => {
       if (data.groupId !== mainGroup.id) return;
       setInCall(false);
       setCallToken(null);
       setCallRoomName(null);
+      autoConnectedRef.current = false;
     };
 
-    socket.on("hangout:call:started", onCallStarted);
     socket.on("hangout:call:ended", onCallEnded);
-
-    // Stage events
-    socket.on("mainstage:mode-changed", (data: { mode: string; master: any }) => {
+    socket.on("mainstage:mode-changed", (data: { mode: string; master: StageState["master"] }) => {
       setStageState({ mode: data.mode as StageState["mode"], master: data.master });
     });
     socket.on("mainstage:knock:approved", () => setKnockStatus("approved"));
@@ -526,7 +841,6 @@ export default function MainStage() {
     });
 
     return () => {
-      socket.off("hangout:call:started", onCallStarted);
       socket.off("hangout:call:ended", onCallEnded);
       socket.off("mainstage:mode-changed");
       socket.off("mainstage:knock:approved");
@@ -539,17 +853,24 @@ export default function MainStage() {
 
   // ── Handlers ──────────────────────────────────────────────────────
 
-  const handleJoin = async () => {
+  // "Go On Stage" — promote from listener to publisher
+  const handleGoOnStage = async () => {
     if (!user || !mainGroup?.id || loading) return;
+    if (callToken && callRoomName) {
+      // Already connected as listener — just flip inCall flag
+      setInCall(true);
+      return;
+    }
+    // Fallback: obtain token if auto-connect failed
     try {
       setLoading(true);
       setCallError(null);
-      setError("");
       let result;
       try {
         result = await joinHangoutCall(mainGroup.id);
-      } catch (joinErr: any) {
-        if (joinErr?.status === 404 || joinErr?.message?.includes("404")) {
+      } catch (joinErr: unknown) {
+        const err = joinErr as { status?: number; message?: string };
+        if (err?.status === 404 || err?.message?.includes("404")) {
           result = await startHangoutCall(mainGroup.id);
         } else throw joinErr;
       }
@@ -564,6 +885,9 @@ export default function MainStage() {
     }
   };
 
+  // Legacy "Join Call" used by the pre-connect hero card when auto-connect failed
+  const handleJoin = handleGoOnStage;
+
   const handleLeave = () => {
     const socket = getSocket();
     if (socket) {
@@ -575,6 +899,7 @@ export default function MainStage() {
     setCallRoomName(null);
     setKnockStatus("idle");
     setKnockQueue([]);
+    autoConnectedRef.current = false;
     getCommunityRoomOccupancy()
       .then((res) => {
         setOccupancy(res.occupancy?.activeUsers ?? 0);
@@ -591,15 +916,8 @@ export default function MainStage() {
     finally { setKnockSending(false); }
   };
 
-  const handleClipMoment = async () => {
-    if (clipSending || !clipCaption.trim()) return;
-    setClipSending(true);
-    try { await clipMoment(clipCaption.trim()); setClipCaption(""); setError("Moment clipped! Posted to your feed."); setTimeout(() => setError(""), 3000); }
-    catch { setError("Could not clip moment. PRIME required."); setTimeout(() => setError(""), 3000); }
-    finally { setClipSending(false); }
-  };
-
   const stageMode = stageState?.mode || "ambient";
+  const hasLiveKitToken = !!(callToken && callRoomName);
 
   // ── Render ────────────────────────────────────────────────────────
 
@@ -609,26 +927,34 @@ export default function MainStage() {
 
       {/* ─── Stage Area ──────────────────────────────────────────── */}
       <div className="overflow-hidden">
-        {inCall && callToken && callRoomName ? (
+        {hasLiveKitToken ? (
           <LiveKitRoom
-            token={callToken}
+            token={callToken!}
             serverUrl={callLivekitUrl}
             connect={true}
             audio={false}
-            video={true}
+            video={false}
             onDisconnected={handleLeave}
             style={{ display: "contents" }}
           >
+            <RoomAudioRenderer />
             <StageRoom
               onLeave={handleLeave}
               stageMode={stageMode}
               isAdmin={isAdmin}
               isPrime={isPrime}
               isMember={isMember}
+              inCall={inCall}
+              onGoOnStage={handleGoOnStage}
+              layout={layout}
+              onLayoutChange={handleLayoutChange}
+              primeVideos={primeVideos}
+              nowPlaying={nowPlaying}
+              wellnessTip={wellnessTips[tipIndex]}
             />
           </LiveKitRoom>
         ) : (
-          /* ── Pre-join Hero ─────────────────────────────────────── */
+          /* ── Pre-join Hero (shown while auto-connecting or if auth needed) ── */
           <Card className="overflow-hidden">
             <div
               className="relative w-full aspect-video flex flex-col items-center justify-center overflow-hidden"
@@ -661,7 +987,12 @@ export default function MainStage() {
 
               {/* Center content */}
               <div className="relative z-10 flex flex-col items-center gap-3 px-4">
-                {occupancyUsers.length > 0 ? (
+                {isAuthenticated ? (
+                  <div className="flex items-center gap-3 text-pnp-textSecondary">
+                    <div className="w-5 h-5 border-2 border-pnp-accent/40 border-t-pnp-accent rounded-full animate-spin" />
+                    <span className="text-white/60 text-sm">Connecting to stage...</span>
+                  </div>
+                ) : occupancyUsers.length > 0 ? (
                   <>
                     <div className="flex items-center -space-x-3">
                       {occupancyUsers.slice(0, 6).map((u, i) => (
@@ -687,7 +1018,6 @@ export default function MainStage() {
                   </>
                 ) : (
                   <>
-                    {/* Audio rings animation */}
                     <div className="relative">
                       <div className="w-20 h-20 rounded-full flex items-center justify-center bg-white/10 backdrop-blur-sm border border-white/20">
                         <svg className="w-9 h-9 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -720,7 +1050,6 @@ export default function MainStage() {
                   <h1 className="text-lg font-bold text-pnp-textPrimary">Main Stage</h1>
                   <p className="text-pnp-textSecondary text-xs mt-0.5">24/7 community hangout with LiveKit</p>
                 </div>
-                {/* Tier badge */}
                 {isAdmin ? (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-pnp-accent/15 text-pnp-accent text-xs font-semibold">Mod</span>
                 ) : isPrime ? (
@@ -732,7 +1061,6 @@ export default function MainStage() {
                 )}
               </div>
 
-              {/* Capability tags */}
               <div className="flex flex-wrap gap-1.5">
                 {(isAdmin || isPrime) && (
                   <>
@@ -758,18 +1086,9 @@ export default function MainStage() {
                 <p className="text-sm bg-red-950/30 border border-red-900/50 rounded-lg px-3 py-2 text-red-400">{callError}</p>
               )}
 
-              {mainGroup?.hasActiveCall && (
-                <div className="rounded-xl border px-3 py-2.5 text-sm text-white/75" style={{ borderColor: "rgba(100,210,255,0.28)", background: "rgba(100,210,255,0.06)" }}>
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                    <span className="font-semibold text-white text-sm">Live call in progress</span>
-                  </div>
-                </div>
-              )}
-
               {isAuthenticated ? (
                 <Button onClick={handleJoin} disabled={loading} className="w-full">
-                  {loading ? "Connecting..." : mainGroup?.hasActiveCall ? "Join Live Call" : "Start Group Call"}
+                  {loading ? "Connecting..." : "Connect to Stage"}
                 </Button>
               ) : (
                 <p className="text-pnp-textSecondary text-sm text-center py-2">Please log in to join the room.</p>
@@ -800,8 +1119,8 @@ export default function MainStage() {
         </div>
       </div>
 
-      {/* ─── Knock to Speak (in-call, member only) ────────────────── */}
-      {inCall && isMember && !isPrime && !isAdmin && (
+      {/* ─── Knock to Speak (connected, member only) ────────────────── */}
+      {hasLiveKitToken && isMember && !isPrime && !isAdmin && (
         <Card className="p-4 space-y-2">
           {knockStatus === "idle" && (
             <button
@@ -825,33 +1144,6 @@ export default function MainStage() {
           {knockStatus === "denied" && (
             <div className="flex items-center gap-2 py-2 text-red-400 text-sm">Request denied</div>
           )}
-        </Card>
-      )}
-
-      {/* ─── Clip Moment (in-call, PRIME+) ────────────────────────── */}
-      {inCall && (isPrime || isAdmin) && (
-        <Card className="p-4">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={clipCaption}
-              onChange={(e) => setClipCaption(e.target.value)}
-              placeholder="Clip this moment..."
-              maxLength={200}
-              className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-pnp-textSecondary outline-none focus:border-pnp-accent transition-colors"
-              style={{ fontSize: "16px" }}
-              onKeyDown={(e) => { if (e.key === "Enter" && clipCaption.trim()) handleClipMoment(); }}
-            />
-            <button
-              onClick={handleClipMoment}
-              disabled={clipSending || !clipCaption.trim()}
-              className="px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all active:scale-95 disabled:opacity-40 shrink-0"
-              style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)" }}
-            >
-              {clipSending ? "..." : "Clip"}
-            </button>
-          </div>
-          <p className="text-[10px] text-pnp-textSecondary mt-1.5">Post a live moment to the social feed</p>
         </Card>
       )}
 

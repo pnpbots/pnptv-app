@@ -20,6 +20,7 @@
  */
 
 const { Room: LKRoom, LocalAudioTrack, AudioSource, AudioFrame, TrackPublishOptions } = require('@livekit/rtc-node');
+const { AudioEncoding } = require('@livekit/rtc-ffi-bindings');
 const { spawn } = require('child_process');
 const { query } = require('../config/postgres');
 const livekitService = require('./livekitService');
@@ -97,7 +98,7 @@ async function loadPlaylist(mode) {
 async function resolveStreamUrl(soundcloudUrl) {
   return new Promise((resolve) => {
     const proc = spawn('yt-dlp', [
-      '--no-warnings', '-q', '-f', 'bestaudio', '--get-url', soundcloudUrl,
+      '--no-warnings', '-q', '-f', 'bestaudio[abr>=160]/bestaudio', '--get-url', soundcloudUrl,
     ], { timeout: 30_000 });
     let stdout = '';
     proc.stdout.on('data', (d) => { stdout += d.toString(); });
@@ -152,9 +153,13 @@ async function connectAndStream() {
   const audioSource = new AudioSource(SAMPLE_RATE, NUM_CHANNELS);
   const track = LocalAudioTrack.createAudioTrack('cristina-radio', audioSource);
   const publishOptions = new TrackPublishOptions();
-  publishOptions.source = 1; // MICROPHONE
+  publishOptions.source = 2; // MICROPHONE (TrackSource enum: 0=UNKNOWN, 1=CAMERA, 2=MICROPHONE)
+  // Music-quality Opus: 192 kbps stereo, DTX off (no silence gap), RED on (packet-loss resilience)
+  publishOptions.audioEncoding = new AudioEncoding({ maxBitrate: BigInt(192_000) });
+  publishOptions.dtx = false;
+  publishOptions.red = true;
   await room.localParticipant.publishTrack(track, publishOptions);
-  logger.info('[CristinaBot] Audio track published');
+  logger.info('[CristinaBot] Audio track published', { bitrate: '192kbps', dtx: false, red: true });
 
   const modeInterval = setupModeListener();
   try {
@@ -219,16 +224,17 @@ function streamTrack(audioSource, streamUrl) {
       '-reconnect_delay_max', '5',
       '-i', streamUrl,
 
-      // Audio filter chain: normalize → resample → limit
+      // Audio filter chain: gentle normalization → high-quality resample → format guard
+      // Less aggressive than before: louder target (-14 LUFS), more headroom, no hard limiter
+      // (the previous alimiter was coloring transients — Opus handles clipping gracefully on its own).
       '-af', [
-        // EBU R128 loudness normalization — targets -16 LUFS (music standard)
-        // Single-pass mode works in real-time; print_format=none suppresses stats
-        'loudnorm=I=-16:TP=-1.5:LRA=11:print_format=none',
-        // High-quality resampling to target rate
-        `aresample=${SAMPLE_RATE}:resampler=soxr`,
+        // EBU R128 loudness normalization — -14 LUFS (Spotify/YouTube streaming standard)
+        // -1 dB true-peak headroom leaves room for Opus encoder without audible clipping
+        'loudnorm=I=-14:TP=-1:LRA=11:print_format=none',
+        // High-quality resampling to target rate via SoX resampler
+        `aresample=${SAMPLE_RATE}:resampler=soxr:precision=28`,
+        // Lock channel layout & sample format so Opus encoder has stable input
         'aformat=channel_layouts=stereo:sample_fmts=s16:sample_rates=48000',
-        // Hard limiter at -1 dB to prevent any clipping
-        'alimiter=limit=0.89:attack=5:release=50',
       ].join(','),
 
       // Output: raw PCM stereo 48kHz
