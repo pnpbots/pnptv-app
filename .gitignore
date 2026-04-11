@@ -10,3 +10,11 @@ infrastructure/data/
 
 # User-uploaded media (served from disk, not tracked in git)
 public/uploads/
+
+# Build & tooling caches
+.turbo/
+*.tsbuildinfo
+.codex
+
+# Runtime-downloaded binaries
+apps/backend/yt-dlp_linux

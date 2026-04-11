@@ -548,10 +548,15 @@ app.use((req, res, next) => {
 
 // 3DS bank challenge iframes load from bank domains (e.g. jpmorgan.com, bancolombia.com).
 // Override helmet's restrictive CSP for checkout pages so frame-src, connect-src, img-src,
-// and form-action allow any HTTPS origin. script-src stays locked to known payment SDKs.
+// and form-action allow any HTTPS origin. script-src is widened with wildcards covering
+// every ePayco / Cardinal Commerce / payco subdomain because the ePayco SDK loads
+// ephemeral 3DS device-data-collection scripts at runtime from subdomains that are not
+// stable across deploys (e.g. apiflow-*.epayco.co, eks-ms-3ds-*.epayco.io). Listing
+// each subdomain explicitly is brittle — wildcards keep the directive accurate while
+// still constraining script execution to ePayco-controlled hosts.
 const CHECKOUT_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com https://cdn.epayco.co https://multimedia.epayco.co https://checkout.epayco.co https://secure.epayco.co https://secure.payco.co https://api.secure.payco.co https://songbird.cardinalcommerce.com https://songbirdstag.cardinalcommerce.com https://centinelapi.cardinalcommerce.com https://centinelapistag.cardinalcommerce.com https://3ds.epayco.com https://3ds-green.epayco.com https://apiflow.epayco.co https://apiflow-green.epayco.co https://apiflow.epayco.io https://eks-ms-3ds-service.epayco.io",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com https://*.epayco.co https://*.epayco.com https://*.epayco.io https://*.payco.co https://*.cardinalcommerce.com",
   "style-src 'self' 'unsafe-inline' https: https://fonts.googleapis.com",
   "font-src 'self' https: https://fonts.gstatic.com data:",
   "img-src 'self' https: data:",
