@@ -227,6 +227,15 @@ const startApiServer = (modeLabel) => {
   server.listen(PORT, '0.0.0.0', () => {
     const prefix = modeLabel ? `${modeLabel} ` : '';
     logger.info(`✓ ${prefix}API server running on port ${PORT} (Socket.IO attached)`);
+
+    // Reconcile call reminders on startup — restores any setTimeout reminders
+    // that were lost when the container restarted.
+    const callNotificationService = safeRequire('../../services/callNotificationService', {});
+    if (typeof callNotificationService.reconcileReminders === 'function') {
+      callNotificationService.reconcileReminders().catch((err) => {
+        logger.warn('[bot.js] reconcileReminders startup error (non-fatal):', err.message);
+      });
+    }
   });
 
   server.on('error', (error) => {

@@ -201,26 +201,15 @@ async function onCallPaymentSuccess(paymentId) {
     return;
   }
 
-  // Idempotency guard: check if credits were already granted for this payment
-  const existingCredits = await query(
-    'SELECT id FROM call_credits WHERE payment_id = $1',
-    [paymentId]
-  );
-  if (existingCredits.rows.length > 0) {
-    logger.info('[callCheckoutService] onCallPaymentSuccess: credits already granted, skipping', {
-      paymentId,
-      creditId: existingCredits.rows[0].id,
-    });
-    return;
-  }
-
-  // HIGH-05: Grant call credits + update payment status in single transaction
+  // HIGH-05: Grant call credits + update payment status in single transaction.
+  // Idempotency is enforced via ON CONFLICT (payment_id) DO NOTHING inside the
+  // transaction so there is no SELECT-then-INSERT race window.
   const pool = getPool();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Grant call credits within transaction
+    // Grant call credits within transaction — ON CONFLICT handles duplicate webhooks atomically
     const pkgResult = await client.query('SELECT * FROM call_packages WHERE id = $1', [packageId]);
     if (!pkgResult.rows[0]) throw new Error(`Package ${packageId} not found`);
     const { creator_id, quantity } = pkgResult.rows[0];
@@ -229,9 +218,18 @@ async function onCallPaymentSuccess(paymentId) {
       `INSERT INTO call_credits
          (member_id, creator_id, package_id, quantity_total, payment_id)
        VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (payment_id) DO NOTHING
        RETURNING *`,
       [payment.user_id, creator_id, packageId, quantity, paymentId]
     );
+
+    if (creditResult.rows.length === 0) {
+      // Duplicate webhook — credits already granted; commit nothing and return success
+      await client.query('ROLLBACK');
+      logger.info('[callCheckoutService] onCallPaymentSuccess: duplicate webhook — credits already granted, skipping', { paymentId });
+      return;
+    }
+
     const credit = creditResult.rows[0];
 
     // Update payment status to completed
@@ -248,6 +246,24 @@ async function onCallPaymentSuccess(paymentId) {
       packageId,
       creditId: credit.id,
     });
+
+    // Record 70/30 earnings split for the creator
+    try {
+      const pkg = pkgResult.rows[0];
+      const grossAmount = parseFloat(pkg.price_usd);
+      const amountCreator = Math.round(grossAmount * 0.70 * 100) / 100;
+      const amountPlatform = Math.round(grossAmount * 0.30 * 100) / 100;
+      await query(
+        `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, period_month)
+         VALUES ($1, $2, $3, $4, 'available', date_trunc('month', CURRENT_DATE))`,
+        [creator_id, grossAmount, amountCreator, amountPlatform]
+      );
+      logger.info('[callCheckoutService] creator earnings recorded', {
+        creatorId: creator_id, grossAmount, amountCreator, amountPlatform,
+      });
+    } catch (earningsErr) {
+      logger.warn('[callCheckoutService] failed to record creator earnings (non-critical)', { error: earningsErr.message });
+    }
 
     // ── Post-payment notifications (fire-and-forget) ─────────────────────
     // Notify buyer + creator that credits have been granted.

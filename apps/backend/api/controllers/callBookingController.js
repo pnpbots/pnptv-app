@@ -126,16 +126,35 @@ async function getBooking(req, res) {
     const roomName = `booking-${credit.id}`;
     const isModerator = userId === String(credit.creator_id);
     const displayName = (isModerator ? credit.creator_display_name : credit.member_display_name) || userId;
-    const photoUrl = (isModerator ? credit.creator_photo : credit.member_photo) || '';
 
-    let jaasInfo = null;
-    try {
-      const token = await generateToken(roomName, userId, displayName, isModerator);
-      jaasInfo = { token, roomName, livekitUrl: LIVEKIT_WS_URL, meetingUrl: null };
-    } catch (livekitErr) {
-      logger.warn('[callBookingController] LiveKit token generation failed', {
+    // Start-time gate: only issue a token within 15 min before the scheduled call.
+    // If no start_at is set (unscheduled credit), issue the token immediately.
+    const startTimeMs = credit.start_at ? new Date(credit.start_at).getTime() : null;
+    const windowOpenMs = startTimeMs ? startTimeMs - 15 * 60 * 1000 : null;
+    const nowMs = Date.now();
+    const tokenAvailableAt = windowOpenMs ? new Date(windowOpenMs).toISOString() : null;
+    const isWithinWindow = !windowOpenMs || nowMs >= windowOpenMs;
+
+    // nbf = 10 min before start so LiveKit itself rejects early-join attempts
+    const nbf = startTimeMs ? Math.floor((startTimeMs - 10 * 60 * 1000) / 1000) : null;
+
+    let livekitInfo = null;
+    if (isWithinWindow) {
+      try {
+        const token = await generateToken(roomName, userId, displayName, isModerator, { nbf });
+        livekitInfo = { token, roomName, livekitUrl: LIVEKIT_WS_URL };
+      } catch (livekitErr) {
+        logger.warn('[callBookingController] LiveKit token generation failed', {
+          creditId,
+          error: livekitErr.message,
+        });
+      }
+    } else {
+      logger.info('[callBookingController] token withheld — call window not yet open', {
         creditId,
-        error: livekitErr.message,
+        tokenAvailableAt,
+        nowMs,
+        windowOpenMs,
       });
     }
 
@@ -157,9 +176,11 @@ async function getBooking(req, res) {
       member_username: credit.member_username,
       member_display_name: credit.member_display_name,
       member_photo: credit.member_photo,
+      token_available_at: tokenAvailableAt,
     };
 
-    return res.json({ success: true, booking, jaas: jaasInfo });
+    // Response key is `livekit` (renamed from `jaas` — breaking change, frontend updated)
+    return res.json({ success: true, booking, livekit: livekitInfo });
   } catch (err) {
     logger.error('[callBookingController] getBooking error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to retrieve booking' });

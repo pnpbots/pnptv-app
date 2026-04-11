@@ -361,8 +361,46 @@ function scheduleCallReminders(bookingId, creatorId, memberId, startAt, jaasInfo
   }
 }
 
+/**
+ * Re-schedule in-memory reminders for all confirmed future bookings.
+ * Must be called on server startup after the DB is ready so that reminders
+ * lost during container restarts (setTimeout is in-process memory) are restored.
+ */
+async function reconcileReminders() {
+  try {
+    const { rows } = await query(
+      `SELECT b.id AS booking_id,
+              b.user_id    AS member_id,
+              p.user_id    AS creator_id,
+              b.start_time_utc AS start_at
+       FROM bookings b
+       JOIN performers p ON p.id = b.performer_id
+       WHERE b.status IN ('confirmed', 'paid')
+         AND b.start_time_utc > NOW()`
+    );
+
+    let count = 0;
+    for (const row of rows) {
+      try {
+        scheduleCallReminders(row.booking_id, row.creator_id, row.member_id, row.start_at, null);
+        count++;
+      } catch (schedErr) {
+        logger.warn('[callNotificationService] reconcileReminders: failed to schedule reminder', {
+          bookingId: row.booking_id,
+          error: schedErr.message,
+        });
+      }
+    }
+
+    logger.info(`[callNotificationService] Reconciled ${count} pending call reminders on startup`);
+  } catch (err) {
+    logger.error('[callNotificationService] reconcileReminders failed', { error: err.message });
+  }
+}
+
 module.exports = {
   sendBookingConfirmationToMember,
   sendBookingConfirmationToCreator,
   scheduleCallReminders,
+  reconcileReminders,
 };

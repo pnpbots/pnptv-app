@@ -800,8 +800,78 @@ const handlePaymentResponse = async (req, res) => {
   }
 };
 
+// ── LiveKit Webhook ───────────────────────────────────────────────────────────
+// Receives participant_joined, participant_left, room_finished events from LiveKit.
+// Keeps hangout_video_calls.participant_count in sync without relying on manual
+// increment/decrement from REST calls (which drift when clients disconnect abruptly).
+// LiveKit signs the payload with LIVEKIT_API_SECRET; we verify before acting.
+
+const { WebhookReceiver } = require('livekit-server-sdk');
+const { query } = require('../../../config/postgres');
+
+const HANGOUT_ROOM_PREFIX = 'hangout-';
+
+const handleLiveKitWebhook = async (req, res) => {
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+
+  if (!apiKey || !apiSecret) {
+    logger.error('LiveKit webhook: LIVEKIT_API_KEY or LIVEKIT_API_SECRET not set');
+    return res.status(500).end();
+  }
+
+  try {
+    const receiver = new WebhookReceiver(apiKey, apiSecret);
+    // livekit-server-sdk needs the raw body as a string and the Authorization header
+    const rawBody = req.body instanceof Buffer ? req.body.toString('utf8') : JSON.stringify(req.body);
+    const authHeader = req.headers['authorization'] || '';
+    const event = await receiver.receive(rawBody, authHeader);
+
+    const roomName = event.room?.name || '';
+    const eventType = event.event;
+
+    logger.info('LiveKit webhook received', { event: eventType, room: roomName });
+
+    // Only act on hangout rooms (named "hangout-{groupId}")
+    if (roomName.startsWith(HANGOUT_ROOM_PREFIX)) {
+      const groupId = roomName.slice(HANGOUT_ROOM_PREFIX.length);
+
+      if (eventType === 'participant_joined') {
+        await query(
+          `UPDATE hangout_video_calls
+           SET participant_count = participant_count + 1
+           WHERE group_id = $1 AND status = 'active'`,
+          [groupId]
+        );
+      } else if (eventType === 'participant_left') {
+        await query(
+          `UPDATE hangout_video_calls
+           SET participant_count = GREATEST(participant_count - 1, 0)
+           WHERE group_id = $1 AND status = 'active'`,
+          [groupId]
+        );
+      } else if (eventType === 'room_finished') {
+        await query(
+          `UPDATE hangout_video_calls
+           SET status = 'ended', ended_at = NOW(), participant_count = 0
+           WHERE group_id = $1 AND status = 'active' AND is_persistent = false`,
+          [groupId]
+        );
+        logger.info('LiveKit room_finished: hangout call marked ended', { groupId, roomName });
+      }
+    }
+
+    res.status(200).end();
+  } catch (err) {
+    logger.error('LiveKit webhook error', { message: err.message });
+    // Return 200 so LiveKit doesn't keep retrying; signature failures are logged above
+    res.status(200).end();
+  }
+};
+
 module.exports = {
   handleEpaycoWebhook,
   handleDaimoWebhook,
   handlePaymentResponse,
+  handleLiveKitWebhook,
 };
