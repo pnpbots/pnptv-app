@@ -175,6 +175,12 @@ class PaymentService {
       cancelled: 'Cancelada',
       reversada: 'Reversada',
       refunded: 'Reversada',
+      expirada: 'Expirada',
+      expired: 'Expirada',
+      retenida: 'Retenida',
+      held: 'Retenida',
+      iniciada: 'Iniciada',
+      started: 'Iniciada',
     };
 
     return mapping[normalized] || state;
@@ -426,7 +432,7 @@ class PaymentService {
       }
     }
 
-  static async createPayment({ userId, planId, provider, sku, chatId, creatorId }) {
+  static async createPayment({ userId, planId, provider, sku, chatId, creatorId, extraMetadata }) {
     try {
       const plan = await PlanModel.getById(planId);
       if (!plan || !plan.active) {
@@ -459,6 +465,18 @@ class PaymentService {
         }
       }
 
+      // M2: Stamp scope metadata atomically at payment creation so the webhook
+      // handler cannot be tricked into granting the wrong scope. extraMetadata
+      // comes from trusted server-side code paths only (never from user input).
+      // The order here matters: extraMetadata wins over creatorId so an explicit
+      // { channelId, hangoutGroupId } supplied by the channel-purchase route
+      // survives merge without being overwritten.
+      const mergedMetadata = {
+        ...(creatorId ? { creatorId } : {}),
+        ...(extraMetadata && typeof extraMetadata === 'object' ? extraMetadata : {}),
+      };
+      const hasMetadata = Object.keys(mergedMetadata).length > 0;
+
       const payment = await PaymentModel.create({
         userId,
         planId,
@@ -467,7 +485,7 @@ class PaymentService {
         amount: paymentAmount,
         currency: plan.currency || 'USD',
         status: 'pending',
-        metadata: creatorId ? { creatorId } : undefined,
+        metadata: hasMetadata ? mergedMetadata : undefined,
       });
 
       let paymentUrl;
@@ -706,9 +724,23 @@ class PaymentService {
 
   /**
    * Verify ePayco HMAC SHA256 signature from x-signature HTTP header.
-   * Tries two message formats:
-   *   1) HMAC-SHA256(key=pKey, message="custId^ref_payco^transaction_id^amount^currency")
-   *   2) HMAC-SHA256(key=pKey, message="custId^pKey^ref_payco^transaction_id^amount^currency")
+   *
+   * HMAC-SHA256(key=EPAYCO_P_KEY, message="custId^ref_payco^transaction_id^amount^currency")
+   *
+   * NOTE: ePayco's public documentation (docs.epayco.com, the reference
+   * confirmation.php, Magento/PrestaShop plugins) only documents the body
+   * `x_signature` field computed as plain SHA256. An `x-signature` HTTP header
+   * is NOT part of the documented spec as of April 2026. This path exists
+   * for the case where ePayco has provisioned an HMAC header for this merchant
+   * out-of-band; it must never be the only verification method, and it must
+   * never accept a weaker message format. The previous implementation tried a
+   * second format that embedded the secret inside the HMAC message — that is
+   * indefensible cryptographically and has been removed.
+   *
+   * Action item: confirm in writing with ePayco support whether an x-signature
+   * header is actually sent for your merchant account. If not, delete this
+   * method entirely and rely only on verifyEpaycoSignature() (body SHA256).
+   *
    * @param {Object} webhookData - Webhook body
    * @param {string} headerSignature - x-signature header value
    * @returns {{ valid: boolean }}
@@ -741,17 +773,10 @@ class PaymentService {
 
     for (const amountCandidate of amountCandidates) {
       for (const currencyCandidate of currencyCandidates) {
-        // Format 1: HMAC key = secret, message = transaction fields only (no secret in message)
-        const msg1 = `${custId}^${x_ref_payco}^${x_transaction_id}^${amountCandidate}^${currencyCandidate}`;
-        const expected1 = crypto.createHmac('sha256', secretKey).update(msg1).digest('hex');
-        if (PaymentService.safeCompareHex(expected1, signatureValue)) {
-          return { valid: true };
-        }
-
-        // Format 2: Same as body SHA256 format but with HMAC instead of hash
-        const msg2 = `${custId}^${secretKey}^${x_ref_payco}^${x_transaction_id}^${amountCandidate}^${currencyCandidate}`;
-        const expected2 = crypto.createHmac('sha256', secretKey).update(msg2).digest('hex');
-        if (PaymentService.safeCompareHex(expected2, signatureValue)) {
+        // Canonical HMAC message: transaction fields only, never the secret itself.
+        const msg = `${custId}^${x_ref_payco}^${x_transaction_id}^${amountCandidate}^${currencyCandidate}`;
+        const expected = crypto.createHmac('sha256', secretKey).update(msg).digest('hex');
+        if (PaymentService.safeCompareHex(expected, signatureValue)) {
           return { valid: true };
         }
       }
@@ -1667,8 +1692,10 @@ class PaymentService {
         || effectiveState === 'Fallida'
         || effectiveState === 'Abandonada'
         || effectiveState === 'Cancelada'
+        || effectiveState === 'Expirada'
       ) {
-        // Payment failed/cancelled (includes abandoned 3DS authentication)
+        // Payment failed/cancelled/expired (includes abandoned 3DS authentication
+        // and links that expired before the user completed the challenge).
         if (payment) {
           await PaymentModel.updateStatus(paymentIdOrType, 'failed', {
             transaction_id: x_transaction_id,
@@ -1788,32 +1815,50 @@ class PaymentService {
         }
 
         return { success: true };
-      } else if (effectiveState === 'Pendiente') {
-        // Payment pending - waiting for 3DS completion or processing
+      } else if (
+        effectiveState === 'Pendiente'
+        || effectiveState === 'Retenida'
+        || effectiveState === 'Iniciada'
+      ) {
+        // Payment in a non-terminal holding state:
+        //   - Pendiente: waiting for 3DS completion or async authorization
+        //   - Retenida (code 7): flagged by ePayco risk engine, awaiting review
+        //   - Iniciada  (code 8): checkout started but not submitted
+        // In all three we keep the payment row in 'pending' and wait for a
+        // terminal webhook (Aceptada / Rechazada / Fallida / Expirada / Reversada).
         if (payment) {
           await PaymentModel.updateStatus(paymentIdOrType, 'pending', {
             transaction_id: x_transaction_id,
             reference: x_ref_payco,
             epayco_ref: x_ref_payco,
+            epayco_estado: effectiveState,
             webhook_received: new Date().toISOString(),
             still_pending_at_webhook: true,
           });
         }
 
-        logger.warn('ePayco webhook received with Pendiente status - still awaiting completion', {
+        logger.warn('ePayco webhook received in non-terminal holding state', {
           x_ref_payco,
           x_transaction_state: effectiveState,
           userId,
           planId: planIdOrBookingId,
           paymentId: paymentIdOrType,
-          message: 'Payment is still pending. This is normal during 3DS authentication flow.',
+          message: 'Awaiting terminal state webhook. Do NOT activate subscription yet.',
         });
 
         // IMPORTANT: Payment is still pending - do NOT activate subscription yet
-        // Wait for next webhook with 'Aceptada' status from ePayco after 3DS completes
         return { success: true };
       }
 
+      // Unknown state — record it explicitly so an operator can investigate a
+      // new ePayco state code instead of silently returning success and
+      // leaving the payment row stuck in 'pending'.
+      logger.error('ePayco webhook received with unrecognized state — no action taken', {
+        x_ref_payco,
+        x_transaction_state: effectiveState,
+        x_cod_transaction_state: x_cod_transaction_state,
+        paymentId: paymentIdOrType,
+      });
       return { success: true };
     } catch (error) {
       logger.error('Error processing ePayco webhook', error);
@@ -3578,6 +3623,8 @@ class PaymentService {
   static mapEpaycoStateCode(stateCode) {
     if (stateCode === undefined || stateCode === null) return null;
     const code = String(stateCode).trim();
+    // Source of truth: epayco/Plugin_ePayco_PrestaShop/payco/payco.php and
+    // epayco/resources/onePage/confirmation/confirmation.php.
     const mapping = {
       '1': 'Aceptada',
       '2': 'Rechazada',
@@ -3585,7 +3632,11 @@ class PaymentService {
       '4': 'Fallida',
       '5': 'Cancelada',
       '6': 'Reversada',
-      '10': 'Abandonada',
+      '7': 'Retenida',     // Held — payment flagged by risk engine
+      '8': 'Iniciada',     // Started — checkout began but not submitted
+      '9': 'Expirada',     // Expired — 3DS challenge timed out or link expired
+      '10': 'Abandonada',  // Abandoned — user left checkout
+      '11': 'Cancelada',   // Cancelled by user (distinct from code 5)
     };
     return mapping[code] || null;
   }
