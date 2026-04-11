@@ -426,7 +426,7 @@ class PaymentService {
       }
     }
 
-  static async createPayment({ userId, planId, provider, sku, chatId, creatorId }) {
+  static async createPayment({ userId, planId, provider, sku, chatId, creatorId, amountOverride, extraMetadata }) {
     try {
       const plan = await PlanModel.getById(planId);
       if (!plan || !plan.active) {
@@ -436,12 +436,16 @@ class PaymentService {
         throw new Error('El plan seleccionado no existe o está inactivo. | Plan not found');
       }
 
-      // Dynamic pricing for plan templates that need a per-resource price.
-      //   creator_monthly  → users.creator_price_usd  (creatorId = creator user id)
-      //   channel_access   → creator_channels.price_usd (creatorId is overloaded to carry channel id)
-      // For everything else we use the plan's static price as-is.
+      // Resolve payment amount:
+      //   1. If caller supplied amountOverride (route already has the price), honor it.
+      //   2. For plan templates with per-resource pricing, look up the dynamic price:
+      //        creator_monthly → users.creator_price_usd (creatorId = creator user id)
+      //        channel_access  → creator_channels.price_usd (creatorId = channel id)
+      //   3. Otherwise use the plan's static price.
       let paymentAmount = plan.price;
-      if (planId === 'creator_monthly' && creatorId) {
+      if (amountOverride != null && Number(amountOverride) > 0) {
+        paymentAmount = Number(amountOverride);
+      } else if (planId === 'creator_monthly' && creatorId) {
         const creatorRes = await query(
           'SELECT creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
           [creatorId, 'active']
@@ -450,7 +454,6 @@ class PaymentService {
           paymentAmount = parseFloat(creatorRes.rows[0].creator_price_usd);
         }
       } else if (planId === 'channel_access' && creatorId) {
-        // creatorId in this context is the channel id (route-level convention).
         const channelRes = await query(
           'SELECT price_usd FROM creator_channels WHERE id = $1 AND is_active = true',
           [parseInt(creatorId, 10)]
@@ -460,6 +463,13 @@ class PaymentService {
         }
       }
 
+      // Merge creatorId + any caller-supplied scope metadata atomically at insert time.
+      // This closes the TOCTOU window where a webhook could race between INSERT and
+      // a follow-up metadata UPDATE and see an unscoped payment.
+      const initialMetadata = {
+        ...(creatorId ? { creatorId } : {}),
+        ...(extraMetadata && typeof extraMetadata === 'object' ? extraMetadata : {}),
+      };
       const payment = await PaymentModel.create({
         userId,
         planId,
@@ -468,7 +478,7 @@ class PaymentService {
         amount: paymentAmount,
         currency: plan.currency || 'USD',
         status: 'pending',
-        metadata: creatorId ? { creatorId } : undefined,
+        metadata: Object.keys(initialMetadata).length > 0 ? initialMetadata : undefined,
       });
 
       let paymentUrl;

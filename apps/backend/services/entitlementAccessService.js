@@ -131,7 +131,7 @@ class EntitlementAccessService {
         cursor = nextCursor;
         entKeys.push(...keys);
       } while (cursor !== '0');
-      const extraKeys = [`user_label:${userId}`, `tier_check:${userId}`];
+      const extraKeys = [`user_label:${userId}`, `tier_check:${userId}`, `ban:${userId}`];
       const allKeys = [...entKeys, ...extraKeys];
       if (allKeys.length > 0) {
         await redis.del(...allKeys);
@@ -151,12 +151,20 @@ class EntitlementAccessService {
    */
   static async isBanned(userId) {
     if (!userId) return false;
+    const cacheKey = `ban:${userId}`;
     try {
+      const redis = getRedis();
+      const cached = await redis.get(cacheKey);
+      if (cached !== null) return cached === '1';
+
       const { rows } = await query(
         `SELECT 1 FROM users WHERE id = $1 AND tier = 'banned' LIMIT 1`,
         [String(userId)]
       );
-      return rows.length > 0;
+      const banned = rows.length > 0;
+      // Fail-open on Redis set errors — we already have the DB answer.
+      await redis.set(cacheKey, banned ? '1' : '0', 'EX', ENTITLEMENT_CACHE_TTL).catch(() => {});
+      return banned;
     } catch (err) {
       logger.error('EntitlementAccessService.isBanned failed', { userId, error: err.message });
       return false;
@@ -309,7 +317,11 @@ class EntitlementAccessService {
       return { allowed: false, reason: 'unauthenticated', code: 'AUTH_REQUIRED' };
     }
 
-    // 1. banned
+    // isBanned is Redis-cached (120s TTL), so in steady state the cold DB
+    // path runs at most once per user per 2 minutes. We keep this sequential
+    // rather than wrapping in Promise.all because the mock query queue in
+    // tests depends on deterministic call order and the cache already
+    // removes the hot-path DB round trip.
     if (await EntitlementAccessService.isBanned(userId)) {
       return { allowed: false, reason: 'banned', code: 'ACCOUNT_SUSPENDED' };
     }

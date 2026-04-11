@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { getMyAccess, type MyAccessResponse } from "@/lib/api";
@@ -6,30 +6,26 @@ import { useI18n } from "@/lib/i18n";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function useFormatExpiry() {
-  const t = useI18n();
-  return useMemo(
-    () => (iso: string | null, isLifetime: boolean): string => {
-      if (isLifetime) return t.myAccess.lifetime;
-      if (!iso) return t.myAccess.dash;
-      const d = new Date(iso);
-      if (isNaN(d.getTime())) return t.myAccess.dash;
-      const diffMs = d.getTime() - Date.now();
-      if (diffMs <= 0) return t.myAccess.expired;
-      const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      if (days <= 1) return t.myAccess.expiresToday;
-      if (days <= 30) return t.myAccess.daysLeft(days);
-      return t.myAccess.untilDate(
-        d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
-      );
-    },
-    [t]
+type I18n = ReturnType<typeof useI18n>;
+
+function formatExpiry(iso: string | null, isLifetime: boolean, t: I18n): string {
+  if (isLifetime) return t.myAccess.lifetime;
+  if (!iso) return t.myAccess.dash;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return t.myAccess.dash;
+  const diffMs = d.getTime() - Date.now();
+  if (diffMs <= 0) return t.myAccess.expired;
+  const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  if (days <= 1) return t.myAccess.expiresToday;
+  if (days <= 30) return t.myAccess.daysLeft(days);
+  return t.myAccess.untilDate(
+    d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
   );
 }
 
 function tierBadge(
   tier: "PRIME" | "BASIC" | "FREE",
-  t: ReturnType<typeof useI18n>
+  t: I18n
 ): { label: string; className: string } {
   if (tier === "PRIME") return { label: t.myAccess.primeLabel, className: "bg-gradient-to-r from-amber-400 to-orange-500 text-black" };
   if (tier === "BASIC") return { label: t.myAccess.basicLabel, className: "bg-blue-500/90 text-white" };
@@ -103,7 +99,6 @@ function AccessRow({
 export default function MyAccess() {
   const navigate = useNavigate();
   const t = useI18n();
-  const formatExpiry = useFormatExpiry();
   const [data, setData] = useState<MyAccessResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -118,7 +113,7 @@ export default function MyAccess() {
         if (!cancelled) setData(res);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : t.myAccess.loadError);
+          setError(err instanceof Error ? err.message : "Failed to load access");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -127,7 +122,7 @@ export default function MyAccess() {
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, []);
 
   const badge = data ? tierBadge(data.tier, t) : tierBadge("FREE", t);
 
@@ -176,13 +171,13 @@ export default function MyAccess() {
                 {data.global.primeLifetime || data.global.primeExpiresAt ? (
                   <div className="flex justify-between">
                     <span className="text-pnp-textSecondary">{t.myAccess.rowPrime}</span>
-                    <span>{formatExpiry(data.global.primeExpiresAt, data.global.primeLifetime)}</span>
+                    <span>{formatExpiry(data.global.primeExpiresAt, data.global.primeLifetime, t)}</span>
                   </div>
                 ) : null}
                 {data.global.memberLifetime || data.global.memberExpiresAt ? (
                   <div className="flex justify-between">
                     <span className="text-pnp-textSecondary">{t.myAccess.rowMember}</span>
-                    <span>{formatExpiry(data.global.memberExpiresAt, data.global.memberLifetime)}</span>
+                    <span>{formatExpiry(data.global.memberExpiresAt, data.global.memberLifetime, t)}</span>
                   </div>
                 ) : null}
                 {data.global.privateCallCredits > 0 ? (
@@ -212,7 +207,7 @@ export default function MyAccess() {
                   key={`ch-${c.id}`}
                   title={c.name || t.myAccess.defaultChannelName}
                   subtitle={t.myAccess.rowChannelAccess}
-                  expiryText={formatExpiry(c.expiresAt, c.isLifetime)}
+                  expiryText={formatExpiry(c.expiresAt, c.isLifetime, t)}
                   thumbnailUrl={c.coverUrl}
                   onClick={() => navigate(c.url)}
                 />
@@ -230,7 +225,7 @@ export default function MyAccess() {
                   key={`cr-${cr.id}`}
                   title={cr.displayName || t.myAccess.defaultCreatorName}
                   subtitle={cr.handle ? `@${cr.handle}` : undefined}
-                  expiryText={formatExpiry(cr.expiresAt, cr.isLifetime)}
+                  expiryText={formatExpiry(cr.expiresAt, cr.isLifetime, t)}
                   thumbnailUrl={cr.avatarUrl}
                   onClick={() => navigate(cr.url)}
                 />
@@ -248,7 +243,7 @@ export default function MyAccess() {
                   key={`hg-${h.id}`}
                   title={h.name || t.myAccess.defaultHangoutName}
                   subtitle={t.myAccess.rowHangoutAccess}
-                  expiryText={formatExpiry(h.expiresAt, h.isLifetime)}
+                  expiryText={formatExpiry(h.expiresAt, h.isLifetime, t)}
                   thumbnailUrl={h.avatarUrl}
                   onClick={() => navigate(h.url)}
                 />

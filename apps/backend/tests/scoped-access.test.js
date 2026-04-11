@@ -306,7 +306,7 @@ describe('hasResourceAccess — hangout', () => {
       [],                                                      // no prime (global override — hangout path)
       // Hangout kind is_paid=false so PAYMENT_REQUIRED branch is skipped.
       // Delegates to channel kind → recursive hasResourceAccess('channel', 'c-linked').
-      [],                                                      // recursive isBanned
+      // Note: recursive isBanned hits Redis cache (set during the outer call) — no DB query.
       [{ id: 'c-linked', access_type: 'paid', creator_id: 'u-1', price_usd: 10 }], // recursive loadResource channel
       [],                                                      // recursive no channel-access
       [],                                                      // recursive no prime

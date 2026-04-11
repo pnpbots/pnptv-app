@@ -5378,40 +5378,22 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
     return res.status(400).json({ error: 'You already have access to this hangout' });
   }
 
-  // Create a hangout_access payment. The plan is a price-agnostic template;
-  // we override payments.amount below with the hangout's actual price.
+  // Create a hangout_access payment with the actual hangout price and scope
+  // metadata atomically at insert time — no follow-up UPDATE, no TOCTOU window
+  // where a webhook could race and see an unscoped unpriced payment.
+  const hangoutPrice = Number(hangout.price_usd);
   const PaymentService = require('../../services/paymentService');
   const payment = await PaymentService.createPayment({
     userId: user.id,
     planId: 'hangout_access',
     provider,
+    amountOverride: hangoutPrice,
+    extraMetadata: {
+      hangoutGroupId: hangout.id,
+      hangoutName: hangout.name,
+      ...(email ? { email } : {}),
+    },
   });
-
-  // Override amount + stamp metadata for the webhook handler.
-  const hangoutPrice = Number(hangout.price_usd);
-  const usdToCopRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
-  const expectedCOP = String(Math.round(hangoutPrice * usdToCopRate));
-  await getPool().query(
-    `UPDATE payments
-        SET amount = $1,
-            metadata = COALESCE(metadata, '{}'::jsonb)
-                       || $2::jsonb
-                       || jsonb_build_object('expected_epayco_amount', $3, 'expected_epayco_currency', 'COP')
-      WHERE id = $4`,
-    [
-      hangoutPrice,
-      JSON.stringify({ hangoutGroupId: hangout.id, hangoutName: hangout.name }),
-      expectedCOP,
-      payment.id,
-    ]
-  );
-
-  if (email) {
-    await getPool().query(
-      `UPDATE payments SET metadata = metadata || $1::jsonb WHERE id = $2`,
-      [JSON.stringify({ email }), payment.id]
-    );
-  }
 
   return res.json({
     success: true,
@@ -5454,38 +5436,23 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
     return res.status(400).json({ error: 'You already have access to this channel' });
   }
 
-  // Create payment. creatorId is overloaded in createPayment to carry the
-  // channelId so the price lookup in paymentService.createPayment works.
-  // Actual entitlement scoping is driven by the metadata we write below.
+  // Create a channel_access payment. creatorId is overloaded to carry the
+  // channel id so createPayment's dynamic-price branch looks up
+  // creator_channels.price_usd. Scope metadata is stamped atomically via
+  // extraMetadata — no follow-up UPDATE, no TOCTOU window.
   const PaymentService = require('../../services/paymentService');
   const payment = await PaymentService.createPayment({
     userId: user.id,
     planId: 'channel_access',
     provider,
     creatorId: String(channel.id),
+    extraMetadata: {
+      channelId: channel.id,
+      hangoutGroupId: channel.hangout_group_id,
+      channelName: channel.name,
+      ...(email ? { email } : {}),
+    },
   });
-
-  // Store channel metadata on the payment record for webhook processing.
-  // The grantEntitlementsForPlan webhook handler reads paymentMetadata.channelId
-  // (and hangoutGroupId) to scope the channel-access entitlement correctly.
-  await getPool().query(
-    `UPDATE payments SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
-    [
-      JSON.stringify({
-        channelId: channel.id,
-        hangoutGroupId: channel.hangout_group_id,
-        channelName: channel.name,
-      }),
-      payment.id,
-    ]
-  );
-
-  if (email) {
-    await getPool().query(
-      `UPDATE payments SET metadata = metadata || $1::jsonb WHERE id = $2`,
-      [JSON.stringify({ email }), payment.id]
-    );
-  }
 
   return res.json({
     success: true,
