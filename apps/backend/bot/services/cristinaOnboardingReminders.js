@@ -5,7 +5,7 @@ const db = require('../../config/postgres');
 const { getRedis } = require('../../config/redis');
 const sendSystemDM = require('./sendSystemDM');
 
-const CRISTINA_ID = 'pnptv-official';
+const CRISTINA_ID = 'cristina-ai';
 const REDIS_PREFIX = 'cristina:onboard_remind:';
 const REDIS_TTL = 60 * 60 * 24 * 60; // 60 days — don't re-send
 
