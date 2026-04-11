@@ -826,13 +826,13 @@ const startBot = async () => {
 
                 const { rows: ins } = await dbQuery(
                   `INSERT INTO chat_messages (room, user_id, username, first_name, content)
-                   VALUES ($1, 'cristina-system', 'cristina', 'Cristina', $2) RETURNING id, created_at`,
+                   VALUES ($1, 'cristina-ai', 'cristina', 'Cristina', $2) RETURNING id, created_at`,
                   [room, welcomeText]
                 );
                 if (socketIO && ins[0]) {
                   socketIO.to(room).emit('chat:message', {
                     id: ins[0].id, room,
-                    user_id: 'cristina-system', username: 'cristina', first_name: 'Cristina',
+                    user_id: 'cristina-ai', username: 'cristina', first_name: 'Cristina',
                     photo_url: null, content: welcomeText, created_at: ins[0].created_at,
                   });
                 }

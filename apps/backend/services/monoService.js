@@ -73,8 +73,8 @@ TABLE: direct_messages
   is_deleted BOOLEAN, is_read BOOLEAN, created_at TIMESTAMP
 
 TABLE: hangout_groups
-  id SERIAL PK, name VARCHAR, description TEXT, owner_id VARCHAR, privacy ('public'|'private'),
-  icon_url, cover_url, created_at TIMESTAMP
+  id SERIAL PK, name VARCHAR, description TEXT, creator_id VARCHAR, is_public BOOLEAN,
+  avatar_url TEXT, is_paid BOOLEAN, price_usd NUMERIC, channel_id INT, created_at TIMESTAMP
 
 TABLE: hangout_members
   id SERIAL PK, group_id INT, user_id VARCHAR, role ('member'|'moderator'|'owner'), is_banned BOOLEAN

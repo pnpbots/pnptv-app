@@ -1429,7 +1429,7 @@ export default function Nearby() {
                                 <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
                               ) : (
                                 <div className="w-full h-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, #1a3a2a, #2a4a3a)" }}>
-                                  <span className="text-lg">{p.emoji || "📍"}</span>
+                                  <span className="text-lg">{p.categoryEmoji || "📍"}</span>
                                 </div>
                               )}
                               <span className="absolute top-1 left-1 px-1 py-0.5 rounded text-[8px] font-bold text-white bg-amber-600/90">

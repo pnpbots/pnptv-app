@@ -241,7 +241,7 @@ export default function SocialPostCard({
             className="w-10 h-10 rounded-full object-cover ring-2 ring-[#1C1C1E]"
             style={{ background: "#1a1a2e" }}
           />
-        ) : post.user_id === "cristina-ai" ? (
+        ) : post.author_id === "cristina-ai" ? (
           <span className="w-10 h-10 rounded-full flex items-center justify-center text-2xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
         ) : isValidPhotoUrl(post.author_photo) ? (
           <img
@@ -255,7 +255,7 @@ export default function SocialPostCard({
             }}
           />
         ) : null}
-        {!post.is_promoted && post.user_id !== "cristina-ai" && (
+        {!post.is_promoted && post.author_id !== "cristina-ai" && (
           <div
             className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ring-2 ring-[#1C1C1E]"
             style={{
