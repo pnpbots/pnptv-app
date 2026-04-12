@@ -7,6 +7,9 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 
@@ -25,10 +28,27 @@ const mediaUpload = multer({
   },
 });
 
-// Video-only upload for direct channel publishing.
+// Large-video uploads go to disk, not memory. A 2 GB Buffer would blow Node's
+// ~1.7 GB default V8 heap — `multer.diskStorage` streams straight to /tmp and
+// the handler then `fs.createReadStream`s into Directus, so the bot's memory
+// footprint stays flat regardless of file size. Temp files are unlinked by
+// the handler in a finally block (success or failure).
+const CHANNEL_VIDEO_TMP_DIR = '/tmp/pnp-uploads';
+try {
+  fs.mkdirSync(CHANNEL_VIDEO_TMP_DIR, { recursive: true });
+} catch (err) {
+  logger.warn('Could not pre-create channel video temp dir', { dir: CHANNEL_VIDEO_TMP_DIR, err: err.message });
+}
+
 const channelVideoUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, CHANNEL_VIDEO_TMP_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || '') || '';
+      cb(null, `${crypto.randomUUID()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB
   fileFilter: (_req, file, cb) => {
     const allowed = ['video/mp4', 'video/webm', 'video/quicktime'];
     if (allowed.includes(file.mimetype)) cb(null, true);
@@ -106,6 +126,33 @@ async function uploadBufferToCreatorFolder({ pnptvId, buffer, filename, contentT
   const form = new FormData();
   if (folderId) form.append('folder', folderId);
   form.append('file', buffer, { filename, contentType });
+
+  const uploadRes = await axios.post(`${DIRECTUS_URL}/files`, form, {
+    headers: { ...directusHeaders(), ...form.getHeaders() },
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+  });
+  const file = uploadRes.data?.data;
+  return {
+    fileId: file?.id,
+    url: `${DIRECTUS_PUBLIC_URL}/assets/${file?.id}`,
+  };
+}
+
+// Streams an on-disk file into the creator's Directus folder and returns { fileId, url }.
+// Used by the channel-video upload path where the file can be up to 2 GB — streaming
+// keeps the Node process memory flat. Caller is responsible for unlinking `filePath`.
+async function uploadStreamToCreatorFolder({ pnptvId, filePath, filename, contentType, knownLength }) {
+  const folderId = await getOrCreateCreatorFolder(pnptvId);
+  const form = new FormData();
+  if (folderId) form.append('folder', folderId);
+  form.append('file', fs.createReadStream(filePath), {
+    filename,
+    contentType,
+    // knownLength lets form-data compute an accurate Content-Length; without
+    // it axios falls back to chunked encoding which some upstreams reject.
+    knownLength,
+  });
 
   const uploadRes = await axios.post(`${DIRECTUS_URL}/files`, form, {
     headers: { ...directusHeaders(), ...form.getHeaders() },
@@ -486,5 +533,6 @@ module.exports = {
   // Exposed for reuse by the channel-video direct-publish flow.
   getOrCreateCreatorFolder,
   uploadBufferToCreatorFolder,
+  uploadStreamToCreatorFolder,
   channelVideoUpload,
 };

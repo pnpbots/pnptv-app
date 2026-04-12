@@ -4,7 +4,8 @@ const { query, getPool } = require('../../../config/postgres');
 const { hasAccess } = require('../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
 const XAutoCampaignService = require('../../../services/xAutoCampaignService');
-const { uploadBufferToCreatorFolder } = require('./cmsCreatorController');
+const { uploadBufferToCreatorFolder, uploadStreamToCreatorFolder } = require('./cmsCreatorController');
+const fs = require('fs');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_GROK_MODES = new Set(['xPost', 'broadcast', 'salesPost']);
@@ -890,6 +891,11 @@ const uploadChannelVideo = async (req, res) => {
   const channelId = parseInt(req.params.id, 10);
   if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
 
+  // Multer wrote the upload to disk (see channelVideoUpload in cmsCreatorController).
+  // We must unlink the temp file on every exit path — success, error, or early return —
+  // otherwise /tmp fills up with orphaned 2 GB blobs.
+  const tmpPath = req.file?.path || null;
+
   try {
     if (!req.file) return res.status(400).json({ error: 'No video file provided' });
 
@@ -913,11 +919,12 @@ const uploadChannelVideo = async (req, res) => {
       return res.status(500).json({ error: 'Creator missing pnptv_id — cannot scope CMS folder' });
     }
 
-    const { fileId, url } = await uploadBufferToCreatorFolder({
+    const { fileId, url } = await uploadStreamToCreatorFolder({
       pnptvId: user.pnptv_id,
-      buffer: req.file.buffer,
+      filePath: req.file.path,
       filename: req.file.originalname,
       contentType: req.file.mimetype,
+      knownLength: req.file.size,
     });
 
     if (!fileId || !url) {
@@ -951,6 +958,14 @@ const uploadChannelVideo = async (req, res) => {
   } catch (err) {
     logger.error('uploadChannelVideo error', err?.response?.data || err);
     return res.status(500).json({ error: 'Failed to upload channel video' });
+  } finally {
+    if (tmpPath) {
+      fs.promises.unlink(tmpPath).catch((err) => {
+        if (err.code !== 'ENOENT') {
+          logger.warn('Failed to unlink channel-video temp file', { tmpPath, err: err.message });
+        }
+      });
+    }
   }
 };
 

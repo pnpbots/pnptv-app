@@ -203,8 +203,8 @@ function ChannelDetailView({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !channel) return;
-    if (file.size > 500 * 1024 * 1024) {
-      setVideoError("Video must be under 500 MB");
+    if (file.size > 2 * 1024 * 1024 * 1024) {
+      setVideoError("Video must be under 2 GB");
       return;
     }
     setVideoError(null);
