@@ -3,8 +3,8 @@ const { v4: uuidv4 } = require('uuid');
 const { query } = require('../../../config/postgres');
 const { cache } = require('../../../config/redis');
 const logger = require('../../../utils/logger');
-const SubscriptionService = require('../../services/subscriptionService');
-const { enforceDefaultFollows } = require('../../services/followService');
+const SubscriptionService = require('../../../services/subscriptionService');
+const { enforceDefaultFollows } = require('../../../services/followService');
 
 /**
  * Authentication Controller

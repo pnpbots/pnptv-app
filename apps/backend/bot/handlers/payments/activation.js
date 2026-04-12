@@ -2,15 +2,15 @@ const logger = require('../../../utils/logger');
 const { query } = require('../../../utils/db');
 const { requirePrivateChat } = require('../../utils/notifications');
 const { getLanguage } = require('../../utils/helpers');
-const PermissionService = require('../../services/permissionService');
-const MessageTemplates = require('../../services/messageTemplates');
-const supportRoutingService = require('../../services/supportRoutingService');
+const PermissionService = require('../../../services/permissionService');
+const MessageTemplates = require('../../../services/messageTemplates');
+const supportRoutingService = require('../../../services/supportRoutingService');
 const UserModel = require('../../../models/userModel');
 const { createChatInviteLink } = require('../../utils/telegramAdmin');
-const BusinessNotificationService = require('../../services/businessNotificationService');
+const BusinessNotificationService = require('../../../services/businessNotificationService');
 const PaymentHistoryService = require('../../../services/paymentHistoryService');
 const { cache } = require('../../../config/redis');
-const PlatformBanService = require('../../services/platformBanService');
+const PlatformBanService = require('../../../services/platformBanService');
 
 const PRIME_FALLBACK_LINK = 'https://t.me/PNPTV_PRIME';
 

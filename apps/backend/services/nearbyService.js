@@ -189,7 +189,7 @@ class NearbyService {
 
       // Emit real-time nearby event to grid room
       try {
-        const io = require('../bot/services/socketSingleton').get();
+        const io = require('./socketSingleton').get();
         if (io) {
           const gridLat = Math.floor(roundedLatitude * 10) / 10;
           const gridLng = Math.floor(roundedLongitude * 10) / 10;

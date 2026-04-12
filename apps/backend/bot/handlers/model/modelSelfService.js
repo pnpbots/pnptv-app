@@ -3,7 +3,7 @@
  * Allows models to manage their own profiles, availability, and settings
  */
 
-const ModelService = require('../../services/modelService');
+const ModelService = require('../../../services/modelService');
 const ComprehensiveAvailabilityService = require('../../../services/comprehensiveAvailabilityService');
 const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');

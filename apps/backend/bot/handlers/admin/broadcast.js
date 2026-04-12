@@ -1,8 +1,8 @@
 const { getBroadcastTypeMenu, getConfirmationMenu, getBackButton } = require('../../utils/menus');
 const { getLanguage } = require('../../utils/helpers');
-const adminService = require('../../services/adminService');
+const adminService = require('../../../services/adminService');
 const logger = require('../../../utils/logger');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 
 /**
  * Handle broadcast menu

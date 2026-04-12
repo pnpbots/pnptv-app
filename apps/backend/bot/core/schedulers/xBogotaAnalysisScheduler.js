@@ -15,7 +15,7 @@
 const cron = require('node-cron');
 const db = require('../../../utils/db');
 const logger = require('../../../utils/logger');
-const GrokService = require('../../services/grokService');
+const GrokService = require('../../../services/grokService');
 
 const ANALYSIS_CRON = '0 10 * * *'; // 10:00 AM every day
 const BOGOTA_TZ = 'America/Bogota';

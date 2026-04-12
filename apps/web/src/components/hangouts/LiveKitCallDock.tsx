@@ -1205,5 +1205,5 @@ function LiveKitCallPanel({
   );
 }
 
-export const TelegramCallDock = LiveKitCallPanel;
+export const LiveKitCallDock = LiveKitCallPanel;
 export default LiveKitCallPanel;

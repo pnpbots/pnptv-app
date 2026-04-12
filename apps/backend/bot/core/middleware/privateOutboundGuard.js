@@ -1,5 +1,5 @@
 const logger = require('../../../utils/logger');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 
 function isCrossChatAllowed(ctx) {
   if (ctx?.state?.allowCrossChatSend) return true;

@@ -3,7 +3,7 @@ const PerformerModel = require('../../../models/performerModel');
 const BookingModel = require('../../../models/bookingModel');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 
 /**
  * Private Call Admin Handlers - Admin dashboard for monitoring private calls

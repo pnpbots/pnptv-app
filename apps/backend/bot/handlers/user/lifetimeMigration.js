@@ -1,7 +1,7 @@
 const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');
 const { isValidEmail } = require('../../../utils/validation');
-const supportRoutingService = require('../../services/supportRoutingService');
+const supportRoutingService = require('../../../services/supportRoutingService');
 
 /**
  * Escape special Markdown characters in user-provided text

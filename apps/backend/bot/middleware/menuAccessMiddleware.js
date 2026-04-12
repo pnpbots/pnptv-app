@@ -1,4 +1,4 @@
-const MenuConfigService = require('../services/menuConfigService');
+const MenuConfigService = require('../../services/menuConfigService');
 const logger = require('../../utils/logger');
 const { t } = require('../../utils/i18n');
 

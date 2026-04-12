@@ -1,5 +1,5 @@
 const { Markup } = require('telegraf');
-const CallService = require('../../services/callService');
+const CallService = require('../../../services/callService');
 const logger = require('../../../utils/logger');
 
 /**

@@ -1,10 +1,10 @@
 const { Markup } = require('telegraf');
-const UserService = require('../../services/userService');
-const NearbyPlaceService = require('../../services/nearbyPlaceService');
+const UserService = require('../../../services/userService');
+const NearbyPlaceService = require('../../../services/nearbyPlaceService');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
 const { getLanguage, isPrimeUser, isMemberUser, isAdminUser } = require('../../utils/helpers');
-const FeatureUrlService = require('../../services/featureUrlService');
+const FeatureUrlService = require('../../../services/featureUrlService');
 
 /**
  * Resolve the calling user's Nearby access tier.

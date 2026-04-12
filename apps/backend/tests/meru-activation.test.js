@@ -71,7 +71,7 @@ jest.mock('../models/entitlementModel', () => ({
 }));
 
 const mockInvalidateCache = jest.fn();
-jest.mock('../bot/services/entitlementAccessService', () => ({
+jest.mock('../services/entitlementAccessService', () => ({
   invalidateCache: mockInvalidateCache,
 }));
 
@@ -86,19 +86,19 @@ jest.mock('../bot/handlers/payments/activation', () => ({
   logActivation: jest.fn(async () => {}),
 }));
 
-jest.mock('../bot/services/businessNotificationService', () => ({
+jest.mock('../services/businessNotificationService', () => ({
   notifyCodeActivation: jest.fn(async () => {}),
 }));
 
 const mockSendPaymentConfirmationNotification = jest.fn(async () => {});
-jest.mock('../bot/services/paymentService', () => ({
+jest.mock('../services/paymentService', () => ({
   sendPaymentConfirmationNotification: mockSendPaymentConfirmationNotification,
 }));
 
-jest.mock('../bot/services/invoiceservice', () => ({
+jest.mock('../services/invoiceservice', () => ({
   generateInvoice: jest.fn(async () => ({ buffer: Buffer.from('pdf') })),
 }));
-jest.mock('../bot/services/emailservice', () => ({
+jest.mock('../services/emailservice', () => ({
   sendInvoiceEmail: jest.fn(async () => {}),
   sendWelcomeEmail: jest.fn(async () => {}),
 }));
@@ -134,9 +134,9 @@ function buildApp() {
   const meruLinkService = require('../services/meruLinkService');
   const UserModel = require('../models/userModel');
   const EntitlementModel = require('../models/entitlementModel');
-  const EntitlementAccessService = require('../bot/services/entitlementAccessService');
+  const EntitlementAccessService = require('../services/entitlementAccessService');
   const PaymentHistoryService = require('../services/paymentHistoryService');
-  const PaymentService = require('../bot/services/paymentService');
+  const PaymentService = require('../services/paymentService');
   const { getPool } = require('../config/postgres');
 
   // Replicate the route logic from routes.js

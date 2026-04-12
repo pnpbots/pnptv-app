@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
-const PermissionService = require('../../services/permissionService');
-const XPostService = require('../../services/xPostService');
+const PermissionService = require('../../../services/permissionService');
+const XPostService = require('../../../services/xPostService');
 // XOAuthService removed — OAuth2 connect flow disabled
 const logger = require('../../../utils/logger');
 

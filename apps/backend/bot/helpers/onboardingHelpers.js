@@ -4,7 +4,7 @@ const { isValidEmail } = require('../../utils/validation');
 const logger = require('../../utils/logger');
 const UserModel = require('../../models/userModel');
 const sanitize = require('../../utils/sanitizer');
-const BusinessNotificationService = require('../services/businessNotificationService');
+const BusinessNotificationService = require('../../services/businessNotificationService');
 
 /**
  * Handle language selection

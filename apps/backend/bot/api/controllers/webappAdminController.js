@@ -3,7 +3,7 @@ const { query, getClient } = require('../../../config/postgres');
 const { cache } = require('../../../config/redis');
 const AdminDashboardService = require('../../../services/adminDashboardService');
 const VideoCallModel = require('../../../models/videoCallModel');
-const SocialPostService = require('../../services/socialPostService');
+const SocialPostService = require('../../../services/socialPostService');
 
 // Escape LIKE/ILIKE metacharacters so user input cannot widen search patterns
 const escapeLike = (str) => str.replace(/[%_\\]/g, '\\$&');
@@ -876,7 +876,7 @@ const sendPushNotification = async (req, res) => {
     const doEmail = activeChannels.includes('email');
 
     // ── Push channel ──────────────────────────────────────────────────────────
-    const PushNotificationService = require('../../services/pushNotificationService');
+    const PushNotificationService = require('../../../services/pushNotificationService');
     const pushPayload = { title, body, url };
 
     let sent = 0;
@@ -931,7 +931,7 @@ const sendPushNotification = async (req, res) => {
     // ── Bot DM channel ────────────────────────────────────────────────────────
     let botDmSent = 0;
     if (doBot && targetUsers.length > 0) {
-      const { sendNotificationViaTelegram } = require('../../services/notificationBotDelivery');
+      const { sendNotificationViaTelegram } = require('../../../services/notificationBotDelivery');
       const usersWithTelegram = targetUsers.filter((u) => u.telegram);
 
       // Fire-and-forget: send all DMs concurrently, count fulfilled
@@ -1009,7 +1009,7 @@ const sendPushNotification = async (req, res) => {
       inAppTargetUsers = usersResult.rows;
     }
 
-    const NotificationEmitter = require('../../services/notificationEmitter');
+    const NotificationEmitter = require('../../../services/notificationEmitter');
     const notificationMessage = url ? `${body} — ${url}` : body;
     const broadcastEntityId = `push_${Date.now()}`;
 
@@ -1627,7 +1627,7 @@ const getMyAccess = async (req, res) => {
     const userId = String(req.user?.id ?? req.session?.user?.id ?? '');
     if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
-    const EntitlementAccessService = require('../../services/entitlementAccessService');
+    const EntitlementAccessService = require('../../../services/entitlementAccessService');
     const access = await EntitlementAccessService.getUserResourceAccess(userId);
     return res.json({ success: true, ...access });
   } catch (error) {

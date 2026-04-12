@@ -10,7 +10,7 @@
 const WebSocket = require('ws');
 const logger = require('../../utils/logger');
 const roomWebSocketService = require('../../services/websocket/roomWebSocketService');
-const { resolveTelegramUser } = require('../services/telegramWebAppAuth');
+const { resolveTelegramUser } = require('../../services/telegramWebAppAuth');
 const { getRedis } = require('../../config/redis');
 
 /**

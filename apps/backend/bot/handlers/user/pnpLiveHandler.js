@@ -1,10 +1,10 @@
 const { Markup } = require('telegraf');
-const ModelService = require('../../services/modelService');
-const PNPLiveService = require('../../services/pnpLiveService');
-const PNPLiveMediaService = require('../../services/pnpLiveMediaService');
-const PNPLiveTimeSlotService = require('../../services/pnpLiveTimeSlotService');
-const AvailabilityService = require('../../services/availabilityService');
-const PNPLiveAvailabilityService = require('../../services/pnpLiveAvailabilityService');
+const ModelService = require('../../../services/modelService');
+const PNPLiveService = require('../../../services/pnpLiveService');
+const PNPLiveMediaService = require('../../../services/pnpLiveMediaService');
+const PNPLiveTimeSlotService = require('../../../services/pnpLiveTimeSlotService');
+const AvailabilityService = require('../../../services/availabilityService');
+const PNPLiveAvailabilityService = require('../../../services/pnpLiveAvailabilityService');
 const { getLanguage, safeEditMessage } = require('../../utils/helpers');
 const logger = require('../../../utils/logger');
 
@@ -42,7 +42,7 @@ const registerPNPLiveHandlers = (bot) => {
       const userId = ctx.from?.id;
       
       // Check if user is admin for testing access
-      const PermissionService = require('../../services/permissionService');
+      const PermissionService = require('../../../services/permissionService');
       const isAdmin = await PermissionService.isAdmin(userId);
       
       if (isAdmin) {

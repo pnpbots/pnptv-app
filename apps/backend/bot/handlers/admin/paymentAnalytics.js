@@ -1,5 +1,5 @@
-const PaymentService = require('../../services/paymentService');
-const CallService = require('../../services/callService');
+const PaymentService = require('../../../services/paymentService');
+const CallService = require('../../../services/callService');
 const logger = require('../../../utils/logger');
 
 /**

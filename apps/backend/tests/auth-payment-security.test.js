@@ -80,7 +80,7 @@ jest.mock('../utils/logger', () => ({
 // so its absence is expected. We mock it as `virtual` so jest doesn't require a
 // real file on disk to attach the mock to.
 jest.mock(
-  '../bot/services/PDSProvisioningService',
+  '../services/PDSProvisioningService',
   () => ({
     createOrLinkPDS: jest.fn(async () => ({ success: true, status: 'existing' })),
   }),
@@ -98,7 +98,7 @@ jest.mock('../services/authentikService', () => ({
   updateUserEmail: jest.fn(async () => true),
   syncUserGroups: jest.fn(async () => undefined),
 }));
-jest.mock('../bot/services/platformBanService', () => ({
+jest.mock('../services/platformBanService', () => ({
   isBanned: jest.fn(async () => null),
 }));
 jest.mock('../bot/utils/helpers', () => ({
@@ -107,7 +107,7 @@ jest.mock('../bot/utils/helpers', () => ({
 jest.mock('../services/emailService', () => ({
   send: jest.fn(async () => ({ messageId: 'test-msg' })),
 }));
-jest.mock('../bot/services/followService', () => ({
+jest.mock('../services/followService', () => ({
   enforceDefaultFollows: jest.fn(async () => {}),
 }));
 jest.mock('../bot/api/middleware/ipTracker', () => (req, res, next) => next());

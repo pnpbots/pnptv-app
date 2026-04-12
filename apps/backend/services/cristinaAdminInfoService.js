@@ -2,7 +2,7 @@ const logger = require('../utils/logger');
 const sanitize = require('../utils/sanitizer');
 const PlanModel = require('../models/planModel');
 const CristinaAdminBriefModel = require('../models/cristinaAdminBriefModel');
-const { getBroadcastQueueIntegration } = require('../bot/services/broadcastQueueIntegration');
+const { getBroadcastQueueIntegration } = require('./broadcastQueueIntegration');
 
 const SECTION_KEYS = {
   LEX_PLAN: 'lex_plan',

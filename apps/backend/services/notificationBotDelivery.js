@@ -24,7 +24,7 @@ function setBotRef(bot) {
 function getBot() {
   if (_bot) return _bot;
   try {
-    const { getBotInstance } = require('../core/bot');
+    const { getBotInstance } = require('../bot/core/bot');
     _bot = getBotInstance();
   } catch {
     // bot.js not ready yet

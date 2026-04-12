@@ -20,7 +20,7 @@ try {
 } catch (_) {}
 
 const { query } = require(path.join(BACKEND_ROOT, 'config/postgres'));
-const emailService = require(path.join(BACKEND_ROOT, 'bot/services/emailservice'));
+const emailService = require(path.join(BACKEND_ROOT, 'services/emailservice'));
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const DELAY_MS = 1500;

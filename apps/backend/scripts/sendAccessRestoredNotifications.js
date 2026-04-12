@@ -29,7 +29,7 @@ try {
 } catch (_) {}
 
 const { getPool, query } = require(path.join(BACKEND_ROOT, 'config/postgres'));
-const emailService = require(path.join(BACKEND_ROOT, 'bot/services/emailservice'));
+const emailService = require(path.join(BACKEND_ROOT, 'services/emailservice'));
 const logger = require(path.join(BACKEND_ROOT, 'utils/logger'));
 
 const DRY_RUN = process.argv.includes('--dry-run');

@@ -1,6 +1,6 @@
 const logger = require('../../../utils/logger');
 const { query } = require('../../../config/postgres');
-const PlatformBanService = require('../../services/platformBanService');
+const PlatformBanService = require('../../../services/platformBanService');
 
 /**
  * Auth Guard Middleware

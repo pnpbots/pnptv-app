@@ -1,4 +1,4 @@
-const PlatformBanService = require('../../services/platformBanService');
+const PlatformBanService = require('../../../services/platformBanService');
 const ModerationModel    = require('../../../models/moderationModel');
 const UserModel          = require('../../../models/userModel');
 const logger             = require('../../../utils/logger');

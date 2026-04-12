@@ -1,4 +1,4 @@
-const AuditLogService = require('../../services/AuditLogService');
+const AuditLogService = require('../../../services/AuditLogService');
 const logger = require('../../../utils/logger');
 
 const auditLogController = {

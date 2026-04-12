@@ -18,7 +18,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const authGuard = require('../middleware/authGuard');
-const CanvaService = require('../../services/canvaService');
+const CanvaService = require('../../../services/canvaService');
 const logger = require('../../../utils/logger');
 
 const router = express.Router();

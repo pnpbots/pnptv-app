@@ -15,9 +15,9 @@
 
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
-const { processHangoutMedia } = require('../../services/hangoutMediaService');
+const { processHangoutMedia } = require('../../../services/hangoutMediaService');
 const BlockedUser = require('../../../models/blockedUser');
-const NotificationEmitter = require('../../services/notificationEmitter');
+const NotificationEmitter = require('../../../services/notificationEmitter');
 const { getRedis } = require('../../../config/redis');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

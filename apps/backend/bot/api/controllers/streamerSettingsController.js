@@ -1,7 +1,7 @@
 'use strict';
 
 const logger = require('../../../utils/logger');
-const streamerSettingsService = require('../../services/streamerSettingsService');
+const streamerSettingsService = require('../../../services/streamerSettingsService');
 
 /**
  * GET /api/webapp/live/settings

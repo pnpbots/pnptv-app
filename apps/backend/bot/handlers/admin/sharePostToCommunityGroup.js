@@ -4,10 +4,10 @@
  */
 const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');
-const communityPostService = require('../../services/communityPostService');
-const PermissionService = require('../../services/permissionService');
+const communityPostService = require('../../../services/communityPostService');
+const PermissionService = require('../../../services/permissionService');
 const { getLanguage } = require('../../utils/helpers');
-const GrokService = require('../../services/grokService');
+const GrokService = require('../../../services/grokService');
 const sanitize = require('../../../utils/sanitizer');
 const broadcastUtils = require('../../utils/broadcastUtils'); // Changed from ../../utils/ to ../../utils/ (no change needed - already correct)
 const performanceUtils = require('../../utils/performanceUtils');

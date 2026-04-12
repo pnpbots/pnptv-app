@@ -13,8 +13,8 @@
 
 const db = require('../../../utils/db');
 const logger = require('../../../utils/logger');
-const PaymentSecurityService = require('../../services/paymentSecurityService');
-const { refreshAccountTokens } = require('../../services/xPostService');
+const PaymentSecurityService = require('../../../services/paymentSecurityService');
+const { refreshAccountTokens } = require('../../../services/xPostService');
 const axios = require('axios');
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours

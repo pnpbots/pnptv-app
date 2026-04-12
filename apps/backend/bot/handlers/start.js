@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const { t } = require('../../utils/i18n');
-const UserService = require('../services/userService');
+const UserService = require('../../services/userService');
 const logger = require('../../utils/logger');
 const { showAgeVerification, showMainMenu } = require('../helpers/onboardingHelpers');
 const { handlePromoDeepLink } = require('./promo/promoHandler');

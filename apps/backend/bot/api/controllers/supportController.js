@@ -1,9 +1,9 @@
 const logger = require('../../../utils/logger');
 const { getRedis } = require('../../../config/redis');
 const { getPool } = require('../../../config/postgres');
-const { chatWithCristina, isCristinaAIAvailable } = require('../../services/cristinaAIService');
+const { chatWithCristina, isCristinaAIAvailable } = require('../../../services/cristinaAIService');
 const { buildCristinaSystemPrompt } = require('../../handlers/support/cristinaAI');
-const supportRoutingService = require('../../services/supportRoutingService');
+const supportRoutingService = require('../../../services/supportRoutingService');
 const SupportTopicModel = require('../../../models/supportTopicModel');
 const SupportTicketMessageModel = require('../../../models/supportTicketMessageModel');
 
@@ -347,7 +347,7 @@ async function verifyPayment(req, res) {
   }
 
   try {
-    const { analyzePayment } = require('../../services/cristinaAIService');
+    const { analyzePayment } = require('../../../services/cristinaAIService');
 
     // Step 1: Run Grok analysis
     const analysis = await analyzePayment({
@@ -381,7 +381,7 @@ async function verifyPayment(req, res) {
       }
 
       try {
-        const PaymentService = require('../../services/paymentService');
+        const PaymentService = require('../../../services/paymentService');
         const grantResult = await PaymentService.grantEntitlementsForPlan(
           String(userId),
           String(planId),

@@ -1,6 +1,6 @@
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
-const DmService = require('../../services/dmService');
+const DmService = require('../../../services/dmService');
 
 // Check if a photo path is a valid web URL (not a Telegram file ID)
 const isValidPhotoUrl = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));

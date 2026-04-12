@@ -1,7 +1,7 @@
 const { getMainMenu, getLanguageMenu } = require('../../utils/menus');
 const { requirePrivateChat } = require('../../utils/notifications');
 const { isPrimeUser } = require('../../utils/helpers');
-const userService = require('../../services/userService');
+const userService = require('../../../services/userService');
 const i18n = require('../../utils/i18n');
 const logger = require('../../../utils/logger');
 const { showMainMenu } = require('./menu');

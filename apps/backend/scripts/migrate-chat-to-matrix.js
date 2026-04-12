@@ -34,7 +34,7 @@ try {
 }
 
 const { getPool, query, closePool } = require(path.join(BACKEND_ROOT, 'config/postgres'));
-const matrixService = require(path.join(BACKEND_ROOT, 'bot/services/matrixService'));
+const matrixService = require(path.join(BACKEND_ROOT, 'services/matrixService'));
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

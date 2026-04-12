@@ -7,9 +7,9 @@ const { Markup } = require('telegraf');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
-const PaymentService = require('../../services/paymentService');
+const PaymentService = require('../../../services/paymentService');
 const PlanModel = require('../../models/planModel');
-const UserService = require('../../services/userService');
+const UserService = require('../../../services/userService');
 
 /**
  * Enhanced Payment Selection Menu

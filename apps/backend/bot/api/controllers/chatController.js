@@ -2,8 +2,8 @@
 
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
-const { processChatMedia } = require('../../services/chatMediaService');
-const mentionService = require('../../services/mentionService');
+const { processChatMedia } = require('../../../services/chatMediaService');
+const mentionService = require('../../../services/mentionService');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;

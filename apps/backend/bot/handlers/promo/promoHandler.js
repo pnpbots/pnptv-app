@@ -4,7 +4,7 @@
  */
 
 const { Markup } = require('telegraf');
-const PromoService = require('../../services/promoService');
+const PromoService = require('../../../services/promoService');
 const PromoModel = require('../../../models/promoModel');
 const PlanModel = require('../../../models/planModel');
 const logger = require('../../../utils/logger');

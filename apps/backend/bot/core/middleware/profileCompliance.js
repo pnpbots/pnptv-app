@@ -1,6 +1,6 @@
 const ModerationModel = require('../../../models/moderationModel');
 const UserModel = require('../../../models/userModel');
-const ChatCleanupService = require('../../services/chatCleanupService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
 const logger = require('../../../utils/logger');
 const { t } = require('../../../utils/i18n');
 const { query } = require('../../../config/postgres');

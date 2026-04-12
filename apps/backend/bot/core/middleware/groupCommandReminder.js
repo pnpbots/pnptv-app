@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 const GROUP_ID = process.env.GROUP_ID;
 
 /**

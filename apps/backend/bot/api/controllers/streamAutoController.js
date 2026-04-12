@@ -1,8 +1,8 @@
 'use strict';
 
 const { getPool } = require('../../../config/postgres');
-const grokService = require('../../services/grokService');
-const socketSingleton = require('../../services/socketSingleton');
+const grokService = require('../../../services/grokService');
+const socketSingleton = require('../../../services/socketSingleton');
 const logger = require('../../../utils/logger');
 
 /**

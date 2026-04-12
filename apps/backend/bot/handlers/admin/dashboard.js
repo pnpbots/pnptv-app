@@ -1,6 +1,6 @@
 const { getAdminMenu } = require('../../utils/menus');
 const { adminOnly } = require('../../core/middleware/admin');
-const adminService = require('../../services/adminService');
+const adminService = require('../../../services/adminService');
 const logger = require('../../../utils/logger');
 
 /**

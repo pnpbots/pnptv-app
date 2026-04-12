@@ -1,7 +1,7 @@
 const SubscriptionModel = require('../../../models/subscriptionModel');
 const PaymentModel = require('../../../models/paymentModel');
-const SubscriptionService = require('../../services/subscriptionService');
-const PaymentService = require('../../services/paymentService');
+const SubscriptionService = require('../../../services/subscriptionService');
+const PaymentService = require('../../../services/paymentService');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 

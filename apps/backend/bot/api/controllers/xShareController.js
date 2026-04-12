@@ -457,7 +457,7 @@ const shareToX = async (req, res) => {
 
       if (mediaUrl) {
         // Upload media natively to X for rich embedding
-        const XPostService = require('../../services/xPostService');
+        const XPostService = require('../../../services/xPostService');
         let mediaId = null;
         try {
           mediaId = await XPostService.uploadMediaToX({ accessToken, mediaUrl });

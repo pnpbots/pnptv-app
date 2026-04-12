@@ -1,9 +1,9 @@
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
-const PlatformBanService = require('../../services/platformBanService');
+const PlatformBanService = require('../../../services/platformBanService');
 const AuthentikService = require('../../../services/authentikService');
 const { isAdminUser } = require('../../utils/helpers');
-const { enforceDefaultFollows } = require('../../services/followService');
+const { enforceDefaultFollows } = require('../../../services/followService');
 const crypto = require('crypto');
 
 /**
@@ -306,7 +306,7 @@ const handleTelegramAuth = async (req, res) => {
       // 0. Authentik credential delivery — send login credentials to new users
       if (authentikResult.isNew && authentikResult.password) {
         try {
-          const emailService = require('../../services/emailservice');
+          const emailService = require('../../../services/emailservice');
           const loginUrl = 'https://pnptv.app';
           const authentikUsername = authentikResult.username;
           const generatedPassword = authentikResult.password;
@@ -364,8 +364,7 @@ const handleTelegramAuth = async (req, res) => {
 
       // 2. Matrix — DMs and hangout chat rooms
       try {
-        const matrixService = require('../../services/matrixService');
-        await matrixService.provisionMatrixUser(user);
+        // Matrix provisioning removed
         logger.info(`[Auth] Matrix provisioned for user ${user.id}`);
       } catch (err) {
         logger.warn(`[Auth] Matrix provisioning failed (non-blocking): ${err.message}`);

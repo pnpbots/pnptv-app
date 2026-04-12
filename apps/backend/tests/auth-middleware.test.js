@@ -45,7 +45,7 @@ jest.mock('../config/postgres', () => ({
   getPool: () => ({ query: mockQuery }),
 }));
 
-jest.mock('../bot/services/platformBanService', () => ({
+jest.mock('../services/platformBanService', () => ({
   isBanned: jest.fn(async () => false),
 }));
 

@@ -73,7 +73,7 @@ jest.mock('../services/dmService', () => ({
   deleteMessage: (...args) => mockDmDeleteMessage(...args),
   markAsRead: (...args) => mockDmMarkAsRead(...args),
 }));
-jest.mock('../bot/services/dmService', () => ({
+jest.mock('../services/dmService', () => ({
   sendMessage: (...args) => mockDmSendMessage(...args),
   deleteMessage: (...args) => mockDmDeleteMessage(...args),
   markAsRead: (...args) => mockDmMarkAsRead(...args),
@@ -381,7 +381,7 @@ describe('directMessagesController.sendMessage', () => {
   it('REGRESSION DM-1: dmController block check must also use correct column names', () => {
     // Bot-side DmService must use the same column names.
     const botDmServiceSource = require('fs').readFileSync(
-      require('path').resolve(__dirname, '../bot/services/dmService.js'),
+      require('path').resolve(__dirname, '../services/dmService.js'),
       'utf8'
     );
     expect(botDmServiceSource).toMatch(/blocked_users[\s\S]*?user_id[\s\S]*?blocked_user_id/);
@@ -867,7 +867,7 @@ describe('dmController.sendMessage', () => {
     // bot dmController delegates to bot DmService which enforces block-check
     // columns internally. Verify via source grep.
     const botDmServiceSource = require('fs').readFileSync(
-      require('path').resolve(__dirname, '../bot/services/dmService.js'),
+      require('path').resolve(__dirname, '../services/dmService.js'),
       'utf8'
     );
     expect(botDmServiceSource).toMatch(/blocked_users[\s\S]*?user_id[\s\S]*?blocked_user_id/);

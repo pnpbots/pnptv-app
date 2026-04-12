@@ -3,7 +3,7 @@ const { cache } = require('../config/redis');
 const ModelService = require('./modelService');
 const AvailabilityService = require('./availabilityService');
 const PNPLiveTimeSlotService = require('./pnpLiveTimeSlotService');
-const JaaSService = require('./jaasService');
+const JaaSService = { isConfigured: () => false }; // JaaS removed — replaced by LiveKit
 const logger = require('../utils/logger');
 
 // Cache TTL for model pricing (1 hour)

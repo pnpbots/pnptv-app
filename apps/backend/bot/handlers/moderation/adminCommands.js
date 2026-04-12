@@ -1,9 +1,9 @@
-const ModerationService = require('../../services/moderationService');
-const TopicModerationService = require('../../services/topicModerationService');
+const ModerationService = require('../../../services/moderationService');
+const TopicModerationService = require('../../../services/topicModerationService');
 const ModerationModel = require('../../../models/moderationModel');
 const logger = require('../../../utils/logger');
 const { isAdmin, isGroupChat } = require('../../../utils/adminUtils');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 
 /**
  * Dual-layer admin check: user must be both a Telegram group admin AND a platform admin.

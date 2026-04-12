@@ -1,9 +1,9 @@
-const XOAuthService = require('../../services/xOAuthService');
+const XOAuthService = require('../../../services/xOAuthService');
 const logger = require('../../../utils/logger');
 const axios = require('axios');
 const crypto = require('crypto');
 const { query } = require('../../../config/postgres');
-const { enforceDefaultFollows } = require('../../services/followService');
+const { enforceDefaultFollows } = require('../../../services/followService');
 const { v4: uuidv4 } = require('uuid');
 
 function encryptToken(plaintext) {
@@ -446,7 +446,7 @@ const handleCallback = async (req, res) => {
 
 const startOAuth1 = async (req, res) => {
   try {
-    const XOAuth1Service = require('../../services/xOAuth1Service');
+    const XOAuth1Service = require('../../../services/xOAuth1Service');
     const appRef = (req.query.app || 'generic').toLowerCase();
     const refUpper = appRef.toUpperCase();
 
@@ -475,7 +475,7 @@ const startOAuth1 = async (req, res) => {
 
 const callbackOAuth1 = async (req, res) => {
   try {
-    const XOAuth1Service = require('../../services/xOAuth1Service');
+    const XOAuth1Service = require('../../../services/xOAuth1Service');
     const { oauth_token, oauth_verifier } = req.query;
 
     if (!oauth_token || !oauth_verifier) {

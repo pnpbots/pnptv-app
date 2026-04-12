@@ -6,7 +6,7 @@
 const { Markup } = require('telegraf');
 const PromoModel = require('../../../models/promoModel');
 const PlanModel = require('../../../models/planModel');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 const { safeAnswerCbQuery, safeReplyOrEdit } = require('../../utils/helpers');
 const logger = require('../../../utils/logger');
 

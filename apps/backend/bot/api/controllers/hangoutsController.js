@@ -1,7 +1,7 @@
 const logger = require('../../../utils/logger');
 const { query } = require('../../../config/postgres');
 const VideoCallModel = require('../../../models/videoCallModel');
-const { validateTelegramWebAppInitData } = require('../../services/telegramWebAppAuth');
+const { validateTelegramWebAppInitData } = require('../../../services/telegramWebAppAuth');
 const { consumeRateLimit, getRateLimitInfo } = require('../../core/middleware/rateLimitGranular');
 // Legacy video call endpoints (Agora-based, used by bot menu)
 

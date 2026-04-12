@@ -1,7 +1,7 @@
 const logger = require('../utils/logger');
 const { query } = require('../config/postgres');
 
-const MembershipCleanupService = require('../bot/services/membershipCleanupService');
+const MembershipCleanupService = require('./membershipCleanupService');
 
 // Normalize all amounts to USD — COP payments are stored in COP and need conversion
 const AMOUNT_USD = `CASE WHEN currency = 'COP' THEN amount / 4250.0 ELSE amount END`;

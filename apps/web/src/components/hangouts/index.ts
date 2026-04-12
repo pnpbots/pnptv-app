@@ -6,6 +6,6 @@ export { MediaUploadButton } from "./MediaUploadButton";
 
 // ─── Video Call Components ──────────────────────────────────────────────────
 export { VideoCallButton } from "./VideoCallButton";
-export { TelegramCallDock } from "./TelegramCallDock";
+export { default as LiveKitCallDock } from "./LiveKitCallDock";
 
 export { HangoutMusicBar } from "./HangoutMusicBar";

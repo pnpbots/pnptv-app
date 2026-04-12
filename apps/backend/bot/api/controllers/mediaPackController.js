@@ -1,5 +1,5 @@
 'use strict';
-const mediaPackService = require('../../services/mediaPackService');
+const mediaPackService = require('../../../services/mediaPackService');
 const logger = require('../../../utils/logger');
 
 // GET /api/webapp/media-packs?type=sticker|gif|emoji

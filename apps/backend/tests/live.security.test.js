@@ -59,9 +59,9 @@ jest.mock('../utils/logger', () => ({
 
 // ─── Imports (after mocks are registered) ─────────────────────────────────────
 
-const PNPLiveService = require('../bot/services/pnpLiveService');
-const PNPLiveTipsService = require('../bot/services/pnpLiveTipsService');
-const PNPLiveNotificationService = require('../bot/services/pnpLiveNotificationService');
+const PNPLiveService = require('../services/pnpLiveService');
+const PNPLiveTipsService = require('../services/pnpLiveTipsService');
+const PNPLiveNotificationService = require('../services/pnpLiveNotificationService');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -148,7 +148,7 @@ describe('DashTokenService.debitTokens — double-spend prevention', () => {
   let DashTokenService;
 
   beforeAll(() => {
-    DashTokenService = require('../bot/services/dashTokenService');
+    DashTokenService = require('../services/dashTokenService');
   });
 
   afterEach(() => {
@@ -539,7 +539,7 @@ describe('PNPLiveService.createBooking — response does not leak internal field
     mockGetClient.mockResolvedValue(mockClient);
 
     // Mock ModelService
-    jest.mock('../bot/services/modelService', () => ({
+    jest.mock('../services/modelService', () => ({
       getModelById: jest.fn().mockResolvedValue({ id: 'p1', name: 'Test Model' }),
     }));
 
@@ -550,7 +550,7 @@ describe('PNPLiveService.createBooking — response does not leak internal field
     });
 
     // Mock JaaSService
-    jest.mock('../bot/services/jaasService', () => ({
+    jest.mock('../services/jaasService', () => ({
       generatePNPLiveRoom: jest.fn().mockReturnValue({
         clientUrl: 'https://meet.example.com/room',
         modelUrl: 'https://meet.example.com/room-mod',

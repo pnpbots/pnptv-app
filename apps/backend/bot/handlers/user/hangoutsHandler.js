@@ -6,7 +6,7 @@ const { hasFullAccess, safeReplyOrEdit } = require('../../utils/helpers');
 const { consumeRateLimit, getRateLimitInfo } = require('../../core/middleware/rateLimitGranular');
 const { buildHangoutsWebAppUrl } = require('../../utils/hangoutsWebApp');
 // Video calls use Agora (bot menu) or Telegram native (webapp hangouts)
-const FeatureUrlService = require('../../services/featureUrlService');
+const FeatureUrlService = require('../../../services/featureUrlService');
 
 /**
  * Hangouts handlers for video calls and main rooms
@@ -64,7 +64,7 @@ const registerHangoutsHandlers = (bot) => {
       const userId = ctx.from?.id;
 
       // Check if admin for pre-launch testing
-      const PermissionService = require('../../services/permissionService');
+      const PermissionService = require('../../../services/permissionService');
       const isAdmin = PermissionService.isEnvSuperAdmin(userId) || PermissionService.isEnvAdmin(userId);
 
       if (isAdmin) {

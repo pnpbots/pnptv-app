@@ -1,11 +1,11 @@
 const { Markup } = require('telegraf');
-const BookingAvailabilityIntegration = require('../../services/bookingAvailabilityIntegration');
+const BookingAvailabilityIntegration = require('../../../services/bookingAvailabilityIntegration');
 const BookingModel = require('../../../models/bookingModel');
 const PerformerProfileModel = require('../../../models/performerProfileModel');
-const VideoCallService = require('../../services/videoCallService');
-const RoleService = require('../../services/roleService');
+const VideoCallService = require('../../../services/videoCallService');
+const RoleService = require('../../../services/roleService');
 const UserModel = require('../../../models/userModel');
-const PaymentService = require('../../services/paymentService');
+const PaymentService = require('../../../services/paymentService');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
 const { t } = require('../../../utils/i18n');

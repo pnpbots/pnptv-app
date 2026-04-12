@@ -1,6 +1,6 @@
 'use strict';
 
-const CanvaService = require('../../services/canvaService');
+const CanvaService = require('../../../services/canvaService');
 const logger = require('../../../utils/logger');
 
 const ITEMS_PER_PAGE = 20;

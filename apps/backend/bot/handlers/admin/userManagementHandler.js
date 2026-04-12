@@ -1,7 +1,7 @@
 const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');
 const UserModel = require('../../../models/userModel');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 const { getLanguage } = require('../../utils/helpers');
 const { query } = require('../../../utils/db');
 
@@ -245,7 +245,7 @@ async function handleUserManagementInput(ctx, next) {
       const user = await UserModel.getById(userId);
 
       // Send via customer service (simulating admin message)
-      const supportRoutingService = require('../../services/supportRoutingService');
+      const supportRoutingService = require('../../../services/supportRoutingService');
       const messageNote = `📨 **Mensaje del Admin**\n\nPara: @${user.username}\n\n${text}`;
 
       try {

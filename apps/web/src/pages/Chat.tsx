@@ -74,7 +74,7 @@ import { EventDetailModal } from "@/components/events";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import { VideoCallButton } from "@/components/hangouts/VideoCallButton";
-import TelegramCallDock from "@/components/hangouts/TelegramCallDock";
+import LiveKitCallDock from "@/components/hangouts/LiveKitCallDock";
 
 type View = "list" | "chat";
 
@@ -1854,7 +1854,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           </div>
         )}
 
-        <TelegramCallDock
+        <LiveKitCallDock
           open={showTelegramDock && !callPanelDismissed}
           onClose={() => { setCallPanelDismissed(true); setShowTelegramDock(false); }}
           token={callToken}

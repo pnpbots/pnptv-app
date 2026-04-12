@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const UserModel = require('../../../models/userModel');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
 

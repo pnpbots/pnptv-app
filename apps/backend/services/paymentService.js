@@ -1,6 +1,6 @@
 const PaymentModel = require('../models/paymentModel');
-const InvoiceService = require('../../bot/services/invoiceservice');
-const EmailService = require('../../bot/services/emailservice');
+const InvoiceService = require('./invoiceservice');
+const EmailService = require('./emailservice');
 const PlanModel = require('../models/planModel');
 const UserModel = require('../models/userModel');
 const BookingModel = require('../models/bookingModel');
@@ -20,7 +20,7 @@ function getBotInstance() {
   if (!_botInstance) {
     try {
       // Lazy-require to break circular dependency (bot.js -> paymentService -> bot.js)
-      const botModule = require('../core/bot');
+      const botModule = require('../bot/core/bot');
       const getter = botModule?.getBotInstance;
       if (typeof getter === 'function') {
         _botInstance = getter();
@@ -44,7 +44,7 @@ const NotificationEmitter = require('./notificationEmitter');
 const BookingAvailabilityIntegration = require('./bookingAvailabilityIntegration');
 const PaymentSecurityService = require('./paymentSecurityService');
 const { isSubscriptionPlan, getEpaycoSubscriptionUrl, normalizePlanId } = require('../config/epaycoSubscriptionPlans');
-const PaymentHistoryService = require('../../services/paymentHistoryService');
+const PaymentHistoryService = require('./paymentHistoryService');
 const axios = require('axios');
 
 class PaymentService {
@@ -432,7 +432,7 @@ class PaymentService {
       }
     }
 
-  static async createPayment({ userId, planId, provider, sku, chatId, creatorId, extraMetadata }) {
+  static async createPayment({ userId, planId, provider, sku, chatId, creatorId, amountOverride, extraMetadata }) {
     try {
       // Daimo Pay is disabled platform-wide. Callers must use 'epayco' (card/PSE) or 'dash' (BTCPay).
       // Runtime fence — mirrors the guard in apps/backend/bot/services/paymentService.js.
@@ -453,9 +453,16 @@ class PaymentService {
         throw new Error('El plan seleccionado no existe o está inactivo. | Plan not found');
       }
 
-      // For creator subscriptions, use the creator's dynamic price
+      // Resolve payment amount:
+      //   1. If caller supplied amountOverride (route already has the price), honor it.
+      //   2. For plan templates with per-resource pricing, look up the dynamic price:
+      //        creator_monthly → users.creator_price_usd (creatorId = creator user id)
+      //        channel_access  → creator_channels.price_usd (creatorId = channel id)
+      //   3. Otherwise use the plan's static price.
       let paymentAmount = plan.price;
-      if (planId === 'creator_monthly' && creatorId) {
+      if (amountOverride != null && Number(amountOverride) > 0) {
+        paymentAmount = Number(amountOverride);
+      } else if (planId === 'creator_monthly' && creatorId) {
         const creatorRes = await query(
           'SELECT creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
           [creatorId, 'active']
@@ -463,22 +470,20 @@ class PaymentService {
         if (creatorRes.rows[0]) {
           paymentAmount = parseFloat(creatorRes.rows[0].creator_price_usd);
         }
-      }
-
-      // For channel access, use the channel's price
-      if (planId === 'channel_access' && creatorId) {
+      } else if (planId === 'channel_access' && creatorId) {
+        // creatorId in this context is the channel id (route-level convention).
         const channelRes = await query(
           'SELECT price_usd FROM creator_channels WHERE id = $1 AND is_active = true',
-          [creatorId]  // creatorId is overloaded to carry channelId for channel_access
+          [parseInt(creatorId, 10)]
         );
-        if (channelRes.rows[0]) {
+        if (channelRes.rows[0] && Number(channelRes.rows[0].price_usd) > 0) {
           paymentAmount = parseFloat(channelRes.rows[0].price_usd);
         }
       }
 
-      // M2: Stamp scope metadata atomically at payment creation so the webhook
-      // handler cannot be tricked into granting the wrong scope. extraMetadata
-      // comes from trusted server-side code paths only (never from user input).
+      // Merge creatorId + any caller-supplied scope metadata atomically at insert time.
+      // This closes the TOCTOU window where a webhook could race between INSERT and
+      // a follow-up metadata UPDATE and see an unscoped payment.
       // The order here matters: extraMetadata wins over creatorId so an explicit
       // { channelId, hangoutGroupId } supplied by the channel-purchase route
       // survives merge without being overwritten.

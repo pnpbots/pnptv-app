@@ -1,12 +1,12 @@
 const logger = require('../../../utils/logger');
-const supportRoutingService = require('../../services/supportRoutingService');
+const supportRoutingService = require('../../../services/supportRoutingService');
 const SupportTopicModel = require('../../../models/supportTopicModel');
 const SupportTicketMessageModel = require('../../../models/supportTicketMessageModel');
 const UserModel = require('../../../models/userModel');
 const { getLanguage } = require('../../utils/helpers');
 const { addReaction } = require('../../utils/telegramReactions');
 const { createChatInviteLink } = require('../../utils/telegramAdmin');
-const socketSingleton = require('../../services/socketSingleton');
+const socketSingleton = require('../../../services/socketSingleton');
 
 /**
  * Support Routing Handlers

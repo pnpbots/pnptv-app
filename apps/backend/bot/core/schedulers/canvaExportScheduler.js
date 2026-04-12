@@ -10,7 +10,7 @@
  * Interval: 15 seconds.
  */
 
-const CanvaService = require('../../services/canvaService');
+const CanvaService = require('../../../services/canvaService');
 const logger = require('../../../utils/logger');
 
 const CHECK_INTERVAL = 15 * 1000; // 15 seconds

@@ -5,12 +5,11 @@ const { spawn } = require('child_process');
 const { query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const { getRedis } = require('../../config/redis');
-const { processChatMedia } = require('../services/chatMediaService');
-const NotificationEmitter = require('../services/notificationEmitter');
+const { processChatMedia } = require('../../services/chatMediaService');
+const NotificationEmitter = require('../../services/notificationEmitter');
 const LiveStreamModel = require('../../models/liveStreamModel');
 const BlockedUser = require('../../models/blockedUser');
-const DmService = require('../services/dmService');
-const matrixService = require('../services/matrixService');
+const DmService = require('../../services/dmService');
 
 // ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
 // H4: Replaces the non-atomic decr + conditional set(0) pattern.
@@ -351,7 +350,7 @@ function initSocketIO(io) {
       const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
       if (!isAdminUser) {
         try {
-          const EntitlementAccessService = require('../services/entitlementAccessService');
+          const EntitlementAccessService = require('../../services/entitlementAccessService');
           const hasAccess = await EntitlementAccessService.hasEntitlement(String(user.id), 'pnp-member');
           if (!hasAccess) {
             socket.emit('hangout:error', { message: 'Member subscription required', code: 'MEMBER_REQUIRED' });
@@ -1048,7 +1047,7 @@ function initSocketIO(io) {
       if (recipientId === user.id) return;
 
       // Free-tier daily DM limit — users without pnp-member entitlement are limited
-      const EntitlementAccessService = require('./services/entitlementAccessService');
+      const EntitlementAccessService = require('../../services/entitlementAccessService');
       const role = user.role || '';
       const hasDmMembership = role === 'admin' || role === 'superadmin' || await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member');
       const isFreeUser = !hasDmMembership;
@@ -1316,7 +1315,7 @@ function initSocketIO(io) {
           const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
           if (!isAdminUser && String(user.id) !== String(dbStream.host_id)) {
             try {
-              const EntitlementAccessService = require('../services/entitlementAccessService');
+              const EntitlementAccessService = require('../../services/entitlementAccessService');
               const hasPrime = await EntitlementAccessService.hasEntitlement(String(user.id), 'pnp-prime');
               if (!hasPrime) {
                 socket.emit('live:error', { message: 'Subscription required to view this stream', code: 'ACCESS_DENIED' });
@@ -1960,30 +1959,9 @@ function initSocketIO(io) {
           }
         }
 
-        // Create/get DM room
-        const callerUser = { id: userId, first_name: user.name || user.firstName || 'User' };
-        const calleeUserRow = await query(
-          `SELECT id, first_name, username, photo_url FROM users WHERE id = $1`, [callee.userId]
-        );
-        if (!calleeUserRow.rows.length) {
-          return socket.emit('randomcall:no-match', {});
-        }
-        const calleeDbUser = calleeUserRow.rows[0];
-
-        let matrixRoomId;
-        try {
-          matrixRoomId = await matrixService.getOrCreateDmRoom(
-            { id: userId, first_name: callerUser.first_name },
-            { id: callee.userId, first_name: calleeDbUser.first_name || 'User' }
-          );
-        } catch (e) {
-          logger.error('[RandomCall] Failed to create DM room:', e.message);
-          return socket.emit('randomcall:error', { message: 'Failed to set up call room' });
-        }
-
-        // Generate call ID — crypto.randomBytes prevents predictable IDs
-        // that could be used to hijack a pending random-call slot.
+        // Generate call ID
         const callId = `rc_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+        const roomId = `random-${callId}`;
 
         // Store pending call with 30s timeout
         const timeoutHandle = setTimeout(() => {

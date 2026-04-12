@@ -89,7 +89,7 @@ const apiApp = require('../api/routes');
 // ─── Utilities (critical) ───────────────────────────────────────────────────
 const { getLanguage } = require('../utils/helpers');
 const { t } = require('../../utils/i18n');
-const UserService = require('../services/userService');
+const UserService = require('../../services/userService');
 
 // ─── Handlers (non-critical — wrapped in safeRequire) ───────────────────────
 const registerAdminHandlers = safeRequire('../handlers/admin');
@@ -216,9 +216,9 @@ const startApiServer = (modeLabel) => {
     path: '/socket.io',
   });
   apiApp.set('io', io);
-  require('../services/socketSingleton').set(io);
-  require('../services/notificationEmitter').setIO(io);
-  require('../services/pushNotificationService').initialize();
+  require('../../services/socketSingleton').set(io);
+  require('../../services/notificationEmitter').setIO(io);
+  require('../../services/pushNotificationService').initialize();
   initSocketIO(io);
 
   // NOTE: Daily notification digest scheduler is now managed by cron.js
@@ -389,7 +389,7 @@ const startBot = async () => {
 
       // Let env-level admins through so their commands still work
       const userId = ctx.from?.id;
-      const PermSvc = require('../services/permissionService');
+      const PermSvc = require('../../services/permissionService');
       const isEnvAdmin = userId && (
         PermSvc.isEnvSuperAdmin(userId) || PermSvc.isEnvAdmin(userId)
       );
@@ -409,7 +409,7 @@ const startBot = async () => {
     bot.command('admin', async (ctx) => {
       logger.info('[ADMIN-EARLY] /admin command received');
       try {
-        const PermissionService = require('../services/permissionService');
+        const PermissionService = require('../../services/permissionService');
         const { getLanguage, t } = require('../utils/helpers');
         const { showAdminPanel } = require('../handlers/admin/index');
         
@@ -533,72 +533,7 @@ const startBot = async () => {
         try { require('./middleware/groupSecurityEnforcement').invalidateLinkedCache(); } catch {}
         await ctx.reply(`✅ Linked to hangout "${groupRows[0].name}" (ID: ${hangoutId}).\n\nMembers can now open this Telegram group from the PNPtv app.`);
 
-        // ── Non-fatal: bridge Matrix room to this Telegram group ──────────────
-        try {
-          const matrixService = require('../services/matrixService');
-          const MATRIX_SERVER_NAME = process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app';
-          const SYNAPSE_INTERNAL_URL = process.env.MATRIX_SYNAPSE_URL || 'http://synapse:8008';
-          const BRIDGE_BOT_MXID = `@telegrambot:${MATRIX_SERVER_NAME}`;
-
-          // Look up the hangout owner's full user record (needed by getOrCreateHangoutRoom)
-          const { rows: creatorRows } = await dbQuery(
-            `SELECT id, telegram, username, first_name, photo_file_id,
-                    matrix_user_id, matrix_access_token, matrix_device_id
-             FROM users WHERE telegram = $1 LIMIT 1`,
-            [String(ctx.from.id)]
-          );
-          if (creatorRows.length === 0) {
-            throw new Error('Creator user record not found for Matrix provisioning');
-          }
-          const creatorUser = creatorRows[0];
-          const groupName = groupRows[0].name;
-
-          // Step 1: Get or create the Matrix room for this hangout
-          const matrixRoomId = await matrixService.getOrCreateHangoutRoom(hangoutId, creatorUser, groupName);
-          logger.info(`[/link] Matrix room resolved for hangout ${hangoutId}: ${matrixRoomId}`);
-
-          // Step 2: Provision creator's Matrix credentials (needed to send invite + message)
-          const creatorCreds = await matrixService.provisionMatrixUser(creatorUser);
-
-          // Step 3: Invite the mautrix-telegram bridge bot to the Matrix room
-          // The creator is the room owner (PL 100), so they can issue invites.
-          const inviteResp = await fetch(
-            `${SYNAPSE_INTERNAL_URL}/_matrix/client/v3/rooms/${encodeURIComponent(matrixRoomId)}/invite`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${creatorCreds.accessToken}`,
-              },
-              body: JSON.stringify({ user_id: BRIDGE_BOT_MXID }),
-            }
-          );
-          if (!inviteResp.ok) {
-            const inviteData = await inviteResp.json().catch(() => ({}));
-            // M_FORBIDDEN / already in room are acceptable — bridge bot may already be present
-            if (inviteData.errcode !== 'M_FORBIDDEN' && inviteData.errcode !== 'M_ALREADY_JOINED') {
-              logger.warn(`[/link] Bridge bot invite returned ${inviteResp.status}: ${inviteData.error || inviteData.errcode}`);
-            } else {
-              logger.info(`[/link] Bridge bot already in room or invite not needed: ${inviteData.errcode}`);
-            }
-          } else {
-            logger.info(`[/link] Bridge bot ${BRIDGE_BOT_MXID} invited to Matrix room ${matrixRoomId}`);
-          }
-
-          // Step 4: Send the mautrix-telegram bridge command in the Matrix room.
-          // The Telegram chat ID is negative for groups; the bridge expects the numeric ID.
-          const telegramChatId = ctx.chat.id;
-          const bridgeCommand = `!tg bridge ${telegramChatId}`;
-          await matrixService.sendRoomMessage(matrixRoomId, creatorCreds.accessToken, bridgeCommand);
-          logger.info(`[/link] Bridge command sent in Matrix room ${matrixRoomId}: "${bridgeCommand}"`);
-        } catch (bridgeErr) {
-          // Bridge setup failure must NOT affect the /link success response already sent
-          logger.error('[/link] Matrix bridge setup failed (non-fatal)', {
-            error: bridgeErr.message,
-            hangoutId,
-            chatId: ctx.chat.id,
-          });
-        }
+        // Matrix bridge removed (migrated to LiveKit/Socket.IO)
         // ─────────────────────────────────────────────────────────────────────
       } catch (err) {
         logger.error('/link command error', { error: err.message, chatId: ctx.chat.id });
@@ -762,7 +697,7 @@ const startBot = async () => {
       const chatId = ctx.chat.id;
       try {
         const { query: dbQuery } = require('../../config/postgres');
-        const socketIO = require('../services/socketSingleton').get();
+        const socketIO = require('../../services/socketSingleton').get();
         if (!socketIO) return next();
 
         // Check if this Telegram group is linked to a hangout
@@ -959,7 +894,7 @@ const startBot = async () => {
           const chatMsgId = chatMsg.id;
           (async () => {
             try {
-              const SocialPostService = require('../services/socialPostService');
+              const SocialPostService = require('../../services/socialPostService');
               const localUrl = await downloadAndSaveHangoutMedia(mediaUrl, mediaType, hangoutId, chatMsgId);
               await SocialPostService.createPost(
                 userId, textContent || null, localUrl, mediaType,
@@ -984,7 +919,7 @@ const startBot = async () => {
           const replyTgMsgId = msg.reply_to_message.message_id;
           (async () => {
             try {
-              const SocialPostService = require('../services/socialPostService');
+              const SocialPostService = require('../../services/socialPostService');
               // Find chat_message for the replied-to TG message
               const { rows: parentChatRows } = await dbQuery(
                 `SELECT id FROM chat_messages
@@ -1037,7 +972,7 @@ const startBot = async () => {
       const chatId = ctx.chat.id;
       try {
         const { query: dbQuery } = require('../../config/postgres');
-        const socketIO = require('../services/socketSingleton').get();
+        const socketIO = require('../../services/socketSingleton').get();
         if (!socketIO) return next();
 
         // Resolve hangout group via Redis-cached lookup (same pattern as message bridge)
@@ -1133,7 +1068,7 @@ const startBot = async () => {
       const needsAdminCheck = adminSessionFlags || isAwaitingSupportMessage || isContactingAdmin || isRequestingActivation;
       if (!isAdminUser && needsAdminCheck) {
         try {
-          const PermissionService = require('../services/permissionService');
+          const PermissionService = require('../../services/permissionService');
           isAdminUser = await PermissionService.isAdmin(ctx.from?.id);
         } catch (adminCheckError) {
           logger.warn(`Admin permission check failed during support routing guard: ${adminCheckError.message}`);
@@ -1443,7 +1378,7 @@ const startBot = async () => {
 
     // Initialize proactive reminder service
     try {
-      const ProactiveReminderService = require('../services/proactiveReminderService');
+      const ProactiveReminderService = require('../../services/proactiveReminderService');
 
       // Check if proactive reminders are enabled (disabled by default if bot is kicked from group)
       const PROACTIVE_REMINDERS_ENABLED = process.env.PROACTIVE_REMINDERS_ENABLED === 'true';
@@ -1466,7 +1401,7 @@ const startBot = async () => {
     }
     // Initialize Daimo payment recovery scheduler (every 5 min)
     try {
-      const PaymentRecoveryService = require('../services/paymentRecoveryService');
+      const PaymentRecoveryService = require('../../services/paymentRecoveryService');
       setInterval(() => PaymentRecoveryService.processStuckDaimoPayments().catch(err =>
         logger.error('Daimo payment recovery error:', err)
       ), 5 * 60 * 1000);

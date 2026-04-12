@@ -15,8 +15,8 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../../.env'
 
 const { query, pool } = require('../bot/config/postgres');
 const { getRedis } = require('../bot/config/redis');
-const sendSystemDM = require('../bot/services/sendSystemDM');
-const { getOrCreateRefCode } = require('../bot/services/referralService');
+const sendSystemDM = require('../services/sendSystemDM');
+const { getOrCreateRefCode } = require('../services/referralService');
 
 const CRISTINA_ID = 'pnptv-official';
 const DRY_RUN = process.argv.includes('--dry-run');

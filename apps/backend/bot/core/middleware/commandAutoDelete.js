@@ -1,5 +1,5 @@
 const logger = require('../../../utils/logger');
-const ChatCleanupService = require('../../services/chatCleanupService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
 
 /**
  * Auto-delete commands in groups

@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const moment = require('moment');
-const UserService = require('../../services/userService');
+const UserService = require('../../../services/userService');
 const UserModel = require('../../../models/userModel');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');

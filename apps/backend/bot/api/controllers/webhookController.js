@@ -1,6 +1,6 @@
 const { schemas } = require('../../../validation/schemas/payment.schema');
-const PaymentService = require('../../services/paymentService');
-const PaymentSecurityService = require('../../services/paymentSecurityService');
+const PaymentService = require('../../../services/paymentService');
+const PaymentSecurityService = require('../../../services/paymentSecurityService');
 const logger = require('../../../utils/logger');
 const DaimoConfig = require('../../../config/daimo');
 const PaymentWebhookEventModel = require('../../../models/paymentWebhookEventModel');
@@ -348,7 +348,7 @@ function verifyEpaycoSignature(req) {
  * @param {Response} res - Express response
  */
 const handleDaimoWebhook = async (req, res) => {
-  const DaimoService = require('../../services/daimoService');
+  const DaimoService = require('../../../services/daimoService');
 
   try {
     // Step 1: Verify auth BEFORE any Redis lock or payload processing

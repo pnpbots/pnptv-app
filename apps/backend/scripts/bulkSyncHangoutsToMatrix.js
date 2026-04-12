@@ -25,7 +25,7 @@ try {
 } catch {}
 
 const { query } = require(path.join(BACKEND_ROOT, 'config/postgres'));
-const matrixService = require(path.join(BACKEND_ROOT, 'bot/services/matrixService'));
+const matrixService = require(path.join(BACKEND_ROOT, 'services/matrixService'));
 const logger = require(path.join(BACKEND_ROOT, 'utils/logger'));
 
 const DRY_RUN = process.argv.includes('--dry-run');
@@ -140,7 +140,7 @@ async function main() {
           if (!DRY_RUN) {
             await matrixService.ensureUserInRoom(group.matrix_room_id, {
               matrixUserId: member.matrix_user_id,
-              accessToken: require(path.join(BACKEND_ROOT, 'bot/services/matrixService')).provisionMatrixUser ?
+              accessToken: require(path.join(BACKEND_ROOT, 'services/matrixService')).provisionMatrixUser ?
                 (await matrixService.provisionMatrixUser(member)).accessToken : null,
             });
           }

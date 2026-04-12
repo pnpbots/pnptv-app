@@ -2,8 +2,8 @@
  * Mono — Telegram bot handler (admin-only)
  * Usage: /mono <question>  OR  free-text message from admin
  */
-const { chatWithMono } = require('../../services/monoService');
-const PermissionService = require('../../services/permissionService');
+const { chatWithMono } = require('../../../services/monoService');
+const PermissionService = require('../../../services/permissionService');
 const logger = require('../../../utils/logger');
 
 const TYPING_INTERVAL = 4000;

@@ -23,7 +23,7 @@ try {
 } catch (_) { /* dotenv may not be needed inside Docker */ }
 
 const { query, closePool } = require(path.join(BACKEND_ROOT, 'config/postgres'));
-const matrixService = require(path.join(BACKEND_ROOT, 'bot/services/matrixService'));
+const matrixService = require(path.join(BACKEND_ROOT, 'services/matrixService'));
 
 const DRY_RUN     = process.argv.includes('--dry-run');
 const SYNC_AVATARS = process.argv.includes('--sync-avatars');

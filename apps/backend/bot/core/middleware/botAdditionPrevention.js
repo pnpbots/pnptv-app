@@ -1,5 +1,5 @@
 const logger = require('../../../utils/logger');
-const ModerationService = require('../../services/moderationService');
+const ModerationService = require('../../../services/moderationService');
 
 /**
  * Bot Addition Prevention Middleware

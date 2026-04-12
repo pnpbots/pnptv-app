@@ -62,7 +62,7 @@ jest.mock('../utils/logger', () => ({
 
 // ── Subject under test ────────────────────────────────────────────────────────
 
-const EntitlementAccessService = require('../bot/services/entitlementAccessService');
+const EntitlementAccessService = require('../services/entitlementAccessService');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

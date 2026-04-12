@@ -57,7 +57,7 @@ jest.mock('../utils/logger', () => ({
 // PaymentRecoveryService dependencies
 const mockRecoverStuckPendingPayment = jest.fn();
 const mockProcessDaimoWebhook = jest.fn();
-jest.mock('../bot/services/paymentService', () => ({
+jest.mock('../services/paymentService', () => ({
   recoverStuckPendingPayment: mockRecoverStuckPendingPayment,
   processDaimoWebhook: mockProcessDaimoWebhook,
 }));
@@ -83,9 +83,9 @@ let PaymentRecoveryService;
 beforeAll(() => {
   process.env.ENCRYPTION_KEY = 'test-encryption-key-32chars!!';
   process.env.JWT_SECRET = 'test-jwt-secret-for-hmac';
-  PaymentSecurityService = require('../bot/services/paymentSecurityService');
-  FraudDetectionService = require('../bot/services/fraudDetectionService');
-  PaymentRecoveryService = require('../bot/services/paymentRecoveryService');
+  PaymentSecurityService = require('../services/paymentSecurityService');
+  FraudDetectionService = require('../services/fraudDetectionService');
+  PaymentRecoveryService = require('../services/paymentRecoveryService');
 });
 
 beforeEach(() => {

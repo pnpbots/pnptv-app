@@ -1,6 +1,6 @@
 const { ROLES, PERMISSIONS } = require('../../../config/roles.config');
-const RoleService = require('../../services/RoleService');
-const AuditLogService = require('../../services/AuditLogService');
+const RoleService = require('../../../services/roleService');
+const AuditLogService = require('../../../services/AuditLogService');
 const { getPool } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 

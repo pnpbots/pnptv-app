@@ -1,5 +1,5 @@
 const logger = require('../../../utils/logger');
-const XPostService = require('../../services/xPostService');
+const XPostService = require('../../../services/xPostService');
 const db = require('../../../utils/db');
 
 const MAX_RETRIES = 3;

@@ -4,7 +4,7 @@
  */
 
 const logger = require('../../../utils/logger');
-const communityPostService = require('../../services/communityPostService');
+const communityPostService = require('../../../services/communityPostService');
 const db = require('../../../utils/db');
 
 class CommunityPostScheduler {

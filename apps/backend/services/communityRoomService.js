@@ -1,5 +1,6 @@
 const logger = require('../utils/logger');
-const JaasService = require('./jaasService');
+// JaaS removed — replaced by LiveKit
+const JaasService = { generateToken: () => { throw new Error('JaaS removed — use LiveKit'); } };
 const { getRedis } = require('../config/redis');
 const EntitlementAccessService = require('./entitlementAccessService');
 

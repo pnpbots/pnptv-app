@@ -1,5 +1,5 @@
-const ModerationService = require('../../services/moderationService');
-const ChatCleanupService = require('../../services/chatCleanupService');
+const ModerationService = require('../../../services/moderationService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
 const logger = require('../../../utils/logger');
 const { t } = require('../../../utils/i18n');
 

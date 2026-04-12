@@ -1,8 +1,8 @@
 const { Markup } = require('telegraf');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
-const ChatCleanupService = require('../../services/chatCleanupService');
-const PermissionService = require('../../services/permissionService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
+const PermissionService = require('../../../services/permissionService');
 const { isPrimeUser, hasFullAccess, hasTierAccess, safeReplyOrEdit } = require('../../utils/helpers');
 const config = require('../../../config/config');
 const UserModel = require('../../../models/userModel');
@@ -347,7 +347,7 @@ const registerMenuHandlers = (bot) => {
     bot.action('admin_panel', async (ctx) => {
       try {
         // PermissionService is required from roleManagement.js
-        const PermissionService = require('../admin/../../services/permissionService');
+        const PermissionService = require('../../../services/permissionService');
         const showRoleManagement = require('../admin/roleManagement.js').showRoleManagement;
         const role = await PermissionService.getUserRole(ctx.from.id);
         if (!(role === 'superadmin' || role === 'admin')) {

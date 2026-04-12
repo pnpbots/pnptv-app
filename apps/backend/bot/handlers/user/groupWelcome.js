@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const UserModel = require('../../../models/userModel');
-const ChatCleanupService = require('../../services/chatCleanupService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
 const { cache } = require('../../../config/redis');
 const logger = require('../../../utils/logger');
 

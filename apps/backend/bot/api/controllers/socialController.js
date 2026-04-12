@@ -9,13 +9,13 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 const logger = require('../../../utils/logger');
-const SocialPostService = require('../../services/socialPostService');
+const SocialPostService = require('../../../services/socialPostService');
 const axios = require('axios');
 
 const { query: dbQuery } = require('../../../config/postgres');
-const NotificationEmitter = require('../../services/notificationEmitter');
-const mentionService = require('../../services/mentionService');
-const { validateTierFresh } = require('../../services/accessService');
+const NotificationEmitter = require('../../../services/notificationEmitter');
+const mentionService = require('../../../services/mentionService');
+const { validateTierFresh } = require('../../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
 
 async function extractVideoThumbnail(videoPath, thumbPath) {

@@ -22,9 +22,9 @@ const BE = path.join(__dirname, '..', 'apps', 'backend');
 
 const { query } = require(path.join(BE, 'config/postgres'));
 const logger = require(path.join(BE, 'utils/logger'));
-const InvoiceService = require(path.join(BE, 'bot/services/invoiceservice'));
-const EmailService = require(path.join(BE, 'bot/services/emailservice'));
-const NotificationEmitter = require(path.join(BE, 'bot/services/notificationEmitter'));
+const InvoiceService = require(path.join(BE, 'services/invoiceservice'));
+const EmailService = require(path.join(BE, 'services/emailservice'));
+const NotificationEmitter = require(path.join(BE, 'services/notificationEmitter'));
 const PaymentHistoryService = require(path.join(BE, 'services/paymentHistoryService'));
 const { Telegraf } = require(path.join(BE, 'node_modules/telegraf'));
 

@@ -1,8 +1,8 @@
 const logger = require('../utils/logger');
 const EmailService = require('./emailService');
 const PaymentHistoryService = require('./paymentHistoryService');
-const MembershipCleanupService = require('../bot/services/membershipCleanupService');
-const MessageTemplates = require('../bot/services/messageTemplates');
+const MembershipCleanupService = require('./membershipCleanupService');
+const MessageTemplates = require('./messageTemplates');
 const UserModel = require('../models/userModel');
 
 /**

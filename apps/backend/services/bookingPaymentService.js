@@ -1,6 +1,6 @@
 const ModelManagementModel = require('../models/modelManagementModel');
 const PaymentModel = require('../models/paymentModel');
-const PaymentSecurityService = require('../../services/paymentSecurityService');
+const PaymentSecurityService = require('./paymentSecurityService');
 const UserModel = require('../models/userModel');
 const logger = require('../utils/logger');
 

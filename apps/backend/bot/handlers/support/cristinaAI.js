@@ -6,7 +6,7 @@
 const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');
 const { detectLanguage } = require('../../../utils/languageDetector');
-const { chatWithCristina, isCristinaAIAvailable } = require('../../services/cristinaAIService');
+const { chatWithCristina, isCristinaAIAvailable } = require('../../../services/cristinaAIService');
 const CristinaAdminInfoService = require('../../../services/cristinaAdminInfoService');
 const sanitize = require('../../../utils/sanitizer');
 

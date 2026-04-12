@@ -1,4 +1,4 @@
-const PrivateCallBookingService = require('../bot/services/privateCallBookingService');
+const PrivateCallBookingService = require('../services/privateCallBookingService');
 const logger = require('../utils/logger');
 
 /**

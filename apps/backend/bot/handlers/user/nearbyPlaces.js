@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
-const NearbyPlaceService = require('../../services/nearbyPlaceService');
-const UserService = require('../../services/userService');
+const NearbyPlaceService = require('../../../services/nearbyPlaceService');
+const UserService = require('../../../services/userService');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
 

@@ -1,5 +1,5 @@
-const userService = require('../../services/userService');
-const paymentService = require('../../services/paymentService');
+const userService = require('../../../services/userService');
+const paymentService = require('../../../services/paymentService');
 const logger = require('../../../utils/logger');
 
 /**

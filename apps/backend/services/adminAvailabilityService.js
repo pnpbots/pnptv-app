@@ -1,5 +1,5 @@
 const logger = require('../utils/logger');
-const MeetGreetTimeSlotService = require('./meetGreetTimeSlotService');
+const PNPLiveTimeSlotService = require('./pnpLiveTimeSlotService');
 const AvailabilityService = require('./availabilityService');
 
 /**
@@ -30,8 +30,8 @@ class AdminAvailabilityService {
       }
 
       // Check if the time frame is within Thursday-Monday window
-      const startDayValid = MeetGreetTimeSlotService.isDayInWindow(startDateTime);
-      const endDayValid = MeetGreetTimeSlotService.isDayInWindow(endDateTime);
+      const startDayValid = PNPLiveTimeSlotService.isDayInWindow(startDateTime);
+      const endDayValid = PNPLiveTimeSlotService.isDayInWindow(endDateTime);
 
       if (!startDayValid || !endDayValid) {
         throw new Error('Availability can only be created for Thursday to Monday');
@@ -318,8 +318,8 @@ class AdminAvailabilityService {
     }
 
     // Check if within Thursday-Monday window
-    const startDayValid = MeetGreetTimeSlotService.isDayInWindow(start);
-    const endDayValid = MeetGreetTimeSlotService.isDayInWindow(end);
+    const startDayValid = PNPLiveTimeSlotService.isDayInWindow(start);
+    const endDayValid = PNPLiveTimeSlotService.isDayInWindow(end);
 
     if (!startDayValid) {
       result.valid = false;

@@ -1,7 +1,7 @@
 const { Markup } = require('telegraf');
-const PaymentService = require('../../services/paymentService');
+const PaymentService = require('../../../services/paymentService');
 const PlanModel = require('../../../models/planModel');
-const UserService = require('../../services/userService');
+const UserService = require('../../../services/userService');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
 const { getLanguage, safeReplyOrEdit } = require('../../utils/helpers');

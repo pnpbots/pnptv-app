@@ -1,8 +1,8 @@
 'use strict';
 
 const { randomUUID } = require('crypto');
-const XAutoCampaignService = require('../../services/xAutoCampaignService');
-const XPostService = require('../../services/xPostService');
+const XAutoCampaignService = require('../../../services/xAutoCampaignService');
+const XPostService = require('../../../services/xPostService');
 const logger = require('../../../utils/logger');
 const { getRedis } = require('../../../config/redis');
 

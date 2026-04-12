@@ -40,7 +40,7 @@ try {
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
 const { getPool, query } = require(path.join(BACKEND_ROOT, 'config/postgres'));
-const { processHangoutMedia } = require(path.join(BACKEND_ROOT, 'bot/services/hangoutMediaService'));
+const { processHangoutMedia } = require(path.join(BACKEND_ROOT, 'services/hangoutMediaService'));
 const logger = require(path.join(BACKEND_ROOT, 'utils/logger'));
 
 const BOT_TOKEN = process.env.BOT_TOKEN;

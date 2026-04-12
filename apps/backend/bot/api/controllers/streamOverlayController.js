@@ -2,7 +2,7 @@
 
 const logger = require('../../../utils/logger');
 const { getPool } = require('../../../config/postgres');
-const socketSingleton = require('../../services/socketSingleton');
+const socketSingleton = require('../../../services/socketSingleton');
 
 // Channel ref validation: alphanumeric + hyphens only (matches Restreamer slugs like 'pnptv-frank')
 const CHANNEL_REF_RE = /^[a-zA-Z0-9-]+$/;

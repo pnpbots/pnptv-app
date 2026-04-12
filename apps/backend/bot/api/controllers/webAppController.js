@@ -11,7 +11,7 @@ const fs = require('fs').promises;
 const FileType = require('file-type');
 
 // ── Enforced follows (shared service) ────────────────────────────────────────
-const { enforceDefaultFollows } = require('../../services/followService');
+const { enforceDefaultFollows } = require('../../../services/followService');
 const AuthentikService = require('../../../services/authentikService');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -272,8 +272,7 @@ function provisionAllServices(user) {
     const userId = user.id;
     // 1. Matrix — DMs and hangout chat rooms
     try {
-      const matrixService = require('../../services/matrixService');
-      await matrixService.provisionMatrixUser(user);
+      // Matrix provisioning removed
       logger.info(`[Provision] Matrix provisioned for user ${userId}`);
     } catch (err) {
       logger.warn(`[Provision] Matrix failed for user ${userId}: ${err.message}`);
@@ -2069,11 +2068,7 @@ const uploadAvatar = async (req, res) => {
 
     logger.info(`Avatar uploaded: user ${user.id} → ${filename}`);
 
-    // Fire-and-forget: sync avatar to Matrix profile
-    const matrixService = require('../../services/matrixService');
-    matrixService.syncMatrixAvatar({ id: user.id, photo_file_id: relativeUrl }).catch(err =>
-      logger.warn(`Matrix avatar sync after upload failed for user ${user.id}: ${err.message}`)
-    );
+    // Matrix avatar sync removed
 
     return res.json({ success: true, photoUrl: relativeUrl });
   } catch (error) {

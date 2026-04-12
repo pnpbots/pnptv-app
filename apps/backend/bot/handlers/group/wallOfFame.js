@@ -3,15 +3,15 @@ const axios = require('axios');
 const UserModel = require('../../../models/userModel');
 const WallOfFameModel = require('../../../models/wallOfFameModel');
 const CultEventModel = require('../../../models/cultEventModel');
-const CultEventService = require('../../services/cultEventService');
+const CultEventService = require('../../../services/cultEventService');
 const { cache } = require('../../../config/redis');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
-const SubscriptionService = require('../../services/subscriptionService');
-const { processHangoutMedia } = require('../../services/hangoutMediaService');
-const SocialPostService = require('../../services/socialPostService');
-const NotificationEmitter = require('../../services/notificationEmitter');
+const SubscriptionService = require('../../../services/subscriptionService');
+const { processHangoutMedia } = require('../../../services/hangoutMediaService');
+const SocialPostService = require('../../../services/socialPostService');
+const NotificationEmitter = require('../../../services/notificationEmitter');
 
 const BADGE_HIGH_LEGEND = 'High Legend of the Cult';
 const BADGE_TRIBUTE = 'Tribute of the Cult';
@@ -120,7 +120,7 @@ async function postToSocialFeed(ctx, fileId, mediaType, user, mimetype) {
     );
 
     // Emit via Socket.IO if available
-    const { get: getIo } = require('../../services/socketSingleton');
+    const { get: getIo } = require('../../../services/socketSingleton');
     const io = getIo();
     if (io) {
       io.emit('feed:new_post', {

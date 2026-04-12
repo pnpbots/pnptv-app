@@ -13,7 +13,7 @@
 const logger = require('../utils/logger');
 const { getPool } = require('../config/postgres');
 const { chatWithCristina, isCristinaAIAvailable } = require('./cristinaAIService');
-const { buildCristinaSystemPrompt } = require('../handlers/support/cristinaAI');
+const { buildCristinaSystemPrompt } = require('../bot/handlers/support/cristinaAI');
 const SupportTopicModel = require('../models/supportTopicModel');
 const SupportTicketMessageModel = require('../models/supportTicketMessageModel');
 

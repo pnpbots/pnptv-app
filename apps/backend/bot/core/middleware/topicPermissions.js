@@ -2,7 +2,7 @@ const { Markup } = require('telegraf');
 const RoleService = require('../../../services/roleService');
 const ApprovalService = require('../../../services/approvalService');
 const UserModel = require('../../../models/userModel');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 const logger = require('../../../utils/logger');
 const ACCESS_CONTROL_CONFIG = require('../../../config/accessControlConfig');
 

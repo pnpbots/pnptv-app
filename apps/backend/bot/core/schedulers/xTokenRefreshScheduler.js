@@ -2,7 +2,7 @@
 
 const db = require('../../../utils/db');
 const logger = require('../../../utils/logger');
-const { refreshAccountTokens } = require('../../services/xPostService');
+const { refreshAccountTokens } = require('../../../services/xPostService');
 
 // Refresh tokens 30 minutes before they expire
 const REFRESH_BUFFER_MS = 30 * 60 * 1000;

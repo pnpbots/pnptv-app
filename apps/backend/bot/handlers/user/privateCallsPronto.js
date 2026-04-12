@@ -1,5 +1,5 @@
 const { Markup } = require('telegraf');
-const PrivateCallBookingService = require('../../services/privateCallBookingService');
+const PrivateCallBookingService = require('../../../services/privateCallBookingService');
 const { getLanguage } = require('../../utils/helpers');
 const logger = require('../../../utils/logger');
 

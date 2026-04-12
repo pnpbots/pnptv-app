@@ -1,6 +1,6 @@
 'use strict';
 const { query } = require('../../../config/postgres');
-const reactionService = require('../../services/reactionService');
+const reactionService = require('../../../services/reactionService');
 const logger = require('../../../utils/logger');
 
 // POST /api/webapp/social/posts/:postId/react  body: { emoji }

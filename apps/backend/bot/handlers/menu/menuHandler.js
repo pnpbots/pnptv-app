@@ -20,7 +20,7 @@ const UserModel = require('../../../models/userModel');
 const VideoCallModel = require('../../../models/videoCallModel');
 const MainRoomModel = require('../../../models/mainRoomModel');
 const { isPrimeUser, hasFullAccess } = require('../../utils/helpers');
-const UserService = require('../../services/userService');
+const UserService = require('../../../services/userService');
 const { buildHangoutsWebAppUrl } = require('../../utils/hangoutsWebApp');
 
 const HANGOUTS_WEB_APP_URL = process.env.HANGOUTS_WEB_APP_URL || 'https://pnptv.app/hangouts';
@@ -36,7 +36,7 @@ const lastMenuMessages = {};
 /**
  * Require ChatCleanupService for message deletion
  */
-const ChatCleanupService = require('../../services/chatCleanupService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
 
 /**
  * Check if message is in a group/supergroup

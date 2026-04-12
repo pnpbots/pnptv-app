@@ -1,9 +1,9 @@
-const CommunityRoomService = require('../../services/communityRoomService');
+const CommunityRoomService = require('../../../services/communityRoomService');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { resolveUserId } = require('../../utils/helpers');
-const EntitlementAccessService = require('../../services/entitlementAccessService');
-const socketSingleton = require('../../services/socketSingleton');
+const EntitlementAccessService = require('../../../services/entitlementAccessService');
+const socketSingleton = require('../../../services/socketSingleton');
 
 /**
  * Get community room info and register presence.
@@ -595,7 +595,7 @@ const clipMoment = async (req, res) => {
       return res.status(400).json({ success: false, error: 'caption is required' });
     }
 
-    const SocialPostService = require('../../services/socialPostService');
+    const SocialPostService = require('../../../services/socialPostService');
     const post = await SocialPostService.createPost(
       userId,
       `🔴 LIVE ON MAIN STAGE: ${String(caption).trim()}`,

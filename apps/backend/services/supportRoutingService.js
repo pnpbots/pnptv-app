@@ -1,6 +1,6 @@
 const logger = require('../utils/logger');
 const SupportTopicModel = require('../models/supportTopicModel');
-const { addReaction } = require('../utils/telegramReactions');
+const { addReaction } = require('../bot/utils/telegramReactions');
 
 /**
  * Support Routing Service

@@ -22,8 +22,8 @@ try {
 } catch (_) {}
 
 const { query } = require(path.join(BACKEND_ROOT, 'config/postgres'));
-const emailService = require(path.join(BACKEND_ROOT, 'bot/services/emailservice'));
-const PushNotificationService = require(path.join(BACKEND_ROOT, 'bot/services/pushNotificationService'));
+const emailService = require(path.join(BACKEND_ROOT, 'services/emailservice'));
+const PushNotificationService = require(path.join(BACKEND_ROOT, 'services/pushNotificationService'));
 const logger = require(path.join(BACKEND_ROOT, 'utils/logger'));
 
 const DRY_RUN = process.argv.includes('--dry-run');

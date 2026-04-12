@@ -1,8 +1,8 @@
 const { requirePrivateChat } = require('../../utils/notifications');
-const userService = require('../../services/userService');
+const userService = require('../../../services/userService');
 const i18n = require('../../utils/i18n');
 const logger = require('../../../utils/logger');
-const supportRoutingService = require('../../services/supportRoutingService');
+const supportRoutingService = require('../../../services/supportRoutingService');
 
 /**
  * Handle support command

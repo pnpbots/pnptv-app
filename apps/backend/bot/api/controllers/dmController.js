@@ -2,8 +2,8 @@ const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { getRedis } = require('../../../config/redis');
 const { resolveUserId } = require('../../utils/helpers');
-const DmService = require('../../services/dmService');
-const { generateToken, LIVEKIT_WS_URL } = require('../../services/livekitService');
+const DmService = require('../../../services/dmService');
+const { generateToken, LIVEKIT_WS_URL } = require('../../../services/livekitService');
 
 const DM_CALL_TTL_SECONDS = 4 * 60 * 60;
 const DM_CALL_KEY_PREFIX = 'dm:call:';

@@ -1,8 +1,8 @@
 const { Markup } = require('telegraf');
-const NearbyPlaceService = require('../../services/nearbyPlaceService');
+const NearbyPlaceService = require('../../../services/nearbyPlaceService');
 const NearbyPlaceCategoryModel = require('../../../models/nearbyPlaceCategoryModel');
 const NearbyPlaceModel = require('../../../models/nearbyPlaceModel');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 const { parse } = require('csv-parse/sync');
 const logger = require('../../../utils/logger');
 

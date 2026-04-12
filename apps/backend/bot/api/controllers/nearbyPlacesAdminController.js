@@ -1,5 +1,5 @@
 const NearbyPlaceModel = require('../../../models/nearbyPlaceModel');
-const NearbyPlaceService = require('../../services/nearbyPlaceService');
+const NearbyPlaceService = require('../../../services/nearbyPlaceService');
 const logger = require('../../../utils/logger');
 
 const ITEMS_PER_PAGE = 20;

@@ -1,12 +1,12 @@
 'use strict';
 
 const { Markup } = require('telegraf');
-const UserService = require('../../services/userService');
+const UserService = require('../../../services/userService');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
 const { query } = require('../../../config/postgres');
-const { invalidatePrefsCache } = require('../../services/notificationEmitter');
+const { invalidatePrefsCache } = require('../../../services/notificationEmitter');
 
 // ── Notification preferences helpers ─────────────────────────────────────────
 

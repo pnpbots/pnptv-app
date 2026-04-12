@@ -2,7 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
 const userService = require('./userService');
-const broadcastUtils = require('../utils/broadcastUtils');
+const broadcastUtils = require('../bot/utils/broadcastUtils');
 
 /**
  * Admin Service - Handles admin operations (PostgreSQL)

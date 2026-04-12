@@ -42,8 +42,8 @@ const roleGuard = require('./middleware/roleGuard');
 const { asyncHandler } = require('./middleware/errorHandler');
 const { authenticateUser } = require('./middleware/auth');
 const ipTracker = require('./middleware/ipTracker');
-const PermissionService = require('../services/permissionService');
-const referralService = require('../services/referralService');
+const PermissionService = require('../../services/permissionService');
+const referralService = require('../../services/referralService');
 
 // Authentication middleware and handlers
 const { telegramAuth, checkTermsAccepted } = require('./middleware/telegramAuth');
@@ -55,9 +55,12 @@ const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const modelRoutes = require('./routes/modelRoutes');
 const applyRoutes = require('./routes/applyRoutes');
 const castingRoutes = require('./routes/castingRoutes');
-const elementRoutes = require('./routes/elementRoutes');
-const matrixController = require('./controllers/matrixController');
-const matrixMessageController = require('./controllers/matrixMessageController');
+// Element + Matrix removed (migrated to LiveKit/Socket.IO)
+const elementRoutes = require('express').Router(); // empty stub
+const matrixMessageController = {
+  sendHangoutMessage: (_req, res) => res.status(410).json({ error: 'Matrix removed — use Socket.IO' }),
+  sendDmMessage: (_req, res) => res.status(410).json({ error: 'Matrix removed — use Socket.IO' }),
+};
 const creatorRoutes = require('./routes/creatorRoutes');
 const gamificationRoutes = require('./routes/gamificationRoutes');
 const canvaRoutes = require('./routes/canvaRoutes');
@@ -98,10 +101,10 @@ const requirePageAuth = (req, res, next) => {
 // Soft & Tier Authentication Middleware
 // ==========================================
 
-const { requireTier, isMemberOrAbove, isAdmin: isAdminTier } = require('../services/accessService');
+const { requireTier, isMemberOrAbove, isAdmin: isAdminTier } = require('../../services/accessService');
 
 // Entitlement-based access control — replaces requireTier for all route middleware
-const EntitlementAccessService = require('../services/entitlementAccessService');
+const EntitlementAccessService = require('../../services/entitlementAccessService');
 
 /**
  * Thin session auth — returns 401 JSON if user is not authenticated.
@@ -1783,9 +1786,9 @@ app.get('/api/confirm-payment/:token', asyncHandler(paymentController.confirmPay
 app.post('/api/payment/:paymentId/retry-webhook', verifyAdminJWT, asyncHandler(paymentController.retryPaymentWebhook));
 
 // PNP Live API routes (formerly Meet & Greet, now consolidated)
-const PNPLiveService = require('../services/pnpLiveService');
-const ModelService = require('../services/modelService');
-const PaymentService = require('../services/paymentService');
+const PNPLiveService = require('../../services/pnpLiveService');
+const ModelService = require('../../services/modelService');
+const PaymentService = require('../../services/paymentService');
 app.get('/api/pnp-live/booking/:bookingId', authenticateUser, asyncHandler(async (req, res) => {
   const { bookingId } = req.params;
 
@@ -1864,7 +1867,7 @@ app.get('/join-group/:token', asyncHandler(invitationController.redirectToGroup)
 
 // Stats endpoint
 app.get('/api/stats', requireSessionAuth, asyncHandler(async (req, res) => {
-  const UserService = require('../services/userService');
+  const UserService = require('../../services/userService');
   const stats = await UserService.getStatistics();
   res.json(stats);
 }));
@@ -3209,7 +3212,7 @@ app.post('/api/webapp/support/verify-payment', adminGuard, asyncHandler(supportC
 
 // Admin: manually trigger Cristina ticket worker
 app.post('/api/admin/support/cristina/run', verifyAdminJWT, asyncHandler(async (req, res) => {
-  const cristinaTicketWorker = require('../services/cristinaTicketWorker');
+  const cristinaTicketWorker = require('../../services/cristinaTicketWorker');
   if (cristinaTicketWorker.isRunning) {
     return res.json({ success: false, message: 'Worker is already running' });
   }
@@ -3231,7 +3234,7 @@ function escapeHtml(s) {
 async function ensureEmailCredentials(userId, email, language) {
   const crypto = require('crypto');
   const { query } = require('../../config/postgres');
-  const EmailService = require('../services/emailservice');
+  const EmailService = require('../../services/emailservice');
 
   // 1. Check if another user already has this email (UNIQUE constraint)
   const { rows: emailConflict } = await query(
@@ -3517,7 +3520,7 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
       logger.warn('Failed to log activation (non-critical)', { error: e.message });
     }
     try {
-      const BusinessNotificationService = require('../services/businessNotificationService');
+      const BusinessNotificationService = require('../../services/businessNotificationService');
       await BusinessNotificationService.notifyCodeActivation({ userId, username, code: meruCode, product: 'lifetime100' });
     } catch (e) {
       logger.warn('Failed to send business notification (non-critical)', { error: e.message });
@@ -3537,8 +3540,8 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
     // 8. Invoice + welcome emails (email is now always available)
     const customerEmail = email ? email.trim() : user.email;
     if (customerEmail) {
-      const InvoiceService = require('../services/invoiceservice');
-      const EmailService = require('../services/emailservice');
+      const InvoiceService = require('../../services/invoiceservice');
+      const EmailService = require('../../services/emailservice');
 
       // Invoice email
       (async () => {
@@ -3730,7 +3733,7 @@ app.post('/api/webapp/admin/creator-subscriptions/:creatorId/subscriptions/:subs
 
 // Grok Social Media Manager chat
 app.post('/api/webapp/admin/grok/manager-chat', adminGuard, asyncHandler(async (req, res) => {
-  const { chatWithGrokManager } = require('../services/grokService');
+  const { chatWithGrokManager } = require('../../services/grokService');
   const redis = getRedis();
   const pool = getPool();
 
@@ -3872,7 +3875,7 @@ Today: ${new Date().toISOString().split('T')[0]} UTC`;
 
 // Mono — personal AI business assistant
 app.post('/api/webapp/admin/mono/chat', adminGuard, asyncHandler(async (req, res) => {
-  const { chatWithMono } = require('../services/monoService');
+  const { chatWithMono } = require('../../services/monoService');
   const { message, reset } = req.body;
   const historyKey = String(req.session?.user?.id || 'admin');
   if (reset) {
@@ -4031,7 +4034,7 @@ app.post('/api/webapp/admin/support/tickets/:userId/reply', adminGuard, asyncHan
   }
 
   try {
-    const io = require('../services/socketSingleton').get();
+    const io = require('../../services/socketSingleton').get();
     if (io && saved) {
       io.to(`user:${userId}`).emit('support:newMessage', {
         id: saved.id,
@@ -4076,7 +4079,7 @@ app.patch('/api/webapp/admin/support/tickets/:userId', adminGuard, asyncHandler(
       await SupportTopicModel.updateResolutionTime(userId);
     }
     try {
-      const io = require('../services/socketSingleton').get();
+      const io = require('../../services/socketSingleton').get();
       if (io) io.to(`user:${userId}`).emit('support:statusChange', { status });
     } catch {}
   }
@@ -4176,7 +4179,7 @@ app.post('/api/webapp/admin/broadcast/telegram', adminGuard, asyncHandler(async 
 app.post('/api/webapp/admin/notifications/digest/test', adminGuard, asyncHandler(async (req, res) => {
   const { userId } = req.body;
   const targetUserId = userId || req.session.user.id;
-  const digestScheduler = require('../services/notificationDigestScheduler');
+  const digestScheduler = require('../../services/notificationDigestScheduler');
   const result = await digestScheduler.sendDigestForUser(targetUserId);
   return res.json({ success: true, result });
 }));
@@ -5767,7 +5770,7 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
 }));
 
 // --- Live Tips Proxy (PNP Live tipping system) ---
-const PNPLiveTipsService = require('../services/pnpLiveTipsService');
+const PNPLiveTipsService = require('../../services/pnpLiveTipsService');
 
 // ─── Events ──────────────────────────────────────────────────────────────────
 // GET /api/proxy/events/upcoming — Public upcoming events feed
@@ -6234,7 +6237,7 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
       // Emit real-time tip event to all live viewers
       try {
         const tipInfo = await PNPLiveTipsService.getTipById(parseInt(tipId, 10));
-        const socketSingleton = require('../services/socketSingleton');
+        const socketSingleton = require('../../services/socketSingleton');
         const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
         if (io && tipInfo) {
           // Emit to the specific performer's live room; all viewers in that room receive it
@@ -6268,7 +6271,7 @@ app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (re
 // ==========================================
 // DASH TOKEN WALLET ROUTES
 // ==========================================
-const DashTokenService = require('../services/dashTokenService');
+const DashTokenService = require('../../services/dashTokenService');
 const {
   createDashInvoice,
   createInvoice: createBtcpayInvoice,
@@ -6308,7 +6311,7 @@ app.get('/api/wallet/history', asyncHandler(async (req, res) => {
   res.json({ success: true, history });
 }));
 
-const TokenCheckoutService = require('../services/tokenCheckoutService');
+const TokenCheckoutService = require('../../services/tokenCheckoutService');
 
 // POST /api/wallet/buy — create a BTCPay Dash invoice for token purchase
 app.post('/api/wallet/buy', asyncHandler(async (req, res) => {
@@ -6835,7 +6838,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       // Grant entitlements — sole source of truth for access control (users.tier is display only).
       // This matches the post-payment flow used by ePayco and Daimo.
       try {
-        const PaymentService = require('../services/paymentService');
+        const PaymentService = require('../../services/paymentService');
         await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay');
         logger.info('BTCPay: entitlements granted', { userId: order.user_id, planId: order.plan_id });
       } catch (entErr) {
@@ -6858,7 +6861,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       }
 
       try {
-        const socketSingleton = require('../services/socketSingleton');
+        const socketSingleton = require('../../services/socketSingleton');
         const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
         if (io) {
           io.to(`user:${order.user_id}`).emit('subscription:activated', {
@@ -6885,7 +6888,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
           // Telegram DM (only for users with Telegram)
           if (u.telegram) {
             try {
-              const PaymentNotificationService = require('../services/paymentNotificationService');
+              const PaymentNotificationService = require('../../services/paymentNotificationService');
               await PaymentNotificationService.sendPaymentConfirmation(order.user_id, {
                 planId: order.plan_id,
                 planName,
@@ -6901,8 +6904,8 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
           // Email invoice + welcome (only if email available)
           if (u.email) {
             try {
-              const InvoiceService = require('../services/invoiceservice');
-              const EmailService = require('../services/emailservice');
+              const InvoiceService = require('../../services/invoiceservice');
+              const EmailService = require('../../services/emailservice');
               const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
                 invoiceNumber: invoiceId,
                 customerName: u.telegram || order.user_id,
@@ -6986,7 +6989,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       // Grant entitlements — idempotent via ON CONFLICT in grantEntitlementsForPlan.
       let metaGrantResult;
       try {
-        const PaymentServiceGf = require('../services/paymentService');
+        const PaymentServiceGf = require('../../services/paymentService');
         metaGrantResult = await PaymentServiceGf.grantEntitlementsForPlan(metaUserId, metaPlanId, 'btcpay');
         logger.info('BTCPay metadata flow: entitlements granted', {
           invoiceId,
@@ -7041,7 +7044,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
 
       // Socket notification (non-critical).
       try {
-        const socketSingleton = require('../services/socketSingleton');
+        const socketSingleton = require('../../services/socketSingleton');
         const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
         if (io) {
           io.to(`user:${metaUserId}`).emit('subscription:activated', {
@@ -7080,7 +7083,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
 
         // Emit real-time tip event
         const tipInfo = await PNPLiveTipsService.getTipById(tipId);
-        const socketSingleton = require('../services/socketSingleton');
+        const socketSingleton = require('../../services/socketSingleton');
         const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
         if (io && tipInfo) {
           const tipPayload = {
@@ -7120,7 +7123,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       logger.info('BTCPay: tokens credited', { userId, tokens, invoiceId, newBalance });
 
       try {
-        const socketSingleton = require('../services/socketSingleton');
+        const socketSingleton = require('../../services/socketSingleton');
         const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
         if (io) {
           io.to(`user:${userId}`).emit('wallet:updated', { balance: newBalance, credited: tokens });
@@ -7248,10 +7251,7 @@ app.use('/api/element', elementRoutes);
 // Matrix / Synapse bridge routes
 // All endpoints require an authenticated session
 // ==========================================
-app.get('/api/webapp/matrix/token', requireSessionAuth, asyncHandler(matrixController.getToken));
-app.post('/api/webapp/matrix/dm/:userId', requireSessionAuth, asyncHandler(matrixController.getOrCreateDmRoom));
-app.post('/api/webapp/matrix/hangout-room/:groupId', requireSessionAuth, asyncHandler(matrixController.getOrCreateHangoutRoom));
-app.post('/api/webapp/matrix/hangout-room/:groupId/sync-members', requireSessionAuth, asyncHandler(matrixController.syncHangoutRoomMembers));
+// Matrix API endpoints removed
 app.post('/api/webapp/matrix/hangout/:groupId/message', requireSessionAuth, asyncHandler(matrixMessageController.sendHangoutMessage));
 app.post('/api/webapp/matrix/dm/:userId/message',       requireSessionAuth, asyncHandler(matrixMessageController.sendDmMessage));
 

@@ -2,12 +2,14 @@
 
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
-const socketSingleton = require('../../services/socketSingleton');
+const socketSingleton = require('../../../services/socketSingleton');
 const userService = require('../../../services/userService');
 const VideoCallModel = require('../../../models/videoCallModel');
-const NotificationEmitter = require('../../services/notificationEmitter');
-const { hasAccess } = require('../../services/accessService');
-const matrixService = require('../../services/matrixService');
+const NotificationEmitter = require('../../../services/notificationEmitter');
+const { hasAccess } = require('../../../services/accessService');
+// Matrix removed — no-op stub; fire-and-forget calls silently resolve
+const _noop = () => Promise.resolve();
+const matrixService = new Proxy({}, { get: () => _noop });
 const BlockedUser = require('../../../models/blockedUser');
 const sharp = require('sharp');
 const path = require('path');
@@ -413,7 +415,7 @@ const joinGroup = async (req, res) => {
     if (!isOwner) {
       if (group.channel_id) {
         // Channel-linked: delegate to checkChannelAccess
-        const { checkChannelAccess } = require('../../services/accessService');
+        const { checkChannelAccess } = require('../../../services/accessService');
         const channelObj = {
           id: group.channel_id,
           access_type: group.channel_access_type || 'free',
@@ -2133,7 +2135,7 @@ module.exports = {
 
 // ── LiveKit video calls ──────────────────────────────────────────────────────
 
-const livekitService = require('../../services/livekitService');
+const livekitService = require('../../../services/livekitService');
 
 // POST /api/webapp/hangouts/groups/:id/call/start
 async function startCall(req, res) {

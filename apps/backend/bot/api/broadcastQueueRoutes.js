@@ -5,11 +5,11 @@
  */
 
 const express = require('express');
-const { getBroadcastQueueIntegration } = require('../services/broadcastQueueIntegration');
-const { getAsyncBroadcastQueue } = require('../services/asyncBroadcastQueue');
+const { getBroadcastQueueIntegration } = require('../../services/broadcastQueueIntegration');
+const { getAsyncBroadcastQueue } = require('../../services/asyncBroadcastQueue');
 const logger = require('../../utils/logger');
 const { verifyAdminJWT } = require('./middleware/jwtAuth');
-const PermissionService = require('../services/permissionService');
+const PermissionService = require('../../services/permissionService');
 
 const router = express.Router();
 const queueIntegration = getBroadcastQueueIntegration();

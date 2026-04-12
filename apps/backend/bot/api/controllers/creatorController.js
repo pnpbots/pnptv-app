@@ -1,7 +1,7 @@
 const logger = require('../../../utils/logger');
-const CreatorService = require('../../services/creatorService');
+const CreatorService = require('../../../services/creatorService');
 const { query, getPool } = require('../../../config/postgres');
-const { hasAccess } = require('../../services/accessService');
+const { hasAccess } = require('../../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
 const XAutoCampaignService = require('../../../services/xAutoCampaignService');
 const { uploadBufferToCreatorFolder, uploadStreamToCreatorFolder } = require('./cmsCreatorController');

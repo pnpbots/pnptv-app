@@ -285,7 +285,9 @@ export default function PostCard({
             post.author_first_name || post.author_username || "user"
           }'s profile`}
         >
-          {photoUrl ? (
+          {post.author_id === "cristina-ai" ? (
+            <span className="w-10 h-10 rounded-full flex items-center justify-center text-2xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
+          ) : photoUrl ? (
             <img
               src={photoUrl}
               alt={`${

@@ -1,6 +1,6 @@
-const PNPLiveNotificationService = require('../bot/services/pnpLiveNotificationService');
-const PNPLiveService = require('../bot/services/pnpLiveService');
-const PNPLiveAvailabilityService = require('../bot/services/pnpLiveAvailabilityService');
+const PNPLiveNotificationService = require('../services/pnpLiveNotificationService');
+const PNPLiveService = require('../services/pnpLiveService');
+const PNPLiveAvailabilityService = require('../services/pnpLiveAvailabilityService');
 const { query } = require('../config/postgres');
 const { cache } = require('../config/redis');
 const logger = require('../utils/logger');

@@ -13,7 +13,7 @@ const {
   isBanned: _isBanned,
   hasMinTier,
   isMemberOrAbove: _isMemberOrAbove,
-} = require('../bot/services/accessService');
+} = require('../services/accessService');
 
 const isPrimeTier = (tier) => _isPrime(tier);
 const isBannedTier = (tier) => _isBanned(tier);

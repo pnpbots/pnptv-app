@@ -1,4 +1,4 @@
-const PermissionService = require('../services/permissionService');
+const PermissionService = require('../../services/permissionService');
 const { PERMISSIONS } = require('../../models/permissionModel');
 const logger = require('../../utils/logger');
 const { t } = require('../../utils/i18n');

@@ -1,4 +1,4 @@
-const ChatCleanupService = require('../../services/chatCleanupService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
 const logger = require('../../../utils/logger');
 
 /**

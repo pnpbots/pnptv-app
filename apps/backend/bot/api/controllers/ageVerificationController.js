@@ -1,4 +1,4 @@
-const ageVerificationService = require('../../services/ageVerificationService');
+const ageVerificationService = require('../../../services/ageVerificationService');
 const logger = require('../../../utils/logger');
 const path = require('path');
 const { resolveUserId } = require('../../utils/helpers');

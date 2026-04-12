@@ -1,8 +1,8 @@
 const logger = require('../../../utils/logger');
 const UserModel = require('../../../models/userModel');
 const { query } = require('../../../utils/db');
-const PermissionService = require('../../services/permissionService');
-const supportRoutingService = require('../../services/supportRoutingService');
+const PermissionService = require('../../../services/permissionService');
+const supportRoutingService = require('../../../services/supportRoutingService');
 const { resolveUserId } = require('../../utils/helpers');
 
 // Escape LIKE/ILIKE metacharacters so user input cannot widen search patterns

@@ -6,14 +6,14 @@
 
 const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');
-const communityPostService = require('../../services/communityPostService');
-const PermissionService = require('../../services/permissionService');
+const communityPostService = require('../../../services/communityPostService');
+const PermissionService = require('../../../services/permissionService');
 const { getLanguage } = require('../../utils/helpers');
-const GrokService = require('../../services/grokService');
+const GrokService = require('../../../services/grokService');
 const broadcastUtils = require('../../utils/broadcastUtils');
 const performanceUtils = require('../../utils/performanceUtils');
 const uxUtils = require('../../utils/uxUtils');
-const XPostService = require('../../services/xPostService');
+const XPostService = require('../../../services/xPostService');
 const { registerXAccountHandlers } = require('./xAccountWizard');
 const dateTimePicker = require('../../utils/dateTimePicker');
 

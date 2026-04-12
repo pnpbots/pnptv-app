@@ -1,12 +1,12 @@
 const { Markup } = require('telegraf');
 const MediaPlayerModel = require('../../../models/mediaPlayerModel');
 const UserModel = require('../../../models/userModel');
-const RoleService = require('../../services/roleService');
+const RoleService = require('../../../services/roleService');
 
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { safeReplyOrEdit } = require('../../utils/helpers');
-const FeatureUrlService = require('../../services/featureUrlService');
+const FeatureUrlService = require('../../../services/featureUrlService');
 
 /**
  * Videorama handlers - Media center with Radio integration
@@ -46,7 +46,7 @@ const registerVideoramaHandlers = (bot) => {
       const userId = ctx.from?.id;
 
       // Check if admin for pre-launch testing
-      const PermissionService = require('../../services/permissionService');
+      const PermissionService = require('../../../services/permissionService');
       const isAdmin = PermissionService.isEnvSuperAdmin(userId) || PermissionService.isEnvAdmin(userId);
 
       if (isAdmin) {

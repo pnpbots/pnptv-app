@@ -1,5 +1,5 @@
 'use strict';
-const mentionService = require('../../services/mentionService');
+const mentionService = require('../../../services/mentionService');
 const logger = require('../../../utils/logger');
 
 // GET /api/webapp/users/mention-search?q=username

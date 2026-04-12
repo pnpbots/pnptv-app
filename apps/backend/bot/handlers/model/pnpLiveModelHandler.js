@@ -1,10 +1,10 @@
 const { Markup } = require('telegraf');
-const RoleService = require('../../services/roleService');
+const RoleService = require('../../../services/roleService');
 const UserModel = require('../../../models/userModel');
 const logger = require('../../../utils/logger');
 const { query } = require('../../../config/postgres');
 
-const BroadcastService = require('../../services/broadcastService');
+const BroadcastService = require('../../../services/broadcastService');
 
 const PerformerProfileModel = require('../../../models/performerProfileModel');
 

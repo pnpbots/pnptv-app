@@ -11,7 +11,7 @@ const groupWelcomeHandlers = require('./groupWelcome');
 const { registerAgeVerificationHandlers } = require('./ageVerificationHandler');
 const lifetimeMigrationHandlers = require('./lifetimeMigration');
 const registerPNPLiveHandlers = require('./pnpLiveHandler');
-const PNPLiveNotificationService = require('../../services/pnpLiveNotificationService');
+const PNPLiveNotificationService = require('../../../services/pnpLiveNotificationService');
 const registerHangoutsHandlers = require('./hangoutsHandler');
 
 const registerVideoramaHandlers = require('./videoramaHandler');

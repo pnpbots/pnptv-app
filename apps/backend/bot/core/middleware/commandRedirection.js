@@ -1,6 +1,6 @@
 const logger = require('../../../utils/logger');
-const ChatCleanupService = require('../../services/chatCleanupService');
-const PermissionService = require('../../services/permissionService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
+const PermissionService = require('../../../services/permissionService');
 
 const GROUP_ID = process.env.GROUP_ID;
 const NOTIFICATIONS_TOPIC_ID = process.env.NOTIFICATIONS_TOPIC_ID || '10682';

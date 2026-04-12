@@ -1,8 +1,8 @@
 const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');
 const { getLanguage, safeReplyOrEdit } = require('../../utils/helpers');
-const UserService = require('../../services/userService');
-const PermissionService = require('../../services/permissionService');
+const UserService = require('../../../services/userService');
+const PermissionService = require('../../../services/permissionService');
 const { showMainMenu: showUserMainMenu } = require('../user/menu');
 
 /**

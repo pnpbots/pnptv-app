@@ -1,9 +1,9 @@
 const PaidContentModel = require('../../../models/paidContentModel');
 const ModelEarningsModel = require('../../../models/modelEarningsModel');
 const WithdrawalModel = require('../../../models/withdrawalModel');
-const ModelMonetizationService = require('../../services/modelMonetizationService');
-const WithdrawalService = require('../../services/withdrawalService');
-const SubscriptionService = require('../../services/subscriptionService');
+const ModelMonetizationService = require('../../../services/modelMonetizationService');
+const WithdrawalService = require('../../../services/withdrawalService');
+const SubscriptionService = require('../../../services/subscriptionService');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 

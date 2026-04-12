@@ -1,5 +1,5 @@
 const CallPackageModel = require('../../../models/callPackageModel');
-const PaymentService = require('../../services/paymentService');
+const PaymentService = require('../../../services/paymentService');
 const logger = require('../../../utils/logger');
 
 /**

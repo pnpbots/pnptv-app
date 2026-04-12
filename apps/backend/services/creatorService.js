@@ -151,7 +151,7 @@ class CreatorService {
     try {
       const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [userId]);
       if (subRes.rows[0]?.authentik_sub) {
-        const AuthentikService = require('../../services/authentikService');
+        const AuthentikService = require('./authentikService');
         await AuthentikService.addUserToCreatorsGroup(subRes.rows[0].authentik_sub);
       }
     } catch (authErr) {
@@ -212,7 +212,7 @@ class CreatorService {
     try {
       const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [app.user_id]);
       if (subRes.rows[0]?.authentik_sub) {
-        const AuthentikService = require('../../services/authentikService');
+        const AuthentikService = require('./authentikService');
         await AuthentikService.addUserToCreatorsGroup(subRes.rows[0].authentik_sub);
       }
     } catch (authErr) {
@@ -699,7 +699,7 @@ class CreatorService {
       try {
         const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [creatorId]);
         if (subRes.rows[0]?.authentik_sub) {
-          const AuthentikService = require('../../services/authentikService');
+          const AuthentikService = require('./authentikService');
           await AuthentikService.removeUserFromCreatorsGroup(subRes.rows[0].authentik_sub);
         }
       } catch (authErr) {
@@ -1112,7 +1112,7 @@ class CreatorService {
     try {
       const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [enrollment.user_id]);
       if (subRes.rows[0]?.authentik_sub) {
-        const AuthentikService = require('../../services/authentikService');
+        const AuthentikService = require('./authentikService');
         await AuthentikService.addUserToCreatorsGroup(subRes.rows[0].authentik_sub);
       }
     } catch (authErr) {

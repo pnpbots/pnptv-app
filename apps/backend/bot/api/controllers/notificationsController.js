@@ -1,7 +1,7 @@
 const { query } = require('../../../config/postgres');
 const { cache, getRedis } = require('../../../config/redis');
 const logger = require('../../../utils/logger');
-const NotificationEmitter = require('../../services/notificationEmitter');
+const NotificationEmitter = require('../../../services/notificationEmitter');
 
 /**
  * Notifications Controller — reads from the unified `notifications` table.

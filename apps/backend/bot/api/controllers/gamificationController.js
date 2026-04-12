@@ -1,4 +1,4 @@
-const gamificationService = require('../../services/gamificationService');
+const gamificationService = require('../../../services/gamificationService');
 const { resolveUserId } = require('../../utils/helpers');
 
 // GET /api/webapp/gamification/categories

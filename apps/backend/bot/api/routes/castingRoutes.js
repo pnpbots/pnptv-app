@@ -2,8 +2,8 @@ const express = require('express');
 const authGuard = require('../middleware/authGuard');
 const roleGuard = require('../middleware/roleGuard');
 const { query } = require('../../../config/postgres');
-const { sendNotificationViaTelegram } = require('../../services/notificationBotDelivery');
-const PermissionService = require('../../services/permissionService');
+const { sendNotificationViaTelegram } = require('../../../services/notificationBotDelivery');
+const PermissionService = require('../../../services/permissionService');
 const logger = require('../../../utils/logger');
 
 const router = express.Router();

@@ -2,10 +2,10 @@
 
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
-const NotificationEmitter = require('../../services/notificationEmitter');
+const NotificationEmitter = require('../../../services/notificationEmitter');
 
-const { isEnforcedFollow } = require('../../services/followService');
-const { validateTierFresh } = require('../../services/accessService');
+const { isEnforcedFollow } = require('../../../services/followService');
+const { validateTierFresh } = require('../../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
 
 const authGuard = (req, res) => {

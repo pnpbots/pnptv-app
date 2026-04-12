@@ -10,8 +10,8 @@
 
 const logger = require('../../../utils/logger');
 const { Markup } = require('telegraf');
-const ChatCleanupService = require('../../services/chatCleanupService');
-const PermissionService = require('../../services/permissionService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
+const PermissionService = require('../../../services/permissionService');
 const { getLanguage } = require('../../utils/helpers');
 const {
   getCristinaRedirectMessage,

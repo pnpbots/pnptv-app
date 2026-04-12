@@ -1,5 +1,5 @@
 const logger = require('../../../utils/logger');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 
 const GROUP_ID = process.env.GROUP_ID || '-1003291737499';
 const NOTIFICATIONS_TOPIC_ID = parseInt(process.env.NOTIFICATIONS_TOPIC_ID || '10682', 10);

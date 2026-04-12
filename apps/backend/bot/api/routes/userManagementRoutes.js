@@ -1,7 +1,7 @@
 const express = require('express');
 const UserManagementController = require('../controllers/userManagementController');
 const { verifyAdminJWT } = require('../middleware/jwtAuth');
-const PermissionService = require('../../services/permissionService');
+const PermissionService = require('../../../services/permissionService');
 
 const router = express.Router();
 

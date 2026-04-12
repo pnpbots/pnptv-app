@@ -1,6 +1,6 @@
 const logger = require('../../utils/logger');
 const { t } = require('../../utils/i18n');
-const accessService = require('../services/accessService');
+const accessService = require('../../services/accessService');
 
 // Admin IDs from environment for pre-launch testing
 const getAdminIds = () => {

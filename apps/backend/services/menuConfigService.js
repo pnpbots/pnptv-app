@@ -35,7 +35,7 @@ class MenuConfigService {
       const userPlanId = user?.planId || 'free';
 
       // Admins have access to all menus
-      const PermissionService = require('../services/permissionService');
+      const PermissionService = require('./permissionService');
       const isAdmin = await PermissionService.isAdmin(userId);
       
       if (isAdmin) {
@@ -65,7 +65,7 @@ class MenuConfigService {
       const userPlanId = user?.planId || 'free';
 
       // Admins have access to all menus
-      const PermissionService = require('../services/permissionService');
+      const PermissionService = require('./permissionService');
       const isAdmin = await PermissionService.isAdmin(userId);
       
       if (isAdmin) {

@@ -1,6 +1,6 @@
 const logger = require('../../../utils/logger');
-const ChatCleanupService = require('../../services/chatCleanupService');
-const PermissionService = require('../../services/permissionService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
+const PermissionService = require('../../../services/permissionService');
 
 const GROUP_ID = process.env.GROUP_ID;
 const AUTO_DELETE_DELAY = 5 * 60 * 1000; // 5 minutes

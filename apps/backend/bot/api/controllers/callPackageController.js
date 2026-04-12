@@ -1,7 +1,7 @@
 'use strict';
-const callPackageService = require('../../services/callPackageService');
-const CallBookingService = require('../../services/CallBookingService');
-const callNotificationService = require('../../services/callNotificationService');
+const callPackageService = require('../../../services/callPackageService');
+const CallBookingService = require('../../../services/CallBookingService');
+const callNotificationService = require('../../../services/callNotificationService');
 const moment = require('moment-timezone');
 
 const logger = require('../../../utils/logger');

@@ -3,8 +3,8 @@ const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
 const SupportTopicModel = require('../../../models/supportTopicModel');
-const supportRoutingService = require('../../services/supportRoutingService');
-const { chatWithCristina, isCristinaAIAvailable } = require('../../services/cristinaAIService');
+const supportRoutingService = require('../../../services/supportRoutingService');
+const { chatWithCristina, isCristinaAIAvailable } = require('../../../services/cristinaAIService');
 
 // Rate limiting map: userId -> lastMessageTime
 const messageTimestamps = new Map();

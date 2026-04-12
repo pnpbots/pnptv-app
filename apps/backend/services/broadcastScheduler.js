@@ -6,7 +6,7 @@
 
 const cron = require('node-cron');
 const logger = require('../utils/logger');
-const BroadcastService = require('../bot/services/broadcastService');
+const BroadcastService = require('./broadcastService');
 const broadcastService = new BroadcastService();
 const { cache } = require('../config/redis');
 

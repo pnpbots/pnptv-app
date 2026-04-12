@@ -1,4 +1,4 @@
-const TopicModerationService = require('../../services/topicModerationService');
+const TopicModerationService = require('../../../services/topicModerationService');
 const logger = require('../../../utils/logger');
 
 /**

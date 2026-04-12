@@ -1,6 +1,6 @@
 'use strict';
 
-const XAutoCampaignService = require('../../services/xAutoCampaignService');
+const XAutoCampaignService = require('../../../services/xAutoCampaignService');
 const logger = require('../../../utils/logger');
 
 const CHECK_INTERVAL = 60 * 1000; // 60 seconds

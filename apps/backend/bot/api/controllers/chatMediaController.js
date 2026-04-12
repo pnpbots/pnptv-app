@@ -13,10 +13,11 @@
 
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
-const { processChatMedia } = require('../../services/chatMediaService');
+const { processChatMedia } = require('../../../services/chatMediaService');
 const { resolveUserId } = require('../../utils/helpers');
-const matrixService = require('../../services/matrixService');
-const NotificationEmitter = require('../../services/notificationEmitter');
+// Matrix removed — stub prevents crash; media endpoints return 503
+const matrixService = new Proxy({}, { get: (_, method) => () => { throw new Error(`Matrix removed – ${method}() unavailable`); } });
+const NotificationEmitter = require('../../../services/notificationEmitter');
 
 const authGuard = (req, res) => {
   const user = req.session?.user;

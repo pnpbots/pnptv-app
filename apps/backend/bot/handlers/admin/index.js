@@ -1,20 +1,20 @@
 const { Markup } = require('telegraf');
-const UserService = require('../../services/userService');
-const PermissionService = require('../../services/permissionService');
+const UserService = require('../../../services/userService');
+const PermissionService = require('../../../services/permissionService');
 const { PERMISSIONS } = require('../../../models/permissionModel');
 const UserModel = require('../../../models/userModel');
 const PaymentModel = require('../../../models/paymentModel');
 const PlanModel = require('../../../models/planModel');
 const ModerationModel = require('../../../models/moderationModel');
 const PaymentWebhookEventModel = require('../../../models/paymentWebhookEventModel');
-const PaymentService = require('../../services/paymentService');
-const PaymentSecurityService = require('../../services/paymentSecurityService');
-const PromoService = require('../../services/promoService');
+const PaymentService = require('../../../services/paymentService');
+const PaymentSecurityService = require('../../../services/paymentSecurityService');
+const PromoService = require('../../../services/promoService');
 const PromoModel = require('../../../models/promoModel');
-const adminService = require('../../services/adminService');
-const { getBroadcastQueueIntegration } = require('../../services/broadcastQueueIntegration');
-const BroadcastService = require('../../services/broadcastService');
-const GrokService = require('../../services/grokService');
+const adminService = require('../../../services/adminService');
+const { getBroadcastQueueIntegration } = require('../../../services/broadcastQueueIntegration');
+const BroadcastService = require('../../../services/broadcastService');
+const GrokService = require('../../../services/grokService');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
 const { getLanguage, validateUserInput } = require('../../utils/helpers');
@@ -29,10 +29,10 @@ const { registerXPostWizardHandlers, handleTextInput: handleXPostTextInput, hand
 const { registerUserManagementHandlers } = require('./userManagementHandler');
 // XFollowersManagement removed (X integration purged)
 const registerPerformerManagementHandlers = require('./performerManagement');
-const PlaylistAdminService = require('../../services/PlaylistAdminService');
-const RadioAdminService = require('../../services/RadioAdminService');
+const PlaylistAdminService = require('../../../services/PlaylistAdminService');
+const RadioAdminService = require('../../../services/RadioAdminService');
 const CristinaAdminInfoService = require('../../../services/cristinaAdminInfoService');
-const { chatWithCristina, isCristinaAIAvailable } = require('../../services/cristinaAIService');
+const { chatWithCristina, isCristinaAIAvailable } = require('../../../services/cristinaAIService');
 
 // Use shared utilities
 const { sanitizeInput } = broadcastUtils;
@@ -6404,7 +6404,7 @@ const registerAudioManagementHandlers = require('./audioManagement');
 const registerDateTimePickerHandlers = require('./dateTimePickerHandlers');
 const registerNearbyPlacesAdminHandlers = require('./nearbyPlacesAdmin');
 const registerEnhancedBusinessAdminHandlers = require('./enhancedBusinessAdmin');
-const ChatCleanupService = require('../../services/chatCleanupService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
 
 // Group cleanup command for admins
 const registerGroupCleanupCommand = (bot) => {

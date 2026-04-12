@@ -1,8 +1,8 @@
 const { Markup } = require('telegraf');
-const PermissionService = require('../../services/permissionService');
-const XPostService = require('../../services/xPostService');
+const PermissionService = require('../../../services/permissionService');
+const XPostService = require('../../../services/xPostService');
 // XOAuthService removed — OAuth2 connect flow disabled
-const GrokService = require('../../services/grokService');
+const GrokService = require('../../../services/grokService');
 const logger = require('../../../utils/logger');
 const dateTimePicker = require('../../utils/dateTimePicker');
 

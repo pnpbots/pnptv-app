@@ -1,4 +1,4 @@
-const GroupInvitationService = require('../../services/groupInvitationService');
+const GroupInvitationService = require('../../../services/groupInvitationService');
 const logger = require('../../../utils/logger');
 
 /**

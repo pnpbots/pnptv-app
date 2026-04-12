@@ -1,5 +1,5 @@
 const { Markup } = require('telegraf');
-const UserService = require('../../services/userService');
+const UserService = require('../../../services/userService');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
