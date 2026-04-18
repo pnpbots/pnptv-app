@@ -1056,6 +1056,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
   // Group card context menu (list view)
   const [groupCardMenuId, setGroupCardMenuId] = useState<number | null>(null);
+  const [groupCardMenuPos, setGroupCardMenuPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
   // Inline edit modal for group list
   const [editingGroup, setEditingGroup] = useState<HangoutGroup | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -3305,7 +3306,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   {!group.isMain && !group.isWallOfFame && (isAdmin || String(group.creatorId) === String(user?.dbId)) && (
                     <div className="relative" onClick={(e) => e.stopPropagation()}>
                       <button
-                        onClick={() => setGroupCardMenuId(groupCardMenuId === group.id ? null : group.id)}
+                        onClick={(e) => {
+                          if (groupCardMenuId !== group.id) {
+                            const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                            setGroupCardMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+                          }
+                          setGroupCardMenuId(groupCardMenuId === group.id ? null : group.id);
+                        }}
                         className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all"
                         aria-label="Group options"
                       >
@@ -3315,8 +3322,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       </button>
                       {groupCardMenuId === group.id && (
                         <>
-                          <div className="fixed inset-0 z-30" onClick={() => setGroupCardMenuId(null)} />
-                          <div className="absolute right-0 top-8 z-40 rounded-xl overflow-hidden shadow-xl min-w-[150px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+                          <div className="fixed inset-0 z-[150]" onClick={() => setGroupCardMenuId(null)} />
+                          <div className="fixed z-[151] rounded-xl overflow-hidden shadow-xl min-w-[150px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", top: groupCardMenuPos.top, right: groupCardMenuPos.right }}>
                             <button
                               onClick={() => {
                                 setGroupCardMenuId(null);
