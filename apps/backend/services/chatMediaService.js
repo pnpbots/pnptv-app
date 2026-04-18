@@ -249,8 +249,19 @@ async function processChatMedia(file, userId) {
   // --- MAGIC BYTE VALIDATION ---
   // Never trust client-supplied Content-Type; inspect actual file bytes
   const detected = await FileType.fromBuffer(file.buffer);
-  const detectedMime = detected?.mime;
-  const mediaType = MAGIC_TO_MEDIA_TYPE[detectedMime];
+  let detectedMime = detected?.mime;
+  let mediaType = MAGIC_TO_MEDIA_TYPE[detectedMime];
+
+  // Container ambiguity fix: WebM and MP4 can carry video OR audio. file-type
+  // always reports the video variant for these containers. When the browser
+  // declares audio/* (e.g. MediaRecorder voice note), trust that hint — both
+  // audio/webm and audio/mp4 are already in our allow-list, so we're not
+  // widening the validation surface, just disambiguating.
+  const claimedMime = (file.mimetype || '').toLowerCase();
+  if (/^audio\//.test(claimedMime)) {
+    if (detectedMime === 'video/webm') { detectedMime = 'audio/webm'; mediaType = 'audio'; }
+    else if (detectedMime === 'video/mp4') { detectedMime = 'audio/mp4'; mediaType = 'audio'; }
+  }
 
   if (!mediaType) {
     logger.warn('chatMediaService: rejected file — magic bytes do not match allowed types', {
