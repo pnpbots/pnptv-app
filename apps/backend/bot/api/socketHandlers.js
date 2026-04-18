@@ -862,7 +862,11 @@ function initSocketIO(io) {
       if (!Number.isFinite(gid) || !Number.isFinite(msgId)) return;
 
       const emojiStr = emoji.trim();
-      if (emojiStr.length > 10) return;
+      const { isAllowedReaction } = require('../../services/reactionService');
+      if (!isAllowedReaction(emojiStr)) {
+        socket.emit('hangout:error', { message: 'Emoji not allowed', code: 'EMOJI_NOT_ALLOWED' });
+        return;
+      }
 
 
       try {

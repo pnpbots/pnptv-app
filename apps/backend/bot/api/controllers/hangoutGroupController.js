@@ -1998,7 +1998,8 @@ const toggleReaction = async (req, res) => {
   }
 
   const emoji = req.body.emoji?.trim();
-  if (!emoji || emoji.length > 10) return res.status(400).json({ error: 'Invalid emoji' });
+  const { isAllowedReaction } = require('../../../services/reactionService');
+  if (!isAllowedReaction(emoji)) return res.status(400).json({ error: 'Emoji not allowed', code: 'EMOJI_NOT_ALLOWED' });
 
   try {
     if (!(await isMember(groupId, user.id))) {

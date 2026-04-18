@@ -1286,7 +1286,9 @@ const startBot = async () => {
         const chatMsgId = msgRows[0].id;
 
         // Extract emoji from reactions (type: 'emoji' only — custom emoji won't render cleanly)
-        const toEmoji = (r) => (r?.type === 'emoji' ? r.emoji : null);
+        // Filter to PNPtv's allowed reaction set so TG-originated reactions stay in sync with webapp rules.
+        const { isAllowedReaction } = require('../../services/reactionService');
+        const toEmoji = (r) => (r?.type === 'emoji' && isAllowedReaction(r.emoji) ? r.emoji : null);
         const newSet = new Set((mr.new_reaction || []).map(toEmoji).filter(Boolean));
         const oldSet = new Set((mr.old_reaction || []).map(toEmoji).filter(Boolean));
 

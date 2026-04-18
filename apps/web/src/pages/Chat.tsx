@@ -138,25 +138,11 @@ function HangoutChatPanel({
   const isNearBottom = useRef(true);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "😮", "😢", "🙏", "💀"];
+  const ALLOWED_REACTIONS = ["😈", "❤️", "😆", "🔝", "🐷", "🍆", "🍑", "💨", "🚀"] as const;
+  const QUICK_REACTIONS = ALLOWED_REACTIONS;
 
   const EMOJI_CATEGORIES = [
-    {
-      label: "Reactions",
-      emojis: ["👍", "❤️", "😂", "🔥", "😮", "😢", "🙏", "💀", "😍", "🤣", "👀", "💯", "🫡", "🤡", "🥵", "💪"],
-    },
-    {
-      label: "Party",
-      emojis: ["🎉", "🎊", "🥳", "🎈", "🎁", "🏆", "🌟", "⭐", "💫", "✨"],
-    },
-    {
-      label: "Naughty",
-      emojis: ["🍆", "🍑", "💦", "👅", "🫦", "🔞", "🌶️", "🫠", "😈", "👿"],
-    },
-    {
-      label: "Nature",
-      emojis: ["🌈", "🦋", "🌺", "🌸", "🐝", "🦊", "🐺", "🌊", "⚡", "🍄"],
-    },
+    { label: "Reactions", emojis: ALLOWED_REACTIONS },
   ] as const;
 
   // Emoji picker state

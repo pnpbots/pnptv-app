@@ -67,14 +67,12 @@ function timeAgo(dateStr: string): string {
 
 // ─── Emoji data ───────────────────────────────────────────────────────────────
 
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "😮", "😢"];
+const ALLOWED_REACTIONS = ["😈", "❤️", "😆", "🔝", "🐷", "🍆", "🍑", "💨", "🚀"] as const;
+const QUICK_REACTIONS = ALLOWED_REACTIONS;
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
 const EMOJI_CATEGORIES = [
-  { label: "Reactions", emojis: ["👍", "❤️", "😂", "🔥", "😮", "😢", "🙏", "💀", "😍", "🤣", "👀", "💯", "🫡", "🤡", "🥵", "💪"] },
-  { label: "Party", emojis: ["🎉", "🎊", "🥳", "🎈", "🎁", "🏆", "🌟", "⭐", "💫", "✨"] },
-  { label: "Naughty", emojis: ["🍆", "🍑", "💦", "👅", "🫦", "🔞", "🌶️", "🫠", "😈", "👿"] },
-  { label: "Nature", emojis: ["🌈", "🦋", "🌺", "🌸", "🐝", "🦊", "🐺", "🌊", "⚡", "🍄"] },
+  { label: "Reactions", emojis: ALLOWED_REACTIONS },
 ] as const;
 
 function parseDmCallInvite(content: string | null): ParsedDmCallInvite | null {

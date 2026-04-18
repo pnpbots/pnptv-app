@@ -2,12 +2,21 @@
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
 
-const DEFAULT_EMOJIS = ['❤️', '🔥', '💊', '😍', '😂', '👀'];
+const DEFAULT_EMOJIS = ['❤️', '😈', '😆', '🔝', '🐷'];
+
+// PNPtv allowed reaction set. Accept both fully-qualified (with VS16) and
+// unqualified forms to tolerate platform differences between web, iOS, TG.
+const ALLOWED_REACTIONS = new Set([
+  '😈', '❤️', '❤', '😆', '🔝', '🐷', '🍆', '🍑', '💨', '🚀',
+]);
+
+function isAllowedReaction(emoji) {
+  if (!emoji || typeof emoji !== 'string') return false;
+  return ALLOWED_REACTIONS.has(emoji);
+}
 
 function validateEmoji(emoji) {
-  if (!emoji || typeof emoji !== 'string') throw new Error('Invalid emoji');
-  // Allow any emoji up to 10 chars (covers multi-codepoint emoji like flags)
-  if (emoji.length > 10) throw new Error('Invalid emoji');
+  if (!isAllowedReaction(emoji)) throw new Error('Invalid emoji');
 }
 
 async function _groupReactions(rows) {
@@ -291,6 +300,8 @@ async function getContentReactions(contentId, userId = null) {
 
 module.exports = {
   DEFAULT_EMOJIS,
+  ALLOWED_REACTIONS,
+  isAllowedReaction,
   togglePostReaction,
   getPostReactions,
   toggleChatReaction,
