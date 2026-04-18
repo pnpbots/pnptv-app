@@ -160,12 +160,13 @@ const startCronJobs = async (bot = null) => {
     });
 
     // Media cleanup - daily at 3 AM UTC
-    // Deletes old avatars and orphaned post media files to minimize storage costs
+    // Deletes old avatars, orphaned post media, and stale DM media files.
     cron.schedule(process.env.MEDIA_CLEANUP_CRON || '0 3 * * *', async () => {
       try {
         logger.info('Running media cleanup job...');
         await MediaCleanupService.cleanupOldAvatars();
         await MediaCleanupService.cleanupOldPostMedia(90); // Keep posts 90 days
+        await MediaCleanupService.cleanupOldDmMedia(parseInt(process.env.DM_MEDIA_RETENTION_DAYS, 10) || 30);
         logger.info('Media cleanup completed');
       } catch (error) {
         logger.error('Error in media cleanup cron:', error);

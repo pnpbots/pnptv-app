@@ -78,6 +78,52 @@ class MediaCleanupService {
   }
 
   /**
+   * Delete DM-media files older than retentionDays (default 30).
+   * Files are stored at /app/public/uploads/dm-media/tg-{userId}-{msgId}.{ext}
+   * and are only needed while the corresponding DM is still in the UI.
+   */
+  static async cleanupOldDmMedia(retentionDays = 30) {
+    try {
+      const dmMediaDir = path.join(__dirname, '../../../public/uploads/dm-media');
+      const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+
+      let files;
+      try {
+        files = await fs.readdir(dmMediaDir);
+      } catch (err) {
+        if (err.code === 'ENOENT') return { deleted: 0, skipped: 0 };
+        throw err;
+      }
+
+      let deleted = 0;
+      let skipped = 0;
+      for (const file of files) {
+        try {
+          const filePath = path.join(dmMediaDir, file);
+          const stat = await fs.stat(filePath);
+          if (!stat.isFile()) continue;
+          if (stat.mtimeMs < cutoffMs) {
+            await fs.unlink(filePath);
+            deleted++;
+          } else {
+            skipped++;
+          }
+        } catch (fileErr) {
+          if (fileErr.code !== 'ENOENT') {
+            logger.warn(`DM media cleanup: failed on ${file}`, { error: fileErr.message });
+          }
+        }
+      }
+
+      logger.info(`DM media cleanup: deleted ${deleted} file(s) older than ${retentionDays} days, kept ${skipped}`);
+      return { deleted, skipped };
+    } catch (error) {
+      logger.error('DM media cleanup error:', error);
+      return { deleted: 0, skipped: 0, error: error.message };
+    }
+  }
+
+  /**
    * Cleanup orphaned avatar files (older than 30 days of inactivity)
    * Only keep the most recent avatar per user
    */
