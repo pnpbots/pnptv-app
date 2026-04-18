@@ -704,14 +704,6 @@ export function Layout() {
         { to: "/main-stage", label: "PNP Main Stage" },
       ],
     },
-    {
-      label: "DISCOVER",
-      links: [
-        { to: "/nearby", label: "PNP Connect" },
-        { to: "/live", label: "PNP Live" },
-        { to: "/media", label: t.nav.prime },
-      ],
-    },
   ];
 
   const secondaryLinks = [
