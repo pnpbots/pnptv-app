@@ -277,8 +277,8 @@ class NearbyService {
         last_seen: null,
       }));
 
-      // ── Step 2: recently-offline users from PostgreSQL (last 72 h) ───────
-      // This ensures the map is never empty just because no one has the app open
+      // ── Step 2: offline users from PostgreSQL (last 365 days) ───────────
+      // Show everyone who has ever shared a location — online OR offline
       try {
         const excludeIds = [...excludeSet, ...onlineIds];
         const offlineRows = await UserLocation.getNearbyUsers(

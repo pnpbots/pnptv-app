@@ -54,8 +54,8 @@ class UserLocation {
     const lon = parseFloat(longitude);
     const latDelta = radiusKm / 111;
     const lngDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
-    // Include online users AND offline users seen within the last 72 hours
-    // so the map is never empty just because no one is active right now
+    // Include online users AND offline users seen within the last year
+    // so the map shows everyone who has shared a location, regardless of online state
     const excludeClause = excludeUserIds.length
       ? `AND ul.user_id != ALL($8::text[])`
       : '';
@@ -80,7 +80,7 @@ class UserLocation {
          )) AS distance_km
        FROM user_locations ul
        JOIN users u ON ul.user_id = u.id
-       WHERE ul.last_seen > NOW() - INTERVAL '72 hours'
+       WHERE ul.last_seen > NOW() - INTERVAL '365 days'
          AND ul.latitude BETWEEN $3 AND $4
          AND ul.longitude BETWEEN $5 AND $6
          ${excludeClause}
