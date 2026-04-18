@@ -587,6 +587,94 @@ const startBot = async () => {
       }
     });
 
+    // /delete — workaround for Telegram's missing message-deletion webhook.
+    // User replies to their own message with /delete; bot soft-deletes in the
+    // webapp hangout and attempts to delete the original TG message.
+    bot.command('delete', async (ctx) => {
+      if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') {
+        return ctx.reply('❌ Use /delete in a linked hangout group by replying to your own message.').catch(() => {});
+      }
+
+      const replyTo = ctx.message?.reply_to_message;
+      if (!replyTo) {
+        const warn = await ctx.reply('❌ Reply to the message you want to delete.').catch(() => null);
+        setTimeout(() => {
+          ctx.deleteMessage(ctx.message.message_id).catch(() => {});
+          if (warn) ctx.deleteMessage(warn.message_id).catch(() => {});
+        }, 5000);
+        return;
+      }
+
+      try {
+        const { query: dbQuery } = require('../../config/postgres');
+        const socketIO = require('../../services/socketSingleton').get();
+
+        const senderTgId = String(ctx.from.id);
+        const targetTgId = String(replyTo.from?.id || '');
+        const isReplyingToOwn = senderTgId === targetTgId;
+
+        const { rows: groupRows } = await dbQuery(
+          'SELECT id FROM hangout_groups WHERE telegram_chat_id = $1',
+          [ctx.chat.id]
+        );
+        if (groupRows.length === 0) return; // not a linked group
+        const hangoutId = groupRows[0].id;
+        const room = `hangout:${hangoutId}`;
+
+        const { rows: msgRows } = await dbQuery(
+          `SELECT id, user_id, is_deleted FROM chat_messages
+           WHERE room = $1 AND (media_metadata->>'telegramMsgId')::bigint = $2
+           LIMIT 1`,
+          [room, replyTo.message_id]
+        );
+        if (msgRows.length === 0) {
+          await ctx.reply('❌ Could not find this message in the PNPtv hangout.').catch(() => {});
+          return;
+        }
+        const chatMsg = msgRows[0];
+        if (chatMsg.is_deleted) return;
+
+        // Permission: must be the message author OR a mod/owner of the hangout
+        let allowed = isReplyingToOwn;
+        if (!allowed) {
+          const { rows: roleRows } = await dbQuery(
+            `SELECT 1 FROM hangout_group_members
+             WHERE group_id=$1 AND user_id=(SELECT id FROM users WHERE telegram=$2 LIMIT 1)
+               AND role IN ('owner','moderator') LIMIT 1`,
+            [hangoutId, senderTgId]
+          );
+          allowed = roleRows.length > 0;
+        }
+        if (!allowed) {
+          await ctx.reply('❌ You can only delete your own messages (or be a mod).').catch(() => {});
+          return;
+        }
+
+        await dbQuery(
+          `UPDATE chat_messages SET is_deleted=true, deleted_by=$1, deleted_for_all=true WHERE id=$2`,
+          [chatMsg.user_id, chatMsg.id]
+        );
+
+        if (socketIO) {
+          socketIO.to(room).emit('hangout:message:deleted', {
+            messageId: chatMsg.id,
+            deletedBy: chatMsg.user_id,
+            forAll: true,
+          });
+        }
+
+        // Try to delete the TG message (requires bot admin rights if not own)
+        await ctx.deleteMessage(replyTo.message_id).catch(() => {});
+        // Clean up the /delete command itself
+        await ctx.deleteMessage(ctx.message.message_id).catch(() => {});
+
+        logger.info(`[TG→App Bridge] /delete processed on hangout ${hangoutId} msg ${chatMsg.id}`);
+      } catch (err) {
+        logger.error('/delete command error', { error: err.message, chatId: ctx.chat.id });
+        await ctx.reply('❌ Delete failed. Please try again.').catch(() => {});
+      }
+    });
+
     // DEBUG: Log all updates
     bot.use(async (ctx, next) => {
       if (ctx.message?.text?.startsWith('/')) {
@@ -684,6 +772,36 @@ const startBot = async () => {
         fs.writeFileSync(destPath, buffer);
         return `/uploads/posts/${filename}`;
       }
+    };
+
+    /**
+     * Download TG DM media to local storage — required because Telegram CDN
+     * links expire after 1 hour. Returns a persistent /uploads/dm-media/... URL.
+     */
+    const downloadAndSaveDmMedia = async (telegramFileUrl, mediaType, telegramUserId, telegramMsgId) => {
+      const sharp = require('sharp');
+      const uploadsDir = path.join(__dirname, '../../../../public/uploads/dm-media');
+      fs.mkdirSync(uploadsDir, { recursive: true });
+
+      const response = await fetch(telegramFileUrl);
+      if (!response.ok) {
+        throw new Error(`Telegram CDN fetch failed: ${response.status} ${response.statusText}`);
+      }
+
+      const ext = mediaType === 'image' ? 'webp' : mediaType === 'video' ? 'mp4' : 'ogg';
+      const filename = `tg-${telegramUserId}-${telegramMsgId}.${ext}`;
+      const destPath = path.join(uploadsDir, filename);
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      if (mediaType === 'image') {
+        await sharp(buffer)
+          .resize(1280, 1280, { fit: 'inside' })
+          .webp({ quality: 80 })
+          .toFile(destPath);
+      } else {
+        fs.writeFileSync(destPath, buffer);
+      }
+      return `/uploads/dm-media/${filename}`;
     };
 
     bot.on('message', async (ctx, next) => {
@@ -1110,6 +1228,116 @@ const startBot = async () => {
       return next();
     });
 
+    // ── Telegram message_reaction → Webapp hangout reaction bridge ──────────
+    bot.on('message_reaction', async (ctx, next) => {
+      const mr = ctx.messageReaction;
+      if (!mr?.message?.chat?.id) return next();
+      if (mr.user?.is_bot) return next();
+
+      const chatId = mr.message.chat.id;
+      try {
+        const { query: dbQuery } = require('../../config/postgres');
+        const socketIO = require('../../services/socketSingleton').get();
+        if (!socketIO) return next();
+
+        const { getRedis } = require('../../config/redis');
+        const redis = getRedis();
+        const cacheKey = `tg-hangout-link:${chatId}`;
+        let hangoutId = null;
+
+        const cached = await redis.get(cacheKey);
+        if (cached === 'none') return next();
+        if (cached) {
+          hangoutId = parseInt(cached, 10);
+        } else {
+          const { rows } = await dbQuery(
+            'SELECT id FROM hangout_groups WHERE telegram_chat_id = $1',
+            [chatId]
+          );
+          if (rows.length === 0) {
+            await redis.set(cacheKey, 'none', 'EX', 60);
+            return next();
+          }
+          hangoutId = rows[0].id;
+          await redis.set(cacheKey, String(hangoutId), 'EX', 60);
+        }
+
+        // Resolve PNPtv user from Telegram reactor — skip anonymous/channel reactions
+        const telegramReactorId = String(mr.user?.id || '');
+        if (!telegramReactorId) return next();
+        const { rows: userRows } = await dbQuery(
+          'SELECT id FROM users WHERE telegram = $1 LIMIT 1',
+          [telegramReactorId]
+        );
+        const pnptvUserId = userRows[0]?.id;
+        if (!pnptvUserId) return next(); // unregistered TG user — can't attribute reaction
+
+        const room = `hangout:${hangoutId}`;
+        const tgMsgId = mr.message.message_id;
+
+        // Find the chat_message by its TG message ID
+        const { rows: msgRows } = await dbQuery(
+          `SELECT id FROM chat_messages
+           WHERE room = $1 AND (media_metadata->>'telegramMsgId')::bigint = $2
+           LIMIT 1`,
+          [room, tgMsgId]
+        );
+        if (msgRows.length === 0) return next();
+        const chatMsgId = msgRows[0].id;
+
+        // Extract emoji from reactions (type: 'emoji' only — custom emoji won't render cleanly)
+        const toEmoji = (r) => (r?.type === 'emoji' ? r.emoji : null);
+        const newSet = new Set((mr.new_reaction || []).map(toEmoji).filter(Boolean));
+        const oldSet = new Set((mr.old_reaction || []).map(toEmoji).filter(Boolean));
+
+        const added = [...newSet].filter(e => !oldSet.has(e));
+        const removed = [...oldSet].filter(e => !newSet.has(e));
+
+        // Remove cleared reactions
+        for (const emoji of removed) {
+          await dbQuery(
+            `DELETE FROM chat_message_reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3`,
+            [chatMsgId, String(pnptvUserId), emoji]
+          );
+        }
+        // Add new reactions (respect 20-emoji-per-message cap)
+        for (const emoji of added) {
+          const { rows: capRows } = await dbQuery(
+            `SELECT COUNT(DISTINCT emoji)::int AS cnt FROM chat_message_reactions WHERE message_id=$1`,
+            [chatMsgId]
+          );
+          if (capRows[0].cnt >= 20) break;
+          await dbQuery(
+            `INSERT INTO chat_message_reactions (message_id, user_id, emoji)
+             VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+            [chatMsgId, String(pnptvUserId), emoji]
+          );
+        }
+
+        if (added.length === 0 && removed.length === 0) return next();
+
+        // Aggregate and broadcast
+        const { rows: agg } = await dbQuery(
+          `SELECT emoji, COUNT(*)::int AS cnt,
+                  json_agg(json_build_object('id', u.id, 'username', u.username)) AS users
+           FROM chat_message_reactions cr
+           JOIN users u ON u.id = cr.user_id
+           WHERE message_id=$1
+           GROUP BY emoji`,
+          [chatMsgId]
+        );
+
+        socketIO.to(room).emit('hangout:reaction:updated', {
+          messageId: chatMsgId,
+          reactions: agg,
+        });
+        logger.info(`[TG→App Bridge] Reaction synced on hangout ${hangoutId} msg ${chatMsgId}`);
+      } catch (err) {
+        logger.error('[TG→App Bridge] message_reaction error', { error: err.message, chatId });
+      }
+      return next();
+    });
+
     // ── Telegram private message → Webapp DM bridge ─────────────────────────
     // When a user sends a private message to the bot, bridge it as a webapp DM
     // to the person they were last chatting with (tracked via Redis).
@@ -1161,33 +1389,34 @@ const startBot = async () => {
         let mediaMime = null;
         let mediaThumbUrl = null;
 
-        // Handle media
+        // Handle media — download locally since TG CDN URLs expire after 1h
+        const tgMsgId = msg.message_id;
         if (msg.photo && msg.photo.length > 0) {
           try {
             const largest = msg.photo[msg.photo.length - 1];
             const fileLink = await ctx.telegram.getFileLink(largest.file_id);
-            mediaUrl = fileLink.href || fileLink.toString();
+            mediaUrl = await downloadAndSaveDmMedia(fileLink.href || fileLink.toString(), 'image', telegramId, tgMsgId);
             mediaType = 'image';
-            mediaMime = 'image/jpeg';
-          } catch (e) { logger.warn('[TG→App DM] Failed to get photo link', { error: e.message }); }
+            mediaMime = 'image/webp';
+          } catch (e) { logger.warn('[TG→App DM] Failed to save photo', { error: e.message }); }
         }
         if (msg.video || msg.video_note) {
           try {
             const vid = msg.video || msg.video_note;
             const fileLink = await ctx.telegram.getFileLink(vid.file_id);
-            mediaUrl = fileLink.href || fileLink.toString();
+            mediaUrl = await downloadAndSaveDmMedia(fileLink.href || fileLink.toString(), 'video', telegramId, tgMsgId);
             mediaType = 'video';
             mediaMime = vid.mime_type || 'video/mp4';
-          } catch (e) { logger.warn('[TG→App DM] Failed to get video link', { error: e.message }); }
+          } catch (e) { logger.warn('[TG→App DM] Failed to save video', { error: e.message }); }
         }
         if (msg.voice || msg.audio) {
           try {
             const aud = msg.voice || msg.audio;
             const fileLink = await ctx.telegram.getFileLink(aud.file_id);
-            mediaUrl = fileLink.href || fileLink.toString();
+            mediaUrl = await downloadAndSaveDmMedia(fileLink.href || fileLink.toString(), 'audio', telegramId, tgMsgId);
             mediaType = 'audio';
             mediaMime = aud.mime_type || 'audio/ogg';
-          } catch (e) { logger.warn('[TG→App DM] Failed to get audio link', { error: e.message }); }
+          } catch (e) { logger.warn('[TG→App DM] Failed to save audio', { error: e.message }); }
         }
 
         if (!textContent && !mediaUrl) return next();
@@ -1215,8 +1444,15 @@ const startBot = async () => {
         // Update last partner for the recipient too (so they can reply from TG)
         await redis.set(`dm:tg-last-partner:${telegramId}`, String(dmPartnerId), 'EX', 86400);
 
+        // Look up partner's display name for the confirmation
+        const { rows: partnerRows } = await dbQuery(
+          'SELECT username, first_name FROM users WHERE id = $1',
+          [dmPartnerId]
+        );
+        const partnerName = partnerRows[0]?.first_name || partnerRows[0]?.username || 'your contact';
+
         // Confirm to the Telegram user
-        await ctx.reply('✅ Message sent via PNPtv DM!', { reply_to_message_id: msg.message_id })
+        await ctx.reply(`✅ Delivered to ${partnerName} on PNPtv.`, { reply_to_message_id: msg.message_id })
           .catch(() => {}); // silent if reply fails
 
         logger.info(`[TG→App DM Bridge] ${pnptvUser.username || telegramId} → ${dmPartnerId}`);
@@ -1691,6 +1927,7 @@ const startBot = async () => {
         'chat_member',     // User joined/left group (for welcome messages)
         'channel_post',
         'edited_message',
+        'message_reaction', // TG emoji reactions on messages (for hangout bridge + wallOfFame)
       ];
 
       // IMPORTANT: Register the webhook route handler and start the API server

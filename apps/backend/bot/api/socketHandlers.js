@@ -915,6 +915,39 @@ function initSocketIO(io) {
         }));
 
         io.to(`hangout:${gid}`).emit('hangout:reaction:updated', { messageId: msgId, reactions });
+
+        // ── Webapp → Telegram reaction bridge: set bot reaction to the top emoji ──
+        // Limitation: Telegram's setMessageReaction attributes the reaction to the
+        // bot, not the user. We show the current top emoji as the bot's reaction
+        // so TG users can see activity. Empty reactions clear the bot's reaction.
+        (async () => {
+          try {
+            const { rows: metaRows } = await query(
+              `SELECT media_metadata FROM chat_messages WHERE id = $1`,
+              [msgId]
+            );
+            const meta = metaRows[0]?.media_metadata;
+            if (!meta?.telegramMsgId || !meta?.telegramChatId) return;
+
+            const { getBotInstance } = require('../core/bot');
+            const bot = getBotInstance();
+            if (!bot) return;
+
+            // Pick the emoji with the highest count (ties broken by emoji string)
+            const top = reactions.slice().sort((a, b) => b.count - a.count || a.emoji.localeCompare(b.emoji))[0];
+            const tgReaction = top ? [{ type: 'emoji', emoji: top.emoji }] : [];
+
+            await bot.telegram.callApi('setMessageReaction', {
+              chat_id: meta.telegramChatId,
+              message_id: meta.telegramMsgId,
+              reaction: tgReaction,
+              is_big: false,
+            });
+          } catch (rxnBridgeErr) {
+            // TG rejects unsupported/custom emoji — ignore silently
+            logger.warn('[App→TG Bridge] reaction sync failed', { error: rxnBridgeErr.message, messageId: msgId });
+          }
+        })();
       } catch (err) {
         logger.error('hangout:reaction:toggle error', { userId: user.id, groupId: gid, messageId: msgId, error: err.message });
       }

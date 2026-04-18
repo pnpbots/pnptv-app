@@ -208,6 +208,21 @@ class DmService {
       const mediaUrl = message.media_url || null;
       const mediaType = message.media_type || null;
 
+      const { getRedis } = require('../config/redis');
+      const redis = getRedis();
+
+      // Check if this is the first bridged DM for this recipient — send intro once per 7 days
+      const introKey = `dm:tg-bridge-intro:${recipientTelegramId}`;
+      const hasSeenIntro = await redis.get(introKey).catch(() => null);
+      if (!hasSeenIntro) {
+        await bot.telegram.sendMessage(
+          recipientTelegramId,
+          `💬 *PNPtv DMs in Telegram*\n\nYou now receive PNPtv direct messages here.\n\n✏️ *Reply* to any message to respond — your reply goes back to that person in the app.\n\n🌐 Or open https://app.pnptv.app to view the full conversation.`,
+          { parse_mode: 'Markdown' }
+        ).catch(() => {});
+        await redis.set(introKey, '1', 'EX', 604800).catch(() => {}); // 7 days
+      }
+
       let tgMsg;
       const APP_PUBLIC_URL = (process.env.APP_PUBLIC_URL || process.env.WEB_APP_URL || 'https://app.pnptv.app').replace(/\/+$/, '');
 
@@ -230,8 +245,6 @@ class DmService {
       // Store mapping so Telegram replies can be bridged back
       if (tgMsg) {
         try {
-          const { getRedis } = require('../config/redis');
-          const redis = getRedis();
           // Map TG message ID → webapp DM sender, so replies go to the right person
           await redis.set(
             `dm:tg-bridge:${recipientTelegramId}:${tgMsg.message_id}`,
