@@ -1045,25 +1045,34 @@ export function Layout() {
           </button>
           <NotificationBell />
 
-          {/* Hamburger — opens slide-out menu */}
+          {/* Avatar — opens profile/settings menu */}
           <button
             onClick={() => setMobileMenuOpen(true)}
-            className="relative ml-0.5 p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors active:scale-95"
-            aria-label="Open menu"
+            className="relative ml-1 rounded-full transition-transform active:scale-95"
+            aria-label="Open profile menu"
             aria-expanded={mobileMenuOpen}
           >
-            <HamburgerIcon />
-          </button>
-
-          {/* Logout */}
-          <button
-            onClick={handleLogout}
-            className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-            aria-label="Sign out"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
-            </svg>
+            {user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? (
+              <img
+                src={user.photoUrl}
+                alt={user.displayName || "Profile"}
+                className="w-9 h-9 rounded-full object-cover ring-2 ring-white/10"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                  (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display");
+                }}
+              />
+            ) : null}
+            <div
+              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ring-2 ring-white/10"
+              style={{
+                background: "linear-gradient(135deg, #D4007A, #E69138)",
+                color: "#fff",
+                display: user?.photoUrl && (user.photoUrl.startsWith("/") || user.photoUrl.startsWith("http")) ? "none" : undefined,
+              }}
+            >
+              {(user?.displayName || user?.username || "U").charAt(0).toUpperCase()}
+            </div>
           </button>
         </div>
       </header>
@@ -1272,6 +1281,19 @@ export function Layout() {
                     </NavLink>
                   </div>
                 )}
+
+                {/* ── Sign out ──────────────────────────────────────────── */}
+                <div className="pt-2 mt-2 border-t border-pnp-border">
+                  <button
+                    onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
+                    className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm font-medium text-pnp-textSecondary hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+                    </svg>
+                    Sign out
+                  </button>
+                </div>
 
               </div>
             </nav>
