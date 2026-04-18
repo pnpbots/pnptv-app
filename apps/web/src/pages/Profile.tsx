@@ -1834,7 +1834,7 @@ export default function Profile() {
             {hangoutActivity.map((h) => (
               <button
                 key={h.id}
-                onClick={() => navigate(`/hangouts/${h.id}`)}
+                onClick={() => navigate(`/chat/${h.id}`)}
                 className="flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all hover:bg-white/10 active:scale-95"
                 style={{ background: "rgba(123,97,255,0.08)", border: "1px solid rgba(123,97,255,0.15)" }}
               >

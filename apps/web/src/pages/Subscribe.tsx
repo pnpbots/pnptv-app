@@ -935,7 +935,7 @@ export default function Subscribe() {
             {s.lifetime100Desc}
           </p>
           <a
-            href="/lifetime100"
+            href="/subscribe?promo=lifetime100"
             className="inline-block text-xs font-semibold text-[#FFB454] hover:text-[#ffcc80] transition-colors border-b border-[#FFB454]/50"
           >
             {s.checkoutLifetime100}

@@ -105,10 +105,6 @@ export default function Live() {
   const [walletHistory, setWalletHistory] = useState<TokenPurchase[]>([]);
   const [walletHistoryLoading, setWalletHistoryLoading] = useState(false);
 
-  // Booking
-  const [showBooking] = useState(false);
-  const [bookingLoaded] = useState(false);
-
   // Socket (null stream — connected only for wallet push events)
   const {
     walletBalance: socketBalance,

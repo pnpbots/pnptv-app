@@ -1,5 +1,10 @@
 import React, { lazy } from "react";
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { createBrowserRouter, Navigate, useParams } from "react-router-dom";
+
+function HangoutToChatRedirect() {
+  const { groupId } = useParams();
+  return <Navigate to={`/chat/${groupId}`} replace />;
+}
 import { Layout } from "@/components/Layout";
 import { AdminLayout } from "@/components/admin/AdminLayout";
 import { ModuleLoader } from "@/components/ModuleLoader";
@@ -320,6 +325,7 @@ export const router = createBrowserRouter([
       },
       { path: "creator", element: <Navigate to="/creators" replace /> },
       { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },
+      { path: "hangouts/:groupId", element: <HangoutToChatRedirect /> },
       { path: "pnplive", element: <Navigate to="/live" replace /> },
       { path: "pnptv-haus", element: <Navigate to="/main-stage" replace /> },
       { path: "community-room", element: <Navigate to="/main-stage" replace /> },
