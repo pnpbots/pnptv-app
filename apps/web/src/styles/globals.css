@@ -251,6 +251,38 @@
   }
 }
 
+/* ── Main Stage — Reaction float ─────────────────────────────────────── */
+
+@keyframes stageReactionFloat {
+  0%   { transform: translateY(0) scale(0.6); opacity: 0; }
+  15%  { transform: translateY(-20px) scale(1.15); opacity: 1; }
+  80%  { transform: translateY(-180px) scale(1); opacity: 1; }
+  100% { transform: translateY(-240px) scale(0.8); opacity: 0; }
+}
+
+.stage-reaction-float {
+  animation: stageReactionFloat 2.6s cubic-bezier(0.22, 0.68, 0.34, 1) forwards;
+  will-change: transform, opacity;
+}
+
+@keyframes stageHandWave {
+  0%, 100% { transform: rotate(0deg); }
+  25%      { transform: rotate(-18deg); }
+  75%      { transform: rotate(18deg); }
+}
+
+.stage-hand-wave {
+  animation: stageHandWave 1.2s ease-in-out infinite;
+  transform-origin: 70% 80%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-reaction-float,
+  .stage-hand-wave {
+    animation: none;
+  }
+}
+
 /* ── Radio Widget — Equalizer bar animation ──────────────────────────── */
 
 @keyframes radio-eq-bar {
