@@ -203,6 +203,8 @@ function StageRoom({
   const [showSelfView, setShowSelfView] = useState(true);
   const [showAttendants, setShowAttendants] = useState(false);
   const [videoIdx, setVideoIdx] = useState(0);
+  const [stageVideoMuted, setStageVideoMuted] = useState(true);
+  const stageVideoRef = useRef<HTMLVideoElement>(null);
 
   // Mic / Cam / Device state — stage rules: cam on by default, mic off, admins can override
   const [cameraOn, setCameraOn] = useState(true);
@@ -469,6 +471,26 @@ function StageRoom({
     );
   };
 
+  // When the stage video is audible, duck the background music so it doesn't
+  // fight with the video's own audio track.
+  useEffect(() => {
+    setDucking(!stageVideoMuted);
+    return () => setDucking(false);
+  }, [stageVideoMuted, setDucking]);
+
+  const toggleStageVideoAudio = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const v = stageVideoRef.current;
+    if (!v) return;
+    const nextMuted = !stageVideoMuted;
+    v.muted = nextMuted;
+    // Unmuting requires a user gesture in most browsers — replay if needed.
+    if (!nextMuted) {
+      v.play().catch(() => {});
+    }
+    setStageVideoMuted(nextMuted);
+  }, [stageVideoMuted]);
+
   const renderCmsVideoTile = (isFocused: boolean = false) => (
     <div
       onClick={(e) => { e.stopPropagation(); setFocusedParticipantId((prev) => (prev === "cms-video" ? null : "cms-video")); }}
@@ -478,11 +500,12 @@ function StageRoom({
     >
       {currentVideoSrc && (
         <video
+          ref={stageVideoRef}
           key={currentVideoSrc}
           className="w-full h-full object-cover"
           src={currentVideoSrc}
           autoPlay
-          muted
+          muted={stageVideoMuted}
           playsInline
           loop={primeVideos.length === 1}
           onEnded={() => setVideoIdx((i) => (i + 1) % Math.max(1, primeVideos.length))}
@@ -492,6 +515,23 @@ function StageRoom({
       <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-black/60 backdrop-blur-sm pointer-events-none">
         <span className="text-white text-[9px] font-medium">Stage Feature</span>
       </div>
+      {/* Tap-for-sound button — video's own audio; ducks background music when on */}
+      <button
+        type="button"
+        onClick={toggleStageVideoAudio}
+        className="absolute bottom-1.5 right-1.5 flex items-center justify-center w-9 h-9 rounded-full bg-black/70 backdrop-blur-sm text-white hover:bg-black/90 active:scale-90 transition-all ring-1 ring-white/10"
+        aria-label={stageVideoMuted ? "Activar sonido del video" : "Silenciar video"}
+      >
+        {stageVideoMuted ? (
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+          </svg>
+        ) : (
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+          </svg>
+        )}
+      </button>
     </div>
   );
 
