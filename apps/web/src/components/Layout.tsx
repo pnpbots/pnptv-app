@@ -658,7 +658,7 @@ function SidebarDmChat({ userId, myDbId, onBack }: SidebarDmChatProps) {
 // ── Layout ────────────────────────────────────────────────────────────────────
 
 export function Layout() {
-  const { isAuthenticated, isAdmin, user, isLoading } = useAuth();
+  const { isAuthenticated, isAdmin, user, isLoading, logout } = useAuth();
   const { tier, isPrime, isMember } = useTier();
   const { isTelegram } = useTelegram();
   useViewportHeight();
@@ -672,6 +672,10 @@ export function Layout() {
   const [hangoutGroupsLoading, setHangoutGroupsLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [inlineDmUserId, setInlineDmUserId] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{ users: any[]; creators: any[]; posts: any[] } | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
   const { enabled: nearbyEnabled, toggle: toggleNearby } = useNearbyToggle();
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const [profileData, setProfileData] = useState<any>(null);
@@ -688,23 +692,23 @@ export function Layout() {
     {
       label: "SOCIAL",
       links: [
-        { to: "/?view=feed", label: t.nav.feed || "Feed" },
-        { to: "/channels", label: "Channels" },
+        { to: "/?view=feed", label: "PNP Feed" },
+        { to: "/channels", label: "PNP Channels" },
       ],
     },
     {
       label: "CONNECT",
       links: [
-        { to: "/?view=hangouts", label: t.nav.hangouts },
-        { to: "/dm", label: t.nav.messages },
-        { to: "/main-stage", label: t.nav.mainStage },
+        { to: "/?view=hangouts", label: "PNP Hangouts" },
+        { to: "/dm", label: "PNP Messages" },
+        { to: "/main-stage", label: "PNP Main Stage" },
       ],
     },
     {
       label: "DISCOVER",
       links: [
-        { to: "/nearby", label: t.nav.nearby },
-        { to: "/live", label: t.nav.live },
+        { to: "/nearby", label: "PNP Nearby" },
+        { to: "/live", label: "PNP Live" },
         { to: "/media", label: t.nav.prime },
       ],
     },
@@ -791,6 +795,43 @@ export function Layout() {
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
+  // Debounced search
+  useEffect(() => {
+    if (!searchOpen || searchQuery.trim().length < 2) {
+      setSearchResults(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setSearchLoading(true);
+      fetch(`/api/webapp/search?q=${encodeURIComponent(searchQuery.trim())}`, { credentials: "include" })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success !== false) {
+            setSearchResults({
+              users: data.users || [],
+              creators: data.creators || [],
+              posts: data.posts || [],
+            });
+          }
+        })
+        .catch(() => {})
+        .finally(() => setSearchLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, searchOpen]);
+
+  const handleSearchClose = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults(null);
+  };
+
+  const handleLogout = () => {
+    if (window.confirm("Sign out of PNPtv?")) {
+      logout();
+    }
+  };
+
   // Show loading state briefly to avoid flash
   if (isLoading) {
     return (
@@ -813,6 +854,18 @@ export function Layout() {
         <div className="flex items-center justify-between px-5 h-16 border-b border-pnp-border">
           <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
           <div className="flex items-center gap-1">
+            {/* Search */}
+            <button
+              onClick={() => setSearchOpen(true)}
+              className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
+              aria-label="Search"
+              title="Search"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </button>
+            {/* DM */}
             <button
               onClick={() => navigate("/dm")}
               className="relative p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
@@ -829,6 +882,17 @@ export function Layout() {
               )}
             </button>
             <NotificationBell />
+            {/* Logout */}
+            <button
+              onClick={handleLogout}
+              className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -952,8 +1016,19 @@ export function Layout() {
         {/* Left: logo */}
         <img src="/logo-header.png" alt="PNPtv!" className="h-8 w-auto max-w-[110px] object-contain" />
 
-        {/* Right: DM + bell + avatar */}
+        {/* Right: Search + DM + Bell + Hamburger + Logout */}
         <div className="flex items-center gap-0.5">
+          {/* Search */}
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+            aria-label="Search"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </button>
+          {/* DM */}
           <button
             onClick={() => navigate("/dm")}
             className="relative p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
@@ -978,6 +1053,17 @@ export function Layout() {
             aria-expanded={mobileMenuOpen}
           >
             <HamburgerIcon />
+          </button>
+
+          {/* Logout */}
+          <button
+            onClick={handleLogout}
+            className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+            aria-label="Sign out"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+            </svg>
           </button>
         </div>
       </header>
@@ -1213,6 +1299,171 @@ export function Layout() {
           </Suspense>
         );
       })()}
+
+      {/* ── Global Search Overlay ─────────────────────────────────────────────── */}
+      {searchOpen && (
+        <div className="fixed inset-0 z-50 bg-pnp-background flex flex-col" role="dialog" aria-modal="true" aria-label="Search">
+          {/* Header */}
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-pnp-border flex-shrink-0">
+            <button
+              onClick={handleSearchClose}
+              className="p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors flex-shrink-0"
+              aria-label="Close search"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+              </svg>
+            </button>
+            <div className="flex-1 flex items-center gap-2 bg-pnp-surface rounded-xl px-3 py-2">
+              <svg className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                autoFocus
+                type="text"
+                placeholder="Search people, creators, posts..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") handleSearchClose(); }}
+                className="flex-1 bg-transparent text-pnp-textPrimary text-sm outline-none placeholder:text-pnp-textSecondary min-w-0"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => { setSearchQuery(""); setSearchResults(null); }}
+                  className="flex-shrink-0 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+                  aria-label="Clear search"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Results */}
+          <div className="flex-1 overflow-y-auto">
+            {searchLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <svg className="w-6 h-6 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              </div>
+            ) : searchQuery.trim().length < 2 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center px-6">
+                <svg className="w-10 h-10 text-pnp-textSecondary/30 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <p className="text-sm text-pnp-textSecondary">Type at least 2 characters to search</p>
+              </div>
+            ) : !searchResults || (searchResults.users.length === 0 && searchResults.creators.length === 0 && searchResults.posts.length === 0) ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center px-6">
+                <svg className="w-10 h-10 text-pnp-textSecondary/30 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.182 16.318A4.486 4.486 0 0012.016 15a4.486 4.486 0 00-3.198 1.318M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75zm-.375 0h.008v.015h-.008V9.75zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75zm-.375 0h.008v.015h-.008V9.75z" />
+                </svg>
+                <p className="text-sm text-pnp-textSecondary">No results for &ldquo;{searchQuery}&rdquo;</p>
+              </div>
+            ) : (
+              <div className="px-4 py-3 space-y-1">
+                {/* People */}
+                {searchResults.users.length > 0 && (
+                  <div>
+                    <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">People</p>
+                    {searchResults.users.map((u: any) => {
+                      const photo = u.photo_file_id
+                        ? u.photo_file_id.startsWith("/") || u.photo_file_id.startsWith("http")
+                          ? u.photo_file_id
+                          : null
+                        : null;
+                      const initial = (u.first_name || u.username || "?")[0].toUpperCase();
+                      return (
+                        <button
+                          key={u.id}
+                          onClick={() => { handleSearchClose(); navigate(`/profile/${u.id}`); }}
+                          className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left"
+                        >
+                          {photo ? (
+                            <img src={photo} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
+                              {initial}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-pnp-textPrimary truncate">
+                              {u.first_name}{u.last_name ? ` ${u.last_name}` : ""}
+                            </p>
+                            {u.username && <p className="text-xs text-pnp-textSecondary truncate">@{u.username}</p>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Creators */}
+                {searchResults.creators.length > 0 && (
+                  <div>
+                    <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Creators</p>
+                    {searchResults.creators.map((c: any) => {
+                      const photo = c.photo_url
+                        ? c.photo_url.startsWith("/") || c.photo_url.startsWith("http")
+                          ? c.photo_url
+                          : null
+                        : null;
+                      const initial = (c.display_name || c.username || "?")[0].toUpperCase();
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() => { handleSearchClose(); navigate(`/profile/${c.user_id}`); }}
+                          className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left"
+                        >
+                          {photo ? (
+                            <img src={photo} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg, #5ED1C4, #D4007A)", color: "#fff" }}>
+                              {initial}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-pnp-textPrimary truncate">{c.display_name || c.username}</p>
+                            {c.category && <p className="text-xs text-pnp-textSecondary truncate">{c.category}</p>}
+                          </div>
+                          {c.verified && (
+                            <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>
+                              Verified
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Posts */}
+                {searchResults.posts.length > 0 && (
+                  <div>
+                    <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Posts</p>
+                    {searchResults.posts.map((post: any) => (
+                      <button
+                        key={post.id}
+                        onClick={() => { handleSearchClose(); navigate(`/social/post/${post.id}`); }}
+                        className="w-full flex items-start gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-pnp-textSecondary mb-0.5">@{post.author_username}</p>
+                          <p className="text-sm text-pnp-textPrimary line-clamp-2">{post.content}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Toast notifications */}
       {isAuthenticated && <Toast />}

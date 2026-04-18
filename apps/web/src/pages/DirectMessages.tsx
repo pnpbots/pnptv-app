@@ -1216,6 +1216,14 @@ function ThreadListView() {
 
   return (
     <div className="relative">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 pt-6 pb-2 mb-2">
+        <div>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.messagesTitle}</h1>
+          <p className="text-sm mt-1 text-pnp-textSecondary">{t.messagesSubtitle}</p>
+        </div>
+      </div>
+
       {/* Search bar */}
       {threads.length > 3 && (
         <div className="px-4 pt-3 pb-1">

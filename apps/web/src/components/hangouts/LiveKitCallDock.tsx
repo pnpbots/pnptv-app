@@ -100,9 +100,15 @@ function CallContent({
       setCallEnded(false);
       // Join muted by default
       room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+      // Allow landscape rotation for video calls
+      document.body.classList.add("allow-landscape");
+      try { screen.orientation?.unlock?.(); } catch {}
     };
     const onDisconnected = () => {
       setConnected(false);
+      // Lock back to portrait
+      document.body.classList.remove("allow-landscape");
+      try { screen.orientation?.lock?.("portrait").catch(() => {}); } catch {}
       // If room is still in reconnecting state, show overlay; otherwise treat as call ended
       if (room.state === "reconnecting") {
         setReconnecting(true);

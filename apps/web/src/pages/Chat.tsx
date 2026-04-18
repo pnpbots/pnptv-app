@@ -1266,12 +1266,27 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Deep-link: auto-open group from /chat/:groupId
   const deepLinkHandled = useRef(false);
   useEffect(() => {
-    if (!urlGroupId || deepLinkHandled.current || isLoading || groups.length === 0) return;
+    if (!urlGroupId || deepLinkHandled.current) return;
+    // Try from already-loaded groups first
     const target = groups.find((g) => String(g.id) === urlGroupId);
     if (target) {
       deepLinkHandled.current = true;
       openChat(target);
+      return;
     }
+    // If groups haven't loaded yet, fetch the group directly
+    if (!isLoading && groups.length === 0) return; // no groups at all
+    if (isLoading) return; // still loading, wait
+    // Groups loaded but target not found — fetch directly
+    (async () => {
+      try {
+        const data = await getHangoutGroup(parseInt(urlGroupId, 10));
+        if (data.success && data.group) {
+          deepLinkHandled.current = true;
+          openChat(data.group as any);
+        }
+      } catch { /* silent */ }
+    })();
   }, [urlGroupId, isLoading, groups]);
 
   // ─── Group creation ─────────────────────────────────────────────────
@@ -2575,7 +2590,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // ─── Group List View ──────────────────────────────────────────────────
 
   return (
-    <div className={embeddedMode ? "" : "max-w-2xl mx-auto px-4 py-6 pb-safe"}>
+    <div className={embeddedMode ? "px-1 py-2" : "max-w-2xl mx-auto px-4 py-6 pb-safe"}>
       {!embeddedMode && (
         <Helmet>
           <title>{t.chat.pageTitle}</title>
@@ -2592,25 +2607,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             {t.chat.hangoutsSubtitle}
           </p>
         </div>
-        {isPrime ? (
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="btn-gradient px-3 py-1.5 rounded-lg text-white text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent active:scale-95 transition-transform"
-          >
-            {t.chat.newGroup}
-          </button>
-        ) : (
-          <button
-            onClick={() => navigate("/subscribe")}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-white/10 bg-white/5 hover:bg-white/10 active:scale-95 transition-all text-pnp-textSecondary"
-            title="Upgrade to Prime to create hangouts"
-          >
-            <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-            </svg>
-            New Group
-          </button>
-        )}
+        {/* Actions handled by SpotlightStrip + icon */}
       </div>
 
       {/* SpotlightStrip — Main Stage pinned + hangout events */}
@@ -2636,9 +2633,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           if (item.kind === "event") setDetailEvent(item.data);
         }}
         showAction={isPrime}
-        onAction={() => setShowCreateEvent(true)}
-        actionLabel="Create event"
-        emptyAction={isPrime ? () => setShowCreateEvent(true) : undefined}
+        onAction={() => setShowCreate(true)}
+        actionLabel="New group"
+        emptyAction={isPrime ? () => setShowCreate(true) : undefined}
       />
 
       {/* Create hangout — success state with Telegram linking instructions */}

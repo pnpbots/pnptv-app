@@ -6,7 +6,7 @@
 const { getPool } = require('../config/postgres');
 const UserModel = require('../models/userModel');
 const logger = require('../utils/logger');
-const { getLanguage } = require('../utils/helpers');
+const { getLanguage } = require('../bot/utils/helpers');
 const broadcastUtils = require('../bot/utils/broadcastUtils');
 const performanceUtils = require('../utils/performanceUtils');
 

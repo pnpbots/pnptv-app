@@ -1266,20 +1266,11 @@ export default function Channels() {
 
       <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
         {/* Header */}
-        <div>
-          <h1
-            className="text-2xl sm:text-3xl font-black tracking-tight"
-            style={{
-              background: "linear-gradient(135deg, #D4007A, #E69138)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-            }}
-          >
-            PNP Channels
-          </h1>
-          <p className="text-sm text-pnp-textSecondary mt-1">
-            Discover creators, exclusive content & live streams
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-pnp-textPrimary">PNP Channels</h1>
+            <p className="text-sm mt-1 text-pnp-textSecondary">Exclusive content from your favorite creators</p>
+          </div>
         </div>
 
         {/* PNPtv PRIME Telegram banner */}

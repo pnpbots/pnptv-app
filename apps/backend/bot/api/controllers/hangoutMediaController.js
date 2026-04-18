@@ -144,14 +144,22 @@ const uploadHangoutMedia = async (req, res) => {
         const mediaCaption = caption ? `${senderName}: ${caption}` : senderName;
         const fullMediaUrl = mediaResult.mediaUrl?.startsWith('/') ? `${APP_PUBLIC_URL}${mediaResult.mediaUrl}` : mediaResult.mediaUrl;
 
+        let tgResult;
         if (mediaResult.mediaType === 'image' && fullMediaUrl) {
-          await bot.telegram.sendPhoto(tgChatId, fullMediaUrl, { caption: mediaCaption });
+          tgResult = await bot.telegram.sendPhoto(tgChatId, fullMediaUrl, { caption: mediaCaption });
         } else if (mediaResult.mediaType === 'video' && fullMediaUrl) {
-          await bot.telegram.sendVideo(tgChatId, fullMediaUrl, { caption: mediaCaption });
+          tgResult = await bot.telegram.sendVideo(tgChatId, fullMediaUrl, { caption: mediaCaption });
         } else if (mediaResult.mediaType === 'audio' && fullMediaUrl) {
-          await bot.telegram.sendVoice(tgChatId, fullMediaUrl, { caption: mediaCaption });
+          tgResult = await bot.telegram.sendVoice(tgChatId, fullMediaUrl, { caption: mediaCaption });
         } else if (fullMediaUrl) {
-          await bot.telegram.sendMessage(tgChatId, `${senderName} sent a file: ${fullMediaUrl}`);
+          tgResult = await bot.telegram.sendMessage(tgChatId, `${senderName} sent a file: ${fullMediaUrl}`);
+        }
+        // Store TG message ID so edits/deletes can be synced
+        if (tgResult?.message_id && msg.id) {
+          await query(
+            `UPDATE chat_messages SET media_metadata = COALESCE(media_metadata, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
+            [JSON.stringify({ source: 'webapp', telegramMsgId: tgResult.message_id, telegramChatId: String(tgChatId) }), msg.id]
+          );
         }
       } catch (bridgeErr) {
         logger.warn('[App→TG Bridge] REST media forward failed', { error: bridgeErr.message, groupId });

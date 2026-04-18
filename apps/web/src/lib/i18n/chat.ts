@@ -6,8 +6,8 @@ const strings = {
       "Join or create video call rooms and group chats on PNPtv Hangouts.",
 
     // Header
-    hangoutsTitle: "Hangouts",
-    hangoutsSubtitle: "Group chats + video calls",
+    hangoutsTitle: "PNP Hangouts",
+    hangoutsSubtitle: "Chat groups with video rooms, a 24/7 Main Stage, and community events",
 
     // Group creation
     newGroup: "+ New Group",
@@ -127,8 +127,8 @@ const strings = {
       "Únete o crea salas de videollamadas y chats grupales en PNPtv Hangouts.",
 
     // Header
-    hangoutsTitle: "Hangouts",
-    hangoutsSubtitle: "Chats grupales + videollamadas",
+    hangoutsTitle: "PNP Hangouts",
+    hangoutsSubtitle: "Grupos de chat con video, un Main Stage 24/7 y eventos comunitarios",
 
     // Group creation
     newGroup: "+ Nuevo grupo",

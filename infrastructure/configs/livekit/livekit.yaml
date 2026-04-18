@@ -6,23 +6,19 @@ rtc:
   port_range_end: 50060
   tcp_port: 7881
   use_external_ip: true
-# Keys are loaded from environment variables at runtime.
-# Set LIVEKIT_API_KEY and LIVEKIT_API_SECRET in the container environment.
-# Do NOT add plaintext keys here — rotate immediately if any were committed.
+# Placeholders are substituted at container start by the entrypoint
+# in docker-compose.yml (livekit service) using env vars LIVEKIT_API_KEY
+# and LIVEKIT_API_SECRET from .env. Do NOT commit plaintext keys here.
 keys:
-  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+  __LIVEKIT_API_KEY__: __LIVEKIT_API_SECRET__
 logging:
   level: info
 turn:
-  enabled: true
-  # UDP for standard NAT traversal
-  udp_port: 3478
-  # TLS-TURN is required for strict-NAT / corporate users that block UDP.
-  # Clients behind firewalls that only permit 443/TCP will use this port.
-  tls_port: 5349
-  domain: ${LIVEKIT_TURN_DOMAIN}
-  external_tls: true
+  # Disabled: LIVEKIT_TURN_DOMAIN is not configured, UFW does not expose 5349,
+  # and WebRTC works via UDP 50000-50060 + STUN. Re-enable only after
+  # provisioning a TURN domain + TLS cert + opening the port.
+  enabled: false
 webhook:
-  api_key: ${LIVEKIT_API_KEY}
+  api_key: __LIVEKIT_API_KEY__
   urls:
     - https://pnptv.app/api/webhooks/livekit

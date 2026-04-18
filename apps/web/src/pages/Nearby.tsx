@@ -1193,7 +1193,10 @@ export default function Nearby() {
       <div className="flex-shrink-0 px-3 pt-3 pb-0">
         {/* Title row */}
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-lg font-bold text-pnp-textPrimary">{t.booking.nearby}</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.booking.nearby}</h1>
+            <p className="text-sm mt-1 text-pnp-textSecondary">{t.booking.nearbySubtitle}</p>
+          </div>
           <div className="flex items-center gap-2">
             {/* Location status */}
             {mode === "realworld" && (

@@ -307,6 +307,9 @@ const sendMessage = async (req, res) => {
       tag: `dm-${user.id}`,
     }).catch(() => {});
 
+    // ── Webapp → Telegram DM bridge: forward to recipient's Telegram ──
+    DmService.bridgeToTelegram(user.id, message.recipient_id, message).catch(() => {});
+
     return res.json({ success: true, message, remaining: req.dmLimit?.remaining ?? null });
   } catch (err) {
     if (err.statusCode) {

@@ -136,8 +136,8 @@ function StageRoom({
 
   useEffect(() => {
     if (!room) return;
-    const onConnected = () => setConnected(true);
-    const onDisconnected = () => setConnected(false);
+    const onConnected = () => { setConnected(true); document.body.classList.add("allow-landscape"); try { screen.orientation?.unlock?.(); } catch {} };
+    const onDisconnected = () => { setConnected(false); document.body.classList.remove("allow-landscape"); try { screen.orientation?.lock?.("portrait").catch(() => {}); } catch {} };
     const onActiveSpeaker = (speakers: Participant[]) => {
       const top = speakers.find((s) => !s.isLocal);
       setActiveSpeakerId(top ? top.identity : null);

@@ -774,13 +774,22 @@ services:
     image: livekit/livekit-server:latest
     container_name: livekit-pnptv
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "7881:7881"
       - "50000-50060:50000-50060/udp"
       - "3478:3478/udp"
     volumes:
       - ./infrastructure/configs/livekit/livekit.yaml:/etc/livekit.yaml:ro
-    command: ["--config", "/etc/livekit.yaml"]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        sed -e "s|__LIVEKIT_API_KEY__|$${LIVEKIT_API_KEY}|g" \
+            -e "s|__LIVEKIT_API_SECRET__|$${LIVEKIT_API_SECRET}|g" \
+            /etc/livekit.yaml > /tmp/livekit.yaml && \
+        exec /livekit-server --config /tmp/livekit.yaml
     networks:
       - pnptvapp_net
     deploy:

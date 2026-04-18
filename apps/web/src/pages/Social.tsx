@@ -52,17 +52,9 @@ export default function Social() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">{t.socialFeedTitle}</h1>
-          <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
-            {t.socialFeedSubtitle}
-          </p>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.socialFeedTitle}</h1>
+          <p className="text-sm mt-1 text-pnp-textSecondary">{t.socialFeedSubtitle}</p>
         </div>
-        <span
-          className="text-xs px-2 py-1 rounded-full font-medium"
-          style={{ background: "rgba(255,180,84,0.15)", color: "#FFB454" }}
-        >
-          {t.community}
-        </span>
       </div>
 
       {/* Featured Performers */}

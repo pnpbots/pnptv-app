@@ -168,7 +168,9 @@ export default function PostDetail() {
                 className="flex-shrink-0"
                 aria-label={`View ${post.author_first_name || post.author_username || "user"}'s profile`}
               >
-                {isValidPhotoUrl(post.author_photo) ? (
+                {post.author_id === "cristina-ai" ? (
+                  <span className="w-12 h-12 rounded-full flex items-center justify-center text-3xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
+                ) : isValidPhotoUrl(post.author_photo) ? (
                   <img
                     src={post.author_photo}
                     alt={`${post.author_first_name || post.author_username || "User"}'s avatar`}

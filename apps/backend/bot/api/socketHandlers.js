@@ -498,7 +498,14 @@ function initSocketIO(io) {
             const bot = getBotInstance();
             if (!bot) return;
             const senderName = user.firstName || user.first_name || user.username || 'User';
-            await bot.telegram.sendMessage(tgChatId, `${senderName}: ${text}`, { parse_mode: undefined });
+            const tgResult = await bot.telegram.sendMessage(tgChatId, `${senderName}: ${text}`, { parse_mode: undefined });
+            // Store TG message ID so edits/deletes can be synced back
+            if (tgResult?.message_id) {
+              await query(
+                `UPDATE chat_messages SET media_metadata = COALESCE(media_metadata, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
+                [JSON.stringify({ source: 'webapp', telegramMsgId: tgResult.message_id, telegramChatId: String(tgChatId) }), msg.id]
+              );
+            }
           } catch (bridgeErr) {
             logger.warn('[App→TG Bridge] socket text forward failed', { error: bridgeErr.message, groupId: gid });
           }
@@ -745,6 +752,29 @@ function initSocketIO(io) {
           editedAt:  result.edited_at,
           editCount: result.edit_count,
         });
+
+        // ── Webapp → Telegram bridge: sync edit to linked Telegram group ──
+        (async () => {
+          try {
+            const { rows: metaRows } = await query(
+              `SELECT media_metadata FROM chat_messages WHERE id = $1`,
+              [msgId]
+            );
+            const meta = metaRows[0]?.media_metadata;
+            if (!meta?.telegramMsgId || !meta?.telegramChatId) return;
+            const { getBotInstance } = require('../core/bot');
+            const bot = getBotInstance();
+            if (!bot) return;
+            const senderName = user.firstName || user.first_name || user.username || 'User';
+            await bot.telegram.editMessageText(
+              meta.telegramChatId, meta.telegramMsgId, undefined,
+              `${senderName}: ${text}`
+            );
+          } catch (editBridgeErr) {
+            // Telegram may reject edits after 48h or for non-text — ignore silently
+            logger.warn('[App→TG Bridge] edit sync failed', { error: editBridgeErr.message, messageId: msgId });
+          }
+        })();
       } catch (err) {
         logger.error('hangout:message:edit error', { userId: user.id, groupId: gid, messageId: msgId, error: err.message });
       }
@@ -798,6 +828,26 @@ function initSocketIO(io) {
           deletedBy: user.id,
           forAll:    deleteForAll,
         });
+
+        // ── Webapp → Telegram bridge: sync delete to linked Telegram group ──
+        if (deleteForAll) {
+          (async () => {
+            try {
+              const { rows: metaRows } = await query(
+                `SELECT media_metadata FROM chat_messages WHERE id = $1`,
+                [msgId]
+              );
+              const meta = metaRows[0]?.media_metadata;
+              if (!meta?.telegramMsgId || !meta?.telegramChatId) return;
+              const { getBotInstance } = require('../core/bot');
+              const bot = getBotInstance();
+              if (!bot) return;
+              await bot.telegram.deleteMessage(meta.telegramChatId, meta.telegramMsgId);
+            } catch (delBridgeErr) {
+              logger.warn('[App→TG Bridge] delete sync failed', { error: delBridgeErr.message, messageId: msgId });
+            }
+          })();
+        }
       } catch (err) {
         logger.error('hangout:message:delete error', { userId: user.id, groupId: gid, messageId: msgId, error: err.message });
       }
@@ -1091,6 +1141,11 @@ function initSocketIO(io) {
 
         // Confirm to sender with the saved message
         socket.emit('dm:sent', { success: true, message });
+
+        // ── Webapp → Telegram DM bridge: forward to recipient's Telegram ──
+        if (!message._ticket) {
+          DmService.bridgeToTelegram(user.id, recipientId, message).catch(() => {});
+        }
       } catch (err) {
         if (err.statusCode) {
           socket.emit('dm:error', { message: err.message, code: err.code });

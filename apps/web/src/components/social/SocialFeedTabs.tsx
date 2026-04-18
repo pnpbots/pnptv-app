@@ -200,28 +200,26 @@ export default function SocialFeedTabs({
 
   return (
     <div>
-      {/* For You / Following tabs — only when no hashtag/hangout filter */}
+      {/* Section header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">PNP Feed</h1>
+          <p className="text-sm mt-1 text-pnp-textSecondary">Share posts, reactions & updates with the community</p>
+        </div>
+      </div>
+
+      {/* All / Following tabs */}
       {canShowTabs && (
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex border-b border-pnp-border mb-4">
           <button
             onClick={() => { if (feedMode !== "all") { setFeedMode("all"); setPosts([]); setNextCursor(null); setIsLoading(true); } }}
-            className="px-4 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
-            style={
-              feedMode === "all"
-                ? { background: "#D4007A", color: "#fff" }
-                : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
-            }
+            className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${feedMode === "all" ? "text-white border-b-2 border-pnp-accent" : "text-pnp-textSecondary"}`}
           >
-            For You
+            All
           </button>
           <button
             onClick={() => { if (feedMode !== "following") { setFeedMode("following"); setPosts([]); setNextCursor(null); setIsLoading(true); } }}
-            className="px-4 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
-            style={
-              feedMode === "following"
-                ? { background: "#D4007A", color: "#fff" }
-                : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
-            }
+            className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${feedMode === "following" ? "text-white border-b-2 border-pnp-accent" : "text-pnp-textSecondary"}`}
           >
             Following
           </button>

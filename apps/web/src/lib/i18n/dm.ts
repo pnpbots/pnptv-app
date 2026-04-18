@@ -5,7 +5,8 @@ const strings = {
     pageDescription: "Direct messages on PNPtv. Chat privately with community members.",
 
     // Thread list header
-    messagesTitle: "Messages",
+    messagesTitle: "PNP Messages",
+    messagesSubtitle: "Private conversations",
     directMessagesSubtitle: "Direct messages",
 
     // Thread list states
@@ -33,7 +34,8 @@ const strings = {
     pageTitle: "Mensajes — PNPtv!",
     pageDescription: "Mensajes directos en PNPtv. Chatea en privado con miembros de la comunidad.",
 
-    messagesTitle: "Mensajes",
+    messagesTitle: "PNP Messages",
+    messagesSubtitle: "Conversaciones privadas",
     directMessagesSubtitle: "Mensajes directos",
 
     loadThreadsError: "No se pudieron cargar los mensajes",

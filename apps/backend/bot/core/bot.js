@@ -101,18 +101,18 @@ const registerSupportRoutingHandlers = safeRequire('../handlers/support/supportR
 const { buildOnboardingPrompt } = safeRequire('../handlers/user/menu', { buildOnboardingPrompt: _noop });
 
 // ─── Services (non-critical — wrapped in safeRequire) ───────────────────────
-const supportRoutingService = safeRequire('../services/supportRoutingService', _noopObj);
-const slaMonitor = safeRequire('../services/slaMonitor', _noopObj);
-const GroupCleanupService = safeRequire('../services/groupCleanupService', _noopObj);
+const supportRoutingService = safeRequire('../../services/supportRoutingService', _noopObj);
+const slaMonitor = safeRequire('../../services/slaMonitor', _noopObj);
+const GroupCleanupService = safeRequire('../../services/groupCleanupService', _noopObj);
 const broadcastScheduler = safeRequire('../../services/broadcastScheduler', _noopObj);
-const MembershipCleanupService = safeRequire('../services/membershipCleanupService', _noopObj);
-const BusinessNotificationService = safeRequire('../services/businessNotificationService', _noopObj);
-const MessageRateLimiter = safeRequire('../services/messageRateLimiter', _noopObj);
-const cristinaTicketWorker = safeRequire('../services/cristinaTicketWorker', _noopObj);
-const CristinaOnboardingReminders = safeRequire('../services/cristinaOnboardingReminders', _noopObj);
+const MembershipCleanupService = safeRequire('../../services/membershipCleanupService', _noopObj);
+const BusinessNotificationService = safeRequire('../../services/businessNotificationService', _noopObj);
+const MessageRateLimiter = safeRequire('../../services/messageRateLimiter', _noopObj);
+const cristinaTicketWorker = safeRequire('../../services/cristinaTicketWorker', _noopObj);
+const CristinaOnboardingReminders = safeRequire('../../services/cristinaOnboardingReminders', _noopObj);
 const SupportTopicModel = safeRequire('../../models/supportTopicModel', _noopObj);
 const BroadcastButtonModel = safeRequire('../../models/broadcastButtonModel', _noopObj);
-const { initializeAsyncBroadcastQueue } = safeRequire('../services/initializeQueue', { initializeAsyncBroadcastQueue: _noop });
+const { initializeAsyncBroadcastQueue } = safeRequire('../../services/initializeQueue', { initializeAsyncBroadcastQueue: _noop });
 const { startCronJobs } = safeRequire('../../scripts/cron', { startCronJobs: _noop });
 
 // ─── Schedulers (non-critical) ──────────────────────────────────────────────
@@ -1032,6 +1032,206 @@ const startBot = async () => {
       }
       return next();
     });
+    // ── Telegram edited_message → Webapp hangout edit bridge ────────────────
+    bot.on('edited_message', async (ctx, next) => {
+      if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') return next();
+      if (ctx.from?.is_bot) return next();
+
+      const chatId = ctx.chat.id;
+      try {
+        const { query: dbQuery } = require('../../config/postgres');
+        const socketIO = require('../../services/socketSingleton').get();
+        if (!socketIO) return next();
+
+        const { getRedis } = require('../../config/redis');
+        const redis = getRedis();
+        const cacheKey = `tg-hangout-link:${chatId}`;
+        let hangoutId = null;
+
+        const cached = await redis.get(cacheKey);
+        if (cached === 'none') return next();
+        if (cached) {
+          hangoutId = parseInt(cached, 10);
+        } else {
+          const { rows } = await dbQuery(
+            'SELECT id FROM hangout_groups WHERE telegram_chat_id = $1',
+            [chatId]
+          );
+          if (rows.length === 0) {
+            await redis.set(cacheKey, 'none', 'EX', 60);
+            return next();
+          }
+          hangoutId = rows[0].id;
+          await redis.set(cacheKey, String(hangoutId), 'EX', 60);
+        }
+
+        const editedMsg = ctx.editedMessage;
+        const tgMsgId = editedMsg.message_id;
+        const newText = editedMsg.text || editedMsg.caption || null;
+        if (!newText) return next();
+
+        const room = `hangout:${hangoutId}`;
+
+        // Find the chat_message by Telegram message ID
+        const { rows: msgRows } = await dbQuery(
+          `SELECT id, user_id, content FROM chat_messages
+           WHERE room = $1 AND (media_metadata->>'telegramMsgId')::bigint = $2
+           LIMIT 1`,
+          [room, tgMsgId]
+        );
+        if (msgRows.length === 0) return next();
+
+        const chatMsg = msgRows[0];
+        const newContent = newText.slice(0, 2000);
+
+        const { rows: updated } = await dbQuery(
+          `UPDATE chat_messages
+           SET content = $1,
+               edited_at = NOW(),
+               edit_count = edit_count + 1,
+               original_content = COALESCE(original_content, content)
+           WHERE id = $2
+           RETURNING id, content, edited_at, edit_count`,
+          [newContent, chatMsg.id]
+        );
+
+        if (updated.length > 0) {
+          socketIO.to(room).emit('hangout:message:edited', {
+            messageId: updated[0].id,
+            content:   updated[0].content,
+            editedAt:  updated[0].edited_at,
+            editCount: updated[0].edit_count,
+          });
+          logger.info(`[TG→App Bridge] Message ${chatMsg.id} edited in hangout ${hangoutId}`);
+        }
+      } catch (err) {
+        logger.error('[TG→App Bridge] edited_message error', { error: err.message, chatId });
+      }
+      return next();
+    });
+
+    // ── Telegram private message → Webapp DM bridge ─────────────────────────
+    // When a user sends a private message to the bot, bridge it as a webapp DM
+    // to the person they were last chatting with (tracked via Redis).
+    // If the message is a reply to a DM notification, use that specific sender.
+    bot.on('message', async (ctx, next) => {
+      if (ctx.chat.type !== 'private') return next();
+      if (ctx.message?.text?.startsWith('/')) return next();
+      if (ctx.from?.is_bot) return next();
+
+      const telegramId = String(ctx.from.id);
+      try {
+        const { query: dbQuery } = require('../../config/postgres');
+        const { getRedis } = require('../../config/redis');
+        const redis = getRedis();
+
+        // Look up PNPtv user by Telegram ID
+        const { rows: userRows } = await dbQuery(
+          'SELECT id, username, first_name, photo_file_id, role FROM users WHERE telegram = $1 LIMIT 1',
+          [telegramId]
+        );
+        if (userRows.length === 0) return next(); // not a registered user
+
+        const pnptvUser = userRows[0];
+        let dmPartnerId = null;
+
+        // Check if this is a reply to a DM bridge notification
+        const replyToMsg = ctx.message.reply_to_message;
+        if (replyToMsg) {
+          const bridgeKey = `dm:tg-bridge:${telegramId}:${replyToMsg.message_id}`;
+          const bridgeData = await redis.get(bridgeKey);
+          if (bridgeData) {
+            const parsed = JSON.parse(bridgeData);
+            dmPartnerId = parsed.senderId; // reply to the original sender
+          }
+        }
+
+        // Fallback: use last DM partner
+        if (!dmPartnerId) {
+          dmPartnerId = await redis.get(`dm:tg-last-partner:${telegramId}`);
+        }
+
+        if (!dmPartnerId) return next(); // no DM context — let other handlers handle it
+
+        // Extract content
+        const msg = ctx.message;
+        let textContent = msg.text || msg.caption || null;
+        let mediaUrl = null;
+        let mediaType = null;
+        let mediaMime = null;
+        let mediaThumbUrl = null;
+
+        // Handle media
+        if (msg.photo && msg.photo.length > 0) {
+          try {
+            const largest = msg.photo[msg.photo.length - 1];
+            const fileLink = await ctx.telegram.getFileLink(largest.file_id);
+            mediaUrl = fileLink.href || fileLink.toString();
+            mediaType = 'image';
+            mediaMime = 'image/jpeg';
+          } catch (e) { logger.warn('[TG→App DM] Failed to get photo link', { error: e.message }); }
+        }
+        if (msg.video || msg.video_note) {
+          try {
+            const vid = msg.video || msg.video_note;
+            const fileLink = await ctx.telegram.getFileLink(vid.file_id);
+            mediaUrl = fileLink.href || fileLink.toString();
+            mediaType = 'video';
+            mediaMime = vid.mime_type || 'video/mp4';
+          } catch (e) { logger.warn('[TG→App DM] Failed to get video link', { error: e.message }); }
+        }
+        if (msg.voice || msg.audio) {
+          try {
+            const aud = msg.voice || msg.audio;
+            const fileLink = await ctx.telegram.getFileLink(aud.file_id);
+            mediaUrl = fileLink.href || fileLink.toString();
+            mediaType = 'audio';
+            mediaMime = aud.mime_type || 'audio/ogg';
+          } catch (e) { logger.warn('[TG→App DM] Failed to get audio link', { error: e.message }); }
+        }
+
+        if (!textContent && !mediaUrl) return next();
+
+        // Send DM via DmService
+        const DmService = require('../../services/dmService');
+        const isAdmin = pnptvUser.role === 'admin' || pnptvUser.role === 'superadmin';
+        const dmData = {
+          content: textContent ? textContent.slice(0, 4000) : null,
+          mediaUrl, mediaType, mediaMime, mediaThumbUrl,
+        };
+
+        const message = await DmService.sendMessage(pnptvUser.id, dmPartnerId, dmData, { isAdmin });
+
+        // Emit to recipient via Socket.IO
+        const socketIO = require('../../services/socketSingleton').get();
+        if (socketIO) {
+          socketIO.to(`user:${dmPartnerId}`).emit('dm:message', {
+            ...message,
+            senderName: pnptvUser.first_name || pnptvUser.username || 'User',
+            senderPhoto: pnptvUser.photo_file_id || null,
+          });
+        }
+
+        // Update last partner for the recipient too (so they can reply from TG)
+        await redis.set(`dm:tg-last-partner:${telegramId}`, String(dmPartnerId), 'EX', 86400);
+
+        // Confirm to the Telegram user
+        await ctx.reply('✅ Message sent via PNPtv DM!', { reply_to_message_id: msg.message_id })
+          .catch(() => {}); // silent if reply fails
+
+        logger.info(`[TG→App DM Bridge] ${pnptvUser.username || telegramId} → ${dmPartnerId}`);
+        return; // Don't pass to next — this message was handled as a DM bridge
+      } catch (err) {
+        if (err.statusCode) {
+          // DmService threw a policy error — inform user
+          await ctx.reply(`❌ ${err.message}`).catch(() => {});
+          return;
+        }
+        logger.error('[TG→App DM Bridge] Error', { error: err.message, telegramId });
+      }
+      return next();
+    });
+
     // ── End Telegram → Webapp bridge ───────────────────────────────────────────
 
     // Register handlers

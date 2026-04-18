@@ -3,7 +3,7 @@
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
 const NotificationEmitter = require('./notificationEmitter');
-const { resolveUserId } = require('../utils/helpers');
+const { resolveUserId } = require('../bot/utils/helpers');
 
 /**
  * DM Service
@@ -175,6 +175,85 @@ class DmService {
   static async deleteMessage(userId, messageId) {
     const result = await query(`UPDATE direct_messages SET is_deleted = true WHERE id = $1 AND sender_id = $2 RETURNING id`, [messageId, userId]);
     return result.rowCount > 0;
+  }
+
+  /**
+   * Bridge a webapp DM to the recipient's Telegram account.
+   * Sends via bot private message and stores the TG message ID in Redis
+   * so the recipient can reply from Telegram.
+   */
+  static async bridgeToTelegram(senderId, recipientId, message) {
+    try {
+      const { getBotInstance } = require('../bot/core/bot');
+      const bot = getBotInstance();
+      if (!bot) return;
+
+      // Look up recipient's Telegram ID
+      const { rows: recipientRows } = await query(
+        'SELECT telegram FROM users WHERE id = $1',
+        [recipientId]
+      );
+      const recipientTelegramId = recipientRows[0]?.telegram;
+      if (!recipientTelegramId) return; // recipient has no linked Telegram
+
+      // Look up sender display name
+      const { rows: senderRows } = await query(
+        'SELECT username, first_name FROM users WHERE id = $1',
+        [senderId]
+      );
+      const sender = senderRows[0];
+      const senderName = sender?.first_name || sender?.username || 'Someone';
+
+      const content = message.content || '';
+      const mediaUrl = message.media_url || null;
+      const mediaType = message.media_type || null;
+
+      let tgMsg;
+      const APP_PUBLIC_URL = (process.env.APP_PUBLIC_URL || process.env.WEB_APP_URL || 'https://app.pnptv.app').replace(/\/+$/, '');
+
+      if (mediaUrl && mediaType) {
+        const fullMediaUrl = mediaUrl.startsWith('/') ? `${APP_PUBLIC_URL}${mediaUrl}` : mediaUrl;
+        const caption = content ? `💬 ${senderName}: ${content}` : `💬 ${senderName}`;
+        if (mediaType === 'image') {
+          tgMsg = await bot.telegram.sendPhoto(recipientTelegramId, fullMediaUrl, { caption });
+        } else if (mediaType === 'video') {
+          tgMsg = await bot.telegram.sendVideo(recipientTelegramId, fullMediaUrl, { caption });
+        } else if (mediaType === 'audio') {
+          tgMsg = await bot.telegram.sendVoice(recipientTelegramId, fullMediaUrl, { caption });
+        } else {
+          tgMsg = await bot.telegram.sendMessage(recipientTelegramId, `💬 ${senderName}: ${fullMediaUrl}`);
+        }
+      } else if (content) {
+        tgMsg = await bot.telegram.sendMessage(recipientTelegramId, `💬 ${senderName}: ${content}`);
+      }
+
+      // Store mapping so Telegram replies can be bridged back
+      if (tgMsg) {
+        try {
+          const { getRedis } = require('../config/redis');
+          const redis = getRedis();
+          // Map TG message ID → webapp DM sender, so replies go to the right person
+          await redis.set(
+            `dm:tg-bridge:${recipientTelegramId}:${tgMsg.message_id}`,
+            JSON.stringify({ senderId, recipientId, messageId: message.id }),
+            'EX', 172800 // 48h TTL
+          );
+          // Also track the last DM partner for this Telegram user (fallback for non-reply messages)
+          await redis.set(
+            `dm:tg-last-partner:${recipientTelegramId}`,
+            String(senderId),
+            'EX', 86400 // 24h TTL
+          );
+        } catch (redisErr) {
+          logger.warn('DM TG bridge: Redis store failed', { error: redisErr.message });
+        }
+      }
+
+      logger.info(`[App→TG DM Bridge] ${senderName} → TG:${recipientTelegramId}`);
+    } catch (bridgeErr) {
+      // Fire-and-forget — don't break the DM flow
+      logger.warn('[App→TG DM Bridge] Failed', { error: bridgeErr.message, senderId, recipientId });
+    }
   }
 }
 

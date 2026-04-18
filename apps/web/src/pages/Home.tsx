@@ -106,20 +106,24 @@ export default function Home() {
                 border: "1px solid rgba(255,255,255,0.08)",
               }}
             >
-              <div className="flex items-center gap-3 mb-3">
-                <h2 className="text-lg font-bold text-white">Welcome, @{username}</h2>
-                <span
-                  className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
-                  style={
-                    isPrime
-                      ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
-                      : isMember
-                        ? { background: "rgba(59,130,246,0.15)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.3)" }
-                        : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
-                  }
-                >
-                  {tierLabel}
-                </span>
+              <div className="mb-3">
+                <h2 className="text-2xl font-bold text-pnp-textPrimary">PNP Hub</h2>
+                <p className="text-sm mt-1 text-pnp-textSecondary">Your dashboard — everything at a glance</p>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs text-pnp-textSecondary">@{username}</span>
+                  <span
+                    className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                    style={
+                      isPrime
+                        ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
+                        : isMember
+                          ? { background: "rgba(59,130,246,0.15)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.3)" }
+                          : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
+                    }
+                  >
+                    {tierLabel}
+                  </span>
+                </div>
               </div>
               <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>Your {tierLabel} benefits:</p>
               <ul className="space-y-1.5">
@@ -176,9 +180,11 @@ export default function Home() {
                     >
                       <div className="flex items-center gap-2 mb-1.5">
                         <div className="w-7 h-7 rounded-full overflow-hidden flex-shrink-0" style={{ background: "rgba(255,255,255,0.06)" }}>
-                          {post.author_photo && (
+                          {post.author_id === "cristina-ai" ? (
+                            <span className="w-7 h-7 flex items-center justify-center text-base bg-[#1a1a2e]">🧜‍♀️</span>
+                          ) : post.author_photo ? (
                             <img src={post.author_photo} alt="" className="w-full h-full object-cover" />
-                          )}
+                          ) : null}
                         </div>
                         <span className="text-xs font-semibold text-white truncate">
                           {post.author_first_name || post.author_username}
@@ -324,76 +330,9 @@ export default function Home() {
         </button>
       )}
 
-      {/* Feed / Hangouts toggle */}
-      <div className="flex items-center gap-2 mb-4">
-        <button
-          onClick={() => handleSetView("feed")}
-          className="px-4 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
-          style={
-            viewMode === "feed"
-              ? { background: "#D4007A", color: "#fff" }
-              : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
-          }
-        >
-          Feed
-        </button>
-        <button
-          onClick={() => handleSetView("hangouts")}
-          className="px-4 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
-          style={
-            viewMode === "hangouts"
-              ? { background: "#D4007A", color: "#fff" }
-              : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
-          }
-        >
-          Hangouts
-        </button>
-      </div>
+      {/* Feed / Hangouts toggle removed — each section has its own page now */}
 
-      {/* Channel strip — hashtag quick filters */}
-      {viewMode === "feed" && isAuthenticated && (
-        <div className="flex gap-1.5 overflow-x-auto pb-2 mb-3 -mx-1 px-1 scrollbar-hide">
-          {/* All */}
-          <button
-            onClick={() => navigate("/?view=feed", { replace: true })}
-            className="flex-shrink-0 px-3 py-1 rounded-full text-[11px] font-semibold transition-all active:scale-95"
-            style={
-              !hashtagFilter && !hangoutFilter
-                ? { background: "#D4007A", color: "#fff" }
-                : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.08)" }
-            }
-          >
-            All
-          </button>
-          {/* User's own posts */}
-          <button
-            onClick={() => navigate(`/?view=feed&tag=${encodeURIComponent(username)}`, { replace: true })}
-            className="flex-shrink-0 px-3 py-1 rounded-full text-[11px] font-semibold transition-all active:scale-95"
-            style={
-              hashtagFilter === username
-                ? { background: "#D4007A", color: "#fff" }
-                : { background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.08)" }
-            }
-          >
-            #{username}
-          </button>
-          {/* Hangout channels */}
-          {myHangouts.filter(h => !h.isWallOfFame).map((h) => (
-            <button
-              key={h.id}
-              onClick={() => navigate(`/?view=feed&hangout=${h.id}`, { replace: true })}
-              className="flex-shrink-0 px-3 py-1 rounded-full text-[11px] font-semibold transition-all active:scale-95"
-              style={
-                hangoutFilter === String(h.id)
-                  ? { background: "linear-gradient(135deg, #7B61FF, #D4007A)", color: "#fff" }
-                  : { background: "rgba(123,97,255,0.08)", color: "#7B61FF", border: "1px solid rgba(123,97,255,0.15)" }
-              }
-            >
-              #{h.name.replace(/\s+/g, "")}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Hashtag pills removed — feed tabs (All / Following) are in SocialFeedTabs */}
 
       {/* View content */}
       {viewMode === "feed" ? (

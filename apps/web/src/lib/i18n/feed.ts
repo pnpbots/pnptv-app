@@ -1,8 +1,8 @@
 const strings = {
   en: {
     // Social page header
-    socialFeedTitle: "Social Feed",
-    socialFeedSubtitle: "Share updates with the PNPTV community",
+    socialFeedTitle: "PNP Feed",
+    socialFeedSubtitle: "Share posts, reactions & updates with the community",
     community: "Community",
     // Featured performers
     featured: "Featured",
@@ -64,8 +64,8 @@ const strings = {
     beFirstHome: "Be the first to post something!",
   },
   es: {
-    socialFeedTitle: "Feed Social",
-    socialFeedSubtitle: "Comparte con la comunidad de PNPtv",
+    socialFeedTitle: "PNP Feed",
+    socialFeedSubtitle: "Comparte posts, reacciones y novedades con la comunidad",
     community: "Comunidad",
     featured: "Destacados",
     live: "En vivo",

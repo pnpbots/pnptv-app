@@ -6,7 +6,8 @@ const strings = {
       "Discover PNPtv members and venues near you. See who's around on the interactive map.",
 
     // Map heading
-    nearby: "Nearby",
+    nearby: "PNP Nearby",
+    nearbySubtitle: "Discover people & places near you",
 
     // Location states
     locationOnline: "Online",
@@ -116,7 +117,8 @@ const strings = {
       "Descubre miembros y lugares de PNPtv cerca de ti. Ve quién está cerca en el mapa interactivo.",
 
     // Map heading
-    nearby: "Cerca",
+    nearby: "PNP Nearby",
+    nearbySubtitle: "Descubre personas y lugares cerca de ti",
 
     // Location states
     locationOnline: "En línea",
