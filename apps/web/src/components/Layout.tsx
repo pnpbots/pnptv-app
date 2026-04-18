@@ -700,7 +700,7 @@ export function Layout() {
       label: "CONNECT",
       links: [
         { to: "/?view=hangouts", label: "PNP Hangouts" },
-        { to: "/dm", label: "PNP Messages" },
+        { to: "/dm", label: "Inbox" },
         { to: "/main-stage", label: "PNP Main Stage" },
       ],
     },

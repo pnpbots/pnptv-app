@@ -5,7 +5,7 @@ const strings = {
     pageDescription: "Direct messages on PNPtv. Chat privately with community members.",
 
     // Thread list header
-    messagesTitle: "PNP Messages",
+    messagesTitle: "Inbox",
     messagesSubtitle: "Private conversations",
     directMessagesSubtitle: "Direct messages",
 
@@ -34,7 +34,7 @@ const strings = {
     pageTitle: "Mensajes — PNPtv!",
     pageDescription: "Mensajes directos en PNPtv. Chatea en privado con miembros de la comunidad.",
 
-    messagesTitle: "PNP Messages",
+    messagesTitle: "Inbox",
     messagesSubtitle: "Conversaciones privadas",
     directMessagesSubtitle: "Mensajes directos",
 
