@@ -1142,29 +1142,6 @@ export function Layout() {
             <nav className="flex-1 overflow-y-auto" aria-label="Mobile navigation">
               <div className="px-3 py-3 space-y-4">
 
-                {/* ── Discover ─────────────────────────────────────────── */}
-                <div>
-                  <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Discover</p>
-                  {[
-                    { to: "/channels", label: "Channels" },
-                    { to: "/main-stage", label: t.nav.mainStage },
-                    { to: "/media", label: t.nav.prime },
-                  ].map((link) => (
-                    <NavLink
-                      key={link.to}
-                      to={link.to}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className={({ isActive }: { isActive: boolean }) =>
-                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                        }`
-                      }
-                    >
-                      {link.label}
-                    </NavLink>
-                  ))}
-                </div>
-
                 {/* ── Account ──────────────────────────────────────────── */}
                 <div>
                   <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Account</p>
