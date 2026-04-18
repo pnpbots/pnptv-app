@@ -176,13 +176,13 @@ const showNearbyMenu = async (ctx, options = {}) => {
     const locationStatus = user.locationSharingEnabled ? '🟢 ON' : '🔴 OFF';
 
     const headerText = lang === 'es'
-      ? '`🔥 PNP Nearby`\n\n' +
+      ? '`🔥 PNP Connect`\n\n' +
         'Explora todo lo que está cerca de ti:\n' +
         '👥 Miembros\n' +
         '🏪 Negocios\n' +
         '📍 Lugares de interés\n\n' +
         '_Selecciona una categoría o ve todo:_'
-      : '`🔥 PNP Nearby`\n\n' +
+      : '`🔥 PNP Connect`\n\n' +
         'Explore everything near you:\n' +
         '👥 Members\n' +
         '🏪 Businesses\n' +
@@ -905,8 +905,8 @@ const registerNearbyUnifiedHandlers = (bot) => {
         const webAppUrl = await FeatureUrlService.getNearbyUrl(userId);
 
         const message = lang === 'es'
-          ? '🔥 *PNP Nearby* ha sido movido a nuestra aplicación web para una mejor experiencia.'
-          : '🔥 *PNP Nearby* has been moved to our web app for a better experience.';
+          ? '🔥 *PNP Connect* ha sido movido a nuestra aplicación web para una mejor experiencia.'
+          : '🔥 *PNP Connect* has been moved to our web app for a better experience.';
 
         await ctx.reply(message, {
           parse_mode: 'Markdown',

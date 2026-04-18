@@ -126,10 +126,10 @@ const SECTIONS: Section[] = [
         external: false,
       },
       {
-        title: "Nearby",
+        title: "PNP Connect",
         description: "Location-based discovery",
         url: "/nearby",
-        badge: "Nearby",
+        badge: "Connect",
         external: false,
       },
       {

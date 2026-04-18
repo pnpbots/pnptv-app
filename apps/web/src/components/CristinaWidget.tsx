@@ -101,7 +101,7 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     emoji: "📍",
     steps: [
       { title: "Open Nearby", description: "Tap the map pin icon in the bottom navigation to open Nearby. The first time, your browser will ask permission to access your location — tap 'Allow'. Your exact coordinates are never stored, only a general area." },
-      { title: "Map & List Views", description: "Nearby has two views: Map (shows pins on a map where users are) and List (shows profile cards sorted by distance). Switch between them using the toggle at the top." },
+      { title: "Map & List Views", description: "PNP Connect has two views: Map (shows pins on a map where users are) and List (shows profile cards sorted by distance). Switch between them using the toggle at the top." },
       { title: "Adjust Your Radius", description: "Use the distance radius filter to control how far you want to search. You can set it from a few kilometers to a wider range. Only users within your selected radius will appear." },
       { title: "View a Profile", description: "Tap any user card or map pin to view their profile. You'll see their photo, bio, interests, and distance from you. From there you can follow them or send a DM (PRIME required for DMs).", action: "Go to Nearby" },
       { title: "Privacy: Hide Your Location", description: "Go to Profile → Settings. You can toggle 'Show location' off to hide yourself from Nearby entirely. Other users won't see you on the map or list. You can re-enable it anytime." },
@@ -264,8 +264,8 @@ const PAGE_CONTEXT: { match: (p: string) => boolean; ctx: PageContext }[] = [
   {
     match: (p) => p.startsWith("/nearby") || p.startsWith("/explore"),
     ctx: {
-      titleEn: "Nearby & Explore",
-      titleEs: "Cercanos y Explorar",
+      titleEn: "PNP Connect & Explore",
+      titleEs: "PNP Connect y Explorar",
       chips: [
         { icon: "📍", en: "How does the Nearby feature work?", es: "¿Cómo funciona la función Cercanos?" },
         { icon: "🗺️", en: "How do I share my location?", es: "¿Cómo comparto mi ubicación?" },
@@ -833,7 +833,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           <div>
             <h3 className="text-sm font-semibold text-pnp-textPrimary">{t.widgetName}</h3>
             <p className="text-[10px] text-pnp-textSecondary">
-              {activeTab === "vj" ? "PNP Radio" : activeTab === "nearby" ? "Nearby" : pageCtx ? (lang === "es" ? pageCtx.titleEs : pageCtx.titleEn) : t.widgetSubtitle}
+              {activeTab === "vj" ? "PNP Radio" : activeTab === "nearby" ? "PNP Connect" : pageCtx ? (lang === "es" ? pageCtx.titleEs : pageCtx.titleEn) : t.widgetSubtitle}
             </p>
           </div>
         </div>

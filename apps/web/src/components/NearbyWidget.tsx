@@ -57,7 +57,7 @@ function getContextLabel(ctx: NearbyContext): string {
     case "live": return "In This Stream";
     case "events": return "Event Attendees";
     case "profile": return "Everyone Nearby";
-    default: return "Nearby";
+    default: return "PNP Connect";
   }
 }
 
@@ -258,7 +258,7 @@ export function NearbyPanel({ onClose }: { onClose: () => void }) {
   return (
     <div className="flex flex-col bg-[#1C1C1E] rounded-t-3xl overflow-hidden" style={{ maxHeight: "80vh" }}>
       <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
-        <h3 className="text-sm font-bold text-[#FFB454]">Nearby Members</h3>
+        <h3 className="text-sm font-bold text-[#FFB454]">PNP Connect</h3>
         <button onClick={onClose} className="p-1"><svg className="w-5 h-5 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M6 18L18 6M6 6l12 12" /></svg></button>
       </div>
 

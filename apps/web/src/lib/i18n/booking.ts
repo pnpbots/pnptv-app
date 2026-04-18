@@ -1,12 +1,12 @@
 const strings = {
   en: {
     // Page meta
-    pageTitle: "Nearby — PNPtv!",
+    pageTitle: "Connect — PNPtv!",
     pageDescription:
       "Discover PNPtv members and venues near you. See who's around on the interactive map.",
 
     // Map heading
-    nearby: "PNP Nearby",
+    nearby: "PNP Connect",
     nearbySubtitle: "Discover people & places near you",
 
     // Location states
@@ -48,7 +48,7 @@ const strings = {
     upgradeToSeeMap: "Upgrade to see the map",
 
     // Member-tier list
-    nearbyTitle: "Nearby",
+    nearbyTitle: "Connect",
     nearbyCount: (n: number, label: string) => `${n} ${label} nearby`,
     upgradeToPrime: "Upgrade to PRIME",
     upgradePrimePrompt: "Upgrade to",
@@ -112,12 +112,12 @@ const strings = {
 
   es: {
     // Page meta
-    pageTitle: "Cerca — PNPtv!",
+    pageTitle: "Conectar — PNPtv!",
     pageDescription:
       "Descubre miembros y lugares de PNPtv cerca de ti. Ve quién está cerca en el mapa interactivo.",
 
     // Map heading
-    nearby: "PNP Nearby",
+    nearby: "PNP Connect",
     nearbySubtitle: "Descubre personas y lugares cerca de ti",
 
     // Location states

@@ -826,7 +826,7 @@ const showProfile = async (ctx, targetUserId, edit = true, isOwnProfile = false)
         Markup.button.callback(t('settings', lang), 'show_settings_overview'),
       ]);
       keyboard.push([
-        Markup.button.callback(lang === 'es' ? '📍 PNP Cercanos' : '📍 PNP Nearby', 'show_nearby_unified'),
+        Markup.button.callback(lang === 'es' ? '📍 PNP Connect' : '📍 PNP Connect', 'show_nearby_unified'),
         Markup.button.callback(t('shareProfile', lang), 'share_profile_direct'),
       ]);
       keyboard.push([Markup.button.callback(t('back', lang), 'back_to_main')]);

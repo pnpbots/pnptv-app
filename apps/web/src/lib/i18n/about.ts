@@ -29,7 +29,7 @@ const strings = {
         description: "Share photos, thoughts, and updates with the community. Follow creators and members whose content resonates with you.",
       },
       {
-        name: "Nearby",
+        name: "PNP Connect",
         icon: "📍",
         description: "Discover other PNPtv members in your area — on your terms. Location sharing is always optional and never stored persistently.",
       },
@@ -101,7 +101,7 @@ const strings = {
         description: "Comparte fotos, pensamientos y actualizaciones con la comunidad. Sigue a creadores y miembros cuyo contenido resuena contigo.",
       },
       {
-        name: "Nearby",
+        name: "PNP Connect",
         icon: "📍",
         description: "Descubre otros miembros de PNPtv en tu área — en tus términos. El compartir ubicación siempre es opcional y nunca se almacena de forma persistente.",
       },

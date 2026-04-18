@@ -707,7 +707,7 @@ export function Layout() {
     {
       label: "DISCOVER",
       links: [
-        { to: "/nearby", label: "PNP Nearby" },
+        { to: "/nearby", label: "PNP Connect" },
         { to: "/live", label: "PNP Live" },
         { to: "/media", label: t.nav.prime },
       ],

@@ -51,7 +51,7 @@ const strings = {
         desc: "Post content, like, repost, and comment. Connect with the community.",
       },
       {
-        title: "Nearby",
+        title: "PNP Connect",
         desc: "Discover members and venues near you. Enable location to see who\u2019s around.",
       },
       {
@@ -923,7 +923,7 @@ const strings = {
         desc: "Plaats inhoud, like, herpost en reageer. Verbind je met de community.",
       },
       {
-        title: "Nearby",
+        title: "PNP Connect",
         desc: "Ontdek leden en locaties bij jou in de buurt. Schakel locatie in om te zien wie er rondom is.",
       },
       {

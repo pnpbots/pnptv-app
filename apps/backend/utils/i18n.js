@@ -403,7 +403,7 @@ Your FREE access includes:
 
 💎 Enjoy:
 • Exclusive uncensored content
-• PNP Nearby - Connect with the community
+• PNP Connect - Connect with the community
 • PNP Hangouts - Private video rooms
 • PNP Television Live - Live events
 • PNP Videorama - Full playlists
@@ -818,7 +818,7 @@ Tu acceso FREE incluye:
 
 💎 Disfruta de:
 • Contenido exclusivo sin censura
-• PNP Nearby - Conecta con la comunidad
+• PNP Connect - Conecta con la comunidad
 • PNP Hangouts - Salas de video privadas
 • PNP Television Live - Eventos en vivo
 • PNP Videorama - Playlists completas

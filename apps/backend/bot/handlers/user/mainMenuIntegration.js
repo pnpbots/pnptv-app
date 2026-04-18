@@ -26,7 +26,7 @@ const integratePrivateCallsToMenu = (bot) => {
             callback_data: 'show_profile'
           },
           {
-            text: lang === 'es' ? '📍 PNP Nearby' : '📍 PNP Nearby',
+            text: lang === 'es' ? '📍 PNP Connect' : '📍 PNP Connect',
             callback_data: 'menu:nearby'
           }
         ],

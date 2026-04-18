@@ -84,7 +84,7 @@ function buildGroupMenuPayload(ctx) {
       'show_subscription_plans'
     )],
     [Markup.button.callback(
-      lang === 'es' ? '📍 PNP Nearby' : '📍 PNP Nearby',
+      lang === 'es' ? '📍 PNP Connect' : '📍 PNP Connect',
       'menu_nearby'
     )],
     [Markup.button.callback(
@@ -634,7 +634,7 @@ Hit *Unlock PRIME* to get even more cloudy fun — full-length videos, lives, Ne
 
 🎁 *Beneficios PRIME:*
 • 🎬 Videos completos y contenido exclusivo
-• 📍 Acceso completo a PNP Nearby
+• 📍 Acceso completo a PNP Connect
 • 🎥 Salas de video premium
 • 💬 Chat privado con miembros
 • 🌟 Perfil destacado
@@ -647,7 +647,7 @@ Hit *Unlock PRIME* to get even more cloudy fun — full-length videos, lives, Ne
 
 🎁 *PRIME Benefits:*
 • 🎬 Full-length and exclusive videos
-• 📍 Full access to PNP Nearby
+• 📍 Full access to PNP Connect
 • 🎥 Premium video rooms
 • 💬 Private chat with members
 • 🌟 Featured profile
@@ -662,14 +662,14 @@ Hit *Unlock PRIME* to get even more cloudy fun — full-length videos, lives, Ne
 🔓 *Estado:* GRATIS
 
 🎁 *Beneficios gratuitos:*
-• 📍 PNP Nearby básico
+• 📍 PNP Connect básico
 • 🎥 Sala comunitaria 24/7
 • 📸 Perfil y fotos
 • 💬 Chat grupal
 
 💎 *Desbloquea PRIME para:*
 • 🎬 Videos completos y exclusivos
-• 📍 Filtros avanzados en Nearby
+• 📍 Filtros avanzados en PNP Connect
 • 🎥 Salas de video privadas
 • 💬 Chat privado con miembros
 • 🌟 Perfil destacado
@@ -681,14 +681,14 @@ Hit *Unlock PRIME* to get even more cloudy fun — full-length videos, lives, Ne
 🔓 *Status:* FREE
 
 🎁 *Free Benefits:*
-• 📍 Basic PNP Nearby
+• 📍 Basic PNP Connect
 • 🎥 24/7 Community Room
 • 📸 Profile and photos
 • 💬 Group chat
 
 💎 *Unlock PRIME for:*
 • 🎬 Full-length and exclusive videos
-• 📍 Advanced Nearby filters
+• 📍 Advanced PNP Connect filters
 • 🎥 Private video rooms
 • 💬 Private chat with members
 • 🌟 Featured profile

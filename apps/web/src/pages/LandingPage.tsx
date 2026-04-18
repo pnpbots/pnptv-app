@@ -133,7 +133,7 @@ const sheets: Record<string, { title: string; emoji: string; body: React.ReactNo
     ),
   },
   nearby: {
-    title: "Nearby",
+    title: "Connect",
     emoji: "📍",
     body: (
       <div className="space-y-3">
@@ -227,7 +227,7 @@ const navItems = [
   { id: "feed",     emoji: "📣", label: "Feed" },
   { id: "hangouts", emoji: "🎙️", label: "Hangouts" },
   { id: "live",     emoji: "🔴", label: "Live" },
-  { id: "nearby",   emoji: "📍", label: "Nearby" },
+  { id: "nearby",   emoji: "📍", label: "Connect" },
   { id: "creators", emoji: "💰", label: "Creators" },
   { id: "payments", emoji: "💳", label: "Payments" },
   { id: "safety",   emoji: "🛡️", label: "Safety" },

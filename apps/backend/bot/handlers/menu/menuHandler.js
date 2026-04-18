@@ -106,7 +106,7 @@ function buildFreeMenuKeyboard(lang = 'en') {
   const labels = lang === 'es' ? {
     profile: '👤 Mi Perfil',
     subscribe: '💎 Suscribirse a PRIME',
-    nearby: '📍 PNP Nearby',
+    nearby: '📍 PNP Connect',
     hangouts: '🎥 Hangouts',
     videorama: '🎶 Videorama',
     live: '📺 En Vivo',
@@ -116,7 +116,7 @@ function buildFreeMenuKeyboard(lang = 'en') {
   } : {
     profile: '👤 My Profile',
     subscribe: '💎 Subscribe to PRIME',
-    nearby: '📍 PNP Nearby',
+    nearby: '📍 PNP Connect',
     hangouts: '🎥 Hangouts',
     videorama: '🎶 Videorama',
     live: '📺 Live',
@@ -1069,13 +1069,13 @@ async function handleMenuCallback(ctx) {
             const locationStatus = user.locationSharingEnabled ? '🟢 ON' : '🔴 OFF';
 
             const headerText = lang === 'es'
-              ? '`🔥 PNP Nearby`\n\n' +
+              ? '`🔥 PNP Connect`\n\n' +
                 'Explora todo lo que está cerca de ti:\n' +
                 '👥 Miembros\n' +
                 '🏪 Negocios\n' +
                 '📍 Lugares de interés\n\n' +
                 '_Selecciona una categoría o ve todo:_'
-              : '`🔥 PNP Nearby`\n\n' +
+              : '`🔥 PNP Connect`\n\n' +
                 'Explore everything near you:\n' +
                 '👥 Members\n' +
                 '🏪 Businesses\n' +

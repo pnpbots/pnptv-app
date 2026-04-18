@@ -35,7 +35,7 @@ const strings = {
     featureFeedTitle: "Social Feed",
     featureFeedDesc:
       "Post, follow, and connect. Share your moments, react to others, and build your audience.",
-    featureNearbyTitle: "Nearby People",
+    featureNearbyTitle: "PNP Connect",
     featureNearbyDesc:
       "See who's around you. Location-based connections with full privacy controls.",
     featureDmTitle: "Direct Messages",
