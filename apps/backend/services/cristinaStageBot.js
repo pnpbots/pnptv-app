@@ -179,6 +179,11 @@ async function connectAndStream() {
   try {
     while (_running && _room.isConnected) {
       const cycleGen = _generation;
+      // Mode changes kill the playback loop (it exits when _generation shifts).
+      // Restart it before decoding the next playlist so audio actually publishes.
+      if (!_playbackLoopActive) {
+        runPlaybackLoop(audioSource, cycleGen);
+      }
       const playlist = await loadPlaylist(_currentMode);
       if (!playlist.length) { await new Promise(r => setTimeout(r, 10000)); continue; }
 
