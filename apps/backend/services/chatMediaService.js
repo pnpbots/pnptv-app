@@ -45,9 +45,8 @@ const IMAGE_MAX_DIMENSION = 1280; // px, longest edge
 const IMAGE_THUMB_DIMENSION = 400; // px, longest edge for thumbnail
 const IMAGE_QUALITY = 78;
 const THUMB_QUALITY = 72;
-// __dirname = /app/apps/backend/bot/services
-// 4 levels up reaches /app (monorepo root), then /public
-const UPLOAD_BASE = path.join(__dirname, '../../../../public/uploads/chat');
+// __dirname = /app/apps/backend/services — 3 levels up reaches /app, then /public
+const UPLOAD_BASE = path.join(__dirname, '../../../public/uploads/chat');
 
 /**
  * Ensure the upload directory exists.
@@ -308,7 +307,7 @@ async function processMedia(file, userId, options = {}) {
     throw err;
   }
 
-  const uploadDir = path.join(__dirname, `../../../../public/uploads/${subdir}`);
+  const uploadDir = path.join(__dirname, `../../../public/uploads/${subdir}`);
   await fs.mkdir(uploadDir, { recursive: true });
 
   try {

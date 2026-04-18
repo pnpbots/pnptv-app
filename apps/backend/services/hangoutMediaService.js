@@ -45,8 +45,8 @@ const VIDEO_MAX_BYTES = 50 * 1024 * 1024;  // 50 MB
 const AUDIO_MAX_BYTES = 10 * 1024 * 1024;  // 10 MB
 
 // Base uploads directory relative to monorepo root
-// __dirname = /app/apps/backend/bot/services  =>  ../../../../public
-const UPLOAD_ROOT = path.join(__dirname, '../../../../public/uploads/hangouts');
+// __dirname = /app/apps/backend/services  =>  ../../../public
+const UPLOAD_ROOT = path.join(__dirname, '../../../public/uploads/hangouts');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
