@@ -1252,7 +1252,7 @@ export default function Nearby() {
             aria-pressed={mode === "realworld"}
           >
             <IcoMapPin className="w-3.5 h-3.5" />
-            Real World
+            Nearby
           </button>
           <button
             onClick={() => handleModeSwitch("online")}
