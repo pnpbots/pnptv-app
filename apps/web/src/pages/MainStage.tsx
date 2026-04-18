@@ -3,6 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
+import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { getSocket } from "@/lib/socket";
 import {
   LiveKitRoom,
@@ -185,6 +186,7 @@ function StageRoom({
 }: StageRoomProps) {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
+  const { setDucking } = useMusicPlayer();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const userVideoTracks = useMemo(
     () => tracks.filter((t) => t.participant.identity !== "cristina-ai"),
@@ -438,6 +440,15 @@ function StageRoom({
     }
     return null;
   }, [activeSpeakerIds, localParticipant?.identity]);
+
+  // Music ducking: drop background music ~9 dB whenever any remote (non-AI) speaker is active.
+  useEffect(() => {
+    const anySpeaker = Array.from(activeSpeakerIds).some(
+      (id) => id !== "cristina-ai" && id !== localParticipant?.identity
+    );
+    setDucking(anySpeaker);
+    return () => setDucking(false);
+  }, [activeSpeakerIds, localParticipant?.identity, setDucking]);
 
   const handleTileSelect = useCallback((id: string) => {
     setFocusedParticipantId((prev) => (prev === id ? null : id));

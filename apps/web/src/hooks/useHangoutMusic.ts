@@ -17,9 +17,11 @@ interface UseHangoutMusicOptions {
   groupId: number | null;
   isModerator: boolean;
   isMainStage?: boolean;
+  // When true, music gain is reduced ~9 dB so a speaker can cut through.
+  duckActive?: boolean;
 }
 
-export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangoutMusicOptions) {
+export function useHangoutMusic({ groupId, isModerator, isMainStage, duckActive }: UseHangoutMusicOptions) {
   const [remoteState, setRemoteState] = useState<HangoutMusicTrackState | null>(null);
   const [localVolume, setLocalVolumeState] = useState<number>(() => {
     const saved = localStorage.getItem("pnp:call:music:volume");
@@ -37,6 +39,14 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
   const mainStageAutoStarted = useRef(false);
   const groupIdRef = useRef<number | null>(groupId);
 
+  // Web Audio mastering chain (lazy, built on first play)
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const duckGainRef = useRef<GainNode | null>(null);
+  const graphFailedRef = useRef(false);
+  const volumeRef = useRef(localVolume);
+
   // Keep stateRef in sync with remoteState
   useEffect(() => {
     stateRef.current = remoteState;
@@ -45,6 +55,72 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
   useEffect(() => {
     groupIdRef.current = groupId;
   }, [groupId]);
+
+  useEffect(() => {
+    volumeRef.current = localVolume;
+  }, [localVolume]);
+
+  const ensureAudioGraph = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || audioCtxRef.current || graphFailedRef.current) return;
+    try {
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) { graphFailedRef.current = true; return; }
+      const ctx: AudioContext = new Ctx();
+      const source = ctx.createMediaElementSource(audio);
+
+      const lowShelf = ctx.createBiquadFilter();
+      lowShelf.type = "lowshelf";
+      lowShelf.frequency.value = 120;
+      lowShelf.gain.value = 2;
+
+      const highShelf = ctx.createBiquadFilter();
+      highShelf.type = "highshelf";
+      highShelf.frequency.value = 8000;
+      highShelf.gain.value = 1.5;
+
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -18;
+      compressor.ratio.value = 3;
+      compressor.attack.value = 0.005;
+      compressor.release.value = 0.15;
+      compressor.knee.value = 6;
+
+      const makeup = ctx.createGain();
+      makeup.gain.value = Math.pow(10, 2 / 20);
+
+      const duck = ctx.createGain();
+      duck.gain.value = duckActive ? 0.355 : 1.0;
+
+      const master = ctx.createGain();
+      master.gain.value = volumeRef.current;
+
+      source.connect(lowShelf);
+      lowShelf.connect(highShelf);
+      highShelf.connect(compressor);
+      compressor.connect(makeup);
+      makeup.connect(duck);
+      duck.connect(master);
+      master.connect(ctx.destination);
+
+      audioCtxRef.current = ctx;
+      sourceNodeRef.current = source;
+      duckGainRef.current = duck;
+      masterGainRef.current = master;
+      audio.volume = 1.0;
+    } catch {
+      graphFailedRef.current = true;
+    }
+  }, [duckActive]);
+
+  // Smoothly duck/unduck when duckActive toggles
+  useEffect(() => {
+    const ctx = audioCtxRef.current;
+    const duck = duckGainRef.current;
+    if (!ctx || !duck) return;
+    const target = duckActive ? 0.355 : 1.0;
+    duck.gain.setTargetAtTime(target, ctx.currentTime, 0.07);
+  }, [duckActive]);
 
   // Create audio element once on mount, destroy on unmount
   useEffect(() => {
@@ -98,13 +174,18 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
     }
 
     if (state.isPlaying) {
+      ensureAudioGraph();
+      const ctx = audioCtxRef.current;
+      if (ctx?.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
       audio.play().catch(() => {
         // Autoplay may be blocked; user interaction will unblock on next event
       });
     } else {
       audio.pause();
     }
-  }, []);
+  }, [ensureAudioGraph]);
 
   // Main stage auto-start: if we are the moderator and no music state arrives within 1.5s,
   // automatically start the first available track as Radio PNP
@@ -227,7 +308,13 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage }: UseHangou
   const setLocalVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
     setLocalVolumeState(clamped);
-    if (audioRef.current) audioRef.current.volume = clamped;
+    const ctx = audioCtxRef.current;
+    const master = masterGainRef.current;
+    if (ctx && master) {
+      master.gain.setTargetAtTime(clamped, ctx.currentTime, 0.015);
+    } else if (audioRef.current) {
+      audioRef.current.volume = clamped;
+    }
     localStorage.setItem("pnp:call:music:volume", String(clamped));
   }, []);
 

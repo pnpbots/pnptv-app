@@ -35,6 +35,7 @@ interface MusicPlayerActions {
   toggleRepeat: () => void;
   loadMore: () => void;
   retryLoad: () => void;
+  setDucking: (active: boolean) => void;
 }
 
 type MusicPlayerContextType = MusicPlayerState & MusicPlayerActions;
@@ -51,6 +52,13 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   const loadingRef = useRef(false);
   const handleTrackEndRef = useRef<() => void>(() => {});
   const currentTrackRef = useRef<MediaTrack | null>(null);
+
+  // ── Web Audio mastering chain (built lazily on first direct-<audio> play) ──
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const duckGainRef = useRef<GainNode | null>(null);
+  const graphFailedRef = useRef(false);
 
   const [tracks, setTracks] = useState<MediaTrack[]>([]);
   const [currentTrack, setCurrentTrack] = useState<MediaTrack | null>(null);
@@ -123,10 +131,82 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync volume to audio element when it changes
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume;
+  // Build mastering chain once, the first time a direct-<audio> track plays.
+  // Cannot process SoundCloud iframe audio — cross-origin widget bypasses the graph.
+  const ensureAudioGraph = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || audioCtxRef.current || graphFailedRef.current) return;
+    try {
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) { graphFailedRef.current = true; return; }
+      const ctx: AudioContext = new Ctx();
+      const source = ctx.createMediaElementSource(audio);
+
+      const lowShelf = ctx.createBiquadFilter();
+      lowShelf.type = "lowshelf";
+      lowShelf.frequency.value = 120;
+      lowShelf.gain.value = 2;
+
+      const highShelf = ctx.createBiquadFilter();
+      highShelf.type = "highshelf";
+      highShelf.frequency.value = 8000;
+      highShelf.gain.value = 1.5;
+
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -18;
+      compressor.ratio.value = 3;
+      compressor.attack.value = 0.005;
+      compressor.release.value = 0.15;
+      compressor.knee.value = 6;
+
+      const makeup = ctx.createGain();
+      makeup.gain.value = Math.pow(10, 2 / 20); // +2 dB
+
+      const duck = ctx.createGain();
+      duck.gain.value = 1.0;
+
+      const master = ctx.createGain();
+      master.gain.value = volume;
+
+      source.connect(lowShelf);
+      lowShelf.connect(highShelf);
+      highShelf.connect(compressor);
+      compressor.connect(makeup);
+      makeup.connect(duck);
+      duck.connect(master);
+      master.connect(ctx.destination);
+
+      audioCtxRef.current = ctx;
+      sourceNodeRef.current = source;
+      duckGainRef.current = duck;
+      masterGainRef.current = master;
+
+      // With the graph intercepting output, element volume must stay at unity.
+      audio.volume = 1.0;
+    } catch {
+      graphFailedRef.current = true;
+    }
   }, [volume]);
+
+  // Sync volume to master gain (or audio element if graph isn't built yet)
+  useEffect(() => {
+    const ctx = audioCtxRef.current;
+    const master = masterGainRef.current;
+    if (ctx && master) {
+      master.gain.setTargetAtTime(volume, ctx.currentTime, 0.015);
+    } else if (audioRef.current) {
+      audioRef.current.volume = volume;
+    }
+  }, [volume]);
+
+  const setDucking = useCallback((active: boolean) => {
+    const ctx = audioCtxRef.current;
+    const duck = duckGainRef.current;
+    if (!ctx || !duck) return;
+    // -9 dB duck (~0.355) with 200 ms fade
+    const target = active ? 0.355 : 1.0;
+    duck.gain.setTargetAtTime(target, ctx.currentTime, 0.07);
+  }, []);
 
   // Handle track ended
   const handleTrackEnd = useCallback(() => {
@@ -316,7 +396,16 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
       } else if (track.url && (track.url.startsWith("http") || track.url.startsWith("/"))) {
         // Direct URL playback (non-SoundCloud with a playable URL)
         audio.src = track.url;
-        audio.volume = volume;
+        ensureAudioGraph();
+        if (audioCtxRef.current?.state === "suspended") {
+          try { await audioCtxRef.current.resume(); } catch { /* unlocks on next user gesture */ }
+        }
+        if (masterGainRef.current) {
+          // Graph controls volume; keep element at unity to avoid double-attenuation.
+          audio.volume = 1.0;
+        } else {
+          audio.volume = volume;
+        }
         await audio.play();
       } else {
         // No playable source
@@ -444,7 +533,13 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
     setVolumeState(clamped);
-    if (audioRef.current) audioRef.current.volume = clamped;
+    const ctx = audioCtxRef.current;
+    const master = masterGainRef.current;
+    if (ctx && master) {
+      master.gain.setTargetAtTime(clamped, ctx.currentTime, 0.015);
+    } else if (audioRef.current) {
+      audioRef.current.volume = clamped;
+    }
     if (soundcloudPlayerRef.current) {
       soundcloudPlayerRef.current.setVolume(clamped * 100);
     }
@@ -507,7 +602,7 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     tracks, currentTrack, currentIndex, isPlaying, progress, duration,
     volume, shuffle, repeat, isLoading, isLoadingTracks, hasMore, loadError,
     play, pause, togglePlay, next, prev, seek, setVolume,
-    toggleShuffle, toggleRepeat, loadMore, retryLoad,
+    toggleShuffle, toggleRepeat, loadMore, retryLoad, setDucking,
   };
 
   return (

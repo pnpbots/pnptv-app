@@ -1236,14 +1236,22 @@ const bulkVideoLimiter = rateLimit({
 // Chat media upload:
 //   Images up to 20 MB — processed by sharp (converted to WebP + thumbnail)
 //   Videos up to 100 MB — stored as-is, poster frame via ffmpeg
-// A single multer instance handles both; mime validation happens in chatMediaService.
+//   Audio (voice notes) up to 20 MB — stored as-is
+// Accepts iPhone formats (HEIC/HEIF, MOV) — real mime validation by magic bytes
+// happens in chatMediaService.
 const chatMediaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const isAllowed = /^(image\/(jpeg|jpg|png|webp|gif)|video\/(mp4|webm))$/i.test(file.mimetype || '');
-    if (isAllowed) return cb(null, true);
-    cb(new Error('Only image (jpg/png/webp/gif) and video (mp4/webm) files are allowed in chat'));
+    const m = (file.mimetype || '').toLowerCase();
+    const isImage = /^image\/(jpeg|jpg|png|webp|gif|heic|heif)$/.test(m);
+    const isVideo = /^video\/(mp4|webm|quicktime|x-m4v)$/.test(m);
+    const isAudio = /^audio\/(webm|ogg|mp4|mpeg|mp3|m4a|x-m4a|wav)$/.test(m);
+    // Some browsers / iOS send application/octet-stream for HEIC — let the
+    // magic-byte validator reject it at the service layer rather than here.
+    const isOctet = m === 'application/octet-stream' || m === '';
+    if (isImage || isVideo || isAudio || isOctet) return cb(null, true);
+    cb(new Error('Only image, video, and voice-note files are allowed'));
   },
 });
 
@@ -1253,7 +1261,7 @@ const uploadChatMedia = (req, res, next) => {
     if (!err) return next();
     let message = 'Invalid file. Please try a different image or video.';
     if (err.code === 'LIMIT_FILE_SIZE') {
-      message = 'File is too large. Images must be under 20 MB and videos under 100 MB.';
+      message = 'File is too large. Max 100 MB.';
     } else if (err.message) {
       message = err.message;
     }

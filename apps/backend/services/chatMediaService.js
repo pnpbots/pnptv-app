@@ -138,6 +138,8 @@ async function processVideo(buffer, userId, mimetype) {
   await ensureUploadDir();
 
   const ts = Date.now();
+  // MOV/quicktime files play fine in <video> tags when served with .mp4 extension
+  // since both use the same container format.
   const ext = mimetype === 'video/webm' ? 'webm' : 'mp4';
   const videoFilename = `vid-${userId}-${ts}.${ext}`;
   const thumbFilename = `vid-${userId}-${ts}-thumb.webp`;
@@ -178,6 +180,27 @@ async function processVideo(buffer, userId, mimetype) {
 }
 
 /**
+ * Process an audio buffer (voice note):
+ *  - write file as-is, no transcoding
+ *  - no thumbnail
+ */
+async function processAudio(buffer, userId, mimetype) {
+  await ensureUploadDir();
+
+  const ts = Date.now();
+  const ext =
+    mimetype === 'audio/webm' ? 'webm' :
+    mimetype === 'audio/ogg' ? 'ogg' :
+    mimetype === 'audio/mpeg' ? 'mp3' :
+    mimetype === 'audio/wav' || mimetype === 'audio/x-wav' ? 'wav' :
+    'm4a';
+  const filename = `aud-${userId}-${ts}.${ext}`;
+  const filePath = path.join(UPLOAD_BASE, filename);
+  await fs.writeFile(filePath, buffer);
+  return { mediaUrl: `/uploads/chat/${filename}` };
+}
+
+/**
  * Main entry point: validate and process an uploaded file.
  *
  * @param {object} file          Express multer file object (memoryStorage)
@@ -192,14 +215,27 @@ async function processVideo(buffer, userId, mimetype) {
  * }>}
  * @throws {Error} with a human-readable `.userMessage` property on validation failure
  */
-// Magic byte → media type mapping for server-side file validation
+// Magic byte → media type mapping for server-side file validation.
+// HEIC/HEIF come from iPhone Photos; quicktime/x-m4v are iPhone Videos.
+// Audio is for voice notes (browser MediaRecorder usually emits webm/ogg).
 const MAGIC_TO_MEDIA_TYPE = {
-  'image/jpeg': 'image',
-  'image/png':  'image',
-  'image/webp': 'image',
-  'image/gif':  'image',
-  'video/mp4':  'video',
-  'video/webm': 'video',
+  'image/jpeg':      'image',
+  'image/png':       'image',
+  'image/webp':      'image',
+  'image/gif':       'image',
+  'image/heic':      'image',
+  'image/heif':      'image',
+  'video/mp4':       'video',
+  'video/webm':      'video',
+  'video/quicktime': 'video',
+  'video/x-m4v':     'video',
+  'audio/mpeg':      'audio',
+  'audio/mp4':       'audio',
+  'audio/x-m4a':     'audio',
+  'audio/ogg':       'audio',
+  'audio/webm':      'audio',
+  'audio/wav':       'audio',
+  'audio/x-wav':     'audio',
 };
 
 async function processChatMedia(file, userId) {
@@ -223,7 +259,7 @@ async function processChatMedia(file, userId) {
       detectedMime: detectedMime || 'unknown',
     });
     const err = new Error(`File content rejected: detected ${detectedMime || 'unknown'}`);
-    err.userMessage = 'Only images (jpg, png, webp, gif) and videos (mp4, webm) are allowed.';
+    err.userMessage = 'Only images, videos, and voice notes are allowed.';
     err.statusCode = 400;
     throw err;
   }
@@ -240,22 +276,33 @@ async function processChatMedia(file, userId) {
 
   try {
     if (mediaType === 'image') {
+      // sharp auto-converts HEIC/HEIF/JPEG/PNG/GIF to WebP, so no special-case needed
       const { mediaUrl, thumbUrl, width, height } = await processImage(file.buffer, userId);
       return {
         mediaType: 'image',
-        mediaMime: detectedMime,
+        mediaMime: 'image/webp', // always WebP after processing
         mediaUrl,
         thumbUrl,
         width,
         height,
       };
-    } else {
+    } else if (mediaType === 'video') {
       const { mediaUrl, thumbUrl } = await processVideo(file.buffer, userId, detectedMime);
       return {
         mediaType: 'video',
-        mediaMime: detectedMime,
+        mediaMime: detectedMime === 'video/quicktime' || detectedMime === 'video/x-m4v' ? 'video/mp4' : detectedMime,
         mediaUrl,
         thumbUrl,
+        width: null,
+        height: null,
+      };
+    } else {
+      const { mediaUrl } = await processAudio(file.buffer, userId, detectedMime);
+      return {
+        mediaType: 'audio',
+        mediaMime: detectedMime,
+        mediaUrl,
+        thumbUrl: null,
         width: null,
         height: null,
       };
@@ -302,7 +349,7 @@ async function processMedia(file, userId, options = {}) {
 
   if (!mediaType) {
     const err = new Error(`File content rejected: detected ${detectedMime || 'unknown'}`);
-    err.userMessage = 'Only images (jpg, png, webp, gif) and videos (mp4, webm) are allowed.';
+    err.userMessage = 'Only images, videos, and voice notes are allowed.';
     err.statusCode = 400;
     throw err;
   }
