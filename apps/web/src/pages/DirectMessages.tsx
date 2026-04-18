@@ -293,6 +293,9 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
   const [sendingMessage, setSendingMessage] = useState(false);
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [isTyping, setIsTyping] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [partnerName, setPartnerName] = useState("");
@@ -313,6 +316,10 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recorderStreamRef = useRef<MediaStream | null>(null);
+  const recorderChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastTypingEmit = useRef(0);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inviteRoomFromQuery = searchParams.get("call");
@@ -572,6 +579,30 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     clearCallParams();
   }, [clearCallParams]);
 
+  const uploadMediaWithProgress = (file: File, caption: string): Promise<{ message?: DmMessage }> => {
+    return new Promise((resolve, reject) => {
+      const formData = new FormData();
+      formData.append("media", file);
+      if (caption) formData.append("content", caption);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE}/api/webapp/dm/media/${userId}`);
+      xhr.withCredentials = true;
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      xhr.onload = () => {
+        setUploadProgress(null);
+        let data: { error?: string; message?: DmMessage } = {};
+        try { data = JSON.parse(xhr.responseText); } catch { /* ignore */ }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+        else reject(new Error(data.error || `Upload failed (${xhr.status})`));
+      };
+      xhr.onerror = () => { setUploadProgress(null); reject(new Error("Network error during upload")); };
+      xhr.onabort = () => { setUploadProgress(null); reject(new Error("Upload cancelled")); };
+      xhr.send(formData);
+    });
+  };
+
   const handleSendMessage = async () => {
     if (!messageInput.trim() && !mediaFile) return;
     if (sendingMessage) return;
@@ -579,13 +610,9 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     setChatError(null);
     try {
       if (mediaFile) {
-        const formData = new FormData();
-        formData.append("media", mediaFile);
-        if (messageInput.trim()) formData.append("content", messageInput.trim());
-        const res = await fetch(`${API_BASE}/api/webapp/dm/media/${userId}`, { method: "POST", credentials: "include", body: formData });
-        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err as { error?: string }).error || "Failed to send media"); }
-        const data = await res.json();
-        if (data.message) setMessages((prev) => prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]);
+        setUploadProgress(0);
+        const data = await uploadMediaWithProgress(mediaFile, messageInput.trim());
+        if (data.message) setMessages((prev) => prev.some((m) => m.id === data.message!.id) ? prev : [...prev, data.message!]);
         setMediaFile(null);
         if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
         setMessageInput("");
@@ -626,6 +653,84 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     setMediaFile(null);
     if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
   };
+
+  // ── Voice note recording ─────────────────────────────────────────────────
+  const pickAudioMime = (): string => {
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
+    for (const m of candidates) {
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m)) return m;
+    }
+    return "";
+  };
+
+  const stopRecordingStream = () => {
+    if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+    recorderStreamRef.current?.getTracks().forEach((t) => t.stop());
+    recorderStreamRef.current = null;
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
+    setRecordingSeconds(0);
+  };
+
+  const startRecording = async () => {
+    if (isRecording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recorderStreamRef.current = stream;
+      const mime = pickAudioMime();
+      const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      recorderChunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) recorderChunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        const blob = new Blob(recorderChunksRef.current, { type: rec.mimeType || "audio/webm" });
+        recorderChunksRef.current = [];
+        const ext = (rec.mimeType || "audio/webm").includes("mp4") ? "m4a" : (rec.mimeType || "").includes("ogg") ? "ogg" : "webm";
+        const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type });
+        setMediaFile(file);
+        setMediaPreview(null);
+        stopRecordingStream();
+      };
+      mediaRecorderRef.current = rec;
+      rec.start();
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => {
+          if (s >= 119) { // 2-minute hard cap
+            try { rec.state === "recording" && rec.stop(); } catch { /* ignore */ }
+            return s;
+          }
+          return s + 1;
+        });
+      }, 1000);
+    } catch (err) {
+      setChatError(err instanceof Error && err.name === "NotAllowedError" ? "Permiso de micrófono denegado" : "No se pudo iniciar la grabación");
+      stopRecordingStream();
+    }
+  };
+
+  const stopRecording = () => {
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state === "recording") {
+      rec.stop();
+    } else {
+      stopRecordingStream();
+    }
+  };
+
+  const cancelRecording = () => {
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state === "recording") {
+      rec.ondataavailable = null;
+      rec.onstop = null;
+      try { rec.stop(); } catch { /* ignore */ }
+    }
+    recorderChunksRef.current = [];
+    stopRecordingStream();
+  };
+
+  // Clean up on unmount
+  useEffect(() => () => { cancelRecording(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMoreMessages = async () => {
     if (loadingMore || !hasMore || messages.length === 0) return;
@@ -969,7 +1074,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
         </div>
       )}
 
-      {/* Media preview */}
+      {/* Media preview + upload progress */}
       {mediaFile && (
         <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-3 flex-shrink-0 bg-pnp-background">
           {mediaPreview ? <img src={mediaPreview} alt="" className="w-10 h-10 rounded-lg object-cover" /> : (
@@ -979,14 +1084,57 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
               </svg>
             </div>
           )}
-          <span className="text-xs text-pnp-textSecondary flex-1 truncate">{mediaFile.name}</span>
-          <button onClick={cancelMedia} className="w-6 h-6 rounded-full flex items-center justify-center bg-red-500/10 text-red-400 hover:bg-red-500/20 active:scale-90 transition-all">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-pnp-textSecondary truncate">{mediaFile.name}</div>
+            {uploadProgress !== null && (
+              <div className="mt-1 h-1 bg-white/10 rounded overflow-hidden">
+                <div
+                  className="h-full transition-all"
+                  style={{ width: `${uploadProgress}%`, background: "linear-gradient(90deg, #D4007A, #E69138)" }}
+                />
+              </div>
+            )}
+          </div>
+          {uploadProgress !== null ? (
+            <span className="text-[11px] font-semibold text-pnp-textPrimary tabular-nums">{uploadProgress}%</span>
+          ) : (
+            <button onClick={cancelMedia} className="w-6 h-6 rounded-full flex items-center justify-center bg-red-500/10 text-red-400 hover:bg-red-500/20 active:scale-90 transition-all">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          )}
         </div>
       )}
 
-      {/* Input bar */}
+      {/* Recording bar — replaces input bar while recording */}
+      {isRecording ? (
+        <div className="flex items-center gap-2 px-3 py-2.5 border-t border-pnp-border flex-shrink-0 bg-pnp-background pb-safe">
+          <button
+            type="button"
+            onClick={cancelRecording}
+            className="p-2 rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0"
+            aria-label="Cancelar grabación"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+          <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-2xl bg-red-500/10 border border-red-500/30">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-sm text-white font-medium">Grabando…</span>
+            <span className="ml-auto text-sm text-white font-mono tabular-nums">
+              {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, "0")}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={stopRecording}
+            className="p-2.5 rounded-full text-white active:scale-90 transition-all flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label="Enviar nota de voz"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
+          </button>
+        </div>
+      ) : (
+      /* Input bar */
       <div className="flex items-end gap-2 px-3 py-2.5 border-t border-pnp-border flex-shrink-0 bg-pnp-background pb-safe">
         <input ref={mediaInputRef} type="file" accept="image/*,video/*,audio/*" className="hidden" onChange={handleMediaSelect} />
         <input ref={cameraInputRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handleMediaSelect} />
@@ -1010,21 +1158,38 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
           rows={1}
           style={{ minHeight: "40px", fontSize: "16px" }}
         />
-        <button
-          type="button"
-          onClick={handleSendMessage}
-          disabled={sendingMessage || (!messageInput.trim() && !mediaFile)}
-          className="p-2.5 rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30"
-          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-          aria-label="Send message"
-        >
-          {sendingMessage ? (
-            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-          ) : (
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
-          )}
-        </button>
+        {/* Mic button — shown only when input is empty and no media attached */}
+        {!messageInput.trim() && !mediaFile && (
+          <button
+            type="button"
+            onClick={startRecording}
+            className="p-2.5 rounded-full text-white active:scale-90 transition-all flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label="Grabar nota de voz"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+            </svg>
+          </button>
+        )}
+        {(messageInput.trim() || mediaFile) && (
+          <button
+            type="button"
+            onClick={handleSendMessage}
+            disabled={sendingMessage}
+            className="p-2.5 rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label="Send message"
+          >
+            {sendingMessage ? (
+              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
+            )}
+          </button>
+        )}
       </div>
+      )}
 
       {/* Context menu */}
       {contextMenu && (
