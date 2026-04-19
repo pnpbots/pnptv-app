@@ -62,15 +62,6 @@ volumes:
       type: none
       o: bind
       device: /opt/pnptvapp/infrastructure/data/directus/postgres
-  # vol_mariadb_ampache — REMOVED 2026-04-11: Ampache decommissioned (zero code wiring)
-  # Data preserved at: /opt/pnptvapp/infrastructure/data/ampache/mariadb
-  # To permanently delete: docker volume rm pnptvapp_vol_mariadb_ampache && rm -rf /opt/pnptvapp/infrastructure/data/ampache
-  # vol_mariadb_ampache:
-  #   driver: local
-  #   driver_opts:
-  #     type: none
-  #     o: bind
-  #     device: /opt/pnptvapp/infrastructure/data/ampache/mariadb
   vol_pg_calcom:
     driver: local
     driver_opts:
@@ -500,14 +491,6 @@ services:
       start_period: 30s
 
   # ===========================================
-  # BLOCK D - REMOVED 2026-04-11: Ampache decommissioned
-  # Had zero active code wiring (no service imports, no API calls, no env var consumers)
-  # DNS record media.pnptv.app should be removed from Hostinger DNS panel
-  # NPM proxy_host 3.conf (media.pnptv.app → ampache:80) should be deleted via NPM UI
-  # To stop and remove containers: docker compose stop ampache mariadb-ampache && docker compose rm -f ampache mariadb-ampache
-  # ===========================================
-
-  # ===========================================
   # BLOCK E - Booking (Cal.com)
   # Dedicated PostgreSQL + Redis for API v2
   # ===========================================
@@ -663,7 +646,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 10s
 
   synapse:
     image: matrixdotorg/synapse:latest
@@ -1046,11 +1029,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
-
-  # ===========================================
-  # BLOCK K - BTCPay Server (Dash Pay)
-  # Self-hosted payment processor for Dash
-  # ===========================================
 
   # ===========================================
   # BLOCK L - Newsletter (Listmonk)

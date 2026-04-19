@@ -11,14 +11,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
-COPY apps/backend/package.json apps/backend/package-lock.json ./apps/backend/
+COPY apps/backend/package.json ./apps/backend/
 COPY package.json package-lock.json ./
 
-WORKDIR /app/apps/backend
-RUN npm ci --omit=dev
-
+# This is an npm-workspaces monorepo: the only authoritative lockfile lives at
+# the repo root. The root `npm ci` installs deps for every workspace including
+# apps/backend (it hoists into root node_modules + creates the symlinked
+# apps/backend/node_modules pointing at hoisted packages). No backend-local
+# lockfile or backend-local `npm ci` is needed.
 WORKDIR /app
-RUN npm ci --omit=dev --ignore-scripts 2>/dev/null || true
+RUN npm ci --omit=dev --ignore-scripts
 
 # Stage 2: Production runtime
 FROM node:18-slim

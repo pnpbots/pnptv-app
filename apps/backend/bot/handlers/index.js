@@ -13,7 +13,7 @@ module.exports = {
     registerMediaHandlers: require('./media'),
     registerCallManagement: require('./user/callManagement'),
     registerPaymentHistory: require('./user/paymentHistory'),
-    registerCallFeedback: require('./user/callFeedback'),
+    // registerCallFeedback removed — placeholder handler was deleted (it only logged a warn and exited)
     registerCallPackages: require('./user/callPackages')
   },
 
