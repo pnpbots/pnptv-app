@@ -30,7 +30,9 @@
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { query, getClient } = require('../config/postgres');
-const { createDaimoPayment } = require('../config/daimo');
+// Daimo retired — createWalletCheckout always throws DAIMO_DISABLED before any
+// Daimo API call. The require is removed; if we ever need Dash token checkout,
+// it lives in createDashCheckout below.
 const { createDashInvoice } = require('../config/btcpay');
 const DashTokenService = require('./dashTokenService');
 const logger = require('../utils/logger');
@@ -229,85 +231,13 @@ class TokenCheckoutService {
    *   usd: number,
    * }>}
    */
-  static async createWalletCheckout(userId, packageId) {
-    // Daimo Pay is disabled platform-wide. Wallet (USDC/Daimo) token checkout is unavailable;
-    // use createCardCheckout (ePayco) or createDashCheckout (BTCPay) instead.
+  static async createWalletCheckout(_userId, _packageId) {
+    // Daimo Pay retired. Token wallet checkout is no longer available;
+    // route callers to createCardCheckout (ePayco) or createDashCheckout (BTCPay).
     throw Object.assign(
-      new Error('Daimo Pay is temporarily unavailable. Please use Card or Dash.'),
-      { code: 'DAIMO_DISABLED', status: 503 }
+      new Error('Daimo Pay has been retired. Please use Card or Dash.'),
+      { code: 'DAIMO_RETIRED', status: 410 }
     );
-    // eslint-disable-next-line no-unreachable
-    const pkg = resolvePackage(packageId);
-    if (!pkg) {
-      throw Object.assign(new Error('Invalid package ID'), { code: 'INVALID_PACKAGE', status: 400 });
-    }
-
-    const purchaseUuid = uuidv4();
-    const invoiceKey = idempotencyKey('daimo', purchaseUuid);
-
-    // Create the Daimo session before writing to DB so we can store it atomically.
-    const daimoResult = await createDaimoPayment({
-      amount: pkg.usd,
-      userId,
-      planId: 'token_purchase',
-      chatId: '',
-      paymentId: purchaseUuid,
-      description: `${pkg.tokens} PNP Tokens`,
-    });
-
-    if (!daimoResult.success) {
-      logger.error('Daimo session creation failed', {
-        userId, packageId, purchaseUuid, error: daimoResult.error,
-      });
-      throw Object.assign(
-        new Error(daimoResult.error || 'Daimo payment creation failed'),
-        { code: 'DAIMO_ERROR', status: 503 }
-      );
-    }
-
-    const checkoutData = {
-      daimo_session_id: daimoResult.daimoPaymentId,
-      daimo_client_secret: daimoResult.clientSecret,
-    };
-
-    const client = await getClient();
-    try {
-      await client.query('BEGIN');
-      await insertPendingPurchase(client, {
-        purchaseUuid,
-        userId,
-        tokens: pkg.tokens,
-        usd: pkg.usd,
-        invoiceKey,
-        paymentMethod: 'daimo',
-        checkoutData,
-      });
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      logger.error('TokenCheckoutService.createWalletCheckout DB error', {
-        userId, packageId, error: err.message,
-      });
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    const checkoutUrl = `${WEB_APP_URL}/token-checkout/${purchaseUuid}`;
-
-    logger.info('Token wallet checkout created', {
-      userId, packageId, purchaseUuid,
-      daimoPaymentId: daimoResult.daimoPaymentId,
-      tokens: pkg.tokens,
-    });
-
-    return {
-      success: true,
-      purchaseId: purchaseUuid,
-      checkoutUrl,
-      tokens: pkg.tokens,
-      usd: pkg.usd,
-    };
   }
 
   // ── Dash / BTCPay checkout ────────────────────────────────────────────────
@@ -470,72 +400,19 @@ class TokenCheckoutService {
       };
     }
 
-    // ── Daimo ────────────────────────────────────────────────────────────────
+    // Daimo retired — return stored session data ONLY for legacy purchases so
+    // the React TokenCheckout page can render its retired-method error cleanly
+    // (it surfaces a "this method is no longer available" message). NEVER
+    // re-create a Daimo session.
     if (provider === 'daimo') {
       const stored = purchase.checkout_data || null;
-      const storedSessionId = stored?.daimo_session_id || null;
-      const storedClientSecret = stored?.daimo_client_secret || null;
-
-      if (storedSessionId && storedClientSecret) {
-        return {
-          ...base,
-          daimo: {
-            sessionId: storedSessionId,
-            clientSecret: storedClientSecret,
-          },
-        };
-      }
-
-      // Session missing — re-create it (idempotent: Daimo uses paymentId as correlation)
-      logger.warn('Daimo session not stored for purchase, re-creating', { purchaseUuid });
-      try {
-        const daimoResult = await createDaimoPayment({
-          amount: usdAmount,
-          userId,
-          planId: 'token_purchase',
-          chatId: '',
-          paymentId: purchaseUuid,
-          description: `${tokens} PNP Tokens`,
-        });
-
-        if (!daimoResult.success) {
-          logger.error('Failed to re-create Daimo session', {
-            purchaseUuid, error: daimoResult.error,
-          });
-          return { ...base, daimo: { sessionId: null, clientSecret: null } };
-        }
-
-        // Best-effort: persist back for subsequent page loads
-        await query(
-          `UPDATE token_purchases
-           SET checkout_data = $1
-           WHERE purchase_uuid = $2`,
-          [
-            JSON.stringify({
-              daimo_session_id: daimoResult.daimoPaymentId,
-              daimo_client_secret: daimoResult.clientSecret,
-            }),
-            purchaseUuid,
-          ]
-        ).catch((updateErr) => {
-          logger.warn('Could not persist re-created Daimo session (non-fatal)', {
-            purchaseUuid, error: updateErr.message,
-          });
-        });
-
-        return {
-          ...base,
-          daimo: {
-            sessionId: daimoResult.daimoPaymentId,
-            clientSecret: daimoResult.clientSecret,
-          },
-        };
-      } catch (daimoErr) {
-        logger.error('Error re-creating Daimo session', {
-          purchaseUuid, error: daimoErr.message,
-        });
-        return { ...base, daimo: { sessionId: null, clientSecret: null } };
-      }
+      return {
+        ...base,
+        daimo: {
+          sessionId: stored?.daimo_session_id || null,
+          clientSecret: stored?.daimo_client_secret || null,
+        },
+      };
     }
 
     // Dash (BTCPay) — BTCPay has its own checkout page; no internal page needed

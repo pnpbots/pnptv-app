@@ -7,7 +7,8 @@ const PromoModel = require('../models/promoModel');
 const PlanModel = require('../models/planModel');
 const PaymentModel = require('../models/paymentModel');
 const UserModel = require('../models/userModel');
-const DaimoConfig = require('../config/daimo');
+// Daimo retired — promo flow no longer creates Daimo sessions; provider==='daimo'
+// is rejected at the early gate in PaymentService.createPayment().
 const logger = require('../utils/logger');
 
 class PromoService {
@@ -148,39 +149,8 @@ class PromoService {
           fallback: true,
         });
       } else if (provider === 'daimo') {
-        // Create Daimo payment with promo price
-        try {
-          const daimoResult = await DaimoConfig.createDaimoPayment({
-            amount: pricing.finalPrice,
-            userId,
-            planId,
-            chatId,
-            paymentId: payment.id,
-            description: `${promo.name} - ${basePlan.name || basePlan.display_name}`,
-          });
-
-          if (daimoResult.success && daimoResult.paymentUrl) {
-            paymentUrl = daimoResult.paymentUrl;
-            await PaymentModel.updateStatus(payment.id, 'pending', {
-              paymentUrl,
-              provider,
-              daimo_payment_id: daimoResult.daimoPaymentId,
-            });
-          } else {
-            throw new Error(daimoResult.error || 'Daimo payment creation failed');
-          }
-        } catch (daimoError) {
-          logger.error('Daimo API error for promo, using fallback:', {
-            error: daimoError.message,
-            paymentId: payment.id,
-          });
-          paymentUrl = `${checkoutDomain}/daimo-checkout/${payment.id}?promo=${promo.code}`;
-          await PaymentModel.updateStatus(payment.id, 'pending', {
-            paymentUrl,
-            provider,
-            fallback: true,
-          });
-        }
+        // Daimo retired — should never reach here (provider rejected upstream).
+        throw new Error('Daimo Pay has been retired for promo checkouts');
       } else {
         paymentUrl = `${checkoutDomain}/payment/${payment.id}?promo=${promo.code}`;
       }

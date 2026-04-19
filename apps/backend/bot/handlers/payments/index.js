@@ -5,7 +5,7 @@ const UserService = require('../../../services/userService');
 const { t } = require('../../../utils/i18n');
 const logger = require('../../../utils/logger');
 const { getLanguage, safeReplyOrEdit } = require('../../utils/helpers');
-const DaimoConfig = require('../../../config/daimo');
+// Daimo retired — DaimoConfig require removed; pay_daimo callback below is a silent ack.
 const registerActivationHandlers = require('./activation');
 
 const showSubscriptionPlans = async (ctx, options = {}) => {
@@ -336,142 +336,11 @@ const registerPaymentHandlers = (bot) => {
     }
   });
 
-  // Pay with Daimo
+  // Pay with Daimo handler removed (Daimo retired). The user-facing button
+  // is gone from menus.js + payments/index.js, and any stale callback that
+  // still arrives is acknowledged silently — no checkout is created.
   bot.action(/^pay_daimo_(.+)$/, async (ctx) => {
-    try {
-      await ctx.answerCbQuery();
-
-      // Validate match result exists
-      if (!ctx.match || !ctx.match[1]) {
-        logger.error('Invalid Daimo payment action format');
-        return;
-      }
-
-      const planId = ctx.match[1];
-      const lang = getLanguage(ctx);
-
-      // Validate user context exists
-      if (!ctx.from?.id) {
-        logger.error('Missing user context in Daimo payment');
-        await ctx.reply(t('error', lang));
-        return;
-      }
-
-      const userId = ctx.from.id;
-      const chatId = ctx.chat?.id;
-
-      // Double-check if user has active subscription before creating payment
-      // Skip this check if admin is in "View as Free" mode
-      const isAdminViewingAsFree = ctx.session?.adminViewMode === 'free';
-      const hasActiveSubscription = !isAdminViewingAsFree && await UserService.hasActiveSubscription(userId);
-
-      if (hasActiveSubscription) {
-        const warningMsg = lang === 'es'
-          ? '⚠️ **Ya tienes una suscripción activa**\n\n'
-            + 'No puedes realizar un nuevo pago mientras tengas una suscripción activa.\n\n'
-            + 'Esto evita pagos duplicados. Si deseas cambiar tu plan, contacta soporte.'
-          : '⚠️ **You already have an active subscription**\n\n'
-            + 'You cannot make a new payment while you have an active subscription.\n\n'
-            + 'This prevents double payments. If you want to change your plan, contact support.';
-        
-        await ctx.editMessageText(
-          warningMsg,
-          {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard([
-              [Markup.button.callback(t('back', lang), 'back_to_main')]
-            ])
-          }
-        );
-        return;
-      }
-
-      logger.info('Creating Daimo payment', { planId, userId });
-
-      await ctx.editMessageText(t('loading', lang));
-
-      // Get plan details for display
-      const plan = await PlanModel.getById(planId);
-      if (!plan) {
-        await ctx.editMessageText(
-          t('error', lang),
-          Markup.inlineKeyboard([
-            [Markup.button.callback(t('back', lang), 'show_subscription_plans')],
-          ]),
-        );
-        return;
-      }
-
-      const result = await PaymentService.createPayment({
-        userId,
-        planId,
-        provider: 'daimo',
-        chatId,
-      });
-
-      if (result.success) {
-        const message = lang === 'es'
-          ? '🪙 *Paga en Crypto con Daimo Pay*\n\n'
-            + `Plan: ${plan.display_name || plan.name}\n`
-            + `Precio: $${plan.price} USDC\n\n`
-            + 'Completa tu suscripción usando crypto a través de nuestro checkout de Daimo Pay — rápido, seguro, discreto y perfecto para miembros que prefieren pagos privados y sin fronteras.\n\n'
-            + '💳 *Daimo Pay acepta USDC, y puedes pagar usando wallets populares como:*\n'
-            + 'Binance • Coinbase Wallet • MetaMask • Trust Wallet • Phantom • Rainbow • OKX Wallet, y más.\n\n'
-            + 'Solo elige tu wallet, confirma la transacción, y listo.\n\n'
-            + '✅ *Una vez confirmado tu pago, recibirás automáticamente:*\n'
-            + '• Tu mensaje de acceso PRIME\n'
-            + '• Tu factura\n'
-            + '• Tus instrucciones de onboarding\n\n'
-            + '💬 Si necesitas ayuda durante el checkout, escríbele a Cristina, nuestra asistente AI — ella te guiará paso a paso o te conectará con Santino si es necesario.'
-          : '🪙 *Pay in Crypto with Daimo Pay*\n\n'
-            + `Plan: ${plan.display_name || plan.name}\n`
-            + `Price: $${plan.price} USDC\n\n`
-            + 'You can complete your subscription using crypto through our Daimo Pay checkout — fast, secure, discreet, and perfect for members who prefer private, borderless payments.\n\n'
-            + '💳 *Daimo Pay accepts USDC, and you can pay using popular wallets such as:*\n'
-            + 'Binance • Coinbase Wallet • MetaMask • Trust Wallet • Phantom • Rainbow • OKX Wallet, and more.\n\n'
-            + 'Just choose your wallet, confirm the transaction, and you\'re done.\n\n'
-            + '✅ *Once your payment is confirmed, you\'ll automatically receive:*\n'
-            + '• Your PRIME access message\n'
-            + '• Your invoice\n'
-            + '• Your onboarding instructions\n\n'
-            + '💬 If you need help during checkout, just message Cristina, our AI assistant — she\'ll guide you step by step or pass you to Santino if needed.';
-
-        await ctx.editMessageText(
-          message,
-          {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard([
-              [Markup.button.url('💰 Pay Now', result.paymentUrl)],
-              [Markup.button.callback(t('back', lang), `select_plan_${planId}`)],
-            ]),
-          },
-        );
-      } else {
-        await ctx.editMessageText(
-          `${t('error', lang)}\n\n${result.error}`,
-          Markup.inlineKeyboard([
-            [Markup.button.callback(t('back', lang), `select_plan_${planId}`)],
-          ]),
-        );
-      }
-    } catch (error) {
-      logger.error('Error creating Daimo payment:', error);
-      const lang = getLanguage(ctx);
-      const errorMsg = lang === 'es'
-        ? '❌ **Error al procesar el pago**\n\nOcurrió un error al crear tu pago con Daimo. Por favor intenta nuevamente o contacta soporte si el problema persiste.\n\n💡 *Sugerencia:* Puedes intentar con otro método de pago como ePayco.'
-        : '❌ **Payment Processing Error**\n\nAn error occurred while creating your Daimo payment. Please try again or contact support if the problem persists.\n\n💡 *Tip:* You can try another payment method like ePayco.';
-
-      const errorPlanId = ctx.match?.[1] || 'unknown';
-      await ctx.editMessageText(
-        errorMsg,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback(t('back', lang), `select_plan_${errorPlanId}`)],
-          ]),
-        },
-      ).catch(() => {});
-    }
+    try { await ctx.answerCbQuery('Daimo Pay retired — please use Card or Dash in the app', { show_alert: true }); } catch (_) { /* noop */ }
   });
 };
 

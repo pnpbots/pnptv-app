@@ -111,54 +111,8 @@ async function createCallCheckout(memberId, packageId, provider, email) {
         }),
       ]
     );
-  } else if (provider === 'daimo') {
-    // Daimo: direct to React checkout page with Daimo SDK modal
-    checkoutUrl = `${WEB_APP_URL}/checkout/${payment.id}`;
-
-    try {
-      const DaimoConfig = require('../config/daimo');
-      const daimoResult = await DaimoConfig.createDaimoPayment({
-        amount: parseFloat(pkg.price_usd),
-        userId: memberId,
-        planId: pkg.sku,
-        paymentId: payment.id,
-        description: `${pkg.title || 'Call Package'} — PNPtv`,
-      });
-
-      if (daimoResult.success && daimoResult.daimoPaymentId) {
-        await query(
-          `UPDATE payments
-           SET daimo_payment_id = $2,
-               metadata = metadata || $3::jsonb,
-               updated_at = NOW()
-           WHERE id = $1`,
-          [
-            payment.id,
-            daimoResult.daimoPaymentId,
-            JSON.stringify({
-              payment_url: checkoutUrl,
-              daimo_payment_id: daimoResult.daimoPaymentId,
-              daimoSessionId: daimoResult.daimoPaymentId,
-              daimoClientSecret: daimoResult.clientSecret || null,
-              daimo_client_secret: daimoResult.clientSecret || null,
-            }),
-          ]
-        );
-      } else {
-        logger.warn('[callCheckoutService] Daimo payment creation returned unsuccessful', {
-          paymentId: payment.id,
-          error: daimoResult.error,
-        });
-        // Don't fail the checkout — the checkout page will handle missing Daimo id
-      }
-    } catch (daimoErr) {
-      // Non-fatal: log and continue — the checkout page retries or shows an error
-      logger.error('[callCheckoutService] Daimo API error', {
-        paymentId: payment.id,
-        error: daimoErr.message,
-      });
-    }
   }
+  // Daimo branch removed — provider==='daimo' is rejected at the early gate above.
 
   logger.info('[callCheckoutService] checkout created', {
     paymentId: payment.id,

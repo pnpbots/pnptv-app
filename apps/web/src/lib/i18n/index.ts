@@ -21,7 +21,7 @@ import { dm, type DmStrings } from "./dm";
 import { apply, type ApplyStrings } from "./apply";
 import { creator, type CreatorStrings } from "./creator";
 import { gates, type GatesStrings } from "./gates";
-import { checkout, type CheckoutStrings } from "./checkout";
+// checkout i18n bundle removed — only the deleted DaimoCheckout page consumed it.
 import { support, type SupportStrings } from "./support";
 import { feed, type FeedStrings } from "./feed";
 import { gamification, type GamificationStrings } from "./gamification";
@@ -63,7 +63,6 @@ export interface I18n {
   apply: Widen<ApplyStrings>;
   creator: Widen<CreatorStrings>;
   gates: Widen<GatesStrings>;
-  checkout: Widen<CheckoutStrings>;
   support: Widen<SupportStrings>;
   feed: Widen<FeedStrings>;
   gamification: Widen<GamificationStrings>;
@@ -103,7 +102,6 @@ function resolve(lang: Lang): I18n {
     apply: pick(apply, lang),
     creator: pick(creator, lang),
     gates: pick(gates, lang),
-    checkout: pick(checkout, lang),
     support: pick(support, lang),
     feed: pick(feed, lang),
     gamification: pick(gamification, lang),

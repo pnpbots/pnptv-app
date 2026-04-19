@@ -396,11 +396,12 @@ class CreatorPayoutService {
    * Run daily subscription renewal for creator subscriptions expiring within 3 days.
    * Called by cron daily at 09:00 UTC. Only processes subscriptions with auto_renew = true.
    *
-   * Strategy: always attempt Daimo (creates a checkout link). ePayco cards cannot be
-   * auto-charged without a stored vault token, so Daimo is the universal renewal path.
-   * The subscription's expires_at is extended optimistically at session creation time;
-   * the actual payment confirmation arrives via the existing Daimo webhook handler
-   * which calls CreatorService.subscribeToCreator() to record earnings again if needed.
+   * Strategy: create a Dash invoice via BTCPay for each renewal. ePayco cards cannot
+   * be auto-charged without a stored vault token, and Daimo is retired, so Dash is
+   * now the universal renewal path. The subscription's expires_at is NOT extended
+   * optimistically — extension happens only when the BTCPay webhook fires
+   * `InvoiceSettled` for a `dash_subscription_orders` row whose plan_id is
+   * `creator_monthly`, at which point CreatorService.subscribeToCreator() runs.
    * Duplicate earnings are avoided by the per-(creator_id, subscription_id, period_month)
    * natural key pattern already in use.
    */
@@ -495,7 +496,7 @@ class CreatorPayoutService {
 
     // Lazy-require to avoid circular dependency issues at module load time
     const PaymentModel = require('../models/paymentModel');
-    const { createDaimoPayment } = require('../config/daimo');
+    const { createDashInvoice } = require('../config/btcpay');
 
     let newPaymentId;
     let checkoutUrl;
@@ -505,7 +506,7 @@ class CreatorPayoutService {
       const newPayment = await PaymentModel.create({
         userId: String(subscriber_id),
         planId: 'creator_monthly',
-        provider: 'daimo',
+        provider: 'dash',
         amount: priceUsd,
         currency: 'USD',
         status: 'pending',
@@ -520,30 +521,39 @@ class CreatorPayoutService {
 
       newPaymentId = newPayment.id;
 
-      // Create Daimo inbound session (subscriber pays treasury)
-      const daimoResult = await createDaimoPayment({
-        amount: priceUsd,
-        userId: subscriber_id,
-        planId: 'creator_monthly',
-        chatId: null,
-        paymentId: newPaymentId,
-        description: `${creatorName} Creator Subscription Renewal`,
+      // Create a Dash invoice (BTCPay hosted checkout) for the subscriber to settle.
+      // The webhook handler at /api/webhooks/btcpay routes this through
+      // CreatorService.subscribeToCreator() once paid (recognised by the
+      // creator_monthly + creator_id metadata thread).
+      const webAppUrl = process.env.WEB_APP_URL || 'https://pnptv.app';
+      const orderId = `renewal-${newPaymentId}`;
+      const invoice = await createDashInvoice({
+        usdAmount: priceUsd,
+        userId: String(subscriber_id),
+        orderId,
+        description: `${creatorName} — Creator Subscription Renewal`,
+        redirectUrl: `${webAppUrl}/profile/${creator_id}`,
       });
 
-      if (!daimoResult.success) {
-        throw new Error(daimoResult.error || 'Daimo session creation failed');
+      if (!invoice.success) {
+        throw new Error(invoice.error || 'Dash invoice creation failed');
       }
 
-      const webAppUrl = process.env.WEB_APP_URL || 'https://pnptv.app';
-      checkoutUrl = `${webAppUrl}/checkout/${newPaymentId}`;
+      // Persist the dash_subscription_orders row so the BTCPay webhook can
+      // settle the renewal exactly the same way it settles a fresh creator sub.
+      const { query: dbQuery } = require('../config/postgres');
+      await dbQuery(
+        `INSERT INTO dash_subscription_orders (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id)
+         VALUES ($1, 'creator_monthly', NULL, $2, $3, 'pending', $4)`,
+        [String(subscriber_id), priceUsd, invoice.invoiceId, String(creator_id)]
+      );
+
+      checkoutUrl = invoice.checkoutUrl;
 
       await PaymentModel.updateStatus(newPaymentId, 'pending', {
         paymentUrl: checkoutUrl,
-        provider: 'daimo',
-        daimo_payment_id: daimoResult.daimoPaymentId,
-        daimoSessionId: daimoResult.daimoPaymentId,
-        daimoClientSecret: daimoResult.clientSecret || null,
-        daimo_client_secret: daimoResult.clientSecret,
+        provider: 'dash',
+        btcpayInvoiceId: invoice.invoiceId,
       });
     } catch (err) {
       // Payment creation failed — cancel subscription and notify subscriber
@@ -566,8 +576,9 @@ class CreatorPayoutService {
     }
 
     // NOTE: Do NOT extend expires_at here. The subscription is extended only after
-    // the Daimo webhook confirms the payment (via processDaimoWebhook → creator_monthly
-    // branch). Extending before payment would give free access if user never pays.
+    // the BTCPay webhook confirms the Dash invoice settles (via the InvoiceSettled
+    // → creator_monthly branch in routes.js, which calls CreatorService.subscribeToCreator).
+    // Extending before payment would give free access if user never pays.
     // Store the renewal payment ID so the webhook handler can find the subscription.
     await query(`
       UPDATE creator_subscriptions
@@ -577,7 +588,7 @@ class CreatorPayoutService {
         AND status = 'active'
     `, [newPaymentId, subscription_id]);
 
-    // Notify subscriber with the checkout link so they complete the Daimo payment
+    // Notify subscriber with the BTCPay/Dash checkout link so they complete the renewal
     await NotificationEmitter.emit({
       type: 'payment',
       category: 'commerce',

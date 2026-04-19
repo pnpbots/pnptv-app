@@ -53,7 +53,6 @@ const strings = {
 
     // Tip payment tabs
     tabTokens: "Tokens",
-    tabDaimoCrypto: "Daimo / Crypto",
     tokenInstantNote: "Instant · No popup · 1 token = $1 USD",
 
     // Add tip message toggle
@@ -283,7 +282,6 @@ const strings = {
 
     // Tip payment tabs
     tabTokens: "Tokens",
-    tabDaimoCrypto: "Daimo / Cripto",
     tokenInstantNote: "Instantáneo · Sin ventanas emergentes · 1 token = $1 USD",
 
     // Add tip message toggle

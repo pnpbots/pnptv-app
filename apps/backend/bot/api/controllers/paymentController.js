@@ -1,4 +1,4 @@
-const DaimoConfig = require('../../../config/daimo');
+// Daimo retired — DaimoConfig require removed.
 const PaymentModel = require('../../../models/paymentModel');
 const PlanModel = require('../../../models/planModel');
 const ConfirmationTokenService = require('../../../services/confirmationTokenService');
@@ -368,43 +368,20 @@ class PaymentController {
           });
         }
       } else if (provider === 'daimo') {
-        // Return Daimo session data for the SDK modal on the frontend
-        const existingSessionId = payment.metadata?.daimo_payment_id
-          || payment.daimo_payment_id;
+        // Daimo retired — return session data only for legacy in-flight lookups
+        // (so historical receipts can still load). NEVER create a new session;
+        // tell the user to start over with Card or Dash.
+        const existingSessionId = payment.metadata?.daimo_payment_id || payment.daimo_payment_id;
         const existingClientSecret = payment.metadata?.daimo_client_secret || payment.daimo_client_secret;
-
         if (existingSessionId && existingClientSecret) {
-          // Session already created — reuse it
           basePaymentData.daimoSessionId = existingSessionId;
           basePaymentData.daimoClientSecret = existingClientSecret;
         } else {
-          // Create a new Daimo session
-          try {
-            const daimoResult = await DaimoConfig.createDaimoPayment({
-              amount: paymentAmount,
-              userId,
-              planId,
-              chatId: '',
-              paymentId: payment.id,
-              description: `${plan.display_name || plan.name} Subscription`,
-            });
-
-            if (daimoResult.success) {
-              basePaymentData.daimoSessionId = daimoResult.daimoPaymentId;
-              basePaymentData.daimoClientSecret = daimoResult.clientSecret;
-              // Persist session data to prevent duplicate creation on refresh
-              await PaymentModel.updateStatus(payment.id, 'pending', {
-                daimo_payment_id: daimoResult.daimoPaymentId,
-                daimo_client_secret: daimoResult.clientSecret,
-              });
-            } else {
-              throw new Error(daimoResult.error || 'Daimo payment creation failed');
-            }
-          } catch (error) {
-            logger.error('Error creating Daimo session:', error);
-            basePaymentData.daimoSessionId = null;
-            basePaymentData.daimoClientSecret = null;
-          }
+          return res.status(410).json({
+            success: false,
+            code: 'DAIMO_RETIRED',
+            error: 'Daimo / USDC checkout has been retired. Please start a new subscription with Card or Dash.',
+          });
         }
       }
 
@@ -608,101 +585,14 @@ class PaymentController {
       // Payment is pending — branch by provider
       const provider = payment.provider || (payment.metadata?.provider);
 
-      // Daimo real-time status check
+      // Daimo real-time status check — RETIRED. Any historical Daimo payment
+      // that's still queryable returns its DB-recorded status; no API call to
+      // Daimo is made (the `pending` Daimo rows are abandoned by definition).
       if (provider === 'daimo') {
-        const daimoPaymentId = payment.daimoPaymentId || payment.daimo_payment_id;
-        if (!daimoPaymentId) {
-          return res.json({
-            success: true,
-            status: 'pending',
-            message: 'Awaiting Daimo payment completion.',
-          });
-        }
-
-        const clientSecret = payment.metadata?.daimoClientSecret || payment.metadata?.daimo_client_secret || null;
-        const daimoCheck = await DaimoConfig.checkDaimoPaymentStatus(daimoPaymentId, clientSecret);
-
-        if (!daimoCheck.success) {
-          return res.json({
-            success: true,
-            status: 'pending',
-            message: 'Could not check Daimo payment status, will retry.',
-          });
-        }
-
-        if (daimoCheck.status === 'payment_completed' || daimoCheck.rawStatus === 'succeeded') {
-          logger.warn('STUCK DAIMO PAYMENT DETECTED (via polling): completed at Daimo but pending locally', {
-            paymentId,
-            daimoPaymentId,
-          });
-
-          // Acquire recovery lock to prevent concurrent polling requests from
-          // triggering duplicate processDaimoWebhook calls
-          const recoveryLockKey = `polling_recovery:${paymentId}`;
-          const recoveryLockAcquired = await cache.acquireLock(recoveryLockKey, 30);
-          if (!recoveryLockAcquired) {
-            return res.json({
-              success: true,
-              status: 'processing_recovery',
-              message: 'Payment activation already in progress.',
-            });
-          }
-
-          // Trigger recovery inline — inject fallback metadata from DB row
-          // in case the Daimo API response lacks paymentId/userId in metadata
-          try {
-            const recoveryMetadata = {
-              ...daimoCheck.metadata,
-              paymentId: daimoCheck.metadata?.paymentId || paymentId,
-              userId: daimoCheck.metadata?.userId || String(payment.userId || payment.user_id || ''),
-              planId: daimoCheck.metadata?.planId || payment.planId || payment.plan_id,
-            };
-            const webhookData = {
-              payment: {
-                id: daimoCheck.id,
-                status: daimoCheck.status,
-                source: daimoCheck.source,
-                destination: daimoCheck.destination,
-                metadata: recoveryMetadata,
-              },
-              _recovery: true,
-            };
-            const recoveryResult = await PaymentService.processDaimoWebhook(webhookData);
-
-            if (recoveryResult?.success) {
-              return res.json({
-                success: true,
-                status: 'completed',
-                message: 'Payment completed — your subscription is now active.',
-              });
-            }
-
-            return res.json({
-              success: true,
-              status: 'processing_recovery',
-              message: 'Payment completed — activating your subscription now.',
-            });
-          } finally {
-            await cache.releaseLock(recoveryLockKey);
-          }
-        }
-
-        if (daimoCheck.status === 'payment_bounced' || daimoCheck.status === 'payment_failed' || daimoCheck.rawStatus === 'bounced' || daimoCheck.rawStatus === 'expired') {
-          await PaymentModel.updateStatus(paymentId, 'failed', {
-            daimo_status: daimoCheck.status,
-            recovered_via_status_check: true,
-          });
-          return res.json({
-            success: true,
-            status: 'failed',
-            message: 'Payment failed or was bounced.',
-          });
-        }
-
         return res.json({
           success: true,
-          status: 'pending',
-          message: 'Awaiting Daimo payment completion.',
+          status: payment.status || 'pending',
+          message: 'Daimo Pay has been retired. If your payment was completed before retirement, contact support@pnptv.app.',
         });
       }
 

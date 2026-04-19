@@ -2,7 +2,9 @@ const { schemas } = require('../../../validation/schemas/payment.schema');
 const PaymentService = require('../../../services/paymentService');
 const PaymentSecurityService = require('../../../services/paymentSecurityService');
 const logger = require('../../../utils/logger');
-const DaimoConfig = require('../../../config/daimo');
+// Daimo retired — DaimoConfig require removed. handleDaimoWebhook below is a
+// tiny 200-OK stub kept only so the routes.js import resolves. The active
+// route registration is inline in routes.js with the same retired no-op.
 const PaymentWebhookEventModel = require('../../../models/paymentWebhookEventModel');
 
 const { cache } = require('../../../config/redis');
@@ -103,51 +105,6 @@ const validateEpaycoPayload = (payload) => {
   return { valid: true, payload: normalizedPayload };
 };
 
-/**
- * Validate Daimo webhook payload
- * Uses the official Daimo Pay webhook structure
- * @param {Object} payload - Webhook payload
- * @returns {Object} { valid: boolean, error?: string, isTestEvent?: boolean }
- */
-const validateDaimoPayload = (payload) => {
-  // Handle test events
-  if (payload && payload.isTestEvent === true) {
-    logger.info('Daimo test event received', { type: payload.type });
-    return { valid: true, isTestEvent: true };
-  }
-
-  // Support simplified test-friendly shape (transaction_id, status, metadata)
-  // — used by integration tests, not real Daimo events.
-  if (payload && payload.transaction_id && payload.status && payload.metadata) {
-    if (typeof payload.metadata !== 'object' || payload.metadata === null) {
-      return { valid: false, error: 'Invalid metadata structure' };
-    }
-    const { paymentId, userId, planId } = payload.metadata;
-    if (!paymentId || !userId || !planId) {
-      return { valid: false, error: 'Invalid metadata structure' };
-    }
-    return { valid: true };
-  }
-
-  // Normalize using the unified normalizer (handles v3, v2, and legacy)
-  const normalized = DaimoConfig.normalizeDaimoPayload(payload);
-
-  if (!normalized.eventId || !normalized.status) {
-    return { valid: false, error: 'Missing required fields' };
-  }
-
-  if (!normalized.metadata?.userId && !normalized.metadata?.paymentId) {
-    return { valid: false, error: 'Invalid metadata structure' };
-  }
-
-  return { valid: true };
-};
-
-/**
- * Handle ePayco webhook
- * @param {Request} req - Express request
- * @param {Response} res - Express response
- */
 const handleEpaycoWebhook = async (req, res) => {
   try {
     const normalizedState = PaymentService.normalizeEpaycoTransactionState(
@@ -340,211 +297,10 @@ function verifyEpaycoSignature(req) {
   return { valid: true, method: 'body_sha256' };
 }
 
-/**
- * Handle Daimo webhook
- * Receives payment events from Daimo Pay (USDC on Optimism via crypto wallets)
- * Webhook URL: pnptv.app/api/daimo -> /api/webhooks/daimo
- * @param {Request} req - Express request
- * @param {Response} res - Express response
- */
-const handleDaimoWebhook = async (req, res) => {
-  const DaimoService = require('../../../services/daimoService');
+// handleDaimoWebhook — RETIRED stub (route in routes.js is also no-op).
+// Kept here only because module.exports below still references the symbol.
+const handleDaimoWebhook = async (_req, res) => res.status(200).json({ ok: true, retired: true });
 
-  try {
-    // Step 1: Verify auth BEFORE any Redis lock or payload processing
-    // Support both new HMAC-SHA256 (Daimo-Signature header) and legacy Bearer token
-    const daimoSignatureHeader = req.headers['daimo-signature'];
-    const authHeader = req.headers['authorization'] || req.headers['x-daimo-signature'];
-    let isValidSignature = false;
-
-    const hmacSecret = process.env.DAIMO_WEBHOOK_HMAC_SECRET;
-    const legacySecret = DaimoService.webhookSecret;
-
-    if (hmacSecret) {
-      // New HMAC-SHA256 path (preferred)
-      if (!daimoSignatureHeader) {
-        logger.error('Daimo webhook rejected: Daimo-Signature header missing (HMAC mode)');
-        return res.status(401).json({ success: false, error: 'Daimo-Signature header required' });
-      }
-      const rawBody = req.rawBody;
-      if (!rawBody) {
-        logger.error('Daimo webhook rejected: rawBody not available — ensure express.json verify callback is configured');
-        return res.status(500).json({ success: false, error: 'Internal configuration error' });
-      }
-      isValidSignature = DaimoService.verifyWebhookSignature(daimoSignatureHeader, rawBody);
-      if (!isValidSignature) {
-        logger.error('Invalid Daimo webhook HMAC signature — rejecting');
-        return res.status(401).json({ success: false, error: 'Invalid signature' });
-      }
-    } else if (legacySecret) {
-      // Legacy Bearer token path — deprecated
-      logger.warn('Daimo webhook: DAIMO_WEBHOOK_HMAC_SECRET not set — using legacy Bearer verification. Migrate to HMAC.');
-      if (!authHeader) {
-        logger.error('Daimo webhook rejected: legacy secret configured but no Authorization header');
-        return res.status(401).json({ success: false, error: 'Authorization header required' });
-      }
-      isValidSignature = DaimoService.verifyWebhookSignature(authHeader, null);
-      if (!isValidSignature) {
-        logger.error('Invalid Daimo webhook authorization — rejecting');
-        return res.status(401).json({ success: false, error: 'Invalid signature' });
-      }
-    } else if (process.env.NODE_ENV === 'production') {
-      logger.error('Daimo webhook rejected: no webhook secret configured in production');
-      return res.status(500).json({ success: false, error: 'Webhook secret not configured' });
-    } else {
-      logger.warn('Daimo webhook accepted without secret configured (non-production)');
-      isValidSignature = true;
-    }
-
-    // Step 2: Normalize payload after auth passes
-    // Guard against empty/malformed bodies (e.g. missing Content-Type header)
-    if (!req.body || typeof req.body !== 'object') {
-      logger.warn('Daimo webhook rejected: empty or non-JSON body');
-      return res.status(400).json({ success: false, error: 'Invalid request body' });
-    }
-
-    // Supports v3 envelope { id, type, data: { session } }, v2 { payment: {} }, and legacy flat
-    const normalized = DaimoConfig.normalizeDaimoPayload(req.body);
-    logger.info('Daimo webhook format detected', { format: normalized.format, eventType: normalized.eventType });
-
-    const id = normalized.eventId;
-    const status = normalized.status;
-    const source = normalized.source;
-    const metadata = normalized.metadata;
-
-    // Reject payloads with undefined id/status to prevent poisoned lock keys
-    if (!id || !status) {
-      logger.warn('Daimo webhook missing id or status', { id, status });
-      return res.status(400).json({ success: false, error: 'Missing id or status' });
-    }
-
-    // Step 3: Acquire idempotency lock (safe now — auth verified, id validated)
-    const idempotencyKey = `daimo_${id}_${status}`;
-    const acquired = await cache.acquireLock(idempotencyKey, 360); // TTL > HMAC replay window (300s)
-    if (!acquired) {
-      logger.info('Duplicate Daimo webhook detected (already processed)', { eventId: id, status });
-      return res.status(200).json({ success: true, duplicate: true });
-    }
-
-    try {
-      const paymentId = isUuid(metadata?.paymentId) ? metadata.paymentId : null;
-      const eventMeta = {
-        provider: 'daimo',
-        eventId: id,
-        paymentId,
-        status,
-        stateCode: req.body?.event || req.body?.type || null,
-        payload: req.body,
-      };
-
-      logger.info('Daimo Pay webhook received', {
-        eventId: id,
-        status,
-        txHash: source?.txHash,
-        userId: metadata?.userId,
-        planId: metadata?.planId,
-        chain: 'Optimism',
-        token: source?.tokenSymbol || 'USDC',
-      });
-
-      await PaymentWebhookEventModel.logEvent({
-        ...eventMeta,
-        isValidSignature,
-      });
-
-      // Security: Replay attack detection (30-day Redis retention)
-      try {
-        const replayKey = `${id}_${status}`;
-        const replay = await PaymentSecurityService.checkReplayAttack(replayKey, 'daimo');
-        if (replay.isReplay) {
-          logger.warn('Daimo replay attack detected', { eventId: id, status });
-          return res.status(200).json({ success: true, duplicate: true });
-        }
-      } catch (err) {
-        logger.error('Replay check failed (non-critical)', { error: err.message });
-      }
-
-      // Validate payload structure
-      const validation = validateDaimoPayload(req.body);
-      if (!validation || !validation.valid) {
-        const errorMsg = validation?.error || 'Invalid metadata structure';
-        logger.warn('Invalid Daimo webhook payload', {
-          error: errorMsg,
-          receivedFields: Object.keys(req.body),
-        });
-        return res.status(400).json({ success: false, error: errorMsg });
-      }
-
-      // Handle test events - acknowledge without processing
-      if (validation.isTestEvent) {
-        logger.info('Daimo test event acknowledged', { eventId: id });
-        return res.status(200).json({ success: true, testEvent: true });
-      }
-
-      // Process webhook with auth header
-      const result = await PaymentService.processDaimoWebhook(req.body);
-
-      if (result.success) {
-        logger.info('Daimo webhook processed successfully', {
-          eventId: id,
-          status,
-          alreadyProcessed: !!result.alreadyProcessed,
-        });
-        const responseBody = { success: true };
-        if (result.alreadyProcessed) {
-          responseBody.alreadyProcessed = true;
-        }
-        return res.status(200).json(responseBody);
-      }
-
-      logger.warn('Daimo webhook processing failed', {
-        eventId: id,
-        error: result.error || result.message,
-      });
-      const errorResponse = {
-        success: false,
-        code: result.code || 'DAIMO_REJECTED',
-        message: result.message || result.error || 'Webhook processing failed',
-      };
-      return res.status(400).json(errorResponse);
-    } finally {
-      await cache.releaseLock(idempotencyKey);
-    }
-    } catch (error) {
-      logger.error('Error handling Daimo webhook:', {
-        error: error.message,
-        stack: error.stack,
-      });
-
-      // Extract metadata from request body (metadata variable is scoped to try block)
-      const errMeta = req.body?.data?.session?.metadata || req.body?.payment?.metadata || req.body?.metadata;
-      PaymentSecurityService.logPaymentError({
-        paymentId: errMeta?.paymentId,
-        userId: errMeta?.userId,
-        provider: 'daimo',
-        errorCode: 'DAIMO_WEBHOOK_HANDLER_ERROR',
-        errorMessage: error.message,
-        stackTrace: error.stack,
-      }).catch(() => {});
-
-      return res.status(500).json({
-        success: false,
-        code: 'INTERNAL_ERROR',
-        message: 'Internal server error',
-      });
-  }
-};
-
-/**
- * Handle payment response page (3DS bank redirect callback)
- *
- * ePayco redirects the user's browser here after 3DS bank authentication.
- * Query params may include: ref_payco, x_transaction_state, x_ref_payco, etc.
- * OR a simple ?status=success/failed from our own url_response.
- *
- * Strategy: recover the paymentId from sessionStorage (set before redirect)
- * and redirect back to the checkout page so polling can confirm the payment.
- */
 const handlePaymentResponse = async (req, res) => {
   try {
     const {

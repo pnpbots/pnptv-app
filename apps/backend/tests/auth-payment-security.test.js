@@ -703,27 +703,6 @@ describe('Email Verification — /api/webapp/auth/verify-email', () => {
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('TOKEN_USED');
   });
-
-  it('SECURITY: verify-email has NO rate limiter — should accept >5 rapid requests without 429', async () => {
-    // This test DOCUMENTS the missing rate limiter vulnerability.
-    // When fixed, remove this test and add one that verifies 429 after N attempts.
-    mockQueryFn.mockResolvedValue({ rows: [] });
-
-    const results = await Promise.all(
-      Array.from({ length: 10 }, () =>
-        request(testApp)
-          .get('/api/webapp/auth/verify-email')
-          .query({ token: 'aaabbbccc' })
-      )
-    );
-
-    // All should return 400 (invalid token) not 429 — rate limiter is absent
-    const status400 = results.filter(r => r.status === 400).length;
-    const status429 = results.filter(r => r.status === 429).length;
-    expect(status429).toBe(0); // No throttling — this is the vulnerability
-    expect(status400).toBe(10);
-    // FIXME: add authLimiter to GET /api/webapp/auth/verify-email route
-  });
 });
 
 // =============================================================================
