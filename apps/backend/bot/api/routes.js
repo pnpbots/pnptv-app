@@ -4365,6 +4365,7 @@ app.post('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, asyncHandle
 app.post('/api/webapp/hangouts/groups/:id/unmute', requireSessionAuth, asyncHandler(hangoutGroupController.unmuteMember));
 app.post('/api/webapp/hangouts/groups/:id/promote', requireSessionAuth, asyncHandler(hangoutGroupController.promoteMember));
 app.post('/api/webapp/hangouts/groups/:id/demote', requireSessionAuth, asyncHandler(hangoutGroupController.demoteMember));
+app.get('/api/webapp/hangouts/groups/:id/moderation/audit', requireSessionAuth, asyncHandler(hangoutGroupController.getModerationAudit));
 app.post('/api/webapp/hangouts/groups/:id/pin', requireSessionAuth, asyncHandler(hangoutGroupController.pinMessage));
 app.delete('/api/webapp/hangouts/groups/:id/pin/:eventId', requireSessionAuth, asyncHandler(hangoutGroupController.unpinMessage));
 app.get('/api/webapp/hangouts/groups/:id/pins', requireSessionAuth, asyncHandler(hangoutGroupController.getPinnedMessages));

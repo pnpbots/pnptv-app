@@ -866,6 +866,14 @@ function initSocketIO(io) {
           [String(user.id), deleteForAll, msgId]
         );
 
+        if (deleteForAll && !isOwnMessage) {
+          query(
+            `INSERT INTO hangout_moderation_audit (group_id, actor_id, target_id, action, metadata)
+             VALUES ($1, $2, $3, 'delete_message', $4)`,
+            [gid, String(user.id), msg.user_id != null ? String(msg.user_id) : null, JSON.stringify({ messageId: msgId })]
+          ).catch((auditErr) => logger.warn('auditModeration failed (socket)', { gid, auditErr: auditErr.message }));
+        }
+
         io.to(`hangout:${gid}`).emit('hangout:message:deleted', {
           messageId: msgId,
           deletedBy: user.id,

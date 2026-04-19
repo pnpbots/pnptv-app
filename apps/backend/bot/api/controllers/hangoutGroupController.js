@@ -50,6 +50,26 @@ const ensureMainGroupMembership = async (userId) => {
   );
 };
 
+// Auto-join the language-specific group (EN or ES) matching the user's preferred language.
+// Admins must configure groups by setting hangout_groups.language_code = 'en' or 'es'
+// on the desired group via SQL or the admin UI. No group is created automatically.
+// If no group with the matching language_code exists, this is a silent no-op.
+const ensureLanguageGroupMembership = async (userId, languageCode) => {
+  if (!languageCode) return;
+  const lc = String(languageCode).toLowerCase().slice(0, 2);
+  if (!['en', 'es'].includes(lc)) return;
+  const { rows } = await query(
+    `SELECT id FROM hangout_groups WHERE language_code = $1 ORDER BY id ASC LIMIT 1`,
+    [lc]
+  );
+  if (rows.length === 0) return;
+  await query(
+    `INSERT INTO hangout_group_members (group_id, user_id, role)
+     VALUES ($1, $2, 'member') ON CONFLICT (group_id, user_id) DO NOTHING`,
+    [rows[0].id, userId]
+  );
+};
+
 // Normalize a message row: strip invalid photo_urls, include all media fields
 const normalizeMessage = (m) => ({
   ...m,
@@ -117,6 +137,7 @@ const listGroups = async (req, res) => {
   try {
     // Auto-join main group
     await ensureMainGroupMembership(user.id);
+    await ensureLanguageGroupMembership(user.id, user.language);
 
     const { rows } = await query(
       `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
@@ -339,6 +360,7 @@ const getGroup = async (req, res) => {
   try {
     // Auto-join main group if not already a member
     await ensureMainGroupMembership(user.id);
+    await ensureLanguageGroupMembership(user.id, user.language);
     const { rows: groupRows } = await query(
       `SELECT g.*,
               g.slow_mode_seconds, g.is_read_only, g.allow_media, g.allow_member_invites,
@@ -949,6 +971,7 @@ const getMessages = async (req, res) => {
   try {
     // Auto-join main group if not already a member
     await ensureMainGroupMembership(user.id);
+    await ensureLanguageGroupMembership(user.id, user.language);
 
     // Check membership
     if (!(await isMember(groupId, user.id))) {
@@ -1029,6 +1052,7 @@ const sendMessage = async (req, res) => {
   try {
     // Auto-join main group if not already a member
     await ensureMainGroupMembership(user.id);
+    await ensureLanguageGroupMembership(user.id, user.language);
 
     if (!(await isMember(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
@@ -1547,6 +1571,8 @@ const promoteMember = async (req, res) => {
     );
     if (rowCount === 0) return res.status(404).json({ error: 'Member not found or already a moderator' });
 
+    auditModeration(groupId, user.id, targetId, 'promote_moderator', null, { previousRole: 'member' });
+
     // Set Matrix power level to 50 (moderator)
     const matrixUserId = `@pnptv_${targetId}:${process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app'}`;
     matrixService.setUserPowerLevel(groupId, matrixUserId, 50).catch(() => {});
@@ -1578,6 +1604,8 @@ const demoteMember = async (req, res) => {
     );
     if (rowCount === 0) return res.status(404).json({ error: 'Moderator not found' });
 
+    auditModeration(groupId, user.id, targetId, 'demote_member', null, { previousRole: 'moderator' });
+
     // Set Matrix power level back to 0 (regular member)
     const matrixUserId = `@pnptv_${targetId}:${process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app'}`;
     matrixService.setUserPowerLevel(groupId, matrixUserId, 0).catch(() => {});
@@ -1586,6 +1614,32 @@ const demoteMember = async (req, res) => {
   } catch (err) {
     logger.error('demoteMember error', err);
     return res.status(500).json({ error: 'Failed to demote member' });
+  }
+};
+
+// GET /api/webapp/hangouts/groups/:id/moderation/audit
+const getModerationAudit = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+
+    const before = req.query.before ? new Date(req.query.before) : null;
+    const { rows } = await query(
+      `SELECT id, group_id, actor_id, target_id, action, reason, metadata, created_at
+       FROM hangout_moderation_audit
+       WHERE group_id = $1
+         AND ($2::timestamptz IS NULL OR created_at < $2)
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [groupId, before]
+    );
+    return res.json({ entries: rows });
+  } catch (err) {
+    logger.error('getModerationAudit error', err);
+    return res.status(500).json({ error: 'Failed to fetch audit log' });
   }
 };
 
@@ -2009,6 +2063,10 @@ const deleteMessage = async (req, res) => {
       [String(user.id), forAll, msgId]
     );
 
+    if (forAll && !isOwnMessage) {
+      auditModeration(groupId, user.id, msg.user_id, 'delete_message', null, { messageId: msgId });
+    }
+
     const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
     if (io) {
       io.to(`hangout:${groupId}`).emit('hangout:message:deleted', {
@@ -2199,6 +2257,7 @@ module.exports = {
   unmuteMember,
   promoteMember,
   demoteMember,
+  getModerationAudit,
   pinMessage,
   unpinMessage,
   getPinnedMessages,
@@ -2234,6 +2293,7 @@ async function startCall(req, res) {
 
   try {
     await ensureMainGroupMembership(user.id);
+    await ensureLanguageGroupMembership(user.id, user.language);
     const member = await isMember(groupId, user.id);
     if (!member) return res.status(403).json({ error: 'Not a member of this group' });
 
@@ -2361,6 +2421,7 @@ async function joinCall(req, res) {
 
   try {
     await ensureMainGroupMembership(user.id);
+    await ensureLanguageGroupMembership(user.id, user.language);
     const member = await isMember(groupId, user.id);
     if (!member) return res.status(403).json({ error: 'Not a member of this group' });
 
