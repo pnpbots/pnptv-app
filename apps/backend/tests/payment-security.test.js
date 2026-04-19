@@ -62,10 +62,8 @@ jest.mock('../services/paymentService', () => ({
   processDaimoWebhook: mockProcessDaimoWebhook,
 }));
 
-const mockCheckDaimoStatus = jest.fn();
-jest.mock('../config/daimo', () => ({
-  checkDaimoPaymentStatus: mockCheckDaimoStatus,
-}));
+// (Daimo config mock removed — config/daimo.js was deleted when Daimo Pay was
+//  retired. The mock was dead code: no test asserted on mockCheckDaimoStatus.)
 
 const mockUpdateStatus = jest.fn();
 jest.mock('../models/paymentModel', () => ({
@@ -95,7 +93,6 @@ beforeEach(() => {
   mockQuery.mockReset();
   mockRecoverStuckPendingPayment.mockReset();
   mockProcessDaimoWebhook.mockReset();
-  mockCheckDaimoStatus.mockReset();
   mockUpdateStatus.mockReset();
 });
 
