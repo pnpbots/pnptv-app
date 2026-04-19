@@ -1,10 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { DaimoSDKProvider, DaimoModal } from "@daimo/sdk/web";
-import "@daimo/sdk/web/styles.css";
-import "@daimo/sdk/web/theme.css";
 import { getTokenCheckoutData } from "@/lib/api";
-import { useAuth } from "@/hooks/useAuth";
 
 // Augment Window with the ePayco checkout object injected by checkout.js
 declare global {
@@ -338,50 +334,6 @@ function EPaycoWidget({ config, tokens, usd, purchaseId, onStartPolling }: EPayc
   );
 }
 
-// ── Daimo widget component ────────────────────────────────────────────────────
-interface DaimoWidgetProps {
-  sessionId: string;
-  // clientSecret is passed via ref to keep it out of React's state tree.
-  clientSecretRef: React.RefObject<string>;
-  tokens: number;
-  usd: number;
-  onSuccess: () => void;
-}
-
-function DaimoWidget({ sessionId, clientSecretRef, tokens, usd, onSuccess }: DaimoWidgetProps) {
-  return (
-    <div>
-      <div style={SUMMARY_BOX}>
-        <div style={{ fontSize: 40, marginBottom: 8 }}>🪙</div>
-        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>
-          {tokens.toLocaleString()} PNP Tokens
-        </div>
-        <div style={{ fontSize: 26, fontWeight: 700, ...GRADIENT_TEXT }}>
-          ${usd.toFixed(2)} USDC
-        </div>
-        <div style={{ fontSize: 11, color: "#8E8E93", marginTop: 6 }}>
-          Paid via crypto wallet — powered by Daimo
-        </div>
-      </div>
-
-      <p style={{ textAlign: "center", fontSize: 13, color: "#8E8E93", marginBottom: 16 }}>
-        Pay with USDC from any compatible crypto wallet. Fast, low fees, and
-        no personal information required.
-      </p>
-
-      <DaimoSDKProvider>
-        <DaimoModal
-          sessionId={sessionId}
-          clientSecret={clientSecretRef.current ?? ""}
-          defaultOpen
-          embedded
-          onPaymentCompleted={onSuccess}
-        />
-      </DaimoSDKProvider>
-    </div>
-  );
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 120_000;
@@ -389,14 +341,11 @@ const POLL_TIMEOUT_MS = 120_000;
 export default function TokenCheckout() {
   const { purchaseId } = useParams<{ purchaseId: string }>();
   const [searchParams] = useSearchParams();
-  const { refreshUser } = useAuth();
   const [state, setState] = useState<CheckoutState>("loading");
   const [data, setData] = useState<Awaited<ReturnType<typeof getTokenCheckoutData>> | null>(null);
   const [error, setError] = useState("");
   const [pollElapsed, setPollElapsed] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Keep Daimo clientSecret out of React's state tree — store in a ref.
-  const daimoClientSecretRef = useRef<string>("");
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -461,8 +410,13 @@ export default function TokenCheckout() {
           setState("error");
           return;
         }
-        if (res.provider === "daimo" && res.daimo?.clientSecret) {
-          daimoClientSecretRef.current = res.daimo.clientSecret;
+        if ((res.provider as string) !== "epayco") {
+          // Legacy Daimo purchase or unknown provider — Daimo is sunset.
+          // Send the user back to the wallet where they can start a new
+          // purchase via Card or Dash.
+          setError("This crypto checkout method is no longer available. Please start a new purchase from your wallet — pay with Card or Dash instead.");
+          setState("error");
+          return;
         }
         setData(res);
         setState("ready");
@@ -474,11 +428,6 @@ export default function TokenCheckout() {
       });
   }, [purchaseId, searchParams, startPolling]);
 
-  const handleSuccess = useCallback(async () => {
-    stopPolling();
-    await refreshUser();
-    setState("success");
-  }, [stopPolling, refreshUser]);
 
   return (
     <div style={BG_STYLES}>
@@ -569,37 +518,18 @@ export default function TokenCheckout() {
           </div>
         )}
 
-        {/* Ready — render provider-specific widget */}
-        {state === "ready" && data && (
-          <>
-            {data.provider === "epayco" && data.epayco && purchaseId && (
-              <EPaycoWidget
-                config={data.epayco}
-                tokens={data.tokens}
-                usd={data.usd}
-                purchaseId={purchaseId}
-                onStartPolling={(id) => {
-                  setState("pending");
-                  startPolling(id);
-                }}
-              />
-            )}
-            {data.provider === "daimo" && data.daimo && (
-              <DaimoWidget
-                sessionId={data.daimo.sessionId}
-                clientSecretRef={daimoClientSecretRef}
-                tokens={data.tokens}
-                usd={data.usd}
-                onSuccess={handleSuccess}
-              />
-            )}
-            {/* Fallback: unknown provider */}
-            {data.provider !== "epayco" && data.provider !== "daimo" && (
-              <p style={{ textAlign: "center", color: "#FF453A", fontSize: 14 }}>
-                Unsupported payment provider. Please contact support.
-              </p>
-            )}
-          </>
+        {/* Ready — render ePayco widget */}
+        {state === "ready" && data && data.epayco && purchaseId && (
+          <EPaycoWidget
+            config={data.epayco}
+            tokens={data.tokens}
+            usd={data.usd}
+            purchaseId={purchaseId}
+            onStartPolling={(id) => {
+              setState("pending");
+              startPolling(id);
+            }}
+          />
         )}
 
         {/* Success */}

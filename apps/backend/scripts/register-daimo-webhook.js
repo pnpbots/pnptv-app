@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * Daimo Webhook Registration Utility
+ * Daimo Webhook Registration Utility — RETIRED
  *
- * Manages webhook endpoints for the PNPtv Daimo Pay integration via the
- * Daimo API. The HMAC secret returned on registration is used by the backend
- * to verify every incoming webhook payload. It is shown ONLY ONCE — save it.
+ * Daimo Pay integration is deprecated; checkout flows moved to BTCPay/Dash.
+ * Kept only for operators to LIST existing registered webhooks (audit) or
+ * DELETE them once Daimo is fully torn down. Do not register new webhooks.
  *
  * Usage:
  *   node scripts/register-daimo-webhook.js              # list existing webhooks
- *   node scripts/register-daimo-webhook.js --register   # register new webhook
+ *   node scripts/register-daimo-webhook.js --register   # register new webhook (avoid)
  *   node scripts/register-daimo-webhook.js --test       # send test event to first webhook
  *   node scripts/register-daimo-webhook.js --delete <id>  # delete a webhook by ID
  *

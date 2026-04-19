@@ -592,7 +592,7 @@ export function sendTip(
   performerId: string,
   amount: number,
   message?: string,
-  paymentMethod: "daimo" | "tokens" | "dash" = "daimo"
+  paymentMethod: "tokens" | "dash" = "tokens"
 ): Promise<{ success: boolean; tipId: number; paymentUrl: string | null; invoiceId?: string; checkoutUrl?: string; amount: number; paymentMethod: string; newBalance?: number }> {
   return request("/api/proxy/live/tips", {
     method: "POST",
@@ -650,7 +650,7 @@ export function getWalletHistory(): Promise<{ success: boolean; history: TokenPu
 
 export interface TokenCheckoutData {
   success: boolean;
-  provider: "epayco" | "daimo";
+  provider: "epayco";
   tokens: number;
   usd: number;
   status: string;
@@ -667,10 +667,6 @@ export interface TokenCheckoutData {
     test: boolean;
     response: string;
     confirmation: string;
-  };
-  daimo?: {
-    sessionId: string;
-    clientSecret: string;
   };
 }
 
@@ -2366,7 +2362,7 @@ export function getMyAccess(): Promise<MyAccessResponse> {
 
 export function createPayment(
   planId: string,
-  provider: "epayco" | "daimo",
+  provider: "epayco" | "dash",
   email?: string
 ): Promise<{
   success: boolean;
@@ -2394,7 +2390,7 @@ export function updatePaymentEmail(
 
 export function initiateCreatorSubscriptionPayment(
   creatorId: string,
-  provider: "epayco" | "daimo",
+  provider: "epayco" | "dash",
   email: string
 ): Promise<{
   success: boolean;
@@ -2425,7 +2421,7 @@ export function getPaymentStatus(
 
 export function purchaseChannelAccess(
   channelId: number,
-  provider: 'epayco' | 'daimo',
+  provider: 'epayco' | 'dash',
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/channels/${channelId}/purchase`, {
@@ -2439,7 +2435,7 @@ export function purchaseChannelAccess(
 // channel-access grants cover both the channel and its linked hangout.
 export function purchaseHangoutAccess(
   hangoutGroupId: number,
-  provider: 'epayco' | 'daimo',
+  provider: 'epayco' | 'dash',
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/hangouts/groups/${hangoutGroupId}/purchase`, {
@@ -2450,7 +2446,8 @@ export function purchaseHangoutAccess(
 
 export function createDashSubscription(
   planId: string,
-  email?: string
+  email?: string,
+  creatorId?: string,
 ): Promise<{
   success: boolean;
   invoiceId: string;
@@ -2461,6 +2458,7 @@ export function createDashSubscription(
 }> {
   const body: Record<string, string> = { planId };
   if (email) body.email = email;
+  if (creatorId) body.creatorId = creatorId;
   return request("/api/webapp/payments/dash/create", {
     method: "POST",
     body,
@@ -5527,7 +5525,7 @@ export function getCreatorCallEarnings(): Promise<{
 
 export interface CallCheckoutPayload {
   packageId: number;
-  provider: "epayco" | "daimo";
+  provider: "epayco" | "dash";
   email: string;
   quantity?: number;
   selectedSlot?: string | null;

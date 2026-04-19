@@ -165,8 +165,10 @@ class MessageTemplates {
    */
   static getProviderDisplayName(provider, language = 'es') {
     const providers = {
-      daimo: { en: 'Daimo Pay', es: 'Daimo Pay' },
+      // Daimo retained for legacy webhook receipts (in-flight refunds + history)
+      daimo: { en: 'Daimo Pay (legacy)', es: 'Daimo Pay (legacy)' },
       epayco: { en: 'ePayco', es: 'ePayco' },
+      dash:   { en: 'Dash (BTCPay)', es: 'Dash (BTCPay)' },
       meru: { en: 'Meru', es: 'Meru' },
     };
 

@@ -4,11 +4,16 @@ const { DAIMO_API_BASE, OPTIMISM_USDC_ADDRESS, OPTIMISM_CHAIN_ID } = require('..
 const logger = require('../utils/logger');
 
 /**
- * Daimo Pay Service
- * Handles payment generation and processing with Daimo Pay
- * - Network: Optimism (low fees, fast finality)
- * - Token: USDC (stablecoin 1:1 with USD)
- * - Payment Apps: Crypto wallets via Daimo Pay checkout
+ * Daimo Pay Service — RETIRED (kept for in-flight settlement + creator payouts)
+ *
+ * No new Daimo sessions are created (all checkout surfaces moved to Dash via
+ * BTCPay). This file remains imported by:
+ *   - apps/backend/bot/api/controllers/webhookController.js  (settlement of any
+ *     straggler webhook + refund flows)
+ *   - apps/backend/services/creatorPayoutService.js          (USDC outbound to
+ *     creators — pending business decision to switch to Dash or pause)
+ *
+ * Do not extend. New crypto integrations should target the BTCPay/Dash stack.
  */
 class DaimoService {
   constructor() {

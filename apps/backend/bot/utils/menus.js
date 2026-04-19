@@ -162,12 +162,12 @@ const getPaymentMethodMenu = (planId, language = 'en') => {
   const labels = {
     en: {
       credit: '💳 Credit Card (ePayco)',
-      crypto: '₿ Crypto/Digital Wallet (Daimo)',
+      crypto: '🥷 Crypto / Dash',
       back: '🔙 Back to Plans',
     },
     es: {
       credit: '💳 Tarjeta de Crédito (ePayco)',
-      crypto: '₿ Cripto/Billetera Digital (Daimo)',
+      crypto: '🥷 Crypto / Dash',
       back: '🔙 Volver a Planes',
     },
   };
@@ -177,7 +177,7 @@ const getPaymentMethodMenu = (planId, language = 'en') => {
   return {
     inline_keyboard: [
       [{ text: l.credit, callback_data: `pay_epayco_${planId}` }],
-      [{ text: l.crypto, callback_data: `pay_daimo_${planId}` }],
+      [{ text: l.crypto, url: 'https://app.pnptv.app/subscribe' }],
       [{ text: l.back, callback_data: 'back_plans' }],
     ],
   };

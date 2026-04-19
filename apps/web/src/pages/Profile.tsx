@@ -22,6 +22,8 @@ import {
   getCreatorSubscriptionStatus,
   unsubscribeFromCreator,
   initiateCreatorSubscriptionPayment,
+  createDashSubscription,
+  getDashAvailable,
   getUserLabel,
   getLabelColor,
   assertPaymentUrl,
@@ -182,7 +184,8 @@ export default function Profile() {
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [subscribeEmail, setSubscribeEmail] = useState("");
   const [subscribeEmailError, setSubscribeEmailError] = useState<string | null>(null);
-  const [subscribeProvider, setSubscribeProvider] = useState<"epayco" | "daimo">("daimo");
+  const [subscribeProvider, setSubscribeProvider] = useState<"epayco" | "dash">("epayco");
+  const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
   const [subscribePaymentLoading, setSubscribePaymentLoading] = useState(false);
   const [subscribePaymentId, setSubscribePaymentId] = useState<string | null>(null);
   const [subscribeAwaitingPayment, setSubscribeAwaitingPayment] = useState(false);
@@ -494,7 +497,14 @@ export default function Profile() {
     setSubscribeError(null);
     setSubscribeAwaitingPayment(false);
     setSubscribePaymentId(null);
+    setSubscribeProvider("epayco");
     setShowSubscribeModal(true);
+    // Probe Dash availability lazily — if BTCPay is down we'll hide the Dash tab.
+    if (dashAvailable === null) {
+      getDashAvailable()
+        .then((res) => setDashAvailable(res.available === true && res.configured === true))
+        .catch(() => setDashAvailable(false));
+    }
   };
 
   const handleUnsubscribe = async () => {
@@ -522,19 +532,26 @@ export default function Profile() {
     setSubscribeError(null);
     try {
       const creatorId = profile.id || paramUserId!;
-      const result = await initiateCreatorSubscriptionPayment(creatorId, subscribeProvider, trimmed);
-      if (result.success && result.paymentUrl) {
-        if (subscribeProvider === "daimo") {
-          // Navigate in-tab to the Daimo checkout page — avoids popup blockers
-          // and provides the full embedded wallet UX.
-          navigate(new URL(assertPaymentUrl(result.paymentUrl)).pathname);
+      if (subscribeProvider === "dash") {
+        const dashRes = await createDashSubscription("creator_monthly", trimmed, creatorId);
+        if (dashRes.success && dashRes.checkoutUrl) {
+          window.open(assertPaymentUrl(dashRes.checkoutUrl), "_blank", "noopener,noreferrer");
+          // Reuse subscribePaymentId to drive the "I've paid, check status" CTA;
+          // for Dash we store the BTCPay invoiceId.
+          setSubscribePaymentId(dashRes.invoiceId);
+          setSubscribeAwaitingPayment(true);
         } else {
+          setSubscribeError(dashRes.error || p.failedToCreatePayment);
+        }
+      } else {
+        const result = await initiateCreatorSubscriptionPayment(creatorId, subscribeProvider, trimmed);
+        if (result.success && result.paymentUrl) {
           window.open(assertPaymentUrl(result.paymentUrl), "_blank", "noopener,noreferrer");
           setSubscribePaymentId(result.paymentId);
           setSubscribeAwaitingPayment(true);
+        } else {
+          setSubscribeError(result.error || p.failedToCreatePayment);
         }
-      } else {
-        setSubscribeError(result.error || p.failedToCreatePayment);
       }
     } catch (err) {
       setSubscribeError(err instanceof Error ? err.message : p.paymentError);
@@ -1452,23 +1469,36 @@ export default function Profile() {
 
             {!subscribeAwaitingPayment ? (
               <>
-                {/* Provider selector */}
+                {/* Provider selector — Card (ePayco) or Dash (BTCPay) */}
                 <div>
                   <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>{p.paymentMethod}</p>
                   <div className="grid grid-cols-2 gap-2">
-                    {(["daimo", "epayco"] as const).map((prov) => (
-                      <button
-                        key={prov}
-                        onClick={() => setSubscribeProvider(prov)}
-                        className="py-2.5 rounded-lg text-sm font-medium transition-colors border"
-                        style={subscribeProvider === prov
-                          ? { background: `rgba(${accentRgb},0.15)`, color: accentColor, borderColor: `rgba(${accentRgb},0.4)` }
+                    <button
+                      type="button"
+                      onClick={() => setSubscribeProvider("epayco")}
+                      className="py-2.5 rounded-lg text-sm font-medium transition-colors border"
+                      style={subscribeProvider === "epayco"
+                        ? { background: `rgba(${accentRgb},0.15)`, color: accentColor, borderColor: `rgba(${accentRgb},0.4)` }
+                        : { background: "rgba(255,255,255,0.04)", color: "#8E8E93", borderColor: "rgba(255,255,255,0.08)" }
+                      }
+                    >
+                      💳 {p.epaycoCard}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => dashAvailable !== false && setSubscribeProvider("dash")}
+                      disabled={dashAvailable === false}
+                      className="py-2.5 rounded-lg text-sm font-medium transition-colors border"
+                      style={
+                        dashAvailable === false
+                          ? { background: "rgba(255,255,255,0.02)", color: "#555", borderColor: "rgba(255,255,255,0.05)", cursor: "not-allowed" }
+                          : subscribeProvider === "dash"
+                          ? { background: "rgba(0,141,228,0.15)", color: "#008DE4", borderColor: "rgba(0,141,228,0.4)" }
                           : { background: "rgba(255,255,255,0.04)", color: "#8E8E93", borderColor: "rgba(255,255,255,0.08)" }
-                        }
-                      >
-                        {prov === "daimo" ? p.cryptoUsdc : p.epaycoCard}
-                      </button>
-                    ))}
+                      }
+                    >
+                      🥷 Dash
+                    </button>
                   </div>
                 </div>
 

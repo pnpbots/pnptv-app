@@ -114,11 +114,13 @@ function registerCallPackageHandlers(bot) {
       ctx.session.temp.purchasingPackage = packageId;
       await ctx.saveSession();
 
-      // Create payment for the package
+      // Create payment for the package (Daimo retired — fall back to ePayco
+      // for any legacy bot flow that still hits this code path; users now
+      // book calls via the webapp Book-Call modal which supports Dash too).
       const result = await PaymentService.createPayment({
         userId: ctx.from.id,
         planId: `call_package_${pkg.calls}calls`,
-        provider: 'daimo',
+        provider: 'epayco',
         chatId: ctx.chat.id,
       });
 

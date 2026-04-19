@@ -217,17 +217,17 @@ export const tutorialContent: Record<string, TutorialSection> = {
         illustration: "paymentMethods",
       },
       {
-        titleEn: "Pay with Crypto (Daimo)",
-        titleEs: "Paga con Crypto (Daimo)",
-        descEn: "Option B — USDC Crypto: Select Daimo. A payment link opens with a QR code and wallet address. Send the exact USDC amount from any wallet — Coinbase, MetaMask, Binance, Trust Wallet, or any exchange that supports USDC on Base/Ethereum. Once the transaction confirms on-chain, your subscription activates automatically.",
-        descEs: "Opcion B — Crypto USDC: Selecciona Daimo. Se abre un enlace de pago con codigo QR y direccion de wallet. Envia la cantidad exacta de USDC desde cualquier wallet — Coinbase, MetaMask, Binance, Trust Wallet o cualquier exchange que soporte USDC en Base/Ethereum. Una vez confirmada la transaccion on-chain, tu suscripcion se activa automaticamente.",
+        titleEn: "Pay with Dash (Crypto)",
+        titleEs: "Paga con Dash (Crypto)",
+        descEn: "Option B — Dash crypto: Select the Dash tab (the ninja icon). A payment screen opens with a QR code and Dash address. Scan it with any Dash wallet — the official Dash Wallet, Kraken, Uphold, or any exchange that supports Dash. Send the exact Dash amount shown. Confirmation typically lands in 2-5 minutes thanks to InstantSend.",
+        descEs: "Opcion B — Crypto Dash: Selecciona la pestaña Dash (el ícono ninja). Se abre una pantalla de pago con código QR y dirección Dash. Escaneala con cualquier wallet Dash — Dash Wallet oficial, Kraken, Uphold, o cualquier exchange que soporte Dash. Envía la cantidad exacta de Dash que se muestra. La confirmación suele llegar en 2-5 minutos gracias a InstantSend.",
         illustration: "paymentMethods",
       },
       {
         titleEn: "Confirm Your Payment",
         titleEs: "Confirma Tu Pago",
-        descEn: "Step 3: After paying, come back to the app and tap 'I've already paid'. We'll verify your payment. If using crypto, wait for the blockchain confirmation (usually under 1 minute on Base). If using ePayco, confirmation is instant.",
-        descEs: "Paso 3: Despues de pagar, regresa a la app y toca 'Ya pague'. Verificaremos tu pago. Si usas crypto, espera la confirmacion en blockchain (usualmente menos de 1 minuto en Base). Si usas ePayco, la confirmacion es instantanea.",
+        descEn: "Step 3: After paying, come back to the app and tap 'I've already paid'. We'll verify your payment. If using Dash, the page updates automatically once your payment confirms on the blockchain (typically 2-5 minutes). If using ePayco, confirmation is instant.",
+        descEs: "Paso 3: Despues de pagar, regresa a la app y toca 'Ya pague'. Verificaremos tu pago. Si usas Dash, la página se actualiza automáticamente cuando se confirme en la blockchain (típicamente 2-5 minutos). Si usas ePayco, la confirmacion es instantanea.",
         illustration: "paymentMethods",
       },
       {

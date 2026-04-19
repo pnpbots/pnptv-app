@@ -977,7 +977,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     groupId: number;
     groupName?: string;
   } | null>(null);
-  const [pgProvider, setPgProvider] = useState<'epayco' | 'daimo'>('daimo');
+  const [pgProvider, setPgProvider] = useState<'epayco' | 'dash'>('epayco');
   const [pgLoading, setPgLoading] = useState(false);
   const [pgPolling, setPgPolling] = useState(false);
 
@@ -1392,7 +1392,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         : await purchaseHangoutAccess(groupId, pgProvider);
       if (pgProvider === 'epayco' && res.paymentUrl) {
         window.open(res.paymentUrl, '_blank');
-      } else if (pgProvider === 'daimo' && res.checkoutUrl) {
+      } else if (pgProvider === 'dash' && res.checkoutUrl) {
         window.open(res.checkoutUrl, '_blank');
       }
       setPgPolling(true);
@@ -3847,14 +3847,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   <div className="space-y-2">
                     <p className="text-[10px] text-pnp-textSecondary text-center uppercase tracking-wider font-semibold">Choose payment method</p>
                     <button
-                      onClick={() => { setPgProvider('daimo'); handlePurchaseChannel(); }}
-                      disabled={pgLoading}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
-                      style={{ background: "linear-gradient(135deg, #3B82F6, #06B6D4)" }}
-                    >
-                      Pay with USDC (Crypto)
-                    </button>
-                    <button
                       onClick={() => { setPgProvider('epayco'); handlePurchaseChannel(); }}
                       disabled={pgLoading}
                       className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
@@ -3863,12 +3855,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       Pay with Card
                     </button>
                     <button
-                      onClick={() => { setPgProvider('daimo'); handlePurchaseChannel(); }}
+                      onClick={() => { setPgProvider('dash'); handlePurchaseChannel(); }}
                       disabled={pgLoading}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white/70 transition-all active:scale-[0.98] disabled:opacity-50"
-                      style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
+                      style={{ background: "linear-gradient(135deg, #008DE4, #0066B2)" }}
                     >
-                      Pay with Dash (Crypto)
+                      🥷 Pay with Dash (Crypto)
                     </button>
                   </div>
                 )}

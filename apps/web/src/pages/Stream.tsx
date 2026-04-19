@@ -56,7 +56,7 @@ export default function Stream() {
 
   // Chat & tips
   const [chatInput, setChatInput] = useState("");
-  const [tipPaymentTab, setTipPaymentTab] = useState<"tokens" | "daimo" | "dash">("tokens");
+  const [tipPaymentTab, setTipPaymentTab] = useState<"tokens" | "dash">("tokens");
   const [tipping, setTipping] = useState(false);
   const [tipSubmitting, setTipSubmitting] = useState(false);
   const [tipError, setTipError] = useState<string | null>(null);
@@ -604,34 +604,6 @@ export default function Stream() {
   const handleTip = async (amount: number) => {
     if (!isAuthenticated) { login(); return; }
 
-    if (tipPaymentTab === "daimo") {
-      // For Daimo/USDC tips, create a payment server-side and navigate to the
-      // dedicated checkout page in the same tab.  This avoids popup blockers
-      // and gives the user the full Daimo embedded modal UX.
-      setTipping(true);
-      setTipSubmitting(true);
-      setTipError(null);
-      setTipSuccess(null);
-      try {
-        const result = await sendTip(streamId || "", amount, undefined, "daimo");
-        if (result.paymentUrl) {
-          // Open checkout in new tab so user stays on the live stream
-          window.open(new URL(assertPaymentUrl(result.paymentUrl)).pathname, "_blank", "noopener,noreferrer");
-        } else {
-          // Backend returned success but no URL — treat as immediate success
-          // (e.g. the tip was credited via a pre-funded balance).
-          setTipSuccess(t.live.tipSuccess);
-          setTimeout(() => setTipSuccess(null), 3000);
-        }
-      } catch (err) {
-        setTipError(err instanceof Error ? err.message : t.live.tipFailed);
-      } finally {
-        setTipping(false);
-        setTipSubmitting(false);
-      }
-      return;
-    }
-
     // Dash tip — create BTCPay invoice, show in-app QR
     if (tipPaymentTab === "dash") {
       setTipping(true);
@@ -1174,13 +1146,6 @@ export default function Stream() {
               className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
             >
               T
-            </button>
-            <button
-              onClick={() => setTipPaymentTab("daimo")}
-              aria-label="Pay with USDC"
-              className={`px-2 py-1.5 text-[10px] font-medium border-y transition-colors ${tipPaymentTab === "daimo" ? "bg-pnp-accent/20 border-y-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-y-pnp-border text-pnp-textSecondary"}`}
-            >
-              $
             </button>
             <button
               onClick={() => setTipPaymentTab("dash")}

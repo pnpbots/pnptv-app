@@ -1,6 +1,11 @@
 /**
- * Daimo Pay Configuration
- * Official integration for receiving crypto payments via USDC on Optimism network
+ * Daimo Pay Configuration — RETIRED (kept for in-flight + payouts)
+ *
+ * No new Daimo sessions are created. Still imported by:
+ *   - services/daimoService.js          (webhook settlement + refund helpers)
+ *   - services/creatorPayoutService.js  (USDC outbound — business decision pending)
+ *   - bot/api/controllers/webhookController.js (signature verification)
+ *
  * API: https://api.daimo.com/v1/sessions (Sessions API v1)
  */
 

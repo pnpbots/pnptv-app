@@ -229,9 +229,9 @@ async function handlePromoDeepLink(ctx, promoCode) {
         lang === 'es' ? `Pagar $${pricing.finalPrice} con Tarjeta` : `Pay $${pricing.finalPrice} with Card`,
         `promo_pay_epayco_${promo.code}`
       )],
-      [Markup.button.callback(
-        lang === 'es' ? `Pagar $${pricing.finalPrice} con Crypto` : `Pay $${pricing.finalPrice} with Crypto`,
-        `promo_pay_daimo_${promo.code}`
+      [Markup.button.url(
+        lang === 'es' ? `Pagar $${pricing.finalPrice} con Dash (en la app)` : `Pay $${pricing.finalPrice} with Dash (in the app)`,
+        'https://app.pnptv.app/subscribe',
       )],
       [Markup.button.callback(lang === 'es' ? 'Menu Principal' : 'Main Menu', 'menu:back')],
     ]);
@@ -384,9 +384,9 @@ function registerPromoHandlers(bot) {
           lang === 'es' ? `Pagar $${pricing.finalPrice} con Tarjeta` : `Pay $${pricing.finalPrice} with Card`,
           `promo_pay_epayco_${promo.code}|${plan.id}`
         )],
-        [Markup.button.callback(
-          lang === 'es' ? `Pagar $${pricing.finalPrice} con Crypto` : `Pay $${pricing.finalPrice} with Crypto`,
-          `promo_pay_daimo_${promo.code}|${plan.id}`
+        [Markup.button.url(
+          lang === 'es' ? `Pagar $${pricing.finalPrice} con Dash (en la app)` : `Pay $${pricing.finalPrice} with Dash (in the app)`,
+          'https://app.pnptv.app/subscribe',
         )],
         [Markup.button.callback(lang === 'es' ? '◀️ Elegir otro plan' : '◀️ Choose another plan', `promo_select_any_${promo.code}`)],
         [Markup.button.callback(lang === 'es' ? 'Menu Principal' : 'Main Menu', 'menu:back')],
@@ -424,11 +424,6 @@ function registerPromoHandlers(bot) {
   // Pay with ePayco (credit card)
   bot.action(/^promo_pay_epayco_(.+)$/, async (ctx) => {
     await handlePromoPayment(ctx, 'epayco');
-  });
-
-  // Pay with Daimo (crypto)
-  bot.action(/^promo_pay_daimo_(.+)$/, async (ctx) => {
-    await handlePromoPayment(ctx, 'daimo');
   });
 
   logger.info('Promo handlers registered');

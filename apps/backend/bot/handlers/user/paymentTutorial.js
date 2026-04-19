@@ -15,7 +15,6 @@ const registerPaymentTutorialHandlers = (bot) => {
   // Action handlers for each payment method tutorial
   bot.action('pay_menu', handlePayMenu);
   bot.action('pay_tut_epayco', handleEpaycoTutorial);
-  bot.action('pay_tut_daimo', handleDaimoTutorial);
   bot.action('pay_tut_dash', handleDashTutorial);
   bot.action('pay_tut_meru', handleMeruTutorial);
   bot.action('pay_tut_plans', handlePlansTutorial);
@@ -50,10 +49,6 @@ Select a method to see the full tutorial:`;
       [Markup.button.callback(
         '💳 ePayco (Tarjeta / PSE)',
         'pay_tut_epayco'
-      )],
-      [Markup.button.callback(
-        '🪙 Daimo (USDC / Crypto / Apple Pay)',
-        'pay_tut_daimo'
       )],
       [Markup.button.callback(
         '🥷 Dash (Crypto Anonimo)',
@@ -708,10 +703,10 @@ async function handlePayFAQ(ctx) {
 R: Revisa tu carpeta de spam. Si no llega en 10 minutos, escribe a /support
 
 *P: Mi tarjeta fue rechazada*
-R: Intenta con otra tarjeta o usa Daimo (acepta Apple Pay y crypto). Tambien puedes pagar en efectivo via Efecty/Baloto con ePayco.
+R: Intenta con otra tarjeta o paga con Dash (cripto, sin banco). Tambien puedes pagar en efectivo via Efecty/Baloto con ePayco.
 
 *P: Puedo pagar desde fuera de Colombia?*
-R: Si! ePayco acepta tarjetas internacionales (Visa, MC, Amex). Daimo funciona en todo el mundo. Dash es global.
+R: Si! ePayco acepta tarjetas internacionales (Visa, MC, Amex). Dash es global y no requiere banco.
 
 *P: El pago dice "pendiente" hace mucho tiempo*
 R: Para ePayco con 3D Secure, confirma en tu app bancaria. Para Dash, espera la confirmacion en blockchain (2-5 min). Si pasan mas de 30 minutos, escribe a /support
@@ -729,17 +724,17 @@ R: Una sola vez. Cada codigo es unico y de uso unico.
 R: ePayco convierte automaticamente a COP usando la tasa 1 USD = 4,000 COP. El monto exacto se muestra antes de pagar.
 
 *P: Es seguro pagar aqui?*
-R: Si! Nunca almacenamos datos de tarjetas. ePayco y Daimo son procesadores certificados PCI-DSS. Todos los pagos usan encriptacion SSL.`
+R: Si! Nunca almacenamos datos de tarjetas. ePayco es un procesador certificado PCI-DSS y los pagos en Dash van directo a la blockchain. Todos los pagos usan encriptacion SSL.`
       : `❓ *Payment FAQ*
 
 *Q: Payment succeeded but I didn't receive the email*
 A: Check your spam folder. If it doesn't arrive within 10 minutes, write to /support
 
 *Q: My card was declined*
-A: Try another card or use Daimo (accepts Apple Pay and crypto). You can also pay cash via Efecty/Baloto through ePayco.
+A: Try another card or pay with Dash (crypto, no bank required). You can also pay cash via Efecty/Baloto through ePayco.
 
 *Q: Can I pay from outside Colombia?*
-A: Yes! ePayco accepts international cards (Visa, MC, Amex). Daimo works worldwide. Dash is global.
+A: Yes! ePayco accepts international cards (Visa, MC, Amex). Dash is global and needs no bank.
 
 *Q: Payment has been "pending" for a long time*
 A: For ePayco with 3D Secure, confirm in your banking app. For Dash, wait for blockchain confirmation (2-5 min). If over 30 minutes, write to /support
@@ -757,7 +752,7 @@ A: Once. Each code is unique and single-use.
 A: ePayco auto-converts to COP using the rate 1 USD = 4,000 COP. The exact amount is shown before paying.
 
 *Q: Is it safe to pay here?*
-A: Yes! We never store card data. ePayco and Daimo are PCI-DSS certified processors. All payments use SSL encryption.`;
+A: Yes! We never store card data. ePayco is a PCI-DSS certified processor and Dash payments settle directly on the blockchain. All payments use SSL encryption.`;
 
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',

@@ -106,8 +106,8 @@ const registerPNPLiveHandlers = (bot) => {
             callback_data: 'pnp_show_payment_options'
           },
           {
-            text: lang === 'es' ? '🪙 Pagar con Crypto (Daimo)' : '🪙 Pay with Crypto (Daimo)',
-            callback_data: 'pnp_show_crypto_options'
+            text: lang === 'es' ? '🥷 Pagar con Dash (en la app)' : '🥷 Pay with Dash (in the app)',
+            url: 'https://app.pnptv.app/live'
           }
         ]);
         

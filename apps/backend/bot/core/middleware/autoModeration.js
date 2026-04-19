@@ -7,22 +7,33 @@ const { autoModerationReasons } = require('../../../config/groupMessages');
 const userMessageHistory = new Map();
 
 /**
- * Check if user is exempt from auto-moderation
- * Only admins are exempt
+ * Check if user is exempt from auto-moderation.
+ *
+ * Two independent checks, either one is sufficient:
+ *   1. Telegram-level: chat creator/administrator.
+ *   2. Platform-level: users.role in (admin, moderator, superadmin).
+ *
+ * Both checks are wrapped independently so a transient failure on one
+ * doesn't skip the other (a Telegram API hiccup must not silently strip
+ * platform staff of their exemption).
  */
 async function isExempt(ctx) {
   try {
-    // Check if user is admin
     const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
-    if (['creator', 'administrator'].includes(member.status)) {
-      return true;
-    }
-
-    return false;
+    if (['creator', 'administrator'].includes(member.status)) return true;
   } catch (error) {
-    logger.error('Error checking exempt status:', error);
-    return false;
+    logger.error('Error checking telegram exempt status:', error);
   }
+
+  try {
+    const UserModel = require('../../../models/userModel');
+    const user = await UserModel.getById(ctx.from.id);
+    if (user && ['admin', 'moderator', 'superadmin'].includes(user.role)) return true;
+  } catch (error) {
+    logger.error('Error checking platform-role exempt status:', error);
+  }
+
+  return false;
 }
 
 /**

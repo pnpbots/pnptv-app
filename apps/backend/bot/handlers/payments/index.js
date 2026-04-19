@@ -205,14 +205,17 @@ const registerPaymentHandlers = (bot) => {
       planHeader += `${t('paymentMethod', lang)}`;
       planHeader += `${t('paymentFooter', lang)}`;
 
-      // Check if this is the lifetime100 promo - exclude ePayco and Daimo
+      // Check if this is the lifetime100 promo - exclude all auto-checkout buttons
       const isLifetime100Promo = plan.id === 'lifetime100-promo' || plan.sku === 'EASYBOTS-PNP-100';
 
       const paymentButtons = [];
-      
+
       if (!isLifetime100Promo) {
         paymentButtons.push([Markup.button.callback(t('payWithEpayco', lang), `pay_epayco_${planId}`)]);
-        paymentButtons.push([Markup.button.callback(t('payWithDaimo', lang), `pay_daimo_${planId}`)]);
+        paymentButtons.push([Markup.button.url(
+          lang === 'es' ? '🥷 Pagar con Dash (en la app)' : '🥷 Pay with Dash (in the app)',
+          'https://app.pnptv.app/subscribe',
+        )]);
       }
 
       // For lifetime100 promo, show manual payment instructions

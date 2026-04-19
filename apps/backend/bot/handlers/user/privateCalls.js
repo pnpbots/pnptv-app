@@ -203,11 +203,13 @@ async function promptForPayment(ctx) {
       return ctx.reply('Booking not found.');
     }
 
-    // Create payment for private call (as a special plan)
+    // Create payment for private call (as a special plan).
+    // Daimo retired — bot flow falls back to ePayco; users on the webapp
+    // get the Dash + ePayco picker via BookCallModal.
     const result = await PaymentService.createPayment({
       userId,
       planId: 'private_call_45min', // This should be dynamic based on the booking
-      provider: 'daimo',
+      provider: 'epayco',
       chatId,
       bookingId: booking.id,
       amount: booking.priceCents / 100,

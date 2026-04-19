@@ -1803,6 +1803,15 @@ const startBot = async () => {
       logger.warn(`Bogota analysis scheduler initialization failed: ${error.message}`);
     }
 
+    // Initialize daily migration nudge scheduler (18:00 America/Bogota)
+    try {
+      const { startMigrationNudgeScheduler } = require('./schedulers/migrationNudgeScheduler');
+      startMigrationNudgeScheduler();
+      logger.info('✓ Migration nudge scheduler initialized');
+    } catch (error) {
+      logger.warn(`Migration nudge scheduler initialization failed: ${error.message}`);
+    }
+
     // Initialize X post analytics ingestion scheduler (every 6h)
     try {
       const XAnalyticsIngestionScheduler = require('./schedulers/xAnalyticsIngestionScheduler');
@@ -1859,29 +1868,13 @@ const startBot = async () => {
     } catch (error) {
       logger.warn(`Proactive reminder service initialization failed, continuing without reminders: ${error.message}`);
     }
-    // Initialize Daimo payment recovery scheduler (every 5 min)
-    try {
-      const PaymentRecoveryService = require('../../services/paymentRecoveryService');
-      setInterval(() => PaymentRecoveryService.processStuckDaimoPayments().catch(err =>
-        logger.error('Daimo payment recovery error:', err)
-      ), 5 * 60 * 1000);
-      // Run once on startup after 30s delay
-      setTimeout(() => PaymentRecoveryService.processStuckDaimoPayments().catch(err =>
-        logger.error('Daimo payment recovery error:', err)
-      ), 30 * 1000);
-      logger.info('✓ Daimo payment recovery scheduler started (5min interval)');
-      // Cleanup abandoned Daimo payments every hour (marks 24h+ unpaid as abandoned)
-      setInterval(() => PaymentRecoveryService.cleanupAbandonedPayments().catch(err =>
-        logger.error('Daimo cleanup error:', err)
-      ), 60 * 60 * 1000);
-      // Run immediately on startup to clear existing stuck payments
-      PaymentRecoveryService.cleanupAbandonedPayments().catch(err =>
-        logger.error('Daimo cleanup (startup) error:', err)
-      );
-      logger.info('✓ Daimo abandoned payment cleanup scheduled (1h interval)');
-    } catch (error) {
-      logger.warn(`Daimo payment recovery scheduler failed: ${error.message}`);
-    }
+    // Daimo payment recovery scheduler — DISABLED.
+    // Daimo Pay is retired; the webapp/bot no longer create new Daimo sessions
+    // and zero pending Daimo rows existed at the time of cutover (verified via
+    // DB query in cleanup PR). The webhook handler at /api/webhooks/daimo stays
+    // wired so any straggler settlement still credits the user, but the polling
+    // loop is no longer needed.
+    logger.info('• Daimo payment recovery scheduler skipped (Daimo retired)');
 
     // Initialize Cristina proactive ticket worker
     try {

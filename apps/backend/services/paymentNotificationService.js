@@ -184,8 +184,10 @@ class PaymentNotificationService {
    */
   static getProviderName(provider, lang = 'en') {
     const providers = {
-      daimo: { en: 'Daimo Pay', es: 'Daimo Pay' },
+      // Daimo kept for legacy receipts (in-flight + refund history)
+      daimo: { en: 'Daimo Pay (legacy)', es: 'Daimo Pay (legacy)' },
       epayco: { en: 'ePayco', es: 'ePayco' },
+      dash:   { en: 'Dash (BTCPay)', es: 'Dash (BTCPay)' },
     };
 
     return providers[provider]?.[lang] || provider.toUpperCase();

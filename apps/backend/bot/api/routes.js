@@ -607,8 +607,18 @@ app.get('/checkout/:paymentId', (req, res) => {
   sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
+// Daimo checkout landing — retired. Returns 410 so any stale link in an old
+// email/Telegram message tells the user clearly that this method is gone.
 app.get('/daimo-checkout/:paymentId', (req, res) => {
-  sendCheckoutHtml(res, 'payment-checkout.html');
+  res.status(410).type('html').send(
+    '<!doctype html><meta charset="utf-8"><title>Payment method retired</title>' +
+    '<body style="font-family:sans-serif;padding:32px;max-width:520px;margin:auto;background:#0d0d0d;color:#eee">' +
+    '<h1 style="background:linear-gradient(135deg,#D4007A,#E69138);-webkit-background-clip:text;-webkit-text-fill-color:transparent">PNPtv!</h1>' +
+    '<h2>This crypto checkout has been retired</h2>' +
+    '<p>Daimo / USDC payments are no longer supported. Please open the app to pay with <strong>Card</strong> or <strong>Dash</strong>.</p>' +
+    '<p><a href="https://app.pnptv.app/subscribe" style="display:inline-block;background:linear-gradient(135deg,#D4007A,#E69138);color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Open the app</a></p>' +
+    '</body>'
+  );
 });
 
 app.get('/api/pnp/checkout', (req, res) => {
@@ -937,7 +947,13 @@ app.get('/pnp/meet-greet/checkout/:bookingId', pageLimiter, (req, res) => {
 });
 
 app.get('/pnp/meet-greet/daimo-checkout/:bookingId', pageLimiter, (req, res) => {
-  sendCheckoutHtml(res, 'payment-checkout.html');
+  res.status(410).type('html').send(
+    '<!doctype html><meta charset="utf-8"><title>Payment method retired</title>' +
+    '<body style="font-family:sans-serif;padding:32px;max-width:520px;margin:auto;background:#0d0d0d;color:#eee">' +
+    '<h2>Daimo / USDC payments retired</h2>' +
+    '<p>Please book your meet & greet again from the app — pay with Card or Dash.</p>' +
+    '<p><a href="https://app.pnptv.app/live" style="color:#D4007A">Open PNP Live</a></p></body>'
+  );
 });
 
 // PNP Live Checkout pages (all use unified payment-checkout.html)
@@ -946,7 +962,13 @@ app.get('/pnp/live/checkout/:bookingId', pageLimiter, (req, res) => {
 });
 
 app.get('/pnp/live/daimo-checkout/:bookingId', pageLimiter, (req, res) => {
-  sendCheckoutHtml(res, 'payment-checkout.html');
+  res.status(410).type('html').send(
+    '<!doctype html><meta charset="utf-8"><title>Payment method retired</title>' +
+    '<body style="font-family:sans-serif;padding:32px;max-width:520px;margin:auto;background:#0d0d0d;color:#eee">' +
+    '<h2>Daimo / USDC payments retired</h2>' +
+    '<p>Please book your PNP Live session again from the app — pay with Card or Dash.</p>' +
+    '<p><a href="https://app.pnptv.app/live" style="color:#D4007A">Open PNP Live</a></p></body>'
+  );
 });
 
 // (Security middleware moved to top of middleware chain, before route registration)
@@ -6651,9 +6673,14 @@ app.get('/api/token-checkout/:purchaseId', requireSessionAuth, asyncHandler(asyn
   }
 }));
 
-// GET /token-checkout/:purchaseId — serve the static token checkout HTML page
+// GET /token-checkout/:purchaseId — redirect to the React SPA token-checkout
+// page. The legacy public/token-checkout.html embedded the retired Daimo SDK
+// so we no longer serve it; the React version handles ePayco only and shows
+// a clear error for any orphaned Daimo purchase.
 app.get('/token-checkout/:purchaseId', (req, res) => {
-  res.sendFile(path.join(__dirname, '../../../../public/token-checkout.html'));
+  const purchaseId = encodeURIComponent(req.params.purchaseId);
+  const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+  res.redirect(302, `https://app.pnptv.app/token-checkout/${purchaseId}${qs}`);
 });
 
 // POST /api/wallet/link-dpns — link a Dash DPNS handle
@@ -6680,42 +6707,70 @@ app.get('/api/webapp/payments/dash/available', requireSessionAuth, asyncHandler(
   return res.json({ available: health.configured && health.reachable, ...health });
 }));
 
-// POST /api/webapp/payments/dash/create — create a BTCPay Dash invoice for a subscription plan
+// POST /api/webapp/payments/dash/create — create a BTCPay Dash invoice for a subscription plan.
+// When planId === 'creator_monthly' AND creatorId is provided, the price is looked up
+// dynamically from users.creator_price_usd (mirrors paymentService.createPayment) and the
+// order carries creator_id so the webhook can credit the right creator with a 70/30 split.
 app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session.user;
 
-  const { planId, email } = req.body;
+  const { planId, email, creatorId } = req.body;
   if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
 
-  const PlanModel = require('../../models/planModel');
-  const plan = await PlanModel.getById(planId);
-  if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
-
   const userId = String(user.telegram_id || user.id);
+  const { query: dbQuery } = require('../../config/postgres');
+
+  let planDisplayName;
+  let usdAmount;
+
+  if (planId === 'creator_monthly') {
+    if (!creatorId) {
+      return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
+    }
+    const creatorRes = await dbQuery(
+      'SELECT id, username, first_name, creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
+      [String(creatorId), 'active']
+    );
+    if (creatorRes.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Creator not found or not active' });
+    }
+    const creator = creatorRes.rows[0];
+    const price = parseFloat(creator.creator_price_usd);
+    if (!Number.isFinite(price) || price <= 0) {
+      return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
+    }
+    usdAmount = price;
+    planDisplayName = `Creator subscription: ${creator.username || creator.first_name || 'creator'}`;
+  } else {
+    const PlanModel = require('../../models/planModel');
+    const plan = await PlanModel.getById(planId);
+    if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+    usdAmount = parseFloat(plan.price);
+    planDisplayName = plan.display_name || plan.name;
+  }
+
   const orderId = `pnptv-sub-${userId}-${Date.now()}`;
-  const usdAmount = parseFloat(plan.price);
 
   try {
     const invoice = await createDashInvoice({
       usdAmount,
       userId,
       orderId,
-      description: `PNPtv ${plan.display_name || plan.name} subscription`,
+      description: `PNPtv ${planDisplayName} subscription`,
       redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`,
     });
 
-    const { query: dbQuery } = require('../../config/postgres');
     await dbQuery(
-      `INSERT INTO dash_subscription_orders (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending')`,
-      [userId, planId, email || null, usdAmount, invoice.invoiceId]
+      `INSERT INTO dash_subscription_orders (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6)`,
+      [userId, planId, email || null, usdAmount, invoice.invoiceId, creatorId ? String(creatorId) : null]
     );
 
     return res.json({
       success: true,
       invoiceId: invoice.invoiceId,
       checkoutUrl: invoice.checkoutUrl,
-      planName: plan.display_name || plan.name,
+      planName: planDisplayName,
       usdAmount,
     });
   } catch (err) {
@@ -7013,23 +7068,38 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
 
     // --- 1. Check if this is a subscription order (legacy Dash flow) ---
     const subResult = await dbQuery(
-      `SELECT id, user_id, plan_id, status FROM dash_subscription_orders
+      `SELECT id, user_id, plan_id, status, creator_id FROM dash_subscription_orders
        WHERE btcpay_invoice_id = $1`,
       [invoiceId]
     );
 
     if (subResult.rows.length > 0) {
       const order = subResult.rows[0];
+      const isCreatorSub = order.plan_id === 'creator_monthly' && order.creator_id;
 
-      const PlanModel = require('../../models/planModel');
-      const plan = await PlanModel.getById(order.plan_id);
-      if (!plan) {
-        logger.error('BTCPay: plan not found for settled invoice', { invoiceId, planId: order.plan_id });
-        await dbQuery(
-          `UPDATE dash_subscription_orders SET status = 'failed', notes = 'plan_not_found' WHERE id = $1`,
-          [order.id]
-        );
-        return res.status(200).json({ success: false, error: 'plan_not_found', invoiceId });
+      // For creator_monthly there is no row in `plans`. Synthesize a plan-like
+      // shape so the rest of the flow (tier set, socket emit, notifications)
+      // still works without forcing the user's main plan_expiry to flip.
+      let plan;
+      if (isCreatorSub) {
+        plan = {
+          id: 'creator_monthly',
+          name: 'Creator Subscription',
+          display_name: 'Creator Subscription',
+          tier: null,           // do not change user's main tier on creator-only purchase
+          duration_days: 30,
+        };
+      } else {
+        const PlanModel = require('../../models/planModel');
+        plan = await PlanModel.getById(order.plan_id);
+        if (!plan) {
+          logger.error('BTCPay: plan not found for settled invoice', { invoiceId, planId: order.plan_id });
+          await dbQuery(
+            `UPDATE dash_subscription_orders SET status = 'failed', notes = 'plan_not_found' WHERE id = $1`,
+            [order.id]
+          );
+          return res.status(200).json({ success: false, error: 'plan_not_found', invoiceId });
+        }
       }
 
       const durationDays = plan.duration_days || plan.duration || 30;
@@ -7047,6 +7117,31 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       if (settleResult.rowCount === 0) {
         logger.info('BTCPay subscription already processed or not pending', { invoiceId, orderId: order.id });
         return res.json({ success: true, alreadyProcessed: true });
+      }
+
+      // Creator subscriptions: route through CreatorService.subscribeToCreator() which
+      // handles entitlement + creator_subscriptions row + 70/30 earnings split + sockets.
+      // Skip the tier/users-table mutation below — buying a creator sub must NOT clobber
+      // the buyer's main subscription expiry.
+      if (isCreatorSub) {
+        try {
+          const CreatorService = require('../../services/creatorService');
+          await CreatorService.subscribeToCreator(order.user_id, order.creator_id, null);
+          logger.info('BTCPay: creator subscription activated', {
+            userId: order.user_id, creatorId: order.creator_id, invoiceId,
+          });
+        } catch (creatorErr) {
+          logger.error('BTCPay creator subscription activation failed', {
+            error: creatorErr.message, userId: order.user_id, creatorId: order.creator_id, invoiceId,
+          });
+          // Mark the order so an operator can investigate — payment is settled on-chain.
+          await dbQuery(
+            `UPDATE dash_subscription_orders SET notes = $2 WHERE id = $1`,
+            [order.id, `creator_sub_failed: ${creatorErr.message}`.slice(0, 500)]
+          );
+          return res.status(500).json({ success: false, error: 'creator_subscription_failed', invoiceId });
+        }
+        return res.json({ success: true, creatorSubscription: true, creatorId: order.creator_id });
       }
 
       await dbQuery(
