@@ -8,6 +8,7 @@ import {
   VideoTrack,
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
+import type { LocalUserChoices } from "@livekit/components-core";
 import { getFeaturedPrimeVideos, getLowResAssetUrl, type PrimeVideo } from "@/lib/directus";
 import { useLiveKitRoomLifecycle } from "@/hooks/useLiveKitRoomLifecycle";
 
@@ -22,6 +23,9 @@ interface LiveKitCallPanelProps {
   startedBy?: string | null;
   participantCount?: number;
   durationLabel?: string;
+  /** Device + mute choices gathered by the pre-join card. When set, the room
+   *  connects with those specific cam/mic IDs and mute states. */
+  initialChoices?: LocalUserChoices | null;
   onCallEnded?: () => void;
 }
 
@@ -1130,6 +1134,7 @@ function LiveKitCallPanel({
   roomName,
   startedBy = null,
   durationLabel = "0:00",
+  initialChoices = null,
   onCallEnded,
 }: LiveKitCallPanelProps) {
   const [activeToken, setActiveToken] = useState<string | null>(token);
@@ -1223,8 +1228,8 @@ function LiveKitCallPanel({
         token={activeToken}
         serverUrl={livekitUrl}
         connect={true}
-        audio={false}
-        video={true}
+        audio={initialChoices ? (initialChoices.audioEnabled ? { deviceId: initialChoices.audioDeviceId || undefined } : false) : false}
+        video={initialChoices ? (initialChoices.videoEnabled ? { deviceId: initialChoices.videoDeviceId || undefined } : false) : true}
         options={{
           adaptiveStream: true,
           dynacast: true,

@@ -13,6 +13,7 @@
     "@daimo/sdk": "^1.4.0",
     "@directus/sdk": "^18.0.0",
     "@livekit/components-react": "^2.9.20",
+    "@livekit/components-styles": "^1.2.0",
     "@pnptv/ui-kit": "*",
     "@types/react-window": "^1.8.8",
     "clsx": "^2.1.1",

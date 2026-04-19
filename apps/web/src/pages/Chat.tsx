@@ -7,6 +7,8 @@ import React, {
 import { createPortal } from "react-dom";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useParams } from "react-router-dom";
+import { PreJoin, type LocalUserChoices } from "@livekit/components-react";
+import "@livekit/components-styles";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -1081,6 +1083,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [callPanelDismissed, setCallPanelDismissed] = useState(false);
   const [callDuration, setCallDuration] = useState("0:00");
   const [callError, setCallError] = useState<string | null>(null);
+  const [showCallPreview, setShowCallPreview] = useState(false);
+  const [preJoinChoices, setPreJoinChoices] = useState<LocalUserChoices | null>(null);
 
   // SpotlightStrip — hangout events
   const [hangoutEvents, setHangoutEvents] = useState<EventItem[]>([]);
@@ -1128,8 +1132,18 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   }, []);
 
   // ─── LiveKit call handlers ────────────────────────────────────────────────
-  const handleStartCall = useCallback(async () => {
+  // Button click opens the pre-join card; the network call is deferred until
+  // the user confirms their mic/cam in `handleConfirmJoinCall` below.
+  const handleStartCall = useCallback(() => {
     if (!activeGroup?.id) return;
+    setCallError(null);
+    setShowCallPreview(true);
+  }, [activeGroup]);
+
+  const handleConfirmJoinCall = useCallback(async (choices: LocalUserChoices) => {
+    if (!activeGroup?.id) return;
+    setPreJoinChoices(choices);
+    setShowCallPreview(false);
     try {
       setCallError(null);
       const hasActive = activeGroup.hasActiveCall;
@@ -1158,7 +1172,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       if (err instanceof ApiError) {
         if (err.status === 403) {
           setCallError("You were removed from this hangout.");
-          // Refresh the group list so the kicked group disappears from the sidebar
           loadGroups();
         } else if (err.status === 402) {
           setCallError("This is a paid hangout. You need access to join the video call.");
@@ -1172,6 +1185,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       }
     }
   }, [activeGroup, loadGroups]);
+
+  const handleCancelCallPreview = useCallback(() => {
+    setShowCallPreview(false);
+  }, []);
 
   const handleLeaveCall = useCallback(() => {
     setShowTelegramDock(false);
@@ -1927,8 +1944,65 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           startedBy={callStartedBy}
           participantCount={callParticipantCount}
           durationLabel={callDuration}
+          initialChoices={preJoinChoices}
           onCallEnded={() => { setShowTelegramDock(false); setCallToken(null); setCallRoomName(null); }}
         />
+
+        {/* Pre-join card — camera preview + mic/cam toggles + device picker */}
+        {showCallPreview && activeGroup && createPortal(
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+            onClick={handleCancelCallPreview}
+          >
+            <div
+              className="relative w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl"
+              style={{ background: "#0b0b12", border: "1px solid rgba(123,97,255,0.25)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-4 pt-4 pb-2 flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-pnp-textSecondary">Joining</div>
+                  <div className="text-base font-semibold text-white">{activeGroup.name}</div>
+                  {!!activeGroup.hasActiveCall && callParticipantCount > 0 && (
+                    <div className="text-[11px] text-green-300 mt-0.5">{callParticipantCount} in call</div>
+                  )}
+                </div>
+                <button
+                  onClick={handleCancelCallPreview}
+                  className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                  aria-label="Cancel"
+                >
+                  <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="px-2 pb-2">
+                <PreJoin
+                  defaults={{
+                    username: user?.displayName || user?.firstName || user?.username || "",
+                    videoEnabled: true,
+                    audioEnabled: false,
+                  }}
+                  onSubmit={handleConfirmJoinCall}
+                  onError={(err) => {
+                    console.error("[Chat] PreJoin error", err);
+                    setCallError("Could not access camera or microphone. Check your browser permissions.");
+                    setShowCallPreview(false);
+                  }}
+                  joinLabel={activeGroup.hasActiveCall ? "Join Call" : "Start Call"}
+                  micLabel="Microphone"
+                  camLabel="Camera"
+                  userLabel="Display Name"
+                  persistUserChoices
+                  data-lk-theme="default"
+                />
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
 
         {/* Online Members Panel */}
         {showOnline && (
