@@ -15,11 +15,14 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { BookCallModal } from "@/components/creators/BookCallModal";
+import { LivePlayer } from "@/components/LivePlayer";
 import {
   listCreatorMedia,
+  listCreatorRecordings,
   getCreatorSubscriptionStatus,
   subscribeToCreator,
   type CreatorMediaItem,
+  type StreamRecording,
   type FeaturedPerformer,
 } from "@/lib/api";
 import type { CreatorCardCreator } from "@/components/creators/CreatorCard";
@@ -132,6 +135,22 @@ function PlaceholderTile() {
   );
 }
 
+// ─── Replay helpers ───────────────────────────────────────────────────────────
+
+function formatDuration(seconds: number | null): string {
+  if (!seconds) return "--";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function formatReplayDate(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 // ─── Main Drawer ──────────────────────────────────────────────────────────────
 
 export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerDrawerProps) {
@@ -145,6 +164,9 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
   const [subLoading, setSubLoading] = useState(false);
   const [showBookModal, setShowBookModal] = useState(false);
   const [showSubscribePrompt, setShowSubscribePrompt] = useState(false);
+  const [recordings, setRecordings] = useState<StreamRecording[]>([]);
+  const [recordingsLoading, setRecordingsLoading] = useState(false);
+  const [replayUrl, setReplayUrl] = useState<string | null>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
 
   const isLive = !!liveStreamId;
@@ -180,8 +202,22 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
       }
     }
 
+    async function loadRecordings() {
+      if (!creatorId) return;
+      setRecordingsLoading(true);
+      try {
+        const res = await listCreatorRecordings(creatorId as string);
+        if (!cancelled) setRecordings(res.recordings || []);
+      } catch {
+        // non-fatal
+      } finally {
+        if (!cancelled) setRecordingsLoading(false);
+      }
+    }
+
     load();
     loadSub();
+    loadRecordings();
     return () => { cancelled = true; };
   }, [performer, creatorId, isAuthenticated]);
 
@@ -361,6 +397,74 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
                     item={item}
                     onGatedTap={() => setShowSubscribePrompt(true)}
                   />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Zone 3: Replays ── */}
+          <div className="px-4 pb-6">
+            <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">Replays</p>
+
+            {/* Inline replay player lightbox */}
+            {replayUrl && (
+              <div className="mb-3">
+                <LivePlayer src={replayUrl} className="rounded-xl" />
+                <button
+                  onClick={() => setReplayUrl(null)}
+                  className="mt-1.5 text-[10px] text-pnp-textSecondary hover:text-white transition-colors"
+                >
+                  Close replay
+                </button>
+              </div>
+            )}
+
+            {recordingsLoading ? (
+              <div className="space-y-2">
+                {[1, 2].map((i) => <div key={i} className="h-14 bg-pnp-surface rounded-xl animate-pulse" />)}
+              </div>
+            ) : recordings.length === 0 ? (
+              <p className="text-xs text-pnp-textSecondary py-3">No replays yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {recordings.map((rec) => (
+                  <button
+                    key={rec.id}
+                    onClick={() => {
+                      if (rec.requiresSubscription) {
+                        setShowSubscribePrompt(true);
+                      } else if (rec.manifestUrl) {
+                        setReplayUrl(rec.manifestUrl);
+                      }
+                    }}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
+                  >
+                    {/* Play icon / lock icon */}
+                    <div
+                      className="w-10 h-10 flex-shrink-0 rounded-lg flex items-center justify-center"
+                      style={{ background: rec.requiresSubscription ? "rgba(212,0,122,0.12)" : "rgba(94,209,196,0.1)" }}
+                    >
+                      {rec.requiresSubscription ? (
+                        <svg className="w-4 h-4 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0110 0v4" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4 text-pnp-accent" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                          <path d="M6.3 2.84A1.5 1.5 0 004 4.11v11.78a1.5 1.5 0 002.3 1.27l9.344-5.891a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-pnp-textPrimary">
+                        {formatReplayDate(rec.startedAt)} &mdash; {formatDuration(rec.durationSeconds)}
+                      </p>
+                      <p className="text-[10px] mt-0.5" style={{ color: "#8E8E93" }}>
+                        {rec.requiresSubscription ? "Subscribe to watch" : "Tap to watch replay"}
+                      </p>
+                    </div>
+                  </button>
                 ))}
               </div>
             )}

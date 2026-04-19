@@ -6069,3 +6069,25 @@ export function reorderCreatorMedia(
 ): Promise<{ success: boolean; updated: number }> {
   return request("/api/webapp/creators/media/reorder", { method: "POST", body: { items } });
 }
+
+// ── VOD Replay Recordings ──────────────────────────────────────────────────
+
+export interface StreamRecording {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  sizeBytes: number | null;
+  manifestUrl: string | null;
+  requiresSubscription: boolean;
+}
+
+export function listCreatorRecordings(
+  creatorId: string
+): Promise<{ success: boolean; recordings: StreamRecording[] }> {
+  return request(`/api/webapp/creators/${creatorId}/recordings`);
+}
+
+export function deleteRecording(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/recordings/${id}`, { method: "DELETE" });
+}
