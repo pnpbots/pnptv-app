@@ -1,8 +1,16 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import {
   getCreatorWallet,
   saveCreatorWallet,
+  saveStreamRules,
+  listCreatorMedia,
+  addCreatorMedia,
+  updateCreatorMedia,
+  deleteCreatorMedia,
+  reorderCreatorMedia,
   type CreatorDashboard as DashboardData,
+  type CreatorMediaItem,
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
 
@@ -29,6 +37,7 @@ interface SettingsTabProps {
 const DASH_ADDRESS_RE = /^[X7][1-9A-HJ-NP-Za-km-z]{33}$/;
 
 export function SettingsTab({ dashboard, t }: SettingsTabProps) {
+  const { user: authUser } = useAuth();
   // Payout method state — USDC retired; Dash is the only crypto option.
   const [payoutMethod, setPayoutMethod] = useState<"dash" | "meru" | "fiat">("dash");
   const [dashAddress, setDashAddress] = useState<string>("");
@@ -41,6 +50,127 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   // Fiat payout state
   const [fiatProvider, setFiatProvider] = useState<string>("");
   const [fiatAccount, setFiatAccount] = useState<string>("");
+
+  // ── Album / media state ──────────────────────────────────────────────────────
+  const [albumItems, setAlbumItems] = useState<CreatorMediaItem[]>([]);
+  const [albumLoading, setAlbumLoading] = useState(true);
+  const [albumError, setAlbumError] = useState<string | null>(null);
+  const [albumSuccess, setAlbumSuccess] = useState<string | null>(null);
+
+  // Add-form state
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addType, setAddType] = useState<"photo" | "video">("photo");
+  const [addUrl, setAddUrl] = useState("");
+  const [addThumbUrl, setAddThumbUrl] = useState("");
+  const [addCaption, setAddCaption] = useState("");
+  const [addPremium, setAddPremium] = useState(false);
+  const [addSaving, setAddSaving] = useState(false);
+
+  const loadAlbum = useCallback(async () => {
+    const userId = authUser?.id ? String(authUser.id) : null;
+    if (!userId) { setAlbumLoading(false); return; }
+    setAlbumLoading(true);
+    try {
+      const res = await listCreatorMedia(userId);
+      setAlbumItems(res.items || []);
+    } catch {
+      // non-fatal
+    } finally {
+      setAlbumLoading(false);
+    }
+  }, [authUser?.id]);
+
+  useEffect(() => { loadAlbum(); }, [loadAlbum]);
+
+  const handleAddMedia = async () => {
+    setAlbumError(null);
+    setAlbumSuccess(null);
+    if (!addUrl.trim()) { setAlbumError("URL is required."); return; }
+    setAddSaving(true);
+    try {
+      await addCreatorMedia({
+        type: addType,
+        url: addUrl.trim(),
+        thumbUrl: addThumbUrl.trim() || null,
+        caption: addCaption.trim() || null,
+        isPremium: addPremium,
+      });
+      setAlbumSuccess("Media added.");
+      setAddUrl(""); setAddThumbUrl(""); setAddCaption(""); setAddPremium(false);
+      setShowAddForm(false);
+      await loadAlbum();
+    } catch (err) {
+      setAlbumError(err instanceof Error ? err.message : "Failed to add media.");
+    } finally {
+      setAddSaving(false);
+    }
+  };
+
+  const handleTogglePremium = async (item: CreatorMediaItem) => {
+    try {
+      await updateCreatorMedia(item.id, { isPremium: !item.isPremium });
+      setAlbumItems((prev) => prev.map((m) => m.id === item.id ? { ...m, isPremium: !m.isPremium } : m));
+    } catch (err) {
+      setAlbumError(err instanceof Error ? err.message : "Failed to update.");
+    }
+  };
+
+  const handleDeleteMedia = async (id: string) => {
+    try {
+      await deleteCreatorMedia(id);
+      setAlbumItems((prev) => prev.filter((m) => m.id !== id));
+      setAlbumSuccess("Deleted.");
+    } catch (err) {
+      setAlbumError(err instanceof Error ? err.message : "Failed to delete.");
+    }
+  };
+
+  const handleMoveItem = async (index: number, direction: -1 | 1) => {
+    const newItems = [...albumItems];
+    const target = index + direction;
+    if (target < 0 || target >= newItems.length) return;
+    [newItems[index], newItems[target]] = [newItems[target], newItems[index]];
+    const reordered = newItems.map((m, i) => ({ ...m, sortOrder: i }));
+    setAlbumItems(reordered);
+    try {
+      await reorderCreatorMedia(reordered.map((m) => ({ id: m.id, sort_order: m.sortOrder ?? 0 })));
+    } catch {
+      // revert on failure
+      await loadAlbum();
+    }
+  };
+
+  // Stream rules state
+  const STREAM_RULES_MAX = 2000;
+  const [streamRules, setStreamRules] = useState<string>(
+    dashboard.streamRules ?? ""
+  );
+  const [streamRulesSaving, setStreamRulesSaving] = useState(false);
+  const [streamRulesError, setStreamRulesError] = useState<string | null>(null);
+  const [streamRulesSuccess, setStreamRulesSuccess] = useState<string | null>(null);
+
+  const handleSaveStreamRules = async () => {
+    setStreamRulesError(null);
+    setStreamRulesSuccess(null);
+    if (streamRules.length > STREAM_RULES_MAX) {
+      setStreamRulesError(`Rules must be at most ${STREAM_RULES_MAX} characters.`);
+      return;
+    }
+    setStreamRulesSaving(true);
+    try {
+      const res = await saveStreamRules(streamRules);
+      if (res.success) {
+        setStreamRulesSuccess("Stream rules saved.");
+        setStreamRules(res.rules ?? "");
+      } else {
+        setStreamRulesError((res as { error?: string }).error || "Failed to save stream rules.");
+      }
+    } catch (err) {
+      setStreamRulesError(err instanceof Error ? err.message : "Failed to save stream rules.");
+    } finally {
+      setStreamRulesSaving(false);
+    }
+  };
 
   // Load wallet data
   const loadWallet = useCallback(async () => {
@@ -313,6 +443,221 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
           </div>
         </div>
       )}
+
+      {/* Stream Rules Card */}
+      <div className="glass-card-sm p-5">
+        <p className="text-sm font-semibold text-white mb-1">My Stream Rules</p>
+        <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+          These rules appear in the "House Rules" section viewers see before joining your stream. Plain text only.
+        </p>
+        <div className="relative">
+          <textarea
+            value={streamRules}
+            onChange={(e) => {
+              setStreamRules(e.target.value);
+              setStreamRulesError(null);
+              setStreamRulesSuccess(null);
+            }}
+            placeholder={"e.g. No screenshots. Respect my boundaries. Tip before making requests."}
+            rows={6}
+            maxLength={STREAM_RULES_MAX}
+            className="w-full px-3 py-2.5 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors resize-none leading-relaxed"
+          />
+          <span
+            className="absolute bottom-2 right-3 text-xs select-none"
+            style={{ color: streamRules.length > STREAM_RULES_MAX * 0.9 ? "#E69138" : "#8E8E93" }}
+          >
+            {streamRules.length} / {STREAM_RULES_MAX}
+          </span>
+        </div>
+
+        {streamRulesSuccess && (
+          <div className="mt-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
+            {streamRulesSuccess}
+          </div>
+        )}
+        {streamRulesError && (
+          <div className="mt-2 px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+            {streamRulesError}
+          </div>
+        )}
+
+        <button
+          onClick={handleSaveStreamRules}
+          disabled={streamRulesSaving || streamRules.length > STREAM_RULES_MAX}
+          className="mt-3 text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
+          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+        >
+          {streamRulesSaving ? "Saving..." : "Save Rules"}
+        </button>
+      </div>
+
+      {/* ── My Album ── */}
+      <div className="glass-card-sm p-5">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-sm font-semibold text-white">My Album</p>
+          <button
+            onClick={() => { setShowAddForm((v) => !v); setAlbumError(null); setAlbumSuccess(null); }}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+            style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }}
+          >
+            {showAddForm ? "Cancel" : "+ Add media"}
+          </button>
+        </div>
+        <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+          Photos and videos shown on your performer card and album grid. Premium items are blurred for non-subscribers.
+        </p>
+
+        {/* Add form */}
+        {showAddForm && (
+          <div className="mb-4 p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <div className="flex gap-2 mb-3">
+              {(["photo", "video"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setAddType(t)}
+                  className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
+                  style={{
+                    background: addType === t ? "linear-gradient(135deg,#D4007A,#E69138)" : "rgba(255,255,255,0.05)",
+                    color: addType === t ? "#fff" : "#8E8E93",
+                    border: addType === t ? "1px solid transparent" : "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  {t === "photo" ? "Photo" : "Video"}
+                </button>
+              ))}
+            </div>
+            <input
+              type="url"
+              value={addUrl}
+              onChange={(e) => setAddUrl(e.target.value)}
+              placeholder="Media URL (https://...)"
+              className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 mb-2"
+            />
+            <input
+              type="url"
+              value={addThumbUrl}
+              onChange={(e) => setAddThumbUrl(e.target.value)}
+              placeholder="Thumbnail URL (optional)"
+              className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 mb-2"
+            />
+            <input
+              type="text"
+              value={addCaption}
+              onChange={(e) => setAddCaption(e.target.value)}
+              placeholder="Caption (optional)"
+              maxLength={160}
+              className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 mb-3"
+            />
+            <label className="flex items-center gap-2 mb-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={addPremium}
+                onChange={(e) => setAddPremium(e.target.checked)}
+                className="w-4 h-4 rounded accent-pink-600"
+              />
+              <span className="text-xs text-white/80">Premium (subscribers only)</span>
+            </label>
+            <button
+              onClick={handleAddMedia}
+              disabled={addSaving || !addUrl.trim()}
+              className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
+              style={{ background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }}
+            >
+              {addSaving ? "Adding..." : "Add"}
+            </button>
+          </div>
+        )}
+
+        {albumSuccess && (
+          <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
+            {albumSuccess}
+          </div>
+        )}
+        {albumError && (
+          <div className="mb-3 px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+            {albumError}
+          </div>
+        )}
+
+        {albumLoading ? (
+          <div className="space-y-2">
+            {[1, 2].map((i) => <div key={i} className="h-14 bg-white/5 rounded-lg animate-pulse" />)}
+          </div>
+        ) : albumItems.length === 0 ? (
+          <p className="text-xs text-center py-6" style={{ color: "#8E8E93" }}>No media yet. Add photos or videos above.</p>
+        ) : (
+          <div className="space-y-2">
+            {albumItems.map((item, idx) => (
+              <div
+                key={item.id}
+                className="flex items-center gap-2 p-2.5 rounded-lg"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
+              >
+                {/* Thumbnail */}
+                <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-white/5">
+                  {(item.thumbUrl || item.url) ? (
+                    item.type === "video" ? (
+                      <video src={(item.thumbUrl || item.url) as string} className="w-full h-full object-cover" muted playsInline preload="none" />
+                    ) : (
+                      <img src={(item.thumbUrl || item.url) as string} alt="" className="w-full h-full object-cover" />
+                    )
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-white/20 text-xs">?</div>
+                  )}
+                </div>
+                {/* Meta */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-white truncate">
+                    {item.type === "video" ? "Video" : "Photo"}
+                    {item.caption ? ` — ${item.caption}` : ""}
+                  </p>
+                  <p className="text-[10px] mt-0.5" style={{ color: item.isPremium ? "#E69138" : "#8E8E93" }}>
+                    {item.isPremium ? "Premium" : "Free"}
+                  </p>
+                </div>
+                {/* Controls */}
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => handleMoveItem(idx, -1)}
+                    disabled={idx === 0}
+                    className="w-6 h-6 rounded flex items-center justify-center text-white/40 hover:text-white/70 disabled:opacity-20 transition-colors"
+                    aria-label="Move up"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    onClick={() => handleMoveItem(idx, 1)}
+                    disabled={idx === albumItems.length - 1}
+                    className="w-6 h-6 rounded flex items-center justify-center text-white/40 hover:text-white/70 disabled:opacity-20 transition-colors"
+                    aria-label="Move down"
+                  >
+                    ▼
+                  </button>
+                  <button
+                    onClick={() => handleTogglePremium(item)}
+                    className="px-2 py-1 rounded text-[10px] font-semibold transition-colors"
+                    style={
+                      item.isPremium
+                        ? { background: "rgba(230,145,56,0.15)", color: "#E69138" }
+                        : { background: "rgba(255,255,255,0.06)", color: "#8E8E93" }
+                    }
+                  >
+                    {item.isPremium ? "Free" : "Lock"}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteMedia(item.id)}
+                    className="w-6 h-6 rounded flex items-center justify-center text-red-400/60 hover:text-red-400 transition-colors"
+                    aria-label="Delete"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

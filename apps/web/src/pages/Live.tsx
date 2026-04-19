@@ -27,11 +27,19 @@ import {
   linkDPNS,
   getWalletHistory,
   assertPaymentUrl,
+  getLiveSchedule,
+  subscribeToSlotReminder,
+  unsubscribeFromSlotReminder,
+  getSlotNotifyStatus,
+  listCreatorMedia,
   type FeaturedPerformer,
   type LiveStream,
+  type LiveScheduleSlot,
   type TokenPackage,
   type TokenPurchase,
+  type CreatorMediaItem,
 } from "@/lib/api";
+import { PerformerDrawer } from "@/components/live/PerformerDrawer";
 
 
 if (false) {
@@ -105,6 +113,20 @@ export default function Live() {
   const [walletHistory, setWalletHistory] = useState<TokenPurchase[]>([]);
   const [walletHistoryLoading, setWalletHistoryLoading] = useState(false);
 
+  // Performer drawer
+  const [drawerPerformer, setDrawerPerformer] = useState<FeaturedPerformer | null>(null);
+  const [drawerStreamId, setDrawerStreamId] = useState<string | null>(null);
+  // Album thumbnail cache: creatorId → first 2 thumbs
+  const [albumThumbs, setAlbumThumbs] = useState<Record<string, CreatorMediaItem[]>>({});
+  const thumbLoadedRef = useRef<Set<string>>(new Set());
+
+  // Next Up schedule hero
+  const [nextSlot, setNextSlot] = useState<LiveScheduleSlot | null>(null);
+  const [nextSlotSubscribed, setNextSlotSubscribed] = useState(false);
+  const [nextSlotNotifying, setNextSlotNotifying] = useState(false);
+  const [countdownLabel, setCountdownLabel] = useState<string>("");
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Socket (null stream — connected only for wallet push events)
   const {
     walletBalance: socketBalance,
@@ -146,8 +168,18 @@ export default function Live() {
       getFeaturedPerformers(),
       fetchStreams(),
     ]).then(([perfData, mergedStreams]) => {
-      setPerformers(perfData.performers || []);
+      const perf = perfData.performers || [];
+      setPerformers(perf);
       setLiveStreams(mergedStreams as LiveStream[]);
+      // Preload first 2 album thumbs for each performer (fire-and-forget)
+      for (const p of perf) {
+        const cid = p.userId || p.id;
+        if (!cid || thumbLoadedRef.current.has(cid)) continue;
+        thumbLoadedRef.current.add(cid);
+        listCreatorMedia(cid, 2).then((res) => {
+          setAlbumThumbs((prev) => ({ ...prev, [cid]: res.items || [] }));
+        }).catch(() => {});
+      }
     }).catch(() => {
       setLoadError(true);
     }).finally(() => setPerformersLoading(false));
@@ -215,6 +247,58 @@ export default function Live() {
     if (!isAuthenticated) return;
     getCastingStatus().then(setCastingStatus).catch(() => {});
   }, [isAuthenticated]);
+
+  // Load next upcoming slot
+  useEffect(() => {
+    getLiveSchedule()
+      .then((res) => {
+        if (!res.success || !res.slots?.length) return;
+        const now = Date.now();
+        // Exclude currently-live slots (edge case — performer grid handles those)
+        const upcoming = res.slots
+          .filter((s) => !s.is_live && new Date(s.start_time).getTime() > now)
+          .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+        const slot = upcoming[0] ?? null;
+        setNextSlot(slot);
+        if (slot) {
+          return getSlotNotifyStatus(slot.id)
+            .then((r) => setNextSlotSubscribed(r.subscribed))
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Countdown ticker — recomputes every 30s, cleaned up on unmount
+  useEffect(() => {
+    if (!nextSlot) {
+      setCountdownLabel("");
+      return;
+    }
+    const compute = () => {
+      const diffMs = new Date(nextSlot.start_time).getTime() - Date.now();
+      if (diffMs <= 0) {
+        setCountdownLabel("Starting now");
+        return;
+      }
+      const totalMinutes = Math.floor(diffMs / 60000);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      if (hours > 0) {
+        setCountdownLabel(`Starts in ${hours}h ${minutes}m`);
+      } else {
+        setCountdownLabel(`Starts in ${minutes}m`);
+      }
+    };
+    compute();
+    countdownRef.current = setInterval(compute, 30000);
+    return () => {
+      if (countdownRef.current !== null) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+      }
+    };
+  }, [nextSlot]);
 
   const handleBuyTokens = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
@@ -305,6 +389,24 @@ export default function Live() {
       alert(err instanceof Error ? err.message : "Failed to submit application");
     } finally {
       setCastingSubmitting(false);
+    }
+  };
+
+  const handleSlotNotify = async () => {
+    if (!nextSlot || nextSlotNotifying) return;
+    setNextSlotNotifying(true);
+    try {
+      if (nextSlotSubscribed) {
+        await unsubscribeFromSlotReminder(nextSlot.id);
+        setNextSlotSubscribed(false);
+      } else {
+        await subscribeToSlotReminder(nextSlot.id);
+        setNextSlotSubscribed(true);
+      }
+    } catch {
+      // ignore — state stays as-is
+    } finally {
+      setNextSlotNotifying(false);
     }
   };
 
@@ -563,6 +665,69 @@ export default function Live() {
         emptyAction={canCreateLive ? () => setShowCreateEvent(true) : undefined}
       />
 
+      {/* ── Next Up Hero ── */}
+      {(() => {
+        if (!nextSlot) return null;
+        const startMs = new Date(nextSlot.start_time).getTime();
+        const diffMs = startMs - Date.now();
+        // Hide if the slot somehow went live (edge case race)
+        if (nextSlot.is_live || diffMs <= 0) return null;
+        const startingSoon = diffMs < 5 * 60 * 1000; // within 5 minutes
+        const title = nextSlot.title || nextSlot.performer_display_name || "Upcoming Show";
+        const avatar = isValidPhotoUrl(nextSlot.performer_avatar) ? nextSlot.performer_avatar : "/default-performer.svg";
+        return (
+          <div
+            className={`rounded-2xl p-4 mb-4 transition-all ${
+              startingSoon
+                ? "animate-pulse border-2 border-pnp-accent/60"
+                : "border border-pnp-border"
+            } bg-pnp-surface`}
+          >
+            {/* Mobile: stacked. sm+: row */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              {/* Avatar */}
+              <img
+                src={avatar}
+                alt={title}
+                className="w-16 h-16 rounded-full object-cover border-2 border-pnp-border self-center sm:self-auto flex-shrink-0"
+                onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
+              />
+              {/* Info */}
+              <div className="flex-1 min-w-0 text-center sm:text-left">
+                <div className="flex items-center justify-center sm:justify-start gap-2 mb-1">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider text-white ${
+                      startingSoon ? "bg-pnp-accent" : "bg-pnp-border"
+                    }`}
+                    style={startingSoon ? {} : { color: "#5ED1C4", background: "rgba(94,209,196,0.15)" }}
+                  >
+                    {startingSoon ? "Starting Soon" : "Next Up"}
+                  </span>
+                </div>
+                <p className="text-sm font-bold text-pnp-textPrimary truncate">{title}</p>
+                <p className="text-xs text-pnp-textSecondary mt-0.5">{countdownLabel}</p>
+              </div>
+              {/* Notify button */}
+              <button
+                onClick={handleSlotNotify}
+                disabled={nextSlotNotifying}
+                className={`w-full sm:w-auto flex-shrink-0 px-4 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 ${
+                  nextSlotSubscribed
+                    ? "bg-pnp-surface border border-pnp-accent/40 text-pnp-accent"
+                    : "text-white btn-gradient"
+                }`}
+              >
+                {nextSlotNotifying
+                  ? "..."
+                  : nextSlotSubscribed
+                  ? "\u2713 You'll be notified"
+                  : "Remind me"}
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Performer Grid ── */}
       {performersLoading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
@@ -584,45 +749,84 @@ export default function Live() {
               : p.hlsUrl && p.userId
               ? `/live/${String(p.userId)}`
               : null;
+            const cid = p.userId || p.id;
+            const thumbs = cid ? (albumThumbs[cid] || []) : [];
+            const thumb1 = thumbs[0];
+            const thumb2 = thumbs[1];
             return (
               <div
                 key={p.id}
-                className={`rounded-xl border bg-pnp-surface p-3 flex flex-col items-center text-center ${isLive ? "border-red-500/50 ring-1 ring-red-500/20" : "border-pnp-border"}`}
+                role="button"
+                tabIndex={0}
+                aria-label={`Open ${p.displayName} profile`}
+                onClick={() => {
+                  setDrawerPerformer(p);
+                  setDrawerStreamId(stream ? stream.id : p.hlsUrl && p.userId ? String(p.userId) : null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    setDrawerPerformer(p);
+                    setDrawerStreamId(stream ? stream.id : p.hlsUrl && p.userId ? String(p.userId) : null);
+                  }
+                }}
+                className={`rounded-xl border bg-pnp-surface overflow-hidden cursor-pointer active:scale-95 transition-all ${isLive ? "border-red-500/50 ring-1 ring-red-500/20" : "border-pnp-border"}`}
               >
-                <div className="relative">
-                  <img
-                    src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl : "/default-performer.svg"}
-                    alt={p.displayName}
-                    className={`w-20 h-20 rounded-full object-cover mb-2 border-2 ${isLive ? "border-red-500" : "border-pnp-border"}`}
-                    onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
-                  />
-                  {isLive && (
-                    <span className="absolute -top-1 -right-1 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                      LIVE
-                    </span>
+                {/* 3-image mosaic: avatar left, 2 album thumbs stacked right */}
+                <div className="flex h-28">
+                  {/* Avatar (left, larger) */}
+                  <div className="relative w-[58%] flex-shrink-0">
+                    <img
+                      src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl as string : "/default-performer.svg"}
+                      alt={p.displayName}
+                      className="w-full h-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
+                    />
+                    {isLive && (
+                      <span className="absolute top-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                        LIVE
+                      </span>
+                    )}
+                  </div>
+                  {/* Two album thumbs (right column, stacked) */}
+                  <div className="flex flex-col flex-1 gap-px">
+                    {[thumb1, thumb2].map((thumb, idx) => (
+                      <div key={idx} className="flex-1 relative bg-pnp-border/30 overflow-hidden">
+                        {thumb && (thumb.thumbUrl || thumb.url) ? (
+                          thumb.type === "video" ? (
+                            <video
+                              src={(thumb.thumbUrl || thumb.url) as string}
+                              className="w-full h-full object-cover"
+                              muted
+                              playsInline
+                              preload="none"
+                            />
+                          ) : (
+                            <img
+                              src={(thumb.thumbUrl || thumb.url) as string}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          )
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <svg className="w-4 h-4 text-pnp-border/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909" />
+                            </svg>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {/* Name row */}
+                <div className="px-2.5 py-2 flex items-center justify-between gap-1">
+                  <span className="text-xs font-semibold text-pnp-textPrimary truncate">{p.displayName}</span>
+                  {p.isFeatured && (
+                    <span className="text-[9px] font-bold flex-shrink-0" style={{ color: "#5ED1C4" }}>★</span>
                   )}
                 </div>
-                <span className="text-sm font-medium text-pnp-textPrimary truncate max-w-full">{p.displayName}</span>
-                {p.isFeatured && (
-                  <span className="text-[10px] mt-0.5 font-semibold" style={{ color: "#5ED1C4" }}>{t.live.performerFeatured}</span>
-                )}
-                <button
-                  onClick={() => {
-                    if (isLive && watchUrl) {
-                      navigate(watchUrl);
-                    } else if (p.userId) {
-                      navigate(`/profile/${p.userId}`);
-                    }
-                  }}
-                  className={`mt-2 w-full py-1.5 rounded-lg font-semibold text-xs active:scale-95 transition-all ${
-                    isLive
-                      ? "text-white bg-red-500 hover:bg-red-600"
-                      : "text-pnp-textPrimary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40"
-                  }`}
-                >
-                  {isLive ? t.live.watchLive : t.live.viewProfile}
-                </button>
               </div>
             );
           })}
@@ -833,6 +1037,15 @@ export default function Live() {
             setLiveEvents((prev) => prev.map((e) => e.id === updated.id ? updated : e));
             setDetailEvent(updated);
           }}
+        />
+      )}
+
+      {/* ── Performer Drawer ── */}
+      {drawerPerformer && (
+        <PerformerDrawer
+          performer={drawerPerformer}
+          liveStreamId={drawerStreamId}
+          onClose={() => { setDrawerPerformer(null); setDrawerStreamId(null); }}
         />
       )}
     </div>

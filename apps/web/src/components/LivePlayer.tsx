@@ -5,15 +5,22 @@ import { StreamOverlayLayer, type StreamOverlayConfig } from "@/components/Strea
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { useI18n } from "@/lib/i18n";
 
+export interface LivePlayerStats {
+  bitrate: number;       // kbps, computed from FRAG_LOADED
+  droppedFrames: number; // cumulative dropped frames from video element
+  bufferStall: boolean;  // true if BUFFER_STALLED_ERROR fired in last 30s
+}
+
 interface LivePlayerProps {
   src: string;
   title?: string;
   poster?: string;
   className?: string;
   overlay?: StreamOverlayConfig | null;
+  onStats?: (stats: LivePlayerStats) => void;
 }
 
-export function LivePlayer({ src, title, poster, className = "", overlay }: LivePlayerProps) {
+export function LivePlayer({ src, title, poster, className = "", overlay, onStats }: LivePlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<"loading" | "live" | "offline" | "error" | "retrying">("loading");
   const [showReload, setShowReload] = useState(false);
@@ -54,11 +61,39 @@ export function LivePlayer({ src, title, poster, className = "", overlay }: Live
       hls.loadSource(source);
       hls.attachMedia(video);
 
+      // Track last buffer stall timestamp so we can report bufferStall=true for 30s
+      let lastStallAt = 0;
+
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setStatus("live");
         clearTimeout(reloadTimerRef.current);
         setShowReload(false);
         video.play().catch(() => {});
+      });
+
+      // FRAG_LOADED: compute bitrate from fragment bytes + duration
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hls.on(Hls.Events.FRAG_LOADED, (_: any, data: any) => {
+        if (!onStats) return;
+        const bytes: number = data?.stats?.loaded ?? 0;
+        const fragDuration: number = data?.frag?.duration ?? 0;
+        const bitrateKbps = fragDuration > 0 ? Math.round((bytes * 8) / fragDuration / 1000) : 0;
+        const dropped: number = (video as HTMLVideoElement & { webkitDroppedFrameCount?: number }).webkitDroppedFrameCount
+          ?? (video as HTMLVideoElement & { mozDroppedFrames?: number }).mozDroppedFrames
+          ?? 0;
+        const bufferStall = Date.now() - lastStallAt < 30_000;
+        onStats({ bitrate: bitrateKbps, droppedFrames: dropped, bufferStall });
+      });
+
+      // BUFFER_STALLED_ERROR: mark stall timestamp
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hls.on("bufferStalledError" as any, () => {
+        lastStallAt = Date.now();
+        if (!onStats) return;
+        const dropped: number = (video as HTMLVideoElement & { webkitDroppedFrameCount?: number }).webkitDroppedFrameCount
+          ?? (video as HTMLVideoElement & { mozDroppedFrames?: number }).mozDroppedFrames
+          ?? 0;
+        onStats({ bitrate: 0, droppedFrames: dropped, bufferStall: true });
       });
 
       hls.on(Hls.Events.ERROR, (_, data) => {

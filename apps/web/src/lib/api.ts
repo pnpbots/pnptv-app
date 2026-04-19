@@ -395,6 +395,34 @@ export function getHostedChannel(): Promise<{
   return request("/api/webapp/live/host");
 }
 
+// Ticketed live shows
+export function getSlotTicketStatus(slotId: string): Promise<{
+  success: boolean;
+  isTicketed: boolean;
+  priceTokens: number | null;
+  priceUsd: string | null;
+  hasTicket: boolean;
+}> {
+  return request(`/api/webapp/live/slot/${encodeURIComponent(slotId)}/ticket-status`);
+}
+
+export function buySlotTicket(
+  slotId: string,
+  currency: "tokens" | "usd"
+): Promise<{
+  success: boolean;
+  hasTicket?: boolean;
+  alreadyOwned?: boolean;
+  newBalance?: number;
+  error?: string;
+}> {
+  return request(`/api/webapp/live/slot/${encodeURIComponent(slotId)}/buy-ticket`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ currency }),
+  });
+}
+
 // Social proxy (Bluesky)
 export interface SocialPost {
   uri: string;
@@ -694,6 +722,18 @@ export function getMyChannel(): Promise<{
   channel: { ref: string; streamKey: string; rtmpUrl: string } | null;
 }> {
   return request("/api/webapp/live/my-channel");
+}
+
+export function provisionChannel(): Promise<{
+  success: boolean;
+  alreadyProvisioned?: boolean;
+  rtmpUrl?: string;
+  streamKey?: string;
+  channelRef?: string;
+  hlsUrl?: string;
+  error?: string;
+}> {
+  return request("/api/webapp/live/provision-channel", { method: "POST" });
 }
 
 // ── WebRTC Streaming (JaaS) ───────────────────────────────────────────────────
@@ -2807,6 +2847,7 @@ export interface CreatorDashboard {
     created_at: string;
   } | null;
   walletAddress?: string | null;
+  streamRules?: string | null;
 }
 
 export interface CreatorSubscriptionStatus {
@@ -4700,16 +4741,26 @@ export function updateAdminTicket(
 
 // Live Rules Acknowledgment Gate
 
-export function getLiveRulesStatus(): Promise<{
+export function getLiveRulesStatus(channelRef?: string | null): Promise<{
   success: boolean;
   acknowledged: boolean;
   version: number;
+  creatorRules: string | null;
+  creatorName: string | null;
 }> {
-  return request("/api/webapp/live/rules-status");
+  const qs = channelRef ? `?channelRef=${encodeURIComponent(channelRef)}` : "";
+  return request(`/api/webapp/live/rules-status${qs}`);
 }
 
 export function acknowledgeLiveRules(): Promise<{ success: boolean }> {
   return request("/api/webapp/live/acknowledge-rules", { method: "POST" });
+}
+
+export function saveStreamRules(rules: string): Promise<{ success: boolean; rules: string | null; error?: string }> {
+  return request("/api/webapp/live/stream-rules", {
+    method: "POST",
+    body: JSON.stringify({ rules }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -5617,6 +5668,45 @@ export function deleteMediaPackItem(itemId: number): Promise<{ success: boolean 
   return request(`/api/webapp/admin/media-packs/items/${itemId}`, { method: "DELETE" });
 }
 
+// ─── Live Schedule ────────────────────────────────────────────────────────────
+
+export interface LiveScheduleSlot {
+  id: string | number;
+  title: string | null;
+  performer_display_name: string | null;
+  performer_avatar: string | null;
+  start_time: string; // ISO 8601
+  end_time: string | null;
+  is_live: boolean;
+}
+
+export interface LiveScheduleResponse {
+  success: boolean;
+  slots: LiveScheduleSlot[];
+}
+
+export function getLiveSchedule(): Promise<LiveScheduleResponse> {
+  return request("/api/webapp/live/schedule");
+}
+
+export function subscribeToSlotReminder(slotId: string | number): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/schedule/notify", {
+    method: "POST",
+    body: { slotId },
+  });
+}
+
+export function unsubscribeFromSlotReminder(slotId: string | number): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/schedule/notify", {
+    method: "DELETE",
+    body: { slotId },
+  });
+}
+
+export function getSlotNotifyStatus(slotId: string | number): Promise<{ subscribed: boolean }> {
+  return request(`/api/webapp/live/schedule/notify/${slotId}`);
+}
+
 // ============================================================================
 // Stage TV API
 // ============================================================================
@@ -5892,4 +5982,90 @@ export function getVideoramaPopular(): Promise<{ success: boolean; results: Invi
 
 export function getVideoramaVideo(videoId: string): Promise<{ success: boolean; video: InvidiousVideo & { formatStreams?: { url: string; qualityLabel: string }[] } }> {
   return request(`/api/webapp/videorama/video/${videoId}`);
+}
+
+// ── Stream Analytics ──────────────────────────────────────────────────────────
+
+export interface StreamSession {
+  id: string;
+  channel_ref: string;
+  started_at: string;
+  ended_at: string | null;
+  peak_viewers: number;
+  unique_viewers: number | null;
+  duration_seconds: number;
+  total_tips_tokens: number;
+  total_tips_usd: string;
+}
+
+export interface StreamAnalyticsSummary {
+  total_sessions: number;
+  total_hours_live: number;
+  avg_peak_viewers: number;
+  total_tips_tokens: number;
+  total_tips_usd: string;
+}
+
+export function getCreatorSessions(limit = 20): Promise<{ success: boolean; sessions: StreamSession[] }> {
+  return request(`/api/webapp/live/analytics/sessions?limit=${limit}`);
+}
+
+export function getCreatorSummary(days = 30): Promise<{ success: boolean; summary: StreamAnalyticsSummary }> {
+  return request(`/api/webapp/live/analytics/summary?days=${days}`);
+}
+
+// ============================================================================
+// Creator Album / Media
+// ============================================================================
+
+export interface CreatorMediaItem {
+  id: string;
+  type: "photo" | "video";
+  url: string | null;
+  thumbUrl: string | null;
+  caption?: string | null;
+  isPremium: boolean;
+  canView: boolean;
+  sortOrder?: number;
+  createdAt?: string;
+}
+
+export function listCreatorMedia(
+  creatorId: string,
+  limit = 50
+): Promise<{ success: boolean; items: CreatorMediaItem[] }> {
+  return request(`/api/webapp/creators/${creatorId}/media?limit=${limit}`);
+}
+
+export function addCreatorMedia(data: {
+  type: "photo" | "video";
+  url: string;
+  thumbUrl?: string | null;
+  caption?: string | null;
+  isPremium?: boolean;
+}): Promise<{ success: boolean; item: CreatorMediaItem }> {
+  return request("/api/webapp/creators/media", { method: "POST", body: data });
+}
+
+export function updateCreatorMedia(
+  id: string,
+  patch: Partial<{
+    url: string;
+    thumbUrl: string | null;
+    caption: string | null;
+    isPremium: boolean;
+    sortOrder: number;
+  }>
+): Promise<{ success: boolean; item: CreatorMediaItem }> {
+  return request(`/api/webapp/creators/media/${id}`, { method: "PATCH", body: patch });
+}
+
+export function deleteCreatorMedia(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creators/media/${id}`, { method: "DELETE" });
+}
+
+export function reorderCreatorMedia(
+  items: { id: string; sort_order: number }[]
+): Promise<{ success: boolean; updated: number }> {
+  return request("/api/webapp/creators/media/reorder", { method: "POST", body: { items } });
 }

@@ -3,39 +3,48 @@ import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-
-const API_BASE = "";
-
-async function getRtmpKey(): Promise<{ success: boolean; rtmpUrl?: string; streamKey?: string; error?: string }> {
-  const res = await fetch(`${API_BASE}/api/webapp/live/rtmp-key`, { credentials: "include" });
-  return res.json();
-}
+import { getRtmpKey, provisionChannel } from "@/lib/api";
 
 export default function CreatorLive() {
   const { user } = useAuth();
   const t = useI18n().creator;
 
   const [rtmpInfo, setRtmpInfo] = useState<{ rtmpUrl: string; streamKey: string } | null>(null);
-  const [loading, setLoading] = useState(false);
+  // "idle" | "loading" | "provisioning" | "ready" | "error"
+  const [phase, setPhase] = useState<"idle" | "loading" | "provisioning" | "ready" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
+  const loading = phase === "loading" || phase === "provisioning";
+
   const loadCredentials = useCallback(async () => {
     if (rtmpInfo) return;
-    setLoading(true);
+    setPhase("loading");
     setError(null);
     try {
+      // First try the normal RTMP key fetch (succeeds if channel already assigned).
       const result = await getRtmpKey();
       if (result.success && result.rtmpUrl && result.streamKey) {
         setRtmpInfo({ rtmpUrl: result.rtmpUrl, streamKey: result.streamKey });
+        setPhase("ready");
+        return;
+      }
+
+      // Channel not yet assigned (404) — self-provision automatically.
+      // Any other error falls through to the catch block below.
+      setPhase("provisioning");
+      const provision = await provisionChannel();
+      if (provision.success && provision.rtmpUrl && provision.streamKey) {
+        setRtmpInfo({ rtmpUrl: provision.rtmpUrl, streamKey: provision.streamKey });
+        setPhase("ready");
       } else {
-        setError(result.error || "Could not load streaming credentials");
+        setError(provision.error || "Could not set up your streaming channel");
+        setPhase("error");
       }
     } catch {
       setError("Network error — please try again");
-    } finally {
-      setLoading(false);
+      setPhase("error");
     }
   }, [rtmpInfo]);
 
@@ -153,13 +162,18 @@ export default function CreatorLive() {
               disabled={loading}
               className="w-full"
             >
-              {loading ? (
+              {phase === "provisioning" ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Setting up your channel...
+                </span>
+              ) : phase === "loading" ? (
                 <span className="flex items-center justify-center gap-2">
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   Loading...
                 </span>
               ) : (
-                "Reveal Stream Credentials"
+                "Set Up My Channel"
               )}
             </Button>
           ) : (

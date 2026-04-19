@@ -3,6 +3,8 @@ import { useI18n } from "@/lib/i18n";
 
 interface LiveRulesModalProps {
   onAcknowledge: () => void;
+  creatorName?: string | null;
+  creatorRules?: string | null;
 }
 
 interface Rule {
@@ -84,7 +86,7 @@ const MODAL_STRINGS: Record<"en" | "es", ModalStrings> = {
 
 const RULE_ICONS = ["\u270b", "\ud83d\udd12", "\ud83d\udEab", "\ud83d\udcb0", "\u2696\ufe0f", "\ud83d\udea9"] as const;
 
-export function LiveRulesModal({ onAcknowledge }: LiveRulesModalProps) {
+export function LiveRulesModal({ onAcknowledge, creatorName, creatorRules }: LiveRulesModalProps) {
   const t = useI18n();
   const [acknowledging, setAcknowledging] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -198,6 +200,23 @@ export function LiveRulesModal({ onAcknowledge }: LiveRulesModalProps) {
               </div>
             </div>
           ))}
+
+          {/* Creator house rules — only rendered when the creator has set custom rules */}
+          {creatorRules && creatorRules.trim().length > 0 && (
+            <div className="mt-2 pt-4 border-t border-pnp-border">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="flex-shrink-0 w-8 h-8 rounded-full bg-pnp-accent/10 border border-pnp-accent/30 flex items-center justify-center text-base leading-none" aria-hidden="true">
+                  🏠
+                </span>
+                <p className="text-xs font-semibold text-pnp-textPrimary">
+                  {creatorName ? `${creatorName}'s House Rules` : "Creator's House Rules"}
+                </p>
+              </div>
+              <p className="text-xs text-pnp-textSecondary leading-relaxed whitespace-pre-wrap pl-10">
+                {creatorRules.trim()}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Footer + CTA */}

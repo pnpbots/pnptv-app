@@ -14,6 +14,7 @@
     "@directus/sdk": "^18.0.0",
     "@livekit/components-react": "^2.9.20",
     "@pnptv/ui-kit": "*",
+    "@types/react-window": "^1.8.8",
     "clsx": "^2.1.1",
     "dompurify": "^3.3.2",
     "hls.js": "^1.5.0",
@@ -27,6 +28,7 @@
     "react-helmet-async": "^2.0.5",
     "react-leaflet": "^4.2.0",
     "react-router-dom": "^6.28.0",
+    "react-window": "^2.2.7",
     "socket.io-client": "^4.7.0"
   },
   "devDependencies": {

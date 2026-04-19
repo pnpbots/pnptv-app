@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Card, Skeleton } from "@pnptv/ui-kit";
@@ -10,6 +10,7 @@ import { LiveRulesModal } from "@/components/LiveRulesModal";
 import { BuyTokensModal } from "@/components/BuyTokensModal";
 import { connectSocket } from "@/lib/socket";
 import { QRCodeSVG } from "qrcode.react";
+import { List, useDynamicRowHeight } from "react-window";
 import {
   getLiveStreams,
   getAllPerformers,
@@ -30,13 +31,62 @@ import {
   initiateRaid,
   setHostedChannel,
   getHostedChannel,
+  getSlotTicketStatus,
+  buySlotTicket,
 } from "@/lib/api";
+import { type LivePlayerStats } from "@/components/LivePlayer";
 
 function extractChannelRef(streamId: string): string | null {
   // streamId is now the channel ref directly (e.g. "pnptv-santino")
   // or could be a legacy full process ID (e.g. "restreamer-ui:ingest:pnptv-santino")
   const match = streamId.match(/restreamer-ui:ingest:([\w-]+)/);
   return match ? match[1] : streamId;
+}
+
+// ── Virtualized chat message list (react-window v2) ───────────────────────
+type ChatMsg = { id: string | number; username: string; content: string };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ChatRow(props: any) {
+  const { index, style, messages } = props as { index: number; style: React.CSSProperties; messages: ChatMsg[] };
+  const msg = messages[index];
+  if (!msg) return null;
+  return (
+    <div style={style} className="py-0.5">
+      <div className="text-xs">
+        <span className="font-medium text-gradient">@{msg.username}</span>
+        <span className="text-pnp-textSecondary mx-1">·</span>
+        <span className="text-pnp-textPrimary">{msg.content}</span>
+      </div>
+    </div>
+  );
+}
+
+function ChatMessageList({
+  messages,
+  listRef,
+  containerRef: _containerRef,
+}: {
+  messages: ChatMsg[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  listRef: React.MutableRefObject<any>;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const rowHeight = useDynamicRowHeight({ defaultRowHeight: 24, key: messages.length });
+  return (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    <List
+      listRef={listRef}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rowComponent={ChatRow as any}
+      rowCount={messages.length}
+      rowHeight={rowHeight}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rowProps={{ messages } as any}
+      style={{ height: 192, width: "100%", marginBottom: "0.5rem" }}
+      tagName="div"
+    />
+  );
 }
 
 export default function Stream() {
@@ -53,6 +103,8 @@ export default function Stream() {
   // Live rules gate — only enforced for authenticated users
   const [rulesAcknowledged, setRulesAcknowledged] = useState(false);
   const [rulesLoading, setRulesLoading] = useState(true);
+  const [creatorRules, setCreatorRules] = useState<string | null>(null);
+  const [creatorRulesName, setCreatorRulesName] = useState<string | null>(null);
 
   // Chat & tips
   const [chatInput, setChatInput] = useState("");
@@ -99,6 +151,28 @@ export default function Stream() {
   const [raidError, setRaidError] = useState<string | null>(null);
   const raidCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ── Leaderboard overlay state ──────────────────────────────────────────────
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboardTab, setLeaderboardTab] = useState<"today" | "week">("today");
+
+  // ── Ticket / paywall state ─────────────────────────────────────────────────
+  const [ticketStatus, setTicketStatus] = useState<{
+    isTicketed: boolean;
+    priceTokens: number | null;
+    priceUsd: string | null;
+    hasTicket: boolean;
+  } | null>(null);
+  const [ticketLoading, setTicketLoading] = useState(false);
+  const [ticketBuying, setTicketBuying] = useState(false);
+  const [ticketError, setTicketError] = useState<string | null>(null);
+
+  // ── Stream health HUD state (creator-only, desktop) ────────────────────────
+  const [streamStats, setStreamStats] = useState<LivePlayerStats | null>(null);
+  const [statsHistory, setStatsHistory] = useState<LivePlayerStats[]>([]);
+  const [hudExpanded, setHudExpanded] = useState(false);
+  const [healthOffline, setHealthOffline] = useState(false);
+  const healthPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // ── Host mode state ────────────────────────────────────────────────────────
   const [hostedChannelRef, setHostedChannelRef] = useState<string | null>(null);
   const [hostedStream, setHostedStream] = useState<LiveStreamWithHost | null>(null);
@@ -123,7 +197,7 @@ export default function Stream() {
 
   // Cleanup all timers/intervals on unmount. Dash tip polling + countdown
   // intervals plus the three one-shot setTimeouts (tip-success toast, dash-tip
-  // success chain, share-copied flash).
+  // success chain, share-copied flash). Also health poll.
   useEffect(() => {
     return () => {
       if (dashTipPollRef.current) clearInterval(dashTipPollRef.current);
@@ -131,6 +205,7 @@ export default function Stream() {
       if (tipSuccessTimerRef.current) clearTimeout(tipSuccessTimerRef.current);
       if (dashTipSettleTimerRef.current) clearTimeout(dashTipSettleTimerRef.current);
       if (shareCopiedTimerRef.current) clearTimeout(shareCopiedTimerRef.current);
+      if (healthPollRef.current) clearInterval(healthPollRef.current);
     };
   }, []);
 
@@ -372,11 +447,14 @@ export default function Stream() {
       setRulesAcknowledged(true);
       return;
     }
+    const channelRef = streamId ? extractChannelRef(streamId) : null;
     setRulesLoading(true);
-    getLiveRulesStatus()
+    getLiveRulesStatus(channelRef)
       .then((data) => {
         if (data.success) {
           setRulesAcknowledged(data.acknowledged);
+          setCreatorRules(data.creatorRules ?? null);
+          setCreatorRulesName(data.creatorName ?? null);
         } else {
           // On unexpected API error, fail closed; use localStorage cache as fallback
           const cached = localStorage.getItem(`live_rules_ack_${user?.id}`);
@@ -391,7 +469,7 @@ export default function Stream() {
       .finally(() => {
         setRulesLoading(false);
       });
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, user?.id, streamId]);
 
   const handleAcknowledgeRules = useCallback(async () => {
     try {
@@ -447,6 +525,75 @@ export default function Stream() {
 
   // Whether the current user is a creator/admin (controls raid + host UI visibility)
   const isStreamOwner = !!(user && ['model', 'creator', 'admin', 'superadmin'].includes(user.role));
+
+  // ── Ticket status fetch — runs after stream resolves, for authenticated users ──
+  useEffect(() => {
+    if (!isAuthenticated || !stream) return;
+    // slotId: Stream.tsx uses the streamId param as the slot/channel reference.
+    // live_streams rows use UUIDs as PK; skip fetch if streamId looks like a channel ref (no dashes pattern of UUID).
+    // We attempt the fetch and silently ignore 404 (non-UUID streamIds will 404).
+    const slotId = streamId;
+    if (!slotId) return;
+    setTicketLoading(true);
+    setTicketError(null);
+    getSlotTicketStatus(slotId)
+      .then((data) => {
+        if (data.success) setTicketStatus(data);
+      })
+      .catch(() => {
+        // Non-ticketed or non-slot stream — silently ignore
+      })
+      .finally(() => setTicketLoading(false));
+  }, [isAuthenticated, streamId, stream]);
+
+  // ── Health HUD: poll streams every 15s to detect offline ──────────────────
+  useEffect(() => {
+    if (!isStreamOwner || !stream?.isLive) {
+      if (healthPollRef.current) { clearInterval(healthPollRef.current); healthPollRef.current = null; }
+      return;
+    }
+    const poll = () => {
+      getLiveStreams()
+        .then((data) => {
+          const channelRef = streamId ? extractChannelRef(streamId) : null;
+          const found = (data.streams || []).some(
+            (s) => s.id === streamId || (channelRef && s.id === channelRef)
+          );
+          setHealthOffline(!found);
+        })
+        .catch(() => {});
+    };
+    healthPollRef.current = setInterval(poll, 15_000);
+    return () => {
+      if (healthPollRef.current) { clearInterval(healthPollRef.current); healthPollRef.current = null; }
+    };
+  }, [isStreamOwner, stream?.isLive, streamId]);
+
+  // Accumulate stats history (keep last 4 samples for HUD sparkline)
+  const handlePlayerStats = useCallback((stats: LivePlayerStats) => {
+    setStreamStats(stats);
+    setStatsHistory((prev) => [...prev.slice(-3), stats]);
+  }, []);
+
+  // ── Ticket purchase handler ────────────────────────────────────────────────
+  const handleBuyTicket = useCallback(async (currency: "tokens" | "usd") => {
+    if (!streamId) return;
+    setTicketBuying(true);
+    setTicketError(null);
+    try {
+      const result = await buySlotTicket(streamId, currency);
+      if (result.success && result.hasTicket) {
+        setTicketStatus((prev) => prev ? { ...prev, hasTicket: true } : null);
+        if (result.newBalance !== undefined) setTokenBalance(result.newBalance);
+      } else {
+        setTicketError(result.error || "Purchase failed");
+      }
+    } catch (err) {
+      setTicketError(err instanceof Error ? err.message : "Purchase failed");
+    } finally {
+      setTicketBuying(false);
+    }
+  }, [streamId]);
 
   // ── Host mode: load current hosted channel on mount (creator only) ─────────
   useEffect(() => {
@@ -703,6 +850,33 @@ export default function Stream() {
     () => typeof window !== 'undefined' && window.innerWidth < 768
   );
 
+  // react-window List ref for programmatic scroll-to-bottom
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const chatListRef = useRef<any>(null);
+
+  // ── Leaderboard: derive from recentTips (client-side, no new endpoints) ────
+  const leaderboardData = useMemo(() => {
+    const now = new Date();
+    const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).getTime();
+    const startOfWeek = (() => {
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+      return d.getTime();
+    })();
+    const aggregate = (cutoff: number) => {
+      const map = new Map<string, { username: string; total: number }>();
+      recentTips.forEach((tip) => {
+        if (new Date(tip.created_at).getTime() < cutoff) return;
+        const key = tip.user_username;
+        const entry = map.get(key) || { username: tip.user_username, total: 0 };
+        entry.total += tip.amount;
+        map.set(key, entry);
+      });
+      return Array.from(map.values()).sort((a, b) => b.total - a.total).slice(0, 5);
+    };
+    return { today: aggregate(startOfDay), week: aggregate(startOfWeek) };
+  }, [recentTips]);
+
   const isNearBottom = () => {
     const el = chatContainerRef.current;
     if (!el) return true;
@@ -711,6 +885,10 @@ export default function Stream() {
 
   useEffect(() => {
     if (isNearBottom()) {
+      const msgs = chatMessages.slice(-50);
+      if (msgs.length > 0) {
+        chatListRef.current?.scrollToRow({ index: msgs.length - 1 });
+      }
       chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
       setHasNewMessages(false);
     } else {
@@ -719,6 +897,10 @@ export default function Stream() {
   }, [chatMessages]);
 
   const scrollToBottom = () => {
+    const msgs = chatMessages.slice(-50);
+    if (msgs.length > 0) {
+      chatListRef.current?.scrollToRow({ index: msgs.length - 1 });
+    }
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     setHasNewMessages(false);
   };
@@ -808,7 +990,11 @@ export default function Stream() {
 
       {/* Rules acknowledgment gate — shown to authenticated users who have not yet agreed */}
       {!rulesAcknowledged && (
-        <LiveRulesModal onAcknowledge={handleAcknowledgeRules} />
+        <LiveRulesModal
+          onAcknowledge={handleAcknowledgeRules}
+          creatorName={creatorRulesName}
+          creatorRules={creatorRules}
+        />
       )}
 
       {/* ── Raid notification overlay ─────────────────────────────────────────
@@ -945,12 +1131,144 @@ export default function Stream() {
 
       {/* Video Player */}
       <div ref={videoContainerRef} className={`relative ${isTheaterMode ? "" : "-mx-4 sm:-mx-6"}`}>
-        <LivePlayer
-          src={stream.hlsUrl}
-          title={stream.name}
-          poster={stream.thumbnailUrl || undefined}
-          overlay={overlay}
-        />
+        {/* ── Paywall overlay — shown when slot is ticketed and viewer has no ticket ── */}
+        {ticketStatus?.isTicketed && !ticketStatus.hasTicket && !ticketLoading ? (
+          <div className="relative aspect-video rounded-xl bg-pnp-surface border border-pnp-border overflow-hidden flex items-center justify-center">
+            {/* Blurred thumbnail as background */}
+            {stream.thumbnailUrl && (
+              <img
+                src={stream.thumbnailUrl}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover opacity-20 blur-sm scale-105"
+                aria-hidden="true"
+              />
+            )}
+            <div className="relative z-10 flex flex-col items-center gap-4 px-6 py-8 text-center max-w-xs">
+              <div className="w-12 h-12 rounded-full bg-pnp-accent/20 border border-pnp-accent/40 flex items-center justify-center">
+                <svg className="w-6 h-6 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-pnp-textPrimary">{stream.name}</p>
+                <p className="text-[11px] text-pnp-textSecondary mt-1">This is a ticketed show</p>
+              </div>
+              {(!ticketStatus.priceTokens && !ticketStatus.priceUsd) ? (
+                <p className="text-[10px] text-pnp-textSecondary">
+                  Tickets unavailable — contact support
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2 w-full">
+                  {ticketError && (
+                    <p className="text-[10px] text-red-400">{ticketError}</p>
+                  )}
+                  {ticketStatus.priceTokens && (
+                    <button
+                      onClick={() => handleBuyTicket("tokens")}
+                      disabled={ticketBuying}
+                      className="w-full px-4 py-2.5 rounded-lg btn-gradient text-white text-xs font-bold disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                      {ticketBuying && <span className="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />}
+                      Buy for {ticketStatus.priceTokens} Tokens
+                    </button>
+                  )}
+                  {ticketStatus.priceUsd && (
+                    <button
+                      onClick={() => handleBuyTicket("usd")}
+                      disabled={ticketBuying}
+                      className="w-full px-4 py-2.5 rounded-lg bg-pnp-surface border border-pnp-accent/40 text-pnp-accent text-xs font-bold disabled:opacity-50 active:scale-95 transition-all"
+                    >
+                      Buy for ${ticketStatus.priceUsd} USD
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <LivePlayer
+            src={stream.hlsUrl}
+            title={stream.name}
+            poster={stream.thumbnailUrl || undefined}
+            overlay={overlay}
+            onStats={isStreamOwner ? handlePlayerStats : undefined}
+          />
+        )}
+
+        {/* ── Stream health HUD — creator-only, desktop, top-left of video ─── */}
+        {isStreamOwner && stream.isLive && !(ticketStatus?.isTicketed && !ticketStatus.hasTicket) && (
+          <div className="hidden md:flex absolute top-3 left-3 z-30 flex-col items-start">
+            <button
+              onClick={() => setHudExpanded((v) => !v)}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold border backdrop-blur-sm transition-colors ${
+                healthOffline
+                  ? "bg-red-500/20 border-red-500/40 text-red-400"
+                  : streamStats?.bufferStall
+                  ? "bg-amber-500/20 border-amber-500/40 text-amber-400"
+                  : "bg-black/60 border-white/20 text-white/80"
+              }`}
+              aria-label="Stream health"
+            >
+              {/* Status dot */}
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                healthOffline ? "bg-red-500" : streamStats?.bufferStall ? "bg-amber-400" : "bg-green-500"
+              }`} />
+              {streamStats ? `${streamStats.bitrate}kbps` : "HUD"}
+              <svg
+                className={`w-2.5 h-2.5 transition-transform ${hudExpanded ? "rotate-180" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {hudExpanded && (
+              <div className="mt-1 w-48 rounded-xl bg-black/80 border border-white/15 backdrop-blur-sm shadow-2xl overflow-hidden">
+                <div className="px-3 py-2 border-b border-white/10">
+                  <span className="text-[10px] font-bold text-white">Stream Health</span>
+                </div>
+                <div className="px-3 py-2 space-y-1.5 text-[10px]">
+                  <div className="flex justify-between">
+                    <span className="text-white/50">Bitrate</span>
+                    <span className={`font-mono font-bold ${streamStats && streamStats.bitrate < 500 ? "text-red-400" : "text-green-400"}`}>
+                      {streamStats ? `${streamStats.bitrate} kbps` : "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-white/50">Dropped frames</span>
+                    <span className={`font-mono font-bold ${streamStats && streamStats.droppedFrames > 30 ? "text-amber-400" : "text-white/80"}`}>
+                      {streamStats ? streamStats.droppedFrames : "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-white/50">Buffer</span>
+                    <span className={`font-bold ${healthOffline ? "text-red-400" : streamStats?.bufferStall ? "text-amber-400" : "text-green-400"}`}>
+                      {healthOffline ? "OFFLINE" : streamStats?.bufferStall ? "STALLED" : "OK"}
+                    </span>
+                  </div>
+                  {/* Last-60s mini history */}
+                  {statsHistory.length > 1 && (
+                    <div className="pt-1 border-t border-white/10">
+                      <p className="text-[9px] text-white/40 mb-1">Last {statsHistory.length} samples</p>
+                      <div className="flex items-end gap-0.5 h-6">
+                        {statsHistory.map((s, i) => {
+                          const pct = Math.min(100, (s.bitrate / 5000) * 100);
+                          return (
+                            <div
+                              key={i}
+                              className={`flex-1 rounded-sm ${s.bufferStall ? "bg-amber-400" : "bg-green-500"}`}
+                              style={{ height: `${Math.max(8, pct)}%` }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {streamError && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30 rounded-xl">
             <div className="text-center">
@@ -1002,6 +1320,15 @@ export default function Stream() {
                 {viewerCount} watching
               </span>
             )}
+            {/* Leaderboard toggle — desktop only */}
+            <button
+              onClick={() => setShowLeaderboard((v) => !v)}
+              className="hidden md:flex items-center justify-center w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-xs"
+              aria-label="Toggle tip leaderboard"
+              title="Tip leaderboard"
+            >
+              🏆
+            </button>
             <span className="text-sm text-white font-medium truncate max-w-[200px]">{stream.name}</span>
           </div>
           {stream.description && (
@@ -1021,6 +1348,45 @@ export default function Stream() {
             </div>
           )}
         </div>
+
+        {/* Tip Leaderboard overlay — desktop only, toggled by trophy button */}
+        {showLeaderboard && (
+          <div className="hidden md:block absolute top-3 right-3 z-40 w-52 rounded-xl bg-black/80 border border-white/10 backdrop-blur-sm shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+              <span className="text-[11px] font-bold text-white">Tip Leaderboard</span>
+              <button onClick={() => setShowLeaderboard(false)} className="text-white/50 hover:text-white text-xs" aria-label="Close leaderboard">✕</button>
+            </div>
+            <div className="flex border-b border-white/10">
+              {(["today", "week"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setLeaderboardTab(tab)}
+                  className={`flex-1 py-1.5 text-[10px] font-semibold transition-colors ${leaderboardTab === tab ? "text-pnp-accent bg-white/5" : "text-white/50 hover:text-white/80"}`}
+                >
+                  {tab === "today" ? "Today" : "This Week"}
+                </button>
+              ))}
+            </div>
+            <div className="px-3 py-2 space-y-2">
+              {leaderboardData[leaderboardTab].length === 0 ? (
+                <p className="text-[10px] text-white/40 text-center py-2">No tips yet — be the first.</p>
+              ) : (
+                leaderboardData[leaderboardTab].map((entry, i) => (
+                  <div key={entry.username} className="flex items-center gap-2">
+                    <span className={`w-4 text-[10px] font-bold tabular-nums text-right flex-shrink-0 ${i === 0 ? "text-yellow-400" : i === 1 ? "text-slate-300" : i === 2 ? "text-amber-600" : "text-white/40"}`}>
+                      {i + 1}
+                    </span>
+                    <div className="w-5 h-5 rounded-full bg-pnp-accent/30 flex items-center justify-center flex-shrink-0 text-[8px] font-bold text-white uppercase">
+                      {entry.username.slice(0, 2)}
+                    </div>
+                    <span className="flex-1 text-[10px] text-white/80 truncate">@{entry.username}</span>
+                    <span className="text-[10px] font-bold text-pnp-accent flex-shrink-0">{entry.total}T</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className={`space-y-3 ${isTheaterMode ? "max-w-7xl mx-auto px-4 sm:px-6 pb-8" : ""}`}>
@@ -1124,6 +1490,9 @@ export default function Stream() {
         </div>
       )}
 
+      {/* ── Paywall gate: hide chat + tips until ticket purchased ─────────────── */}
+      {ticketStatus?.isTicketed && !ticketStatus.hasTicket ? null : (<>
+
       {/* Wallet Balance — Improvement #1 */}
       {isAuthenticated && (
         <div className="flex items-center justify-between px-1 py-1">
@@ -1133,7 +1502,7 @@ export default function Stream() {
                 <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
               </svg>
             </div>
-            <span className="text-[11px] font-semibold text-pnp-textPrimary">
+            <span className="text-[10px] sm:text-[11px] font-semibold text-pnp-textPrimary">
               {tokenBalance === null ? "—" : `${tokenBalance} ${t.live.tokens}`}
             </span>
           </div>
@@ -1148,7 +1517,7 @@ export default function Stream() {
 
       {/* Tip bar — hidden when stream is offline */}
       <div className={`flex items-center gap-2 ${!stream.isLive ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="flex gap-1.5 flex-1 overflow-x-auto">
+        <div className="flex gap-1.5 flex-1 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
           {TIP_AMOUNTS.map((amount) => (
             <button
               key={amount}
@@ -1238,11 +1607,12 @@ export default function Stream() {
             </div>
           ) : dashTip.destination && dashTip.amount ? (
             <div className="flex flex-col items-center gap-2">
-              <div className="bg-white p-2 rounded-lg">
+              <div className="bg-white p-1.5 sm:p-2 rounded-lg max-w-[120px] w-full mx-auto">
                 <QRCodeSVG
                   value={`dash:${dashTip.destination}?amount=${dashTip.amount}`}
-                  size={120}
+                  size={112}
                   level="M"
+                  style={{ width: "100%", height: "auto", display: "block" }}
                 />
               </div>
               <p className="text-sm font-bold text-white">{dashTip.amount} DASH</p>
@@ -1354,24 +1724,20 @@ export default function Stream() {
                   New messages
                 </button>
               )}
-              <div ref={chatContainerRef} className="h-48 overflow-y-auto space-y-1 mb-2 pr-1" style={{ scrollbarWidth: "thin" }}>
-                {chatMessages.length === 0 ? (
-                  <p className="text-[10px] text-pnp-textSecondary text-center py-4">
+              {chatMessages.length === 0 ? (
+                <div className="h-48 flex items-center justify-center mb-2">
+                  <p className="text-[10px] text-pnp-textSecondary text-center">
                     {chatConnected ? t.live.beFirstToChat : t.live.connectingToChat}
                   </p>
-                ) : (
-                  // FE-M4: render at most the latest 50 messages to avoid
-                  // long DOM lists degrading scroll performance on mobile.
-                  chatMessages.slice(-50).map((msg) => (
-                    <div key={msg.id} className="text-xs">
-                      <span className="font-medium text-gradient">@{msg.username}</span>
-                      <span className="text-pnp-textSecondary mx-1">·</span>
-                      <span className="text-pnp-textPrimary">{msg.content}</span>
-                    </div>
-                  ))
-                )}
-                <div ref={chatEndRef} />
-              </div>
+                </div>
+              ) : (
+                <ChatMessageList
+                  messages={chatMessages.slice(-50)}
+                  listRef={chatListRef}
+                  containerRef={chatContainerRef}
+                />
+              )}
+              <div ref={chatEndRef} />
             </div>
 
             {isAuthenticated ? (
@@ -1411,6 +1777,9 @@ export default function Stream() {
           </>
         )}
       </Card>
+
+      {/* Close paywall fragment gate */}
+      </>)}
 
       </div>
 

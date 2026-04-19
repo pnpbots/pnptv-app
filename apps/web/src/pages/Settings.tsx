@@ -979,6 +979,7 @@ export default function Settings() {
               ["payments", p.notifPayments],
               ["announcements", p.notifAnnouncements],
               ["hangout_calls", p.notifHangoutCalls],
+              ["going_live", "Notify me when creators I follow go live"],
             ] as const).map(([key, label]) => {
               const pref = notifPrefs[key] as ChannelPrefs | undefined;
               if (!pref) return null;
