@@ -1701,11 +1701,17 @@ const makeCreator = async (req, res) => {
       }
     }
 
-    // Build the UPDATE statement dynamically so we only touch provided fields
+    // Build the UPDATE statement dynamically so we only touch provided fields.
+    // Mirrors approveApplication so admin cherry-picks land the user in the
+    // same fully-featured state as the regular flow.
     const setClauses = [
       'role = $2',
       'creator_status = $3',
       'creator_enabled_at = NOW()',
+      'creator_terms_accepted_at = COALESCE(creator_terms_accepted_at, NOW())',
+      'creator_verified = true',
+      'creator_featured = true',
+      'creator_strikes = 0',
       'role_assigned_at = NOW()',
       'primary_role = $4',
       'updated_at = NOW()',
@@ -1736,11 +1742,41 @@ const makeCreator = async (req, res) => {
 
     const updatedUser = updateResult.rows[0];
 
-    // Optionally grant the creator-subscription lifetime entitlement
+    // Backfill subscription code, live_channel slug, and DM policy if not yet
+    // set. Each query is no-op when the column already has a value, so this is
+    // safe to call on existing creators too.
+    try {
+      await query(
+        `UPDATE users SET creator_subscription_code = generate_creator_code()
+          WHERE id = $1 AND creator_subscription_code IS NULL`,
+        [userId]
+      );
+      if (channelRef === undefined) {
+        await query(
+          `UPDATE users
+              SET live_channel = generate_live_channel(COALESCE(username, 'creator'), id)
+            WHERE id = $1 AND live_channel IS NULL`,
+          [userId]
+        );
+      }
+      await query(
+        `UPDATE users
+            SET privacy = COALESCE(privacy, '{}'::jsonb)
+                          || jsonb_build_object('creatorDmPolicy', 'subscribers_and_mutuals')
+          WHERE id = $1 AND (privacy->>'creatorDmPolicy') IS NULL`,
+        [userId]
+      );
+    } catch (finaliseErr) {
+      logger.warn('makeCreator: finalise step failed (non-fatal)', { userId, error: finaliseErr.message });
+    }
+
+    // Grant the lifetime pnp-member entitlement so the new creator gets full
+    // platform access (hangouts, live, DMs, calls) — but NOT prime exclusive
+    // content. See project_creator_entitlements policy.
     if (grantMonetization) {
       await EntitlementModel.grantEntitlement(
         String(userId),
-        'creator-subscription',
+        'pnp-member',
         {
           isLifetime: true,
           durationDays: 0,
@@ -1764,8 +1800,11 @@ const makeCreator = async (req, res) => {
       logger.warn('makeCreator: audit log write failed (non-fatal)', { error: auditErr.message });
     });
 
-    // Invalidate Redis user cache
+    // Invalidate Redis caches: user record, label, and per-add-on entitlement
+    // checks so the new creator's access takes effect on the very next request.
     await cache.del(`user:${userId}`);
+    await cache.del(`user_label:${userId}`);
+    await cache.delPattern(`ent:${userId}:*`);
 
     logger.info('Admin promoted user to creator', {
       adminId: admin?.id,
@@ -1815,12 +1854,20 @@ const revokeCreator = async (req, res) => {
 
     const updatedUser = updateResult.rows[0];
 
-    // Revoke the creator-subscription entitlement (if any)
+    // Revoke ONLY the lifetime pnp-member entitlement granted by an earlier
+    // admin promotion. We deliberately leave entitlements that came from a
+    // plan purchase (source_plan_id IS NOT NULL) or a payment
+    // (source_payment_id IS NOT NULL) untouched — losing creator status must
+    // never strip a paid membership.
     await query(
-      `DELETE FROM user_entitlements WHERE user_id = $1 AND add_on_id = 'creator-subscription'`,
+      `DELETE FROM user_entitlements
+        WHERE user_id = $1
+          AND add_on_id = 'pnp-member'
+          AND source_plan_id IS NULL
+          AND source_payment_id IS NULL`,
       [userId]
     ).catch((delErr) => {
-      logger.warn('revokeCreator: failed to delete creator-subscription entitlement (non-fatal)', {
+      logger.warn('revokeCreator: failed to delete admin-granted pnp-member entitlement (non-fatal)', {
         error: delErr.message,
         userId,
       });
@@ -1839,8 +1886,11 @@ const revokeCreator = async (req, res) => {
       logger.warn('revokeCreator: audit log write failed (non-fatal)', { error: auditErr.message });
     });
 
-    // Invalidate Redis user cache
+    // Invalidate caches so the demoted user no longer hits stale 'creator'
+    // entitlement state on the very next request.
     await cache.del(`user:${userId}`);
+    await cache.del(`user_label:${userId}`);
+    await cache.delPattern(`ent:${userId}:*`);
 
     logger.info('Admin revoked creator status', { adminId: admin?.id, userId });
 
