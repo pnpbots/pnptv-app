@@ -1141,7 +1141,11 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   }, [activeGroup]);
 
   const handleConfirmJoinCall = useCallback(async (choices: LocalUserChoices) => {
-    if (!activeGroup?.id) return;
+    console.log("[Chat] PreJoin submit", { groupId: activeGroup?.id, hasActive: activeGroup?.hasActiveCall, choices });
+    if (!activeGroup?.id) {
+      console.warn("[Chat] No activeGroup.id — aborting join");
+      return;
+    }
     setPreJoinChoices(choices);
     setShowCallPreview(false);
     try {
@@ -1162,11 +1166,18 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       } else {
         result = await startHangoutCall(activeGroup.id);
       }
+      console.log("[Chat] Got LiveKit token", { roomName: result.roomName, livekitUrl: result.livekitUrl });
       setCallToken(result.token);
       setCallRoomName(result.roomName);
       setCallLivekitUrl(result.livekitUrl || "wss://livekit.pnptv.app");
       setShowTelegramDock(true);
       setCallPanelDismissed(false);
+      // Scroll the dock into view — it mounts inline in the chat column, so
+      // if the user was scrolled elsewhere the dock can otherwise be off-screen.
+      requestAnimationFrame(() => {
+        const dock = document.querySelector('[data-lk-theme="default"]') as HTMLElement | null;
+        dock?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     } catch (err: unknown) {
       console.error("[Chat] Video call start/join failed", err);
       if (err instanceof ApiError) {
