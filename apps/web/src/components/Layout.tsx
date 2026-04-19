@@ -19,6 +19,63 @@ import { MediaMessage } from "@/components/hangouts/MediaMessage";
 
 const SIDEBAR_DM_BASE = import.meta.env.VITE_API_URL || "";
 
+// ── FlashBanner ───────────────────────────────────────────────────────────────
+// Reads a one-shot message stashed by another route (e.g. HangoutInviteRedirect
+// when the invite is invalid) from sessionStorage["pnptv:flash"] and shows it
+// for 5s. Self-contained so any future redirect can drop a flash message
+// without touching the toast/notifications system.
+
+type FlashPayload = { type?: "error" | "success" | "info"; message: string };
+
+function FlashBanner() {
+  const [flash, setFlash] = useState<FlashPayload | null>(null);
+
+  useEffect(() => {
+    let raw: string | null = null;
+    try { raw = sessionStorage.getItem("pnptv:flash"); } catch {}
+    if (!raw) return;
+    try { sessionStorage.removeItem("pnptv:flash"); } catch {}
+    let parsed: FlashPayload | null = null;
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj.message === "string") parsed = obj;
+    } catch {
+      // Allow plain string payloads too — be lenient about producers.
+      parsed = { message: raw };
+    }
+    if (!parsed) return;
+    setFlash(parsed);
+    const t = setTimeout(() => setFlash(null), 5000);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!flash) return null;
+
+  const accent =
+    flash.type === "success" ? "border-green-500/50 bg-green-500/15 text-green-200"
+    : flash.type === "info"  ? "border-sky-500/50 bg-sky-500/15 text-sky-200"
+    : "border-red-500/50 bg-red-500/15 text-red-200";
+
+  return (
+    <div
+      role="alert"
+      className={`fixed top-4 left-1/2 -translate-x-1/2 z-[300] max-w-sm px-4 py-2.5 rounded-2xl border backdrop-blur-md text-sm shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-2 duration-200 ${accent}`}
+    >
+      <span className="flex-1">{flash.message}</span>
+      <button
+        type="button"
+        onClick={() => setFlash(null)}
+        className="text-white/70 hover:text-white"
+        aria-label="Dismiss message"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 // ── HamburgerIcon / CloseIcon ─────────────────────────────────────────────────
 
 function HamburgerIcon() {
@@ -1458,6 +1515,11 @@ export function Layout() {
 
       {/* Toast notifications */}
       {isAuthenticated && <Toast />}
+
+      {/* One-shot flash messages stashed in sessionStorage by other routes
+          (e.g. failed hangout-invite redirect). Shown regardless of auth so the
+          message survives the redirect to /login. */}
+      <FlashBanner />
     </div>
   );
 }

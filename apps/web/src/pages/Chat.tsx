@@ -1035,6 +1035,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Invite link
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   // Member action loading
   const [memberActionLoading, setMemberActionLoading] = useState<string | null>(null);
@@ -2003,15 +2004,32 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       <div className="flex items-center gap-2">
                         <button
                           onClick={async () => {
+                            setInviteError(null);
                             try {
                               const data = await getHangoutInviteLink(activeGroup.id);
-                              if (data.success) {
-                                setInviteUrl(data.inviteUrl);
+                              if (!data.success || !data.inviteUrl) {
+                                setInviteError("Couldn't generate invite link");
+                                setTimeout(() => setInviteError(null), 3000);
+                                return;
+                              }
+                              setInviteUrl(data.inviteUrl);
+                              try {
                                 await navigator.clipboard.writeText(data.inviteUrl);
                                 setInviteCopied(true);
                                 setTimeout(() => setInviteCopied(false), 2000);
+                              } catch {
+                                // Clipboard API blocked (HTTP, no permission, in-app webview).
+                                // Link still showed below — user can long-press to copy manually.
+                                setInviteError("Tap link below to copy");
+                                setTimeout(() => setInviteError(null), 3000);
                               }
-                            } catch { /* silent */ }
+                            } catch (err) {
+                              const msg = err instanceof Error && err.message
+                                ? err.message
+                                : "Couldn't generate invite link";
+                              setInviteError(msg);
+                              setTimeout(() => setInviteError(null), 3000);
+                            }
                           }}
                           className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all active:scale-95"
                           style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)" }}
@@ -2020,6 +2038,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                           {inviteCopied ? "Copied!" : "Copy Invite Link"}
                         </button>
                       </div>
+                      {inviteError && (
+                        <p role="alert" className="text-[11px] text-red-300 mt-1.5">{inviteError}</p>
+                      )}
                       {inviteUrl && <p className="text-[10px] text-pnp-textSecondary mt-1 truncate">{inviteUrl}</p>}
                     </div>
 
