@@ -167,10 +167,16 @@ async function connectAndStream() {
   const audioSource = new AudioSource(SAMPLE_RATE, NUM_CHANNELS);
   const track = LocalAudioTrack.createAudioTrack('cristina-radio', audioSource);
   const publishOptions = new TrackPublishOptions();
-  publishOptions.source = 2; // MICROPHONE
-  publishOptions.audioEncoding = new AudioEncoding({ maxBitrate: BigInt(128_000) }); // Lower slightly for better stability
-  publishOptions.dtx = false;
-  publishOptions.red = true;
+  // SCREEN_SHARE_AUDIO (4) signals "system/music audio" to the SFU, which
+  // selects the music-tuned Opus preset (stereo, full-band, no aggressive
+  // VAD/noise-shaping). MICROPHONE (2) used the speech preset and made
+  // music sound tinny on the client side.
+  publishOptions.source = 4; // SCREEN_SHARE_AUDIO
+  // 192 kbps stereo Opus is the sweet spot for music; 128 kbps was leaving
+  // audible artifacts on dense mixes.
+  publishOptions.audioEncoding = new AudioEncoding({ maxBitrate: BigInt(192_000) });
+  publishOptions.dtx = false; // never silence quiet music passages
+  publishOptions.red = true;  // packet-loss redundancy
   await _room.localParticipant.publishTrack(track, publishOptions);
 
   runPlaybackLoop(audioSource, _generation);

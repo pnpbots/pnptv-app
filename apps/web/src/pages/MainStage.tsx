@@ -3,6 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
+import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useLiveKitRoomLifecycle } from "@/hooks/useLiveKitRoomLifecycle";
 import { getSocket } from "@/lib/socket";
 import {
@@ -244,6 +245,21 @@ function StageRoom({
 }: StageRoomProps) {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
+  const { setDucking, pause: pauseLocalMusic, play: resumeLocalMusic, isPlaying: localMusicPlaying } =
+    useMusicPlayer();
+  // Pause local Ampache on enter so it doesn't double-play with the
+  // cristina-ai LiveKit relay (same playlist served two ways → comb filter).
+  // Restore it on leave only if it was playing when we joined.
+  const wasLocalPlayingRef = useRef(false);
+  useEffect(() => {
+    wasLocalPlayingRef.current = localMusicPlaying;
+    if (localMusicPlaying) pauseLocalMusic();
+    return () => {
+      if (wasLocalPlayingRef.current) resumeLocalMusic();
+    };
+    // Mount/unmount only — don't re-pause every time the user toggles music.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const userVideoTracks = useMemo(
     () => tracks.filter((t) => t.participant.identity !== "cristina-ai"),
@@ -267,6 +283,9 @@ function StageRoom({
   }, []);
   const [showAttendants, setShowAttendants] = useState(false);
   const [videoIdx, setVideoIdx] = useState(0);
+  // Stage clips start muted (browser autoplay policy). Tap-for-sound unmutes
+  // and ducks the cristina-ai music so the clip's own audio is dominant.
+  const [stageVideoMuted, setStageVideoMuted] = useState(true);
   const stageVideoRef = useRef<HTMLVideoElement>(null);
 
   // Mic / Cam / Device state — stage rules: cam on by default, mic off, admins can override
@@ -384,29 +403,25 @@ function StageRoom({
     return () => { cancelled = true; };
   }, [room, connected, cameraOn, micOn, canToggleMic]);
 
-  // Subscribe-deny cristina-ai's audio publications. The stage bot relays
-  // background music into the room as a regular audio track; we want the
-  // stage to be music-free, so unsubscribe as soon as it publishes (or right
-  // away for tracks already published when we joined). Speaker mics from
-  // human participants are unaffected.
+  // Music ducking: when the stage clip is unmuted (its own audio is playing),
+  // lower the local music player ~9 dB so the clip's audio dominates without
+  // muting the cristina-ai stream entirely. The cristina-ai LiveKit relay is
+  // intentionally NOT denied — it IS the room's background music.
   useEffect(() => {
-    if (!room) return;
-    const denyCristinaAudio = (participant: Participant) => {
-      if (participant.identity !== "cristina-ai") return;
-      participant.audioTrackPublications?.forEach?.((pub: any) => {
-        try { pub.setSubscribed?.(false); } catch {}
-      });
-    };
-    const onTrackPublished = (_pub: unknown, participant: Participant) => denyCristinaAudio(participant);
-    const onParticipantConnected = (participant: Participant) => denyCristinaAudio(participant);
-    room.remoteParticipants?.forEach?.(denyCristinaAudio);
-    room.on(RoomEvent.TrackPublished, onTrackPublished as any);
-    room.on(RoomEvent.ParticipantConnected, onParticipantConnected as any);
-    return () => {
-      room.off(RoomEvent.TrackPublished, onTrackPublished as any);
-      room.off(RoomEvent.ParticipantConnected, onParticipantConnected as any);
-    };
-  }, [room]);
+    setDucking(!stageVideoMuted);
+    return () => setDucking(false);
+  }, [stageVideoMuted, setDucking]);
+
+  const toggleStageVideoAudio = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const v = stageVideoRef.current;
+    if (!v) return;
+    const nextMuted = !stageVideoMuted;
+    v.muted = nextMuted;
+    // Unmuting requires a user gesture in some browsers — replay if needed.
+    if (!nextMuted) v.play().catch(() => {});
+    setStageVideoMuted(nextMuted);
+  }, [stageVideoMuted]);
 
   // Reactions over LiveKit data channel
   useEffect(() => {
@@ -660,8 +675,9 @@ function StageRoom({
           className="w-full h-full object-cover"
           src={currentVideoSrc}
           autoPlay
-          // Stage clips are always silent — no background music on this page.
-          muted
+          // Starts muted (autoplay policy); the tap-for-sound button below
+          // unmutes and ducks the cristina-ai background music.
+          muted={stageVideoMuted}
           playsInline
           loop={primeVideos.length === 1}
           // Anti-rip: hide download menu, block PiP, swallow right-click.
@@ -701,6 +717,25 @@ function StageRoom({
       <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-black/60 backdrop-blur-sm pointer-events-none">
         <span className="text-white text-[9px] font-medium">Stage Feature</span>
       </div>
+      {/* Tap-for-sound — unmute the clip's own audio; ducks bg music when on */}
+      {currentVideoSrc && !videoGiveUp && (
+        <button
+          type="button"
+          onClick={toggleStageVideoAudio}
+          className="absolute bottom-1.5 right-1.5 flex items-center justify-center w-9 h-9 rounded-full bg-black/70 backdrop-blur-sm text-white hover:bg-black/90 active:scale-90 transition-all ring-1 ring-white/10"
+          aria-label={stageVideoMuted ? "Unmute stage video" : "Mute stage video"}
+        >
+          {stageVideoMuted ? (
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+            </svg>
+          )}
+        </button>
+      )}
     </div>
   );
 
