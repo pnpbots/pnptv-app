@@ -152,19 +152,28 @@ const cache = {
   async delPattern(pattern) {
     try {
       const client = getRedis();
+      // ioredis applies `keyPrefix` to commands like get/set/del but NOT to
+      // scanStream's `match` option — we have to prepend the prefix manually,
+      // then strip it back off before calling del() (which re-prefixes).
+      // Without this, delPattern silently matches zero keys when a prefix is
+      // configured and stale cache entries persist.
+      const prefix = (client.options && client.options.keyPrefix) || '';
+      const fullPattern = prefix + pattern;
       let deletedCount = 0;
       const batchSize = 100;
 
-      // Use SCAN instead of KEYS to avoid blocking Redis
       const stream = client.scanStream({
-        match: pattern,
+        match: fullPattern,
         count: batchSize,
       });
 
       for await (const keys of stream) {
         if (keys.length > 0) {
-          await client.del(...keys);
-          deletedCount += keys.length;
+          const stripped = prefix
+            ? keys.map((k) => (k.startsWith(prefix) ? k.slice(prefix.length) : k))
+            : keys;
+          await client.del(...stripped);
+          deletedCount += stripped.length;
         }
       }
 
@@ -343,16 +352,24 @@ const cache = {
   async scanKeys(pattern, limit = 1000) {
     try {
       const client = getRedis();
+      // Same ioredis quirk as delPattern: scanStream ignores keyPrefix on its
+      // `match`. Prepend the prefix on the way in, strip it on the way out so
+      // callers see the unprefixed keys they passed.
+      const prefix = (client.options && client.options.keyPrefix) || '';
+      const fullPattern = prefix + pattern;
       const keys = [];
       const batchSize = 100;
 
       const stream = client.scanStream({
-        match: pattern,
+        match: fullPattern,
         count: batchSize,
       });
 
       for await (const batch of stream) {
-        keys.push(...batch);
+        const stripped = prefix
+          ? batch.map((k) => (k.startsWith(prefix) ? k.slice(prefix.length) : k))
+          : batch;
+        keys.push(...stripped);
         if (keys.length >= limit) {
           stream.destroy(); // Stop scanning once limit is reached
           break;
