@@ -526,3 +526,132 @@
   border-radius: 0.75rem;
 }
 
+/* ── LiveKit in-call dock — PNPtv theme overrides ──────────────────
+   Scoped to .lk-pnptv-call so the PreJoin block above is untouched.
+   Targets the prebuilt <VideoConference /> component's internals via
+   its LiveKit CSS vars + a few element-level selectors. */
+.lk-pnptv-call[data-lk-theme="default"] {
+  --lk-bg: #000000;
+  --lk-bg2: rgba(255,255,255,0.05);
+  --lk-bg3: rgba(255,255,255,0.08);
+  --lk-bg4: rgba(255,255,255,0.12);
+  --lk-bg5: rgba(255,255,255,0.16);
+  --lk-fg: #ffffff;
+  --lk-fg2: rgba(255,255,255,0.92);
+  --lk-fg3: rgba(255,255,255,0.75);
+  --lk-border-color: rgba(123,97,255,0.2);
+  --lk-accent-fg: #ffffff;
+  --lk-accent-bg: #7B61FF;
+  --lk-accent2: #8F78FF;
+  --lk-accent3: #A391FF;
+  --lk-accent4: #B9AAFF;
+  --lk-danger-fg: #ffffff;
+  --lk-danger-bg: #D4007A;
+  --lk-danger2: #E0168B;
+  --lk-danger3: #EB2D9C;
+  --lk-danger4: #F543AD;
+  --lk-control-bg: rgba(255,255,255,0.08);
+  --lk-control-hover-bg: rgba(255,255,255,0.16);
+  --lk-control-active-bg: rgba(123,97,255,0.3);
+  --lk-control-active-hover-bg: rgba(123,97,255,0.45);
+  --lk-border-radius: 999px;
+  --lk-font-family: inherit;
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-control-bar {
+  background: rgba(12, 10, 20, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+  margin: 0 0.75rem 0.75rem;
+  padding: 0.4rem 0.5rem;
+  gap: 0.4rem;
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-button {
+  border-radius: 999px;
+  min-width: 44px;
+  min-height: 44px;
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-disconnect-button {
+  background: #D4007A;
+  color: #fff;
+  font-weight: 600;
+  padding: 0 1rem;
+  box-shadow: 0 4px 14px rgba(212,0,122,0.4);
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-disconnect-button:hover:not(:disabled) {
+  background: #E0168B;
+  box-shadow: 0 6px 18px rgba(212,0,122,0.55);
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-participant-tile {
+  border-radius: 1rem;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-participant-tile.lk-speaking,
+.lk-pnptv-call[data-lk-theme="default"] .lk-participant-tile[data-lk-speaking="true"] {
+  border-color: rgba(123,97,255,0.7);
+  box-shadow: 0 0 0 2px rgba(123,97,255,0.5), 0 4px 18px rgba(123,97,255,0.35);
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-participant-metadata {
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
+  margin: 0.5rem;
+  font-size: 0.75rem;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-chat {
+  background: rgba(12, 10, 20, 0.94);
+  border-left: 1px solid rgba(123,97,255,0.2);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-chat-form-button,
+.lk-pnptv-call[data-lk-theme="default"] .lk-chat-form input[type="submit"] {
+  background: #D4007A;
+  color: #fff;
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-settings-menu-modal {
+  background: rgba(19, 16, 26, 0.98);
+  border: 1px solid rgba(123,97,255,0.25);
+  border-radius: 1rem;
+  color: #fff;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-grid-layout {
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+.lk-pnptv-call[data-lk-theme="default"] .lk-focus-layout {
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+@supports (padding: env(safe-area-inset-bottom)) {
+  .lk-pnptv-call[data-lk-theme="default"] .lk-control-bar {
+    margin-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
