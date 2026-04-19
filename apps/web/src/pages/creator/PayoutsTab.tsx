@@ -3,7 +3,9 @@ import { ConfirmDialog } from "@/components/creators/ConfirmDialog";
 import { requestWithdrawal, type ModelWithdrawal } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
 
-type PayoutMethod = "bank_transfer" | "daimo";
+type PayoutMethod = "bank_transfer" | "dash";
+
+const DASH_ADDRESS_REGEX = /^[X7][1-9A-HJ-NP-Za-km-z]{33}$/;
 
 interface PayoutsTabProps {
   withdrawable: number;
@@ -18,19 +20,19 @@ export function PayoutsTab({ withdrawable, withdrawals, t, onReload }: PayoutsTa
   const [withdrawSuccess, setWithdrawSuccess] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>("bank_transfer");
-  const [daimoAddress, setDaimoAddress] = useState("");
-  const [daimoAddressError, setDaimoAddressError] = useState<string | null>(null);
+  const [dashAddress, setDashAddress] = useState("");
+  const [dashAddressError, setDashAddressError] = useState<string | null>(null);
 
   const validateAndConfirm = () => {
-    setDaimoAddressError(null);
-    if (payoutMethod === "daimo") {
-      const trimmed = daimoAddress.trim();
+    setDashAddressError(null);
+    if (payoutMethod === "dash") {
+      const trimmed = dashAddress.trim();
       if (!trimmed) {
-        setDaimoAddressError("Please enter your Daimo wallet address.");
+        setDashAddressError("Please enter your Dash wallet address.");
         return;
       }
-      if (trimmed.length < 10) {
-        setDaimoAddressError("Please enter a valid Daimo wallet address.");
+      if (!DASH_ADDRESS_REGEX.test(trimmed)) {
+        setDashAddressError("Invalid Dash address. Mainnet addresses start with X (or 7) and are 34 characters long.");
         return;
       }
     }
@@ -44,13 +46,13 @@ export function PayoutsTab({ withdrawable, withdrawals, t, onReload }: PayoutsTa
     setWithdrawSuccess(null);
     try {
       const paymentDetails: Record<string, string> = {};
-      if (payoutMethod === "daimo" && daimoAddress.trim()) {
-        paymentDetails.daimo_address = daimoAddress.trim();
+      if (payoutMethod === "dash" && dashAddress.trim()) {
+        paymentDetails.dash_address = dashAddress.trim();
       }
       const res = await requestWithdrawal(payoutMethod, paymentDetails);
       setWithdrawSuccess(
         t.withdrawAmount(res.data.withdrawal.amountUsd.toFixed(2)) +
-          " requested successfully. You will receive a confirmation email shortly."
+          " requested successfully. You will receive a Dash claim link by email shortly."
       );
       await onReload();
     } catch (err) {
@@ -77,7 +79,7 @@ export function PayoutsTab({ withdrawable, withdrawals, t, onReload }: PayoutsTa
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => { setPayoutMethod("bank_transfer"); setDaimoAddressError(null); }}
+              onClick={() => { setPayoutMethod("bank_transfer"); setDashAddressError(null); }}
               className="flex-1 text-xs font-semibold py-2 px-3 rounded-lg border transition-colors"
               style={{
                 background: payoutMethod === "bank_transfer" ? "rgba(94,209,196,0.12)" : "rgba(255,255,255,0.04)",
@@ -89,15 +91,15 @@ export function PayoutsTab({ withdrawable, withdrawals, t, onReload }: PayoutsTa
             </button>
             <button
               type="button"
-              onClick={() => { setPayoutMethod("daimo"); setDaimoAddressError(null); }}
+              onClick={() => { setPayoutMethod("dash"); setDashAddressError(null); }}
               className="flex-1 text-xs font-semibold py-2 px-3 rounded-lg border transition-colors"
               style={{
-                background: payoutMethod === "daimo" ? "rgba(94,209,196,0.12)" : "rgba(255,255,255,0.04)",
-                borderColor: payoutMethod === "daimo" ? "#5ED1C4" : "rgba(255,255,255,0.1)",
-                color: payoutMethod === "daimo" ? "#5ED1C4" : "#8E8E93",
+                background: payoutMethod === "dash" ? "rgba(0,141,228,0.12)" : "rgba(255,255,255,0.04)",
+                borderColor: payoutMethod === "dash" ? "#008DE4" : "rgba(255,255,255,0.1)",
+                color: payoutMethod === "dash" ? "#008DE4" : "#8E8E93",
               }}
             >
-              Daimo (USDC)
+              🥷 Dash
             </button>
           </div>
         </div>
@@ -117,28 +119,28 @@ export function PayoutsTab({ withdrawable, withdrawals, t, onReload }: PayoutsTa
           </div>
         )}
 
-        {payoutMethod === "daimo" && (
+        {payoutMethod === "dash" && (
           <div className="mb-4">
             <label className="block text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>
-              Daimo Wallet Address
+              Dash Wallet Address
             </label>
             <input
               type="text"
-              value={daimoAddress}
-              onChange={(e) => { setDaimoAddress(e.target.value); setDaimoAddressError(null); }}
-              placeholder="e.g. 0xabc... or your Daimo username"
-              className="w-full text-xs px-3 py-2 rounded-lg border outline-none"
+              value={dashAddress}
+              onChange={(e) => { setDashAddress(e.target.value); setDashAddressError(null); }}
+              placeholder="e.g. Xa1bc2d3e... (34 chars, starts with X or 7)"
+              className="w-full text-xs px-3 py-2 rounded-lg border outline-none font-mono"
               style={{
                 background: "rgba(255,255,255,0.05)",
-                borderColor: daimoAddressError ? "#ef4444" : "rgba(255,255,255,0.12)",
+                borderColor: dashAddressError ? "#ef4444" : "rgba(255,255,255,0.12)",
                 color: "#fff",
               }}
             />
-            {daimoAddressError && (
-              <p className="mt-1 text-xs" style={{ color: "#ef4444" }}>{daimoAddressError}</p>
+            {dashAddressError && (
+              <p className="mt-1 text-xs" style={{ color: "#ef4444" }}>{dashAddressError}</p>
             )}
-            <p className="mt-1 text-xs" style={{ color: "#8E8E93" }}>
-              Payouts are sent as USDC on the Optimism network.
+            <p className="mt-1 text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+              You'll receive an email with a claim link. Open it, paste this Dash address, and BTCPay sends the funds on-chain. Your USD balance is converted to Dash at the live exchange rate at claim time.
             </p>
           </div>
         )}
@@ -201,8 +203,8 @@ export function PayoutsTab({ withdrawable, withdrawals, t, onReload }: PayoutsTa
         open={showConfirm}
         title={t.withdrawConfirmTitle}
         message={
-          payoutMethod === "daimo"
-            ? `Request payout of $${withdrawable.toFixed(2)} via Daimo (USDC) to ${daimoAddress.trim()}?`
+          payoutMethod === "dash"
+            ? `Request payout of $${withdrawable.toFixed(2)} in Dash to ${dashAddress.trim()}?`
             : t.withdrawConfirmMsg(withdrawable.toFixed(2))
         }
         confirmLabel={t.withdrawBtn}

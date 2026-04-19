@@ -6901,6 +6901,59 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       return res.status(400).json({ success: false, error: 'Invalid JSON' });
     }
 
+    // ── Pull-Payment / Payout events (creator outbound payouts in Dash) ──────
+    // These events do NOT carry invoiceId — they carry payoutId + pullPaymentId.
+    // We act only on the terminal Completed/Cancelled events.
+    if (event.type === 'PayoutCompleted' || event.type === 'PayoutCancelled') {
+      const pullPaymentId = event.pullPaymentId;
+      if (!pullPaymentId) {
+        logger.warn('BTCPay payout webhook missing pullPaymentId', { type: event.type, payoutId: event.payoutId });
+        return res.status(400).json({ success: false, error: 'Missing pullPaymentId' });
+      }
+      try {
+        const CreatorPayoutService = require('../../services/creatorPayoutService');
+        if (event.type === 'PayoutCompleted') {
+          const result = await CreatorPayoutService.settleDashPullPayment(pullPaymentId, {
+            txHash: event.proofOfPayment?.txId || event.txId || null,
+            payoutId: event.payoutId || null,
+          });
+          return res.json({ success: true, type: 'payout_completed', ...result });
+        }
+        // PayoutCancelled: release the earnings back to 'available' so the next
+        // monthly run can re-attempt with whatever payout method the creator has now.
+        const { rows } = await query(
+          `UPDATE creator_payouts SET status = 'cancelled', notes = COALESCE(notes,'') || ' cancelled_via_webhook'
+           WHERE btcpay_pull_payment_id = $1 AND status IN ('pending', 'claimed')
+           RETURNING earning_ids, creator_id`,
+          [pullPaymentId]
+        );
+        if (rows[0]?.earning_ids) {
+          await query(
+            `UPDATE creator_earnings SET status = 'available'
+             WHERE id = ANY($1) AND status = 'in_payout'`,
+            [rows[0].earning_ids]
+          );
+          logger.info('BTCPay PayoutCancelled: released earnings back to available', {
+            pullPaymentId, creatorId: rows[0].creator_id, earningCount: rows[0].earning_ids.length,
+          });
+        }
+        return res.json({ success: true, type: 'payout_cancelled' });
+      } catch (payoutErr) {
+        logger.error('BTCPay payout webhook handler error', {
+          type: event.type, pullPaymentId, error: payoutErr.message,
+        });
+        return res.status(500).json({ success: false, error: 'payout_handler_error' });
+      }
+    }
+
+    // Other pull-payment lifecycle events we don't act on (audit-log only).
+    if (event.type && event.type.startsWith('Payout')) {
+      logger.info('BTCPay payout lifecycle event (no-op)', {
+        type: event.type, pullPaymentId: event.pullPaymentId, payoutId: event.payoutId,
+      });
+      return res.json({ success: true, ignored: true, reason: 'payout_lifecycle' });
+    }
+
     const invoiceId = event.invoiceId;
     if (!invoiceId) return res.status(400).json({ success: false, error: 'Missing invoiceId' });
 

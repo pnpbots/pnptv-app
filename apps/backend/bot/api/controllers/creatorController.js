@@ -144,14 +144,18 @@ const unsubscribeFromCreator = async (req, res) => {
 const getWalletAddress = async (req, res) => {
   try {
     const { rows } = await query(
-      'SELECT creator_wallet_address, creator_wallet_verified, payout_method, meru_account, creator_payout_chain_id, fiat_payout_method, fiat_payout_account FROM users WHERE id = $1',
+      `SELECT creator_dash_address, creator_wallet_address, creator_wallet_verified,
+              payout_method, meru_account, creator_payout_chain_id,
+              fiat_payout_method, fiat_payout_account
+       FROM users WHERE id = $1`,
       [req.user.id]
     );
     return res.json({
       success: true,
+      dashAddress: rows[0]?.creator_dash_address || null,
       address: rows[0]?.creator_wallet_address || null,
       verified: rows[0]?.creator_wallet_verified || false,
-      payoutMethod: rows[0]?.payout_method || 'crypto',
+      payoutMethod: rows[0]?.payout_method || 'dash',
       meruAccount: rows[0]?.meru_account || null,
       payoutChainId: rows[0]?.creator_payout_chain_id || 10,
       fiatPayoutMethod: rows[0]?.fiat_payout_method || null,
@@ -166,18 +170,27 @@ const getWalletAddress = async (req, res) => {
 // POST /api/webapp/creator/wallet
 const saveWalletAddress = async (req, res) => {
   try {
-    const { address, payoutMethod, meruAccount, chainId, fiatProvider, fiatAccount } = req.body || {};
-    const SUPPORTED_CHAIN_IDS = [10, 8453, 42161, 137, 1];
-    const method = payoutMethod === 'meru' ? 'meru' : payoutMethod === 'fiat' ? 'fiat' : 'crypto';
+    const { dashAddress, payoutMethod, meruAccount, fiatProvider, fiatAccount } = req.body || {};
+    // 'crypto' (USDC EVM) is no longer accepted — Dash is the only crypto path.
+    // Any legacy `creator_wallet_address` row stays read-only via getWalletAddress.
+    const method = payoutMethod === 'meru' ? 'meru'
+      : payoutMethod === 'fiat'  ? 'fiat'
+      : 'dash';                                 // default
 
-    if (method === 'crypto') {
-      if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
-        return res.status(400).json({ error: 'Invalid Ethereum wallet address. Must be 0x followed by 40 hex characters.' });
+    if (method === 'dash') {
+      const trimmed = (dashAddress || '').trim();
+      if (!trimmed || !/^[X7][1-9A-HJ-NP-Za-km-z]{33}$/.test(trimmed)) {
+        return res.status(400).json({
+          error: 'Invalid Dash wallet address. Dash mainnet addresses start with X (or 7 for P2SH) and are 34 characters long (e.g. Xa1bc…).',
+        });
       }
-      const resolvedChainId = chainId && SUPPORTED_CHAIN_IDS.includes(Number(chainId)) ? Number(chainId) : 10;
       await query(
-        'UPDATE users SET creator_wallet_address = $1, payout_method = $2, meru_account = NULL, creator_payout_chain_id = $3 WHERE id = $4',
-        [address.toLowerCase(), 'crypto', resolvedChainId, req.user.id]
+        `UPDATE users
+         SET creator_dash_address = $1,
+             payout_method = 'dash',
+             meru_account = NULL
+         WHERE id = $2`,
+        [trimmed, req.user.id]
       );
     } else if (method === 'fiat') {
       const VALID_FIAT_PROVIDERS = ['venmo', 'cashapp', 'zelle', 'paypal', 'wise', 'revolut'];

@@ -3075,22 +3075,24 @@ export function getCreatorDashboard(): Promise<{
 
 export function getCreatorWallet(): Promise<{
   success: boolean;
+  // `address` (legacy 0x EVM) and `payoutChainId` are read-only carry-overs
+  // from the retired USDC payout flow. New writes go through `dashAddress`.
   address: string | null;
   verified: boolean;
-  payoutMethod: "crypto" | "meru" | "fiat";
+  payoutMethod: "dash" | "meru" | "fiat" | "crypto"; // 'crypto' returned only for grandfathered rows
   meruAccount: string | null;
   payoutChainId: number;
   fiatPayoutMethod: string | null;
   fiatPayoutAccount: string | null;
+  dashAddress?: string | null;
 }> {
   return request("/api/webapp/creator/wallet");
 }
 
 export function saveCreatorWallet(payload: {
-  payoutMethod: "crypto" | "meru" | "fiat";
-  address?: string;
+  payoutMethod: "dash" | "meru" | "fiat";
+  dashAddress?: string;
   meruAccount?: string;
-  chainId?: number;
   fiatProvider?: string;
   fiatAccount?: string;
 }): Promise<{

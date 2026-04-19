@@ -6,20 +6,10 @@ import {
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
 
-const ETHEREUM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
-
 const TIERS: { key: "ice" | "crystal" | "diamond"; label: string; price: number; emoji: string }[] = [
   { key: "ice", label: "Ice", price: 5, emoji: "❄" },
   { key: "crystal", label: "Crystal", price: 10, emoji: "🔮" },
   { key: "diamond", label: "Diamond", price: 15, emoji: "💎" },
-];
-
-const CHAIN_OPTIONS: { id: number; name: string }[] = [
-  { id: 10, name: "Optimism" },
-  { id: 8453, name: "Base" },
-  { id: 42161, name: "Arbitrum" },
-  { id: 137, name: "Polygon" },
-  { id: 1, name: "Ethereum" },
 ];
 
 const FIAT_PROVIDERS: { key: string; label: string }[] = [
@@ -36,18 +26,17 @@ interface SettingsTabProps {
   t: CreatorStrings;
 }
 
+const DASH_ADDRESS_RE = /^[X7][1-9A-HJ-NP-Za-km-z]{33}$/;
+
 export function SettingsTab({ dashboard, t }: SettingsTabProps) {
-  // Payout method state
-  const [payoutMethod, setPayoutMethod] = useState<"crypto" | "meru" | "fiat">("crypto");
-  const [walletAddress, setWalletAddress] = useState<string>(dashboard.walletAddress || "");
+  // Payout method state — USDC retired; Dash is the only crypto option.
+  const [payoutMethod, setPayoutMethod] = useState<"dash" | "meru" | "fiat">("dash");
+  const [dashAddress, setDashAddress] = useState<string>("");
   const [meruAccount, setMeruAccount] = useState<string>("");
   const [walletLoading, setWalletLoading] = useState(true);
   const [walletSaving, setWalletSaving] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletSuccess, setWalletSuccess] = useState<string | null>(null);
-
-  // Chain preference state (for crypto payouts)
-  const [payoutChainId, setPayoutChainId] = useState<number>(10);
 
   // Fiat payout state
   const [fiatProvider, setFiatProvider] = useState<string>("");
@@ -59,10 +48,13 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
     try {
       const res = await getCreatorWallet();
       if (res.success) {
-        setPayoutMethod(res.payoutMethod || "crypto");
-        setWalletAddress(res.address || "");
+        // Normalize legacy 'crypto' / 'meru' (when no dash address present) to 'dash'
+        const method = res.payoutMethod === 'fiat' ? 'fiat'
+          : res.payoutMethod === 'meru' ? 'meru'
+          : 'dash';
+        setPayoutMethod(method);
+        setDashAddress(res.dashAddress || "");
         setMeruAccount(res.meruAccount || "");
-        setPayoutChainId(res.payoutChainId || 10);
         setFiatProvider(res.fiatPayoutMethod || "");
         setFiatAccount(res.fiatPayoutAccount || "");
       }
@@ -81,23 +73,23 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
     setWalletError(null);
     setWalletSuccess(null);
 
-    if (payoutMethod === "crypto") {
-      const trimmed = walletAddress.trim();
-      if (!ETHEREUM_ADDRESS_RE.test(trimmed)) {
-        setWalletError(t.errorInvalidAddress);
+    if (payoutMethod === "dash") {
+      const trimmed = dashAddress.trim();
+      if (!DASH_ADDRESS_RE.test(trimmed)) {
+        setWalletError("Invalid Dash address. Mainnet addresses start with X (or 7) and are 34 characters long.");
         return;
       }
       setWalletSaving(true);
       try {
-        const res = await saveCreatorWallet({ payoutMethod: "crypto", address: trimmed, chainId: payoutChainId });
+        const res = await saveCreatorWallet({ payoutMethod: "dash", dashAddress: trimmed });
         if (res.success) {
-          setWalletSuccess(t.walletSavedCrypto);
-          setWalletAddress(trimmed.toLowerCase());
+          setWalletSuccess("Dash payout address saved. You'll receive a claim link by email when your next payout is ready.");
+          setDashAddress(trimmed);
         } else {
-          setWalletError((res as { error?: string }).error || t.errorSaveWallet);
+          setWalletError((res as { error?: string }).error || "Failed to save Dash address.");
         }
       } catch (err) {
-        setWalletError(err instanceof Error ? err.message : t.errorSaveWallet);
+        setWalletError(err instanceof Error ? err.message : "Failed to save Dash address.");
       } finally {
         setWalletSaving(false);
       }
@@ -157,12 +149,12 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
         <p className="text-sm font-semibold text-white mb-1">{t.payoutMethodTitle}</p>
         <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>{t.payoutMethodDesc}</p>
 
-        {/* Method selector */}
-        <div className="flex gap-2 mb-4">
+        {/* Method selector — Dash is the only crypto option; USDC retired */}
+        <div className="grid grid-cols-3 gap-2 mb-4">
           {([
-            { key: "meru" as const, label: t.payoutMeruLabel, icon: "📱" },
-            { key: "crypto" as const, label: t.payoutCryptoLabel, icon: "🔑" },
-            { key: "fiat" as const, label: t.payoutFiatLabel || "Fiat", icon: "💵" },
+            { key: "dash" as const, label: "Dash",                       icon: "🥷" },
+            { key: "fiat" as const, label: t.payoutFiatLabel || "Fiat",  icon: "💵" },
+            { key: "meru" as const, label: t.payoutMeruLabel,            icon: "📱" },
           ]).map((opt) => (
             <button
               key={opt.key}
@@ -191,6 +183,25 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
 
         {walletLoading ? (
           <div className="h-10 bg-white/5 rounded-lg animate-pulse mb-3" />
+        ) : payoutMethod === "dash" ? (
+          <div className="mb-3">
+            <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>
+              Enter your Dash wallet address. When a payout is ready you'll get an email with a one-tap claim link — BTCPay sends Dash on-chain to this address. USD balance is converted to Dash at claim time using the live exchange rate.
+            </p>
+            <input
+              type="text"
+              value={dashAddress}
+              onChange={(e) => {
+                setDashAddress(e.target.value);
+                setWalletError(null);
+                setWalletSuccess(null);
+              }}
+              placeholder="Xa1bc2d3... (34 chars, starts with X or 7)"
+              spellCheck={false}
+              autoComplete="off"
+              className="w-full px-3 py-2.5 rounded-lg text-sm font-mono text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
+            />
+          </div>
         ) : payoutMethod === "meru" ? (
           <div className="mb-3">
             <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>{t.meruInputHint}</p>
@@ -237,34 +248,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
               className="w-full px-3 py-2.5 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
             />
           </div>
-        ) : (
-          <div className="mb-3">
-            <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>{t.cryptoInputHint}</p>
-            <input
-              type="text"
-              value={walletAddress}
-              onChange={(e) => {
-                setWalletAddress(e.target.value);
-                setWalletError(null);
-                setWalletSuccess(null);
-              }}
-              placeholder={t.cryptoPlaceholder}
-              spellCheck={false}
-              autoComplete="off"
-              className="w-full px-3 py-2.5 rounded-lg text-sm font-mono text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
-            />
-            <p className="text-xs mt-3 mb-1" style={{ color: "#8E8E93" }}>{t.chainSelectorHint || "Preferred payout chain"}</p>
-            <select
-              value={payoutChainId}
-              onChange={(e) => setPayoutChainId(Number(e.target.value))}
-              className="w-full px-3 py-2.5 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 transition-colors"
-            >
-              {CHAIN_OPTIONS.map((c) => (
-                <option key={c.id} value={c.id} className="bg-[#1a1a2e]">{c.name}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        ) : null}
 
         {walletSuccess && (
           <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
@@ -279,7 +263,11 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
 
         <button
           onClick={handleSaveWallet}
-          disabled={walletSaving || walletLoading || (payoutMethod === "crypto" ? !walletAddress.trim() : payoutMethod === "fiat" ? (!fiatProvider || !fiatAccount.trim()) : !meruAccount.trim())}
+          disabled={walletSaving || walletLoading || (
+            payoutMethod === "dash" ? !dashAddress.trim() :
+            payoutMethod === "fiat" ? (!fiatProvider || !fiatAccount.trim()) :
+                                      !meruAccount.trim()
+          )}
           className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
           style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
         >

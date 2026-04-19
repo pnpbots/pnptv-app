@@ -36,9 +36,19 @@ class WithdrawalService {
         );
       }
 
-      // For daimo method, require a wallet address
-      if (method === 'daimo' && !paymentDetails.daimo_address) {
-        throw new Error('Daimo wallet address is required for crypto withdrawals');
+      // For dash method, require a Dash wallet address (X... or 7... base58check, 34 chars).
+      // We accept the legacy 'daimo' method name as an alias during cutover but treat
+      // it as Dash so any in-flight UI request that still says 'daimo' doesn't break.
+      const isCrypto = method === 'dash' || method === 'daimo';
+      const cryptoAddress = paymentDetails.dash_address || paymentDetails.daimo_address || null;
+      if (isCrypto) {
+        method = 'dash';
+        if (!cryptoAddress) {
+          throw new Error('Dash wallet address is required for crypto withdrawals');
+        }
+        if (!/^[X7][1-9A-HJ-NP-Za-km-z]{33}$/.test(cryptoAddress)) {
+          throw new Error('Invalid Dash address format. Dash mainnet addresses start with X (or 7 for P2SH) and are 34 characters long.');
+        }
       }
 
       // Fetch user email for notifications
@@ -50,8 +60,8 @@ class WithdrawalService {
 
       // Build reason string that embeds payment details so _executeWithdrawal can read them
       let reason = `Auto-withdrawal of ${pendingEarnings.length} earnings records`;
-      if (method === 'daimo' && paymentDetails.daimo_address) {
-        reason += ` | daimo_address:${paymentDetails.daimo_address}`;
+      if (isCrypto && cryptoAddress) {
+        reason += ` | dash_address:${cryptoAddress}`;
       }
 
       // Create withdrawal request
@@ -85,7 +95,7 @@ class WithdrawalService {
           <tr><td><strong>Amount (USD)</strong></td><td>$${totalUsd.toFixed(2)}</td></tr>
           <tr><td><strong>Earnings Count</strong></td><td>${pendingEarnings.length}</td></tr>
           <tr><td><strong>Method</strong></td><td>${emailService.escapeHtml(method)}</td></tr>
-          ${method === 'daimo' && paymentDetails.daimo_address ? `<tr><td><strong>Daimo Address</strong></td><td>${emailService.escapeHtml(paymentDetails.daimo_address)}</td></tr>` : ''}
+          ${isCrypto && cryptoAddress ? `<tr><td><strong>Dash Address</strong></td><td>${emailService.escapeHtml(cryptoAddress)}</td></tr>` : ''}
           <tr><td><strong>Requested At</strong></td><td>${new Date().toISOString()}</td></tr>
         </table>
         <p style="margin-top:16px;color:#888;">Log into the PNPtv admin panel to approve or reject this request.</p>
@@ -258,21 +268,24 @@ class WithdrawalService {
       const withdrawalId = withdrawal.id;
       const now = new Date().toISOString();
 
-      // Extract daimo address embedded in reason field (set during requestWithdrawal)
-      let daimoAddress = null;
-      if (method === 'daimo' && withdrawal.reason) {
-        const match = withdrawal.reason.match(/daimo_address:([^\s|]+)/);
-        if (match) daimoAddress = match[1];
+      // Extract crypto address embedded in reason field (set during requestWithdrawal).
+      // Accept the legacy 'daimo_address:...' marker so any in-flight withdrawal request
+      // created before this cutover still surfaces its address to the admin email.
+      let cryptoAddress = null;
+      if ((method === 'dash' || method === 'daimo') && withdrawal.reason) {
+        const m = withdrawal.reason.match(/(?:dash_address|daimo_address):([^\s|]+)/);
+        if (m) cryptoAddress = m[1];
       }
 
       // Build admin notification email
       const methodLabel = method === 'bank_transfer' ? 'Bank Transfer'
-        : method === 'daimo' ? 'Daimo (Crypto / USDC on Optimism)'
+        : method === 'dash'   ? 'Dash (BTCPay)'
+        : method === 'daimo'  ? 'Daimo USDC (LEGACY — drain only)'
         : method === 'paypal' ? 'PayPal'
         : method.replace(/_/g, ' ');
 
-      const daimoRow = daimoAddress
-        ? `<tr><td style="padding:6px;color:#555;"><strong>Daimo Address</strong></td><td style="padding:6px;">${emailService.escapeHtml(daimoAddress)}</td></tr>`
+      const daimoRow = cryptoAddress
+        ? `<tr><td style="padding:6px;color:#555;"><strong>Dash Address</strong></td><td style="padding:6px;">${emailService.escapeHtml(cryptoAddress)}</td></tr>`
         : '';
 
       const adminHtml = `
