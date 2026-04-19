@@ -1728,8 +1728,18 @@ app.post('/api/webhook/epayco', webhookLimiter, webhookController.handleEpaycoWe
 app.post('/checkout/pnp', webhookLimiter, webhookController.handleEpaycoWebhook);
 app.post('/checkout/pnp/confirmation', webhookLimiter, webhookController.handleEpaycoWebhook);
 
-// Main Daimo webhook handler
-app.post('/api/webhooks/daimo', webhookLimiter, webhookController.handleDaimoWebhook);
+// Daimo webhook — RETIRED. Daimo Pay is no longer accepted; any straggler
+// delivery is acknowledged (200) so Daimo doesn't retry forever, but no
+// settlement work is performed. If a real Daimo settlement ever arrives after
+// this date it would mean an in-flight session we missed — investigate via the
+// dashboard at https://pay.daimo.com.
+app.post('/api/webhooks/daimo', webhookLimiter, (req, res) => {
+  logger.warn('Daimo webhook hit after retirement (no-op)', {
+    ip: req.ip,
+    headers: { 'user-agent': req.get('user-agent') },
+  });
+  res.status(200).json({ ok: true, retired: true });
+});
 // LiveKit webhook — participant_joined, participant_left, room_finished
 // express.raw() is required — livekit-server-sdk verifies the raw body signature
 app.post(
@@ -5615,8 +5625,8 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
   if (!Number.isFinite(hangoutId)) {
     return res.status(400).json({ error: 'Invalid hangout ID' });
   }
-  if (!['epayco', 'daimo'].includes(provider)) {
-    return res.status(400).json({ error: 'Provider must be epayco or daimo' });
+  if (!['epayco', 'dash'].includes(provider)) {
+    return res.status(400).json({ error: 'Provider must be epayco or dash' });
   }
 
   const { rows: groups } = await getPool().query(
@@ -5646,21 +5656,62 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
     return res.status(400).json({ error: 'You already have access to this hangout' });
   }
 
+  const hangoutPrice = Number(hangout.price_usd);
+  const scopeMetadata = {
+    hangoutGroupId: hangout.id,
+    hangoutName: hangout.name,
+    ...(email ? { email } : {}),
+  };
+
+  // ── Dash branch ───────────────────────────────────────────────────────────
+  // Open a BTCPay invoice and stash the hangout scope on the dash order. The
+  // BTCPay webhook reads order.metadata and routes through
+  // grantEntitlementsForPlan(..., 'dash', metadata) — same code path the
+  // ePayco webhook uses for hangout-access grants.
+  if (provider === 'dash') {
+    try {
+      const userId = String(user.telegram_id || user.id);
+      const orderId = `pnptv-hangout-${userId}-${hangout.id}-${Date.now()}`;
+      const invoice = await createDashInvoice({
+        usdAmount: hangoutPrice,
+        userId,
+        orderId,
+        description: `Hangout access: ${hangout.name}`,
+        redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/chat/${hangout.id}`,
+      });
+      const insertRes = await getPool().query(
+        `INSERT INTO dash_subscription_orders
+           (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
+         VALUES ($1, 'hangout_access', $2, $3, $4, 'pending', $5)
+         RETURNING id`,
+        [userId, email || null, hangoutPrice, invoice.invoiceId, JSON.stringify(scopeMetadata)]
+      );
+      return res.json({
+        success: true,
+        paymentId: String(insertRes.rows[0].id),
+        invoiceId: invoice.invoiceId,
+        checkoutUrl: invoice.checkoutUrl,
+      });
+    } catch (err) {
+      logger.error(`Hangout dash purchase failed: ${err.message}`);
+      if (err.message?.includes('not configured')) {
+        return res.status(503).json({ error: 'Crypto payments are not available yet. Please use Card.', code: 'BTCPAY_NOT_CONFIGURED' });
+      }
+      return res.status(500).json({ error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
+    }
+  }
+
+  // ── ePayco branch (unchanged) ─────────────────────────────────────────────
   // Create a hangout_access payment with the actual hangout price and scope
   // metadata atomically at insert time — no follow-up UPDATE, no TOCTOU window
   // where a webhook could race and see an unscoped unpriced payment.
-  const hangoutPrice = Number(hangout.price_usd);
   const PaymentService = require('../../services/paymentService');
   const payment = await PaymentService.createPayment({
     userId: user.id,
     planId: 'hangout_access',
     provider,
     amountOverride: hangoutPrice,
-    extraMetadata: {
-      hangoutGroupId: hangout.id,
-      hangoutName: hangout.name,
-      ...(email ? { email } : {}),
-    },
+    extraMetadata: scopeMetadata,
   });
 
   return res.json({
@@ -5682,8 +5733,8 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
   if (!Number.isFinite(channelId)) {
     return res.status(400).json({ error: 'Invalid channel ID' });
   }
-  if (!['epayco', 'daimo'].includes(provider)) {
-    return res.status(400).json({ error: 'Provider must be epayco or daimo' });
+  if (!['epayco', 'dash'].includes(provider)) {
+    return res.status(400).json({ error: 'Provider must be epayco or dash' });
   }
 
   const { rows: channels } = await getPool().query(
@@ -5704,6 +5755,49 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
     return res.status(400).json({ error: 'You already have access to this channel' });
   }
 
+  const channelPrice = Number(channel.price_usd);
+  const scopeMetadata = {
+    channelId: channel.id,
+    hangoutGroupId: channel.hangout_group_id,
+    channelName: channel.name,
+    ...(email ? { email } : {}),
+  };
+
+  // ── Dash branch ───────────────────────────────────────────────────────────
+  if (provider === 'dash') {
+    try {
+      const userId = String(user.telegram_id || user.id);
+      const orderId = `pnptv-channel-${userId}-${channel.id}-${Date.now()}`;
+      const invoice = await createDashInvoice({
+        usdAmount: channelPrice,
+        userId,
+        orderId,
+        description: `Channel access: ${channel.name}`,
+        redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/chat/${channel.hangout_group_id || ''}`,
+      });
+      const insertRes = await getPool().query(
+        `INSERT INTO dash_subscription_orders
+           (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
+         VALUES ($1, 'channel_access', $2, $3, $4, 'pending', $5)
+         RETURNING id`,
+        [userId, email || null, channelPrice, invoice.invoiceId, JSON.stringify(scopeMetadata)]
+      );
+      return res.json({
+        success: true,
+        paymentId: String(insertRes.rows[0].id),
+        invoiceId: invoice.invoiceId,
+        checkoutUrl: invoice.checkoutUrl,
+      });
+    } catch (err) {
+      logger.error(`Channel dash purchase failed: ${err.message}`);
+      if (err.message?.includes('not configured')) {
+        return res.status(503).json({ error: 'Crypto payments are not available yet. Please use Card.', code: 'BTCPAY_NOT_CONFIGURED' });
+      }
+      return res.status(500).json({ error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
+    }
+  }
+
+  // ── ePayco branch (unchanged) ─────────────────────────────────────────────
   // Create a channel_access payment. creatorId is overloaded to carry the
   // channel id so createPayment's dynamic-price branch looks up
   // creator_channels.price_usd. Scope metadata is stamped atomically via
@@ -5714,12 +5808,7 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
     planId: 'channel_access',
     provider,
     creatorId: String(channel.id),
-    extraMetadata: {
-      channelId: channel.id,
-      hangoutGroupId: channel.hangout_group_id,
-      channelName: channel.name,
-      ...(email ? { email } : {}),
-    },
+    extraMetadata: scopeMetadata,
   });
 
   return res.json({
@@ -6075,11 +6164,12 @@ app.get('/api/proxy/live/performers', requireSessionAuth, livePerformersLimiter,
 }));
 
 // POST /api/proxy/live/tips — Create a tip (member+ required)
-// paymentMethod: 'daimo' (default) | 'tokens' (instant, deducts from wallet)
+// paymentMethod: 'tokens' (instant, deducts from wallet) | 'dash' (BTCPay invoice)
 app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user;
 
-  const { performerId, amount, message, paymentMethod = 'daimo', idempotencyKey } = req.body;
+  let { paymentMethod = 'tokens' } = req.body;
+  const { performerId, amount, message, idempotencyKey } = req.body;
   if (!performerId || !amount) {
     return res.status(400).json({ success: false, error: 'performerId and amount are required' });
   }
@@ -6090,8 +6180,12 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
     return res.status(400).json({ success: false, error: `Amount must be one of: ${validAmounts.join(', ')}` });
   }
 
-  if (!['daimo', 'tokens'].includes(paymentMethod)) {
-    return res.status(400).json({ success: false, error: 'paymentMethod must be daimo or tokens' });
+  // Daimo retired — silently re-route any legacy 'daimo' selection to 'dash'
+  // so older clients that still send the old value keep working.
+  if (paymentMethod === 'daimo') paymentMethod = 'dash';
+
+  if (!['tokens', 'dash'].includes(paymentMethod)) {
+    return res.status(400).json({ success: false, error: 'paymentMethod must be tokens or dash' });
   }
 
   try {
@@ -6280,113 +6374,9 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
       });
     }
 
-    // --- Daimo payment flow (existing) ---
-    const tip = await PNPLiveTipsService.createTip(
-      userId,
-      null,       // model_id (legacy, no longer used)
-      null,       // booking_id
-      numAmount,
-      (message || '').slice(0, 200),
-      String(resolvedPerformerId)  // performer_id (resolved from channel ref if needed)
-    );
-
-    if (!tip) {
-      return res.status(500).json({ success: false, error: 'Failed to create tip' });
-    }
-
-    // Create a real payments row for the Daimo tip so we get a UUID paymentId
-    // that works with /checkout/:paymentId and PaymentModel.getById
-    const webAppUrl = process.env.WEB_APP_URL || 'https://pnptv.app';
-    let paymentUrl = null;
-    let tipPaymentId = null;
-    try {
-      const { createDaimoPayment } = require('../../config/daimo');
-
-      // Look up performer's wallet for P2P direct tip routing
-      let creatorWallet = null;
-      let creatorChainId = null;
-      let isP2P = false;
-      try {
-        const walletRes = await getPool().query(
-          `SELECT u.creator_wallet_address, u.creator_payout_chain_id
-           FROM performers p
-           JOIN users u ON u.id = p.user_id
-           WHERE p.id::text = $1 OR p.user_id::text = $1
-           LIMIT 1`,
-          [String(resolvedPerformerId)]
-        );
-        if (walletRes.rows.length > 0 && walletRes.rows[0].creator_wallet_address) {
-          creatorWallet = walletRes.rows[0].creator_wallet_address;
-          creatorChainId = walletRes.rows[0].creator_payout_chain_id || 10;
-          isP2P = true;
-        }
-      } catch (walletErr) {
-        logger.warn(`Tips: failed to look up creator wallet for P2P: ${walletErr.message}`);
-      }
-
-      // Create payment record first
-      const paymentRow = await getPool().query(
-        `INSERT INTO payments (user_id, plan_id, amount, currency, provider, payment_method, status, metadata)
-         VALUES ($1, $2, $3, 'USD', 'daimo', 'daimo', 'pending', $4::jsonb)
-         RETURNING id`,
-        [
-          userId,
-          null,
-          numAmount,
-          JSON.stringify({
-            tipId: tip.id,
-            performerId: String(resolvedPerformerId),
-            planId: `tip-${tip.id}`,
-            p2p: isP2P,
-            creatorWallet: creatorWallet || null,
-          }),
-        ]
-      );
-      tipPaymentId = paymentRow.rows[0].id;
-
-      const daimoResult = await createDaimoPayment({
-        amount: numAmount,
-        userId,
-        planId: `tip-${tip.id}`,
-        paymentId: tipPaymentId,
-        description: `Tip for ${performerName}`,
-        // P2P: route directly to creator's wallet if available
-        destinationAddress: creatorWallet || undefined,
-        destinationChainId: creatorChainId || undefined,
-      });
-      if (daimoResult.success && daimoResult.daimoPaymentId) {
-        // Use internal checkout page (matches /checkout/:paymentId route)
-        paymentUrl = `${webAppUrl}/checkout/${tipPaymentId}`;
-
-        // Store Daimo session data on the payment record
-        await getPool().query(
-          `UPDATE payments
-           SET daimo_payment_id = $2,
-               metadata = metadata || $3::jsonb
-           WHERE id = $1`,
-          [
-            tipPaymentId,
-            daimoResult.daimoPaymentId,
-            JSON.stringify({
-              daimoSessionId: daimoResult.daimoPaymentId,
-              daimoClientSecret: daimoResult.clientSecret || null,
-              daimo_client_secret: daimoResult.clientSecret || null,
-            }),
-          ]
-        );
-      }
-    } catch (daimoErr) {
-      logger.warn(`Daimo payment creation failed for tip, falling back: ${daimoErr.message}`);
-    }
-
-    res.json({
-      success: true,
-      tipId: tip.id,
-      paymentId: tipPaymentId,
-      paymentUrl,
-      amount: numAmount,
-      paymentMethod: 'daimo',
-    });
+    // Unreachable — the early payment-method gate above guarantees one of the
+    // two return-path blocks above (tokens / dash) handled the request.
+    return res.status(500).json({ success: false, error: 'Unhandled payment method' });
   } catch (error) {
     logger.error(`Live tips proxy create error: ${error.message}`);
     res.status(500).json({ success: false, error: 'Failed to create tip' });
@@ -7121,13 +7111,63 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
 
     // --- 1. Check if this is a subscription order (legacy Dash flow) ---
     const subResult = await dbQuery(
-      `SELECT id, user_id, plan_id, status, creator_id FROM dash_subscription_orders
+      `SELECT id, user_id, plan_id, status, creator_id, metadata FROM dash_subscription_orders
        WHERE btcpay_invoice_id = $1`,
       [invoiceId]
     );
 
     if (subResult.rows.length > 0) {
       const order = subResult.rows[0];
+
+      // ── Scoped resource purchases (hangout-access / channel-access) ──────
+      // When order.metadata carries hangoutGroupId or channelId we route the
+      // grant through PaymentService.grantEntitlementsForPlan with source='dash'
+      // — same code path the ePayco webhook uses for these plans. Skips the
+      // tier/users-table mutation block below (which would wrongly clobber
+      // the buyer's main subscription expiry).
+      const orderMetadata = order.metadata && typeof order.metadata === 'object'
+        ? order.metadata
+        : (typeof order.metadata === 'string' ? (() => { try { return JSON.parse(order.metadata); } catch { return null; } })() : null);
+      const isScopedPurchase = orderMetadata && (orderMetadata.hangoutGroupId || orderMetadata.channelId);
+
+      if (isScopedPurchase) {
+        // Atomic idempotency — only one webhook delivery should grant.
+        const settleScoped = await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW()
+             WHERE id = $1 AND status = 'pending' RETURNING id`,
+          [order.id]
+        );
+        if (settleScoped.rowCount === 0) {
+          return res.json({ success: true, alreadyProcessed: true });
+        }
+        try {
+          const PaymentService = require('../../services/paymentService');
+          const grantResult = await PaymentService.grantEntitlementsForPlan(
+            order.user_id,
+            order.plan_id,
+            'dash',
+            orderMetadata
+          );
+          logger.info('BTCPay scoped resource purchase granted', {
+            invoiceId,
+            orderId: order.id,
+            planId: order.plan_id,
+            scope: orderMetadata.hangoutGroupId ? `hangout:${orderMetadata.hangoutGroupId}` : `channel:${orderMetadata.channelId}`,
+            grantResult,
+          });
+          return res.json({ success: true, scopedPurchase: true, grantResult });
+        } catch (grantErr) {
+          logger.error('BTCPay scoped grant failed', {
+            invoiceId, orderId: order.id, planId: order.plan_id, error: grantErr.message,
+          });
+          await dbQuery(
+            `UPDATE dash_subscription_orders SET notes = $2 WHERE id = $1`,
+            [order.id, `scoped_grant_failed: ${grantErr.message}`.slice(0, 500)]
+          );
+          return res.status(500).json({ success: false, error: 'scoped_grant_failed', invoiceId });
+        }
+      }
+
       const isCreatorSub = order.plan_id === 'creator_monthly' && order.creator_id;
 
       // For creator_monthly there is no row in `plans`. Synthesize a plan-like
