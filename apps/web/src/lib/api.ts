@@ -1631,6 +1631,12 @@ export function getHangoutInviteLink(groupId: number): Promise<{ success: boolea
   return request(`/api/webapp/hangouts/groups/${groupId}/invite-link`);
 }
 
+export function joinHangoutByInvite(code: string): Promise<{ success: boolean; groupId: number }> {
+  return request(`/api/webapp/hangouts/groups/join-by-invite/${encodeURIComponent(code)}`, {
+    method: "POST",
+  });
+}
+
 export function updateHangoutNotification(groupId: number, mode: "all" | "mentions" | "muted"): Promise<{ success: boolean }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/notification`, {
     method: "PUT",

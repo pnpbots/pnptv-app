@@ -1,9 +1,52 @@
-import React, { lazy } from "react";
+import React, { lazy, useEffect, useState } from "react";
 import { createBrowserRouter, Navigate, useParams } from "react-router-dom";
+import { joinHangoutByInvite, ApiError } from "@/lib/api";
 
 function HangoutToChatRedirect() {
   const { groupId } = useParams();
   return <Navigate to={`/chat/${groupId}`} replace />;
+}
+
+function HangoutInviteRedirect() {
+  const { code } = useParams();
+  const [target, setTarget] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!code) {
+      setTarget("/?view=hangouts");
+      return;
+    }
+    joinHangoutByInvite(code)
+      .then((r) => {
+        if (cancelled) return;
+        setTarget(r?.groupId ? `/chat/${r.groupId}` : "/?view=hangouts");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 401) {
+          setTarget("/login");
+          return;
+        }
+        const msg = err instanceof Error ? err.message : "Invalid invite link";
+        try {
+          sessionStorage.setItem("pnptv:flash", JSON.stringify({ type: "error", message: msg }));
+        } catch {}
+        setTarget("/?view=hangouts");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [code]);
+
+  if (!target) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black text-white">
+        <div className="text-sm opacity-70">Joining hangout…</div>
+      </div>
+    );
+  }
+  return <Navigate to={target} replace />;
 }
 import { Layout } from "@/components/Layout";
 import { AdminLayout } from "@/components/admin/AdminLayout";
@@ -327,6 +370,7 @@ export const router = createBrowserRouter([
       },
       { path: "creator", element: <Navigate to="/creators" replace /> },
       { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },
+      { path: "hangouts/invite/:code", element: <HangoutInviteRedirect /> },
       { path: "hangouts/:groupId", element: <HangoutToChatRedirect /> },
       { path: "pnplive", element: <Navigate to="/live" replace /> },
       { path: "pnptv-haus", element: <Navigate to="/main-stage" replace /> },
