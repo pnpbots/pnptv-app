@@ -48,8 +48,9 @@ function escapeHtml(str) {
  *
  * @param {string} memberId    - users.id of the purchasing member
  * @param {number} packageId   - call_packages.id
- * @param {string} provider    - 'epayco' | 'daimo'
+ * @param {string} provider    - 'epayco' (Dash uses createCallCheckoutDash)
  * @param {string} email       - member email for payment confirmation
+ * @param {object|null} slotTimes - optional { startTimeUtc, endTimeUtc } for slot-locked bookings
  * @returns {{ paymentId: string, checkoutUrl: string, amount: number, currency: string, sku: string }}
  */
 async function createCallCheckout(memberId, packageId, provider, email, slotTimes = null) {
@@ -62,13 +63,6 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
   if (!pkg) {
     const err = new Error(`Call package ${packageId} not found or inactive`);
     err.code = 'PACKAGE_NOT_FOUND';
-    throw err;
-  }
-
-  if (provider === 'daimo') {
-    const err = new Error('Daimo Pay is temporarily unavailable. Please use Card or Dash.');
-    err.code = 'DAIMO_DISABLED';
-    err.status = 503;
     throw err;
   }
 
@@ -161,7 +155,6 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
       ]
     );
   }
-  // Daimo branch removed — provider==='daimo' is rejected at the early gate above.
 
   logger.info('[callCheckoutService] checkout created', {
     paymentId: payment.id,

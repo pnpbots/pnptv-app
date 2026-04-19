@@ -30,7 +30,9 @@ const ONLINE_TTL_SECONDS = 30 * 60;
 
 /**
  * Create a payment intent for a call package.
- * Body: { packageId: number, provider: 'epayco'|'daimo', email: string }
+ * Body: { packageId: number, provider: 'epayco', email: string,
+ *         startTimeUtc?: string, endTimeUtc?: string }
+ * Dash payments use POST /book-call/checkout/dash instead.
  */
 async function createCheckout(req, res) {
   try {
