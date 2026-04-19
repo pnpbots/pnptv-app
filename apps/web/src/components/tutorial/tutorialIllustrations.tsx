@@ -255,11 +255,11 @@ const illustrations: Record<string, React.ReactNode> = {
       <rect x="60" y="78" width="15" height="8" rx="2" fill="white" opacity="0.1" />
       <text x="55" y="50" fill={CYAN} fontSize="10" fontFamily="monospace" opacity="0.6">💳</text>
       <circle cx="140" cy="75" r="22" stroke={PINK} strokeWidth="1.5" fill={PINK} fillOpacity="0.06" />
-      <text x="129" y="72" fill={ORANGE} fontSize="14" fontFamily="monospace" opacity="0.7">$</text>
-      <text x="138" y="84" fill={PINK} fontSize="7" fontWeight="bold" fontFamily="monospace" opacity="0.8">USDC</text>
+      <text x="131" y="74" fill={ORANGE} fontSize="14" fontFamily="monospace" opacity="0.7">🥷</text>
+      <text x="138" y="84" fill={PINK} fontSize="7" fontWeight="bold" fontFamily="monospace" opacity="0.8">DASH</text>
       <path d="M90 75 L110 75" stroke={ORANGE} strokeWidth="2" strokeLinecap="round" strokeDasharray="4 3" />
       <text x="67" y="120" fill="white" fontSize="7" fontFamily="monospace" opacity="0.25">ePayco</text>
-      <text x="125" y="120" fill="white" fontSize="7" fontFamily="monospace" opacity="0.25">Daimo</text>
+      <text x="128" y="120" fill="white" fontSize="7" fontFamily="monospace" opacity="0.25">Dash</text>
     </Wrap>
   ),
 

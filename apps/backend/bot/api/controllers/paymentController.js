@@ -234,36 +234,20 @@ class PaymentController {
             return res.status(500).json({ success: false, error: 'Error de configuración del pago.' });
           }
         } else if (provider === 'daimo') {
+          // Daimo retired — only return an existing session for legacy in-flight
+          // lookups. Never create a NEW Daimo session; tell the user to start
+          // over with Card or Dash.
           const existingSessionId = payment.metadata?.daimo_payment_id || payment.daimo_payment_id;
           const existingClientSecret = payment.metadata?.daimo_client_secret || payment.daimo_client_secret;
           if (existingSessionId && existingClientSecret) {
             tokenPaymentData.daimoSessionId = existingSessionId;
             tokenPaymentData.daimoClientSecret = existingClientSecret;
           } else {
-            try {
-              const daimoResult = await DaimoConfig.createDaimoPayment({
-                amount: paymentAmountUsd,
-                userId,
-                planId: 'token_purchase',
-                chatId: '',
-                paymentId: actualPaymentId,
-                description: `${tokenAmount} PNP Tokens`,
-              });
-              if (daimoResult.success) {
-                tokenPaymentData.daimoSessionId = daimoResult.daimoPaymentId;
-                tokenPaymentData.daimoClientSecret = daimoResult.clientSecret;
-                await PaymentModel.updateStatus(actualPaymentId, 'pending', {
-                  daimo_payment_id: daimoResult.daimoPaymentId,
-                  daimo_client_secret: daimoResult.clientSecret,
-                });
-              } else {
-                throw new Error(daimoResult.error || 'Daimo payment creation failed');
-              }
-            } catch (daimoErr) {
-              logger.error('Error creating Daimo session for token purchase:', daimoErr);
-              tokenPaymentData.daimoSessionId = null;
-              tokenPaymentData.daimoClientSecret = null;
-            }
+            return res.status(410).json({
+              success: false,
+              error: 'Daimo / USDC checkout has been retired. Please start a new token purchase with Card or Dash.',
+              code: 'DAIMO_RETIRED',
+            });
           }
         }
 

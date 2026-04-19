@@ -150,7 +150,14 @@ class SubscriptionPaymentController {
         // Use existing ePayco integration
         checkoutUrl = `/api/payments/epayco-checkout/${payment.id}`;
       } else if (paymentMethod === 'daimo') {
-        checkoutUrl = `/api/payments/daimo-checkout/${payment.id}`;
+        // Daimo retired — refuse to mint a new session and tell the caller to
+        // switch to Card or Dash. The webhook handler stays wired only for
+        // straggler settlements of in-flight (pre-cutover) payments.
+        return res.status(410).json({
+          success: false,
+          error: 'Daimo / USDC checkout has been retired. Please use Card (ePayco) or Dash (BTCPay).',
+          code: 'DAIMO_RETIRED',
+        });
       }
 
       logger.info('Subscription checkout created', {

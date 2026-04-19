@@ -46,24 +46,12 @@ const startCronJobs = async (bot = null) => {
       TelegramSubscriptionReminderService.initialize(bot);
     }
 
-    // Daimo payment recovery - process stuck Daimo payments every 5 minutes
-    // Checks Daimo Pay API for completed payments and replays webhooks if needed
-    // More frequent than ePayco since Daimo has no 3DS delay, payments complete fast
-    cron.schedule(process.env.DAIMO_RECOVERY_CRON || '*/5 * * * *', async () => {
-      try {
-        logger.info('Running Daimo payment recovery process...');
-        const results = await PaymentRecoveryService.processStuckDaimoPayments();
-        logger.info('Daimo payment recovery completed', {
-          checked: results.checked,
-          recovered: results.recovered,
-          stillPending: results.stillPending,
-          failed: results.failed,
-          errors: results.errors,
-        });
-      } catch (error) {
-        logger.error('Error in Daimo payment recovery cron:', error);
-      }
-    });
+    // Daimo payment recovery — DISABLED (Daimo retired, all checkout surfaces
+    // moved to Dash/BTCPay). Webhook handler at /api/webhooks/daimo stays
+    // wired so any straggler settlement still credits the user, but the
+    // 5-min polling loop is gone. Zero pending Daimo rows existed at cutover
+    // (verified via DB query). To re-enable temporarily during incident
+    // response, uncomment and set DAIMO_RECOVERY_CRON in env.
 
     // ePayco payment recovery - process stuck pending payments every 2 hours
     // Checks ePayco API for completed payments and replays webhooks if needed
