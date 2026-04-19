@@ -491,36 +491,22 @@ const registerPrivateCallsProntoHandlers = (bot) => {
         return;
       }
 
-      // Create payment link
-      const paymentResult = await PrivateCallBookingService.createPaymentLink(booking.bookingId, 'epayco', 10);
+      // Show payment method picker — user chooses card (ePayco) or crypto (Dash)
+      ctx.session.privateCallBooking.step = 'payment_method';
 
-      if (!paymentResult.success) {
-        await ctx.editMessageText(
-          lang === 'es' ? '❌ Error creando enlace de pago.' : '❌ Error creating payment link.',
-          Markup.inlineKeyboard([[Markup.button.callback('🔄', 'PRIVATECALL_START')]])
-        );
-        return;
-      }
-
-      ctx.session.privateCallBooking.paymentId = paymentResult.paymentId;
-      ctx.session.privateCallBooking.step = 'payment';
-
-      // Show payment screen
       const message = lang === 'es'
-        ? `💳 *Pagar Reserva*\n\n` +
-          `💰 Total: $${(paymentResult.amountCents / 100).toFixed(2)} ${paymentResult.currency}\n\n` +
-          `⏰ Este enlace expira en 10 minutos.\n\n` +
-          `Haz clic en "Pagar Ahora" para completar tu reserva.`
-        : `💳 *Pay for Booking*\n\n` +
-          `💰 Total: $${(paymentResult.amountCents / 100).toFixed(2)} ${paymentResult.currency}\n\n` +
-          `⏰ This link expires in 10 minutes.\n\n` +
-          `Click "Pay Now" to complete your booking.`;
+        ? `💳 *Elige tu método de pago*\n\n` +
+          `Total: $${(booking.priceCents / 100).toFixed(2)} ${booking.currency || 'USD'}\n\n` +
+          `⏰ Tu reserva se mantiene 10 minutos mientras pagas.`
+        : `💳 *Choose your payment method*\n\n` +
+          `Total: $${(booking.priceCents / 100).toFixed(2)} ${booking.currency || 'USD'}\n\n` +
+          `⏰ Your booking is held for 10 minutes while you pay.`;
 
       await ctx.editMessageText(message, {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.url(lang === 'es' ? '💳 Pagar Ahora' : '💳 Pay Now', paymentResult.paymentLink)],
-          [Markup.button.callback(lang === 'es' ? '🔄 Verificar Pago' : '🔄 Check Payment', 'PC_REFRESH_PAYMENT_STATUS')],
+          [Markup.button.callback(lang === 'es' ? '💳 Tarjeta (ePayco)' : '💳 Card (ePayco)', 'PC_PAY_EPAYCO')],
+          [Markup.button.callback(lang === 'es' ? '₿ Cripto (Dash)' : '₿ Crypto (Dash)', 'PC_PAY_DASH')],
           [Markup.button.callback(lang === 'es' ? '❌ Cancelar' : '❌ Cancel', 'PC_CANCEL_BOOKING')],
         ]),
       });
@@ -533,6 +519,71 @@ const registerPrivateCallsProntoHandlers = (bot) => {
   // =====================================================
   // STEP 6: PAYMENT
   // =====================================================
+
+  async function showPaymentLinkScreen(ctx, lang, paymentResult, provider) {
+    const providerLabel = provider === 'dash'
+      ? (lang === 'es' ? 'Cripto (Dash)' : 'Crypto (Dash)')
+      : (lang === 'es' ? 'Tarjeta (ePayco)' : 'Card (ePayco)');
+
+    const message = lang === 'es'
+      ? `💳 *Pagar con ${providerLabel}*\n\n` +
+        `💰 Total: $${(paymentResult.amountCents / 100).toFixed(2)} ${paymentResult.currency}\n\n` +
+        `⏰ Este enlace expira en 10 minutos.\n\n` +
+        `Haz clic en "Pagar Ahora" para completar tu reserva.`
+      : `💳 *Pay with ${providerLabel}*\n\n` +
+        `💰 Total: $${(paymentResult.amountCents / 100).toFixed(2)} ${paymentResult.currency}\n\n` +
+        `⏰ This link expires in 10 minutes.\n\n` +
+        `Click "Pay Now" to complete your booking.`;
+
+    await ctx.editMessageText(message, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.url(lang === 'es' ? '💳 Pagar Ahora' : '💳 Pay Now', paymentResult.paymentLink)],
+        [Markup.button.callback(lang === 'es' ? '🔄 Verificar Pago' : '🔄 Check Payment', 'PC_REFRESH_PAYMENT_STATUS')],
+        [Markup.button.callback(lang === 'es' ? '❌ Cancelar' : '❌ Cancel', 'PC_CANCEL_BOOKING')],
+      ]),
+    });
+  }
+
+  async function handlePayByProvider(ctx, provider) {
+    try {
+      await ctx.answerCbQuery();
+      const lang = getLanguage(ctx);
+      const booking = ctx.session.privateCallBooking;
+
+      if (!booking?.bookingId) {
+        await ctx.editMessageText(
+          lang === 'es' ? '❌ Sesión expirada.' : '❌ Session expired.',
+          Markup.inlineKeyboard([[Markup.button.callback('🔄', 'PRIVATECALL_START')]])
+        );
+        return;
+      }
+
+      const paymentResult = await PrivateCallBookingService.createPaymentLink(booking.bookingId, provider, 10);
+      if (!paymentResult.success) {
+        const msg = paymentResult.error === 'btcpay_not_configured'
+          ? (lang === 'es' ? '❌ Pagos cripto no disponibles. Usa Tarjeta.' : '❌ Crypto payments unavailable. Use Card.')
+          : (lang === 'es' ? '❌ Error creando enlace de pago.' : '❌ Error creating payment link.');
+        await ctx.editMessageText(
+          msg,
+          Markup.inlineKeyboard([[Markup.button.callback('🔄', 'PRIVATECALL_START')]])
+        );
+        return;
+      }
+
+      ctx.session.privateCallBooking.paymentId = paymentResult.paymentId;
+      ctx.session.privateCallBooking.provider = provider;
+      ctx.session.privateCallBooking.step = 'payment';
+
+      await showPaymentLinkScreen(ctx, lang, paymentResult, provider);
+    } catch (error) {
+      logger.error(`Error in PC_PAY_${provider.toUpperCase()}:`, error);
+      await ctx.answerCbQuery('Error', true);
+    }
+  }
+
+  bot.action('PC_PAY_EPAYCO', (ctx) => handlePayByProvider(ctx, 'epayco'));
+  bot.action('PC_PAY_DASH', (ctx) => handlePayByProvider(ctx, 'dash'));
 
   bot.action('PC_REFRESH_PAYMENT_STATUS', async (ctx) => {
     try {

@@ -5470,7 +5470,9 @@ export function getCreatorCallEarnings(): Promise<{
 
 export interface CallCheckoutPayload {
   packageId: number;
-  provider: "epayco" | "dash";
+  // For Dash payments use createCallCheckoutDash() — this endpoint is
+  // card-only (ePayco 3DS 2.0 flow). Server rejects any other value.
+  provider: "epayco";
   email: string;
   quantity?: number;
   selectedSlot?: string | null;

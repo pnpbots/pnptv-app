@@ -45,8 +45,10 @@ async function createCheckout(req, res) {
     if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
     }
-    if (!provider || !['epayco', 'daimo'].includes(provider)) {
-      return res.status(400).json({ success: false, error: 'provider must be epayco or daimo' });
+    if (!provider || !['epayco'].includes(provider)) {
+      // Dash is handled by the dedicated /book-call/checkout/dash endpoint
+      // since it needs startTime/endTime params and a BTCPay invoice flow.
+      return res.status(400).json({ success: false, error: 'provider must be epayco (use /book-call/checkout/dash for crypto)' });
     }
     if (!email || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ success: false, error: 'A valid email is required' });

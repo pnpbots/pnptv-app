@@ -356,9 +356,30 @@ class PrivateCallBookingService {
       const domain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
 
       switch (provider) {
-        case 'epayco':
-          paymentLink = `${domain}/payment/${paymentId}`;
+        case 'epayco': {
+          // Bridge booking_payments → payments so the existing /payment/:id
+          // ePayco checkout page (which reads from PaymentModel) can serve the
+          // booking payment. ePayco webhook routes back to this booking via
+          // metadata.type === 'private_call_booking'.
+          const PaymentModel = require('../models/paymentModel');
+          const usdAmount = Number(booking.priceCents) / 100;
+          const paymentsRow = await PaymentModel.create({
+            userId: String(booking.userId),
+            planId: 'private_call_booking',
+            provider: 'epayco',
+            amount: usdAmount,
+            currency: 'USD',
+            metadata: {
+              type: 'private_call_booking',
+              bookingPaymentId: paymentId,
+              bookingId,
+              performerName: booking.performerName,
+              durationMinutes: booking.durationMinutes,
+            },
+          });
+          paymentLink = `${domain}/payment/${paymentsRow.id}`;
           break;
+        }
 
         case 'dash': {
           // BTCPay invoice in USD. On settlement, the /api/webhooks/btcpay

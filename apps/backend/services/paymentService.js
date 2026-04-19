@@ -1274,6 +1274,46 @@ class PaymentService {
           return { success: true, type: 'token_purchase' };
         }
 
+        // Handle private-call booking — route to PrivateCallBookingService which
+        // flips booking_payments.status, confirms bookings row, creates the
+        // LiveKit session, and schedules reminders.
+        if (payment?.metadata?.type === 'private_call_booking' && payment?.metadata?.bookingPaymentId) {
+          try {
+            const PrivateCallBookingService = require('./privateCallBookingService');
+            const settleResult = await PrivateCallBookingService.handlePaymentComplete(
+              payment.metadata.bookingPaymentId,
+              x_ref_payco || x_transaction_id
+            );
+            if (!settleResult?.success) {
+              logger.error('ePayco: private-call booking settlement failed', {
+                paymentId: paymentIdOrType,
+                bookingPaymentId: payment.metadata.bookingPaymentId,
+                error: settleResult?.error,
+                refPayco: x_ref_payco,
+              });
+              return { success: false, error: settleResult?.error || 'booking_settlement_failed' };
+            }
+            await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
+              transaction_id: x_transaction_id,
+              reference_code: x_ref_payco,
+              webhook_processed_at: new Date().toISOString(),
+            });
+            logger.info('ePayco: private-call booking settled', {
+              paymentId: paymentIdOrType,
+              bookingPaymentId: payment.metadata.bookingPaymentId,
+              refPayco: x_ref_payco,
+            });
+          } catch (bookingErr) {
+            logger.error('ePayco private-call booking settlement error', {
+              error: bookingErr.message,
+              paymentId: paymentIdOrType,
+              refPayco: x_ref_payco,
+            });
+            return { success: false, error: bookingErr.message };
+          }
+          return { success: true, type: 'private_call_booking' };
+        }
+
         // Handle call package purchase — credit call credits instead of activating a subscription
         if (payment?.metadata?.type === 'call_package' && paymentIdOrType) {
           try {
