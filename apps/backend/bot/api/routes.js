@@ -6770,6 +6770,49 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
         ),
       ]);
 
+      // Expire any awaiting_payment booking rows linked to this invoice via the order metadata
+      try {
+        const expiredOrders = await dbQuery(
+          `SELECT metadata FROM dash_subscription_orders
+           WHERE btcpay_invoice_id = $1
+             AND metadata->>'resource' IN ('call_package', 'private_call_booking')`,
+          [invoiceId]
+        );
+        for (const expiredOrder of expiredOrders.rows) {
+          const meta = expiredOrder.metadata && typeof expiredOrder.metadata === 'object'
+            ? expiredOrder.metadata
+            : (() => { try { return JSON.parse(expiredOrder.metadata); } catch { return null; } })();
+          if (meta?.paymentId) {
+            if (meta.resource === 'private_call_booking') {
+              await dbQuery(
+                `UPDATE booking_payments SET status = 'expired' WHERE id = $1 AND status IN ('created','pending')`,
+                [meta.paymentId]
+              );
+              if (meta.bookingId) {
+                await dbQuery(
+                  `UPDATE bookings SET status = 'expired', updated_at = NOW()
+                   WHERE id = $1 AND status = 'awaiting_payment'`,
+                  [meta.bookingId]
+                );
+              }
+            } else {
+              await dbQuery(
+                `UPDATE bookings SET status = 'expired', updated_at = NOW()
+                 WHERE payment_id = $1 AND status = 'awaiting_payment'`,
+                [meta.paymentId]
+              );
+            }
+            logger.info('BTCPay: expired call booking on invoice expiry', {
+              invoiceId, paymentId: meta.paymentId, resource: meta.resource,
+            });
+          }
+        }
+      } catch (expireBookingErr) {
+        logger.warn('BTCPay: failed to expire call booking on invoice expiry (non-critical)', {
+          invoiceId, error: expireBookingErr.message,
+        });
+      }
+
       const affected = (subUpd.rowCount || 0) + (purchUpd.rowCount || 0);
       logger.info(`BTCPay webhook: ${event.type}`, { invoiceId, rowsUpdated: affected });
       return res.json({ success: true, type: terminalStatus, rowsUpdated: affected });
@@ -6975,6 +7018,94 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
             [order.id, `ticket_settlement_failed: ${ticketErr.message}`.slice(0, 500)]
           );
           return res.status(500).json({ success: false, error: 'ticket_settlement_failed', invoiceId });
+        }
+      }
+
+      // ── Private-call booking (Dash/BTCPay, bot flow) ────────────────────
+      if (orderMetadata?.resource === 'private_call_booking' && orderMetadata?.paymentId) {
+        const settleBooking = await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW()
+           WHERE id = $1 AND status = 'pending' RETURNING id`,
+          [order.id]
+        );
+        if (settleBooking.rowCount === 0) {
+          return res.json({ success: true, alreadyProcessed: true });
+        }
+        try {
+          const PrivateCallBookingService = require('../../services/privateCallBookingService');
+          const settleResult = await PrivateCallBookingService.handlePaymentComplete(
+            orderMetadata.paymentId,
+            invoiceId
+          );
+          if (!settleResult?.success) {
+            logger.error('BTCPay: private-call booking settlement failed', {
+              invoiceId, paymentId: orderMetadata.paymentId, error: settleResult?.error,
+            });
+            await dbQuery(
+              `UPDATE dash_subscription_orders SET notes = $2 WHERE id = $1`,
+              [order.id, `booking_settlement_failed: ${settleResult?.error || 'unknown'}`.slice(0, 500)]
+            );
+            return res.status(500).json({ success: false, error: 'booking_settlement_failed', invoiceId });
+          }
+          await markInvoiceProcessed(invoiceId, {
+            userId: order.user_id,
+            paymentId: orderMetadata.paymentId,
+            source: 'private_call_booking',
+          });
+          logger.info('BTCPay: private-call booking settled', {
+            invoiceId,
+            userId: order.user_id,
+            paymentId: orderMetadata.paymentId,
+            bookingId: orderMetadata.bookingId,
+          });
+          return res.json({ success: true, type: 'private_call_booking', paymentId: orderMetadata.paymentId });
+        } catch (bookingErr) {
+          logger.error('BTCPay: private-call booking settlement error', {
+            invoiceId, orderId: order.id, error: bookingErr.message,
+          });
+          await dbQuery(
+            `UPDATE dash_subscription_orders SET notes = $2 WHERE id = $1`,
+            [order.id, `booking_settlement_error: ${bookingErr.message}`.slice(0, 500)]
+          );
+          return res.status(500).json({ success: false, error: 'booking_settlement_error', invoiceId });
+        }
+      }
+
+      // ── Call package purchase (Dash/BTCPay) ─────────────────────────────
+      if (orderMetadata?.resource === 'call_package' && orderMetadata?.paymentId) {
+        // Atomic idempotency — flip status once
+        const settleCall = await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW()
+           WHERE id = $1 AND status = 'pending' RETURNING id`,
+          [order.id]
+        );
+        if (settleCall.rowCount === 0) {
+          return res.json({ success: true, alreadyProcessed: true });
+        }
+        try {
+          const callCheckoutSvc = require('../../services/callCheckoutService');
+          await callCheckoutSvc.onCallPaymentSuccess(orderMetadata.paymentId);
+          await markInvoiceProcessed(invoiceId, {
+            userId: order.user_id,
+            paymentId: orderMetadata.paymentId,
+            source: 'call_package',
+          });
+          logger.info('BTCPay: call package settled', {
+            invoiceId,
+            userId: order.user_id,
+            paymentId: orderMetadata.paymentId,
+            bookingId: orderMetadata.bookingId,
+          });
+          return res.json({ success: true, type: 'call_package', paymentId: orderMetadata.paymentId });
+        } catch (callErr) {
+          logger.error('BTCPay: call package settlement failed', {
+            invoiceId, orderId: order.id, error: callErr.message,
+          });
+          await dbQuery(
+            `UPDATE dash_subscription_orders SET notes = $2 WHERE id = $1`,
+            [order.id, `call_settlement_failed: ${callErr.message}`.slice(0, 500)]
+          );
+          return res.status(500).json({ success: false, error: 'call_settlement_failed', invoiceId });
         }
       }
 
@@ -7636,6 +7767,16 @@ app.post('/api/webapp/book-call/checkout',
   requireSessionAuth,
   asyncHandler(callBookingController.createCheckout));
 
+// Dash/BTCPay checkout for call packages
+app.post('/api/webapp/book-call/checkout/dash',
+  requireSessionAuth,
+  asyncHandler(callBookingController.createCheckoutDash));
+
+// Payment-status poller for Dash checkout flow (must be before /:bookingId catch-all)
+app.get('/api/webapp/bookings/:bookingId/payment-status',
+  requireSessionAuth,
+  asyncHandler(callBookingController.getBookingPaymentStatus));
+
 app.get('/api/webapp/bookings/:bookingId',
   requireSessionAuth,
   asyncHandler(callBookingController.getBooking));
@@ -7678,6 +7819,11 @@ app.patch('/api/webapp/bookings/:bookingId/complete',
 app.post('/api/webapp/bookings/:bookingId/cancel',
   requireSessionAuth,
   asyncHandler(callBookingController.cancelBooking));
+
+// Member: upcoming confirmed bookings (with 15-min join window)
+app.get('/api/webapp/bookings/upcoming',
+  requireSessionAuth,
+  asyncHandler(callBookingController.getUpcomingBookings));
 
 // Creator: get/set next show date
 app.get('/api/webapp/creator/next-show-date',

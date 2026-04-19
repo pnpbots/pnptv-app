@@ -353,17 +353,57 @@ class PrivateCallBookingService {
       // Generate payment link based on provider
       let paymentLink = '';
       const paymentId = payment.id;
+      const domain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
 
       switch (provider) {
-
-        case 'daimo':
-          paymentLink = `${process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app'}/daimo-checkout/${paymentId}`;
-          break;
         case 'epayco':
-          paymentLink = `${process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app'}/payment/${paymentId}`;
+          paymentLink = `${domain}/payment/${paymentId}`;
           break;
+
+        case 'dash': {
+          // BTCPay invoice in USD. On settlement, the /api/webhooks/btcpay
+          // handler reads dash_subscription_orders.metadata.resource and
+          // routes to PrivateCallBookingService.handlePaymentComplete.
+          const { createInvoice, isConfigured: btcpayConfigured } = require('../config/btcpay');
+          if (!btcpayConfigured()) {
+            return { success: false, error: 'btcpay_not_configured' };
+          }
+          const usdAmount = Number(booking.priceCents) / 100;
+          const invoice = await createInvoice({
+            amount: usdAmount,
+            currency: 'USD',
+            orderId: `booking-${bookingId}`,
+            userId: String(booking.userId),
+            planId: 'private_call_booking',
+            metadata: {
+              resource: 'private_call_booking',
+              bookingId,
+              paymentId,
+            },
+            redirectUrl: `${domain}/private-call/booking/${bookingId}?payment=${paymentId}`,
+          });
+          const { query: dbQuery } = require('../config/postgres');
+          await dbQuery(
+            `INSERT INTO dash_subscription_orders
+             (user_id, plan_id, usd_amount, btcpay_invoice_id, status, metadata)
+             VALUES ($1, 'private_call_booking', $2, $3, 'pending', $4)`,
+            [
+              String(booking.userId),
+              usdAmount,
+              invoice.invoiceId,
+              JSON.stringify({
+                resource: 'private_call_booking',
+                bookingId,
+                paymentId,
+              }),
+            ]
+          );
+          paymentLink = invoice.checkoutLink;
+          break;
+        }
+
         default:
-          paymentLink = `${process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app'}/checkout/${paymentId}`;
+          paymentLink = `${domain}/checkout/${paymentId}`;
       }
 
       // Update payment with link

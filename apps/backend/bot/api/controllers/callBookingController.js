@@ -741,9 +741,242 @@ async function setNextShowDate(req, res) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// POST /api/webapp/book-call/checkout/dash
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a BTCPay Dash invoice for a call package purchase.
+ * Body: { packageId: number, startTimeUtc: string (ISO 8601), endTimeUtc: string (ISO 8601) }
+ * Returns: { invoiceId, checkoutUrl, paymentId, bookingId, amountUsd, expiresAt }
+ */
+async function createCheckoutDash(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+
+    const { packageId, startTimeUtc, endTimeUtc } = req.body;
+
+    if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
+      return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
+    }
+
+    const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+    if (!startTimeUtc || typeof startTimeUtc !== 'string' || !ISO_RE.test(startTimeUtc)) {
+      return res.status(400).json({ success: false, error: 'startTimeUtc must be an ISO 8601 timestamp with timezone' });
+    }
+    if (!endTimeUtc || typeof endTimeUtc !== 'string' || !ISO_RE.test(endTimeUtc)) {
+      return res.status(400).json({ success: false, error: 'endTimeUtc must be an ISO 8601 timestamp with timezone' });
+    }
+
+    const start = new Date(startTimeUtc);
+    const end = new Date(endTimeUtc);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ success: false, error: 'startTimeUtc or endTimeUtc is not a valid date' });
+    }
+    if (start >= end) {
+      return res.status(400).json({ success: false, error: 'endTimeUtc must be after startTimeUtc' });
+    }
+    if (start <= new Date()) {
+      return res.status(400).json({ success: false, error: 'startTimeUtc must be in the future' });
+    }
+
+    const result = await callCheckoutService.createCallCheckoutDash({
+      userId,
+      packageId: Number(packageId),
+      startTimeUtc,
+      endTimeUtc,
+    });
+
+    return res.status(201).json({ success: true, ...result });
+  } catch (err) {
+    logger.error('[callBookingController] createCheckoutDash error', { error: err.message, code: err.code });
+
+    if (err.code === 'PACKAGE_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Call package not found or inactive' });
+    }
+    if (err.code === 'PERFORMER_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Creator profile not found' });
+    }
+    if (err.code === 'SLOT_TAKEN') {
+      return res.status(409).json({ success: false, error: 'The requested time slot is no longer available' });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to create Dash checkout' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/webapp/bookings/:bookingId/payment-status
+// ---------------------------------------------------------------------------
+
+/**
+ * Poll payment status for a booking created via the Dash checkout flow.
+ * Auth: only the buyer (user_id) or the performer (via performers table) may read.
+ *
+ * Returns:
+ *   { status: 'pending'|'paid'|'expired'|'failed', bookingId, roomName? }
+ */
+async function getBookingPaymentStatus(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const callerUserId = String(sessionUser.id);
+
+    // bookingId is a UUID (bookings.id)
+    const { bookingId } = req.params;
+    if (!bookingId || typeof bookingId !== 'string') {
+      return res.status(400).json({ success: false, error: 'Invalid bookingId' });
+    }
+
+    // Load booking + join payment + performer user for auth check
+    const result = await query(
+      `SELECT
+         b.id                  AS booking_id,
+         b.user_id             AS member_id,
+         b.status              AS booking_status,
+         b.payment_id,
+         b.start_time_utc,
+         b.end_time_utc,
+         b.credit_id,
+         p_row.status          AS payment_status,
+         p_row.metadata        AS payment_metadata,
+         perf_user.id          AS performer_user_id,
+         COALESCE(b.room_name, CONCAT('booking-', b.id::text)) AS room_name
+       FROM bookings b
+       LEFT JOIN payments p_row ON p_row.id = b.payment_id
+       LEFT JOIN performers perf ON perf.id = b.performer_id
+       LEFT JOIN users perf_user ON perf_user.id = perf.user_id
+       WHERE b.id = $1`,
+      [bookingId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    const row = result.rows[0];
+
+    // Owner check: must be buyer or performer
+    if (row.member_id !== callerUserId && row.performer_user_id !== callerUserId) {
+      return res.status(403).json({ success: false, error: 'Not authorized to view this booking' });
+    }
+
+    // Derive normalized status
+    let status;
+    const bookingStatus = row.booking_status;
+    const paymentStatus = row.payment_status;
+
+    if (bookingStatus === 'confirmed') {
+      status = 'paid';
+    } else if (bookingStatus === 'expired' || bookingStatus === 'cancelled') {
+      status = 'expired';
+    } else {
+      // awaiting_payment — check the underlying payment/DSO
+      if (paymentStatus === 'completed') {
+        status = 'paid';
+      } else if (paymentStatus === 'failed') {
+        status = 'failed';
+      } else {
+        // Check dash_subscription_orders for invoice expiry
+        const meta = row.payment_metadata || {};
+        let invoiceStatus = null;
+        if (meta.btcpay_invoice_id) {
+          const dsoRes = await query(
+            `SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1`,
+            [meta.btcpay_invoice_id]
+          );
+          invoiceStatus = dsoRes.rows[0]?.status || null;
+        }
+        if (invoiceStatus === 'expired' || invoiceStatus === 'invalid') {
+          status = 'expired';
+        } else {
+          status = 'pending';
+        }
+      }
+    }
+
+    // Ensure room_name is persisted on the bookings row for confirmed bookings
+    let roomName = row.room_name;
+    if (status === 'paid' && !row.room_name) {
+      const generatedRoom = `booking-${row.booking_id}`;
+      await query(
+        `UPDATE bookings SET room_name = $2, updated_at = NOW() WHERE id = $1 AND room_name IS NULL`,
+        [row.booking_id, generatedRoom]
+      ).catch(() => {});
+      roomName = generatedRoom;
+    }
+
+    return res.json({
+      success: true,
+      status,
+      bookingId: row.booking_id,
+      roomName: status === 'paid' ? roomName : undefined,
+    });
+  } catch (err) {
+    logger.error('[callBookingController] getBookingPaymentStatus error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to retrieve payment status' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/webapp/bookings/upcoming
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the caller's confirmed bookings with start_time_utc > NOW() - 15 min.
+ * Includes a 15-min join window so the caller can still see the booking while
+ * they are already inside it.
+ */
+async function getUpcomingBookings(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+
+    const result = await query(
+      `SELECT
+         b.id,
+         b.performer_id,
+         u_creator.id          AS creator_id,
+         u_creator.username    AS performer_username,
+         COALESCE(u_creator.display_name, u_creator.username) AS performer_name,
+         u_creator.photo_url   AS performer_photo,
+         b.start_time_utc,
+         b.end_time_utc,
+         b.duration_minutes,
+         b.status,
+         b.call_type,
+         CONCAT('booking-', b.credit_id::text) AS room_name
+       FROM bookings b
+       JOIN performers p ON p.id = b.performer_id
+       JOIN users u_creator ON u_creator.id = p.user_id
+       WHERE b.user_id = $1
+         AND b.status = 'confirmed'
+         AND b.start_time_utc > NOW() - INTERVAL '15 minutes'
+       ORDER BY b.start_time_utc ASC
+       LIMIT 50`,
+      [userId]
+    );
+
+    return res.json({ success: true, bookings: result.rows });
+  } catch (err) {
+    logger.error('[callBookingController] getUpcomingBookings error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to retrieve upcoming bookings' });
+  }
+}
+
 module.exports = {
   createCheckout,
+  createCheckoutDash,
   getBooking,
+  getBookingPaymentStatus,
   submitSurvey,
   saveAvailabilitySchedule,
   setOnlineStatus,
@@ -754,4 +987,5 @@ module.exports = {
   cancelBooking,
   getNextShowDate,
   setNextShowDate,
+  getUpcomingBookings,
 };

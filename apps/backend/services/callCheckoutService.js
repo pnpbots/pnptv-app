@@ -18,6 +18,14 @@ const { sendNotificationViaTelegram } = require('./notificationBotDelivery');
 const emailService = require('./emailservice');
 const logger = require('../utils/logger');
 
+// Loaded lazily to avoid circular-require on startup
+function getBtcpay() {
+  return require('../config/btcpay');
+}
+function getCallNotificationService() {
+  return require('./callNotificationService');
+}
+
 const CHECKOUT_DOMAIN = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
 const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
 
@@ -64,7 +72,7 @@ async function createCallCheckout(memberId, packageId, provider, email) {
     throw err;
   }
 
-  if (!['epayco'].includes(provider)) {
+  if (!['epayco', 'dash'].includes(provider)) {
     const err = new Error(`Invalid payment provider: ${provider}`);
     err.code = 'INVALID_PROVIDER';
     throw err;
@@ -199,6 +207,51 @@ async function onCallPaymentSuccess(paymentId) {
       [paymentId]
     );
 
+    // Confirm the bookings row that was pre-created at checkout time (Dash flow).
+    // For ePayco, startTimeUtc/endTimeUtc come from payment metadata.
+    // ON CONFLICT: a booking row may not exist (ePayco path without pre-slot) — that is OK.
+    const bookingMeta = meta.startTimeUtc && meta.endTimeUtc ? meta : null;
+    let confirmedBookingId = meta.bookingId || null;
+
+    if (!confirmedBookingId) {
+      // ePayco path: no pre-created booking row. Create one now if times are provided.
+      if (bookingMeta) {
+        const pkgForBooking = pkgResult.rows[0];
+        const performerRes = await client.query(
+          `SELECT id FROM performers WHERE user_id = $1 LIMIT 1`,
+          [creator_id]
+        );
+        const performerId = performerRes.rows[0]?.id;
+        if (performerId) {
+          const priceCents = Math.round(parseFloat(pkgForBooking.price_usd) * 100);
+          const newBooking = await client.query(
+            `INSERT INTO bookings
+               (user_id, performer_id, package_id, payment_id, credit_id,
+                start_time_utc, end_time_utc, status, call_type,
+                duration_minutes, price_cents, currency)
+             VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$7::timestamptz,
+                     'confirmed','video',$8,$9,'USD')
+             ON CONFLICT DO NOTHING
+             RETURNING id`,
+            [
+              payment.user_id, performerId, packageId, paymentId, credit.id,
+              bookingMeta.startTimeUtc, bookingMeta.endTimeUtc,
+              pkgForBooking.duration_minutes, priceCents,
+            ]
+          );
+          confirmedBookingId = newBooking.rows[0]?.id || null;
+        }
+      }
+    } else {
+      // Dash path: confirm the pre-created booking row and link the credit
+      await client.query(
+        `UPDATE bookings
+         SET status = 'confirmed', credit_id = $2, updated_at = NOW()
+         WHERE id = $1 AND payment_id = $3 AND status = 'awaiting_payment'`,
+        [confirmedBookingId, credit.id, paymentId]
+      );
+    }
+
     await client.query('COMMIT');
 
     logger.info('[callCheckoutService] call credits granted after payment', {
@@ -206,6 +259,7 @@ async function onCallPaymentSuccess(paymentId) {
       userId: payment.user_id,
       packageId,
       creditId: credit.id,
+      bookingId: confirmedBookingId,
     });
 
     // Record 70/30 earnings split for the creator
@@ -303,6 +357,22 @@ async function onCallPaymentSuccess(paymentId) {
             });
           }
         }
+        // Schedule call reminders if we have a confirmed booking with time slots
+        if (confirmedBookingId && meta.startTimeUtc) {
+          try {
+            getCallNotificationService().scheduleCallReminders(
+              confirmedBookingId,
+              creator_id,
+              payment.user_id,
+              meta.startTimeUtc,
+              null
+            );
+          } catch (reminderErr) {
+            logger.warn('[callCheckoutService] failed to schedule call reminders (non-critical)', {
+              bookingId: confirmedBookingId, error: reminderErr.message,
+            });
+          }
+        }
       } catch (notifErr) {
         logger.warn('[callCheckoutService] post-payment notification error (non-fatal)', {
           paymentId, error: notifErr.message,
@@ -321,4 +391,270 @@ async function onCallPaymentSuccess(paymentId) {
   }
 }
 
-module.exports = { createCallCheckout, onCallPaymentSuccess };
+// ---------------------------------------------------------------------------
+// Internal: slot-lock + atomic booking row creation
+// ---------------------------------------------------------------------------
+
+/**
+ * Open a DB transaction, acquire a row-level lock on overlapping bookings for
+ * the performer, then INSERT a new bookings row with status='awaiting_payment'.
+ *
+ * @param {object} opts
+ * @param {object} client         - pg PoolClient already in a transaction
+ * @param {string} performerId    - performers.id (UUID)
+ * @param {string} memberId       - users.id of the buyer
+ * @param {string} startTimeUtc   - ISO 8601 string
+ * @param {string} endTimeUtc     - ISO 8601 string
+ * @param {string} paymentId      - payments.id (UUID)
+ * @param {number} packageId      - call_packages.id
+ * @param {number} durationMinutes
+ * @param {number} priceUsd
+ * @returns {object} Inserted bookings row
+ */
+async function _lockSlotAndInsertBooking(client, {
+  performerId,
+  memberId,
+  startTimeUtc,
+  endTimeUtc,
+  paymentId,
+  packageId,
+  durationMinutes,
+  priceUsd,
+}) {
+  // Acquire row-level lock on any overlapping active bookings.
+  // FOR UPDATE blocks concurrent writers from confirming the same slot.
+  const overlap = await client.query(
+    `SELECT id FROM bookings
+     WHERE performer_id = $1
+       AND status IN ('held', 'awaiting_payment', 'confirmed')
+       AND (start_time_utc, end_time_utc) OVERLAPS ($2::timestamptz, $3::timestamptz)
+     FOR UPDATE`,
+    [performerId, startTimeUtc, endTimeUtc]
+  );
+  if (overlap.rows.length > 0) {
+    const err = new Error('The requested time slot is no longer available');
+    err.code = 'SLOT_TAKEN';
+    err.status = 409;
+    throw err;
+  }
+
+  const priceCents = Math.round(parseFloat(priceUsd) * 100);
+
+  const insertResult = await client.query(
+    `INSERT INTO bookings
+       (user_id, performer_id, package_id, payment_id, start_time_utc, end_time_utc,
+        status, call_type, duration_minutes, price_cents, currency)
+     VALUES ($1, $2, $3, $4, $5::timestamptz, $6::timestamptz,
+             'awaiting_payment', 'video', $7, $8, 'USD')
+     RETURNING *`,
+    [memberId, performerId, packageId, paymentId, startTimeUtc, endTimeUtc, durationMinutes, priceCents]
+  );
+  return insertResult.rows[0];
+}
+
+/**
+ * Resolve the performers.id UUID for a creator's users.id.
+ * Returns null if no performer row found.
+ * @param {object} client - pg PoolClient
+ * @param {string} creatorUserId - users.id
+ * @returns {string|null} performers.id UUID
+ */
+async function _getPerformerId(client, creatorUserId) {
+  const res = await client.query(
+    `SELECT id FROM performers WHERE user_id = $1 LIMIT 1`,
+    [creatorUserId]
+  );
+  return res.rows[0]?.id || null;
+}
+
+// ---------------------------------------------------------------------------
+// createCallCheckoutDash — Dash/BTCPay checkout for a call package
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a BTCPay Dash invoice for a call package purchase.
+ * Locks the slot atomically and creates an awaiting_payment booking row
+ * before the invoice is issued.
+ *
+ * @param {object} opts
+ * @param {string} opts.userId        - users.id of the buyer
+ * @param {number} opts.packageId     - call_packages.id
+ * @param {string} opts.startTimeUtc  - ISO 8601
+ * @param {string} opts.endTimeUtc    - ISO 8601
+ * @returns {{ invoiceId, checkoutUrl, paymentId, amountUsd, expiresAt, bookingId }}
+ */
+async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTimeUtc }) {
+  // 1. Load package
+  const pkgResult = await query(
+    'SELECT * FROM call_packages WHERE id = $1 AND is_active = true',
+    [packageId]
+  );
+  const pkg = pkgResult.rows[0];
+  if (!pkg) {
+    const err = new Error(`Call package ${packageId} not found or inactive`);
+    err.code = 'PACKAGE_NOT_FOUND';
+    throw err;
+  }
+
+  const amountUsd = parseFloat(pkg.price_usd);
+
+  // 2. Create a pending payment record so we have a payment UUID before the invoice
+  const payment = await PaymentModel.create({
+    userId,
+    planId: null,
+    provider: 'dash',
+    sku: pkg.sku,
+    amount: amountUsd,
+    currency: 'USD',
+    status: 'pending',
+    metadata: {
+      type: 'call_package',
+      packageId: pkg.id,
+      packageSku: pkg.sku,
+      creatorId: pkg.creator_id,
+      startTimeUtc,
+      endTimeUtc,
+      provider: 'dash',
+    },
+  });
+
+  const pool = getPool();
+  const client = await pool.connect();
+  let booking;
+  try {
+    await client.query('BEGIN');
+
+    // 3. Resolve performer row for the creator
+    const performerId = await _getPerformerId(client, pkg.creator_id);
+    if (!performerId) {
+      throw Object.assign(new Error(`Creator ${pkg.creator_id} has no performer profile`), {
+        code: 'PERFORMER_NOT_FOUND', status: 404,
+      });
+    }
+
+    // 4. Slot-lock + insert booking row
+    booking = await _lockSlotAndInsertBooking(client, {
+      performerId,
+      memberId: userId,
+      startTimeUtc,
+      endTimeUtc,
+      paymentId: payment.id,
+      packageId: pkg.id,
+      durationMinutes: pkg.duration_minutes,
+      priceUsd: pkg.price_usd,
+    });
+
+    await client.query('COMMIT');
+  } catch (txErr) {
+    await client.query('ROLLBACK');
+    // Clean up the pending payment record so it doesn't accumulate as orphaned debt
+    await query(
+      `UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1`,
+      [payment.id]
+    ).catch(() => {});
+    throw txErr;
+  } finally {
+    client.release();
+  }
+
+  // 5. Create BTCPay invoice — outside the booking transaction so a BTCPay error
+  //    doesn't leave a half-committed DB state. On failure, expire the booking.
+  const { createInvoice } = getBtcpay();
+  let btcpayInvoice;
+  try {
+    const orderId = `call-${payment.id}`;
+    const redirectUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/bookings/${booking.id}`;
+
+    btcpayInvoice = await createInvoice({
+      amount: amountUsd,
+      currency: 'USD',
+      orderId,
+      userId,
+      planId: 'call_package',
+      metadata: {
+        resource: 'call_package',
+        packageId: pkg.id,
+        paymentId: payment.id,
+        bookingId: booking.id,
+        creatorId: pkg.creator_id,
+        startTimeUtc,
+        endTimeUtc,
+      },
+      redirectUrl,
+      paymentMethods: ['DASH'],
+    });
+  } catch (invoiceErr) {
+    // Expire the booking so the slot is freed
+    await query(
+      `UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+      [booking.id]
+    ).catch(() => {});
+    await query(
+      `UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1`,
+      [payment.id]
+    ).catch(() => {});
+    logger.error('[callCheckoutService] BTCPay invoice creation failed', {
+      paymentId: payment.id, bookingId: booking.id, error: invoiceErr.message,
+    });
+    throw invoiceErr;
+  }
+
+  // 6. Link BTCPay invoice to the dash_subscription_orders table so the webhook can route
+  await query(
+    `INSERT INTO dash_subscription_orders
+       (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id, metadata)
+     VALUES ($1, 'call_package', NULL, $2, $3, 'pending', $4, $5::jsonb)
+     ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
+    [
+      userId,
+      amountUsd,
+      btcpayInvoice.invoiceId,
+      pkg.creator_id,
+      JSON.stringify({
+        resource: 'call_package',
+        packageId: pkg.id,
+        paymentId: payment.id,
+        bookingId: booking.id,
+        startTimeUtc,
+        endTimeUtc,
+      }),
+    ]
+  );
+
+  // 7. Stamp the invoice ID back onto the payment record for cross-reference
+  await query(
+    `UPDATE payments
+     SET metadata = metadata || $2::jsonb, updated_at = NOW()
+     WHERE id = $1`,
+    [payment.id, JSON.stringify({ btcpay_invoice_id: btcpayInvoice.invoiceId, booking_id: booking.id })]
+  );
+
+  // BTCPay invoices expire after the store's default window (usually 15 min).
+  // We don't receive this from the API, so use a 15-min heuristic.
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+  logger.info('[callCheckoutService] Dash checkout created', {
+    paymentId: payment.id,
+    bookingId: booking.id,
+    btcpayInvoiceId: btcpayInvoice.invoiceId,
+    packageId: pkg.id,
+    amountUsd,
+  });
+
+  return {
+    invoiceId: btcpayInvoice.invoiceId,
+    checkoutUrl: btcpayInvoice.checkoutLink,
+    paymentId: payment.id,
+    bookingId: booking.id,
+    amountUsd,
+    expiresAt,
+  };
+}
+
+module.exports = {
+  createCallCheckout,
+  createCallCheckoutDash,
+  onCallPaymentSuccess,
+  _lockSlotAndInsertBooking,
+  _getPerformerId,
+};
