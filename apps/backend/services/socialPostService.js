@@ -652,6 +652,9 @@ class SocialPostService {
 
   static async getReplies(postId, viewerId, cursor) {
     const cursorId = cursor ? parseInt(cursor, 10) : null;
+    // Fetch limit + 1 so we can detect "more available" without a second
+    // round trip. The extra row is sliced off before returning.
+    const lim = 20;
     // CRIT-2 FIX: Exclude replies from users the viewer has blocked and from
     // users who have blocked the viewer, using the users.blocked text[] column.
     // $1 = viewerId, $2 = postId, $3 (optional) = cursorId
@@ -671,10 +674,12 @@ class SocialPostService {
          -- Filter: reply author has not blocked the viewer
          AND NOT COALESCE(u.blocked @> ARRAY[$1::text], false)
          ${cursorId ? 'AND sp.id > $3' : ''}
-       ORDER BY sp.id ASC LIMIT 20`,
+       ORDER BY sp.id ASC LIMIT ${lim + 1}`,
       params
     );
-    return { replies: sanitizePostRows(rows) };
+    const page = rows.slice(0, lim);
+    const nextCursor = rows.length > lim ? String(page[page.length - 1].id) : null;
+    return { replies: sanitizePostRows(page), nextCursor };
   }
 
   // ── Public Profile ────────────────────────────────────────────────────────

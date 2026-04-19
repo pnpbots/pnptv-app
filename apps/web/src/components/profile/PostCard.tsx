@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useI18n } from "@/lib/i18n";
 import {
-  togglePostLike as _unused_togglePostLike,
+  togglePostLike,
   getReplies,
   createReply,
   type SocialPostItem,
@@ -95,11 +95,22 @@ export default function PostCard({
   const [showReplies, setShowReplies] = useState(false);
   const [replies, setReplies] = useState<SocialPostItem[]>([]);
   const [loadingReplies, setLoadingReplies] = useState(false);
+  const [loadingMoreReplies, setLoadingMoreReplies] = useState(false);
+  const [repliesCursor, setRepliesCursor] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [sendingReply, setSendingReply] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [composerKey, setComposerKey] = useState(0); // bump to remount + autofocus
+  // Local optimistic state for per-reply likes — keyed by reply post id.
+  // Lets us flip the heart instantly without re-fetching the reply list.
+  const [replyLikes, setReplyLikes] = useState<Record<number, { liked: boolean; count: number }>>({});
   const [localReplyCount, setLocalReplyCount] = useState(
     post.replies_count || 0
   );
+  // Counter for synthesising stable client-side ids on optimistic replies before
+  // the server returns the real post.id. Prefixed negative-ish range so it
+  // never collides with real bigint ids.
+  const optimisticIdRef = useRef(-Date.now());
 
   const canDelete = isOwn || isAdmin;
 
@@ -123,48 +134,140 @@ export default function PostCard({
   const loadReplies = useCallback(async () => {
     if (loadingReplies) return;
     setLoadingReplies(true);
+    setReplyError(null);
     try {
       const res = await getReplies(post.id);
-      if (res.success) setReplies(res.replies);
-    } catch {
-      /* silent */
+      if (res.success) {
+        setReplies(res.replies);
+        setRepliesCursor(res.nextCursor || null);
+      }
+    } catch (err) {
+      setReplyError(err instanceof Error && err.message ? err.message : ft.replyFailed);
     }
     setLoadingReplies(false);
-  }, [post.id, loadingReplies]);
+  }, [post.id, loadingReplies, ft.replyFailed]);
+
+  const loadMoreReplies = useCallback(async () => {
+    if (loadingMoreReplies || !repliesCursor) return;
+    setLoadingMoreReplies(true);
+    try {
+      const res = await getReplies(post.id, repliesCursor);
+      if (res.success) {
+        // Dedupe in case an optimistic reply is now also returned by the server.
+        setReplies((prev) => {
+          const seen = new Set(prev.map((r) => r.id));
+          return [...prev, ...res.replies.filter((r) => !seen.has(r.id))];
+        });
+        setRepliesCursor(res.nextCursor || null);
+      }
+    } catch { /* surface via inline error pill on next user action */ }
+    setLoadingMoreReplies(false);
+  }, [post.id, loadingMoreReplies, repliesCursor]);
 
   const toggleReplies = useCallback(() => {
     const next = !showReplies;
     setShowReplies(next);
-    if (next) {
-      if (replies.length === 0) loadReplies();
-      // Pre-fill @mention of post author if reply box is empty
-      if (!replyText && post.author_username) {
-        setReplyText(`@${post.author_username} `);
-      }
-    }
-  }, [
-    showReplies,
-    replies.length,
-    loadReplies,
-    replyText,
-    post.author_username,
-  ]);
+    if (next && replies.length === 0) loadReplies();
+    // Bump composer key so MentionInput remounts with autoFocus the moment
+    // the reply section opens. Doesn't fire on close.
+    if (next) setComposerKey((k) => k + 1);
+  }, [showReplies, replies.length, loadReplies]);
+
+  // Tap-to-reply on a specific reply: prepend `@theirusername ` to whatever's
+  // in the composer and focus it. If the mention is already present, no-op so
+  // double-tap doesn't duplicate.
+  const replyToUser = useCallback((username: string | null) => {
+    if (!username) return;
+    const handle = `@${username}`;
+    setReplyText((prev) => {
+      if (prev.includes(handle)) return prev;
+      const sep = prev && !prev.endsWith(" ") ? " " : "";
+      return `${prev}${sep}${handle} `;
+    });
+    setComposerKey((k) => k + 1);
+  }, []);
 
   const handleSendReply = useCallback(async () => {
-    if (!replyText.trim() || sendingReply) return;
+    const text = replyText.trim();
+    if (!text || sendingReply) return;
     setSendingReply(true);
+    setReplyError(null);
+
+    // Optimistic insert — show the reply immediately so the user gets
+    // instant feedback. Marked pending=true so the row renders dimmed.
+    const tempId = optimisticIdRef.current--;
+    const optimistic: SocialPostItem = {
+      ...post, // borrow author identity from current viewer if available below
+      id: tempId,
+      content: text,
+      likes_count: 0,
+      replies_count: 0,
+      liked_by_me: false,
+      created_at: new Date().toISOString(),
+      // currentUser fields aren't in PostCardProps directly — pull from author
+      // shape on the parent post and override with currentUserId. The optimistic
+      // row is replaced on success so this is purely visual.
+      author_id: currentUserId,
+      author_username: post.author_username, // best-effort placeholder
+      author_first_name: undefined,
+      author_photo: undefined,
+      // Pending flag — used in the row renderer to show "sending…" opacity.
+      // Not part of SocialPostItem; widened to unknown then cast back.
+      ...({ __pending: true } as object),
+    } as unknown as SocialPostItem;
+
+    setReplies((prev) => [...prev, optimistic]);
+    setReplyText("");
+    setLocalReplyCount((c) => c + 1);
+
     try {
-      const res = await createReply(post.id, replyText.trim());
-      if (res.success) {
-        setReplies((prev) => [...prev, res.post]);
-        setReplyText("");
-        setLocalReplyCount((c) => c + 1);
+      const res = await createReply(post.id, text);
+      if (res.success && res.post) {
+        // Replace the optimistic row with the real one.
+        setReplies((prev) => prev.map((r) => (r.id === tempId ? res.post : r)));
+      } else {
+        throw new Error(ft.replyFailed);
       }
-    } catch {
-      /* silent */
+    } catch (err) {
+      // Rollback: remove optimistic row + restore the user's draft so they can
+      // tap retry without re-typing.
+      setReplies((prev) => prev.filter((r) => r.id !== tempId));
+      setLocalReplyCount((c) => Math.max(0, c - 1));
+      setReplyText(text);
+      setReplyError(err instanceof Error && err.message ? err.message : ft.replyFailed);
     }
     setSendingReply(false);
-  }, [replyText, sendingReply, post]);
+  }, [replyText, sendingReply, post, currentUserId, ft.replyFailed]);
+
+  // Per-reply like — replies are first-class posts so we just call togglePostLike.
+  // Optimistic toggle in replyLikes; rolled back on error.
+  const toggleReplyLike = useCallback(async (reply: SocialPostItem) => {
+    const id = reply.id;
+    const current = replyLikes[id] ?? { liked: !!reply.liked_by_me, count: reply.likes_count || 0 };
+    const next = { liked: !current.liked, count: current.count + (current.liked ? -1 : 1) };
+    setReplyLikes((m) => ({ ...m, [id]: next }));
+    try {
+      const res = await togglePostLike(id);
+      if (typeof res?.likes_count === "number") {
+        setReplyLikes((m) => ({ ...m, [id]: { liked: res.liked, count: res.likes_count! } }));
+      } else {
+        setReplyLikes((m) => ({ ...m, [id]: { ...next, liked: res.liked } }));
+      }
+    } catch {
+      // Rollback
+      setReplyLikes((m) => ({ ...m, [id]: current }));
+    }
+  }, [replyLikes]);
+
+  // Keyboard: Esc closes the reply section if the composer is empty.
+  useEffect(() => {
+    if (!showReplies) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !replyText.trim()) setShowReplies(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showReplies, replyText]);
 
   const isExclusiveLocked =
     post.is_exclusive === true &&
@@ -564,120 +667,190 @@ export default function PostCard({
           {/* Replies section */}
           {showReplies && (
             <div className="mt-3 pt-3 border-t border-white/10">
-              {/* "Replying to @username" context banner */}
-              {post.author_username && (
-                <div className="flex items-center gap-1.5 mb-2 text-xs">
-                  <svg
-                    className="w-3 h-3 flex-shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    style={{ color: "#8E8E93" }}
-                    aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"
-                    />
+              {/* "Reply to @author" pill — only when composer is empty and the
+                  post has an author username. Tap inserts the @mention + focus.
+                  Replaces the always-on "Replying to @user" banner that
+                  presumed every reply was @-mentioning the author. */}
+              {post.author_username && !replyText.trim() && (
+                <button
+                  type="button"
+                  onClick={() => replyToUser(post.author_username!)}
+                  className="inline-flex items-center gap-1.5 mb-2 px-2 py-0.5 rounded-full text-xs transition-colors hover:bg-white/10"
+                  style={{ background: "rgba(94,209,196,0.10)", color: "#5ED1C4" }}
+                >
+                  <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
                   </svg>
-                  <span style={{ color: "#8E8E93" }}>
-                    {ft.replyingTo}{" "}
-                    <span
-                      className="font-medium"
-                      style={{ color: "#5ED1C4" }}
-                    >
-                      @{post.author_username}
-                    </span>
-                  </span>
-                </div>
+                  <span>{ft.replyToAuthor.replace("{name}", post.author_username)}</span>
+                </button>
               )}
 
               {loadingReplies ? (
-                <p className="text-xs" style={{ color: "#8E8E93" }}>
-                  {ft.loadingReplies}
-                </p>
+                /* Shimmer skeleton — three rows roughly matching real reply dimensions */
+                <div className="space-y-3 mb-3" aria-label={ft.loadingReplies} role="status">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="flex gap-2 animate-pulse">
+                      <div className="w-7 h-7 rounded-full bg-white/10 flex-shrink-0" />
+                      <div className="flex-1 space-y-1.5 pt-1">
+                        <div className="h-2 rounded bg-white/10 w-1/4" />
+                        <div className="h-2 rounded bg-white/10 w-3/4" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : replies.length === 0 ? (
                 <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
                   {ft.noRepliesYet}
                 </p>
               ) : (
                 <div className="space-y-3 mb-3">
-                  {replies.map((reply) => (
-                    <div key={reply.id} className="flex gap-2">
-                      <button
-                        onClick={() => onAuthorTap?.(reply.author_id)}
-                        className="flex-shrink-0"
+                  {replies.map((reply) => {
+                    const pending = (reply as unknown as { __pending?: boolean }).__pending === true;
+                    const likeState = replyLikes[reply.id] ?? {
+                      liked: !!reply.liked_by_me,
+                      count: reply.likes_count || 0,
+                    };
+                    const isOwnReply = String(reply.author_id) === String(currentUserId);
+                    return (
+                      <div
+                        key={reply.id}
+                        className={`flex gap-2 transition-opacity ${pending ? "opacity-60" : ""}`}
                       >
-                        {resolvePhotoUrl(reply.author_photo) ? (
-                          <img
-                            src={resolvePhotoUrl(reply.author_photo)!}
-                            alt=""
-                            className="w-7 h-7 rounded-full object-cover"
-                          />
-                        ) : (
-                          <div
-                            className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
-                            style={{
-                              background:
-                                "linear-gradient(135deg, #D4007A, #E69138)",
-                              color: "#fff",
-                            }}
-                          >
-                            {(
-                              reply.author_first_name ||
-                              reply.author_username ||
-                              "?"
-                            )[0].toUpperCase()}
+                        <button
+                          onClick={() => !pending && onAuthorTap?.(reply.author_id)}
+                          className="flex-shrink-0"
+                          disabled={pending}
+                        >
+                          {resolvePhotoUrl(reply.author_photo) ? (
+                            <img
+                              src={resolvePhotoUrl(reply.author_photo)!}
+                              alt=""
+                              className="w-7 h-7 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div
+                              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
+                              style={{
+                                background: "linear-gradient(135deg, #D4007A, #E69138)",
+                                color: "#fff",
+                              }}
+                            >
+                              {(reply.author_first_name || reply.author_username || "?")[0].toUpperCase()}
+                            </div>
+                          )}
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-semibold text-white truncate">
+                              {reply.author_first_name || reply.author_username}
+                            </span>
+                            <span className="text-xs" style={{ color: "#8E8E93" }}>
+                              {pending ? ft.sending : timeAgo(reply.created_at)}
+                            </span>
                           </div>
-                        )}
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-semibold text-white truncate">
-                            {reply.author_first_name || reply.author_username}
-                          </span>
-                          <span
-                            className="text-xs"
-                            style={{ color: "#8E8E93" }}
-                          >
-                            {timeAgo(reply.created_at)}
-                          </span>
+                          {/* Reply content — @mentions as clickable links */}
+                          <MentionText
+                            text={reply.content}
+                            className="text-xs text-white/80 mt-0.5 whitespace-pre-wrap block"
+                          />
+                          {/* Per-reply actions — like + reply-to-this-user.
+                              Hidden while the row is pending (no real id yet). */}
+                          {!pending && (
+                            <div className="mt-1 flex items-center gap-3 text-[11px]">
+                              <button
+                                type="button"
+                                onClick={() => toggleReplyLike(reply)}
+                                className="inline-flex items-center gap-1 transition-colors active:scale-95"
+                                style={{ color: likeState.liked ? "#D4007A" : "#8E8E93" }}
+                                aria-pressed={likeState.liked}
+                                aria-label={likeState.liked ? p.unlikePost : p.likePost}
+                              >
+                                <svg className="w-3.5 h-3.5" fill={likeState.liked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                                </svg>
+                                {likeState.count > 0 && <span>{likeState.count}</span>}
+                              </button>
+                              {!isOwnReply && reply.author_username && (
+                                <button
+                                  type="button"
+                                  onClick={() => replyToUser(reply.author_username || null)}
+                                  className="inline-flex items-center gap-1 transition-colors hover:text-white/80"
+                                  style={{ color: "#8E8E93" }}
+                                  aria-label={ft.replyToAuthor.replace("{name}", reply.author_username)}
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                                  </svg>
+                                  <span>{ft.reply}</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        {/* Reply content — @mentions as clickable links */}
-                        <MentionText
-                          text={reply.content}
-                          className="text-xs text-white/80 mt-0.5 whitespace-pre-wrap block"
-                        />
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+
+                  {/* Load more — visible only when the API said there's another page */}
+                  {repliesCursor && (
+                    <button
+                      type="button"
+                      onClick={loadMoreReplies}
+                      disabled={loadingMoreReplies}
+                      className="w-full text-xs py-2 rounded-lg transition-colors hover:bg-white/5 disabled:opacity-50"
+                      style={{ color: "#5ED1C4" }}
+                    >
+                      {loadingMoreReplies ? ft.loading : ft.loadMoreReplies}
+                    </button>
+                  )}
                 </div>
               )}
 
               {/* Reply composer */}
               {currentUserId && (
-                <div className="flex gap-2 items-end">
-                  <MentionInput
-                    value={replyText}
-                    onChange={setReplyText}
-                    placeholder={ft.writeReply}
-                    maxLength={500}
-                    rows={2}
-                    disabled={sendingReply}
-                    onSubmit={handleSendReply}
-                    className="flex-1 bg-white/5 text-white text-xs rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/30 resize-none"
-                  />
-                  <button
-                    onClick={handleSendReply}
-                    disabled={!replyText.trim() || sendingReply}
-                    className="text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-30 transition-colors flex-shrink-0"
-                    style={{ color: "#D4007A" }}
-                  >
-                    {sendingReply ? "..." : ft.reply}
-                  </button>
-                </div>
+                <>
+                  <div className="flex gap-2 items-end">
+                    <MentionInput
+                      key={composerKey}
+                      value={replyText}
+                      onChange={setReplyText}
+                      placeholder={ft.writeReply}
+                      maxLength={500}
+                      rows={2}
+                      disabled={sendingReply}
+                      autoFocus
+                      onSubmit={handleSendReply}
+                      className="flex-1 bg-white/5 text-white text-xs rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 placeholder:text-white/30 resize-none"
+                    />
+                    <button
+                      onClick={handleSendReply}
+                      disabled={!replyText.trim() || sendingReply}
+                      className="text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-30 transition-colors flex-shrink-0"
+                      style={{ color: "#D4007A" }}
+                    >
+                      {sendingReply ? "..." : ft.reply}
+                    </button>
+                  </div>
+                  {/* Inline error pill — appears under composer; tap to retry. */}
+                  {replyError && (
+                    <div
+                      role="alert"
+                      className="mt-1.5 flex items-center justify-between gap-2 px-2.5 py-1 rounded-lg text-[11px]"
+                      style={{ background: "rgba(239,68,68,0.10)", color: "#FCA5A5" }}
+                    >
+                      <span className="truncate">{replyError}</span>
+                      <button
+                        type="button"
+                        onClick={() => { setReplyError(null); handleSendReply(); }}
+                        disabled={!replyText.trim()}
+                        className="font-semibold disabled:opacity-50"
+                        style={{ color: "#FCA5A5" }}
+                      >
+                        {ft.retry}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

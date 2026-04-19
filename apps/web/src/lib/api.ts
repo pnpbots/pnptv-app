@@ -1214,7 +1214,7 @@ export function getWofStats(): Promise<{ total_posts: number; total_likes: numbe
 export function getReplies(
   postId: number,
   cursor?: string
-): Promise<{ success: boolean; replies: SocialPostItem[] }> {
+): Promise<{ success: boolean; replies: SocialPostItem[]; nextCursor: string | null }> {
   const params = new URLSearchParams();
   if (cursor) params.set("cursor", cursor);
   return request(`/api/webapp/social/posts/${postId}/replies?${params}`);
@@ -3075,16 +3075,12 @@ export function getCreatorDashboard(): Promise<{
 
 export function getCreatorWallet(): Promise<{
   success: boolean;
-  // `address` (legacy 0x EVM) and `payoutChainId` are read-only carry-overs
-  // from the retired USDC payout flow. New writes go through `dashAddress`.
-  address: string | null;
   verified: boolean;
-  payoutMethod: "dash" | "meru" | "fiat" | "crypto"; // 'crypto' returned only for grandfathered rows
+  payoutMethod: "dash" | "meru" | "fiat";
   meruAccount: string | null;
-  payoutChainId: number;
   fiatPayoutMethod: string | null;
   fiatPayoutAccount: string | null;
-  dashAddress?: string | null;
+  dashAddress: string | null;
 }> {
   return request("/api/webapp/creator/wallet");
 }
@@ -4923,7 +4919,7 @@ export interface CreatorDetailAdmin {
   creator_type: string | null;
   creator_price_usd: number;
   creator_subscriber_count: number;
-  creator_wallet_address: string | null;
+  creator_dash_address: string | null;
   payout_method: string | null;
   email: string | null;
 }
