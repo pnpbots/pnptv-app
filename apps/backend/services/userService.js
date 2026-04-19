@@ -65,6 +65,22 @@ class UserService {
   }
 
   /**
+   * Alias retained for handlers that name the method after the model layer
+   * (UserService.getById is semantically identical to .getUser).
+   */
+  async getById(userId) {
+    return this.getUser(userId);
+  }
+
+  /**
+   * Alias for handlers that expect an "updateProfile" semantic. Same shape as
+   * updateUser — accepts a partial user-fields object, delegates to UserModel.
+   */
+  async updateProfile(userId, updates) {
+    return this.updateUser(userId, updates);
+  }
+
+  /**
    * Get user by ID
    * @param {string|number} userId - Telegram user ID
    * @returns {Promise<Object|null>} User object or null
