@@ -1992,14 +1992,23 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               <div className="px-2 pb-2">
                 <PreJoin
                   defaults={{
-                    username: user?.displayName || user?.firstName || user?.username || "",
+                    username:
+                      user?.displayName ||
+                      user?.firstName ||
+                      user?.username ||
+                      (user?.id ? `guest-${String(user.id).slice(-4)}` : "Guest"),
                     videoEnabled: true,
                     audioEnabled: false,
                   }}
+                  onValidate={(v) => v.username.trim().length >= 1}
                   onSubmit={handleConfirmJoinCall}
                   onError={(err) => {
                     console.error("[Chat] PreJoin error", err);
-                    setCallError("Could not access camera or microphone. Check your browser permissions.");
+                    setCallError(
+                      err?.message
+                        ? `Camera/mic error: ${err.message}. Check browser permissions.`
+                        : "Could not access camera or microphone. Check browser permissions."
+                    );
                     setShowCallPreview(false);
                   }}
                   joinLabel={activeGroup.hasActiveCall ? "Join Call" : "Start Call"}

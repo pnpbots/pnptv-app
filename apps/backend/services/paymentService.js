@@ -336,6 +336,37 @@ class PaymentService {
     const amountMatched = Array.from(webhookAmountSet).some((value) => expectedAmountSet.has(value));
     const currencyMatched = webhookCurrency ? expected.currencyCandidates.includes(webhookCurrency) : false;
 
+    // Rate-drift monitor: when the amount check fails, surface how far off the
+    // webhook amount is from the closest expected value so we can tell rate
+    // drift apart from fraud/replay. Triggers a WARN log at >10% delta.
+    if (!amountMatched && webhookAmountCandidates.length > 0 && expected.amountCandidates.length > 0) {
+      try {
+        const received = Number(webhookAmountCandidates[0]);
+        const closest = expected.amountCandidates
+          .map((v) => Number(v))
+          .filter((n) => Number.isFinite(n) && n > 0)
+          .reduce(
+            (best, v) => (Math.abs(v - received) < Math.abs(best - received) ? v : best),
+            Number(expected.amountCandidates[0]) || 0
+          );
+        if (Number.isFinite(received) && closest > 0) {
+          const deltaPct = ((received - closest) / closest) * 100;
+          if (Math.abs(deltaPct) >= 10) {
+            logger.warn('[ePayco] FX rate drift — webhook COP amount differs from stored expected by >10%', {
+              paymentId: payment.id,
+              received,
+              expectedClosest: closest,
+              deltaPercent: Number(deltaPct.toFixed(2)),
+              envRate: process.env.EPAYCO_USD_TO_COP || '4000',
+              hint: 'Update EPAYCO_USD_TO_COP env var if the market rate has shifted permanently.',
+            });
+          }
+        }
+      } catch (e) {
+        logger.debug?.('[ePayco] rate-drift diagnostic failed silently', { error: e?.message });
+      }
+    }
+
     return {
       valid: amountMatched && currencyMatched,
       amountMatched,
