@@ -25,6 +25,13 @@ export default defineConfig({
           vendor: ["react", "react-dom", "react-router-dom"],
           auth: ["oidc-client-ts"],
           media: ["hls.js"],
+          livekit: [
+            "@livekit/components-react",
+            "@livekit/components-core",
+            "@livekit/components-styles",
+            "livekit-client",
+          ],
+          socket: ["socket.io-client"],
         },
       },
     },
