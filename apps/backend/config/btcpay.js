@@ -284,6 +284,96 @@ function validateWebhookSignature(rawBody, signature) {
 }
 
 /**
+ * Create a BTCPay Pull Payment for an outbound payout in Dash.
+ *
+ * The creator gets a viewUrl they open in any browser, paste their Dash address,
+ * and claim the funds themselves. The payout is denominated in USD on the BTCPay
+ * side; BTCPay converts to DASH at claim time using its live exchange rate, so
+ * the creator receives the equivalent DASH for the requested USD amount.
+ *
+ * autoApproveClaims=true means the moment a creator submits a claim with their
+ * Dash address, BTCPay sends the payout immediately. Set to false if you want
+ * an admin in BTCPay to approve each claim manually.
+ *
+ * @param {object} opts
+ * @param {number} opts.amountUsd       — USD amount to pay out
+ * @param {string} opts.creatorId       — PNPtv creator user ID (stored in metadata)
+ * @param {string} [opts.description]   — Human-readable label
+ * @param {boolean} [opts.autoApprove]  — Auto-approve claims (default true)
+ * @returns {Promise<{ pullPaymentId: string, viewUrl: string }>}
+ */
+async function createPullPayment({ amountUsd, creatorId, description, autoApprove = true }) {
+  if (!BTCPAY_API_KEY || !BTCPAY_STORE_ID) {
+    throw new Error('BTCPay Server not configured (missing BTCPAY_API_KEY or BTCPAY_STORE_ID)');
+  }
+  if (!amountUsd || amountUsd <= 0) throw new Error('amountUsd must be a positive number');
+  if (!creatorId) throw new Error('creatorId is required');
+
+  const payload = {
+    name: description || `PNPtv creator payout — ${creatorId}`,
+    description: description || `PNPtv creator earnings payout — ${creatorId}`,
+    amount: String(amountUsd.toFixed(2)),
+    currency: 'USD',
+    paymentMethods: ['DASH'],
+    autoApproveClaims: !!autoApprove,
+  };
+
+  try {
+    const response = await btcpayClient.post(`/stores/${BTCPAY_STORE_ID}/pull-payments`, payload);
+    const pullPayment = response.data;
+    const viewUrl = `${BTCPAY_PUBLIC_URL}/pull-payments/${pullPayment.id}`;
+    logger.info('BTCPay createPullPayment: pull payment created', {
+      pullPaymentId: pullPayment.id, creatorId, amountUsd,
+    });
+    return { pullPaymentId: pullPayment.id, viewUrl };
+  } catch (err) {
+    logger.error('BTCPay createPullPayment failed:', {
+      status: err.response?.status,
+      data: err.response?.data,
+      message: err.message,
+      creatorId,
+      amountUsd,
+    });
+    throw err;
+  }
+}
+
+/**
+ * Fetch a pull payment by id (used to poll status).
+ * @param {string} pullPaymentId
+ * @returns {Promise<object>} Raw BTCPay response.
+ */
+async function getPullPayment(pullPaymentId) {
+  try {
+    const response = await btcpayClient.get(`/pull-payments/${pullPaymentId}`);
+    return response.data;
+  } catch (err) {
+    logger.error('BTCPay getPullPayment failed:', {
+      pullPaymentId,
+      status: err.response?.status,
+      message: err.message,
+    });
+    throw err;
+  }
+}
+
+/**
+ * Cancel a pull payment (e.g. if the creator never claims and we want to release
+ * the underlying earnings rows back to 'available' for the next cycle).
+ * @param {string} pullPaymentId
+ */
+async function archivePullPayment(pullPaymentId) {
+  try {
+    await btcpayClient.delete(`/stores/${BTCPAY_STORE_ID}/pull-payments/${pullPaymentId}`);
+  } catch (err) {
+    logger.error('BTCPay archivePullPayment failed:', {
+      pullPaymentId, status: err.response?.status, message: err.message,
+    });
+    throw err;
+  }
+}
+
+/**
  * Check whether BTCPay is configured and reachable.
  * Returns { configured: boolean, reachable: boolean, reason?: string }
  */
@@ -308,6 +398,10 @@ module.exports = {
   markInvoiceProcessed,
   validateWebhookSignature,
   checkBtcpayHealth,
+  // Outbound (creator payouts via Dash Pull Payments)
+  createPullPayment,
+  getPullPayment,
+  archivePullPayment,
   BTCPAY_WEBHOOK_SECRET,
   get isConfigured() { return !!(BTCPAY_API_KEY && BTCPAY_STORE_ID); },
 };
