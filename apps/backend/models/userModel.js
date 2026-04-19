@@ -1156,8 +1156,16 @@ class UserModel {
    */
   static async getIncompleteOnboarding() {
     try {
+      // Only target accounts created in the last 30 days. Beyond that, the
+      // user has clearly chosen not to onboard — continuing to nag them is
+      // spam. Admin/superadmin accounts (PNPtvOficial etc.) are excluded so
+      // we don't DM platform actors who never need to "onboard" via /start.
       const result = await query(
-        `SELECT * FROM ${TABLE} WHERE onboarding_complete = false ORDER BY created_at ASC`
+        `SELECT * FROM ${TABLE}
+         WHERE onboarding_complete = false
+           AND created_at > NOW() - INTERVAL '30 days'
+           AND COALESCE(role, 'user') NOT IN ('admin', 'superadmin')
+         ORDER BY created_at ASC`
       );
       return result.rows.map((row) => this.mapRowToUser(row));
     } catch (error) {
