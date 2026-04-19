@@ -462,3 +462,67 @@
     display: none !important;
   }
 }
+
+/* ── LiveKit PreJoin — PNPtv theme overrides ──────────────────────
+   Scoped to the pre-join card inside our hangout modal so we don't
+   affect the in-call dock that still uses the LiveKit defaults. */
+.lk-prejoin[data-lk-theme="default"] {
+  --lk-bg: transparent;
+  --lk-bg2: rgba(255, 255, 255, 0.04);
+  --lk-bg3: rgba(255, 255, 255, 0.08);
+  --lk-bg4: rgba(255, 255, 255, 0.12);
+  --lk-bg5: rgba(255, 255, 255, 0.16);
+  --lk-fg: #ffffff;
+  --lk-fg2: rgba(255, 255, 255, 0.95);
+  --lk-fg3: rgba(255, 255, 255, 0.85);
+  --lk-border-color: rgba(123, 97, 255, 0.25);
+  --lk-accent-fg: #ffffff;
+  --lk-accent-bg: #D4007A;
+  --lk-accent2: #e0168b;
+  --lk-accent3: #eb2d9c;
+  --lk-accent4: #f543ad;
+  --lk-control-bg: rgba(255, 255, 255, 0.06);
+  --lk-control-hover-bg: rgba(255, 255, 255, 0.12);
+  --lk-control-active-bg: rgba(212, 0, 122, 0.25);
+  --lk-control-active-hover-bg: rgba(212, 0, 122, 0.35);
+  --lk-border-radius: 0.75rem;
+  --lk-font-family: inherit;
+  background: transparent;
+  padding: 0.25rem;
+}
+
+.lk-prejoin[data-lk-theme="default"] .lk-button-group,
+.lk-prejoin[data-lk-theme="default"] .lk-join-button {
+  border-radius: 0.75rem;
+}
+
+.lk-prejoin[data-lk-theme="default"] .lk-join-button {
+  background: linear-gradient(135deg, #D4007A, #E69138);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: 0 6px 18px rgba(212, 0, 122, 0.35);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.lk-prejoin[data-lk-theme="default"] .lk-join-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(212, 0, 122, 0.45);
+}
+
+.lk-prejoin[data-lk-theme="default"] input[type="text"] {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(123, 97, 255, 0.25);
+  color: #fff;
+  border-radius: 0.625rem;
+}
+
+.lk-prejoin[data-lk-theme="default"] input[type="text"]:focus {
+  outline: none;
+  border-color: rgba(212, 0, 122, 0.6);
+  box-shadow: 0 0 0 3px rgba(212, 0, 122, 0.18);
+}
+
+.lk-prejoin[data-lk-theme="default"] video {
+  border-radius: 0.75rem;
+}
+
