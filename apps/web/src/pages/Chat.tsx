@@ -1181,7 +1181,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     } catch (err: unknown) {
       console.error("[Chat] Video call start/join failed", err);
       if (err instanceof ApiError) {
-        if (err.status === 403) {
+        if (err.code === "TIER_NOT_ELIGIBLE_FOR_CALLS") {
+          setCallError("Your plan doesn't include video calls. Upgrade to join or host a call.");
+        } else if (err.code === "CALL_PARTICIPANT_LIMIT_REACHED") {
+          setCallError(err.message || "This call is full. Try again when someone leaves.");
+        } else if (err.code === "CALL_ROOMS_PER_DAY_EXCEEDED") {
+          setCallError(err.message || "You've hit your daily call limit. Try again tomorrow.");
+        } else if (err.status === 403) {
           setCallError("You were removed from this hangout.");
           loadGroups();
         } else if (err.status === 402) {

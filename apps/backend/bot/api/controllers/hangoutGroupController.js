@@ -2285,6 +2285,29 @@ module.exports = {
 
 const livekitService = require('../../../services/livekitService');
 
+// Per-tier video-call caps. Admins bypass almost everything. Free users can't
+// start or join. Override at runtime via env var HANGOUT_CALL_LIMITS_BY_TIER
+// (JSON map of tier → { maxParticipants, maxRoomsPerDay }).
+const CALL_LIMITS_DEFAULTS = {
+  admin:      { maxParticipants: 1000, maxRoomsPerDay: 999 },
+  superadmin: { maxParticipants: 1000, maxRoomsPerDay: 999 },
+  prime:      { maxParticipants: 50,   maxRoomsPerDay: 5 },
+  member:     { maxParticipants: 10,   maxRoomsPerDay: 3 },
+  free:       { maxParticipants: 0,    maxRoomsPerDay: 0 },
+};
+const CALL_LIMITS_OVERRIDE = (() => {
+  try { return JSON.parse(process.env.HANGOUT_CALL_LIMITS_BY_TIER || '{}'); }
+  catch { return {}; }
+})();
+function effectiveCallLimits(userRole, userTier) {
+  const role = String(userRole || '').toLowerCase();
+  if (role === 'admin' || role === 'superadmin') {
+    return CALL_LIMITS_OVERRIDE[role] || CALL_LIMITS_DEFAULTS[role];
+  }
+  const tier = String(userTier || 'free').toLowerCase();
+  return CALL_LIMITS_OVERRIDE[tier] || CALL_LIMITS_DEFAULTS[tier] || CALL_LIMITS_DEFAULTS.free;
+}
+
 // POST /api/webapp/hangouts/groups/:id/call/start
 async function startCall(req, res) {
   const user = authGuard(req, res); if (!user) return;
@@ -2296,6 +2319,11 @@ async function startCall(req, res) {
     await ensureLanguageGroupMembership(user.id, user.language);
     const member = await isMember(groupId, user.id);
     if (!member) return res.status(403).json({ error: 'Not a member of this group' });
+
+    const starterLimits = effectiveCallLimits(user.role, user.tier);
+    if (starterLimits.maxRoomsPerDay === 0) {
+      return res.status(403).json({ error: 'Your tier cannot start video calls', code: 'TIER_NOT_ELIGIBLE_FOR_CALLS' });
+    }
 
     {
       const { rows: [grp] } = await query(
@@ -2315,6 +2343,23 @@ async function startCall(req, res) {
       }
     }
 
+    // Rooms-per-day cap — owner/mods of THIS group bypass so hosts aren't
+    // blocked; admins bypass via their limit being 999.
+    const isOwnerModForGroup = await isOwnerOrMod(groupId, user.id);
+    if (!isOwnerModForGroup && starterLimits.maxRoomsPerDay < 999) {
+      const { rows: [rpd] } = await query(
+        `SELECT COUNT(*)::int AS count FROM hangout_video_calls
+         WHERE creator_id = $1 AND created_at > NOW() - INTERVAL '24 hours'`,
+        [user.id]
+      );
+      if ((rpd?.count || 0) >= starterLimits.maxRoomsPerDay) {
+        return res.status(429).json({
+          error: `Daily call limit reached (${starterLimits.maxRoomsPerDay} rooms/day)`,
+          code: 'CALL_ROOMS_PER_DAY_EXCEEDED',
+        });
+      }
+    }
+
     const roomName = `hangout-${groupId}`;
 
     await query(
@@ -2326,22 +2371,45 @@ async function startCall(req, res) {
 
     // If an active call already exists, join it instead of creating a new one
     const { rows: existing } = await query(
-      `SELECT id, room_name FROM hangout_video_calls WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
+      `SELECT hvc.id, hvc.room_name, hvc.creator_id, u.role AS creator_role, u.tier AS creator_tier
+       FROM hangout_video_calls hvc LEFT JOIN users u ON u.id = hvc.creator_id
+       WHERE hvc.group_id=$1 AND hvc.status='active' ORDER BY hvc.created_at DESC LIMIT 1`,
       [groupId]
     );
 
     if (existing.length > 0) {
       const activeRoomName = existing[0].room_name;
+      const existingCallId = existing[0].id;
       const displayName = user.firstName || user.first_name || user.username || 'User';
+
+      // Capacity check — based on call creator's tier. Skip if user is already
+      // an active participant (they're just re-fetching a token).
+      const creatorLimits = effectiveCallLimits(existing[0].creator_role, existing[0].creator_tier);
+      const { rows: [already] } = await query(
+        `SELECT 1 FROM hangout_call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL`,
+        [existingCallId, user.id]
+      );
+      if (!already) {
+        const { rows: [cap] } = await query(
+          `SELECT COUNT(*)::int AS count FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL`,
+          [existingCallId]
+        );
+        if ((cap?.count || 0) >= creatorLimits.maxParticipants) {
+          return res.status(409).json({
+            error: `Call is full (${creatorLimits.maxParticipants} participants max)`,
+            code: 'CALL_PARTICIPANT_LIMIT_REACHED',
+          });
+        }
+      }
+
       const ownerModJoin = await isOwnerOrMod(groupId, user.id);
       const joinTtl = ownerModJoin ? 4 * 3600 : 2 * 3600;
       const token = await livekitService.generateToken(activeRoomName, String(user.id), displayName, false, { ttlSeconds: joinTtl });
-      // UPSERT to handle re-joins from disconnect-reconnect cycles; trigger syncs participant_count
       await query(
         `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (call_id, user_id) DO UPDATE SET joined_at = NOW(), left_at = NULL`,
-        [existing[0].id, user.id, displayName]
+        [existingCallId, user.id, displayName]
       );
       return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName: activeRoomName });
     }
@@ -2425,6 +2493,11 @@ async function joinCall(req, res) {
     const member = await isMember(groupId, user.id);
     if (!member) return res.status(403).json({ error: 'Not a member of this group' });
 
+    const joinerLimits = effectiveCallLimits(user.role, user.tier);
+    if (joinerLimits.maxParticipants === 0) {
+      return res.status(403).json({ error: 'Your tier cannot join video calls', code: 'TIER_NOT_ELIGIBLE_FOR_CALLS' });
+    }
+
     {
       const { rows: [grp] } = await query(
         `SELECT id, is_paid, price_usd FROM hangout_groups WHERE id = $1`,
@@ -2444,18 +2517,39 @@ async function joinCall(req, res) {
     }
 
     const { rows } = await query(
-      `SELECT id, room_name FROM hangout_video_calls WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
+      `SELECT hvc.id, hvc.room_name, u.role AS creator_role, u.tier AS creator_tier
+       FROM hangout_video_calls hvc LEFT JOIN users u ON u.id = hvc.creator_id
+       WHERE hvc.group_id=$1 AND hvc.status='active' ORDER BY hvc.created_at DESC LIMIT 1`,
       [groupId]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'No active call for this group' });
 
     const { id: callId, room_name: roomName } = rows[0];
+    const creatorLimits = effectiveCallLimits(rows[0].creator_role, rows[0].creator_tier);
+
+    // Capacity check — skip if user already active (re-fetching token)
+    const { rows: [already] } = await query(
+      `SELECT 1 FROM hangout_call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL`,
+      [callId, user.id]
+    );
+    if (!already) {
+      const { rows: [cap] } = await query(
+        `SELECT COUNT(*)::int AS count FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL`,
+        [callId]
+      );
+      if ((cap?.count || 0) >= creatorLimits.maxParticipants) {
+        return res.status(409).json({
+          error: `Call is full (${creatorLimits.maxParticipants} participants max)`,
+          code: 'CALL_PARTICIPANT_LIMIT_REACHED',
+        });
+      }
+    }
+
     const displayName = user.firstName || user.first_name || user.username || 'User';
     const isOwnerModJoin = await isOwnerOrMod(groupId, user.id);
     const joinCallTtl = isOwnerModJoin ? 4 * 3600 : 2 * 3600;
     const token = await livekitService.generateToken(roomName, String(user.id), displayName, isOwnerModJoin, { ttlSeconds: joinCallTtl });
 
-    // UPSERT to handle re-joins from disconnect-reconnect cycles; trigger syncs participant_count
     await query(
       `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
        VALUES ($1, $2, $3, NOW())
