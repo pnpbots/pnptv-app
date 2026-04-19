@@ -78,6 +78,12 @@ export default function Stream() {
   const [dashTipSuccess, setDashTipSuccess] = useState(false);
   const dashTipPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dashTipCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Tracked one-shot timers so unmount cancels any pending state updates and
+  // we don't generate "setState on unmounted component" warnings when the user
+  // navigates away during a tip success / share copied flash.
+  const tipSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dashTipSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shareCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isTheaterMode, setIsTheaterMode] = useState(false);
   const [streamError, setStreamError] = useState(false);
 
@@ -115,11 +121,16 @@ export default function Stream() {
     emitRaid,
   } = useLiveSocket(streamId || null);
 
-  // Cleanup dashTip polling/countdown intervals on unmount
+  // Cleanup all timers/intervals on unmount. Dash tip polling + countdown
+  // intervals plus the three one-shot setTimeouts (tip-success toast, dash-tip
+  // success chain, share-copied flash).
   useEffect(() => {
     return () => {
       if (dashTipPollRef.current) clearInterval(dashTipPollRef.current);
       if (dashTipCountdownRef.current) clearInterval(dashTipCountdownRef.current);
+      if (tipSuccessTimerRef.current) clearTimeout(tipSuccessTimerRef.current);
+      if (dashTipSettleTimerRef.current) clearTimeout(dashTipSettleTimerRef.current);
+      if (shareCopiedTimerRef.current) clearTimeout(shareCopiedTimerRef.current);
     };
   }, []);
 
@@ -635,11 +646,17 @@ export default function Stream() {
               if (details.status === "Settled" || details.status === "Complete") {
                 if (dashTipPollRef.current) { clearInterval(dashTipPollRef.current); dashTipPollRef.current = null; }
                 setDashTipSuccess(true);
-                setTimeout(() => {
+                if (dashTipSettleTimerRef.current) clearTimeout(dashTipSettleTimerRef.current);
+                dashTipSettleTimerRef.current = setTimeout(() => {
                   setDashTip(null);
                   setDashTipSuccess(false);
                   setTipSuccess(t.live.tipSuccess);
-                  setTimeout(() => setTipSuccess(null), 3000);
+                  if (tipSuccessTimerRef.current) clearTimeout(tipSuccessTimerRef.current);
+                  tipSuccessTimerRef.current = setTimeout(() => {
+                    setTipSuccess(null);
+                    tipSuccessTimerRef.current = null;
+                  }, 3000);
+                  dashTipSettleTimerRef.current = null;
                 }, 1500);
               }
             } catch { /* ignore */ }
@@ -662,7 +679,11 @@ export default function Stream() {
     try {
       await sendTip(streamId || "", amount, undefined, "tokens");
       setTipSuccess(t.live.tipSuccess);
-      setTimeout(() => setTipSuccess(null), 3000);
+      if (tipSuccessTimerRef.current) clearTimeout(tipSuccessTimerRef.current);
+      tipSuccessTimerRef.current = setTimeout(() => {
+        setTipSuccess(null);
+        tipSuccessTimerRef.current = null;
+      }, 3000);
     } catch (err) {
       setTipError(err instanceof Error ? err.message : t.live.tipFailed);
     } finally {
@@ -717,7 +738,11 @@ export default function Stream() {
     try {
       await navigator.clipboard.writeText(url);
       setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 2000);
+      if (shareCopiedTimerRef.current) clearTimeout(shareCopiedTimerRef.current);
+      shareCopiedTimerRef.current = setTimeout(() => {
+        setShareCopied(false);
+        shareCopiedTimerRef.current = null;
+      }, 2000);
     } catch {
       // Clipboard unavailable — silently ignore
     }

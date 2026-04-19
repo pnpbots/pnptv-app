@@ -2,6 +2,7 @@
 
 const { query, getClient } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
+const { getRedis } = require('../../../config/redis');
 const socketSingleton = require('../../../services/socketSingleton');
 const userService = require('../../../services/userService');
 const VideoCallModel = require('../../../models/videoCallModel');
@@ -137,43 +138,63 @@ const listGroups = async (req, res) => {
       [user.id]
     );
 
-    // Fetch unread counts from Redis (set by message send endpoints)
-    const { getRedis } = require('../../../config/redis');
+    // Fetch unread counts from Redis using MGET (single round-trip)
     const redis = getRedis();
-    const unreadCounts = await Promise.all(
-      rows.map(r => redis.get(`hangout:unread:${r.id}:${user.id}`).catch(() => null))
-    );
+    const unreadKeys = rows.map(r => `hangout:unread:${r.id}:${user.id}`);
+    const unreadValues = unreadKeys.length > 0
+      ? await redis.mget(...unreadKeys).catch(() => unreadKeys.map(() => null))
+      : [];
 
-    const groups = rows.map((r, i) => ({
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      avatarUrl: r.avatar_url,
-      creatorId: r.creator_id,
-      isMain: r.is_main,
-      isWallOfFame: r.is_wall_of_fame,
-      isPublic: r.is_public,
-      maxMembers: r.max_members,
-      memberCount: r.member_count,
-      createdAt: r.created_at,
-      hasActiveCall: r.has_active_call,
-      activeCallId: r.active_call_id,
-      lastMessage: null, // Messages live in Matrix; frontend renders from Matrix SDK
-      unreadCount: parseInt(unreadCounts[i], 10) || 0,
-      feedVisibility: r.feed_visibility || 'public',
-      isReadOnly: !!r.is_read_only,
-      slowModeSeconds: r.slow_mode_seconds || 0,
-      tags: r.tags || [],
-      rules: r.rules || null,
-      telegramChatId: r.telegram_chat_id || null,
-      telegramInviteLink: r.telegram_invite_link || null,
-      isPaid: !!r.is_paid,
-      priceUsd: Number(r.price_usd) || 0,
-      channelId: r.channel_id || null,
-      channelAccessType: r.channel_access_type || null,
-      channelPriceUsd: r.channel_price_usd != null ? Number(r.channel_price_usd) : null,
-      channelName: r.channel_name || null,
-    }));
+    // Fetch active call cache using MGET (single round-trip, 60s TTL set on startCall)
+    const activeCallKeys = rows.map(r => `hangout:active_call:${r.id}`);
+    const activeCallValues = activeCallKeys.length > 0
+      ? await redis.mget(...activeCallKeys).catch(() => activeCallKeys.map(() => null))
+      : [];
+
+    const groups = rows.map((r, i) => {
+      // Parse cached active call (if present, skip DB-computed value)
+      let hasActiveCall = r.has_active_call;
+      let activeCallId = r.active_call_id;
+      if (activeCallValues[i]) {
+        try {
+          const cached = JSON.parse(activeCallValues[i]);
+          hasActiveCall = true;
+          activeCallId = cached.id ? String(cached.id) : activeCallId;
+        } catch {
+          // cache parse failure — fall back to DB-computed value
+        }
+      }
+      return {
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        avatarUrl: r.avatar_url,
+        creatorId: r.creator_id,
+        isMain: r.is_main,
+        isWallOfFame: r.is_wall_of_fame,
+        isPublic: r.is_public,
+        maxMembers: r.max_members,
+        memberCount: r.member_count,
+        createdAt: r.created_at,
+        hasActiveCall,
+        activeCallId,
+        lastMessage: null,
+        unreadCount: parseInt(unreadValues[i], 10) || 0,
+        feedVisibility: r.feed_visibility || 'public',
+        isReadOnly: !!r.is_read_only,
+        slowModeSeconds: r.slow_mode_seconds || 0,
+        tags: r.tags || [],
+        rules: r.rules || null,
+        telegramChatId: r.telegram_chat_id || null,
+        telegramInviteLink: r.telegram_invite_link || null,
+        isPaid: !!r.is_paid,
+        priceUsd: Number(r.price_usd) || 0,
+        channelId: r.channel_id || null,
+        channelAccessType: r.channel_access_type || null,
+        channelPriceUsd: r.channel_price_usd != null ? Number(r.channel_price_usd) : null,
+        channelName: r.channel_name || null,
+      };
+    });
 
     return res.json({ success: true, groups });
   } catch (err) {
@@ -313,7 +334,7 @@ const createGroup = async (req, res) => {
 const getGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     // Auto-join main group if not already a member
@@ -407,7 +428,7 @@ const getGroup = async (req, res) => {
 const joinGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     const { rows } = await query(
@@ -563,7 +584,7 @@ const joinGroup = async (req, res) => {
 const leaveGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     // Can't leave the main community group
@@ -595,7 +616,7 @@ const leaveGroup = async (req, res) => {
 const deleteGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
@@ -632,7 +653,7 @@ const deleteGroup = async (req, res) => {
 const updateGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     const { rows: groupRows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
@@ -741,7 +762,7 @@ const updateGroup = async (req, res) => {
 const updateGroupAvatar = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   if (!req.file) return res.status(400).json({ error: 'No image file uploaded' });
 
@@ -792,7 +813,7 @@ const updateGroupAvatar = async (req, res) => {
 const kickMember = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   const { userId: targetUserId } = req.body;
   if (!targetUserId) return res.status(400).json({ error: 'userId is required' });
@@ -837,6 +858,8 @@ const kickMember = async (req, res) => {
       [groupId, targetUserId]
     );
 
+    auditModeration(groupId, user.id, targetUserId, 'kick', req.body.reason || null, null);
+
     // Sync Matrix room membership — fire-and-forget (non-blocking, non-fatal)
     matrixService.removeFromHangoutRoom(groupId, {
       id: targetUserId,
@@ -857,7 +880,7 @@ const updateMemberRole = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
   const targetUserId = req.params.userId;
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
   if (!targetUserId) return res.status(400).json({ error: 'Invalid target user ID' });
 
   const { role: newRole } = req.body;
@@ -1140,7 +1163,7 @@ const sendMessage = async (req, res) => {
 const markAsRead = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
   try {
     if (!(await isMember(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
@@ -1203,7 +1226,7 @@ const discoverGroups = async (req, res) => {
 const requestJoinGroup = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     const { rows: groupRows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
@@ -1261,7 +1284,7 @@ const requestJoinGroup = async (req, res) => {
 const getJoinRequests = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     // Only creator can view requests
@@ -1381,10 +1404,23 @@ const handleJoinRequest = async (req, res) => {
   }
 };
 
-// Helper: check if user is owner or moderator
+// Helper: write a moderation audit record — never throws, never blocks the caller
+async function auditModeration(groupId, actorId, targetId, action, reason = null, metadata = null) {
+  try {
+    await query(
+      `INSERT INTO hangout_moderation_audit (group_id, actor_id, target_id, action, reason, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [groupId, String(actorId), targetId != null ? String(targetId) : null, action, reason, metadata ? JSON.stringify(metadata) : null]
+    );
+  } catch (err) {
+    logger.warn('auditModeration failed', { groupId, action, err: err.message });
+  }
+}
+
+// Helper: check if user is owner or moderator (banned moderators are excluded)
 const isOwnerOrMod = async (groupId, userId) => {
   const { rows } = await query(
-    "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role IN ('owner','moderator')",
+    "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND is_banned = FALSE AND role IN ('owner','moderator')",
     [groupId, userId]
   );
   return rows.length > 0;
@@ -1410,6 +1446,7 @@ const banMember = async (req, res) => {
       'UPDATE hangout_group_members SET is_banned = true WHERE group_id=$1 AND user_id=$2',
       [groupId, targetId]
     );
+    auditModeration(groupId, user.id, targetId, 'ban', req.body.reason || null, null);
     matrixService.removeFromHangoutRoom(groupId, { id: targetId, matrix_user_id: null }).catch(() => {});
     return res.json({ success: true });
   } catch (err) {
@@ -1431,6 +1468,7 @@ const unbanMember = async (req, res) => {
       'UPDATE hangout_group_members SET is_banned = false WHERE group_id=$1 AND user_id=$2',
       [groupId, targetId]
     );
+    auditModeration(groupId, user.id, targetId, 'unban', null, null);
     return res.json({ success: true });
   } catch (err) {
     logger.error('unbanMember error', err);
@@ -1459,6 +1497,7 @@ const muteMember = async (req, res) => {
       'UPDATE hangout_group_members SET is_muted = true, muted_until = $3 WHERE group_id=$1 AND user_id=$2',
       [groupId, targetId, mutedUntil]
     );
+    auditModeration(groupId, user.id, targetId, 'mute', req.body.reason || null, { durationSeconds: Math.min(durationMinutes, 10080) * 60 });
     return res.json({ success: true, mutedUntil });
   } catch (err) {
     logger.error('muteMember error', err);
@@ -1479,6 +1518,7 @@ const unmuteMember = async (req, res) => {
       'UPDATE hangout_group_members SET is_muted = false, muted_until = NULL WHERE group_id=$1 AND user_id=$2',
       [groupId, targetId]
     );
+    auditModeration(groupId, user.id, targetId, 'unmute', null, null);
     return res.json({ success: true });
   } catch (err) {
     logger.error('unmuteMember error', err);
@@ -1594,7 +1634,7 @@ const unpinMessage = async (req, res) => {
 const getPinnedMessages = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     if (!(await isMember(groupId, user.id))) return res.status(403).json({ error: 'Not a member' });
@@ -1618,7 +1658,7 @@ const getPinnedMessages = async (req, res) => {
 const updateGroupSettings = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
@@ -1712,7 +1752,7 @@ const transferOwnership = async (req, res) => {
 const getInviteLink = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     const isOwnerMod = await isOwnerOrMod(groupId, user.id);
@@ -1801,7 +1841,7 @@ const updateNotificationMode = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
   const { mode } = req.body;
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
   const validModes = ['all', 'mentions', 'muted'];
   if (!validModes.includes(mode)) return res.status(400).json({ error: 'Invalid mode. Use: all, mentions, muted' });
 
@@ -2190,7 +2230,7 @@ const livekitService = require('../../../services/livekitService');
 async function startCall(req, res) {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id, 10);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     await ensureMainGroupMembership(user.id);
@@ -2233,7 +2273,9 @@ async function startCall(req, res) {
     if (existing.length > 0) {
       const activeRoomName = existing[0].room_name;
       const displayName = user.firstName || user.first_name || user.username || 'User';
-      const token = await livekitService.generateToken(activeRoomName, String(user.id), displayName, false);
+      const ownerModJoin = await isOwnerOrMod(groupId, user.id);
+      const joinTtl = ownerModJoin ? 4 * 3600 : 2 * 3600;
+      const token = await livekitService.generateToken(activeRoomName, String(user.id), displayName, false, { ttlSeconds: joinTtl });
       // UPSERT to handle re-joins from disconnect-reconnect cycles; trigger syncs participant_count
       await query(
         `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
@@ -2263,7 +2305,9 @@ async function startCall(req, res) {
         );
         if (race.length > 0) {
           const displayName = user.firstName || user.first_name || user.username || 'User';
-          const token = await livekitService.generateToken(race[0].room_name, String(user.id), displayName, false);
+          const ownerModRace = await isOwnerOrMod(groupId, user.id);
+          const raceTtl = ownerModRace ? 4 * 3600 : 2 * 3600;
+          const token = await livekitService.generateToken(race[0].room_name, String(user.id), displayName, false, { ttlSeconds: raceTtl });
           await query(
             `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
              VALUES ($1, $2, $3, NOW())
@@ -2284,7 +2328,8 @@ async function startCall(req, res) {
        ON CONFLICT (call_id, user_id) DO UPDATE SET left_at = NULL, joined_at = EXCLUDED.joined_at`,
       [callId, user.id, displayName]
     );
-    const token = await livekitService.generateToken(roomName, String(user.id), displayName, true);
+    // Creator of a new call is always owner/mod — use 4h TTL
+    const token = await livekitService.generateToken(roomName, String(user.id), displayName, true, { ttlSeconds: 4 * 3600 });
 
     // Notify everyone in the hangout room
     const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
@@ -2295,6 +2340,10 @@ async function startCall(req, res) {
         startedBy: { firstName: user.firstName || user.first_name, username: user.username },
       });
     }
+
+    // Cache active call for 60s so listGroups can skip the DB sub-query
+    const activeCallCacheKey = `hangout:active_call:${groupId}`;
+    getRedis().set(activeCallCacheKey, JSON.stringify({ id: callId, roomName, participantCount: 1 }), 'EX', 60).catch(() => {});
 
     logger.info(`startCall: group=${groupId} call=${callId} user=${user.id}`);
     return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName });
@@ -2308,7 +2357,7 @@ async function startCall(req, res) {
 async function joinCall(req, res) {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id, 10);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     await ensureMainGroupMembership(user.id);
@@ -2341,7 +2390,9 @@ async function joinCall(req, res) {
 
     const { id: callId, room_name: roomName } = rows[0];
     const displayName = user.firstName || user.first_name || user.username || 'User';
-    const token = await livekitService.generateToken(roomName, String(user.id), displayName, false);
+    const isOwnerModJoin = await isOwnerOrMod(groupId, user.id);
+    const joinCallTtl = isOwnerModJoin ? 4 * 3600 : 2 * 3600;
+    const token = await livekitService.generateToken(roomName, String(user.id), displayName, isOwnerModJoin, { ttlSeconds: joinCallTtl });
 
     // UPSERT to handle re-joins from disconnect-reconnect cycles; trigger syncs participant_count
     await query(
@@ -2371,7 +2422,7 @@ async function joinCall(req, res) {
 async function endCall(req, res) {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id, 10);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     const isAdminRole = (user.role || '').toLowerCase() === 'admin' || (user.role || '').toLowerCase() === 'superadmin';
@@ -2394,6 +2445,9 @@ async function endCall(req, res) {
       `UPDATE hangout_video_calls SET status='ended', ended_at=NOW(), ended_by=$1 WHERE id=$2`,
       [user.id, callId]
     );
+
+    // Invalidate active call cache
+    getRedis().del(`hangout:active_call:${groupId}`).catch(() => {});
 
     const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
     if (io) {
@@ -2435,6 +2489,9 @@ async function leaveCall(req, res) {
       [callId]
     );
 
+    // Invalidate active call cache (participant count changed; TTL refresh happens on next startCall)
+    getRedis().del(`hangout:active_call:${groupId}`).catch(() => {});
+
     const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
     if (io) {
       io.to(`hangout:${groupId}`).emit('hangout:call:participant-left', {
@@ -2455,7 +2512,7 @@ async function leaveCall(req, res) {
 async function linkTelegramGroup(req, res) {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id, 10);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   const { telegramChatId, telegramInviteLink } = req.body;
   if (!telegramChatId) return res.status(400).json({ error: 'telegramChatId is required' });
@@ -2490,7 +2547,7 @@ async function linkTelegramGroup(req, res) {
 async function getVideoChatStatus(req, res) {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id, 10);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     const { rows } = await query(
@@ -2551,7 +2608,7 @@ async function getVideoChatStatus(req, res) {
 async function unlinkTelegramGroup(req, res) {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id, 10);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
     // Only owner or admin can unlink

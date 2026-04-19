@@ -283,6 +283,13 @@
   }
 }
 
+/* Reaction picker stagger pop (used inline via animation: stage-pop ... ) */
+@keyframes stage-pop {
+  0%   { opacity: 0; transform: translateY(6px) scale(0.7); }
+  70%  { opacity: 1; transform: translateY(-1px) scale(1.06); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* ── Radio Widget — Equalizer bar animation ──────────────────────────── */
 
 @keyframes radio-eq-bar {

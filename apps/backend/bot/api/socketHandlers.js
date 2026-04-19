@@ -108,6 +108,32 @@ const MSG_RETURNING_COLS = `
 // SOCK-L1: moved out of the per-connection handler closure.
 const STREAM_ID_RE = /^[a-zA-Z0-9_:\-\.]{1,200}$/;
 
+// ── Socket-local entitlement cache ───────────────────────────────────────────
+// Caches entitlement booleans on socket.data to avoid a DB hit on every message.
+// TTL: 60s. On expiry the value is re-fetched from EntitlementAccessService.
+const SOCKET_ENTITLEMENT_TTL_MS = 60 * 1000;
+
+/**
+ * Return a cached entitlement value for (socket, userId, key).
+ * Re-fetches via EntitlementAccessService when the cache entry is absent or expired.
+ *
+ * @param {import('socket.io').Socket} socket
+ * @param {string} userId
+ * @param {string} entitlementKey  e.g. 'pnp-member'
+ * @returns {Promise<boolean>}
+ */
+async function getCachedEntitlement(socket, userId, entitlementKey) {
+  if (!socket.data.entitlementCache) socket.data.entitlementCache = {};
+  const cached = socket.data.entitlementCache[entitlementKey];
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+  const EntitlementAccessService = require('../../services/entitlementAccessService');
+  const value = await EntitlementAccessService.hasEntitlement(String(userId), entitlementKey);
+  socket.data.entitlementCache[entitlementKey] = { value, expiresAt: Date.now() + SOCKET_ENTITLEMENT_TTL_MS };
+  return value;
+}
+
 // ── Global online presence ────────────────────────────────────────────────────
 
 // Track online users: userId → { name, photoUrl, hangoutGroupIds: Set<number>, socketIds: Set<string> }
@@ -350,8 +376,7 @@ function initSocketIO(io) {
       const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
       if (!isAdminUser) {
         try {
-          const EntitlementAccessService = require('../../services/entitlementAccessService');
-          const hasAccess = await EntitlementAccessService.hasEntitlement(String(user.id), 'pnp-member');
+          const hasAccess = await getCachedEntitlement(socket, user.id, 'pnp-member');
           if (!hasAccess) {
             socket.emit('hangout:error', { message: 'Member subscription required', code: 'MEMBER_REQUIRED' });
             return;
@@ -485,7 +510,39 @@ function initSocketIO(io) {
           }
         }
 
-        // Broadcast to all users in the hangout room
+        // ── Webapp → Telegram bridge: forward BEFORE broadcast so telegramMsgId is in the emitted payload ──
+        let telegramMsgId = null;
+        try {
+          const { rows: tgRows } = await query(
+            'SELECT telegram_chat_id FROM hangout_groups WHERE id = $1 AND telegram_chat_id IS NOT NULL',
+            [gid]
+          );
+          if (tgRows.length > 0) {
+            const tgChatId = tgRows[0].telegram_chat_id;
+            const { getBotInstance } = require('../core/bot');
+            const bot = getBotInstance();
+            if (bot) {
+              const senderName = user.firstName || user.first_name || user.username || 'User';
+              const tgResult = await bot.telegram.sendMessage(tgChatId, `${senderName}: ${text}`, { parse_mode: undefined });
+              if (tgResult?.message_id) {
+                telegramMsgId = tgResult.message_id;
+                await query(
+                  `UPDATE chat_messages SET media_metadata = COALESCE(media_metadata, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
+                  [JSON.stringify({ source: 'webapp', telegramMsgId: tgResult.message_id, telegramChatId: String(tgChatId) }), msg.id]
+                );
+                // Patch the in-memory msg so broadcast includes telegramMsgId
+                if (!msg.media_metadata) msg.media_metadata = {};
+                msg.media_metadata.telegramMsgId = tgResult.message_id;
+                msg.media_metadata.telegramChatId = String(tgChatId);
+              }
+            }
+          }
+        } catch (bridgeErr) {
+          // Never block local chat on Telegram issues — log and continue
+          logger.warn('[App→TG Bridge] socket text forward failed', { error: bridgeErr.message, groupId: gid });
+        }
+
+        // Broadcast to all users in the hangout room (telegramMsgId included when available)
         io.to(room).emit('chat:message', msg);
 
         // Auto-drop feed-worthy messages to the hangout feed (non-blocking)
@@ -496,32 +553,6 @@ function initSocketIO(io) {
 
         // Touch activity timestamp for 72h inactivity cleanup
         await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [gid]);
-
-        // ── Webapp → Telegram bridge: forward text message to linked Telegram group ──
-        (async () => {
-          try {
-            const { rows: tgRows } = await query(
-              'SELECT telegram_chat_id FROM hangout_groups WHERE id = $1 AND telegram_chat_id IS NOT NULL',
-              [gid]
-            );
-            if (tgRows.length === 0) return;
-            const tgChatId = tgRows[0].telegram_chat_id;
-            const { getBotInstance } = require('../core/bot');
-            const bot = getBotInstance();
-            if (!bot) return;
-            const senderName = user.firstName || user.first_name || user.username || 'User';
-            const tgResult = await bot.telegram.sendMessage(tgChatId, `${senderName}: ${text}`, { parse_mode: undefined });
-            // Store TG message ID so edits/deletes can be synced back
-            if (tgResult?.message_id) {
-              await query(
-                `UPDATE chat_messages SET media_metadata = COALESCE(media_metadata, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
-                [JSON.stringify({ source: 'webapp', telegramMsgId: tgResult.message_id, telegramChatId: String(tgChatId) }), msg.id]
-              );
-            }
-          } catch (bridgeErr) {
-            logger.warn('[App→TG Bridge] socket text forward failed', { error: bridgeErr.message, groupId: gid });
-          }
-        })();
 
         // ── Push notifications to offline hangout members ──
         // Fire-and-forget: don't block the message flow

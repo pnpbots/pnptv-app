@@ -1901,6 +1901,15 @@ const startBot = async () => {
     }
 
 
+    // Initialize orphaned media cleanup worker (every 6h, 10-min startup delay)
+    try {
+      const orphanedMediaCleanup = require('../../workers/orphanedMediaCleanup');
+      orphanedMediaCleanup.start();
+      logger.info('✓ Orphaned media cleanup worker initialized');
+    } catch (error) {
+      logger.warn(`Orphaned media cleanup worker initialization failed: ${error.message}`);
+    }
+
     // Register commands with Telegram
     try {
       const commands = [

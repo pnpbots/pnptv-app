@@ -55,6 +55,7 @@ import {
   purchaseChannelAccess,
   purchaseHangoutAccess,
   getPaymentStatus,
+  ApiError,
   type HangoutGroup,
   type GroupMessage,
   type GroupMember,
@@ -1122,18 +1123,42 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     try {
       setCallError(null);
       const hasActive = activeGroup.hasActiveCall;
-      const result = hasActive
-        ? await joinHangoutCall(activeGroup.id)
-        : await startHangoutCall(activeGroup.id);
+      let result: { token: string; livekitUrl: string; roomName: string };
+      if (hasActive) {
+        try {
+          result = await joinHangoutCall(activeGroup.id);
+        } catch (joinErr: unknown) {
+          // 404 means the active call already ended — fall through to start
+          if (joinErr instanceof ApiError && joinErr.status === 404) {
+            result = await startHangoutCall(activeGroup.id);
+          } else {
+            throw joinErr;
+          }
+        }
+      } else {
+        result = await startHangoutCall(activeGroup.id);
+      }
       setCallToken(result.token);
       setCallRoomName(result.roomName);
       setCallLivekitUrl(result.livekitUrl || "wss://livekit.pnptv.app");
       setShowTelegramDock(true);
       setCallPanelDismissed(false);
-    } catch {
-      setCallError("Could not connect to the call. Please try again.");
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        if (err.status === 403) {
+          setCallError("You were removed from this hangout.");
+          // Refresh the group list so the kicked group disappears from the sidebar
+          loadGroups();
+        } else if (err.status === 402) {
+          setCallError("This is a paid hangout. You need access to join the video call.");
+        } else {
+          setCallError("Could not connect to the call. Please try again.");
+        }
+      } else {
+        setCallError("Could not connect to the call. Please try again.");
+      }
     }
-  }, [activeGroup]);
+  }, [activeGroup, loadGroups]);
 
   const handleLeaveCall = useCallback(() => {
     setShowTelegramDock(false);
@@ -1168,14 +1193,22 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setCallParticipantCount((prev) => prev + (data.count ?? 1));
     };
 
+    const onParticipantLeft = (data: { groupId?: number; callId?: number }) => {
+      // groupId may not be present in older payloads; guard gracefully
+      if (data.groupId !== undefined && data.groupId !== activeGroup.id) return;
+      setCallParticipantCount((prev) => Math.max(0, prev - 1));
+    };
+
     socket.on("hangout:call:started", onCallStarted);
     socket.on("hangout:call:ended", onCallEnded);
     socket.on("hangout:call:participant-joined", onParticipantJoined);
+    socket.on("hangout:call:participant-left", onParticipantLeft);
 
     return () => {
       socket.off("hangout:call:started", onCallStarted);
       socket.off("hangout:call:ended", onCallEnded);
       socket.off("hangout:call:participant-joined", onParticipantJoined);
+      socket.off("hangout:call:participant-left", onParticipantLeft);
     };
   }, [activeGroup?.id]);
 
