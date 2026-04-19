@@ -144,8 +144,8 @@ const unsubscribeFromCreator = async (req, res) => {
 const getWalletAddress = async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT creator_dash_address, creator_wallet_address, creator_wallet_verified,
-              payout_method, meru_account, creator_payout_chain_id,
+      `SELECT creator_dash_address, creator_wallet_verified,
+              payout_method, meru_account,
               fiat_payout_method, fiat_payout_account
        FROM users WHERE id = $1`,
       [req.user.id]
@@ -153,11 +153,9 @@ const getWalletAddress = async (req, res) => {
     return res.json({
       success: true,
       dashAddress: rows[0]?.creator_dash_address || null,
-      address: rows[0]?.creator_wallet_address || null,
       verified: rows[0]?.creator_wallet_verified || false,
       payoutMethod: rows[0]?.payout_method || 'dash',
       meruAccount: rows[0]?.meru_account || null,
-      payoutChainId: rows[0]?.creator_payout_chain_id || 10,
       fiatPayoutMethod: rows[0]?.fiat_payout_method || null,
       fiatPayoutAccount: rows[0]?.fiat_payout_account || null,
     });
@@ -172,7 +170,7 @@ const saveWalletAddress = async (req, res) => {
   try {
     const { dashAddress, payoutMethod, meruAccount, fiatProvider, fiatAccount } = req.body || {};
     // 'crypto' (USDC EVM) is no longer accepted — Dash is the only crypto path.
-    // Any legacy `creator_wallet_address` row stays read-only via getWalletAddress.
+    // The legacy creator_wallet_address column was dropped in migration 123.
     const method = payoutMethod === 'meru' ? 'meru'
       : payoutMethod === 'fiat'  ? 'fiat'
       : 'dash';                                 // default
@@ -203,7 +201,7 @@ const saveWalletAddress = async (req, res) => {
         return res.status(400).json({ error: 'Fiat account handle/email is required (max 200 chars).' });
       }
       await query(
-        'UPDATE users SET payout_method = $1, fiat_payout_method = $2, fiat_payout_account = $3, creator_wallet_address = NULL, meru_account = NULL WHERE id = $4',
+        'UPDATE users SET payout_method = $1, fiat_payout_method = $2, fiat_payout_account = $3, meru_account = NULL WHERE id = $4',
         ['fiat', provider, account, req.user.id]
       );
     } else {
@@ -215,7 +213,7 @@ const saveWalletAddress = async (req, res) => {
         return res.status(400).json({ error: 'Meru account too long.' });
       }
       await query(
-        'UPDATE users SET payout_method = $1, meru_account = $2, creator_wallet_address = NULL WHERE id = $3',
+        'UPDATE users SET payout_method = $1, meru_account = $2 WHERE id = $3',
         ['meru', meru, req.user.id]
       );
     }
@@ -782,7 +780,7 @@ const getMyConsents = async (req, res) => {
         u.content_disclaimer, u.content_disclaimer_accepted_at,
         u.created_at,
         u.fiat_payout_method,
-        (u.creator_wallet_address IS NOT NULL AND u.creator_wallet_address <> '') AS wallet_address_set,
+        (u.creator_dash_address IS NOT NULL AND u.creator_dash_address <> '') AS wallet_address_set,
         u.creator_wallet_verified,
         ma.id                AS application_id,
         ma.application_type,

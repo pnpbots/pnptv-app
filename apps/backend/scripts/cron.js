@@ -221,9 +221,10 @@ const startCronJobs = async (bot = null) => {
     });
 
     // ── Creator Monthly Payouts — 1st of month at 00:00 UTC ─────────────────
-    // Groups all `available` creator_earnings by creator, sends one consolidated
-    // USDC payout per creator to their creator_wallet_address via Daimo transfer.
-    // Skips creators without a wallet address (notifies them instead).
+    // Groups all `available` creator_earnings by creator, creates ONE BTCPay
+    // Pull Payment in Dash per creator (creator claims via emailed link).
+    // Falls back to fiat off-ramp via Peer Protocol when payout_method='fiat'.
+    // Skips creators with no Dash address + no fiat method (notifies them).
     // Minimum threshold: $1.00. Earnings below threshold roll over automatically.
     cron.schedule(process.env.CREATOR_PAYOUT_CRON || '0 0 1 * *', async () => {
       try {

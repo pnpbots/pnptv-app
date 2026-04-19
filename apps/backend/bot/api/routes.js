@@ -56,8 +56,9 @@ const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const modelRoutes = require('./routes/modelRoutes');
 const applyRoutes = require('./routes/applyRoutes');
 const castingRoutes = require('./routes/castingRoutes');
-// Element + Matrix removed (migrated to LiveKit/Socket.IO)
-const elementRoutes = require('express').Router(); // empty stub
+// Matrix removed (migrated to LiveKit/Socket.IO). matrixMessageController stays
+// as 410-stub for any stale link/webhook; the empty /api/element Router was
+// also removed since nothing called it.
 const matrixMessageController = {
   sendHangoutMessage: (_req, res) => res.status(410).json({ error: 'Matrix removed — use Socket.IO' }),
   sendDmMessage: (_req, res) => res.status(410).json({ error: 'Matrix removed — use Socket.IO' }),
@@ -1887,78 +1888,11 @@ app.post('/api/subscription/create-plan', verifyAdminJWT, asyncHandler(subscript
 app.get('/api/subscription/subscriber/:identifier', verifyAdminJWT, asyncHandler(subscriptionController.getSubscriber));
 app.get('/api/subscription/stats', verifyAdminJWT, asyncHandler(subscriptionController.getStatistics));
 
-// Audio Management API
-const audioStreamer = require('../../services/audioStreamer');
-
-// List all available audio files
-app.get('/api/audio/list', verifyAdminJWT, asyncHandler(async (req, res) => {
-  const files = audioStreamer.listAudioFiles();
-  res.json({
-    success: true,
-    files,
-    current: audioStreamer.getCurrentTrack()
-  });
-}));
-
-// Setup background audio from SoundCloud (PROTECTED: require authentication)
-app.post('/api/audio/setup-soundcloud', authenticateUser, asyncHandler(async (req, res) => {
-  const { soundcloudUrl, trackName = 'background-music' } = req.body;
-
-  if (!soundcloudUrl) {
-    return res.status(400).json({
-      success: false,
-      message: 'SoundCloud URL is required'
-    });
-  }
-
-  try {
-    const result = await audioStreamer.setupBackgroundAudio(soundcloudUrl, trackName);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Failed to setup audio',
-      error: error.message
-    });
-  }
-}));
-
-// Get current audio track
-app.get('/api/audio/current', asyncHandler(async (req, res) => {
-  const current = audioStreamer.getCurrentTrack();
-  res.json({
-    success: true,
-    current
-  });
-}));
-
-// Stop background audio (PROTECTED: require authentication)
-app.post('/api/audio/stop', authenticateUser, asyncHandler(async (req, res) => {
-  audioStreamer.stopBackgroundAudio();
-  res.json({
-    success: true,
-    message: 'Background audio stopped'
-  });
-}));
-
-// Delete audio file
-app.delete('/api/audio/:filename', verifyAdminJWT, asyncHandler(async (req, res) => {
-  const { filename } = req.params;
-
-  try {
-    const deleted = audioStreamer.deleteAudioFile(filename);
-    res.json({
-      success: deleted,
-      message: deleted ? 'Audio file deleted' : 'Audio file not found'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete audio',
-      error: error.message
-    });
-  }
-}));
+// /api/audio/* HTTP routes removed — they were a parallel duplicate of the
+// admin audio management bot handler at bot/handlers/admin/audioManagement.js
+// (which IS wired and remains the canonical surface). Zero frontend or bot
+// callers ever invoked these HTTP routes. The audioStreamer service is still
+// imported by audioManagement.js for the bot flow.
 
 // ==========================================
 // Hangouts API (PROTECTED: create/join require authentication)
@@ -7590,8 +7524,6 @@ app.use('/api/model', modelRoutes);
 // Model/Creator application routes
 app.use('/api/apply', applyRoutes);
 app.use('/api/casting', castingRoutes);
-
-app.use('/api/element', elementRoutes);
 
 // ==========================================
 // Matrix / Synapse bridge routes

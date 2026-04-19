@@ -22,7 +22,7 @@
  *   private key (`sendDirectUSDCTransfer`). That route was removed when all
  *   creators moved to Dash. Creators who still have a legacy 0x EVM address on
  *   file get notified each cycle to enter a Dash address — earnings roll over
- *   in the meantime. The legacy `creator_wallet_address` column is read-only.
+ *   in the meantime. The legacy creator_wallet_address column was dropped in migration 123.
  */
 
 const { query } = require('../config/postgres');
@@ -54,8 +54,6 @@ class CreatorPayoutService {
           COALESCE(SUM(ce.amount_creator), 0)::numeric  AS total_creator,
           ARRAY_AGG(ce.id)                               AS earning_ids,
           u.creator_dash_address,
-          u.creator_wallet_address,
-          u.creator_payout_chain_id,
           u.payout_method,
           u.fiat_payout_method,
           u.fiat_payout_account,
@@ -67,9 +65,9 @@ class CreatorPayoutService {
         JOIN users u ON u.id = ce.creator_id
         WHERE ce.status  = 'available'
           AND ce.paid_at IS NULL
-        GROUP BY ce.creator_id, u.creator_dash_address, u.creator_wallet_address,
-                 u.creator_payout_chain_id, u.payout_method, u.fiat_payout_method,
-                 u.fiat_payout_account, u.email, u.username, u.first_name, u.language
+        GROUP BY ce.creator_id, u.creator_dash_address, u.payout_method,
+                 u.fiat_payout_method, u.fiat_payout_account, u.email,
+                 u.username, u.first_name, u.language
         HAVING COALESCE(SUM(ce.amount_creator), 0) >= $1
       `, [MINIMUM_PAYOUT_USD]);
       rows = result.rows;
@@ -125,10 +123,9 @@ class CreatorPayoutService {
    *   2. creator_dash_address set  → BTCPay Pull Payment in Dash (default crypto path).
    *   3. nothing configured        → skip + notify creator to set Dash address.
    *
-   * The previous legacy on-chain USDC sweep route was removed once all crypto
-   * payouts moved to Dash. Creators who still have only a `creator_wallet_address`
-   * (0x EVM) on file are treated as "no payout method" — they get a nudge to
-   * enter a Dash address and the earnings roll over until they do.
+   * Migration 123 dropped the legacy creator_wallet_address column entirely —
+   * any historical USDC-only creators now fall through to the "skip + notify"
+   * branch the same as a brand-new creator who hasn't set up payouts yet.
    *
    * @param {Object} creator - Row from the aggregate query in runMonthlyPayouts
    * @returns {{ skipped: boolean }}
@@ -136,7 +133,7 @@ class CreatorPayoutService {
   static async _processCreatorPayout(creator) {
     const {
       creator_id, total_creator, earning_ids,
-      creator_dash_address, creator_wallet_address,
+      creator_dash_address,
       payout_method, fiat_payout_method, fiat_payout_account,
       email, username, first_name,
     } = creator;
@@ -154,14 +151,11 @@ class CreatorPayoutService {
 
     const hasFiatMethod = payout_method === 'fiat' && !!fiat_payout_method && !!fiat_payout_account;
     const hasDashAddress = !!creator_dash_address;
-    const hasOnlyLegacyEvm = !hasDashAddress && !hasFiatMethod && !!creator_wallet_address;
 
     if (!hasFiatMethod && !hasDashAddress) {
-      const nudge = hasOnlyLegacyEvm
-        ? `Your payout of $${amountUsd.toFixed(2)} is ready, but USDC payouts have been retired. Open Creator Settings and enter a Dash wallet address to receive it.`
-        : `Your payout of $${amountUsd.toFixed(2)} is ready! Add your Dash wallet address in Creator Settings to receive it.`;
+      const nudge = `Your payout of $${amountUsd.toFixed(2)} is ready! Add your Dash wallet address in Creator Settings to receive it.`;
       logger.warn('CreatorPayoutService: creator has no valid payout method, skipping', {
-        creatorId: creator_id, hasOnlyLegacyEvm,
+        creatorId: creator_id,
       });
       await NotificationEmitter.emit({
         type: 'system',
@@ -172,7 +166,7 @@ class CreatorPayoutService {
         entityType: 'creator',
         entityId: String(creator_id),
         message: nudge,
-        metadata: { pendingAmountUsd: amountUsd, earningIds: earning_ids, hasOnlyLegacyEvm },
+        metadata: { pendingAmountUsd: amountUsd, earningIds: earning_ids },
       });
       return { skipped: true };
     }

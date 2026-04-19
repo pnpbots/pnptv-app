@@ -399,9 +399,9 @@ function CreatorDetailPanel({
                 <p className="text-xs text-pnp-textSecondary mt-0.5">
                   {detail.creator.creator_type ?? "—"} creator &middot; {fmtUsd(detail.creator.creator_price_usd)}/mo &middot; payout: {detail.creator.payout_method ?? "—"}
                 </p>
-                {detail.creator.creator_wallet_address && (
+                {detail.creator.creator_dash_address && (
                   <p className="font-mono text-xs text-pnp-textSecondary mt-0.5 truncate">
-                    {detail.creator.creator_wallet_address}
+                    {detail.creator.creator_dash_address}
                   </p>
                 )}
               </div>

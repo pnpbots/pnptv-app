@@ -63,7 +63,7 @@ const creatorSubscriptionAdminController = {
       const { rows: creatorRows } = await query(
         `SELECT
            id, username, first_name, avatar_url, creator_type, creator_price_usd,
-           creator_subscriber_count, creator_wallet_address, payout_method, email
+           creator_subscriber_count, creator_dash_address, payout_method, email
          FROM users
          WHERE id = $1 AND creator_status = 'active'`,
         [creatorId]
@@ -148,7 +148,7 @@ const creatorSubscriptionAdminController = {
       const { creatorId } = req.params;
 
       const { rows: creatorInfo } = await query(
-        `SELECT id, username, creator_wallet_address, payout_method, email
+        `SELECT id, username, creator_dash_address, payout_method, email
          FROM users WHERE id = $1 AND creator_status = 'active'`,
         [creatorId]
       );
@@ -188,7 +188,7 @@ const creatorSubscriptionAdminController = {
         amount: pending,
         earningsCount: rowCount,
         method: creatorInfo[0].payout_method || 'manual',
-        walletAddress: creatorInfo[0].creator_wallet_address || null,
+        walletAddress: creatorInfo[0].creator_dash_address || null,
         processedBy: req.session?.user?.id,
       });
 
@@ -198,7 +198,7 @@ const creatorSubscriptionAdminController = {
         earningsCount: rowCount,
         creator: creatorInfo[0].username,
         method: creatorInfo[0].payout_method || 'manual',
-        walletAddress: creatorInfo[0].creator_wallet_address || null,
+        walletAddress: creatorInfo[0].creator_dash_address || null,
       });
     } catch (err) {
       logger.error('processCreatorPayout admin error', { error: err.message, creatorId: req.params.creatorId });
