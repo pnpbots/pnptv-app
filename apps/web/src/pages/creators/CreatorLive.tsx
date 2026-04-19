@@ -192,6 +192,92 @@ export default function CreatorLive() {
           )}
         </Card>
 
+        {/* How do you want to stream? */}
+        <Card className="p-5 space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <svg className="w-4 h-4" style={{ color: "#5ED1C4" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              How do you want to stream?
+            </h2>
+            <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
+              Choose one. You can switch anytime.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Option 1 — Stream from this app (recommended) */}
+            <a
+              href="https://studio.pnptv.app"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="relative block rounded-xl p-4 transition-all hover:scale-[1.02]"
+              style={{
+                background: "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(123,97,255,0.15))",
+                border: "1px solid rgba(212,0,122,0.35)",
+              }}
+            >
+              <span
+                className="absolute top-2 right-2 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider"
+                style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)", color: "#fff" }}
+              >
+                Recommended
+              </span>
+              <div
+                className="w-9 h-9 rounded-lg flex items-center justify-center mb-2"
+                style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)" }}
+              >
+                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <p className="text-sm font-semibold text-white">Stream from this app</p>
+              <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.65)" }}>
+                No setup — just your camera & mic. Scenes, filters, chat & auto-messages included.
+              </p>
+              <p className="text-[11px] mt-2 flex items-center gap-1 font-semibold" style={{ color: "#5ED1C4" }}>
+                Open PNPtv Studio
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+              </p>
+            </a>
+
+            {/* Option 2 — Use OBS / External RTMP */}
+            <button
+              type="button"
+              onClick={() => {
+                document.getElementById("rtmp-credentials")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                if (!rtmpInfo) loadCredentials();
+              }}
+              className="relative block text-left rounded-xl p-4 transition-all hover:scale-[1.02]"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <div
+                className="w-9 h-9 rounded-lg flex items-center justify-center mb-2"
+                style={{ background: "rgba(255,255,255,0.08)" }}
+              >
+                <svg className="w-5 h-5 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <p className="text-sm font-semibold text-white">Use OBS or external RTMP</p>
+              <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.6)" }}>
+                Stream from OBS Studio, Streamlabs, or any RTMP-compatible app using the credentials below.
+              </p>
+              <p className="text-[11px] mt-2 flex items-center gap-1 font-semibold text-white/70">
+                See RTMP credentials
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                </svg>
+              </p>
+            </button>
+          </div>
+        </Card>
+
         {/* Hero */}
         <div
           className="relative rounded-2xl overflow-hidden p-6"
@@ -215,7 +301,7 @@ export default function CreatorLive() {
               </div>
             </div>
             <p className="text-sm text-white/60 leading-relaxed">
-              Use OBS Studio, Streamlabs, or any RTMP-compatible app to stream directly to PNPtv.
+              Prefer external software? Use OBS Studio, Streamlabs, or any RTMP-compatible app with the credentials below.
               Your stream will appear on the Live page for all members.
             </p>
           </div>
@@ -258,6 +344,7 @@ export default function CreatorLive() {
         </Card>
 
         {/* RTMP Credentials */}
+        <div id="rtmp-credentials" />
         <Card className="p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
