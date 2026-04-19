@@ -1336,11 +1336,6 @@ export function getHangoutGroups(): Promise<{ success: boolean; groups: HangoutG
   return request("/api/webapp/hangouts/groups");
 }
 
-// Lean shortcut — avoids the full groups-list hydration when the caller only
-// needs the main stage group (MainStage.tsx on mount).
-export function getMainGroup(): Promise<{ success: boolean; group: HangoutGroup }> {
-  return request("/api/webapp/main-group");
-}
 
 export function createHangoutGroup(
   name: string,
@@ -4701,125 +4696,6 @@ export function updateAdminTicket(
   });
 }
 
-// ============================================================================
-// Community Room (Main Stage) API — 24/7 open Telegram-powered hangout
-// ============================================================================
-
-export interface StagePermissions {
-  role: 'free' | 'member' | 'prime' | 'admin';
-  canToggleAudio: boolean;
-  canToggleVideo: boolean;
-  canScreenshare: boolean;
-  canClipMoment: boolean;
-  canKnockToSpeak: boolean;
-  isModerator: boolean;
-}
-
-export interface StageState {
-  mode: 'ambient' | 'dj-live' | 'community';
-  master: { userId: string; displayName: string; startedAt: number } | null;
-}
-
-export interface CommunityRoomInfo {
-  token?: string;
-  meetingUrl?: string;
-  domain?: string;
-  videoProvider?: "telegram-webk";
-  telegramWebPath?: string;
-  roomName: string;
-  roomId: string;
-  isModerator: boolean;
-  isTrueModerator: boolean;
-  isOpen24_7: boolean;
-  permissions: StagePermissions;
-  stageState: StageState;
-  room: {
-    id: string;
-    code: string;
-    name: string;
-    maxParticipants: number;
-    isPersistent: boolean;
-    isOpen24_7: boolean;
-    description: string;
-  };
-  telegram?: {
-    groupId: number | null;
-    telegramChatId: number | null;
-    telegramInviteLink: string | null;
-  };
-}
-
-export interface RoomOccupancy {
-  activeUsers: number;
-  users: Array<{
-    userId: string;
-    displayName: string;
-    role: string;
-    joinedAt: string;
-  }>;
-  roomId: string;
-  maxCapacity: number;
-}
-
-export function joinCommunityRoom(
-  displayName: string
-): Promise<CommunityRoomInfo> {
-  return request("/api/community-room/join", {
-    method: "POST",
-    body: { displayName },
-  });
-}
-
-export function getCommunityRoomOccupancy(): Promise<{
-  success: boolean;
-  occupancy: RoomOccupancy;
-}> {
-  return request("/api/community-room/occupancy");
-}
-
-export function getCommunityRoomStats(): Promise<{
-  success: boolean;
-  stats: {
-    roomId: string;
-    totalActiveUsers: number;
-    messageCount: number;
-  };
-}> {
-  return request("/api/community-room/stats");
-}
-
-export function getStageState(): Promise<{ success: boolean; stageState: StageState }> {
-  return request("/api/community-room/stage-state");
-}
-
-export function setStageMode(mode: string): Promise<{ success: boolean }> {
-  return request("/api/community-room/stage-mode", {
-    method: "POST",
-    body: { mode },
-  });
-}
-
-export function knockToSpeak(): Promise<{ success: boolean }> {
-  return request("/api/community-room/knock", {
-    method: "POST",
-    body: {},
-  });
-}
-
-export function approveKnock(targetUserId: string): Promise<{ success: boolean }> {
-  return request("/api/community-room/knock/approve", {
-    method: "POST",
-    body: { targetUserId },
-  });
-}
-
-export function denyKnock(targetUserId: string): Promise<{ success: boolean }> {
-  return request("/api/community-room/knock/deny", {
-    method: "POST",
-    body: { targetUserId },
-  });
-}
-
 // getJaasLiveToken, refreshJaasToken removed — JaaS live streaming removed
 
 // Live Rules Acknowledgment Gate
@@ -5905,6 +5781,10 @@ export function joinHangoutCall(groupId: number): Promise<{ token: string; livek
 
 export function endHangoutCall(groupId: number): Promise<void> {
   return request(`/api/webapp/hangouts/groups/${groupId}/call/end`, { method: "POST" });
+}
+
+export function leaveHangoutCall(groupId: number | string): Promise<{ ok: boolean; participantCount: number }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/call/leave`, { method: "POST" });
 }
 
 // ── Radio / Now Playing ──────────────────────────────────────────────────────

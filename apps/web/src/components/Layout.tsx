@@ -758,7 +758,6 @@ export function Layout() {
       links: [
         { to: "/?view=hangouts", label: "PNP Hangouts" },
         { to: "/dm", label: "Inbox" },
-        { to: "/main-stage", label: "PNP Main Stage" },
       ],
     },
   ];
@@ -1339,7 +1338,7 @@ export function Layout() {
 
       {/* Unified Cristina widget: AI Chat + VJ + Travel Agent — code-split to remove from initial bundle */}
       {isAuthenticated && (() => {
-        const inVideoCall = location.pathname.startsWith("/chat/") || location.pathname === "/main-stage";
+        const inVideoCall = location.pathname.startsWith("/chat/");
         const showCompact = isLandscape && isMobile && inVideoCall;
         return (
           <Suspense fallback={null}>

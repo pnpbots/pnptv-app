@@ -1,6 +1,5 @@
 const { Markup } = require('telegraf');
 const VideoCallModel = require('../../../models/videoCallModel');
-const MainRoomModel = require('../../../models/mainRoomModel');
 const logger = require('../../../utils/logger');
 const { hasFullAccess, safeReplyOrEdit } = require('../../utils/helpers');
 const { consumeRateLimit, getRateLimitInfo } = require('../../core/middleware/rateLimitGranular');
@@ -101,40 +100,21 @@ const registerHangoutsHandlers = (bot) => {
         logger.warn(`Error fetching public calls: ${e.message}`);
       }
 
-      // Get main rooms
-      let mainRooms = [];
-      try {
-        mainRooms = await MainRoomModel.getAll();
-      } catch (e) {
-        logger.warn(`Error fetching main rooms: ${e.message}`);
-      }
-
       const message = lang === 'es'
         ? `🎥 *PNP Hangouts*\n\n` +
           `Videollamadas y salas comunitarias.\n\n` +
-          `📞 *Llamadas Activas:* ${publicCalls.length}\n` +
-          `🏠 *Salas Principales:* ${mainRooms.length}\n\n` +
+          `📞 *Llamadas Activas:* ${publicCalls.length}\n\n` +
           `Elige una opción:`
         : `🎥 *PNP Hangouts*\n\n` +
           `Video calls and community rooms.\n\n` +
-          `📞 *Active Calls:* ${publicCalls.length}\n` +
-          `🏠 *Main Rooms:* ${mainRooms.length}\n\n` +
+          `📞 *Active Calls:* ${publicCalls.length}\n\n` +
           `Choose an option:`;
-
-      // Build room buttons
-      const roomButtons = mainRooms.slice(0, 3).map(room => [
-        Markup.button.callback(
-          `🏠 ${room.name} (${room.currentParticipants}/${room.maxParticipants})`,
-          `join_main_room_${room.id}`
-        )
-      ]);
 
       await safeReplyOrEdit(ctx, message, {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
           [Markup.button.callback(lang === 'es' ? '🎥 Crear Videollamada' : '🎥 Create Video Call', 'create_video_call')],
           [Markup.button.callback(lang === 'es' ? '📋 Mis Llamadas' : '📋 My Calls', 'my_active_calls')],
-          ...roomButtons,
           [Markup.button.callback(lang === 'es' ? '⬅️ Menú Principal' : '⬅️ Main Menu', 'back_to_main')],
         ]),
       });
@@ -432,123 +412,6 @@ const registerHangoutsHandlers = (bot) => {
         { show_alert: true }
       );
     }
-  });
-
-  // ==========================================
-  // MAIN ROOMS (PRIME ONLY)
-  // ==========================================
-
-  /**
-   * Join a main room
-   */
-  const joinMainRoom = async (ctx, roomId) => {
-    try {
-      const resolvedRoomId = Number(roomId);
-      if (!Number.isFinite(resolvedRoomId)) {
-        return;
-      }
-      const lang = ctx.session?.language || 'en';
-      const user = ctx.session?.user || {};
-      const userId = ctx.from?.id;
-
-      // Check access - main rooms require PRIME or admin access
-      if (!hasFullAccess(user, userId)) {
-        const message = lang === 'es'
-          ? '🔒 *Función PRIME*\n\nLas salas comunitarias requieren membresía PRIME.'
-          : '🔒 *PRIME Feature*\n\nCommunity rooms require PRIME membership.';
-
-        await safeReplyOrEdit(ctx, message, {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback(lang === 'es' ? '💎 Ver Planes' : '💎 View Plans', 'show_subscription_plans')],
-            [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'hangouts_menu')],
-          ]),
-        });
-        return;
-      }
-
-      const room = await MainRoomModel.getById(resolvedRoomId);
-
-      if (!room) {
-        try {
-          await ctx.answerCbQuery(
-            lang === 'es' ? '❌ Sala no encontrada' : '❌ Room not found',
-            { show_alert: true }
-          );
-        } catch {}
-        return;
-      }
-
-      // Join the room (as viewer by default)
-      const { rtcToken, appId } = await MainRoomModel.joinRoom(
-        resolvedRoomId,
-        ctx.from.id,
-        ctx.from.first_name || ctx.from.username || 'User',
-        false // Start as viewer
-      );
-
-      const displayName = ctx.from.first_name || ctx.from.username || 'User';
-
-      const webAppUrl = buildHangoutsWebAppUrl({
-        baseUrl: HANGOUTS_WEB_APP_URL,
-        room: room.channelName,
-        token: rtcToken,
-        uid: ctx.from.id,
-        username: displayName,
-        type: 'main',
-        appId,
-      });
-
-      const message = lang === 'es'
-        ? `🏠 *${room.name}*\n\n` +
-          `${room.description}\n\n` +
-          `👥 ${room.currentParticipants}/50 participantes\n\n` +
-          `Usa el botón para entrar:`
-        : `🏠 *${room.name}*\n\n` +
-          `${room.description}\n\n` +
-          `👥 ${room.currentParticipants}/50 participants\n\n` +
-          `Use the button below to join:`;
-
-      await safeReplyOrEdit(ctx, message, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.webApp(lang === 'es' ? '📱 Entrar' : '📱 Join Room', webAppUrl)],
-          [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'hangouts_menu')],
-        ]),
-      });
-
-      logger.info('User joining main room', { roomId, userId: ctx.from.id });
-    } catch (error) {
-      logger.error('Error joining main room:', error);
-      const lang = ctx.session?.language || 'en';
-
-      if (error.message.includes('full')) {
-        try {
-          await ctx.answerCbQuery(
-            lang === 'es' ? '❌ La sala está llena' : '❌ Room is full',
-            { show_alert: true }
-          );
-        } catch {}
-      } else {
-        try {
-          await ctx.answerCbQuery(
-            lang === 'es' ? '❌ Error al entrar' : '❌ Error joining',
-            { show_alert: true }
-          );
-        } catch {}
-      }
-    }
-  };
-
-  bot.action(/^join_main_room_(\d+)$/, async (ctx) => {
-    await ctx.answerCbQuery();
-    const roomId = parseInt(ctx.match[1], 10);
-    return joinMainRoom(ctx, roomId);
-  });
-
-  bot.action('hangouts_join_main', async (ctx) => {
-    await ctx.answerCbQuery();
-    return joinMainRoom(ctx, 1);
   });
 
 };

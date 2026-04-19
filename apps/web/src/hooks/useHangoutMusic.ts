@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { connectSocket } from "@/lib/socket";
-import { getMediaTracks, type MediaTrack } from "@/lib/api";
+import { type MediaTrack } from "@/lib/api";
 
 export interface HangoutMusicTrackState {
   trackId: string;
@@ -16,12 +16,11 @@ export interface HangoutMusicTrackState {
 interface UseHangoutMusicOptions {
   groupId: number | null;
   isModerator: boolean;
-  isMainStage?: boolean;
   // When true, music gain is reduced ~9 dB so a speaker can cut through.
   duckActive?: boolean;
 }
 
-export function useHangoutMusic({ groupId, isModerator, isMainStage, duckActive }: UseHangoutMusicOptions) {
+export function useHangoutMusic({ groupId, isModerator, duckActive }: UseHangoutMusicOptions) {
   const [remoteState, setRemoteState] = useState<HangoutMusicTrackState | null>(null);
   const [localVolume, setLocalVolumeState] = useState<number>(() => {
     const saved = localStorage.getItem("pnp:call:music:volume");
@@ -36,7 +35,7 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage, duckActive 
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stateRef = useRef<HangoutMusicTrackState | null>(null);
-  const mainStageAutoStarted = useRef(false);
+
   const groupIdRef = useRef<number | null>(groupId);
 
   // Web Audio mastering chain (lazy, built on first play)
@@ -169,37 +168,6 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage, duckActive 
     }
   }, [ensureAudioGraph]);
 
-  // Main stage auto-start: if we are the moderator and no music state arrives within 1.5s,
-  // automatically start the first available track as Radio PNP
-  useEffect(() => {
-    if (!isMainStage || !isModerator || mainStageAutoStarted.current || !groupId) return;
-
-    const timer = setTimeout(async () => {
-      if (stateRef.current || mainStageAutoStarted.current) return;
-      mainStageAutoStarted.current = true;
-      try {
-        const res = await getMediaTracks(0, 1);
-        if (!res.success || !res.tracks?.length) return;
-        const track = res.tracks[0];
-        const artistName = typeof track.artist === "string"
-          ? track.artist
-          : (track.artist as { name: string })?.name || "Unknown";
-        const socket = connectSocket();
-        socket.emit("hangout:music:play", {
-          groupId,
-          trackId: track.id,
-          trackUrl: `/api/proxy/media/stream/${track.id}`,
-          trackTitle: track.title,
-          trackArtist: artistName,
-          trackArt: track.art || null,
-        });
-      } catch {
-        // Silent — non-critical feature
-      }
-    }, 1500);
-
-    return () => clearTimeout(timer);
-  }, [isMainStage, isModerator, groupId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Socket event subscriptions
   useEffect(() => {

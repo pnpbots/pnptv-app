@@ -72,8 +72,6 @@ const canvaRoutes = require('./routes/canvaRoutes');
 // Courtesy invite links — admin/model create, any authenticated user redeems
 const courtesyInviteRoutes = require('./routes/courtesyInviteRoutes');
 
-// Community Room (Haus) — 24/7 Telegram-powered community hangout
-const communityRoomController = require('./controllers/communityRoomController');
 
 // JaaS token generation (viewer, moderator, live streaming) — handled by jaasStreamController
 
@@ -828,23 +826,7 @@ app.get('/login', (req, res) => {
   return res.sendFile(path.join(__dirname, '../../../public/login.html'));
 });
 
-// PNPtv Haus page
-app.get('/community-room', (req, res) => {
-  const host = req.get('host') || '';
-  if (host.includes('easybots.store') || host.includes('easybots')) {
-    return res.status(404).send('Not found');
-  }
-  res.redirect(302, '/community-room.html');
-});
 
-// PNPtv Haus alias
-app.get('/pnptv-haus', (req, res) => {
-  const host = req.get('host') || '';
-  if (host.includes('easybots.store') || host.includes('easybots')) {
-    return res.status(404).send('Not found');
-  }
-  res.redirect(302, '/community-room.html');
-});
 
 // Community Features page
 app.get('/community-features', (req, res) => {
@@ -1537,48 +1519,6 @@ app.get('/health', healthLimiter, async (req, res) => {
   }
 });
 
-// Cristina stage bot health — green/yellow/red based on Redis heartbeat.
-// Public (no auth) so external monitoring can hit it. The heartbeat is written
-// by services/cristinaStageBot.js after each successful captureFrame, debounced
-// to ~once per 10s. Key expires at 60s TTL so if the bot dies the endpoint
-// flips to red within a minute regardless of staleness checks.
-app.get('/api/health/cristina', asyncHandler(async (req, res) => {
-  const redis = getRedis();
-  const raw = await redis.get('cristina:heartbeat');
-  if (!raw) {
-    return res.status(503).json({
-      status: 'red',
-      reason: 'no heartbeat — bot not publishing',
-      ageSeconds: null,
-    });
-  }
-  let hb;
-  try {
-    hb = JSON.parse(raw);
-  } catch {
-    return res.status(503).json({
-      status: 'red',
-      reason: 'corrupt heartbeat payload',
-      ageSeconds: null,
-    });
-  }
-  const ageMs = Date.now() - hb.at;
-  const ageSeconds = Math.floor(ageMs / 1000);
-  let status = 'green';
-  let reason = 'healthy';
-  if (ageMs > 30_000) { status = 'yellow'; reason = 'heartbeat stale (>30s)'; }
-  if (ageMs > 60_000) { status = 'red'; reason = 'heartbeat expired (>60s)'; }
-  const httpStatus = status === 'red' ? 503 : 200;
-  return res.status(httpStatus).json({
-    status,
-    reason,
-    ageSeconds,
-    mode: hb.mode,
-    room: hb.room,
-    track: hb.track,
-    trackStartedAt: hb.trackStartedAt,
-  });
-}));
 
 // API routes
 // Authentication API endpoints
@@ -4378,34 +4318,7 @@ app.post(
 app.get('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.listGroups));
 app.post('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.createGroup));
 
-// Main-stage shortcut — lean query just for `is_main=true`. Cheaper than
-// hydrating the full groups list when the client only needs the main group
-// (used by MainStage.tsx mount).
-app.get('/api/webapp/main-group', requireSessionAuth, asyncHandler(async (req, res) => {
-  const { query } = require('../../config/postgres');
-  const { rows } = await query(
-    `SELECT id, name, description, is_main, is_public, is_paid, price_usd, creator_id, avatar_url
-       FROM hangout_groups
-      WHERE is_main = true
-      LIMIT 1`
-  );
-  if (rows.length === 0) return res.status(404).json({ error: 'Main stage group not configured' });
-  const r = rows[0];
-  return res.json({
-    success: true,
-    group: {
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      isMain: r.is_main,
-      isPublic: r.is_public,
-      isPaid: r.is_paid,
-      priceUsd: r.price_usd,
-      creatorId: r.creator_id,
-      avatarUrl: r.avatar_url,
-    },
-  });
-}));
+
 // Discover must be before /:id to avoid route collision
 app.get('/api/webapp/hangouts/groups/discover', requireSessionAuth, asyncHandler(hangoutGroupController.discoverGroups));
 // join-by-invite must be before /:id to avoid :code being captured as :id
@@ -4465,10 +4378,11 @@ app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, asyncHandler
 app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asyncHandler(socialController.dropToFeed));
 
 // Hangout video calls — LiveKit
-const { startCall, joinCall, endCall } = require('./controllers/hangoutGroupController');
+const { startCall, joinCall, endCall, leaveCall } = require('./controllers/hangoutGroupController');
 app.post('/api/webapp/hangouts/groups/:id/call/start', requireSessionAuth, asyncHandler(startCall));
 app.post('/api/webapp/hangouts/groups/:id/call/join', requireSessionAuth, asyncHandler(joinCall));
 app.post('/api/webapp/hangouts/groups/:id/call/end', requireSessionAuth, asyncHandler(endCall));
+app.post('/api/webapp/hangouts/groups/:id/call/leave', requireSessionAuth, asyncHandler(leaveCall));
 
 // DM Video Calls — removed (dead code, never called from frontend)
 
@@ -7577,24 +7491,6 @@ app.use('/api/webapp/gamification', gamificationRoutes);
 // Canva Connect API routes
 app.use('/api/canva', canvaRoutes);
 
-// ==========================================
-// Community Room (Haus) — 24/7 Telegram-powered community hangout
-// ==========================================
-app.post('/api/community-room/join', requireSessionAuth, asyncHandler(communityRoomController.joinCommunityRoom));
-app.get('/api/community-room/occupancy', requireSessionAuth, asyncHandler(communityRoomController.getRoomOccupancy));
-app.get('/api/community-room/chat-history', requireSessionAuth, asyncHandler(communityRoomController.getChatHistory));
-app.post('/api/community-room/message', requireSessionAuth, asyncHandler(communityRoomController.addMessage));
-app.get('/api/community-room/stats', requireSessionAuth, asyncHandler(communityRoomController.getRoomStats));
-app.get('/api/community-room/leaderboard', requireSessionAuth, asyncHandler(communityRoomController.getLeaderboard));
-app.post('/api/community-room/moderation/mute', verifyAdminJWT, asyncHandler(communityRoomController.muteUser));
-app.post('/api/community-room/moderation/remove', verifyAdminJWT, asyncHandler(communityRoomController.removeUser));
-app.post('/api/community-room/moderation/clear-chat', verifyAdminJWT, asyncHandler(communityRoomController.clearChat));
-app.get('/api/community-room/stage-state', requireSessionAuth, asyncHandler(communityRoomController.getStageState));
-app.post('/api/community-room/stage-mode', requireSessionAuth, asyncHandler(communityRoomController.setStageMode));
-app.post('/api/community-room/knock', requireSessionAuth, asyncHandler(communityRoomController.knockToSpeak));
-app.post('/api/community-room/knock/approve', requireSessionAuth, asyncHandler(communityRoomController.approveKnock));
-app.post('/api/community-room/knock/deny', requireSessionAuth, asyncHandler(communityRoomController.denyKnock));
-app.post('/api/community-room/clip', requireSessionAuth, asyncHandler(communityRoomController.clipMoment));
 
 // JaaS Token Endpoints — removed (dead code, jaasController deleted)
 

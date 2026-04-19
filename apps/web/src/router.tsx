@@ -84,7 +84,6 @@ const CommunityResourcesPage = lazy(() => import("@/pages/CommunityResourcesPage
 const ShopPage = lazy(() => import("@/pages/ShopPage"));
 const DownloadPage = lazy(() => import("@/pages/DownloadPage"));
 const DashBankPage = lazy(() => import("@/pages/DashBankPage"));
-const MainStage = lazy(() => import("@/pages/MainStage"));
 
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
@@ -231,13 +230,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "main-stage",
-        element: (
-          <ModuleLoader>
-            <VerificationGate>
-              <MainStage />
-            </VerificationGate>
-          </ModuleLoader>
-        ),
+        element: <Navigate to="/?view=hangouts" replace />,
       },
       {
         path: "dm",
@@ -372,9 +365,9 @@ export const router = createBrowserRouter([
       { path: "hangouts/invite/:code", element: <HangoutInviteRedirect /> },
       { path: "hangouts/:groupId", element: <HangoutToChatRedirect /> },
       { path: "pnplive", element: <Navigate to="/live" replace /> },
-      { path: "pnptv-haus", element: <Navigate to="/main-stage" replace /> },
-      { path: "community-room", element: <Navigate to="/main-stage" replace /> },
-      { path: "da-haus", element: <Navigate to="/main-stage" replace /> },
+      { path: "pnptv-haus", element: <Navigate to="/?view=hangouts" replace /> },
+      { path: "community-room", element: <Navigate to="/?view=hangouts" replace /> },
+      { path: "da-haus", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "portal", element: <Navigate to="/" replace /> },
     ],
   },

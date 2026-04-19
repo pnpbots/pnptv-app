@@ -364,6 +364,18 @@ function initSocketIO(io) {
       }
 
       try {
+        // Sliding-window rate limit: max 5 messages per 10s per user per group
+        {
+          const rlRedis = getRedis();
+          const rlKey = `rl:hangout:msg:${user.id}:${gid}`;
+          const current = await rlRedis.incr(rlKey);
+          if (current === 1) await rlRedis.expire(rlKey, 10);
+          if (current > 5) {
+            socket.emit('hangout:message:error', { error: 'rate_limited', message: 'Slow down — max 5 messages per 10s' });
+            return;
+          }
+        }
+
         // Mute check
         const { rows: memberInfo } = await query(
           'SELECT role, is_muted, muted_until, is_banned FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
@@ -2204,18 +2216,6 @@ function initSocketIO(io) {
       const otherUserId = call.callerId === userId ? call.calleeId : call.callerId;
       io.to(`user:${otherUserId}`).emit('randomcall:ended', { callId });
       logger.info(`[RandomCall] Ended by ${userId} (callId=${callId})`);
-    });
-
-    // ── Main Stage Events ────────────────────────────────────────────────────
-
-    socket.on('mainstage:join', () => {
-      socket.join('mainstage');
-      logger.debug('Socket joined mainstage room', { socketId: socket.id, userId: user.id });
-    });
-
-    socket.on('mainstage:leave', () => {
-      socket.leave('mainstage');
-      logger.debug('Socket left mainstage room', { socketId: socket.id, userId: user.id });
     });
 
     socket.on('disconnect', async () => {

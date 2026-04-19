@@ -88,7 +88,7 @@ function CallContent({
   // Panel ref for fullscreen
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // ── Room connection events (shared with MainStage via useLiveKitRoomLifecycle) ──
+  // ── Room connection events via useLiveKitRoomLifecycle ──
 
   const { connected, reconnecting } = useLiveKitRoomLifecycle(room, {
     onConnected: () => {
@@ -1133,9 +1133,32 @@ function LiveKitCallPanel({
   onCallEnded,
 }: LiveKitCallPanelProps) {
   const [activeToken, setActiveToken] = useState<string | null>(token);
+  // Guard against double-fire on rapid unmount/remount cycles
+  const hasLeftRef = useRef(false);
 
   // Keep token in sync with prop (parent may issue a new one)
   useEffect(() => { setActiveToken(token); }, [token]);
+
+  // Fire /leave when the component unmounts (user closed dock or navigated away)
+  useEffect(() => {
+    if (!open || !roomName) return;
+    hasLeftRef.current = false;
+    return () => {
+      if (hasLeftRef.current) return;
+      hasLeftRef.current = true;
+      const match = roomName.match(/hangout[-_](\d+)/);
+      if (!match) return;
+      const groupId = parseInt(match[1], 10);
+      if (!Number.isFinite(groupId)) return;
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      import("@/lib/api").then(({ leaveHangoutCall }) => {
+        leaveHangoutCall(groupId).catch((err: unknown) => {
+          // Best-effort — silently swallow; server TTL will reconcile
+          void err;
+        });
+      }).catch(() => {});
+    };
+  }, [open, roomName]);
 
   // Attempt to refresh token on reconnect if it's near expiry
   const handleReconnecting = useCallback(async () => {
@@ -1158,6 +1181,24 @@ function LiveKitCallPanel({
       // Proceed with existing token — reconnect will still attempt
     }
   }, [activeToken, roomName]);
+
+  // LiveKit disconnect event also fires /leave so the participant row is
+  // marked left_at even if the component stays mounted (call ended remotely)
+  const handleDisconnected = useCallback(() => {
+    if (!hasLeftRef.current && roomName) {
+      hasLeftRef.current = true;
+      const match = roomName.match(/hangout[-_](\d+)/);
+      if (match) {
+        const groupId = parseInt(match[1], 10);
+        if (Number.isFinite(groupId)) {
+          import("@/lib/api").then(({ leaveHangoutCall }) => {
+            leaveHangoutCall(groupId).catch(() => {});
+          }).catch(() => {});
+        }
+      }
+    }
+    onCallEnded?.();
+  }, [roomName, onCallEnded]);
 
   if (!open || !activeToken) return null;
 
@@ -1192,7 +1233,7 @@ function LiveKitCallPanel({
             videoCodec: publishCodec,
           },
         }}
-        onDisconnected={() => onCallEnded?.()}
+        onDisconnected={handleDisconnected}
         style={{ display: "contents" }}
       >
         <CallContent

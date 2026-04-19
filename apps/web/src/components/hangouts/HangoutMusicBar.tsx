@@ -7,7 +7,6 @@ import { getMediaTracks, type MediaTrack } from "@/lib/api";
 interface HangoutMusicBarProps {
   groupId: number;
   isModerator: boolean;
-  isMainStage?: boolean;
 }
 
 // ─── Animated equalizer bars ─────────────────────────────────────────────────
@@ -251,7 +250,6 @@ function TrackPickerModal({
 export function HangoutMusicBar({
   groupId,
   isModerator,
-  isMainStage = false,
 }: HangoutMusicBarProps) {
   const {
     remoteState,
@@ -263,7 +261,7 @@ export function HangoutMusicBar({
     resume,
     shuffle,
     toggleShuffle,
-  } = useHangoutMusic({ groupId, isModerator, isMainStage });
+  } = useHangoutMusic({ groupId, isModerator });
 
   const [showPicker, setShowPicker] = useState(false);
   const [showVolume, setShowVolume] = useState(false);
@@ -282,7 +280,7 @@ export function HangoutMusicBar({
 
   // ── No music yet: empty state ─────────────────────────────────────────
 
-  if (!remoteState && !isMainStage) {
+  if (!remoteState) {
     if (!isModerator) {
       return (
         <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-pnp-surface/30 border border-white/5">
@@ -353,12 +351,8 @@ export function HangoutMusicBar({
     );
   }
 
-  // ── Main bar (music playing or main stage placeholder) ────────────────
-
-  const trackTitle =
-    remoteState?.trackTitle || (isMainStage ? "Radio PNP" : "—");
-  const trackArtist =
-    remoteState?.trackArtist || (isMainStage ? "PNPtv!" : "");
+  const trackTitle = remoteState?.trackTitle || "—";
+  const trackArtist = remoteState?.trackArtist || "";
   const trackArt = remoteState?.trackArt || null;
   const playing = remoteState?.isPlaying ?? false;
 
@@ -404,17 +398,6 @@ export function HangoutMusicBar({
 
         {/* Track info */}
         <div role="status" aria-live="polite" className="flex-1 min-w-0">
-          {isMainStage && (
-            <span
-              className="text-[8px] font-bold px-1 py-0.5 rounded"
-              style={{
-                background: "rgba(94,209,196,0.2)",
-                color: "#5ED1C4",
-              }}
-            >
-              RADIO
-            </span>
-          )}
           <p className="text-[11px] font-medium text-pnp-textPrimary truncate leading-tight">
             {trackTitle}
           </p>
@@ -425,8 +408,8 @@ export function HangoutMusicBar({
 
         {/* Controls */}
         <div className="flex items-center gap-1 flex-shrink-0">
-          {/* Play/pause — moderators in non-main-stage rooms only */}
-          {isModerator && !isMainStage && (
+          {/* Play/pause — moderators only */}
+          {isModerator && (
             <button
               onClick={handlePlayPause}
               className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all"

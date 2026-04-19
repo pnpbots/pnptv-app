@@ -18,7 +18,6 @@ const { detectLanguage } = require('../../../utils/languageDetector');
 const { showProfile, showEditProfileMenu } = require('../user/profile');
 const UserModel = require('../../../models/userModel');
 const VideoCallModel = require('../../../models/videoCallModel');
-const MainRoomModel = require('../../../models/mainRoomModel');
 const { isPrimeUser, hasFullAccess } = require('../../utils/helpers');
 const UserService = require('../../../services/userService');
 const { buildHangoutsWebAppUrl } = require('../../utils/hangoutsWebApp');
@@ -781,72 +780,23 @@ async function handleDeepLinkCallJoin(ctx, lang, callId) {
 }
 
 /**
- * Handle deep link to join main room 1
+ * Handle deep link to join hangouts (formerly main room deeplink)
  */
 async function handleDeepLinkMainRoom(ctx, lang) {
-  try {
-    const user = await UserModel.getById(ctx.from.id);
-    if (!hasFullAccess(user, ctx.from.id)) {
-      const message = lang === 'es'
-        ? '🔒 *Función PRIME*\n\nLas salas comunitarias requieren membresía PRIME.'
-        : '🔒 *PRIME Feature*\n\nCommunity rooms require PRIME membership.';
+  const message = lang === 'es'
+    ? '🎥 *PNP Hangouts*\n\nÚnete a los grupos de Hangout en la aplicación web.'
+    : '🎥 *PNP Hangouts*\n\nJoin Hangout groups in the web app.';
 
-      await ctx.reply(message, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback(lang === 'es' ? '💎 Ver Planes' : '💎 View Plans', 'show_subscription_plans')],
-          [Markup.button.callback(lang === 'es' ? '🏠 Menú Principal' : '🏠 Main Menu', 'menu:back')],
-        ]),
-      });
-      return;
-    }
+  const webAppUrl = buildHangoutsWebAppUrl({
+    baseUrl: HANGOUTS_WEB_APP_URL,
+  });
 
-    const room = await MainRoomModel.getById(1);
-    if (!room) {
-      await ctx.reply(lang === 'es' ? '❌ Sala no encontrada' : '❌ Room not found');
-      return;
-    }
-
-    const displayName = ctx.from.first_name || ctx.from.username || 'User';
-    const { rtcToken, appId } = await MainRoomModel.joinRoom(
-      1,
-      ctx.from.id,
-      displayName,
-      false
-    );
-
-    const webAppUrl = buildHangoutsWebAppUrl({
-      baseUrl: HANGOUTS_WEB_APP_URL,
-      room: room.channelName,
-      token: rtcToken,
-      uid: ctx.from.id,
-      username: displayName,
-      type: 'main',
-      appId,
-    });
-
-    const message = lang === 'es'
-      ? `🏠 *${room.name}*\n\n` +
-        `${room.description}\n\n` +
-        `👥 ${room.currentParticipants}/50 participantes\n\n` +
-        `Presiona el botón para entrar:`
-      : `🏠 *${room.name}*\n\n` +
-        `${room.description}\n\n` +
-        `👥 ${room.currentParticipants}/50 participants\n\n` +
-        `Tap the button to join:`;
-
-    await ctx.reply(message, {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.webApp(lang === 'es' ? '🚀 Entrar a Sala' : '🚀 Join Room', webAppUrl)],
-      ]),
-    });
-  } catch (error) {
-    logger.error('Error joining main room via deeplink:', error);
-    await ctx.reply(
-      lang === 'es' ? '❌ Error al entrar a la sala.' : '❌ Error joining room.'
-    );
-  }
+  await ctx.reply(message, {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([
+      [Markup.button.webApp(lang === 'es' ? '🚀 Abrir Hangouts' : '🚀 Open Hangouts', webAppUrl)],
+    ]),
+  });
 }
 
 /**

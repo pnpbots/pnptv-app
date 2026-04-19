@@ -581,7 +581,7 @@ const handleLiveKitWebhook = async (req, res) => {
         await query(
           `UPDATE hangout_video_calls
            SET status = 'ended', ended_at = NOW(), participant_count = 0
-           WHERE group_id = $1 AND status = 'active' AND is_persistent = false`,
+           WHERE group_id = $1 AND status = 'active'`,
           [groupId]
         );
         logger.info('LiveKit room_finished: hangout call marked ended', { groupId, roomName });

@@ -12,14 +12,10 @@ type Callbacks = {
 };
 
 /**
- * Shared LiveKit room lifecycle wiring used by MainStage's StageRoom and the
- * hangout LiveKitCallDock. Centralises:
- *   - connected / reconnecting state
- *   - body.allow-landscape class + screen.orientation lock dance
- *   - RoomEvent subscriptions
- *
- * Consumer-specific state (active-speaker set, own quality, call-ended
- * banner) stays in the caller via the optional callbacks.
+ * Shared LiveKit room lifecycle wiring for the hangout LiveKitCallDock.
+ * Centralises connected/reconnecting state, landscape class + orientation
+ * lock dance, and RoomEvent subscriptions. Consumer-specific state stays in
+ * the caller via the optional callbacks.
  */
 export function useLiveKitRoomLifecycle(
   room: Room | undefined,

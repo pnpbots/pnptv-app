@@ -237,7 +237,7 @@ const PAGE_CONTEXT: { match: (p: string) => boolean; ctx: PageContext }[] = [
     },
   },
   {
-    match: (p) => p.startsWith("/live") || p === "/main-stage",
+    match: (p) => p.startsWith("/live"),
     ctx: {
       titleEn: "Live Streams",
       titleEs: "Transmisiones en Vivo",

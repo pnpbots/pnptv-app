@@ -2627,23 +2627,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         {/* Actions handled by SpotlightStrip + icon */}
       </div>
 
-      {/* SpotlightStrip — Main Stage pinned + hangout events */}
+      {/* SpotlightStrip — hangout events */}
       <SpotlightStrip
         items={[
-          {
-            kind: "action",
-            id: "main-stage",
-            label: "Main Stage",
-            sublabel: "24/7 open",
-            icon: (
-              <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#5ED1C4" }}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            ),
-            gradient: "linear-gradient(135deg, rgba(94,209,196,0.3), rgba(212,0,122,0.2))",
-            onClick: () => navigate("/main-stage"),
-            pinned: true,
-          },
           ...hangoutEvents.map((ev) => ({ kind: "event" as const, data: ev })),
         ]}
         onItemClick={(item) => {

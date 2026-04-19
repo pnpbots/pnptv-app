@@ -1,6 +1,6 @@
 'use strict';
 
-const { query } = require('../../../config/postgres');
+const { query, getClient } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const socketSingleton = require('../../../services/socketSingleton');
 const userService = require('../../../services/userService');
@@ -480,24 +480,41 @@ const joinGroup = async (req, res) => {
       }
     }
 
-    // Atomic capacity-checked insert (prevents race condition)
-    const { rowCount } = await query(
-      `INSERT INTO hangout_group_members (group_id, user_id, role)
-       SELECT $1, $2, 'member'
-       WHERE (SELECT COUNT(*) FROM hangout_group_members WHERE group_id=$1) < $3
-       ON CONFLICT DO NOTHING`,
-      [groupId, user.id, rows[0].max_members]
-    );
-    if (rowCount === 0) {
-      // Either already a member (ON CONFLICT) or group is full
-      const { rows: checkRows } = await query(
+    // Serialise concurrent joins with a row lock to prevent capacity overshoot
+    const txClient = await getClient();
+    try {
+      await txClient.query('BEGIN');
+      const { rows: lockedGroup } = await txClient.query(
+        'SELECT id, max_members FROM hangout_groups WHERE id = $1 FOR UPDATE',
+        [groupId]
+      );
+      if (!lockedGroup[0]) {
+        await txClient.query('ROLLBACK');
+        return res.status(404).json({ error: 'Group not found' });
+      }
+      const { rows: [{ count }] } = await txClient.query(
+        'SELECT COUNT(*)::int AS count FROM hangout_group_members WHERE group_id = $1',
+        [groupId]
+      );
+      const { rows: alreadyMember } = await txClient.query(
         'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
         [groupId, user.id]
       );
-      if (checkRows.length === 0) {
+      if (alreadyMember.length === 0 && count >= lockedGroup[0].max_members) {
+        await txClient.query('ROLLBACK');
         return res.status(409).json({ error: 'Group is full' });
       }
-      // Already a member — proceed silently
+      await txClient.query(
+        `INSERT INTO hangout_group_members (group_id, user_id, role)
+         VALUES ($1, $2, 'member') ON CONFLICT (group_id, user_id) DO NOTHING`,
+        [groupId, user.id]
+      );
+      await txClient.query('COMMIT');
+    } catch (txErr) {
+      await txClient.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      txClient.release();
     }
 
     // Touch activity timestamp
@@ -1698,10 +1715,16 @@ const getInviteLink = async (req, res) => {
   if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
-    if (!(await isOwnerOrMod(groupId, user.id))) {
-      // Check if non-owner invites are allowed
-      const { rows: gs } = await query('SELECT allow_member_invites FROM hangout_groups WHERE id=$1', [groupId]);
-      if (!gs[0]?.allow_member_invites) return res.status(403).json({ error: 'Not authorized' });
+    const isOwnerMod = await isOwnerOrMod(groupId, user.id);
+
+    if (!isOwnerMod) {
+      const { rows: gs } = await query('SELECT is_public, allow_member_invites FROM hangout_groups WHERE id=$1', [groupId]);
+      if (!gs[0]) return res.status(404).json({ error: 'Group not found' });
+      // Private groups: only owners/moderators may generate the link
+      if (!gs[0].is_public) {
+        return res.status(403).json({ error: 'Only owners and moderators can generate invite links for private groups' });
+      }
+      if (!gs[0].allow_member_invites) return res.status(403).json({ error: 'Not authorized' });
       if (!(await isMember(groupId, user.id))) return res.status(403).json({ error: 'Not a member' });
     }
 
@@ -2156,28 +2179,12 @@ module.exports = {
   startCall,
   joinCall,
   endCall,
+  leaveCall,
 };
 
 // ── LiveKit video calls ──────────────────────────────────────────────────────
 
 const livekitService = require('../../../services/livekitService');
-
-// Main-stage tokens enforce "cam on, mic off" at the SFU level. Admins get
-// full publish grants; knock-approved members get audio via approveKnock
-// re-minting with these flags flipped.
-async function isMainStageGroup(groupId) {
-  const { rows } = await query('SELECT is_main FROM hangout_groups WHERE id=$1', [groupId]);
-  return rows.length > 0 && rows[0].is_main === true;
-}
-
-function mainStageGrantsFor(role) {
-  const isAdmin = role === 'admin' || role === 'superadmin';
-  return {
-    isModerator: isAdmin,
-    canPublishAudio: isAdmin,   // members: no mic by default (raise hand → re-mint)
-    canPublishVideo: true,      // everyone publishes video (the stage rule)
-  };
-}
 
 // POST /api/webapp/hangouts/groups/:id/call/start
 async function startCall(req, res) {
@@ -2190,13 +2197,29 @@ async function startCall(req, res) {
     const member = await isMember(groupId, user.id);
     if (!member) return res.status(403).json({ error: 'Not a member of this group' });
 
+    {
+      const { rows: [grp] } = await query(
+        `SELECT id, is_paid, price_usd FROM hangout_groups WHERE id = $1`,
+        [groupId]
+      );
+      if (!grp) return res.status(404).json({ error: 'Group not found' });
+      if (grp.is_paid && parseFloat(grp.price_usd || 0) > 0) {
+        const ownerMod = await isOwnerOrMod(groupId, user.id);
+        if (!ownerMod) {
+          const EntitlementAccessService = require('../../../services/entitlementAccessService');
+          const result = await EntitlementAccessService.hasResourceAccess(String(user.id), 'hangout', String(groupId));
+          if (!result.allowed) {
+            return res.status(402).json({ error: 'Paid hangout — access required to join call', code: 'PAID_ACCESS_REQUIRED' });
+          }
+        }
+      }
+    }
+
     const roomName = `hangout-${groupId}`;
 
-    // Clean up stale "active" calls older than 6 hours — LiveKit rooms don't persist that long.
-    // Never touch persistent calls (is_persistent=true) — those are managed by cristinaStageBot.
     await query(
       `UPDATE hangout_video_calls SET status = 'ended', ended_at = NOW()
-       WHERE group_id = $1 AND status = 'active' AND is_persistent = false
+       WHERE group_id = $1 AND status = 'active'
          AND created_at < NOW() - INTERVAL '6 hours'`,
       [groupId]
     );
@@ -2210,42 +2233,57 @@ async function startCall(req, res) {
     if (existing.length > 0) {
       const activeRoomName = existing[0].room_name;
       const displayName = user.firstName || user.first_name || user.username || 'User';
-      const isMainStage = await isMainStageGroup(groupId);
-      const token = isMainStage
-        ? await livekitService.generateToken(
-            activeRoomName, String(user.id), displayName,
-            mainStageGrantsFor(user.role).isModerator,
-            {
-              canPublishAudio: mainStageGrantsFor(user.role).canPublishAudio,
-              canPublishVideo: mainStageGrantsFor(user.role).canPublishVideo,
-            },
-          )
-        : await livekitService.generateToken(activeRoomName, String(user.id), displayName, false);
-      // Track participant (upsert) and update count from actual participants
+      const token = await livekitService.generateToken(activeRoomName, String(user.id), displayName, false);
+      // UPSERT to handle re-joins from disconnect-reconnect cycles; trigger syncs participant_count
       await query(
         `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (call_id, user_id) DO UPDATE SET joined_at = NOW(), left_at = NULL`,
         [existing[0].id, user.id, displayName]
       );
-      await query(
-        `UPDATE hangout_video_calls SET participant_count = (
-           SELECT COUNT(*) FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL
-         ) WHERE id = $1`,
-        [existing[0].id]
-      );
       return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName: activeRoomName });
     }
 
-    // Create a new call record — only include columns that exist in the schema
-    const { rows: created } = await query(
-      `INSERT INTO hangout_video_calls (group_id, creator_id, room_name, status, participant_count)
-       VALUES ($1, $2, $3, 'active', 1)
-       RETURNING id`,
-      [groupId, user.id, roomName]
-    );
+    let callId;
+    try {
+      // Create a new call record — participant_count starts at 0 (trigger will increment after participant insert)
+      const { rows: created } = await query(
+        `INSERT INTO hangout_video_calls (group_id, creator_id, room_name, status, participant_count)
+         VALUES ($1, $2, $3, 'active', 0)
+         RETURNING id`,
+        [groupId, user.id, roomName]
+      );
+      callId = created[0].id;
+    } catch (insertErr) {
+      if (insertErr.code === '23505') {
+        // Unique-index collision: concurrent startCall won the race — join the existing call
+        const { rows: race } = await query(
+          `SELECT id, room_name FROM hangout_video_calls WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
+          [groupId]
+        );
+        if (race.length > 0) {
+          const displayName = user.firstName || user.first_name || user.username || 'User';
+          const token = await livekitService.generateToken(race[0].room_name, String(user.id), displayName, false);
+          await query(
+            `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT (call_id, user_id) DO UPDATE SET joined_at = NOW(), left_at = NULL`,
+            [race[0].id, user.id, displayName]
+          );
+          return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName: race[0].room_name });
+        }
+      }
+      throw insertErr;
+    }
 
     const displayName = user.firstName || user.first_name || user.username || 'User';
+    // Insert creator as first participant — trigger sets participant_count to 1
+    await query(
+      `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (call_id, user_id) DO UPDATE SET left_at = NULL, joined_at = EXCLUDED.joined_at`,
+      [callId, user.id, displayName]
+    );
     const token = await livekitService.generateToken(roomName, String(user.id), displayName, true);
 
     // Notify everyone in the hangout room
@@ -2253,12 +2291,12 @@ async function startCall(req, res) {
     if (io) {
       io.to(`hangout:${groupId}`).emit('hangout:call:started', {
         groupId,
-        callId: created[0].id,
+        callId,
         startedBy: { firstName: user.firstName || user.first_name, username: user.username },
       });
     }
 
-    logger.info(`startCall: group=${groupId} call=${created[0].id} user=${user.id}`);
+    logger.info(`startCall: group=${groupId} call=${callId} user=${user.id}`);
     return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName });
   } catch (err) {
     logger.error('startCall error', err);
@@ -2277,6 +2315,24 @@ async function joinCall(req, res) {
     const member = await isMember(groupId, user.id);
     if (!member) return res.status(403).json({ error: 'Not a member of this group' });
 
+    {
+      const { rows: [grp] } = await query(
+        `SELECT id, is_paid, price_usd FROM hangout_groups WHERE id = $1`,
+        [groupId]
+      );
+      if (!grp) return res.status(404).json({ error: 'Group not found' });
+      if (grp.is_paid && parseFloat(grp.price_usd || 0) > 0) {
+        const ownerMod = await isOwnerOrMod(groupId, user.id);
+        if (!ownerMod) {
+          const EntitlementAccessService = require('../../../services/entitlementAccessService');
+          const result = await EntitlementAccessService.hasResourceAccess(String(user.id), 'hangout', String(groupId));
+          if (!result.allowed) {
+            return res.status(402).json({ error: 'Paid hangout — access required to join call', code: 'PAID_ACCESS_REQUIRED' });
+          }
+        }
+      }
+    }
+
     const { rows } = await query(
       `SELECT id, room_name FROM hangout_video_calls WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
       [groupId]
@@ -2285,21 +2341,14 @@ async function joinCall(req, res) {
 
     const { id: callId, room_name: roomName } = rows[0];
     const displayName = user.firstName || user.first_name || user.username || 'User';
-    const isMainStage = await isMainStageGroup(groupId);
-    const token = isMainStage
-      ? await livekitService.generateToken(
-          roomName, String(user.id), displayName,
-          mainStageGrantsFor(user.role).isModerator,
-          {
-            canPublishAudio: mainStageGrantsFor(user.role).canPublishAudio,
-            canPublishVideo: mainStageGrantsFor(user.role).canPublishVideo,
-          },
-        )
-      : await livekitService.generateToken(roomName, String(user.id), displayName, false);
+    const token = await livekitService.generateToken(roomName, String(user.id), displayName, false);
 
+    // UPSERT to handle re-joins from disconnect-reconnect cycles; trigger syncs participant_count
     await query(
-      `UPDATE hangout_video_calls SET participant_count = participant_count + 1 WHERE id=$1`,
-      [callId]
+      `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (call_id, user_id) DO UPDATE SET left_at = NULL, joined_at = EXCLUDED.joined_at`,
+      [callId, user.id, displayName]
     );
 
     const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
@@ -2356,6 +2405,49 @@ async function endCall(req, res) {
   } catch (err) {
     logger.error('endCall error', err);
     return res.status(500).json({ error: 'Failed to end call' });
+  }
+}
+
+// POST /api/webapp/hangouts/groups/:id/call/leave
+async function leaveCall(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    if (!(await isMember(groupId, user.id))) return res.status(403).json({ error: 'Not a member of this group' });
+
+    const { rows: callRows } = await query(
+      `SELECT id FROM hangout_video_calls WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
+      [groupId]
+    );
+    if (callRows.length === 0) return res.status(404).json({ error: 'No active call for this group' });
+
+    const callId = callRows[0].id;
+    await query(
+      `UPDATE hangout_call_participants SET left_at = NOW()
+       WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL`,
+      [callId, user.id]
+    );
+
+    const { rows: [{ count }] } = await query(
+      'SELECT COUNT(*)::int AS count FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL',
+      [callId]
+    );
+
+    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+    if (io) {
+      io.to(`hangout:${groupId}`).emit('hangout:call:participant-left', {
+        callId,
+        userId: user.id,
+        participantCount: count,
+      });
+    }
+
+    return res.json({ ok: true, participantCount: count });
+  } catch (err) {
+    logger.error('leaveCall error', err);
+    return res.status(500).json({ error: 'Failed to leave call' });
   }
 }
 
