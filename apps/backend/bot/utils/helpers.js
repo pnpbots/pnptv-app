@@ -315,6 +315,9 @@ module.exports = {
   safeEditMessage,
   safeAnswerCbQuery,
   resolveUserId,
+  // Re-export `t` so callers can pull it from helpers alongside getLanguage
+  // (bot/core/bot.js:413 already uses `const { getLanguage, t } = require(...)`)
+  t,
 };
 
 /**

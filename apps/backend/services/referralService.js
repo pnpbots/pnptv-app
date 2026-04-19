@@ -1,6 +1,9 @@
 'use strict';
 
-const { query, pool } = require('../config/postgres');
+// postgres exports `getClient` for transactional work, not a bare `pool`.
+// The previous `pool.connect()` call would crash on the first referral
+// claim because `pool` was undefined.
+const { query, getClient } = require('../config/postgres');
 const crypto = require('crypto');
 
 function generateCode(userId) {
@@ -40,7 +43,7 @@ async function redeemReferral(code, refereeId) {
   const referrerId = refRows[0].id;
   if (referrerId === refereeId) throw new Error('Cannot use your own referral code');
 
-  const client = await pool.connect();
+  const client = await getClient();
   try {
     await client.query('BEGIN');
 

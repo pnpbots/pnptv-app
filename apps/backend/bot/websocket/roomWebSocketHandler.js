@@ -10,7 +10,8 @@
 const WebSocket = require('ws');
 const logger = require('../../utils/logger');
 const roomWebSocketService = require('../../services/websocket/roomWebSocketService');
-const { resolveTelegramUser } = require('../../services/telegramWebAppAuth');
+// (resolveTelegramUser was destructured here but never called and the source
+//  module doesn't export it — removing the dead import.)
 const { getRedis } = require('../../config/redis');
 
 /**

@@ -125,7 +125,10 @@ Respuesta concisa (máx 400 palabras), orientada a acción.`;
     const opsChat = process.env.BOT_OPS_CHAT_ID;
     if (opsChat) {
       try {
-        const { bot } = require('../bot');
+        // bot.js exports getBotInstance(), not a bare `bot` — destructuring
+        // `{ bot }` produced undefined and the sendMessage call crashed.
+        const { getBotInstance } = require('../bot');
+        const bot = getBotInstance();
         const msg = `📊 *Bogota Daily X Analysis — ${new Date().toISOString().split('T')[0]}*\n\n${analysis}`;
         await bot.telegram.sendMessage(opsChat, msg, { parse_mode: 'Markdown' });
         logger.info('[BogotaAnalysis] Analysis sent to ops channel', { opsChat });
