@@ -5476,6 +5476,11 @@ export interface CallCheckoutPayload {
   email: string;
   quantity?: number;
   selectedSlot?: string | null;
+  // When both are provided the server locks the slot + creates a bookings
+  // row at checkout, mirroring the Dash path so reminders + My Calls work
+  // for ePayco-paid bookings too.
+  startTimeUtc?: string;
+  endTimeUtc?: string;
 }
 
 export interface CallCheckoutResponse {

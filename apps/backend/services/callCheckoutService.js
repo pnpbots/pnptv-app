@@ -52,7 +52,7 @@ function escapeHtml(str) {
  * @param {string} email       - member email for payment confirmation
  * @returns {{ paymentId: string, checkoutUrl: string, amount: number, currency: string, sku: string }}
  */
-async function createCallCheckout(memberId, packageId, provider, email) {
+async function createCallCheckout(memberId, packageId, provider, email, slotTimes = null) {
   // 1. Load and validate the package
   const pkgResult = await query(
     'SELECT * FROM call_packages WHERE id = $1 AND is_active = true',
@@ -79,6 +79,22 @@ async function createCallCheckout(memberId, packageId, provider, email) {
   }
 
   // 2. Create the payment record (plan_id = null, metadata carries package info)
+  //    When slotTimes are provided the same atomic slot-lock pattern used by
+  //    the Dash path runs, and startTimeUtc/endTimeUtc/bookingId are baked
+  //    into metadata so onCallPaymentSuccess confirms the booking and
+  //    schedules reminders when the webhook fires.
+  const paymentMetadata = {
+    type: 'call_package',
+    packageId: pkg.id,
+    packageSku: pkg.sku,
+    creatorId: pkg.creator_id,
+    email: email || null,
+  };
+  if (slotTimes?.startTimeUtc && slotTimes?.endTimeUtc) {
+    paymentMetadata.startTimeUtc = slotTimes.startTimeUtc;
+    paymentMetadata.endTimeUtc = slotTimes.endTimeUtc;
+  }
+
   const payment = await PaymentModel.create({
     userId: memberId,
     planId: null,
@@ -87,14 +103,39 @@ async function createCallCheckout(memberId, packageId, provider, email) {
     amount: parseFloat(pkg.price_usd),
     currency: 'USD',
     status: 'pending',
-    metadata: {
-      type: 'call_package',
-      packageId: pkg.id,
-      packageSku: pkg.sku,
-      creatorId: pkg.creator_id,
-      email: email || null,
-    },
+    metadata: paymentMetadata,
   });
+
+  // 2b. If slot times are provided, lock the slot + create awaiting_payment
+  //     booking row. Same pattern as createCallCheckoutDash so the two
+  //     payment providers converge at onCallPaymentSuccess.
+  if (slotTimes?.startTimeUtc && slotTimes?.endTimeUtc) {
+    try {
+      const performerId = await _getPerformerId(pkg.creator_id);
+      const booking = await _lockSlotAndInsertBooking({
+        performerId,
+        memberId,
+        packageId: pkg.id,
+        paymentId: payment.id,
+        startTimeUtc: slotTimes.startTimeUtc,
+        endTimeUtc: slotTimes.endTimeUtc,
+        durationMinutes: pkg.duration_minutes,
+        priceCents: Math.round(parseFloat(pkg.price_usd) * 100),
+      });
+      // Persist booking id into payment metadata so onCallPaymentSuccess
+      // flips the right row to 'confirmed' when the webhook lands.
+      await query(
+        `UPDATE payments SET metadata = metadata || $2::jsonb, updated_at = NOW() WHERE id = $1`,
+        [payment.id, JSON.stringify({ bookingId: booking.id })]
+      );
+    } catch (lockErr) {
+      // Mark the pending payment as failed so it doesn't orphan.
+      await PaymentModel.updateStatus(payment.id, 'failed', {
+        error_reason: `slot_lock_failed: ${lockErr.message || 'unknown'}`.slice(0, 500),
+      }).catch(() => {});
+      throw lockErr;
+    }
+  }
 
   // 3. Persist metadata and build checkout URL
   let checkoutUrl;

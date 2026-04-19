@@ -512,6 +512,12 @@ export function BookCallModal({
         email,
         quantity: 1,
         selectedSlot: selectedSlot?.startUtc ?? null,
+        // Pass slot times so the backend locks the slot + creates a bookings
+        // row at checkout; this makes "My Upcoming Calls" + reminders work
+        // for ePayco-paid bookings (previously only Dash had this).
+        ...(selectedSlot?.startUtc && selectedSlot?.endUtc
+          ? { startTimeUtc: selectedSlot.startUtc, endTimeUtc: selectedSlot.endUtc }
+          : {}),
       };
       const res = await createCallCheckout(payload);
 

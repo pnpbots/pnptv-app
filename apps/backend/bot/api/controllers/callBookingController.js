@@ -40,7 +40,7 @@ async function createCheckout(req, res) {
     }
     const memberId = String(sessionUser.id);
 
-    const { packageId, provider, email } = req.body;
+    const { packageId, provider, email, startTimeUtc, endTimeUtc } = req.body;
 
     if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
@@ -53,12 +53,35 @@ async function createCheckout(req, res) {
     if (!email || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ success: false, error: 'A valid email is required' });
     }
+    // Optional slot times — when both are provided the service locks the slot
+    // at checkout and a bookings row is created with status='awaiting_payment'.
+    // When omitted, the legacy credit-only flow runs (no scheduled booking).
+    const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+    let slotTimes = null;
+    if (startTimeUtc || endTimeUtc) {
+      if (!startTimeUtc || !endTimeUtc || !ISO_RE.test(startTimeUtc) || !ISO_RE.test(endTimeUtc)) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc and endTimeUtc must both be ISO 8601 timestamps with timezone' });
+      }
+      const s = new Date(startTimeUtc);
+      const e = new Date(endTimeUtc);
+      if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc or endTimeUtc is not a valid date' });
+      }
+      if (e <= s) {
+        return res.status(400).json({ success: false, error: 'endTimeUtc must be after startTimeUtc' });
+      }
+      if (s <= new Date()) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc must be in the future' });
+      }
+      slotTimes = { startTimeUtc, endTimeUtc };
+    }
 
     const result = await callCheckoutService.createCallCheckout(
       memberId,
       Number(packageId),
       provider,
-      email.trim().toLowerCase()
+      email.trim().toLowerCase(),
+      slotTimes
     );
 
     return res.status(201).json({ success: true, ...result });
