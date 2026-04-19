@@ -655,3 +655,73 @@
   }
 }
 
+/* Narrow phones (iPhone SE etc.) — tighten the control bar */
+@media (max-width: 480px) {
+  .lk-pnptv-call[data-lk-theme="default"] .lk-control-bar {
+    margin: 0 0.5rem 0.5rem;
+    padding: 0.3rem 0.35rem;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .lk-pnptv-call[data-lk-theme="default"] .lk-button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  .lk-pnptv-call[data-lk-theme="default"] .lk-disconnect-button {
+    padding: 0 0.75rem;
+  }
+  @supports (padding: env(safe-area-inset-bottom)) {
+    .lk-pnptv-call[data-lk-theme="default"] .lk-control-bar {
+      margin-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    }
+  }
+}
+
+/* Landscape phones — short viewports, compact everything */
+@media (max-height: 480px) and (orientation: landscape) {
+  .lk-pnptv-call[data-lk-theme="default"] .lk-control-bar {
+    margin: 0 0.5rem 0.35rem;
+    padding: 0.25rem 0.4rem;
+    gap: 0.3rem;
+  }
+  .lk-pnptv-call[data-lk-theme="default"] .lk-button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  .lk-pnptv-call[data-lk-theme="default"] .lk-grid-layout,
+  .lk-pnptv-call[data-lk-theme="default"] .lk-focus-layout {
+    gap: 0.25rem;
+    padding: 0.25rem;
+  }
+  .lk-pnptv-call[data-lk-theme="default"] .lk-participant-metadata {
+    padding: 0.15rem 0.45rem;
+    margin: 0.25rem;
+    font-size: 0.7rem;
+  }
+}
+
+/* Desktop / wide screens — more generous spacing, cap the grid at sensible size */
+@media (min-width: 1024px) {
+  .lk-pnptv-call[data-lk-theme="default"] .lk-control-bar {
+    margin: 0 1rem 1rem;
+    padding: 0.45rem 0.6rem;
+  }
+  .lk-pnptv-call[data-lk-theme="default"] .lk-grid-layout,
+  .lk-pnptv-call[data-lk-theme="default"] .lk-focus-layout {
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+}
+
+/* Prefers-reduced-motion — disable spin/transform animations */
+@media (prefers-reduced-motion: reduce) {
+  .lk-pnptv-call[data-lk-theme="default"] .lk-button,
+  .lk-pnptv-call[data-lk-theme="default"] .lk-participant-tile {
+    transition: none !important;
+  }
+  .lk-pnptv-call[data-lk-theme="default"] .lk-button:hover:not(:disabled) {
+    transform: none !important;
+  }
+}
+

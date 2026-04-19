@@ -76,28 +76,33 @@ function CallOverlay({ startedBy }: { startedBy: string | null }) {
   return (
     <>
       <div
-        className="pointer-events-none absolute top-0 left-0 right-0 z-10 p-2.5 flex items-center justify-between gap-2"
-        style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 100%)" }}
+        className="pointer-events-none absolute top-0 left-0 right-0 z-10 px-2 py-2 sm:px-3 flex items-center justify-between gap-1.5 sm:gap-2"
+        style={{
+          background: "linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 100%)",
+          paddingRight: "calc(3rem + env(safe-area-inset-right, 0px))", // leave room for × button
+          paddingTop: "calc(0.5rem + env(safe-area-inset-top, 0px))",
+          paddingLeft: "calc(0.5rem + env(safe-area-inset-left, 0px))",
+        }}
       >
-        <div className="flex items-center gap-1.5 text-white text-xs min-w-0">
+        <div className="flex items-center gap-1 sm:gap-1.5 text-white text-[11px] sm:text-xs min-w-0 flex-shrink">
           {startedBy && (
             <span
-              className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md truncate max-w-[180px] border border-white/10"
+              className="px-2 sm:px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md truncate max-w-[40vw] sm:max-w-[200px] border border-white/10"
               title={`Hosted by ${startedBy}`}
             >
-              <span className="mr-1">👑</span>
+              <span className="mr-1" aria-hidden>👑</span>
               <span className="font-medium">{startedBy}</span>
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1.5 text-white text-xs">
+        <div className="flex items-center gap-1 sm:gap-1.5 text-white text-[11px] sm:text-xs flex-shrink-0">
           {isConnected && (
-            <span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md tabular-nums font-medium border border-white/10">
+            <span className="px-2 sm:px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md tabular-nums font-medium border border-white/10">
               {formatDuration(elapsed)}
             </span>
           )}
-          <span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10">
-            <span className="mr-1">👥</span>{participants.length}
+          <span className="px-2 sm:px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10 whitespace-nowrap">
+            <span className="mr-1" aria-hidden>👥</span>{participants.length}
           </span>
         </div>
       </div>
@@ -110,7 +115,10 @@ function CallOverlay({ startedBy }: { startedBy: string | null }) {
       )}
 
       {isAlone && (
-        <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 z-10 px-4 py-3 rounded-2xl bg-black/70 text-white text-sm backdrop-blur-md border border-white/10 max-w-[280px] text-center">
+        <div
+          className="pointer-events-none absolute left-1/2 -translate-x-1/2 z-10 px-4 py-3 rounded-2xl bg-black/70 text-white text-sm backdrop-blur-md border border-white/10 max-w-[min(280px,calc(100%-2rem))] text-center"
+          style={{ bottom: "calc(5.5rem + env(safe-area-inset-bottom, 0px))" }}
+        >
           <div className="font-semibold mb-0.5">You're the only one here</div>
           <div className="text-xs text-white/70">Others can join from the hangout chat.</div>
         </div>
@@ -217,11 +225,14 @@ function LiveKitCallPanel({
 
   return (
     <div
-      className="lk-pnptv-call mx-3 mt-2 mb-1 flex-shrink-0 rounded-2xl overflow-hidden relative"
+      className="lk-pnptv-call mx-3 mt-2 mb-1 md:mx-auto md:my-3 md:self-center flex-shrink-0 rounded-2xl overflow-hidden relative w-auto md:w-full"
       data-lk-theme="default"
       style={{
-        minHeight: "min(420px, 60dvh)",
+        // Adaptive sizing: fits landscape phones (min-height shrinks with dvh)
+        // and caps width on tablet/desktop so it doesn't stretch full-monitor.
+        minHeight: "min(360px, calc(100dvh - 120px))",
         maxHeight: "min(80dvh, calc(100dvh - 5rem))",
+        maxWidth: "min(64rem, calc(100vw - 1.5rem))",
         display: "flex",
         flexDirection: "column",
         border: "1px solid rgba(123,97,255,0.25)",
@@ -256,7 +267,11 @@ function LiveKitCallPanel({
         type="button"
         onClick={requestClose}
         aria-label="Close call"
-        className="absolute top-2 right-2 z-30 w-9 h-9 rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 flex items-center justify-center text-xl leading-none backdrop-blur-md border border-white/10 transition-transform"
+        className="absolute z-30 w-10 h-10 sm:w-9 sm:h-9 rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 flex items-center justify-center text-xl leading-none backdrop-blur-md border border-white/10 transition-transform"
+        style={{
+          top: "calc(0.5rem + env(safe-area-inset-top, 0px))",
+          right: "calc(0.5rem + env(safe-area-inset-right, 0px))",
+        }}
       >
         ×
       </button>
