@@ -26,7 +26,7 @@ import {
   getBookingOptions,
   createCallCheckout,
   createCallCheckoutDash,
-  getDashSubscriptionStatus,
+  getBookingPaymentStatus,
   assertPaymentUrl,
   type CallPackage,
   type BookingSlot,
@@ -173,6 +173,10 @@ export function BookCallModal({
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [confirmedStartAt, setConfirmedStartAt] = useState<string | null>(null);
+  const [confirmedRoomName, setConfirmedRoomName] = useState<string | null>(null);
+  const [confirmedBookingId, setConfirmedBookingId] = useState<string | number | null>(null);
+  const [dashTimedOut, setDashTimedOut] = useState(false);
+  const [dashPaymentId, setDashPaymentId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [retryPayload, setRetryPayload] = useState<{
     packageId: number;
@@ -181,6 +185,10 @@ export function BookCallModal({
     quantity: number;
     selectedSlot: string | null;
   } | null>(null);
+
+  // Join Call state (loading/error shown while navigating)
+  const [joinCallLoading, setJoinCallLoading] = useState(false);
+  const [joinCallError, setJoinCallError] = useState<string | null>(null);
 
   // Permission preflight state
   const [permissionWarning, setPermissionWarning] = useState<"camera" | "microphone" | "both" | null>(null);
@@ -228,8 +236,14 @@ export function BookCallModal({
     setEmail("");
     setCheckoutError(null);
     setConfirmedStartAt(null);
+    setConfirmedRoomName(null);
+    setConfirmedBookingId(null);
+    setDashTimedOut(false);
+    setDashPaymentId(null);
     setIsProcessing(false);
     setRetryPayload(null);
+    setJoinCallLoading(false);
+    setJoinCallError(null);
     checkoutInFlight.current = false;
     setSlots([]);
     setSlotsOffset(0);
@@ -423,35 +437,71 @@ export function BookCallModal({
     try {
       // Dash uses a separate endpoint that creates a BTCPay invoice
       if (provider === "dash") {
-        const dashRes = await createCallCheckoutDash(activePackage.id);
+        const dashRes = await createCallCheckoutDash(
+          activePackage.id,
+          selectedSlot?.startUtc ?? undefined,
+          selectedSlot?.endUtc ?? undefined
+        );
         if (dashRes.checkoutUrl) {
-          window.open(dashRes.checkoutUrl, '_blank');
+          window.open(dashRes.checkoutUrl, "_blank");
         }
-        // Poll for completion — store ref for cleanup
-        if (dashRes.invoiceId) {
+        // Store paymentId for retry if needed
+        setDashPaymentId(dashRes.paymentId ?? null);
+
+        // Poll /api/webapp/bookings/:paymentId/payment-status every 5s, hard-stop at 15min
+        if (dashRes.paymentId) {
           if (dashPollRef.current) clearInterval(dashPollRef.current);
+
+          const pollId = dashRes.paymentId;
+          const POLL_INTERVAL_MS = 5_000;
+          const POLL_TIMEOUT_MS = 900_000; // 15 min
+          const pollStart = Date.now();
+
           dashPollRef.current = setInterval(async () => {
+            // Hard-stop after 15 minutes
+            if (Date.now() - pollStart >= POLL_TIMEOUT_MS) {
+              if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+              setCheckoutLoading(false);
+              setIsProcessing(false);
+              checkoutInFlight.current = false;
+              setDashTimedOut(true);
+              return;
+            }
             try {
-              const status = await getDashSubscriptionStatus(dashRes.invoiceId);
-              if (status.status === 'paid' || status.status === 'completed' || status.status === 'confirmed') {
-                if (dashPollRef.current) clearInterval(dashPollRef.current);
-                dashPollRef.current = null;
+              const status = await getBookingPaymentStatus(pollId);
+              if (status.status === "paid") {
+                if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+                setConfirmedRoomName(status.roomName ?? null);
+                setConfirmedBookingId(status.bookingId ?? pollId);
+                // Preserve slot start time so SUCCESS step can show "scheduled for"
+                if (selectedSlot?.startUtc) setConfirmedStartAt(selectedSlot.startUtc);
                 setStep("SUCCESS");
                 setCheckoutLoading(false);
                 setIsProcessing(false);
                 checkoutInFlight.current = false;
+              } else if (status.status === "expired" || status.status === "failed") {
+                if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+                setCheckoutError(
+                  status.status === "expired"
+                    ? "Dash invoice expired. Please try again."
+                    : "Payment failed. Please try again."
+                );
+                setRetryPayload({
+                  packageId: activePackage.id,
+                  provider: "dash",
+                  email,
+                  quantity: 1,
+                  selectedSlot: selectedSlot?.startUtc ?? null,
+                });
+                setCheckoutLoading(false);
+                setIsProcessing(false);
+                checkoutInFlight.current = false;
               }
-            } catch {}
-          }, 5000);
-          setTimeout(() => {
-            if (dashPollRef.current) {
-              clearInterval(dashPollRef.current);
-              dashPollRef.current = null;
+              // status === 'pending' → keep polling
+            } catch {
+              // Network hiccup — keep polling
             }
-            setCheckoutLoading(false);
-            setIsProcessing(false);
-            checkoutInFlight.current = false;
-          }, 600000);
+          }, POLL_INTERVAL_MS);
         }
         return;
       }
@@ -490,7 +540,7 @@ export function BookCallModal({
       setIsProcessing(false);
       checkoutInFlight.current = false;
     }
-  }, [activePackage, provider, email, selectedSlot, onClose, navigate]);
+  }, [activePackage, provider, email, selectedSlot]);
 
   if (!open) return null;
 
@@ -1093,8 +1143,47 @@ export function BookCallModal({
         />
       </div>
 
+      {/* Dash: 15-min timeout recovery card */}
+      {provider === "dash" && dashTimedOut && (
+        <div
+          className="rounded-xl px-4 py-4 space-y-3"
+          style={{ background: "rgba(255,159,10,0.10)", border: "1px solid rgba(255,159,10,0.25)" }}
+          role="alert"
+        >
+          <p className="text-sm font-semibold" style={{ color: "#FF9F0A" }}>
+            Still waiting?
+          </p>
+          <p className="text-xs" style={{ color: "#8E8E93" }}>
+            Refresh this page after paying to check status. If you already paid, your booking will be confirmed automatically.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 min-h-[36px] rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
+              style={{ background: "rgba(255,255,255,0.08)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.10)" }}
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDashTimedOut(false);
+                setCheckoutError(null);
+                checkoutInFlight.current = false;
+                handleCheckout();
+              }}
+              className="flex-1 min-h-[36px] rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-80"
+              style={{ background: "#D4007A" }}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Dash: waiting for payment indicator */}
-      {provider === "dash" && checkoutLoading && (
+      {provider === "dash" && checkoutLoading && !dashTimedOut && (
         <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
           <div className="flex items-center gap-2">
             <Spinner size={16} />
@@ -1139,7 +1228,7 @@ export function BookCallModal({
       )}
 
       {/* Submit */}
-      {!(provider === "dash" && checkoutLoading) && (
+      {!(provider === "dash" && (checkoutLoading || dashTimedOut)) && (
         <button
           type="button"
           disabled={checkoutLoading || !email.trim() || !activePackage}
@@ -1167,68 +1256,129 @@ export function BookCallModal({
 
   // ── SUCCESS step ─────────────────────────────────────────────────────────────
 
+  // Determine if start is within ±15min of now
+  const startTimeForJoin = confirmedStartAt ?? (selectedSlot?.startUtc ?? null);
+  const isWithinJoinWindow = startTimeForJoin
+    ? Math.abs(new Date(startTimeForJoin).getTime() - Date.now()) <= 15 * 60 * 1000
+    : isOnline; // online + now booking = always in window
+
+  // Navigate to /call/:bookingId — CallRoom page handles LiveKit connection
+  const handleJoinCallWithToken = () => {
+    if (!confirmedBookingId) return;
+    onClose();
+    navigate(`/call/${encodeURIComponent(String(confirmedBookingId))}`);
+  };
+
   const renderSuccessStep = () => (
     <div className="flex flex-col items-center gap-5 py-4 text-center">
-      <div
-        className="w-20 h-20 rounded-full flex items-center justify-center"
-        style={{ background: "rgba(52,199,89,0.14)" }}
-      >
-        <svg
-          className="w-10 h-10"
-          style={{ color: "#34C759" }}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2.5}
-          aria-hidden="true"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M5 13l4 4L19 7"
-            strokeDasharray="30"
-            strokeDashoffset="0"
-            style={{ animation: "draw-check 0.4s ease forwards" }}
-          />
-        </svg>
-      </div>
+      <>
+          <div
+            className="w-20 h-20 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(52,199,89,0.14)" }}
+          >
+            <svg
+              className="w-10 h-10"
+              style={{ color: "#34C759" }}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2.5}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M5 13l4 4L19 7"
+                strokeDasharray="30"
+                strokeDashoffset="0"
+                style={{ animation: "draw-check 0.4s ease forwards" }}
+              />
+            </svg>
+          </div>
 
-      <div>
-        <h3 className="text-xl font-bold" style={{ color: "#EBEBF5" }}>{t.creator.bookingConfirmedTitle}</h3>
-        <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
-          {confirmedStartAt
-            ? (() => { const { date, time } = formatSlotDate(confirmedStartAt); return t.creator.callScheduledFor(date, time); })()
-            : isOnline
-              ? t.creator.callStartsInFifteen
-              : t.creator.bookingReceived}
-        </p>
-      </div>
+          <div>
+            <h3 className="text-xl font-bold" style={{ color: "#EBEBF5" }}>{t.creator.bookingConfirmedTitle}</h3>
+            <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
+              {startTimeForJoin
+                ? (() => { const { date, time } = formatSlotDate(startTimeForJoin); return t.creator.callScheduledFor(date, time); })()
+                : isOnline
+                  ? t.creator.callStartsInFifteen
+                  : t.creator.bookingReceived}
+            </p>
+          </div>
 
-      <div
-        className="w-full rounded-2xl p-4 text-left space-y-2"
-        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
-      >
-        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#8E8E93" }}>{t.creator.callDetailsTitle}</p>
-        <p className="text-sm" style={{ color: "#EBEBF5" }}>
-          <span style={{ color: "#8E8E93" }}>{t.creator.callDetailCreator}</span>@{creator.username}
-        </p>
-        <p className="text-sm" style={{ color: "#EBEBF5" }}>
-          <span style={{ color: "#8E8E93" }}>{t.creator.callDetailDuration}</span>{t.creator.slotDuration(duration)}
-        </p>
-      </div>
+          <div
+            className="w-full rounded-2xl p-4 text-left space-y-2"
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#8E8E93" }}>{t.creator.callDetailsTitle}</p>
+            <p className="text-sm" style={{ color: "#EBEBF5" }}>
+              <span style={{ color: "#8E8E93" }}>{t.creator.callDetailCreator}</span>@{creator.username}
+            </p>
+            <p className="text-sm" style={{ color: "#EBEBF5" }}>
+              <span style={{ color: "#8E8E93" }}>{t.creator.callDetailDuration}</span>{t.creator.slotDuration(duration)}
+            </p>
+            {startTimeForJoin && (
+              <p className="text-sm" style={{ color: "#EBEBF5" }}>
+                <span style={{ color: "#8E8E93" }}>Starts: </span>
+                {(() => { const { date, time } = formatSlotDate(startTimeForJoin); return `${date} · ${time}`; })()}
+              </p>
+            )}
+          </div>
 
-      <button
-        type="button"
-        onClick={onClose}
-        className="w-full min-h-[44px] rounded-2xl text-sm font-semibold transition-opacity hover:opacity-80 active:scale-[0.98]"
-        style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.10)" }}
-      >
-        {t.creator.closeBtn}
-      </button>
+          {/* Join Call button — only within ±15min of start */}
+          {isWithinJoinWindow && confirmedBookingId ? (
+            <div className="w-full space-y-2">
+              {joinCallError && (
+                <p className="text-xs text-center" style={{ color: "#FF453A" }}>{joinCallError}</p>
+              )}
+              <button
+                type="button"
+                disabled={joinCallLoading}
+                onClick={handleJoinCallWithToken}
+                className="w-full min-h-[48px] rounded-2xl text-base font-bold text-white flex items-center justify-center gap-2 transition-opacity hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: "linear-gradient(90deg, #7B61FF, #D4007A)" }}
+              >
+                {joinCallLoading ? (
+                  <>
+                    <Spinner size={18} />
+                    <span>Joining…</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                    </svg>
+                    <span>Join Call</span>
+                  </>
+                )}
+              </button>
+            </div>
+          ) : startTimeForJoin && !isWithinJoinWindow ? (
+            <div
+              className="w-full rounded-xl px-4 py-3 text-sm text-center"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#8E8E93" }}
+            >
+              Your call with <span style={{ color: "#EBEBF5" }}>@{creator.username}</span> is scheduled for{" "}
+              <span style={{ color: "#EBEBF5" }}>
+                {(() => { const { date, time } = formatSlotDate(startTimeForJoin); return `${date} at ${time}`; })()}
+              </span>. We'll send a reminder 15 min before.
+            </div>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full min-h-[44px] rounded-2xl text-sm font-semibold transition-opacity hover:opacity-80 active:scale-[0.98]"
+            style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.10)" }}
+          >
+            {t.creator.closeBtn}
+          </button>
+      </>
     </div>
   );
 
-  // ── Step content map ──────────────────────────────────────────────────────────
+  // ── Step content map ───────────────────────────────────────────────────────────
 
   const stepContent: Record<Step, React.ReactNode> = {
     SELECT_MODEL: renderModelStep(),

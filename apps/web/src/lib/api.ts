@@ -5494,12 +5494,44 @@ export function createCallCheckout(
 }
 
 export function createCallCheckoutDash(
-  packageId: number
-): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; paymentId: string; usdAmount: number }> {
+  packageId: number,
+  startTimeUtc?: string,
+  endTimeUtc?: string
+): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; paymentId: string; amountUsd: number; addressDash?: string; expiresAt?: string }> {
+  const body: Record<string, unknown> = { packageId };
+  if (startTimeUtc) body.startTimeUtc = startTimeUtc;
+  if (endTimeUtc) body.endTimeUtc = endTimeUtc;
   return request("/api/webapp/book-call/checkout/dash", {
     method: "POST",
-    body: { packageId },
+    body,
   });
+}
+
+export interface BookingPaymentStatus {
+  status: "pending" | "paid" | "expired" | "failed";
+  bookingId?: string | number;
+  roomName?: string;
+}
+
+export function getBookingPaymentStatus(
+  bookingId: string | number
+): Promise<BookingPaymentStatus> {
+  return request(`/api/webapp/bookings/${encodeURIComponent(String(bookingId))}/payment-status`);
+}
+
+export interface UpcomingBooking {
+  id: string | number;
+  performer_id: string;
+  performer_name: string;
+  performer_photo?: string | null;
+  start_time_utc: string;
+  end_time_utc: string;
+  room_name?: string | null;
+  duration_minutes?: number;
+}
+
+export function getUpcomingBookings(): Promise<{ bookings: UpcomingBooking[] }> {
+  return request("/api/webapp/bookings/upcoming");
 }
 
 export interface CallBooking {

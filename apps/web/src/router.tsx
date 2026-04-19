@@ -88,6 +88,7 @@ const DashBankPage = lazy(() => import("@/pages/DashBankPage"));
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
 const BookingConfirmation = lazy(() => import("@/pages/BookingConfirmation"));
+const CallRoom = lazy(() => import("@/pages/CallRoom"));
 
 // Admin pages
 const StatsOverview = lazy(() => import("@/pages/admin/StatsOverview"));
@@ -208,6 +209,16 @@ export const router = createBrowserRouter([
           <ModuleLoader>
             <VerificationGate>
               <BookingConfirmation />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "call/:bookingId",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <CallRoom />
             </VerificationGate>
           </ModuleLoader>
         ),

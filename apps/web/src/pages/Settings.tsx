@@ -21,10 +21,12 @@ import {
   getVapidKey,
   subscribePush,
   unsubscribePush,
+  getUpcomingBookings,
   type ReferralStats,
   type BlockedUser,
   type EraseAccountReceipt,
   type TokenPurchase,
+  type UpcomingBooking,
 } from "@/lib/api";
 import IdentityConnections from "@/components/profile/IdentityConnections";
 
@@ -178,6 +180,10 @@ export default function Settings() {
   const [txLoading, setTxLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
+  // ── Upcoming calls state ─────────────────────────────────────────────────
+  const [upcomingCalls, setUpcomingCalls] = useState<UpcomingBooking[]>([]);
+  const [upcomingCallsLoading, setUpcomingCallsLoading] = useState(false);
+
   // ── Newsletter subscription state ─────────────────────────────────────
   const [newsletterSubscribed, setNewsletterSubscribed] = useState(() => {
     try { return localStorage.getItem("pnp_newsletter_subscribed") === "1"; } catch { return false; }
@@ -267,6 +273,18 @@ export default function Settings() {
       cancelled = true;
     };
   }, [isAuthenticated, user?.language]);
+
+  // ── Load upcoming calls ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    setUpcomingCallsLoading(true);
+    getUpcomingBookings()
+      .then((res) => { if (!cancelled) setUpcomingCalls(res.bookings ?? []); })
+      .catch(() => { if (!cancelled) setUpcomingCalls([]); })
+      .finally(() => { if (!cancelled) setUpcomingCallsLoading(false); });
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -637,6 +655,123 @@ export default function Settings() {
       {/* ── Identity & Connections ──────────────────────────────────────── */}
       <IdentityConnections telegramUsername={user?.username || undefined} />
 
+      {/* ── Upcoming Calls ───────────────────────────────────────────────── */}
+      {isAuthenticated && (
+        <Section title="Upcoming Calls">
+          {upcomingCallsLoading ? (
+            <div className="space-y-3">
+              {[1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="h-16 rounded-xl animate-pulse"
+                  style={{ background: "rgba(255,255,255,0.06)" }}
+                />
+              ))}
+            </div>
+          ) : upcomingCalls.length === 0 ? (
+            <p className="text-sm" style={{ color: "#636366" }}>
+              No upcoming calls. Book one from a creator's profile.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {upcomingCalls.map((booking) => {
+                const startMs = new Date(booking.start_time_utc).getTime();
+                const nowMs = Date.now();
+                const diffMs = startMs - nowMs;
+                const inWindow = Math.abs(diffMs) <= 15 * 60 * 1000;
+                const diffMin = Math.floor(diffMs / 60_000);
+                const startsInLabel =
+                  diffMs <= 0
+                    ? "Now"
+                    : diffMin < 60
+                    ? `in ${diffMin}m`
+                    : diffMin < 1440
+                    ? `in ${Math.floor(diffMin / 60)}h ${diffMin % 60}m`
+                    : `in ${Math.floor(diffMin / 1440)}d`;
+                const localTime = new Date(booking.start_time_utc).toLocaleString(undefined, {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                  hour12: true,
+                });
+                return (
+                  <div
+                    key={String(booking.id)}
+                    className="flex items-center gap-3 p-3 rounded-xl"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    {/* Avatar */}
+                    {booking.performer_photo ? (
+                      <img
+                        src={booking.performer_photo}
+                        alt={booking.performer_name}
+                        className="w-16 h-16 rounded-full object-cover flex-shrink-0"
+                        style={{ border: "2px solid rgba(255,255,255,0.10)" }}
+                      />
+                    ) : (
+                      <div
+                        className="w-16 h-16 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold text-white"
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                      >
+                        {booking.performer_name.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <p className="text-sm font-semibold text-white truncate">
+                        @{booking.performer_name}
+                      </p>
+                      <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
+                        {localTime}
+                      </p>
+                      <span
+                        className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                        style={
+                          inWindow
+                            ? { background: "rgba(52,199,89,0.15)", color: "#34C759" }
+                            : { background: "rgba(255,255,255,0.08)", color: "#8E8E93" }
+                        }
+                      >
+                        {startsInLabel}
+                      </span>
+                    </div>
+
+                    {/* Action */}
+                    {inWindow ? (
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/call/${encodeURIComponent(String(booking.id))}`)}
+                        className="flex-shrink-0 min-h-[36px] px-4 rounded-xl text-xs font-semibold text-white transition-opacity hover:opacity-80 active:scale-[0.97]"
+                        style={{ background: "linear-gradient(90deg, #7B61FF, #D4007A)" }}
+                      >
+                        Join Call
+                      </button>
+                    ) : (
+                      <span
+                        className="flex-shrink-0 min-h-[36px] px-4 rounded-xl text-xs font-semibold flex items-center"
+                        style={{
+                          background: "rgba(255,255,255,0.06)",
+                          color: "#636366",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        Scheduled
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Section>
+      )}
+
       {/* ── App Preferences ──────────────────────────────────────────────── */}
       <Section title={p.appPreferences}>
         {/* Language toggle */}
@@ -751,6 +886,114 @@ export default function Settings() {
             accentColor="#000000"
           />
         </div>
+      </Section>
+
+      {/* ── Upcoming Private Calls ────────────────────────────────────────── */}
+      <Section title="Upcoming Calls">
+        {upcomingCallsLoading ? (
+          <div className="space-y-3">
+            {[1, 2].map((i) => (
+              <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: "rgba(255,255,255,0.06)" }} />
+            ))}
+          </div>
+        ) : upcomingCalls.length === 0 ? (
+          <div className="py-4 flex flex-col items-center gap-2 text-center">
+            <svg className="w-8 h-8" style={{ color: "#636366" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+            <p className="text-sm font-medium" style={{ color: "#EBEBF5" }}>No upcoming calls</p>
+            <a
+              href="/creators"
+              className="text-xs font-semibold underline underline-offset-2 transition-opacity hover:opacity-70"
+              style={{ color: "#D4007A" }}
+            >
+              Browse creators
+            </a>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {upcomingCalls.map((booking) => {
+              const startMs = new Date(booking.start_time_utc).getTime();
+              const nowMs = Date.now();
+              const diffMs = startMs - nowMs;
+              const diffMinutes = Math.floor(diffMs / 60_000);
+              const isInWindow = Math.abs(diffMs) <= 15 * 60_000; // ±15min
+              const isInProgress = diffMs < 0 && Math.abs(diffMs) < (booking.duration_minutes ?? 30) * 60_000;
+
+              let timePill: string;
+              if (isInProgress) {
+                timePill = "In progress";
+              } else if (isInWindow) {
+                timePill = "Starts soon!";
+              } else if (diffMinutes < 60) {
+                timePill = `in ${diffMinutes}m`;
+              } else if (diffMinutes < 24 * 60) {
+                timePill = `in ${Math.floor(diffMinutes / 60)}h ${diffMinutes % 60}m`;
+              } else {
+                timePill = `in ${Math.floor(diffMinutes / 1440)}d`;
+              }
+
+              const formattedStart = new Date(booking.start_time_utc).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true,
+              });
+
+              return (
+                <div
+                  key={booking.id}
+                  className="flex items-center gap-3 px-3 py-3 rounded-xl"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  {/* Avatar */}
+                  <div className="w-10 h-10 rounded-full overflow-hidden flex-shrink-0">
+                    {booking.performer_photo ? (
+                      <img src={booking.performer_photo} alt={booking.performer_name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                      >
+                        {booking.performer_name.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{ color: "#EBEBF5" }}>
+                      @{booking.performer_name}
+                    </p>
+                    <p className="text-xs" style={{ color: "#8E8E93" }}>{formattedStart}</p>
+                  </div>
+
+                  {/* Time pill + join button */}
+                  {isInWindow || isInProgress ? (
+                    <a
+                      href={`/call/${booking.id}`}
+                      className="flex-shrink-0 min-h-[34px] px-3 rounded-lg text-xs font-bold text-white flex items-center gap-1.5 transition-opacity hover:opacity-90"
+                      style={{ background: "linear-gradient(90deg, #7B61FF, #D4007A)" }}
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
+                      </svg>
+                      Join
+                    </a>
+                  ) : (
+                    <span
+                      className="flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-medium"
+                      style={{ background: "rgba(255,255,255,0.07)", color: "#8E8E93" }}
+                    >
+                      {timePill}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Section>
 
       {/* ── Wallet & Dash Identity ────────────────────────────────────────── */}
