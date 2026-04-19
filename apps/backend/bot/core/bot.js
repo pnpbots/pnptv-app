@@ -49,6 +49,7 @@ const { mediaMirrorMiddleware } = require('./middleware/mediaMirror');
 const topicModerationMiddleware = require('./middleware/topicModeration');
 const botAdditionPreventionMiddleware = require('./middleware/botAdditionPrevention');
 const autoModerationMiddleware = require('./middleware/autoModeration');
+const personalInfoFilterMiddleware = require('./middleware/personalInfoFilter');
 const { commandRedirectionMiddleware, notificationsAutoDelete } = require('./middleware/commandRedirection');
 const { groupSecurityEnforcementMiddleware, registerGroupSecurityHandlers } = require('./middleware/groupSecurityEnforcement');
 const { groupMessageAutoDeleteMiddleware } = require('./middleware/groupMessageAutoDelete');
@@ -695,6 +696,7 @@ const startBot = async () => {
       ['groupMessageAutoDelete', () => bot.use(groupMessageAutoDeleteMiddleware())],
       ['botAdditionPrevention', () => bot.use(botAdditionPreventionMiddleware())],
       ['autoModeration', () => bot.use(autoModerationMiddleware())],
+      ['personalInfoFilter', () => bot.use(personalInfoFilterMiddleware())],
       ['moderationFilter', () => bot.use(moderationFilter())],
       ['primeChannelSilentRedirect', () => bot.use(primeChannelSilentRedirectMiddleware())],
       ['groupBehavior', () => bot.use(groupBehaviorMiddleware())],
