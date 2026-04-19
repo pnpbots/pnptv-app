@@ -88,6 +88,180 @@ class UserService {
   }
 
   /**
+   * Update the user's last-known location. Used by the bot's profile.js
+   * "share location" handler. Stores both raw lat/lng and a derived geohash
+   * the nearby search uses for cheap proximity buckets.
+   */
+  async updateLocation(userId, { lat, lng } = {}) {
+    if (typeof lat !== 'number' || typeof lng !== 'number') {
+      return { success: false, error: 'lat and lng required' };
+    }
+    try {
+      await UserModel.updateProfile(userId, {
+        location_lat: lat,
+        location_lng: lng,
+      });
+      await UserModel.invalidateCache?.(userId);
+      return { success: true };
+    } catch (error) {
+      logger.error('Error updating location:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Find users near `userId` within `radiusKm`. Resolves the requesting
+   * user's saved location first, then delegates to UserModel.getNearby.
+   * Returns [] if the user has no location saved.
+   */
+  async getNearbyUsers(userId, radiusKm = 10) {
+    try {
+      const user = await UserModel.getById(userId);
+      if (!user || user.locationLat == null || user.locationLng == null) return [];
+      return await UserModel.getNearby(
+        { lat: Number(user.locationLat), lng: Number(user.locationLng) },
+        radiusKm
+      );
+    } catch (error) {
+      logger.error('Error fetching nearby users:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Persist a place favorite for the user. Backed by user_place_favorites
+   * (composite PK on user_id, place_id) — the ON CONFLICT makes the call
+   * idempotent so the bot's repeated callback taps don't error.
+   */
+  async saveFavoritePlace(userId, placeId) {
+    if (!userId || !placeId) return { success: false, error: 'userId and placeId required' };
+    try {
+      await query(
+        `INSERT INTO user_place_favorites (user_id, place_id)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id, place_id) DO NOTHING`,
+        [String(userId), Number(placeId)]
+      );
+      return { success: true };
+    } catch (error) {
+      logger.error('Error saving favorite place:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * True when the user has any active paid plan (basic 'pnp-member', PRIME,
+   * or any lifetime). Admins/super-admins always count as subscribed.
+   */
+  async hasActiveSubscription(userId) {
+    try {
+      if (isEnvAdminOrSuperAdmin(userId)) return true;
+      const user = await UserModel.getById(userId);
+      if (!user) return false;
+      // Lifetime plans don't have an expiry in the past
+      const planId = String(user.planId || '').toLowerCase();
+      if (planId.includes('lifetime')) return true;
+      // Otherwise: active subscription_status with a future expiry
+      if (user.subscriptionStatus === 'active') {
+        if (!user.planExpiry) return true;
+        return new Date(user.planExpiry) > new Date();
+      }
+      return false;
+    } catch (error) {
+      logger.error('Error checking active subscription:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Aggregate user-base statistics for admin dashboards.
+   */
+  async getStatistics() {
+    try {
+      return await UserModel.getStatistics();
+    } catch (error) {
+      logger.error('Error fetching user statistics:', error);
+      return null;
+    }
+  }
+
+  /** Alias retained for the analytics handler that uses the older name. */
+  async getUserStats() {
+    return this.getStatistics();
+  }
+
+  /**
+   * Lookup the streamer record for a given live-channel reference. Used by
+   * the token-wallet stream-heartbeat flow to credit the right creator.
+   */
+  async findUserByChannelRef(channelRef) {
+    if (!channelRef) return null;
+    try {
+      const result = await query(
+        `SELECT * FROM users WHERE live_channel = $1 LIMIT 1`,
+        [String(channelRef)]
+      );
+      if (result.rows.length === 0) return null;
+      return UserModel.mapRowToUser(result.rows[0]);
+    } catch (error) {
+      logger.error('Error finding user by channel ref:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Bulk fetch for admin tools. UserModel.getAll already paginates with a
+   * sane default cap so we don't accidentally pull 50k rows into memory.
+   */
+  async getAllUsers(limit = 50, startAfter = null) {
+    try {
+      return await UserModel.getAll(limit, startAfter);
+    } catch (error) {
+      logger.error('Error fetching all users:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Case-insensitive username search. Strips a leading @ if present so the
+   * admin handler can pass the user's raw input ("@bob" or "bob") unchanged.
+   */
+  async searchUserByUsername(username) {
+    if (!username) return null;
+    const normalized = String(username).replace(/^@+/, '').trim();
+    if (!normalized) return null;
+    try {
+      const result = await query(
+        `SELECT * FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1`,
+        [normalized]
+      );
+      if (result.rows.length === 0) return null;
+      return UserModel.mapRowToUser(result.rows[0]);
+    } catch (error) {
+      logger.error('Error searching user by username:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Admin helper: update a user's subscription. UserModel.updateSubscription
+   * takes a single subscription-shape object; this wrapper accepts the bot's
+   * (userId, planId, expiry) call shape for backward compatibility.
+   */
+  async updateSubscription(userId, planId, expiry) {
+    try {
+      return await UserModel.updateSubscription(userId, {
+        planId,
+        expiry,
+        status: 'active',
+      });
+    } catch (error) {
+      logger.error('Error updating subscription:', error);
+      return false;
+    }
+  }
+
+  /**
    * Get user by ID
    * @param {string|number} userId - Telegram user ID
    * @returns {Promise<Object|null>} User object or null
