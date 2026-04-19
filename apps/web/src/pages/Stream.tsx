@@ -165,6 +165,11 @@ export default function Stream() {
   const [ticketLoading, setTicketLoading] = useState(false);
   const [ticketBuying, setTicketBuying] = useState(false);
   const [ticketError, setTicketError] = useState<string | null>(null);
+  // Dash ticket polling state — mirrors dashTip pattern
+  const [dashTicketInvoiceId, setDashTicketInvoiceId] = useState<string | null>(null);
+  const [dashTicketCheckoutUrl, setDashTicketCheckoutUrl] = useState<string | null>(null);
+  const [dashTicketPollActive, setDashTicketPollActive] = useState(false);
+  const dashTicketPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Stream health HUD state (creator-only, desktop) ────────────────────────
   const [streamStats, setStreamStats] = useState<LivePlayerStats | null>(null);
@@ -202,6 +207,7 @@ export default function Stream() {
     return () => {
       if (dashTipPollRef.current) clearInterval(dashTipPollRef.current);
       if (dashTipCountdownRef.current) clearInterval(dashTipCountdownRef.current);
+      if (dashTicketPollRef.current) clearInterval(dashTicketPollRef.current);
       if (tipSuccessTimerRef.current) clearTimeout(tipSuccessTimerRef.current);
       if (dashTipSettleTimerRef.current) clearTimeout(dashTipSettleTimerRef.current);
       if (shareCopiedTimerRef.current) clearTimeout(shareCopiedTimerRef.current);
@@ -439,6 +445,29 @@ export default function Stream() {
     };
   }, [streamId]);
 
+  // Real-time ticket confirmation — server emits live:ticket:purchased after webhook settles
+  useEffect(() => {
+    if (!streamId || !user?.id) return;
+    const socket = connectSocket();
+    const onTicketPurchased = (data: { slotId: string; userId: string }) => {
+      if (String(data.userId) === String(user.id) && data.slotId === streamId) {
+        setTicketStatus((prev) => prev ? { ...prev, hasTicket: true } : null);
+        // Stop Dash polling if it was running
+        if (dashTicketPollRef.current) {
+          clearInterval(dashTicketPollRef.current);
+          dashTicketPollRef.current = null;
+        }
+        setDashTicketPollActive(false);
+        setDashTicketInvoiceId(null);
+        setDashTicketCheckoutUrl(null);
+      }
+    };
+    socket.on("live:ticket:purchased", onTicketPurchased);
+    return () => {
+      socket.off("live:ticket:purchased", onTicketPurchased);
+    };
+  }, [streamId, user?.id]);
+
   // Live rules acknowledgment check — only for authenticated users
   useEffect(() => {
     if (!isAuthenticated) {
@@ -576,18 +605,104 @@ export default function Stream() {
   }, []);
 
   // ── Ticket purchase handler ────────────────────────────────────────────────
-  const handleBuyTicket = useCallback(async (currency: "tokens" | "usd") => {
+  const handleBuyTicket = useCallback(async (currency: "tokens" | "epayco" | "dash") => {
     if (!streamId) return;
     setTicketBuying(true);
     setTicketError(null);
     try {
       const result = await buySlotTicket(streamId, currency);
-      if (result.success && result.hasTicket) {
-        setTicketStatus((prev) => prev ? { ...prev, hasTicket: true } : null);
-        if (result.newBalance !== undefined) setTokenBalance(result.newBalance);
-      } else {
+
+      if (!result.success) {
         setTicketError(result.error || "Purchase failed");
+        return;
       }
+
+      // Tokens path — immediate grant
+      if (currency === "tokens") {
+        if (result.hasTicket) {
+          setTicketStatus((prev) => prev ? { ...prev, hasTicket: true } : null);
+          if (result.newBalance !== undefined) setTokenBalance(result.newBalance);
+        }
+        return;
+      }
+
+      // ePayco path — open the ePayco JS widget using the returned config.
+      // The widget is loaded globally by the app (epayco.min.js + validateThreeds.min.js).
+      // On confirmation the webhook settles, then the socket event fires hasTicket: true.
+      if (currency === "epayco" && result.epayco) {
+        const cfg = result.epayco;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ePayco = (window as any).ePayco;
+        if (!ePayco || typeof ePayco.checkout?.configure !== "function") {
+          // Fallback: redirect to hosted checkout page
+          window.open(result.checkoutUrl, "_blank", "noopener,noreferrer");
+          return;
+        }
+        const handler = ePayco.checkout.configure({
+          key: cfg.publicKey,
+          test: cfg.test,
+        });
+        handler.open({
+          name: cfg.description,
+          description: cfg.description,
+          currency: cfg.currency,
+          amount: String(cfg.amount),
+          tax_base: "0",
+          tax: "0",
+          invoice: cfg.invoice,
+          signature: cfg.signature || undefined,
+          extra1: cfg.extra1,
+          extra2: cfg.extra2,
+          extra3: cfg.extra3,
+          country: "CO",
+          lang: "es",
+          external: "false",
+          response: cfg.response,
+          confirmation: cfg.confirmation,
+        });
+        return;
+      }
+
+      // Dash path — open BTCPay checkout in new tab + start polling
+      if (currency === "dash" && result.invoiceId && result.checkoutUrl) {
+        const safeUrl = assertPaymentUrl(result.checkoutUrl);
+        setDashTicketInvoiceId(result.invoiceId);
+        setDashTicketCheckoutUrl(safeUrl);
+        setDashTicketPollActive(true);
+        window.open(safeUrl, "_blank", "noopener,noreferrer");
+
+        // Poll every 10s for up to 15 min (90 polls).
+        // Socket event is the primary signal; polling is the fallback.
+        let polls = 0;
+        const MAX_POLLS = 90;
+        if (dashTicketPollRef.current) clearInterval(dashTicketPollRef.current);
+        dashTicketPollRef.current = setInterval(async () => {
+          polls++;
+          try {
+            const status = await getDashPaymentDetails(result.invoiceId!);
+            if (status.status === "Settled" || status.status === "Complete") {
+              if (dashTicketPollRef.current) {
+                clearInterval(dashTicketPollRef.current);
+                dashTicketPollRef.current = null;
+              }
+              setDashTicketPollActive(false);
+              setDashTicketInvoiceId(null);
+              setDashTicketCheckoutUrl(null);
+              setTicketStatus((prev) => prev ? { ...prev, hasTicket: true } : null);
+            }
+          } catch { /* ignore */ }
+          if (polls >= MAX_POLLS) {
+            if (dashTicketPollRef.current) {
+              clearInterval(dashTicketPollRef.current);
+              dashTicketPollRef.current = null;
+            }
+            setDashTicketPollActive(false);
+          }
+        }, 10000);
+        return;
+      }
+
+      setTicketError("Unexpected response from payment server");
     } catch (err) {
       setTicketError(err instanceof Error ? err.message : "Purchase failed");
     } finally {
@@ -1172,14 +1287,59 @@ export default function Stream() {
                       Buy for {ticketStatus.priceTokens} Tokens
                     </button>
                   )}
-                  {ticketStatus.priceUsd && (
-                    <button
-                      onClick={() => handleBuyTicket("usd")}
-                      disabled={ticketBuying}
-                      className="w-full px-4 py-2.5 rounded-lg bg-pnp-surface border border-pnp-accent/40 text-pnp-accent text-xs font-bold disabled:opacity-50 active:scale-95 transition-all"
-                    >
-                      Buy for ${ticketStatus.priceUsd} USD
-                    </button>
+                  {ticketStatus.priceUsd && !dashTicketPollActive && (
+                    <>
+                      <button
+                        onClick={() => handleBuyTicket("epayco")}
+                        disabled={ticketBuying}
+                        className="w-full px-4 py-2.5 rounded-lg bg-pnp-surface border border-pnp-accent/40 text-pnp-accent text-xs font-bold disabled:opacity-50 active:scale-95 transition-all"
+                      >
+                        {ticketBuying ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <span className="w-3 h-3 border border-pnp-accent/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                            Processing...
+                          </span>
+                        ) : (
+                          `Pay $${ticketStatus.priceUsd} with Card`
+                        )}
+                      </button>
+                      <button
+                        onClick={() => handleBuyTicket("dash")}
+                        disabled={ticketBuying}
+                        className="w-full px-4 py-2.5 rounded-lg bg-pnp-surface border border-white/20 text-pnp-textSecondary text-xs font-bold disabled:opacity-50 active:scale-95 transition-all"
+                      >
+                        Pay $${ticketStatus.priceUsd} with Crypto (Dash)
+                      </button>
+                    </>
+                  )}
+                  {ticketStatus.priceUsd && dashTicketPollActive && dashTicketCheckoutUrl && (
+                    <div className="w-full flex flex-col items-center gap-2">
+                      <p className="text-[10px] text-pnp-textSecondary text-center">
+                        Waiting for crypto payment...
+                      </p>
+                      <a
+                        href={dashTicketCheckoutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full px-4 py-2 rounded-lg bg-pnp-surface border border-white/20 text-pnp-textSecondary text-xs font-bold text-center transition-all hover:border-white/40"
+                      >
+                        Open Payment Page
+                      </a>
+                      <button
+                        onClick={() => {
+                          if (dashTicketPollRef.current) {
+                            clearInterval(dashTicketPollRef.current);
+                            dashTicketPollRef.current = null;
+                          }
+                          setDashTicketPollActive(false);
+                          setDashTicketInvoiceId(null);
+                          setDashTicketCheckoutUrl(null);
+                        }}
+                        className="text-[10px] text-pnp-textSecondary underline"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   )}
                 </div>
               )}

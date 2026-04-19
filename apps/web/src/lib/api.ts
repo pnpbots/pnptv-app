@@ -406,15 +406,35 @@ export function getSlotTicketStatus(slotId: string): Promise<{
   return request(`/api/webapp/live/slot/${encodeURIComponent(slotId)}/ticket-status`);
 }
 
+export interface EpaycoTicketCheckout {
+  publicKey: string;
+  amount: number;
+  currency: string;
+  description: string;
+  invoice: string;
+  signature: string | null;
+  extra1: string;
+  extra2: string;
+  extra3: string;
+  test: boolean;
+  response: string;
+  confirmation: string;
+}
+
 export function buySlotTicket(
   slotId: string,
-  currency: "tokens" | "usd"
+  currency: "tokens" | "epayco" | "dash"
 ): Promise<{
   success: boolean;
   hasTicket?: boolean;
   alreadyOwned?: boolean;
   newBalance?: number;
   error?: string;
+  provider?: "epayco" | "dash";
+  paymentId?: string;
+  checkoutUrl?: string;
+  epayco?: EpaycoTicketCheckout;
+  invoiceId?: string;
 }> {
   return request(`/api/webapp/live/slot/${encodeURIComponent(slotId)}/buy-ticket`, {
     method: "POST",
@@ -6014,6 +6034,44 @@ export function getCreatorSummary(days = 30): Promise<{ success: boolean; summar
   return request(`/api/webapp/live/analytics/summary?days=${days}`);
 }
 
+// ── Creator Revenue ───────────────────────────────────────────────────────────
+
+export interface CreatorRevenueDayEntry {
+  date: string;
+  usd: number;
+  tokens: number;
+}
+
+export interface CreatorRevenueBySource {
+  count: number;
+  tokens: number;
+  usd: number;
+}
+
+export interface CreatorRevenueResponse {
+  success: boolean;
+  days: number;
+  totals: { usd: number; tokens: number };
+  byDay: CreatorRevenueDayEntry[];
+  bySource: {
+    tips: CreatorRevenueBySource;
+    tickets: CreatorRevenueBySource;
+    subs: CreatorRevenueBySource;
+    calls: CreatorRevenueBySource;
+  };
+}
+
+export function getCreatorRevenue(days = 30, creatorId?: string): Promise<CreatorRevenueResponse> {
+  const qs = creatorId
+    ? `/api/webapp/creator/revenue?days=${days}&creatorId=${encodeURIComponent(creatorId)}`
+    : `/api/webapp/creator/revenue?days=${days}`;
+  return request(qs);
+}
+
+export function broadcastLiveNow(opts?: { message?: string }): Promise<{ success: boolean; dispatched: number; skippedDedup: boolean }> {
+  return request('/api/webapp/live/broadcast-live-now', { method: 'POST', body: opts ?? {} });
+}
+
 // ============================================================================
 // Creator Album / Media
 // ============================================================================
@@ -6079,6 +6137,9 @@ export interface StreamRecording {
   durationSeconds: number | null;
   sizeBytes: number | null;
   manifestUrl: string | null;
+  thumbUrl: string | null;
+  title: string | null;
+  description: string | null;
   requiresSubscription: boolean;
 }
 
@@ -6090,4 +6151,15 @@ export function listCreatorRecordings(
 
 export function deleteRecording(id: string): Promise<{ success: boolean }> {
   return request(`/api/webapp/recordings/${id}`, { method: "DELETE" });
+}
+
+export function updateRecording(
+  id: string,
+  data: { title?: string; description?: string }
+): Promise<{ success: boolean; title: string | null; description: string | null }> {
+  return request(`/api/webapp/recordings/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
 }

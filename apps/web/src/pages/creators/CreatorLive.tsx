@@ -3,7 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { getRtmpKey, provisionChannel } from "@/lib/api";
+import { getRtmpKey, provisionChannel, broadcastLiveNow } from "@/lib/api";
 
 export default function CreatorLive() {
   const { user } = useAuth();
@@ -15,6 +15,44 @@ export default function CreatorLive() {
   const [error, setError] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+
+  // ── Notify followers state ────────────────────────────────────────────────
+  const [broadcastMsg, setBroadcastMsg] = useState("");
+  const [broadcastStatus, setBroadcastStatus] = useState<"idle" | "sending" | "done" | "dedup" | "error">("idle");
+  const [broadcastDisabled, setBroadcastDisabled] = useState(false);
+  const [broadcastToast, setBroadcastToast] = useState<string | null>(null);
+
+  const handleBroadcast = useCallback(async () => {
+    if (broadcastDisabled || broadcastStatus === "sending") return;
+    setBroadcastStatus("sending");
+    setBroadcastDisabled(true);
+    setBroadcastToast(null);
+    try {
+      const res = await broadcastLiveNow({ message: broadcastMsg.trim() || undefined });
+      if (res.success) {
+        if (res.skippedDedup) {
+          setBroadcastStatus("dedup");
+          setBroadcastToast("Already notified today — followers can only be alerted once every 6 hours.");
+        } else {
+          setBroadcastStatus("done");
+          setBroadcastToast(`Notified ${res.dispatched} follower${res.dispatched !== 1 ? "s" : ""}`);
+        }
+      } else {
+        setBroadcastStatus("error");
+        setBroadcastToast("Failed to send — please try again.");
+        setBroadcastDisabled(false);
+      }
+    } catch {
+      setBroadcastStatus("error");
+      setBroadcastToast("Network error — please try again.");
+      setBroadcastDisabled(false);
+    }
+    // Re-enable button after 10s regardless
+    setTimeout(() => {
+      setBroadcastDisabled(false);
+      setBroadcastStatus("idle");
+    }, 10_000);
+  }, [broadcastDisabled, broadcastMsg, broadcastStatus]);
 
   const loading = phase === "loading" || phase === "provisioning";
 
@@ -74,6 +112,85 @@ export default function CreatorLive() {
         <title>Go Live — PNPtv!</title>
       </Helmet>
       <div className="p-4 lg:p-6 space-y-5 max-w-2xl mx-auto">
+
+        {/* Notify followers card */}
+        <Card className="p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <svg className="w-4 h-4" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+            </svg>
+            Notify Followers Now
+          </h2>
+          <p className="text-xs" style={{ color: "#8E8E93" }}>
+            Alert your followers before you connect OBS. Max one notification per 6 hours.
+          </p>
+          <div className="space-y-2">
+            <textarea
+              className="w-full rounded-xl px-3 py-2.5 text-sm text-white resize-none focus:outline-none focus:ring-1"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                minHeight: "68px",
+              }}
+              placeholder={`Optional message (max 240 chars) — default: "🔴 You are going live!"`}
+              maxLength={240}
+              value={broadcastMsg}
+              onChange={(e) => setBroadcastMsg(e.target.value)}
+              disabled={broadcastDisabled}
+            />
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[10px]" style={{ color: "#8E8E93" }}>
+                {broadcastMsg.length}/240
+              </span>
+              <button
+                onClick={handleBroadcast}
+                disabled={broadcastDisabled}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all"
+                style={{
+                  background: broadcastDisabled
+                    ? "rgba(255,255,255,0.08)"
+                    : "linear-gradient(135deg, #D4007A, #7B61FF)",
+                  opacity: broadcastDisabled ? 0.6 : 1,
+                  cursor: broadcastDisabled ? "not-allowed" : "pointer",
+                }}
+              >
+                {broadcastStatus === "sending" ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                    Broadcast to followers
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+          {broadcastToast && (
+            <div
+              className="px-3 py-2 rounded-lg text-xs"
+              style={{
+                background: broadcastStatus === "done"
+                  ? "rgba(94,209,196,0.1)"
+                  : broadcastStatus === "dedup"
+                    ? "rgba(245,166,35,0.1)"
+                    : "rgba(212,0,122,0.1)",
+                color: broadcastStatus === "done"
+                  ? "#5ED1C4"
+                  : broadcastStatus === "dedup"
+                    ? "#F5A623"
+                    : "#D4007A",
+                border: `1px solid ${broadcastStatus === "done" ? "rgba(94,209,196,0.2)" : broadcastStatus === "dedup" ? "rgba(245,166,35,0.2)" : "rgba(212,0,122,0.2)"}`,
+              }}
+            >
+              {broadcastToast}
+            </div>
+          )}
+        </Card>
 
         {/* Hero */}
         <div

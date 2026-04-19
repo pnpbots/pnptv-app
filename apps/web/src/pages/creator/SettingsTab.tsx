@@ -11,6 +11,7 @@ import {
   reorderCreatorMedia,
   listCreatorRecordings,
   deleteRecording,
+  updateRecording,
   type CreatorDashboard as DashboardData,
   type CreatorMediaItem,
   type StreamRecording,
@@ -190,6 +191,43 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       setMyRecordings((prev) => prev.filter((r) => r.id !== id));
     } catch (err) {
       setRecordingsError(err instanceof Error ? err.message : "Failed to delete recording.");
+    }
+  };
+
+  // ── Inline recording edit ──────────────────────────────────────────────────
+  const [editingRecId, setEditingRecId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const openEditRec = (rec: StreamRecording) => {
+    setEditingRecId(rec.id);
+    setEditTitle(rec.title ?? "");
+    setEditDescription(rec.description ?? "");
+    setEditError(null);
+  };
+
+  const cancelEditRec = () => {
+    setEditingRecId(null);
+    setEditError(null);
+  };
+
+  const saveEditRec = async (id: string) => {
+    setEditError(null);
+    if (editTitle.length > 120) { setEditError("Title must be 120 characters or fewer."); return; }
+    if (editDescription.length > 2000) { setEditError("Description must be 2000 characters or fewer."); return; }
+    setEditSaving(true);
+    try {
+      const res = await updateRecording(id, { title: editTitle, description: editDescription });
+      setMyRecordings((prev) =>
+        prev.map((r) => r.id === id ? { ...r, title: res.title, description: res.description } : r)
+      );
+      setEditingRecId(null);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to save.");
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -570,36 +608,107 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
             {myRecordings.map((rec) => (
               <div
                 key={rec.id}
-                className="flex items-center gap-2 p-2.5 rounded-lg"
+                className="rounded-lg overflow-hidden"
                 style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
               >
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-white truncate">
-                    {fmtDate(rec.startedAt)} &mdash; {fmtDuration(rec.durationSeconds)}
-                  </p>
-                  <p className="text-[10px] mt-0.5" style={{ color: "#8E8E93" }}>
-                    {fmtBytes(rec.sizeBytes)}
-                    {rec.endedAt && ` · Expires ${fmtDate(new Date(new Date(rec.endedAt).getTime() + 7 * 86400000).toISOString())}`}
-                  </p>
-                </div>
-                {rec.manifestUrl && (
-                  <a
-                    href={rec.manifestUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2 py-1 rounded text-[10px] font-semibold transition-colors"
-                    style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}
+                {/* Row: thumb + meta + actions */}
+                <div className="flex items-center gap-2 p-2.5">
+                  {/* Thumbnail */}
+                  <div
+                    className="w-14 h-9 flex-shrink-0 rounded overflow-hidden"
+                    style={{ background: "linear-gradient(135deg,#1a1a2e,#16213e)" }}
                   >
-                    Preview
-                  </a>
+                    {rec.thumbUrl ? (
+                      <img src={rec.thumbUrl} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <svg className="w-4 h-4 opacity-30" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                          <path d="M2 6a2 2 0 012-2h6l2 2h4a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-white truncate">
+                      {rec.title || `${fmtDate(rec.startedAt)} \u2014 ${fmtDuration(rec.durationSeconds)}`}
+                    </p>
+                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#8E8E93" }}>
+                      {fmtBytes(rec.sizeBytes)}
+                      {rec.endedAt && ` · Expires ${fmtDate(new Date(new Date(rec.endedAt).getTime() + 7 * 86400000).toISOString())}`}
+                    </p>
+                  </div>
+                  {/* Edit icon */}
+                  <button
+                    onClick={() => editingRecId === rec.id ? cancelEditRec() : openEditRec(rec)}
+                    className="w-6 h-6 rounded flex items-center justify-center transition-colors"
+                    style={{ color: editingRecId === rec.id ? "#5ED1C4" : "rgba(255,255,255,0.3)" }}
+                    aria-label="Edit recording"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 112.828 2.828L11.828 15.828A2 2 0 0110 16.414V18h1.586a2 2 0 001.414-.586l6.586-6.586" />
+                    </svg>
+                  </button>
+                  {rec.manifestUrl && (
+                    <a
+                      href={rec.manifestUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2 py-1 rounded text-[10px] font-semibold transition-colors"
+                      style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}
+                    >
+                      Preview
+                    </a>
+                  )}
+                  <button
+                    onClick={() => handleDeleteRecording(rec.id)}
+                    className="w-6 h-6 rounded flex items-center justify-center text-red-400/60 hover:text-red-400 transition-colors"
+                    aria-label="Delete recording"
+                  >
+                    &times;
+                  </button>
+                </div>
+
+                {/* Inline edit form */}
+                {editingRecId === rec.id && (
+                  <div className="px-2.5 pb-2.5 space-y-2">
+                    {editError && (
+                      <p className="text-[10px] text-red-400">{editError}</p>
+                    )}
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      maxLength={120}
+                      placeholder="Title (optional)"
+                      className="w-full px-2.5 py-1.5 rounded text-xs text-white bg-black/30 border border-white/10 focus:outline-none focus:border-white/30"
+                    />
+                    <textarea
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      maxLength={2000}
+                      placeholder="Description (optional)"
+                      rows={2}
+                      className="w-full px-2.5 py-1.5 rounded text-xs text-white bg-black/30 border border-white/10 focus:outline-none focus:border-white/30 resize-none"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => saveEditRec(rec.id)}
+                        disabled={editSaving}
+                        className="px-3 py-1 rounded text-[10px] font-semibold disabled:opacity-50 transition-colors"
+                        style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}
+                      >
+                        {editSaving ? "Saving..." : "Save"}
+                      </button>
+                      <button
+                        onClick={cancelEditRec}
+                        className="px-3 py-1 rounded text-[10px] font-semibold transition-colors"
+                        style={{ color: "#8E8E93" }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 )}
-                <button
-                  onClick={() => handleDeleteRecording(rec.id)}
-                  className="w-6 h-6 rounded flex items-center justify-center text-red-400/60 hover:text-red-400 transition-colors"
-                  aria-label="Delete recording"
-                >
-                  &times;
-                </button>
               </div>
             ))}
           </div>
