@@ -44,6 +44,27 @@ class UserService {
   }
 
   /**
+   * Telegraf-context-aware wrapper around getOrCreateUser. Used by bot
+   * middleware and every handler that needs the current user record without
+   * having to extract id/username/first_name/last_name/language_code by hand.
+   *
+   * @param {import('telegraf').Context} ctx
+   * @returns {Promise<Object>} User row
+   */
+  async getOrCreateFromContext(ctx) {
+    const from = ctx?.from;
+    if (!from?.id) {
+      throw new Error('getOrCreateFromContext: ctx.from.id missing');
+    }
+    return this.getOrCreateUser(from.id, {
+      username: from.username,
+      firstName: from.first_name,
+      lastName: from.last_name,
+      language: from.language_code,
+    });
+  }
+
+  /**
    * Get user by ID
    * @param {string|number} userId - Telegram user ID
    * @returns {Promise<Object|null>} User object or null
