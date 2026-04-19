@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { Button } from "@pnptv/ui-kit";
 import { useNearbyToggle, getTier, toggleNearby } from "@/components/NearbyBadge";
 import { useTier } from "@/hooks/useTier";
 import { getSocket } from "@/lib/socket";
@@ -280,7 +281,7 @@ export function NearbyPanel({ onClose }: { onClose: () => void }) {
             </div>
             <div className="flex gap-2 w-full px-4">
               <Button onClick={() => openDm(selectedUser)} className="flex-1">Message</Button>
-              <Button onClick={() => navigate(`/profile/${selectedUser.user_id}`)} variant="outline" className="flex-1">Profile</Button>
+              <Button onClick={() => navigate(`/profile/${selectedUser.user_id}`)} variant="secondary" className="flex-1">Profile</Button>
             </div>
             <button onClick={() => setView("grid")} className="text-sm text-pnp-accent font-medium">Back to grid</button>
           </div>

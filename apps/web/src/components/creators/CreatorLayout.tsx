@@ -356,23 +356,168 @@ export function CreatorSubscribers() {
 
 // ── Creator Consents Page ─────────────────────────────────────────────────────
 
+type ConsentRowStatus = "accepted" | "pending" | "submitted" | "missing" | "info";
+type ConsentRow = {
+  label: string;
+  status: ConsentRowStatus;
+  detail?: string | null;
+  date?: string | null;
+};
+
+function statusPillClass(s: ConsentRowStatus): string {
+  switch (s) {
+    case "accepted":
+    case "submitted":
+      return "bg-green-500/20 text-green-400";
+    case "missing":
+      return "bg-red-500/20 text-red-400";
+    case "info":
+      return "bg-white/10 text-white/70";
+    case "pending":
+    default:
+      return "bg-amber-500/20 text-amber-400";
+  }
+}
+
+function statusLabel(s: ConsentRowStatus): string {
+  switch (s) {
+    case "accepted":   return "Accepted";
+    case "submitted":  return "Submitted";
+    case "missing":    return "Missing";
+    case "info":       return "On file";
+    case "pending":
+    default:           return "Pending";
+  }
+}
+
+function ConsentRowList({ rows }: { rows: ConsentRow[] }) {
+  return (
+    <div className="space-y-3">
+      {rows.map((item, i) => (
+        <div key={i} className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }}>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-white">{item.label}</p>
+            {item.detail && (
+              <p className="text-xs text-pnp-textSecondary mt-0.5 truncate">{item.detail}</p>
+            )}
+            {item.date && (
+              <p className="text-[10px] text-pnp-textSecondary/70 mt-0.5">
+                {new Date(item.date).toLocaleDateString()}
+              </p>
+            )}
+          </div>
+          <span className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold ${statusPillClass(item.status)}`}>
+            {statusLabel(item.status)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function CreatorConsents() {
   const [consents, setConsents] = React.useState<any>(null);
+  const [userId, setUserId] = React.useState<string | number | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
     getCreatorConsents().then(res => {
-      if (res.success) setConsents(res.consents);
+      if (res.success) {
+        setConsents(res.consents);
+        if (res.userId !== undefined && res.userId !== null) setUserId(res.userId);
+      }
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
-  const items = consents ? [
-    { label: "Terms of Service", accepted: consents.terms_accepted, date: consents.created_at },
-    { label: "Privacy Policy", accepted: consents.privacy_accepted, date: consents.created_at },
-    { label: "Age Verification", accepted: consents.age_verified, date: consents.age_verified_at },
-    { label: "Wall of Fame Photo Consent", accepted: consents.wof_photo_consent, date: null },
-    { label: "Content Disclaimer", accepted: consents.content_disclaimer, date: consents.content_disclaimer_accepted_at },
+  const genericRows: ConsentRow[] = consents ? [
+    { label: "Terms of Service", status: consents.terms_accepted ? "accepted" : "pending", date: consents.created_at },
+    { label: "Privacy Policy", status: consents.privacy_accepted ? "accepted" : "pending", date: consents.created_at },
+    { label: "Age Verification", status: consents.age_verified ? "accepted" : "pending", date: consents.age_verified_at },
+    { label: "Wall of Fame Photo Consent", status: consents.wof_photo_consent ? "accepted" : "pending" },
+    { label: "Content Disclaimer", status: consents.content_disclaimer ? "accepted" : "pending", date: consents.content_disclaimer_accepted_at },
+  ] : [];
+
+  const hasApplication = !!consents?.application_id;
+  const applicationTypeLabel = (() => {
+    switch (consents?.application_type) {
+      case "live":            return "Live Performer";
+      case "content_creator": return "Content Creator";
+      case "both":            return "Live Performer + Content Creator";
+      default:                return null;
+    }
+  })();
+
+  const creatorRows: ConsentRow[] = consents ? [
+    {
+      label: "Model / Creator Application",
+      status: hasApplication
+        ? (consents.application_status === "approved" ? "accepted"
+          : consents.application_status === "rejected" ? "missing"
+          : "pending")
+        : "missing",
+      detail: hasApplication
+        ? `${applicationTypeLabel ?? "Application"} — ${consents.application_status ?? "pending"}`
+        : "Not submitted",
+      date: consents.application_created_at,
+    },
+    {
+      label: "Stage Name",
+      status: consents.stage_name ? "submitted" : "missing",
+      detail: consents.stage_name || "Not submitted",
+    },
+    {
+      label: "Legal Identity (2257)",
+      status: (consents.legal_full_name && consents.date_of_birth) ? "submitted" : "missing",
+      detail: consents.legal_full_name
+        ? `${consents.legal_full_name}${consents.date_of_birth ? ` — DOB ${new Date(consents.date_of_birth).toLocaleDateString()}` : ""}`
+        : "Legal name + DOB required for 2257 compliance",
+    },
+    {
+      label: "Location Declaration",
+      status: (consents.country && consents.city_state) ? "submitted" : "missing",
+      detail: (consents.country || consents.city_state)
+        ? [consents.city_state, consents.country].filter(Boolean).join(", ")
+        : "Country + city/state required",
+    },
+    {
+      label: "Government ID — Front",
+      status: consents.id_front_submitted ? "submitted" : "missing",
+      detail: consents.id_front_submitted ? "Image on file (admin-only)" : "Upload required",
+    },
+    {
+      label: "Government ID — Back",
+      status: consents.id_back_submitted ? "submitted" : "missing",
+      detail: consents.id_back_submitted ? "Image on file (admin-only)" : "Upload required",
+    },
+    {
+      label: "Creator Terms Agreement",
+      status: consents.creator_terms_agreed ? "accepted" : "pending",
+      detail: consents.creator_terms_version ? `Version ${consents.creator_terms_version}` : null,
+      date: consents.creator_terms_agreed_at,
+    },
+    {
+      label: "Onboarding Call",
+      status: consents.call_scheduled ? "accepted" : "pending",
+      detail: consents.call_scheduled ? "Scheduled" : "Not scheduled",
+      date: consents.call_scheduled_at,
+    },
+    {
+      label: "Fiat Payout Method",
+      status: consents.fiat_payout_method ? "info" : "missing",
+      detail: consents.fiat_payout_method
+        ? `Configured (${String(consents.fiat_payout_method).toUpperCase()})`
+        : "Not configured",
+    },
+    {
+      label: "Crypto Payout Wallet",
+      status: consents.wallet_address_set
+        ? (consents.creator_wallet_verified ? "accepted" : "info")
+        : "missing",
+      detail: consents.wallet_address_set
+        ? (consents.creator_wallet_verified ? "Connected & verified" : "Connected — pending verification")
+        : "Not connected",
+    },
   ] : [];
 
   return (
@@ -380,31 +525,49 @@ export function CreatorConsents() {
       <Helmet><title>Consents — Creator Studio — PNPtv!</title></Helmet>
       <div className="p-4 lg:p-6">
         <h1 className="text-xl font-bold text-pnp-textPrimary mb-2">Consents &amp; Agreements</h1>
-        <p className="text-sm text-pnp-textSecondary mb-6">A record of the consents and agreements you've accepted on PNPtv.</p>
+        <p className="text-sm text-pnp-textSecondary mb-6">A record of every consent, form, and document you've submitted as a creator/performer on PNPtv.</p>
 
         {loading ? (
           <div className="animate-pulse space-y-3">
             {[1,2,3,4,5].map(i => <div key={i} className="h-16 bg-white/5 rounded-xl" />)}
           </div>
+        ) : !consents ? (
+          <p className="text-sm text-pnp-textSecondary">Could not load your consents.</p>
         ) : (
-          <div className="space-y-3">
-            {items.map((item, i) => (
-              <div key={i} className="flex items-center justify-between px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }}>
-                <div>
-                  <p className="text-sm font-medium text-white">{item.label}</p>
-                  {item.date && (
-                    <p className="text-xs text-pnp-textSecondary mt-0.5">{new Date(item.date).toLocaleDateString()}</p>
-                  )}
+          <div className="space-y-8">
+            {/* Identifiers — always at top so admin support can reference them */}
+            <section>
+              <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider mb-3">Identifiers</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="px-4 py-3 rounded-xl bg-white/5">
+                  <p className="text-[10px] text-pnp-textSecondary uppercase tracking-wider mb-1">User ID</p>
+                  <p className="text-sm font-mono text-white break-all">{userId ?? "—"}</p>
                 </div>
-                <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold ${item.accepted ? "bg-green-500/20 text-green-400" : "bg-amber-500/20 text-amber-400"}`}>
-                  {item.accepted ? "Accepted" : "Pending"}
-                </span>
+                <div className="px-4 py-3 rounded-xl bg-white/5">
+                  <p className="text-[10px] text-pnp-textSecondary uppercase tracking-wider mb-1">Application ID</p>
+                  <p className="text-sm font-mono text-white break-all">{consents.application_id ?? "—"}</p>
+                </div>
               </div>
-            ))}
+            </section>
+
+            {/* Generic platform consents */}
+            <section>
+              <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider mb-3">Platform consents</h2>
+              <ConsentRowList rows={genericRows} />
+            </section>
+
+            {/* Creator/performer-specific forms */}
+            <section>
+              <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider mb-3">Creator / Performer forms</h2>
+              <ConsentRowList rows={creatorRows} />
+              <p className="text-[10px] text-pnp-textSecondary/60 mt-3 px-1">
+                Government ID images and full payout account handles are stored encrypted and only visible to platform admins for compliance review.
+              </p>
+            </section>
 
             {/* Content disclaimer timestamp note */}
-            {consents?.content_disclaimer && consents?.content_disclaimer_accepted_at && (
-              <p className="text-[10px] text-pnp-textSecondary/50 mt-2 px-1">
+            {consents.content_disclaimer && consents.content_disclaimer_accepted_at && (
+              <p className="text-[10px] text-pnp-textSecondary/50 px-1">
                 Content disclaimer accepted on {new Date(consents.content_disclaimer_accepted_at).toLocaleDateString()}
               </p>
             )}

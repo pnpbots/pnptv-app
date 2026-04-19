@@ -756,14 +756,48 @@ const getMySubscribers = async (req, res) => {
 const getMyConsents = async (req, res) => {
   try {
     const userId = req.session?.user?.id;
+    // Pull generic consent flags from users plus payout-config flags. Joined to
+    // the latest model_application so the consents page can also show creator/
+    // performer-specific form status (2257 ID, legal name, onboarding call).
+    // Sensitive PII (raw ID URLs, full payout account handle, wallet address)
+    // is NEVER returned — only "submitted" booleans + non-secret summaries.
     const result = await query(`
-      SELECT terms_accepted, privacy_accepted, age_verified, age_verified_at,
-             wof_photo_consent, content_disclaimer, content_disclaimer_accepted_at,
-             created_at
-      FROM users WHERE id = $1
+      SELECT
+        u.terms_accepted, u.privacy_accepted,
+        u.age_verified, u.age_verified_at,
+        u.wof_photo_consent,
+        u.content_disclaimer, u.content_disclaimer_accepted_at,
+        u.created_at,
+        u.fiat_payout_method,
+        (u.creator_wallet_address IS NOT NULL AND u.creator_wallet_address <> '') AS wallet_address_set,
+        u.creator_wallet_verified,
+        ma.id                AS application_id,
+        ma.application_type,
+        ma.status            AS application_status,
+        ma.created_at        AS application_created_at,
+        ma.stage_name,
+        ma.legal_full_name,
+        ma.date_of_birth,
+        ma.country,
+        ma.city_state,
+        (ma.id_front_url IS NOT NULL AND ma.id_front_url <> '') AS id_front_submitted,
+        (ma.id_back_url  IS NOT NULL AND ma.id_back_url  <> '') AS id_back_submitted,
+        ma.terms_agreed      AS creator_terms_agreed,
+        ma.terms_version     AS creator_terms_version,
+        ma.terms_agreed_at   AS creator_terms_agreed_at,
+        ma.call_scheduled,
+        ma.call_scheduled_at
+      FROM users u
+      LEFT JOIN LATERAL (
+        SELECT * FROM model_applications
+        WHERE user_id = u.id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) ma ON TRUE
+      WHERE u.id = $1
     `, [userId]);
     if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
-    return res.json({ success: true, consents: result.rows[0] });
+    return res.json({ success: true, userId, consents: result.rows[0] });
   } catch (err) {
     logger.error('getMyConsents error', err);
     return res.status(500).json({ error: 'Failed to load consents' });

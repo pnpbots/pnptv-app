@@ -73,7 +73,7 @@ if (typeof Node !== "undefined") {
 }
 
 // Lock orientation to portrait (works for installed PWAs)
-try { screen.orientation?.lock?.("portrait").catch(() => {}); } catch {}
+try { (screen.orientation as any)?.lock?.("portrait").catch(() => {}); } catch {}
 
 if (!resetInProgress) {
   ReactDOM.createRoot(document.getElementById("root")!).render(

@@ -3,7 +3,6 @@ import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
-import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useLiveKitRoomLifecycle } from "@/hooks/useLiveKitRoomLifecycle";
 import { getSocket } from "@/lib/socket";
 import {
@@ -16,7 +15,7 @@ import {
   RoomAudioRenderer,
   useConnectionQualityIndicator,
 } from "@livekit/components-react";
-import type { TrackReferenceOrPlaceholder } from "@livekit/components-core";
+import type { TrackReference, TrackReferenceOrPlaceholder } from "@livekit/components-core";
 import {
   Track,
   RoomEvent,
@@ -26,7 +25,7 @@ import {
 } from "livekit-client";
 import {
   getFeaturedPrimeVideos,
-  getAssetUrl,
+  getLowResAssetUrl,
   type PrimeVideo,
 } from "@/lib/directus";
 
@@ -39,10 +38,8 @@ import {
   getMainGroup,
   startHangoutCall,
   joinHangoutCall,
-  getRadioNowPlaying,
   type StageState,
   type HangoutGroup,
-  type NowPlaying,
 } from "@/lib/api";
 import { UpcomingEvents } from "@/components/events";
 
@@ -159,6 +156,10 @@ function ParticipantTile({ trackRef, isActive, isFocused, isSpeaking, onSelect, 
   const { quality } = useConnectionQualityIndicator({ participant: trackRef.participant });
   const micPub = trackRef.participant.getTrackPublication?.(Track.Source.Microphone);
   const micMuted = !micPub || micPub.isMuted;
+  // useTracks widens to TrackReferenceOrPlaceholder, but VideoTrack only
+  // accepts TrackReference. Placeholder rows have publication=undefined; we
+  // skip rendering the video element for them so no broken-element flash.
+  const realTrackRef = trackRef.publication ? (trackRef as TrackReference) : null;
 
   const qualityColor =
     quality === ConnectionQuality.Excellent ? "bg-green-400" :
@@ -177,7 +178,9 @@ function ParticipantTile({ trackRef, isActive, isFocused, isSpeaking, onSelect, 
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
       className={`relative w-full h-full rounded-xl overflow-hidden bg-[#1C1C1E] cursor-pointer transition-all group ${ring}`}
     >
-      <VideoTrack trackRef={trackRef} className="w-full h-full object-cover" />
+      {realTrackRef && (
+        <VideoTrack trackRef={realTrackRef} className="w-full h-full object-cover" />
+      )}
 
       {/* Quality dot */}
       <div className="absolute top-1.5 left-1.5 flex items-center gap-1 pointer-events-none">
@@ -222,7 +225,6 @@ interface StageRoomProps {
   onLayoutChange: (l: StageLayout) => void;
   primeVideos: PrimeVideo[];
   primeVideosLoaded: boolean;
-  nowPlaying: NowPlaying | null;
   onOpenDm: (userId: string, name: string) => void;
 }
 
@@ -238,27 +240,10 @@ function StageRoom({
   onLayoutChange,
   primeVideos,
   primeVideosLoaded,
-  nowPlaying,
   onOpenDm,
 }: StageRoomProps) {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
-  const { setDucking, pause: pauseLocalMusic, play: resumeLocalMusic, isPlaying: localMusicPlaying } = useMusicPlayer();
-  // Remember whether the user had local Ampache playing when they joined the
-  // stage so we can restore it on leave. We pause the local stream on entry
-  // because cristinaStageBot relays the same music into the LiveKit room —
-  // playing both at once phase-mangled the audio ("music sounds terrible").
-  const wasLocalPlayingRef = useRef(false);
-  useEffect(() => {
-    wasLocalPlayingRef.current = localMusicPlaying;
-    if (localMusicPlaying) pauseLocalMusic();
-    return () => {
-      if (wasLocalPlayingRef.current) resumeLocalMusic();
-    };
-    // Intentionally run only on mount/unmount; ignoring subsequent isPlaying
-    // changes so toggling music while on stage doesn't recursively pause.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const userVideoTracks = useMemo(
     () => tracks.filter((t) => t.participant.identity !== "cristina-ai"),
@@ -398,6 +383,30 @@ function StageRoom({
     })();
     return () => { cancelled = true; };
   }, [room, connected, cameraOn, micOn, canToggleMic]);
+
+  // Subscribe-deny cristina-ai's audio publications. The stage bot relays
+  // background music into the room as a regular audio track; we want the
+  // stage to be music-free, so unsubscribe as soon as it publishes (or right
+  // away for tracks already published when we joined). Speaker mics from
+  // human participants are unaffected.
+  useEffect(() => {
+    if (!room) return;
+    const denyCristinaAudio = (participant: Participant) => {
+      if (participant.identity !== "cristina-ai") return;
+      participant.audioTrackPublications?.forEach?.((pub: any) => {
+        try { pub.setSubscribed?.(false); } catch {}
+      });
+    };
+    const onTrackPublished = (_pub: unknown, participant: Participant) => denyCristinaAudio(participant);
+    const onParticipantConnected = (participant: Participant) => denyCristinaAudio(participant);
+    room.remoteParticipants?.forEach?.(denyCristinaAudio);
+    room.on(RoomEvent.TrackPublished, onTrackPublished as any);
+    room.on(RoomEvent.ParticipantConnected, onParticipantConnected as any);
+    return () => {
+      room.off(RoomEvent.TrackPublished, onTrackPublished as any);
+      room.off(RoomEvent.ParticipantConnected, onParticipantConnected as any);
+    };
+  }, [room]);
 
   // Reactions over LiveKit data channel
   useEffect(() => {
@@ -605,8 +614,10 @@ function StageRoom({
     } catch {}
   }, []);
 
+  // Low-res Directus transform (?quality=35&width=480) — visual deterrent
+  // against screen-recording theft of the curated CMS clips.
   const currentVideoSrc = primeVideos.length > 0
-    ? getAssetUrl(primeVideos[videoIdx % primeVideos.length]?.video_file || null) ?? undefined
+    ? getLowResAssetUrl(primeVideos[videoIdx % primeVideos.length]?.video_file || null) ?? undefined
     : undefined;
 
   const primaryActiveSpeakerId = useMemo(() => {
@@ -615,9 +626,6 @@ function StageRoom({
     }
     return null;
   }, [activeSpeakerIds, localParticipant?.identity]);
-
-  // Music ducking — triggers when any remote (non-AI) speaker is active.
-  // Stage CMS video is permanently muted so that branch was removed.
 
   const handleTileSelect = useCallback((id: string) => {
     setFocusedParticipantId((prev) => (prev === id ? null : id));
@@ -638,18 +646,6 @@ function StageRoom({
     );
   };
 
-  useEffect(() => {
-    const anySpeaker = Array.from(activeSpeakerIds).some(
-      (id) => id !== "cristina-ai" && id !== localParticipant?.identity
-    );
-    setDucking(anySpeaker);
-  }, [activeSpeakerIds, localParticipant?.identity, setDucking]);
-
-  // Restore full music volume only when the stage is torn down.
-  // Previously we returned setDucking(false) from the effect above, which
-  // fired on every dependency change and oscillated the duck gain.
-  useEffect(() => () => setDucking(false), [setDucking]);
-
   const renderCmsVideoTile = (isFocused: boolean = false) => (
     <div
       onClick={(e) => { e.stopPropagation(); setFocusedParticipantId((prev) => (prev === "cms-video" ? null : "cms-video")); }}
@@ -664,11 +660,15 @@ function StageRoom({
           className="w-full h-full object-cover"
           src={currentVideoSrc}
           autoPlay
-          // Stage feature clips are silent by design — the background music
-          // player is the only audio source on the stage.
+          // Stage clips are always silent — no background music on this page.
           muted
           playsInline
           loop={primeVideos.length === 1}
+          // Anti-rip: hide download menu, block PiP, swallow right-click.
+          // Doesn't stop a determined screen-recorder, but cuts off casual theft.
+          controlsList="nodownload"
+          disablePictureInPicture
+          onContextMenu={(e) => e.preventDefault()}
           onEnded={() => {
             videoErrorCountRef.current = 0;
             setVideoIdx((i) => (i + 1) % Math.max(1, primeVideos.length));
@@ -919,16 +919,6 @@ function StageRoom({
             </svg>
           </button>
         </div>
-
-        {/* Now playing */}
-        {nowPlaying?.track && !isFullscreen && (
-          <div className="absolute bottom-0 left-0 right-0 z-[160] flex items-center gap-2 px-4 py-2.5 bg-gradient-to-t from-black/80 to-transparent pointer-events-none">
-            <svg className="w-3.5 h-3.5 text-[#FFB454] shrink-0" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M9 9l10.5-3v12.553a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 0019.5 14.803V5.25L9 8.25v7.303a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 0011 16.803V9z" />
-            </svg>
-            <span className="text-white/60 text-[11px] truncate">{nowPlaying.track.title}</span>
-          </div>
-        )}
 
         {/* Knock toast */}
         {knockToast && (
@@ -1205,7 +1195,6 @@ export default function MainStage() {
   // MainStage is a top-level page that only unmounts on navigation.
   const joinInFlightRef = useRef(false);
 
-  const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
   const [primeVideos, setPrimeVideos] = useState<PrimeVideo[]>([]);
   const [primeVideosLoaded, setPrimeVideosLoaded] = useState(false);
   const [layout, setLayout] = useState<StageLayout>("video");
@@ -1245,14 +1234,6 @@ export default function MainStage() {
     };
     fetchOcc();
     const id = setInterval(fetchOcc, 20000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Now-playing metadata — poll every 15s.
-  useEffect(() => {
-    const fetchNP = () => { getRadioNowPlaying().then(setNowPlaying).catch(() => {}); };
-    fetchNP();
-    const id = setInterval(fetchNP, 15000);
     return () => clearInterval(id);
   }, []);
 
@@ -1299,7 +1280,7 @@ export default function MainStage() {
     setActiveDm(null);
   }, []);
 
-  const currentVideoSrc = primeVideos.length > 0 ? getAssetUrl(primeVideos[0]?.video_file || null) : undefined;
+  const currentVideoSrc = primeVideos.length > 0 ? getLowResAssetUrl(primeVideos[0]?.video_file || null) : undefined;
 
   const liveKitOptions = useMemo(() => {
     // Safari <16 can't publish VP9 reliably; fall back to h264 there. Detect
@@ -1347,17 +1328,28 @@ export default function MainStage() {
               onLayoutChange={setLayout}
               primeVideos={primeVideos}
               primeVideosLoaded={primeVideosLoaded}
-              nowPlaying={nowPlaying}
               onOpenDm={(id, name) => setActiveDm({ id, name })}
             />
           </LiveKitRoom>
         ) : (
           <div className="aspect-video relative flex flex-col items-center justify-center bg-[#1C1C1E]">
-            {currentVideoSrc && <video src={currentVideoSrc} autoPlay muted playsInline loop className="absolute inset-0 w-full h-full object-cover opacity-40" />}
+            {currentVideoSrc && (
+              <video
+                src={currentVideoSrc}
+                autoPlay
+                muted
+                playsInline
+                loop
+                controlsList="nodownload"
+                disablePictureInPicture
+                onContextMenu={(e) => e.preventDefault()}
+                className="absolute inset-0 w-full h-full object-cover opacity-40"
+              />
+            )}
             <div className="relative z-10 flex flex-col items-center gap-6 text-center px-4">
               <div className="flex flex-col items-center gap-2">
                 <h1 className="text-3xl font-black text-white tracking-tight uppercase">THE MAIN STAGE</h1>
-                <p className="text-[#FFB454] text-sm font-medium">24/7 Community Hangout & Live Music</p>
+                <p className="text-[#FFB454] text-sm font-medium">24/7 Community Hangout</p>
               </div>
               <div className="flex -space-x-3">
                 {occupancyUsers.slice(0, 5).map((u, i) => (
@@ -1371,12 +1363,6 @@ export default function MainStage() {
               {joinError && (
                 <div role="alert" className="max-w-sm px-4 py-2 rounded-xl border border-red-500/40 bg-red-500/10 text-sm text-red-300">
                   {joinError}
-                </div>
-              )}
-              {nowPlaying?.track && (
-                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 backdrop-blur-md border border-white/10">
-                  <span className="text-[10px] text-[#FFB454] font-bold uppercase tracking-widest">LIVE MUSIC</span>
-                  <span className="text-xs text-white/80 font-medium">{nowPlaying.track.title}</span>
                 </div>
               )}
             </div>
@@ -1397,7 +1383,7 @@ export default function MainStage() {
           </div>
           <div className="flex gap-3">
             <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400">🔇</div>
-            <div><p className="text-sm font-bold text-white">Mics Off</p><p className="text-xs text-white/50">Main stage is for music and visuals. Raise hand to request the mic.</p></div>
+            <div><p className="text-sm font-bold text-white">Mics Off</p><p className="text-xs text-white/50">Main stage is silent by default. Raise hand to request the mic.</p></div>
           </div>
         </div>
       </Card>

@@ -3321,7 +3321,9 @@ export function getCreatorMySubscribers(page = 1): Promise<{
 
 export function getCreatorConsents(): Promise<{
   success: boolean;
+  userId?: string | number;
   consents: {
+    // Generic platform consents
     terms_accepted: boolean;
     privacy_accepted: boolean;
     age_verified: boolean;
@@ -3330,6 +3332,27 @@ export function getCreatorConsents(): Promise<{
     content_disclaimer: boolean;
     content_disclaimer_accepted_at: string | null;
     created_at: string;
+    // Payout configuration (non-secret summaries only)
+    fiat_payout_method: string | null;
+    wallet_address_set: boolean;
+    creator_wallet_verified: boolean;
+    // Latest model/creator application (null when no application submitted)
+    application_id: string | null;
+    application_type: "live" | "content_creator" | "both" | null;
+    application_status: "pending" | "approved" | "rejected" | "withdrawn" | null;
+    application_created_at: string | null;
+    stage_name: string | null;
+    legal_full_name: string | null;
+    date_of_birth: string | null;
+    country: string | null;
+    city_state: string | null;
+    id_front_submitted: boolean;
+    id_back_submitted: boolean;
+    creator_terms_agreed: boolean;
+    creator_terms_version: string | null;
+    creator_terms_agreed_at: string | null;
+    call_scheduled: boolean;
+    call_scheduled_at: string | null;
   };
 }> {
   return request("/api/webapp/creator/consents");
