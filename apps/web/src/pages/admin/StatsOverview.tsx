@@ -10,6 +10,7 @@ import {
   getAdminStats,
   triggerCristinaNeighborDM,
   triggerRevokeUnusedTrials,
+  getAdminRevenueReport,
   type AdminStats,
 } from "@/lib/api";
 
@@ -383,6 +384,38 @@ export default function StatsOverview() {
                 {actionLoading === "revoke" ? t.statsOverview.running : t.statsOverview.revokeNow}
               </button>
             </div>
+          </div>
+          <div className="flex-1 min-w-[220px] p-3 rounded-lg border border-pnp-border bg-pnp-background">
+            <p className="text-sm font-medium text-pnp-textPrimary mb-1">Revenue report</p>
+            <p className="text-xs text-pnp-textSecondary mb-3">Download a JSON breakdown of completed payments for the last 30 days, grouped by day.</p>
+            <button
+              disabled={!!actionLoading}
+              onClick={async () => {
+                setActionLoading("revenue");
+                try {
+                  const r = await getAdminRevenueReport({ groupBy: "day" });
+                  const blob = new Blob([JSON.stringify(r.report, null, 2)], { type: "application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  const stamp = new Date().toISOString().slice(0, 10);
+                  a.href = url;
+                  a.download = `pnptv-revenue-report-${stamp}.json`;
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  URL.revokeObjectURL(url);
+                  setActionMsg("Revenue report downloaded");
+                  setTimeout(() => setActionMsg(null), 5000);
+                } catch (err) {
+                  setActionMsg(err instanceof Error ? err.message : "Error generating revenue report");
+                } finally {
+                  setActionLoading(null);
+                }
+              }}
+              className="px-3 py-1.5 text-xs rounded-lg bg-pnp-accent/20 text-pnp-accent border border-pnp-accent/30 hover:bg-pnp-accent/30 disabled:opacity-40 transition-colors"
+            >
+              {actionLoading === "revenue" ? "Generating…" : "Download report (30d)"}
+            </button>
           </div>
         </div>
       </div>

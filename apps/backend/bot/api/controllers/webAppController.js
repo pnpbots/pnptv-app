@@ -1805,6 +1805,20 @@ const updateProfile = async (req, res) => {
     }
   }
 
+  // Content moderation — reject descriptions containing forbidden terms
+  // (CSAM, zoophilia, non-consent, bug chasing, IV drug use).
+  try {
+    const { assertCleanText } = require('../../../services/contentModerationFilter');
+    if (req.body.bio) assertCleanText(req.body.bio, 'bio');
+    if (req.body.firstName) assertCleanText(req.body.firstName, 'first name');
+    if (req.body.lastName) assertCleanText(req.body.lastName, 'last name');
+  } catch (err) {
+    if (err.code === 'FORBIDDEN_CONTENT') {
+      return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+    }
+    throw err;
+  }
+
   // Validate and check uniqueness of username if provided
   if (req.body.username !== undefined && req.body.username !== '') {
     // Username can only be set once manually — if already set, reject

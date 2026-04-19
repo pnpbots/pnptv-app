@@ -7,12 +7,13 @@ import CreatorEnrollmentWizard, { CREATOR_TIERS, TIER_CONFIG, type TierId } from
 
 export interface MonetizeContentCardProps {
   creatorStatus?: string;
+  interestExpressed?: boolean;
   onActivated?: () => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function MonetizeContentCard({ creatorStatus, onActivated }: MonetizeContentCardProps) {
+export default function MonetizeContentCard({ creatorStatus, interestExpressed = false, onActivated }: MonetizeContentCardProps) {
   const t = useI18n();
   const p = t.profile;
   const [eligibility, setEligibility] = useState<CreatorEligibility | null>(null);
@@ -21,14 +22,23 @@ export default function MonetizeContentCard({ creatorStatus, onActivated }: Mone
   const [selectedTier, setSelectedTier] = useState<TierId>("ice");
   const [showWizard, setShowWizard] = useState(false);
 
+  // Only fetch eligibility/enrollment when the user has actively opted in
+  // (via the "Become a Creator" menu entry) or is already in a pipeline state.
+  const hasSignal = interestExpressed || creatorStatus === "pending_review";
+
   useEffect(() => {
+    if (!hasSignal) {
+      setLoading(false);
+      return;
+    }
     Promise.all([
       getCreatorEligibility().then((res) => { if (res.success) setEligibility(res); }).catch(() => {}),
       getCreatorEnrollment().then((res) => { if (res.success) setEnrollment(res.enrollment); }).catch(() => {}),
     ]).finally(() => setLoading(false));
-  }, []);
+  }, [hasSignal]);
 
   if (creatorStatus === "active") return null;
+  if (!hasSignal) return null;
 
   if (loading) {
     return (

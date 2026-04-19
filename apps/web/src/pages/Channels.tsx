@@ -27,12 +27,6 @@ const TIER_COLORS: Record<string, { bg: string; text: string; label: string }> =
   full_time: { bg: "rgba(255,215,0,0.15)", text: "#FFD700", label: "Pro" },
 };
 
-const SORT_OPTIONS = [
-  { value: "popular", label: "Popular" },
-  { value: "newest", label: "Newest" },
-  { value: "az", label: "A\u2013Z" },
-] as const;
-
 // ── Helper ───────────────────────────────────────────────────────────────────
 function isValidPhotoUrl(url: string | null | undefined): url is string {
   if (!url) return false;
@@ -1033,25 +1027,14 @@ export default function Channels() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // View mode: creator profiles vs creator channels
-  const [viewMode, setViewMode] = useState<"creators" | "channels">("creators");
-
   // Selected channel for detail view
   const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
 
-  // ── Creator profile state ──
+  // ── Creator profile state (feeds the pill strip at the bottom of the page) ──
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [sort, setSort] = useState<"popular" | "newest" | "az">("popular");
-  const [filter, setFilter] = useState<"all" | "live" | "featured">("all");
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [total, setTotal] = useState(0);
-  const [loadingMore, setLoadingMore] = useState(false);
 
-  // ── Creator channels state ──
+  // ── Creator channels state (the main grid) ──
   const [creatorChannels, setCreatorChannels] = useState<CreatorChannel[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [channelsSearch, setChannelsSearch] = useState("");
@@ -1061,7 +1044,6 @@ export default function Channels() {
   const [channelsTotal, setChannelsTotal] = useState(0);
   const [channelsLoadingMore, setChannelsLoadingMore] = useState(false);
 
-  const sentinelRef = useRef<HTMLDivElement>(null);
   const channelsSentinelRef = useRef<HTMLDivElement>(null);
 
   // ── Create channel form (Channels page shortcut) ──
@@ -1097,46 +1079,29 @@ export default function Channels() {
     }
   };
 
-  // ── Debounce search (creators) ──
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(timer);
-  }, [search]);
-
   // ── Debounce search (channels) ──
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedChannelsSearch(channelsSearch), 300);
     return () => clearTimeout(timer);
   }, [channelsSearch]);
 
-  // ── Fetch creator profiles ──
+  // ── Fetch creator profiles (feeds the pill strip — popular first, top 24 is
+  // plenty for a horizontal scroll) ──
   const fetchChannels = useCallback(
-    async (pageNum: number, append = false) => {
-      if (!append) setLoading(true);
-      else setLoadingMore(true);
+    async () => {
+      setLoading(true);
       try {
-        const res = await getChannels({
-          search: debouncedSearch || undefined,
-          live: filter === "live" || undefined,
-          featured: filter === "featured" || undefined,
-          sort,
-          page: pageNum,
-          limit: 24,
-        });
+        const res = await getChannels({ sort: "popular", page: 0, limit: 24 });
         if (res.success) {
-          setChannels((prev) => (append ? [...prev, ...res.channels] : res.channels));
-          setHasMore(res.nextPage !== null);
-          setTotal(res.total);
-          setPage(pageNum);
+          setChannels(res.channels);
         }
       } catch {
         // non-critical
       } finally {
         setLoading(false);
-        setLoadingMore(false);
       }
     },
-    [debouncedSearch, filter, sort]
+    []
   );
 
   // ── Fetch creator channels ──
@@ -1166,18 +1131,10 @@ export default function Channels() {
     [debouncedChannelsSearch]
   );
 
-  // ── Trigger fetches on mode/filter/search change ──
-  useEffect(() => {
-    if (viewMode === "creators") {
-      fetchChannels(0);
-    }
-  }, [viewMode, fetchChannels]);
-
-  useEffect(() => {
-    if (viewMode === "channels") {
-      fetchCreatorChannels(0);
-    }
-  }, [viewMode, fetchCreatorChannels]);
+  // ── Trigger fetches ──
+  // Channels drive the main grid; creators feed the pill strip below it.
+  useEffect(() => { fetchChannels(); }, [fetchChannels]);
+  useEffect(() => { fetchCreatorChannels(0); }, [fetchCreatorChannels]);
 
   // ── Real-time live status via Socket.IO ──
   useEffect(() => {
@@ -1200,24 +1157,9 @@ export default function Channels() {
     };
   }, []);
 
-  // ── Infinite scroll (creators) ──
+  // ── Infinite scroll (creator channels — the main grid) ──
   useEffect(() => {
-    if (viewMode !== "creators" || !sentinelRef.current || !hasMore || loadingMore) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && hasMore && !loadingMore) {
-          fetchChannels(page + 1, true);
-        }
-      },
-      { rootMargin: "200px" }
-    );
-    observer.observe(sentinelRef.current);
-    return () => observer.disconnect();
-  }, [viewMode, hasMore, loadingMore, page, fetchChannels]);
-
-  // ── Infinite scroll (creator channels) ──
-  useEffect(() => {
-    if (viewMode !== "channels" || !channelsSentinelRef.current || !channelsHasMore || channelsLoadingMore) return;
+    if (!channelsSentinelRef.current || !channelsHasMore || channelsLoadingMore) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting && channelsHasMore && !channelsLoadingMore) {
@@ -1228,9 +1170,7 @@ export default function Channels() {
     );
     observer.observe(channelsSentinelRef.current);
     return () => observer.disconnect();
-  }, [viewMode, channelsHasMore, channelsLoadingMore, channelsPage, fetchCreatorChannels]);
-
-  const featuredChannels = channels.filter((c) => c.featured);
+  }, [channelsHasMore, channelsLoadingMore, channelsPage, fetchCreatorChannels]);
 
   // ── If channel detail is open, render that view ──
   if (selectedChannelId !== null) {
@@ -1291,187 +1231,8 @@ export default function Channels() {
           <svg className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
         </a>
 
-        {/* View mode toggle */}
-        <div className="flex gap-2 p-1 rounded-xl w-fit" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-          <button
-            onClick={() => setViewMode("creators")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              viewMode === "creators"
-                ? "text-white"
-                : "text-pnp-textSecondary hover:text-pnp-textPrimary"
-            }`}
-            style={viewMode === "creators" ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
-          >
-            Creators
-          </button>
-          <button
-            onClick={() => setViewMode("channels")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              viewMode === "channels"
-                ? "text-white"
-                : "text-pnp-textSecondary hover:text-pnp-textPrimary"
-            }`}
-            style={viewMode === "channels" ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
-          >
-            Content Channels
-          </button>
-        </div>
-
-        {/* ── CREATORS VIEW ── */}
-        {viewMode === "creators" && (
-          <>
-            {/* Search + Filters */}
-            <div className="space-y-3">
-              <div className="relative">
-                <svg
-                  className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pnp-textSecondary"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search creators..."
-                  className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent/50 transition-colors"
-                />
-              </div>
-
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                  {(["all", "live", "featured"] as const).map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => setFilter(f)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
-                        filter === f
-                          ? "bg-pnp-accent text-white"
-                          : "bg-pnp-surface border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary"
-                      }`}
-                    >
-                      {f === "all" ? "All" : f === "live" ? "Live Now" : "Featured"}
-                    </button>
-                  ))}
-                </div>
-
-                <select
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value as typeof sort)}
-                  className="px-3 py-1.5 rounded-lg bg-pnp-surface border border-pnp-border text-xs text-pnp-textPrimary focus:outline-none"
-                >
-                  {SORT_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Featured Strip */}
-            {!loading && featuredChannels.length > 0 && filter === "all" && !debouncedSearch && (
-              <div>
-                <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">Featured Creators</h2>
-                <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
-                  {featuredChannels.map((ch) => (
-                    <button
-                      key={ch.id}
-                      onClick={() => navigate(`/profile/${ch.id}`)}
-                      className="flex-shrink-0 flex flex-col items-center w-20 group"
-                    >
-                      <div className="relative">
-                        <img
-                          src={isValidPhotoUrl(ch.photoUrl) ? ch.photoUrl : "/default-performer.svg"}
-                          alt={ch.displayName}
-                          className={`w-16 h-16 rounded-full object-cover border-2 ${
-                            ch.isLive ? "border-red-500" : "border-pnp-accent"
-                          } group-hover:scale-105 transition-transform`}
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = "/default-performer.svg";
-                          }}
-                        />
-                        {ch.isLive && (
-                          <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[8px] font-bold uppercase">
-                            Live
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[11px] text-pnp-textPrimary mt-1.5 truncate max-w-full">
-                        {ch.displayName}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Total count */}
-            {!loading && (
-              <p className="text-xs text-pnp-textSecondary">
-                {total} creator{total !== 1 ? "s" : ""}
-                {debouncedSearch ? ` matching "${debouncedSearch}"` : ""}
-              </p>
-            )}
-
-            {/* Creator Grid */}
-            {loading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                {Array.from({ length: 12 }).map((_, i) => (
-                  <div key={i} className="rounded-xl border border-pnp-border bg-pnp-surface p-4 flex flex-col items-center">
-                    <div className="w-20 h-20 rounded-full bg-pnp-surfaceHover animate-pulse mb-3" />
-                    <div className="w-20 h-3 rounded bg-pnp-surfaceHover animate-pulse mb-2" />
-                    <div className="w-14 h-2.5 rounded bg-pnp-surfaceHover animate-pulse mb-2" />
-                    <div className="w-24 h-2 rounded bg-pnp-surfaceHover animate-pulse" />
-                  </div>
-                ))}
-              </div>
-            ) : channels.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div
-                  className="w-20 h-20 rounded-full flex items-center justify-center mb-4"
-                  style={{ background: "rgba(212,0,122,0.1)" }}
-                >
-                  <svg className="w-8 h-8 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                  </svg>
-                </div>
-                <p className="text-pnp-textPrimary font-semibold mb-1">No creators found</p>
-                <p className="text-sm text-pnp-textSecondary mb-4">
-                  {debouncedSearch ? "Try a different search term" : "No creators available yet"}
-                </p>
-                <Button variant="secondary" size="sm" onClick={() => { setSearch(""); setFilter("all"); }}>
-                  Clear filters
-                </Button>
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {channels.map((ch) => (
-                    <ChannelCard
-                      key={ch.id}
-                      channel={ch}
-                      onClick={() => navigate(`/profile/${ch.id}`)}
-                    />
-                  ))}
-                </div>
-                {loadingMore && (
-                  <div className="flex justify-center py-4">
-                    <div className="w-6 h-6 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
-                  </div>
-                )}
-                <div ref={sentinelRef} className="h-1" />
-              </>
-            )}
-          </>
-        )}
-
-        {/* ── CHANNELS VIEW ── */}
-        {viewMode === "channels" && (
-          <>
+        {/* ── CHANNELS VIEW (primary) ── */}
+        <>
             {/* Search + Create button row */}
             <div className="flex gap-2">
               <div className="relative flex-1">
@@ -1657,8 +1418,44 @@ export default function Channels() {
                 <div ref={channelsSentinelRef} className="h-1" />
               </>
             )}
-          </>
-        )}
+
+            {/* ── Creators pill strip (horizontal circle avatars) ── */}
+            {!loading && channels.length > 0 && (
+              <div className="pt-4 border-t border-pnp-border">
+                <h2 className="text-sm font-semibold text-pnp-textPrimary mb-3">Creators</h2>
+                <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
+                  {channels.map((ch) => (
+                    <button
+                      key={ch.id}
+                      onClick={() => navigate(`/profile/${ch.id}`)}
+                      className="flex-shrink-0 flex flex-col items-center w-20 group"
+                    >
+                      <div className="relative">
+                        <img
+                          src={isValidPhotoUrl(ch.photoUrl) ? ch.photoUrl : "/default-performer.svg"}
+                          alt={ch.displayName}
+                          className={`w-16 h-16 rounded-full object-cover border-2 ${
+                            ch.isLive ? "border-red-500" : "border-pnp-accent"
+                          } group-hover:scale-105 transition-transform`}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = "/default-performer.svg";
+                          }}
+                        />
+                        {ch.isLive && (
+                          <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[8px] font-bold uppercase">
+                            Live
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-pnp-textPrimary mt-1.5 truncate max-w-full">
+                        {ch.displayName}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+        </>
       </div>
     </>
   );

@@ -446,6 +446,20 @@ const createChannel = async (req, res) => {
     }
     const trimmedName = name.trim().slice(0, 100);
 
+    try {
+      const { assertCleanText } = require('../../../services/contentModerationFilter');
+      assertCleanText(trimmedName, 'name');
+      if (description) assertCleanText(description, 'description');
+      if (Array.isArray(tags)) {
+        for (const tag of tags) assertCleanText(tag, 'tag');
+      }
+    } catch (err) {
+      if (err.code === 'FORBIDDEN_CONTENT') {
+        return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+      }
+      throw err;
+    }
+
     // Validate and sanitize telegramChannelId
     let safeTelegramChannelId = null;
     if (telegramChannelId && typeof telegramChannelId === 'string') {
@@ -522,6 +536,21 @@ const updateChannel = async (req, res) => {
     let idx = 1;
 
     const { name, slug, description, coverImageUrl, tags, isPremium, sortOrder, collaborators, telegramChannelId, bridgeEnabled } = req.body;
+
+    try {
+      const { assertCleanText } = require('../../../services/contentModerationFilter');
+      if (name !== undefined) assertCleanText(name, 'name');
+      if (description !== undefined) assertCleanText(description, 'description');
+      if (Array.isArray(tags)) {
+        for (const tag of tags) assertCleanText(tag, 'tag');
+      }
+    } catch (err) {
+      if (err.code === 'FORBIDDEN_CONTENT') {
+        return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+      }
+      throw err;
+    }
+
     if (name !== undefined) { updates.push(`name = $${idx++}`); params.push(String(name).trim().slice(0, 100)); }
     if (slug !== undefined) {
       const cleanSlug = String(slug).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 100);

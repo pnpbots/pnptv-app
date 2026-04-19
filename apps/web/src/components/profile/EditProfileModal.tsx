@@ -86,7 +86,11 @@ export default function EditProfileModal({
     setError(null);
     try {
       const payload: Parameters<typeof updateProfile>[0] = { firstName, lastName, bio, locationText };
-      if (username.trim()) payload.username = username.trim();
+      // Only send username when the user is setting it for the first time.
+      // If they already have a real (non-ANONYMOUS) username, the field is read-only
+      // and resending it would trip the backend's "username cannot be changed" guard.
+      const hasRealUsername = !!profile.username && profile.username.toUpperCase() !== 'ANONYMOUS';
+      if (!hasRealUsername && username.trim()) payload.username = username.trim();
       payload.xHandle = xHandle.trim().replace(/^@/, "") || "";
       if (dob) payload.dateOfBirth = dob;
       if (city.trim()) payload.city = city.trim();
@@ -336,7 +340,12 @@ export default function EditProfileModal({
           <p className="text-[10px] text-pnp-textSecondary/50 mt-1">Your X handle for cross-posting and profile display</p>
         </div>
 
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && (
+          <div role="alert" className="rounded-xl p-3 bg-red-500/10 border border-red-500/40 flex items-start gap-2">
+            <span className="text-red-400 text-lg leading-none mt-0.5" aria-hidden="true">⚠</span>
+            <p className="text-sm text-red-300 leading-snug whitespace-pre-line">{error}</p>
+          </div>
+        )}
         <div className="flex gap-3 pt-2">
           <Button variant="danger" className="flex-1" onClick={onClose}>
             {p.cancel}

@@ -4,6 +4,7 @@ const logger = require('../../../utils/logger');
 const { resolveUserId } = require('../../utils/helpers');
 const EntitlementAccessService = require('../../../services/entitlementAccessService');
 const socketSingleton = require('../../../services/socketSingleton');
+const livekitService = require('../../../services/livekitService');
 
 /**
  * Get community room info and register presence.
@@ -509,9 +510,45 @@ const approveKnock = async (req, res) => {
 
     await CommunityRoomService.removeKnockRequest(targetUserId);
 
+    // Mint a NEW LiveKit token for the approved user with canPublishAudio=true
+    // so the SFU actually lets them speak. Without this the client would
+    // "unlock" the mic button but the publish would be rejected server-side.
+    let upgradeToken = null;
+    let upgradeRoomName = null;
+    try {
+      const { rows: mainRows } = await query(
+        `SELECT id FROM hangout_groups WHERE is_main = true LIMIT 1`
+      );
+      if (mainRows.length > 0) {
+        const mainGroupId = mainRows[0].id;
+        const { rows: callRows } = await query(
+          `SELECT room_name FROM hangout_video_calls
+             WHERE group_id=$1 AND status='active'
+             ORDER BY created_at DESC LIMIT 1`,
+          [mainGroupId]
+        );
+        if (callRows.length > 0) {
+          upgradeRoomName = callRows[0].room_name;
+          const target = await UserModel.getById(targetUserId);
+          const displayName = target?.firstName || target?.first_name || target?.username || 'User';
+          upgradeToken = await livekitService.generateToken(
+            upgradeRoomName, String(targetUserId), displayName,
+            false, // still non-moderator
+            { canPublishAudio: true, canPublishVideo: true },
+          );
+        }
+      }
+    } catch (e) {
+      logger.error('approveKnock: failed to mint upgrade token', e);
+    }
+
     const io = socketSingleton.get();
     if (io) {
-      io.to(`user:${targetUserId}`).emit('mainstage:knock:approved');
+      io.to(`user:${targetUserId}`).emit('mainstage:knock:approved', {
+        token: upgradeToken,
+        livekitUrl: livekitService.LIVEKIT_WS_URL,
+        roomName: upgradeRoomName,
+      });
       io.to('mainstage').emit('mainstage:knock:resolved', { targetUserId, action: 'approved' });
     }
 

@@ -1340,6 +1340,12 @@ export function getHangoutGroups(): Promise<{ success: boolean; groups: HangoutG
   return request("/api/webapp/hangouts/groups");
 }
 
+// Lean shortcut — avoids the full groups-list hydration when the caller only
+// needs the main stage group (MainStage.tsx on mount).
+export function getMainGroup(): Promise<{ success: boolean; group: HangoutGroup }> {
+  return request("/api/webapp/main-group");
+}
+
 export function createHangoutGroup(
   name: string,
   description?: string,
@@ -1903,6 +1909,173 @@ export function isUserBlocked(userId: string): Promise<{
   isBlocked: boolean;
 }> {
   return request(`/api/webapp/users/is-blocked/${userId}`);
+}
+
+// ============================================================================
+// Community Reports — report a user for rule violations
+// ============================================================================
+
+export type ReportCategory =
+  | "harassment"
+  | "hate"
+  | "spam_scam"
+  | "impersonation"
+  | "csam"
+  | "nudity_nonconsensual"
+  | "self_harm"
+  | "other";
+
+export type ReportEvidenceType = "profile" | "post" | "hangout_message" | "dm";
+
+export type ReportStatus = "pending" | "reviewed" | "action_taken" | "dismissed";
+
+export interface CreateReportInput {
+  reportedUserId: string;
+  category: ReportCategory;
+  description?: string;
+  evidenceType?: ReportEvidenceType;
+  evidenceId?: string | number;
+}
+
+export function createUserReport(input: CreateReportInput): Promise<{
+  success: boolean;
+  report?: { id: number; status: ReportStatus };
+  error?: string;
+  code?: string;
+}> {
+  return request("/api/webapp/reports", {
+    method: "POST",
+    body: input,
+  });
+}
+
+export interface AdminReport {
+  id: number;
+  reporter_id: string;
+  reported_user_id: string;
+  category: ReportCategory;
+  description: string | null;
+  evidence_type: ReportEvidenceType | null;
+  evidence_id: string | null;
+  status: ReportStatus;
+  reviewer_id: string | null;
+  reviewed_at: string | null;
+  action_notes: string | null;
+  created_at: string;
+  updated_at: string;
+  reporter_first_name: string | null;
+  reporter_username: string | null;
+  reporter_photo: string | null;
+  reported_first_name: string | null;
+  reported_username: string | null;
+  reported_photo: string | null;
+  reported_role: string | null;
+  reported_is_active: boolean;
+}
+
+export function listAdminReports(params?: {
+  status?: ReportStatus | "all";
+  limit?: number;
+  offset?: number;
+}): Promise<{
+  success: boolean;
+  reports: AdminReport[];
+  counts: Partial<Record<ReportStatus, number>>;
+  pending: number;
+}> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  const query = qs.toString();
+  return request(`/api/webapp/admin/reports${query ? `?${query}` : ""}`);
+}
+
+export type ReportAction = "dismiss" | "warn" | "suspend_7d" | "ban";
+
+export function reviewAdminReport(
+  reportId: number,
+  action: ReportAction,
+  notes?: string,
+): Promise<{ success: boolean; report?: AdminReport; error?: string; code?: string }> {
+  return request(`/api/webapp/admin/reports/${reportId}`, {
+    method: "PATCH",
+    body: { action, notes },
+  });
+}
+
+// ============================================================================
+// Appeals — public appeal form for banned users + admin review
+// ============================================================================
+
+export type AppealStatus = "pending" | "approved" | "denied";
+
+export interface SubmitAppealInput {
+  submittedIdentifier: string;
+  contactEmail: string;
+  explanation: string;
+  honeypot?: string;
+}
+
+export function submitAppeal(input: SubmitAppealInput): Promise<{
+  success: boolean;
+  appeal?: { id: number; status: AppealStatus };
+  error?: string;
+  code?: string;
+}> {
+  return request("/api/webapp/appeal", {
+    method: "POST",
+    body: input,
+  });
+}
+
+export interface AdminAppeal {
+  id: number;
+  submitted_identifier: string;
+  resolved_user_id: string | null;
+  contact_email: string;
+  explanation: string;
+  status: AppealStatus;
+  admin_notes: string | null;
+  reviewer_id: string | null;
+  reviewed_at: string | null;
+  ip: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_first_name: string | null;
+  resolved_username: string | null;
+  resolved_role: string | null;
+  resolved_is_active: boolean | null;
+  resolved_photo: string | null;
+}
+
+export function listAdminAppeals(params?: {
+  status?: AppealStatus | "all";
+  limit?: number;
+  offset?: number;
+}): Promise<{
+  success: boolean;
+  appeals: AdminAppeal[];
+  counts: Partial<Record<AppealStatus, number>>;
+  pending: number;
+}> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  const query = qs.toString();
+  return request(`/api/webapp/admin/appeals${query ? `?${query}` : ""}`);
+}
+
+export function reviewAdminAppeal(
+  appealId: number,
+  action: "approve" | "deny",
+  notes?: string,
+): Promise<{ success: boolean; appeal?: AdminAppeal; error?: string; code?: string }> {
+  return request(`/api/webapp/admin/appeals/${appealId}`, {
+    method: "PATCH",
+    body: { action, notes },
+  });
 }
 
 // ============================================================================
@@ -4247,6 +4420,39 @@ export function triggerCristinaNeighborDM(): Promise<{ success: boolean; message
 
 export function triggerRevokeUnusedTrials(dryRun = false): Promise<{ success: boolean; message: string }> {
   return request(`/api/webapp/admin/trials/revoke-unused${dryRun ? "?dry_run=1" : ""}`, { method: "POST" });
+}
+
+export type RevenueReportGroupBy = "day" | "week" | "month" | "method";
+
+export interface AdminRevenueReport {
+  period: { start: string; end: string };
+  groupedBy: RevenueReportGroupBy;
+  rows: Array<{
+    period: string;
+    transaction_count: number;
+    unique_payers: number;
+    total_revenue: number;
+    avg_transaction: number;
+    min_transaction: number;
+    max_transaction: number;
+    completed_count: number;
+    failed_count: number;
+    pending_count: number;
+  }>;
+  totals?: Record<string, unknown>;
+}
+
+export function getAdminRevenueReport(params?: {
+  startDate?: string | Date;
+  endDate?: string | Date;
+  groupBy?: RevenueReportGroupBy;
+}): Promise<{ success: boolean; report: AdminRevenueReport; error?: string }> {
+  const qs = new URLSearchParams();
+  if (params?.startDate) qs.set("startDate", params.startDate instanceof Date ? params.startDate.toISOString() : params.startDate);
+  if (params?.endDate)   qs.set("endDate",   params.endDate   instanceof Date ? params.endDate.toISOString()   : params.endDate);
+  if (params?.groupBy)   qs.set("groupBy",   params.groupBy);
+  const q = qs.toString();
+  return request(`/api/webapp/admin/revenue-report${q ? `?${q}` : ""}`);
 }
 
 // Gamification API

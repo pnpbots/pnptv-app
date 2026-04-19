@@ -166,6 +166,16 @@ const createPost = async (req, res) => {
   const { content, isExclusive, isShareable, hangoutGroupId: rawHangoutGroupId } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
 
+  try {
+    const { assertCleanText } = require('../../../services/contentModerationFilter');
+    assertCleanText(content, 'content');
+  } catch (err) {
+    if (err.code === 'FORBIDDEN_CONTENT') {
+      return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+    }
+    throw err;
+  }
+
   let replyToId = req.body.replyToId ? parseInt(req.body.replyToId, 10) : null;
   let repostOfId = req.body.repostOfId ? parseInt(req.body.repostOfId, 10) : null;
   if (req.body.replyToId && (!Number.isFinite(replyToId) || replyToId <= 0)) {
@@ -383,6 +393,15 @@ const editPost = async (req, res) => {
   }
   const trimmed = content.trim().slice(0, 2000);
   try {
+    const { assertCleanText } = require('../../../services/contentModerationFilter');
+    assertCleanText(trimmed, 'content');
+  } catch (err) {
+    if (err.code === 'FORBIDDEN_CONTENT') {
+      return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+    }
+    throw err;
+  }
+  try {
     const result = await dbQuery(
       `UPDATE social_posts SET content = $1, updated_at = NOW()
        WHERE id = $2 AND user_id = $3 AND is_deleted = false
@@ -464,6 +483,18 @@ const createPostWithMedia = async (req, res) => {
   const { content, isExclusive, isShareable, videoTitle, videoDescription } = req.body;
 
   if (!content || !content.toString().trim()) return res.status(400).json({ error: 'Content required' });
+
+  try {
+    const { assertCleanText } = require('../../../services/contentModerationFilter');
+    assertCleanText(content, 'content');
+    if (videoTitle) assertCleanText(videoTitle, 'video title');
+    if (videoDescription) assertCleanText(videoDescription, 'video description');
+  } catch (err) {
+    if (err.code === 'FORBIDDEN_CONTENT') {
+      return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+    }
+    throw err;
+  }
 
   let replyToId = req.body.replyToId ? parseInt(req.body.replyToId, 10) : null;
   let repostOfId = req.body.repostOfId ? parseInt(req.body.repostOfId, 10) : null;
@@ -749,6 +780,16 @@ const createPostWithMultiMedia = async (req, res) => {
   const { content, isExclusive, isShareable } = req.body;
 
   if (!content || !content.toString().trim()) return res.status(400).json({ error: 'Content required' });
+
+  try {
+    const { assertCleanText } = require('../../../services/contentModerationFilter');
+    assertCleanText(content, 'content');
+  } catch (err) {
+    if (err.code === 'FORBIDDEN_CONTENT') {
+      return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+    }
+    throw err;
+  }
 
   let replyToId = req.body.replyToId ? parseInt(req.body.replyToId, 10) : null;
   let repostOfId = req.body.repostOfId ? parseInt(req.body.repostOfId, 10) : null;

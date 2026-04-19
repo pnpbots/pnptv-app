@@ -1814,6 +1814,28 @@ const startBot = async () => {
       logger.warn(`X analytics ingestion scheduler initialization failed: ${error.message}`);
     }
 
+    // Initialize onboarding reminder scheduler — daily DM nudge to users who
+    // haven't finished /start. Only sends private messages, never to groups.
+    try {
+      const OnboardingReminderService = require('../../services/onboardingReminderService');
+      OnboardingReminderService.initialize(bot);
+      const ONBOARDING_REMINDER_INTERVAL_MS = 24 * 60 * 60 * 1000;
+      // Stagger the first run by 5 minutes so it doesn't pile on top of startup
+      setTimeout(() => {
+        OnboardingReminderService.sendIncompleteOnboardingReminders().catch((err) => {
+          logger.warn('Onboarding reminder run failed', { error: err.message });
+        });
+        setInterval(() => {
+          OnboardingReminderService.sendIncompleteOnboardingReminders().catch((err) => {
+            logger.warn('Onboarding reminder run failed', { error: err.message });
+          });
+        }, ONBOARDING_REMINDER_INTERVAL_MS);
+      }, 5 * 60 * 1000);
+      logger.info('✓ Onboarding reminder scheduler initialized (daily, +5m delay)');
+    } catch (error) {
+      logger.warn(`Onboarding reminder scheduler initialization failed: ${error.message}`);
+    }
+
     // Initialize proactive reminder service
     try {
       const ProactiveReminderService = require('../../services/proactiveReminderService');

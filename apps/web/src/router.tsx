@@ -55,6 +55,7 @@ const UserDetail = lazy(() => import("@/pages/admin/UserDetail"));
 const PlanManagement = lazy(() => import("@/pages/admin/PlanManagement"));
 const ContentModeration = lazy(() => import("@/pages/admin/ContentModeration"));
 const HangoutModeration = lazy(() => import("@/pages/admin/HangoutModeration"));
+const AdminReports = lazy(() => import("@/pages/admin/Reports"));
 const CreatorApplications = lazy(() => import("@/pages/admin/CreatorApplications"));
 const AdminNotifications = lazy(() => import("@/pages/admin/AdminNotifications"));
 const ExternalServices = lazy(() => import("@/pages/admin/ExternalServices"));
@@ -82,6 +83,7 @@ const CreatorAvailability = lazy(() => import("@/pages/creators/CreatorAvailabil
 const CreatorAnalytics = lazy(() => import("@/pages/creators/CreatorAnalytics"));
 const CreatorSettings = lazy(() => import("@/pages/creators/CreatorSettings"));
 const CreatorApply = lazy(() => import("@/pages/creators/CreatorApply"));
+const Appeal = lazy(() => import("@/pages/Appeal"));
 const CreatorSubscribers = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorSubscribers })));
 const CreatorConsents = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorConsents })));
 const CreatorXCampaignsPage = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorXCampaigns })));
@@ -390,6 +392,14 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "reports",
+        element: (
+          <ModuleLoader>
+            <AdminReports />
+          </ModuleLoader>
+        ),
+      },
+      {
         path: "creators",
         element: (
           <ModuleLoader>
@@ -539,6 +549,14 @@ export const router = createBrowserRouter([
     element: (
       <ModuleLoader>
         <ResetPassword />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/appeal",
+    element: (
+      <ModuleLoader>
+        <Appeal />
       </ModuleLoader>
     ),
   },

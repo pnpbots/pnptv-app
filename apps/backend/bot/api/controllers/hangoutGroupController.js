@@ -189,6 +189,18 @@ const createGroup = async (req, res) => {
 
   if (!name?.trim()) return res.status(400).json({ error: 'Group name is required' });
 
+  try {
+    const { assertCleanText } = require('../../../services/contentModerationFilter');
+    assertCleanText(name, 'name');
+    assertCleanText(description, 'description');
+    assertCleanText(rules, 'rules');
+  } catch (err) {
+    if (err.code === 'FORBIDDEN_CONTENT') {
+      return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+    }
+    throw err;
+  }
+
   const sanitizedRules = rules ? String(rules).trim().slice(0, 1000) || null : null;
   const channelId = rawChannelId ? parseInt(rawChannelId, 10) : null;
 
@@ -624,6 +636,18 @@ const updateGroup = async (req, res) => {
     }
 
     const { name, description, is_public, is_paid, price_usd } = req.body;
+
+    try {
+      const { assertCleanText } = require('../../../services/contentModerationFilter');
+      if (name !== undefined) assertCleanText(name, 'name');
+      if (description !== undefined) assertCleanText(description, 'description');
+      if (req.body.rules !== undefined) assertCleanText(req.body.rules, 'rules');
+    } catch (err) {
+      if (err.code === 'FORBIDDEN_CONTENT') {
+        return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+      }
+      throw err;
+    }
 
     // Build update dynamically — only touch provided fields
     const updates = [];
@@ -2138,6 +2162,23 @@ module.exports = {
 
 const livekitService = require('../../../services/livekitService');
 
+// Main-stage tokens enforce "cam on, mic off" at the SFU level. Admins get
+// full publish grants; knock-approved members get audio via approveKnock
+// re-minting with these flags flipped.
+async function isMainStageGroup(groupId) {
+  const { rows } = await query('SELECT is_main FROM hangout_groups WHERE id=$1', [groupId]);
+  return rows.length > 0 && rows[0].is_main === true;
+}
+
+function mainStageGrantsFor(role) {
+  const isAdmin = role === 'admin' || role === 'superadmin';
+  return {
+    isModerator: isAdmin,
+    canPublishAudio: isAdmin,   // members: no mic by default (raise hand → re-mint)
+    canPublishVideo: true,      // everyone publishes video (the stage rule)
+  };
+}
+
 // POST /api/webapp/hangouts/groups/:id/call/start
 async function startCall(req, res) {
   const user = authGuard(req, res); if (!user) return;
@@ -2169,7 +2210,17 @@ async function startCall(req, res) {
     if (existing.length > 0) {
       const activeRoomName = existing[0].room_name;
       const displayName = user.firstName || user.first_name || user.username || 'User';
-      const token = await livekitService.generateToken(activeRoomName, String(user.id), displayName, false);
+      const isMainStage = await isMainStageGroup(groupId);
+      const token = isMainStage
+        ? await livekitService.generateToken(
+            activeRoomName, String(user.id), displayName,
+            mainStageGrantsFor(user.role).isModerator,
+            {
+              canPublishAudio: mainStageGrantsFor(user.role).canPublishAudio,
+              canPublishVideo: mainStageGrantsFor(user.role).canPublishVideo,
+            },
+          )
+        : await livekitService.generateToken(activeRoomName, String(user.id), displayName, false);
       // Track participant (upsert) and update count from actual participants
       await query(
         `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
@@ -2234,7 +2285,17 @@ async function joinCall(req, res) {
 
     const { id: callId, room_name: roomName } = rows[0];
     const displayName = user.firstName || user.first_name || user.username || 'User';
-    const token = await livekitService.generateToken(roomName, String(user.id), displayName, false);
+    const isMainStage = await isMainStageGroup(groupId);
+    const token = isMainStage
+      ? await livekitService.generateToken(
+          roomName, String(user.id), displayName,
+          mainStageGrantsFor(user.role).isModerator,
+          {
+            canPublishAudio: mainStageGrantsFor(user.role).canPublishAudio,
+            canPublishVideo: mainStageGrantsFor(user.role).canPublishVideo,
+          },
+        )
+      : await livekitService.generateToken(roomName, String(user.id), displayName, false);
 
     await query(
       `UPDATE hangout_video_calls SET participant_count = participant_count + 1 WHERE id=$1`,

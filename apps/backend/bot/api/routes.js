@@ -2910,6 +2910,137 @@ app.delete('/api/webapp/users/unblock/:blockedUserId', requireSessionAuth, async
 app.get('/api/webapp/users/blocked', requireSessionAuth, asyncHandler(blockedUsersController.getBlockedUsers));
 app.get('/api/webapp/users/is-blocked/:userId', requireSessionAuth, asyncHandler(blockedUsersController.isUserBlocked));
 
+// ── Community user reporting ──────────────────────────────────────────────
+const userReportService = require('../../services/userReportService');
+
+// POST /api/webapp/reports — user-facing
+app.post('/api/webapp/reports', requireSessionAuth, socialActionLimiter, asyncHandler(async (req, res) => {
+  const reporterId = req.session?.user?.id;
+  if (!reporterId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  const { reportedUserId, category, description, evidenceType, evidenceId } = req.body || {};
+  const result = await userReportService.createReport({
+    reporterId,
+    reportedUserId,
+    category,
+    description,
+    evidenceType,
+    evidenceId,
+  });
+
+  if (!result.success) {
+    const statusCode = result.code === 'RATE_LIMITED' ? 429
+      : result.code === 'TARGET_NOT_FOUND' ? 404
+      : result.code === 'DUPLICATE_OPEN' ? 409
+      : 400;
+    return res.status(statusCode).json(result);
+  }
+  return res.json({ success: true, report: { id: result.report.id, status: result.report.status } });
+}));
+
+// GET /api/webapp/admin/reports — admin list
+app.get('/api/webapp/admin/reports', adminGuard, asyncHandler(async (req, res) => {
+  const { status, limit, offset } = req.query || {};
+  const data = await userReportService.listReports({ status, limit, offset });
+  return res.json({ success: true, ...data });
+}));
+
+// PATCH /api/webapp/admin/reports/:id — admin review action
+app.patch('/api/webapp/admin/reports/:id', adminGuard, asyncHandler(async (req, res) => {
+  const reviewerId = req.session?.user?.id;
+  const { action, notes } = req.body || {};
+  const result = await userReportService.reviewReport({
+    reportId: req.params.id,
+    reviewerId,
+    action,
+    notes,
+  });
+  if (!result.success) {
+    const statusCode = result.code === 'NOT_FOUND' ? 404 : 400;
+    return res.status(statusCode).json(result);
+  }
+  return res.json({ success: true, report: result.report });
+}));
+
+// ── Public appeal flow for banned / suspended users ───────────────────────
+const appealService = require('../../services/appealService');
+
+function getRequestIp(req) {
+  const xfwd = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim();
+  return xfwd || req.ip || req.socket?.remoteAddress || null;
+}
+
+// POST /api/webapp/appeal — PUBLIC (no auth); rate-limited per IP in the service
+app.post('/api/webapp/appeal', asyncHandler(async (req, res) => {
+  const { submittedIdentifier, contactEmail, explanation, honeypot } = req.body || {};
+  const result = await appealService.submitAppeal({
+    submittedIdentifier,
+    contactEmail,
+    explanation,
+    honeypot,
+    ip: getRequestIp(req),
+    userAgent: req.headers['user-agent'],
+  });
+  if (!result.success) {
+    const statusCode = result.code && result.code.startsWith('RATE_LIMITED') ? 429
+      : result.code === 'DUPLICATE_PENDING' ? 409
+      : 400;
+    return res.status(statusCode).json(result);
+  }
+  return res.json({ success: true, appeal: { id: result.appeal.id, status: result.appeal.status } });
+}));
+
+// GET /api/webapp/admin/appeals — admin list
+app.get('/api/webapp/admin/appeals', adminGuard, asyncHandler(async (req, res) => {
+  const { status, limit, offset } = req.query || {};
+  const data = await appealService.listAppeals({ status, limit, offset });
+  return res.json({ success: true, ...data });
+}));
+
+// PATCH /api/webapp/admin/appeals/:id — admin review action
+app.patch('/api/webapp/admin/appeals/:id', adminGuard, asyncHandler(async (req, res) => {
+  const reviewerId = req.session?.user?.id;
+  const { action, notes } = req.body || {};
+  const result = await appealService.reviewAppeal({
+    appealId: req.params.id,
+    reviewerId,
+    action,
+    notes,
+  });
+  if (!result.success) {
+    const statusCode = result.code === 'NOT_FOUND' ? 404 : 400;
+    return res.status(statusCode).json(result);
+  }
+  return res.json({ success: true, appeal: result.appeal });
+}));
+
+// ── Token wallet (pay-per-use balance for stream heartbeats, tips, etc.) ───
+const tokenService = require('../../services/tokenService');
+app.get('/api/webapp/users/me/tokens', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.session?.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+  const balance = await tokenService.getBalance(userId);
+  return res.json({ success: true, balance });
+}));
+
+// ── Admin revenue report (date range + grouping) ──────────────────────────
+const RevenueReportService = require('../../services/revenueReportService');
+app.get('/api/webapp/admin/revenue-report', adminGuard, asyncHandler(async (req, res) => {
+  const { startDate, endDate, groupBy } = req.query || {};
+  // Default to last 30 days when caller doesn't provide a range
+  const end = endDate ? new Date(endDate) : new Date();
+  const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    return res.status(400).json({ success: false, error: 'Invalid startDate or endDate' });
+  }
+  try {
+    const report = await RevenueReportService.getRevenueReport(start, end, groupBy || 'day');
+    return res.json({ success: true, report });
+  } catch (err) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+}));
+
 // Web App Follow System
 const followController = require('./controllers/followController');
 app.post('/api/webapp/users/follow',                   requireSessionAuth, socialActionLimiter, asyncHandler(followController.followUser));
@@ -4344,6 +4475,35 @@ app.post(
 // ── Hangout Groups ───────────────────────────────────────────────────────────
 app.get('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.listGroups));
 app.post('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.createGroup));
+
+// Main-stage shortcut — lean query just for `is_main=true`. Cheaper than
+// hydrating the full groups list when the client only needs the main group
+// (used by MainStage.tsx mount).
+app.get('/api/webapp/main-group', requireSessionAuth, asyncHandler(async (req, res) => {
+  const { query } = require('../../config/postgres');
+  const { rows } = await query(
+    `SELECT id, name, description, is_main, is_public, is_paid, price_usd, creator_id, avatar_url
+       FROM hangout_groups
+      WHERE is_main = true
+      LIMIT 1`
+  );
+  if (rows.length === 0) return res.status(404).json({ error: 'Main stage group not configured' });
+  const r = rows[0];
+  return res.json({
+    success: true,
+    group: {
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      isMain: r.is_main,
+      isPublic: r.is_public,
+      isPaid: r.is_paid,
+      priceUsd: r.price_usd,
+      creatorId: r.creator_id,
+      avatarUrl: r.avatar_url,
+    },
+  });
+}));
 // Discover must be before /:id to avoid route collision
 app.get('/api/webapp/hangouts/groups/discover', requireSessionAuth, asyncHandler(hangoutGroupController.discoverGroups));
 // join-by-invite must be before /:id to avoid :code being captured as :id
@@ -4620,6 +4780,60 @@ app.post('/api/admin/social/sync-content', adminGuard, asyncHandler(contentFeedS
 
 // Users search
 app.get('/api/webapp/users/search', asyncHandler(usersController.searchUsers));
+
+// Global search — used by the navbar 🔍 icon. Aggregates users, creators,
+// and posts in a single response so the client doesn't have to fan out.
+// Client expects: { success, users:[…], creators:[…], posts:[…] }.
+app.get('/api/webapp/search', requireSessionAuth, asyncHandler(async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ success: true, users: [], creators: [], posts: [] });
+  const { query } = require('../../config/postgres');
+  const viewerId = req.session.user.id;
+  const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
+
+  const [usersRes, creatorsRes, postsRes] = await Promise.all([
+    query(
+      `SELECT id, username, first_name, last_name, photo_file_id
+         FROM users
+        WHERE id::text != $1
+          AND is_deleted = false
+          AND (username ILIKE $2 ESCAPE '\\' OR first_name ILIKE $2 ESCAPE '\\' OR last_name ILIKE $2 ESCAPE '\\')
+        ORDER BY first_name ASC
+        LIMIT 8`,
+      [String(viewerId), like],
+    ),
+    query(
+      `SELECT id, id AS user_id, first_name AS display_name, username,
+              photo_file_id AS photo_url,
+              COALESCE(creator_verified, false) AS verified
+         FROM users
+        WHERE is_deleted = false
+          AND creator_status = 'active'
+          AND (username ILIKE $1 ESCAPE '\\' OR first_name ILIKE $1 ESCAPE '\\' OR last_name ILIKE $1 ESCAPE '\\')
+        ORDER BY first_name ASC
+        LIMIT 8`,
+      [like],
+    ),
+    query(
+      `SELECT p.id, p.content, u.username AS author_username
+         FROM social_posts p
+         JOIN users u ON u.id::text = p.user_id::text
+        WHERE p.is_deleted = false
+          AND u.is_deleted = false
+          AND p.content ILIKE $1 ESCAPE '\\'
+        ORDER BY p.created_at DESC
+        LIMIT 8`,
+      [like],
+    ),
+  ]);
+
+  return res.json({
+    success: true,
+    users: usersRes.rows,
+    creators: creatorsRes.rows,
+    posts: postsRes.rows,
+  });
+}));
 
 // ── @Mention autocomplete ────────────────────────────────────────────────────
 const mentionController = require('./controllers/mentionController');

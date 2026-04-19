@@ -4,6 +4,7 @@ import React, {
   useRef,
   useCallback,
 } from "react";
+import { createPortal } from "react-dom";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -1644,8 +1645,16 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     return (
       <>
       <div className="chat-overlay-safe left-0 right-0 lg:left-72 flex flex-col bg-pnp-background overflow-hidden">
-        {/* Chat header — fixed strip: name, members, video call */}
-        <div className="flex items-center px-1.5 sm:px-3 border-b border-pnp-border flex-shrink-0 bg-pnp-surface" style={{ minHeight: 56, paddingTop: "max(0.75rem, env(safe-area-inset-top, 0px))", paddingBottom: "0.75rem" }}>
+        {/* Chat header — sticky strip: name, members, video call */}
+        <div
+          className="sticky top-0 z-30 flex items-center px-1.5 sm:px-3 border-b border-pnp-border flex-shrink-0 bg-pnp-surface shadow-sm"
+          style={{
+            minHeight: 56,
+            paddingTop: "max(0.75rem, env(safe-area-inset-top, 0px))",
+            paddingBottom: "0.75rem",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+          }}
+        >
           {/* Left: back + avatar + info */}
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <button
@@ -3320,7 +3329,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                           <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
                         </svg>
                       </button>
-                      {groupCardMenuId === group.id && (
+                      {groupCardMenuId === group.id && createPortal(
                         <>
                           <div className="fixed inset-0 z-[150]" onClick={() => setGroupCardMenuId(null)} />
                           <div className="fixed z-[151] rounded-xl overflow-hidden shadow-xl min-w-[150px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", top: groupCardMenuPos.top, right: groupCardMenuPos.right }}>
@@ -3347,7 +3356,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                               Delete
                             </button>
                           </div>
-                        </>
+                        </>,
+                        document.body
                       )}
                     </div>
                   )}

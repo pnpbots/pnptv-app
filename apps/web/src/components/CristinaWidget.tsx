@@ -15,6 +15,7 @@ import {
   getTicketMessages,
   addTicketMessage,
   verifyPaymentWithCristina,
+  activateMeruCode,
   type SupportTicket,
   type TicketMessage,
   type TicketCategory,
@@ -34,7 +35,7 @@ interface ChatMessage {
   timestamp: number;
 }
 
-type WidgetView = "helpCenter" | "chat" | "tutorial" | "ticketForm" | "ticketView" | "paymentVerify";
+type WidgetView = "helpCenter" | "chat" | "tutorial" | "ticketForm" | "ticketView" | "paymentVerify" | "meruActivate";
 type CristinaTab = "ai" | "vj" | "nearby";
 
 interface CristinaWidgetProps {
@@ -349,7 +350,7 @@ function getPageContext(pathname: string): PageContext | null {
 }
 
 export function CristinaWidget({ mode = "widget", compact = false }: CristinaWidgetProps) {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, refreshUser } = useAuth();
   const { support: t } = useI18n();
   const { isPlaying: musicIsPlaying } = useMusicPlayer();
   const location = useLocation();
@@ -398,6 +399,47 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   const [pvLoading, setPvLoading] = useState(false);
   const [pvResult, setPvResult] = useState<PaymentVerificationResult | null>(null);
   const [pvActivated, setPvActivated] = useState<{ success: boolean; granted?: number; error?: string } | null>(null);
+
+  // Meru code activation state (available to all users)
+  const [meruCode, setMeruCode] = useState("");
+  const [meruEmail, setMeruEmail] = useState("");
+  const [meruSubmitting, setMeruSubmitting] = useState(false);
+  const [meruError, setMeruError] = useState<string | null>(null);
+  const [meruSuccess, setMeruSuccess] = useState(false);
+
+  const handleMeruActivate = useCallback(async () => {
+    const trimmedCode = meruCode.trim();
+    const trimmedEmail = meruEmail.trim();
+    if (!trimmedCode || meruSubmitting) return;
+    const langEs = user?.language === "es";
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail) || trimmedEmail.length > 254) {
+      setMeruError(langEs ? "Por favor ingresa un correo electrónico válido" : "Please enter a valid email address");
+      return;
+    }
+    setMeruSubmitting(true);
+    setMeruError(null);
+    try {
+      const result = await activateMeruCode(trimmedCode, trimmedEmail);
+      if (result.success) {
+        setMeruSuccess(true);
+        await refreshUser();
+        // Auto-return to help center after celebration.
+        setTimeout(() => {
+          setMeruSuccess(false);
+          setMeruCode("");
+          setMeruEmail("");
+          setView("helpCenter");
+        }, 3200);
+      } else {
+        setMeruError(result.error || (langEs ? "Error en la activación" : "Activation failed"));
+      }
+    } catch (err: unknown) {
+      const fallback = langEs ? "Error al activar" : "Activation error";
+      setMeruError(err instanceof Error ? err.message : fallback);
+    } finally {
+      setMeruSubmitting(false);
+    }
+  }, [meruCode, meruEmail, meruSubmitting, user?.language, refreshUser]);
 
   // FAB corner: tl/tr/bl/br — draggable to any corner
   type Corner = "tl" | "tr" | "bl" | "br";
@@ -1080,6 +1122,21 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
               <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{lang === "es" ? "Descubre gente y lugares cerca" : "Discover people & places near you"}</p>
             </button>
           </div>
+
+          {/* Activate Meru Code — available to all users */}
+          <button
+            onClick={() => {
+              setMeruError(null);
+              setMeruSuccess(false);
+              setMeruEmail(user?.email || "");
+              setView("meruActivate");
+            }}
+            className="w-full mb-2 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98] flex items-center justify-center gap-2"
+            style={{ background: "linear-gradient(135deg, #FFB454, #FF6B35)" }}
+          >
+            <span>🎟️</span>
+            <span>{lang === "es" ? "Activar Código Meru" : "Activate Meru Code"}</span>
+          </button>
 
           {/* Chat with Cristina CTA */}
           <button
@@ -1862,8 +1919,115 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
         </div>
       )}
 
-      {/* Input area — hidden in ticketForm, helpCenter, tutorial, and paymentVerify views */}
-      {view !== "ticketForm" && view !== "helpCenter" && view !== "tutorial" && view !== "paymentVerify" && (
+      {/* ------------------------------------------------------------------ */}
+      {/* MERU ACTIVATION VIEW                                                 */}
+      {/* ------------------------------------------------------------------ */}
+      {view === "meruActivate" && (
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <button
+              onClick={() => { setMeruError(null); setView("helpCenter"); }}
+              className="text-gray-400 hover:text-white transition-colors text-xs font-medium"
+              disabled={meruSubmitting}
+            >
+              {lang === "es" ? "← Atrás" : "← Back"}
+            </button>
+            <h3 className="text-white font-semibold text-sm flex items-center gap-1.5">
+              <span>🎟️</span>
+              <span>{lang === "es" ? "Activar Código Meru" : "Activate Meru Code"}</span>
+            </h3>
+          </div>
+
+          {meruSuccess ? (
+            /* Success celebration */
+            <div
+              className="rounded-xl p-5 text-center"
+              style={{ background: "linear-gradient(135deg, rgba(255,180,84,0.15), rgba(255,107,53,0.15))", border: "1px solid rgba(255,180,84,0.35)" }}
+            >
+              <div className="text-4xl mb-2">🎉</div>
+              <p className="text-sm font-bold text-white mb-1">
+                {lang === "es" ? "¡Membresía Lifetime activada!" : "Lifetime membership activated!"}
+              </p>
+              <p className="text-xs" style={{ color: "#D1D1D6" }}>
+                {lang === "es"
+                  ? "Tu cuenta ahora tiene acceso Lifetime + 60 días de PRIME. Refrescando…"
+                  : "Your account now has Lifetime + 60 days of PRIME. Refreshing…"}
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Explainer */}
+              <div
+                className="mb-4 rounded-xl p-3"
+                style={{ background: "rgba(255,180,84,0.06)", border: "1px solid rgba(255,180,84,0.2)" }}
+              >
+                <p className="text-xs leading-relaxed" style={{ color: "#D1D1D6" }}>
+                  {lang === "es"
+                    ? "Canjea tu código Meru para activar tu membresía Lifetime más 60 días de PRIME como bonificación."
+                    : "Redeem your Meru code to activate Lifetime membership plus 60 days of PRIME as a bonus."}
+                </p>
+              </div>
+
+              {/* Email */}
+              <label className="text-xs font-medium text-white/90 mb-1.5 block">
+                {lang === "es" ? "Correo electrónico" : "Email"}
+              </label>
+              <input
+                type="email"
+                autoComplete="email"
+                value={meruEmail}
+                onChange={(e) => { setMeruEmail(e.target.value); setMeruError(null); }}
+                placeholder={lang === "es" ? "tu@ejemplo.com" : "you@example.com"}
+                disabled={meruSubmitting}
+                className="w-full rounded-xl px-4 py-2.5 mb-3 bg-white/5 border border-white/10 text-white placeholder-white/40 focus:outline-none focus:border-[#FFB454] transition-colors disabled:opacity-50"
+                style={{ fontSize: "16px" }}
+              />
+
+              {/* Code */}
+              <label className="text-xs font-medium text-white/90 mb-1.5 block">
+                {lang === "es" ? "Código Meru" : "Meru Code"}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={meruCode}
+                  onChange={(e) => { setMeruCode(e.target.value); setMeruError(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleMeruActivate(); }}
+                  placeholder={lang === "es" ? "Ingresa tu código Meru" : "Enter your Meru code"}
+                  disabled={meruSubmitting}
+                  className="flex-1 rounded-xl px-4 py-2.5 bg-white/5 border border-white/10 text-white placeholder-white/40 focus:outline-none focus:border-[#FFB454] transition-colors disabled:opacity-50"
+                  style={{ fontSize: "16px" }}
+                />
+                <button
+                  onClick={handleMeruActivate}
+                  disabled={!meruCode.trim() || !meruEmail.trim() || meruSubmitting}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap transition-all active:scale-[0.97]"
+                  style={{ background: "linear-gradient(135deg, #FFB454, #FF6B35)" }}
+                >
+                  {meruSubmitting ? (lang === "es" ? "Verificando…" : "Verifying…") : (lang === "es" ? "Activar" : "Activate")}
+                </button>
+              </div>
+
+              {meruSubmitting && (
+                <p className="mt-3 text-xs" style={{ color: "#8E8E93" }}>
+                  {lang === "es"
+                    ? "Verificando el pago con Meru… esto puede tardar unos segundos."
+                    : "Verifying payment with Meru… this may take a few seconds."}
+                </p>
+              )}
+              {meruError && (
+                <p className="mt-3 text-xs text-red-400">{meruError}</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Input area — hidden in ticketForm, helpCenter, tutorial, paymentVerify, and meruActivate views */}
+      {view !== "ticketForm" && view !== "helpCenter" && view !== "tutorial" && view !== "paymentVerify" && view !== "meruActivate" && (
         <form
           onSubmit={handleSubmit}
           className="flex items-center gap-2 p-3 pb-safe border-t border-pnp-border flex-shrink-0"

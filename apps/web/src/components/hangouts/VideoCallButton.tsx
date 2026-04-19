@@ -26,13 +26,11 @@ function Tooltip({ text, visible }: TooltipProps) {
   return (
     <div
       role="tooltip"
-      className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white bg-pnp-surfaceHover border border-white/10 whitespace-nowrap pointer-events-none shadow-lg transition-all duration-150 z-50 ${
+      className={`absolute bottom-full right-0 mb-2 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white bg-pnp-surfaceHover border border-white/10 shadow-lg pointer-events-none transition-all duration-150 z-50 max-w-[70vw] sm:max-w-[260px] text-right ${
         visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1"
       }`}
     >
       {text}
-      {/* Arrow */}
-      <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-pnp-surfaceHover" />
     </div>
   );
 }
@@ -115,9 +113,9 @@ export function VideoCallButton({
                 Join
               </span>
 
-              {/* Participant count badge — always visible, smaller on mobile */}
+              {/* Participant count badge — readable on mobile */}
               {participantCount > 0 && (
-                <span className="flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full bg-green-400/20 text-[10px] sm:text-xs font-bold text-green-300 ring-1 ring-green-400/30">
+                <span className="flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-green-400/25 text-[11px] sm:text-xs font-bold text-green-200 ring-1 ring-green-400/40">
                   {participantCount}
                 </span>
               )}

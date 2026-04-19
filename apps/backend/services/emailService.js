@@ -16,7 +16,7 @@ class EmailService {
      * Get the from address (lazy loaded to ensure env is ready)
      */
     get from() {
-        return process.env.EMAIL_FROM || 'noreply@pnptv.app';
+        return process.env.EMAIL_FROM || 'PNPtv! <noreply@pnptv.app>';
     }
 
     /**
@@ -241,7 +241,7 @@ class EmailService {
     async sendBroadcastEmail(data) {
         const {
             email,
-            userName = 'PNP Latino Member',
+            userName = 'PNPtv! Member',
             messageEn,
             messageEs,
             userLanguage = 'en',
@@ -255,8 +255,8 @@ class EmailService {
 
         const message = userLanguage === 'es' ? messageEs : messageEn;
         const subject = userLanguage === 'es'
-            ? (subjectEs || 'PNP Latino Update! Noticias de PNP Latino')
-            : (subjectEn || 'PNP Latino Update! Noticias de PNP Latino');
+            ? (subjectEs || 'PNPtv! — Novedades')
+            : (subjectEn || 'PNPtv! — Latest Update');
         const preheader = userLanguage === 'es' ? preheaderEs : preheaderEn;
         const html = this.getBroadcastEmailTemplate({
             userName,
@@ -271,7 +271,7 @@ class EmailService {
             to: email,
             subject,
             html,
-            from: 'noreply@pnptv.app'
+            from: 'PNPtv! <noreply@pnptv.app>'
         });
     }
 
@@ -296,7 +296,7 @@ class EmailService {
             try {
                 await this.sendBroadcastEmail({
                     email: user.email,
-                    userName: user.first_name || user.username || 'PNP Latino Member',
+                    userName: user.first_name || user.username || 'PNPtv! Member',
                     messageEn,
                     messageEs,
                     userLanguage: user.language || 'en',
@@ -326,16 +326,16 @@ class EmailService {
      * @returns {Promise<Object>} Send result
      */
     async sendReactivationEmail(data) {
-        const { email, userName = 'PNP Latino Member', lifetimeDealLink, telegramLink, userLanguage = 'en' } = data;
+        const { email, userName = 'PNPtv! Member', lifetimeDealLink, telegramLink, userLanguage = 'en' } = data;
 
-        const subject = userLanguage === 'es' ? '🔥 PNP Latino TV Está de Vuelta 🔥' : '🔥 PNP Latino TV IS BACK 🔥';
+        const subject = userLanguage === 'es' ? '🔥 PNPtv! Está de Vuelta 🔥' : '🔥 PNPtv! IS BACK 🔥';
         const html = this.getReactivationEmailTemplate({ lifetimeDealLink, telegramLink, language: userLanguage });
 
         return await this.send({
             to: email,
             subject: subject,
             html,
-            from: 'noreply@pnptv.app'
+            from: 'PNPtv! <noreply@pnptv.app>'
         });
     }
 
@@ -380,8 +380,8 @@ class EmailService {
         const isSpanish = language === 'es';
         const greeting = isSpanish ? `¡Hola ${userName}!` : `Hey ${userName}!`;
         const footerText = isSpanish
-            ? 'Recibiste este correo porque eres miembro de PNP Latino TV.'
-            : 'You received this email because you are a member of PNP Latino TV.';
+            ? 'Recibiste este correo porque eres miembro de PNPtv!'
+            : 'You received this email because you are a member of PNPtv!';
         const unsubText = isSpanish
             ? 'Para dejar de recibir estos correos, actualiza tus preferencias en el bot.'
             : 'To stop receiving these emails, update your preferences in the bot.';
@@ -404,7 +404,7 @@ class EmailService {
 
         // Media HTML
         const mediaHtml = mediaUrl
-            ? `<div style="text-align: center; margin: 20px 0;"><img src="${mediaUrl}" alt="PNP Latino" style="max-width: 100%; border-radius: 10px;"></div>`
+            ? `<div style="text-align: center; margin: 20px 0;"><img src="${mediaUrl}" alt="PNPtv!" style="max-width: 100%; border-radius: 10px;"></div>`
             : '';
 
         // Convert message line breaks to HTML
@@ -501,7 +501,7 @@ class EmailService {
     ${preheaderText}
     <div class="container">
         <div class="header">
-            <div class="logo">🔥 PNP Latino TV</div>
+            <div class="logo">🔥 PNPtv!</div>
         </div>
 
         <h1 class="greeting">${greeting}</h1>
@@ -524,7 +524,7 @@ class EmailService {
             </div>
             <p>${footerText}</p>
             <p>${unsubText}</p>
-            <p>© ${new Date().getFullYear()} PNP Latino TV. All rights reserved.</p>
+            <p>© ${new Date().getFullYear()} PNPtv!. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -934,7 +934,7 @@ class EmailService {
             to: email,
             subject: `Invoice #${invoiceNumber} from ${storeName}`,
             html,
-            from: 'noreply@pnptv.app' // Explicitly setting the 'from' address
+            from: 'PNPtv! <noreply@pnptv.app>'
         });
     }
 
@@ -1153,7 +1153,7 @@ class EmailService {
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>PNP Latino TV Está de Vuelta</title>
+  <title>PNPtv! Está de Vuelta</title>
   <style>
     body {
       margin: 0;
@@ -1250,7 +1250,7 @@ class EmailService {
           <tr>
             <td>
               <p>
-                <span class="highlight">PNP Latino TV</span> está de vuelta — <span class="highlight">más 🔥 que nunca</span>.
+                <span class="highlight">PNPtv!</span> está de vuelta — <span class="highlight">más 🔥 que nunca</span>.
               </p>
               <p>
                 Después de cada intento de cierre, nos levantamos más fuertes, trayéndote el contenido que amas y un bot de nueva generación construido para mantener a nuestra comunidad más unida que nunca.
@@ -1288,7 +1288,7 @@ class EmailService {
 
           <tr>
             <td align="center" class="footer-text">
-              PNP Latino TV — Comunidad • Conexión • Placer
+              PNPtv! — Comunidad • Conexión • Placer
             </td>
           </tr>
 
@@ -1303,7 +1303,7 @@ class EmailService {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>PNP Latino TV Is Back</title>
+  <title>PNPtv! Is Back</title>
   <style>
     body {
       margin: 0;
@@ -1392,7 +1392,7 @@ class EmailService {
           
           <tr>
             <td class="header">
-              <h1>🔥 PNP Latino TV IS BACK 🔥</h1>
+              <h1>🔥 PNPtv! IS BACK 🔥</h1>
               <h2>Hotter Than Ever</h2>
             </td>
           </tr>
@@ -1400,7 +1400,7 @@ class EmailService {
           <tr>
             <td>
               <p>
-                <span class="highlight">PNP Latino TV</span> is back — <span class="highlight">hotter than ever</span>.
+                <span class="highlight">PNPtv!</span> is back — <span class="highlight">hotter than ever</span>.
               </p>
               <p>
                 After every shutdown attempt, we rise stronger, bringing you the content you love and a new generation bot built to keep our community closer than ever.
@@ -1438,7 +1438,7 @@ class EmailService {
 
           <tr>
             <td align="center" class="footer-text">
-              PNP Latino TV — Community • Connection • Pleasure
+              PNPtv! — Community • Connection • Pleasure
             </td>
           </tr>
 

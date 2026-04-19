@@ -53,9 +53,9 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   const handleTrackEndRef = useRef<() => void>(() => {});
   const currentTrackRef = useRef<MediaTrack | null>(null);
 
-  // ── Web Audio mastering chain (built lazily on first direct-<audio> play) ──
+  // ── Web Audio graph (built lazily on first direct-<audio> play) ──
+  // Graph is source → duck → master → destination; no mastering chain.
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
   const duckGainRef = useRef<GainNode | null>(null);
   const graphFailedRef = useRef(false);
@@ -139,45 +139,31 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     try {
       const Ctx = window.AudioContext || (window as any).webkitAudioContext;
       if (!Ctx) { graphFailedRef.current = true; return; }
-      const ctx: AudioContext = new Ctx();
+      let ctx: AudioContext;
+      try {
+        // latencyHint only — do NOT pin sampleRate: forcing 48 kHz on 44.1 kHz
+        // source streams triggers browser resampling that sounds gritty.
+        ctx = new Ctx({ latencyHint: "playback" });
+      } catch {
+        ctx = new Ctx();
+      }
       const source = ctx.createMediaElementSource(audio);
 
-      const lowShelf = ctx.createBiquadFilter();
-      lowShelf.type = "lowshelf";
-      lowShelf.frequency.value = 120;
-      lowShelf.gain.value = 2;
-
-      const highShelf = ctx.createBiquadFilter();
-      highShelf.type = "highshelf";
-      highShelf.frequency.value = 8000;
-      highShelf.gain.value = 1.5;
-
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -18;
-      compressor.ratio.value = 3;
-      compressor.attack.value = 0.005;
-      compressor.release.value = 0.15;
-      compressor.knee.value = 6;
-
-      const makeup = ctx.createGain();
-      makeup.gain.value = Math.pow(10, 2 / 20); // +2 dB
-
+      // Minimal graph: duck → master → destination. The streams are already
+      // mastered; earlier EQ + 2:1 compressor + 20:1 limiter chain made them
+      // sound squashed / pumpy and was the root cause of "music sounds
+      // terrible". We only need real-time volume control and ducking.
       const duck = ctx.createGain();
       duck.gain.value = 1.0;
 
       const master = ctx.createGain();
       master.gain.value = volume;
 
-      source.connect(lowShelf);
-      lowShelf.connect(highShelf);
-      highShelf.connect(compressor);
-      compressor.connect(makeup);
-      makeup.connect(duck);
+      source.connect(duck);
       duck.connect(master);
       master.connect(ctx.destination);
 
       audioCtxRef.current = ctx;
-      sourceNodeRef.current = source;
       duckGainRef.current = duck;
       masterGainRef.current = master;
 
@@ -203,8 +189,8 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     const ctx = audioCtxRef.current;
     const duck = duckGainRef.current;
     if (!ctx || !duck) return;
-    // -9 dB duck (~0.355) with 200 ms fade
-    const target = active ? 0.355 : 1.0;
+    // -6 dB duck (~0.5) with 200 ms fade — cedes space to voice without feeling jarring.
+    const target = active ? 0.5 : 1.0;
     duck.gain.setTargetAtTime(target, ctx.currentTime, 0.07);
   }, []);
 
@@ -365,7 +351,8 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
               soundcloudPlayerRef.current.bind(window.SC.Widget.Events.PLAY, () => setIsPlaying(true));
               soundcloudPlayerRef.current.bind(window.SC.Widget.Events.PAUSE, () => setIsPlaying(false));
               soundcloudPlayerRef.current.bind(window.SC.Widget.Events.READY, () => {
-                soundcloudPlayerRef.current?.setVolume(volume * 100);
+                // Clamp SC widget to 85% to match perceived loudness of graph-processed tracks.
+                soundcloudPlayerRef.current?.setVolume(volume * 85);
                 // The first track was loaded via the iframe src, so just play it.
                 soundcloudPlayerRef.current?.play();
                 setIsPlaying(true);
@@ -381,7 +368,7 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
                 if (gen !== playGenRef.current) return;
                 setIsPlaying(true);
                 setIsLoading(false);
-                soundcloudPlayerRef.current?.setVolume(volume * 100);
+                soundcloudPlayerRef.current?.setVolume(volume * 85);
               },
             });
           };
@@ -541,7 +528,7 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
       audioRef.current.volume = clamped;
     }
     if (soundcloudPlayerRef.current) {
-      soundcloudPlayerRef.current.setVolume(clamped * 100);
+      soundcloudPlayerRef.current.setVolume(clamped * 85);
     }
     try { localStorage.setItem("pnp:music:volume", String(clamped)); } catch { /* SecurityError in Telegram browsers */ }
   }, []);

@@ -37,6 +37,23 @@ const X_MAX_TEXT_LENGTH = 280;
 const CROSS_POST_DAILY_LIMIT = 25;
 const PNPTV_APP_URL = 'https://pnptv.app';
 
+// When X returns 402 CreditsDepleted, stop hammering the endpoint for this
+// long — cuts log noise and API cost while the developer plan is topped up.
+const X_CREDITS_COOLDOWN_KEY = 'x:credits_depleted:cooldown';
+const X_CREDITS_COOLDOWN_SECONDS = 60 * 60; // 1 hour
+// Don't re-page admins more than once per 24 h for the same incident.
+const X_CREDITS_ALERT_KEY = 'x:credits_depleted:alerted';
+const X_CREDITS_ALERT_SECONDS = 24 * 60 * 60;
+const X_CREDITS_USER_MESSAGE =
+  'Cross-posting to X is temporarily unavailable (API quota exhausted). Please try again later.';
+
+function isCreditsDepletedError(errData) {
+  if (!errData || typeof errData !== 'object') return false;
+  if (errData.title === 'CreditsDepleted') return true;
+  if (typeof errData.type === 'string' && errData.type.includes('/problems/credits')) return true;
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // AES-256-GCM helpers — identical to those in xOAuthRoutes.js
 // ---------------------------------------------------------------------------
@@ -294,6 +311,20 @@ const shareToX = async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid post ID' });
   }
 
+  // Short-circuit while the X developer account is known to be out of credits —
+  // cleared automatically when the Redis TTL expires.
+  try {
+    const redis = getRedis();
+    const cooldown = redis ? await redis.get(X_CREDITS_COOLDOWN_KEY) : null;
+    if (cooldown) {
+      return res.status(503).json({
+        success: false,
+        code: 'x_credits_depleted',
+        error: X_CREDITS_USER_MESSAGE,
+      });
+    }
+  } catch (_) { /* Redis unavailable — fall through and let the X call decide */ }
+
   try {
     // ── 1. Fetch user's X credentials from DB ──────────────────────────────
     const { rows: userRows } = await query(
@@ -511,6 +542,45 @@ const shareToX = async (req, res) => {
           success: false,
           code: 'x_rate_limited',
           error: 'X is rate limiting posts right now. Please try again in a few minutes.',
+        });
+      }
+
+      // X developer account out of credits (billing-side, not user-specific) —
+      // set a cooldown so we stop slamming the endpoint, and page admins once.
+      if (status === 402 && isCreditsDepletedError(xErrData)) {
+        try {
+          const redis = getRedis();
+          if (redis) {
+            await redis.set(X_CREDITS_COOLDOWN_KEY, '1', 'EX', X_CREDITS_COOLDOWN_SECONDS);
+            const alreadyAlerted = await redis.get(X_CREDITS_ALERT_KEY);
+            if (!alreadyAlerted) {
+              await redis.set(X_CREDITS_ALERT_KEY, '1', 'EX', X_CREDITS_ALERT_SECONDS);
+              try {
+                const NotificationService = require('../../../services/notificationService');
+                NotificationService.notifyAdmins(
+                  'X cross-posting disabled — API credits depleted. Top up at developer.twitter.com.',
+                  'x_credits_depleted'
+                ).catch((err) => logger.warn('[X Share] Admin alert failed', { error: err.message }));
+              } catch (notifyErr) {
+                logger.warn('[X Share] Could not load NotificationService', { error: notifyErr.message });
+              }
+            }
+          }
+        } catch (redisErr) {
+          logger.warn('[X Share] Redis cooldown set failed', { error: redisErr.message });
+        }
+
+        await query(
+          `UPDATE x_cross_post_log SET status = 'failed', error_message = $1, updated_at = NOW()
+           WHERE social_post_id = $2 AND user_id = $3`,
+          ['X API credits depleted (402)', postId, sessionUser.id],
+          { cache: false }
+        );
+
+        return res.status(503).json({
+          success: false,
+          code: 'x_credits_depleted',
+          error: X_CREDITS_USER_MESSAGE,
         });
       }
 

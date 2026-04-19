@@ -7,8 +7,9 @@ import {
   AudioTrack,
   VideoTrack,
 } from "@livekit/components-react";
-import { Track, RoomEvent, Participant } from "livekit-client";
+import { Track } from "livekit-client";
 import { getFeaturedPrimeVideos, getLowResAssetUrl, type PrimeVideo } from "@/lib/directus";
+import { useLiveKitRoomLifecycle } from "@/hooks/useLiveKitRoomLifecycle";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,8 +57,6 @@ function CallContent({
   // Core state — join muted by default, cam always on
   const [muted, setMuted] = useState(true);
   const [camOff, setCamOff] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
   const [callEnded, setCallEnded] = useState(false);
   const [permissionError, setPermissionError] = useState<"camera" | "microphone" | null>(null);
   const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null);
@@ -89,68 +88,25 @@ function CallContent({
   // Panel ref for fullscreen
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // ── Room connection events ────────────────────────────────────────────────
+  // ── Room connection events (shared with MainStage via useLiveKitRoomLifecycle) ──
 
-  useEffect(() => {
-    if (!room) return;
-
-    const onConnected = () => {
-      setConnected(true);
-      setReconnecting(false);
+  const { connected, reconnecting } = useLiveKitRoomLifecycle(room, {
+    onConnected: () => {
       setCallEnded(false);
       // Join muted by default
-      room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
-      // Allow landscape rotation for video calls
-      document.body.classList.add("allow-landscape");
-      try { screen.orientation?.unlock?.(); } catch {}
-    };
-    const onDisconnected = () => {
-      setConnected(false);
-      // Lock back to portrait
-      document.body.classList.remove("allow-landscape");
-      try { screen.orientation?.lock?.("portrait").catch(() => {}); } catch {}
-      // If room is still in reconnecting state, show overlay; otherwise treat as call ended
-      if (room.state === "reconnecting") {
-        setReconnecting(true);
-      } else {
-        setReconnecting(false);
-        setCallEnded(true);
-      }
-    };
-    const onReconnecting = () => {
-      setReconnecting(true);
-      setConnected(false);
-      onReconnectingEvent?.();
-    };
-    const onReconnected = () => {
-      setReconnecting(false);
-      setConnected(true);
-    };
-
-    const onActiveSpeaker = (speakers: Participant[]) => {
+      room?.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+    },
+    onDisconnected: () => {
+      // The shared hook already flips reconnecting based on room.state.
+      // If the room is fully gone (not reconnecting), surface call-ended UI.
+      if (room && room.state !== "reconnecting") setCallEnded(true);
+    },
+    onReconnecting: () => { onReconnectingEvent?.(); },
+    onActiveSpeakers: (speakers) => {
       const top = speakers.find((s) => !s.isLocal);
       setActiveSpeakerId(top ? top.identity : null);
-    };
-
-    room.on(RoomEvent.Connected, onConnected);
-    room.on(RoomEvent.Disconnected, onDisconnected);
-    room.on(RoomEvent.Reconnecting, onReconnecting);
-    room.on(RoomEvent.Reconnected, onReconnected);
-    room.on(RoomEvent.ActiveSpeakersChanged, onActiveSpeaker);
-
-    if (room.state === "connected") {
-      setConnected(true);
-      room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
-    }
-
-    return () => {
-      room.off(RoomEvent.Connected, onConnected);
-      room.off(RoomEvent.Disconnected, onDisconnected);
-      room.off(RoomEvent.Reconnecting, onReconnecting);
-      room.off(RoomEvent.Reconnected, onReconnected);
-      room.off(RoomEvent.ActiveSpeakersChanged, onActiveSpeaker);
-    };
-  }, [room, onReconnectingEvent]);
+    },
+  });
 
   // ── Fetch CMS clips ──────────────────────────────────────────────────────
 
@@ -333,7 +289,7 @@ function CallContent({
   // ── Shared style helpers ──────────────────────────────────────────────────
 
   const btnBase =
-    "flex flex-col items-center justify-center gap-1 rounded-2xl transition-all active:scale-95 select-none";
+    "flex flex-col items-center justify-center gap-1 rounded-2xl transition-all active:scale-95 select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent";
   const btnSizeMobile = "min-w-[52px] min-h-[52px] p-2";
   const btnLabel = "text-[9px] font-medium text-white/50 leading-none";
 
@@ -371,7 +327,7 @@ function CallContent({
           <button
             type="button"
             onClick={() => permissionError === "camera" ? toggleCam() : toggleMute()}
-            className="flex-shrink-0 px-3 min-h-[32px] rounded-lg text-xs font-semibold text-white bg-red-500/30 border border-red-500/50 hover:bg-red-500/50 transition-colors"
+            className="flex-shrink-0 px-4 min-h-[40px] rounded-lg text-xs font-semibold text-white bg-red-500/30 border border-red-500/50 hover:bg-red-500/50 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
             aria-label={`Retry ${permissionError} access`}
           >
             Retry
@@ -410,8 +366,9 @@ function CallContent({
             <button
               type="button"
               onClick={() => { setCallEnded(false); onClose(); }}
-              className="px-4 min-h-[44px] rounded-xl text-sm font-medium text-white/70 bg-white/10 border border-white/15 hover:bg-white/15 transition-colors"
+              className="px-6 min-h-[44px] rounded-xl text-sm font-medium text-white/80 bg-white/10 border border-white/15 hover:bg-white/15 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
               aria-label="Close call dock"
+              autoFocus
             >
               Close
             </button>
@@ -445,13 +402,13 @@ function CallContent({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           {/* Layout toggle */}
           <button
             onClick={cycleLayout}
-            className="w-7 h-7 rounded-full flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"
+            className="w-10 h-10 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             title={`Layout: ${gridLayout}`}
-            aria-label={`Video layout, currently ${gridLayout}`}
+            aria-label={`Video layout, currently ${gridLayout}. Tap to cycle.`}
           >
             {gridLayout === "auto" && (
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -477,9 +434,11 @@ function CallContent({
           {/* Close */}
           <button
             onClick={onClose}
-            className="w-7 h-7 rounded-full flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"
+            className="w-10 h-10 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+            title="Close call dock"
+            aria-label="Close call dock"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -546,10 +505,14 @@ function CallContent({
                   />
                 ) : null}
               </div>
-              {/* Strip: remaining tiles */}
-              <div className="flex-shrink-0 flex gap-1.5 overflow-x-auto pb-1" style={{ minHeight: "56px" }}>
+              {/* Strip: remaining tiles — horizontal scroll on all sizes, with mobile snap */}
+              <div
+                className="flex-shrink-0 flex gap-1.5 overflow-x-auto pb-1 snap-x snap-mandatory scrollbar-hide"
+                style={{ minHeight: "60px", WebkitOverflowScrolling: "touch" }}
+                aria-label="Other participants"
+              >
                 {showCristinaTile && activeSpeakerId && userVideoTracks.find((t) => t.participant.identity === activeSpeakerId) && (
-                  <div className="w-14 h-14 flex-shrink-0">
+                  <div className="w-14 h-14 flex-shrink-0 snap-start">
                     <CristinaClipTile
                       featuredVideos={featuredVideos}
                       clipIndex={clipIndex}
@@ -561,7 +524,7 @@ function CallContent({
                 {userVideoTracks
                   .filter((t) => t.participant.identity !== activeSpeakerId)
                   .map((trackRef) => (
-                    <div key={trackRef.publication.trackSid} className="w-14 h-14 flex-shrink-0">
+                    <div key={trackRef.publication.trackSid} className="w-14 h-14 flex-shrink-0 snap-start">
                       <VideoTile
                         trackRef={trackRef}
                         isActiveSpeaker={false}
@@ -612,9 +575,13 @@ function CallContent({
               )}
               {/* User cams strip */}
               {userVideoTracks.length > 0 && (
-                <div className="flex-shrink-0 flex gap-1.5 overflow-x-auto pb-1" style={{ minHeight: "48px" }}>
+                <div
+                  className="flex-shrink-0 flex gap-1.5 overflow-x-auto pb-1 snap-x snap-mandatory scrollbar-hide"
+                  style={{ minHeight: "52px", WebkitOverflowScrolling: "touch" }}
+                  aria-label="Other participants"
+                >
                   {userVideoTracks.map((trackRef) => (
-                    <div key={trackRef.publication.trackSid} className="w-12 h-12 flex-shrink-0 rounded-full overflow-hidden">
+                    <div key={trackRef.publication.trackSid} className="w-12 h-12 flex-shrink-0 rounded-full overflow-hidden snap-start">
                       <VideoTile
                         trackRef={trackRef}
                         isActiveSpeaker={activeSpeakerId === trackRef.participant.identity}
@@ -637,29 +604,34 @@ function CallContent({
           <p className="text-[10px] text-white/30 uppercase tracking-wider font-semibold mb-2">
             {totalPeople} in the room
           </p>
-          <div className="flex flex-wrap gap-1.5">
-            {others.slice(0, 12).map((p) => (
-              <div
-                key={p.identity}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-full"
-                style={{ background: "rgba(255,255,255,0.05)" }}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
-                <span className="text-[11px] text-white/70 truncate max-w-[80px]">
-                  {p.name || p.identity}
-                </span>
-                {isMicMuted(p.identity) && (
-                  <svg className="w-3 h-3 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-                  </svg>
-                )}
-              </div>
-            ))}
+          <div className="flex flex-wrap gap-1.5 overflow-y-auto max-h-[6.5rem]">
+            {others.slice(0, 12).map((p) => {
+              const name = p.name || p.identity;
+              return (
+                <div
+                  key={p.identity}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-full"
+                  style={{ background: "rgba(255,255,255,0.05)" }}
+                  title={isMicMuted(p.identity) ? `${name} (muted)` : name}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" aria-hidden="true" />
+                  <span className="text-[11px] text-white/70 truncate max-w-[120px]">
+                    {name}
+                  </span>
+                  {isMicMuted(p.identity) && (
+                    <svg className="w-3 h-3 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-label="muted">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                    </svg>
+                  )}
+                </div>
+              );
+            })}
             {others.length > 12 && (
               <div
                 className="flex items-center px-2 py-1 rounded-full"
                 style={{ background: "rgba(255,255,255,0.05)" }}
+                title={`${others.length - 12} more participants`}
               >
                 <span className="text-[11px] text-white/40">+{others.length - 12}</span>
               </div>
@@ -677,7 +649,7 @@ function CallContent({
         }}
       >
         <div
-          className="flex items-center justify-between px-3 py-3 gap-1"
+          className="flex items-center justify-between px-3 py-3 gap-2"
           style={{
             background: "rgba(10,12,20,0.85)",
             backdropFilter: "blur(20px)",
@@ -685,8 +657,8 @@ function CallContent({
             paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
           }}
         >
-          {/* Left group: Mic, Camera, ScreenShare, Chat, Settings */}
-          <div className="flex items-center gap-1">
+          {/* Left group: Mic, Camera, Settings, Fullscreen — scrollable on tight landscape phones */}
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide" style={{ WebkitOverflowScrolling: "touch" }}>
             {/* Mic */}
             <button
               onClick={toggleMute}
@@ -816,10 +788,10 @@ function CallContent({
               <p className="text-sm font-semibold text-white">Device Settings</p>
               <button
                 onClick={() => setSettingsOpen(false)}
-                className="w-11 h-11 flex items-center justify-center rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-all"
+                className="w-11 h-11 flex items-center justify-center rounded-full text-white/60 hover:text-white hover:bg-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
                 aria-label="Close device settings"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
@@ -891,6 +863,10 @@ function CallContent({
           0%, 100% { box-shadow: 0 0 0 2px rgba(123,97,255,0.6); }
           50%       { box-shadow: 0 0 0 4px rgba(123,97,255,0.3); }
         }
+        @media (prefers-reduced-motion: reduce) {
+          @keyframes speakerGlow { 0%, 100% { box-shadow: 0 0 0 2px rgba(123,97,255,0.6); } }
+          @keyframes eqBounce1, @keyframes eqBounce2, @keyframes eqBounce3, @keyframes eqBounce4 { from,to { height: 8px; } }
+        }
       `}</style>
     </div>
   );
@@ -909,9 +885,11 @@ function VideoTile({
   isMuted: boolean;
   compact: boolean;
 }) {
+  const name = trackRef.participant.name || trackRef.participant.identity;
   return (
     <div
       className="relative rounded-xl overflow-hidden bg-black"
+      title={isMuted ? `${name} (muted)` : name}
       style={{
         aspectRatio: compact ? "auto" : "16/9",
         minHeight: compact ? "80px" : undefined,
@@ -923,21 +901,32 @@ function VideoTile({
     >
       <VideoTrack trackRef={trackRef} className="w-full h-full object-cover" />
 
-      {/* Name overlay */}
-      <div
-        className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-2 py-1"
-        style={{ background: "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%)" }}
-      >
-        <span className="text-[10px] text-white/90 font-medium truncate">
-          {trackRef.participant.name || trackRef.participant.identity}
-        </span>
-        {isMuted && (
-          <svg className="w-3 h-3 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      {/* Name overlay — hide on ultra-compact tiles */}
+      {!compact && (
+        <div
+          className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-2 py-1 gap-1"
+          style={{ background: "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%)" }}
+        >
+          <span className="text-[10px] text-white/90 font-medium truncate">
+            {name}
+          </span>
+          {isMuted && (
+            <svg className="w-3 h-3 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-label="muted">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+            </svg>
+          )}
+        </div>
+      )}
+      {/* Compact mute indicator pinned top-left so it survives tiny sizes */}
+      {compact && isMuted && (
+        <div className="absolute top-1 left-1 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: "rgba(255,59,48,0.85)" }}>
+          <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} aria-label="muted">
             <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
           </svg>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Active speaker indicator */}
       {isActiveSpeaker && (
@@ -1172,12 +1161,18 @@ function LiveKitCallPanel({
 
   if (!open || !activeToken) return null;
 
+  // Safari <16 can't publish VP9 reliably — fall back to h264 there so users
+  // on Safari don't silently fail to appear in the call.
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
+  const publishCodec: "vp9" | "h264" = isSafari ? "h264" : "vp9";
+
   return (
     <div
       className="mx-3 mt-2 mb-1 flex-shrink-0 rounded-2xl overflow-hidden"
       style={{
-        minHeight: "420px",
-        maxHeight: "80vh",
+        minHeight: "min(420px, 60dvh)",
+        maxHeight: "min(80dvh, calc(100dvh - 5rem))",
         display: "flex",
         flexDirection: "column",
         border: "1px solid rgba(123,97,255,0.2)",
@@ -1194,7 +1189,7 @@ function LiveKitCallPanel({
           dynacast: true,
           publishDefaults: {
             simulcast: true,
-            videoCodec: "vp9",
+            videoCodec: publishCodec,
           },
         }}
         onDisconnected={() => onCallEnded?.()}

@@ -66,40 +66,22 @@ export function useHangoutMusic({ groupId, isModerator, isMainStage, duckActive 
     try {
       const Ctx = window.AudioContext || (window as any).webkitAudioContext;
       if (!Ctx) { graphFailedRef.current = true; return; }
-      const ctx: AudioContext = new Ctx();
+      // latencyHint only — do not pin sampleRate: forcing 48 kHz on 44.1 kHz
+      // streams triggers resampling that sounded gritty in earlier testing.
+      let ctx: AudioContext;
+      try { ctx = new Ctx({ latencyHint: "playback" }); } catch { ctx = new Ctx(); }
       const source = ctx.createMediaElementSource(audio);
 
-      const lowShelf = ctx.createBiquadFilter();
-      lowShelf.type = "lowshelf";
-      lowShelf.frequency.value = 120;
-      lowShelf.gain.value = 2;
-
-      const highShelf = ctx.createBiquadFilter();
-      highShelf.type = "highshelf";
-      highShelf.frequency.value = 8000;
-      highShelf.gain.value = 1.5;
-
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -18;
-      compressor.ratio.value = 3;
-      compressor.attack.value = 0.005;
-      compressor.release.value = 0.15;
-      compressor.knee.value = 6;
-
-      const makeup = ctx.createGain();
-      makeup.gain.value = Math.pow(10, 2 / 20);
-
+      // Minimal graph: duck → master → destination. No EQ, no compressor,
+      // no make-up gain. The Ampache streams are already mastered; earlier
+      // processing was making them sound squashed / pumpy.
       const duck = ctx.createGain();
       duck.gain.value = duckActive ? 0.355 : 1.0;
 
       const master = ctx.createGain();
       master.gain.value = volumeRef.current;
 
-      source.connect(lowShelf);
-      lowShelf.connect(highShelf);
-      highShelf.connect(compressor);
-      compressor.connect(makeup);
-      makeup.connect(duck);
+      source.connect(duck);
       duck.connect(master);
       master.connect(ctx.destination);
 

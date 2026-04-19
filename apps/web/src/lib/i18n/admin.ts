@@ -30,6 +30,7 @@ const strings = {
       support: "Support",
       creatorSubs: "Creator Subs",
       meruLinks: "Meru Links",
+      reports: "Reports",
     },
     // Shared admin strings
     shared: {
@@ -788,6 +789,7 @@ const strings = {
       support: "Soporte",
       creatorSubs: "Subs Creadores",
       meruLinks: "Meru Links",
+      reports: "Reportes",
     },
     shared: {
       search: "Buscar",

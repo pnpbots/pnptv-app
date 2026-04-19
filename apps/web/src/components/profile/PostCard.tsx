@@ -50,6 +50,7 @@ export interface PostCardProps {
   onDelete: (id: number) => void;
   onAuthorTap?: (userId: string) => void;
   onSubscribeCta?: () => void;
+  onReport?: (postId: number) => void;
   contentDisclaimerAccepted?: boolean;
   onAcceptDisclaimer?: () => Promise<void>;
   viewerCity?: string | null;
@@ -71,6 +72,7 @@ export default function PostCard({
   onDelete,
   onAuthorTap,
   onSubscribeCta,
+  onReport,
   contentDisclaimerAccepted,
   onAcceptDisclaimer,
   viewerCity,
@@ -515,6 +517,21 @@ export default function PostCard({
               </button>
             )}
 
+            {/* Report post (non-owner) */}
+            {!isOwn && onReport && (
+              <button
+                onClick={() => onReport(post.id)}
+                className="ml-auto text-xs hover:text-amber-400 transition-colors"
+                title={p.reportPost}
+                aria-label={p.reportPost}
+                style={{ color: "#8E8E93" }}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v1.5M3 21v-6m0 0l2.77-.693a9 9 0 016.208.682l.108.054a9 9 0 006.086.71l3.114-.732a48.524 48.524 0 01-.005-10.499l-3.11.732a9 9 0 01-6.085-.711l-.108-.054a9 9 0 00-6.208-.682L3 4.5M3 15V4.5" />
+                </svg>
+              </button>
+            )}
+
             {/* Delete (owner or admin) */}
             {canDelete && (
               <button
@@ -523,7 +540,7 @@ export default function PostCard({
                   onDelete(post.id);
                 }}
                 disabled={deleting}
-                className="ml-auto text-xs hover:text-red-400 transition-colors"
+                className={`${!isOwn && onReport ? "" : "ml-auto"} text-xs hover:text-red-400 transition-colors`}
                 title={p.deletePost}
                 aria-label={p.deletePost}
               >

@@ -235,8 +235,35 @@ async function processStreamHeartbeat(viewerId, channelRef) {
 }
 
 
+/**
+ * Returns the user's current token balance. Returns 0 if no wallet exists yet.
+ *
+ * @param {string|number} userId
+ * @returns {Promise<number>}
+ */
+async function getBalance(userId) {
+  try {
+    const cached = await cache.get(`wallet:${userId}`).catch(() => null);
+    if (cached != null) {
+      const n = Number(cached);
+      if (Number.isFinite(n)) return n;
+    }
+    const res = await query(
+      'SELECT balance_tokens FROM user_token_wallets WHERE user_id = $1',
+      [String(userId)]
+    );
+    const balance = res.rows.length === 0 ? 0 : Number(res.rows[0].balance_tokens) || 0;
+    await cache.set(`wallet:${userId}`, balance, 30).catch(() => {});
+    return balance;
+  } catch (error) {
+    logger.error('tokenService.getBalance error', { userId, error: error.message });
+    return 0;
+  }
+}
+
 module.exports = {
   hasSufficientBalance,
+  getBalance,
   deductTokens,
   creditTokens,
   processStreamHeartbeat,

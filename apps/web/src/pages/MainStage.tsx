@@ -4,6 +4,7 @@ import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
+import { useLiveKitRoomLifecycle } from "@/hooks/useLiveKitRoomLifecycle";
 import { getSocket } from "@/lib/socket";
 import {
   LiveKitRoom,
@@ -35,7 +36,7 @@ import {
   knockToSpeak,
   approveKnock,
   denyKnock,
-  getHangoutGroups,
+  getMainGroup,
   startHangoutCall,
   joinHangoutCall,
   getRadioNowPlaying,
@@ -53,6 +54,16 @@ type FloatReaction = { id: string; emoji: string; x: number };
 
 type KnockEntry = { userId: string; displayName: string };
 
+// ─── Close icon ────────────────────────────────────────────────────────────
+
+function CloseIcon({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
 // ─── Floating DM Component ──────────────────────────────────────────────────
 
 interface FloatingDmProps {
@@ -69,18 +80,67 @@ function FloatingDm({ userId, displayName, onClose }: FloatingDmProps) {
           <div className="w-2 h-2 bg-green-500 rounded-full" />
           <span className="text-sm font-bold text-white truncate max-w-[180px]">{displayName}</span>
         </div>
-        <button onClick={onClose} className="p-1 hover:bg-white/10 rounded-full transition-colors">
-          <svg className="w-4 h-4 text-white/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
+        <button onClick={onClose} className="p-1 hover:bg-white/10 rounded-full transition-colors text-white/50">
+          <CloseIcon className="w-4 h-4" />
         </button>
       </div>
       <iframe
-        src={`/dm/${userId}?embedded=true`}
+        src={`/dm/${encodeURIComponent(String(userId))}?embedded=true`}
         className="flex-1 w-full border-0"
         title={`Chat with ${displayName}`}
       />
     </div>
+  );
+}
+
+// ─── Self-view ─────────────────────────────────────────────────────────────
+// Renders the local camera by attaching the publication's MediaStreamTrack to
+// a <video> element directly. Does NOT depend on useTracks returning a stable
+// TrackReference for the local participant, which was the source of the
+// "I can't see my own cam" bug.
+
+function SelfView({ participant }: { participant: Participant | undefined }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!participant) return;
+    const v = videoRef.current;
+    if (!v) return;
+
+    let currentTrack: any = null;
+
+    const attach = () => {
+      const pub = participant.getTrackPublication?.(Track.Source.Camera);
+      const track = pub?.track;
+      if (track && track !== currentTrack) {
+        if (currentTrack) { try { currentTrack.detach(v); } catch {} }
+        try { track.attach(v); currentTrack = track; } catch {}
+      }
+    };
+
+    attach();
+    participant.on("trackPublished" as any, attach);
+    participant.on("trackSubscribed" as any, attach);
+    participant.on("trackUnmuted" as any, attach);
+    participant.on("localTrackPublished" as any, attach);
+
+    return () => {
+      participant.off("trackPublished" as any, attach);
+      participant.off("trackSubscribed" as any, attach);
+      participant.off("trackUnmuted" as any, attach);
+      participant.off("localTrackPublished" as any, attach);
+      if (currentTrack) { try { currentTrack.detach(v); } catch {} }
+    };
+  }, [participant]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      playsInline
+      muted
+      className="w-full h-full object-cover bg-[#1C1C1E]"
+    />
   );
 }
 
@@ -158,58 +218,80 @@ interface StageRoomProps {
   stageMode: string;
   isAdmin: boolean;
   isPrime: boolean;
-  isMember: boolean;
-  inCall: boolean;
-  onGoOnStage: () => void;
   layout: StageLayout;
   onLayoutChange: (l: StageLayout) => void;
   primeVideos: PrimeVideo[];
+  primeVideosLoaded: boolean;
   nowPlaying: NowPlaying | null;
-  wellnessTip: string;
   onOpenDm: (userId: string, name: string) => void;
 }
 
+// StageRoom mounts only when the user is committed to the call (token in hand),
+// mirroring LiveKitCallDock. There is no pre-room / lobby state inside the
+// LiveKit context — rendering this component means the user is on stage.
 function StageRoom({
   onLeave,
   stageMode,
   isAdmin,
   isPrime,
-  isMember,
-  inCall,
-  onGoOnStage,
   layout,
   onLayoutChange,
   primeVideos,
+  primeVideosLoaded,
   nowPlaying,
-  wellnessTip,
   onOpenDm,
 }: StageRoomProps) {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
-  const { setDucking } = useMusicPlayer();
+  const { setDucking, pause: pauseLocalMusic, play: resumeLocalMusic, isPlaying: localMusicPlaying } = useMusicPlayer();
+  // Remember whether the user had local Ampache playing when they joined the
+  // stage so we can restore it on leave. We pause the local stream on entry
+  // because cristinaStageBot relays the same music into the LiveKit room —
+  // playing both at once phase-mangled the audio ("music sounds terrible").
+  const wasLocalPlayingRef = useRef(false);
+  useEffect(() => {
+    wasLocalPlayingRef.current = localMusicPlaying;
+    if (localMusicPlaying) pauseLocalMusic();
+    return () => {
+      if (wasLocalPlayingRef.current) resumeLocalMusic();
+    };
+    // Intentionally run only on mount/unmount; ignoring subsequent isPlaying
+    // changes so toggling music while on stage doesn't recursively pause.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const userVideoTracks = useMemo(
     () => tracks.filter((t) => t.participant.identity !== "cristina-ai"),
     [tracks]
   );
 
-  const [connected, setConnected] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
   const [ownQuality, setOwnQuality] = useState<ConnectionQuality>(ConnectionQuality.Unknown);
   const [activeSpeakerIds, setActiveSpeakerIds] = useState<Set<string>>(new Set());
   const [focusedParticipantId, setFocusedParticipantId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
-  const [showSelfView, setShowSelfView] = useState(true);
+  const [showSelfView, setShowSelfViewState] = useState<boolean>(() => {
+    try { const v = localStorage.getItem("pnp:stage:showSelfView"); return v === null ? true : v === "1"; } catch { return true; }
+  });
+  const setShowSelfView = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setShowSelfViewState((prev) => {
+      const resolved = typeof next === "function" ? (next as (p: boolean) => boolean)(prev) : next;
+      try { localStorage.setItem("pnp:stage:showSelfView", resolved ? "1" : "0"); } catch {}
+      return resolved;
+    });
+  }, []);
   const [showAttendants, setShowAttendants] = useState(false);
   const [videoIdx, setVideoIdx] = useState(0);
-  const [stageVideoMuted, setStageVideoMuted] = useState(true);
   const stageVideoRef = useRef<HTMLVideoElement>(null);
 
   // Mic / Cam / Device state — stage rules: cam on by default, mic off, admins can override
   const [cameraOn, setCameraOn] = useState(true);
   const [micOn, setMicOn] = useState(false);
-  const canToggleMic = isAdmin || isPrime;
+  // Track the SFU's view of publish rights. After approveKnock re-mints the
+  // token, LiveKitRoom reconnects and this flips to true, which unlocks the
+  // mic button without us having to persist any client-side "invited" flag.
+  const [canPublishAudio, setCanPublishAudio] = useState(false);
+  const canToggleMic = isAdmin || isPrime || canPublishAudio;
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [activeCamId, setActiveCamId] = useState<string>("");
   const [showDevices, setShowDevices] = useState(false);
@@ -219,68 +301,103 @@ function StageRoom({
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [raiseHand, setRaiseHand] = useState(false);
   const [knockToast, setKnockToast] = useState<string | null>(null);
+  // Kept separate from knockToast so a cam/mic permission error doesn't
+  // clobber a raise-hand notification or vice versa.
+  const [mediaError, setMediaError] = useState<string | null>(null);
   const [knockQueue, setKnockQueue] = useState<KnockEntry[]>([]);
   const [showKnockTray, setShowKnockTray] = useState(false);
 
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  // Reaction rate limiter — max one send per 300 ms (~3.3/s) and cap on-screen
+  const lastReactionAtRef = useRef(0);
+  // Prime-video error counter — stop cycling after ~2 full passes of failures
+  // so a broken CDN doesn't pin a render loop updating state forever.
+  const videoErrorCountRef = useRef(0);
+  const [videoGiveUp, setVideoGiveUp] = useState(false);
 
   const participants = useParticipants();
   const totalInRoom = participants.length;
 
-  // Connection + speaker + quality events
+  // LiveKit room lifecycle — connect/disconnect/reconnect + landscape lock
+  // are shared with LiveKitCallDock via useLiveKitRoomLifecycle. We only
+  // layer stage-specific state (stable active-speaker set, own quality) here.
+  const { connected, reconnecting } = useLiveKitRoomLifecycle(room, {
+    onActiveSpeakers: (speakers) => {
+      // Stable Set: only update when identities actually change. LiveKit fires
+      // this many times per second; unstable identity churn was re-running the
+      // ducking effect and causing audible gain zipper on the music.
+      const next = speakers.map((s) => s.identity).sort();
+      setActiveSpeakerIds((prev) => {
+        if (prev.size === next.length) {
+          let same = true;
+          for (const id of next) if (!prev.has(id)) { same = false; break; }
+          if (same) return prev;
+        }
+        return new Set(next);
+      });
+    },
+    onQuality: (q, p) => { if (p.isLocal) setOwnQuality(q); },
+  });
+
+  // Read the SFU's publish permissions from the local participant. Token
+  // grants only apply at connect time, so on reconnect-with-new-token this
+  // auto-flips and the mic button unlocks.
   useEffect(() => {
-    if (!room) return;
-    const onConnected = () => {
-      setConnected(true);
-      setReconnecting(false);
-      document.body.classList.add("allow-landscape");
-      try { (screen.orientation as any)?.unlock?.(); } catch {}
+    if (!room || !localParticipant) return;
+    const readPerms = () => {
+      const perms: any = localParticipant.permissions;
+      if (!perms) return setCanPublishAudio(false);
+      // ParticipantPermission exposes canPublish + canPublishSources. When
+      // canPublishSources is set, the Microphone source (2) signals audio rights.
+      const sources: number[] | undefined = perms.canPublishSources;
+      const allowAudio = perms.canPublish && (
+        !sources || sources.length === 0 || sources.includes(Track.Source.Microphone as unknown as number) || sources.includes(2)
+      );
+      setCanPublishAudio(!!allowAudio);
     };
-    const onDisconnected = () => {
-      setConnected(false);
-      document.body.classList.remove("allow-landscape");
-      try { (screen.orientation as any)?.lock?.("portrait").catch(() => {}); } catch {}
-    };
-    const onReconnecting = () => setReconnecting(true);
-    const onReconnected = () => setReconnecting(false);
-    const onActiveSpeakers = (speakers: Participant[]) => {
-      setActiveSpeakerIds(new Set(speakers.map((s) => s.identity)));
-    };
-    const onQuality = (q: ConnectionQuality, p: Participant) => {
-      if (p.isLocal) setOwnQuality(q);
-    };
+    readPerms();
+    const onPermsChanged = () => readPerms();
+    localParticipant.on("participantPermissionsChanged" as any, onPermsChanged);
+    return () => { localParticipant.off("participantPermissionsChanged" as any, onPermsChanged); };
+  }, [room, localParticipant]);
 
-    room.on(RoomEvent.Connected, onConnected);
-    room.on(RoomEvent.Disconnected, onDisconnected);
-    room.on(RoomEvent.Reconnecting, onReconnecting);
-    room.on(RoomEvent.Reconnected, onReconnected);
-    room.on(RoomEvent.ActiveSpeakersChanged, onActiveSpeakers);
-    room.on(RoomEvent.ConnectionQualityChanged, onQuality);
-
-    if (room.state === "connected") setConnected(true);
-    return () => {
-      room.off(RoomEvent.Connected, onConnected);
-      room.off(RoomEvent.Disconnected, onDisconnected);
-      room.off(RoomEvent.Reconnecting, onReconnecting);
-      room.off(RoomEvent.Reconnected, onReconnected);
-      room.off(RoomEvent.ActiveSpeakersChanged, onActiveSpeakers);
-      room.off(RoomEvent.ConnectionQualityChanged, onQuality);
-    };
-  }, [room]);
-
-  // Camera publishing — only when user is "on stage" AND cameraOn
-  useEffect(() => {
-    if (!room || !connected) return;
-    room.localParticipant.setCameraEnabled(inCall && cameraOn).catch(() => {});
-  }, [room, connected, inCall, cameraOn]);
-
-  // Mic — only admins/prime can unmute themselves; everyone else stays muted
+  // Cam + mic publishing. Errors surface to a dedicated mediaError toast so
+  // browser permission denials and SFU publish-rejection are visible to the
+  // user instead of silently leaving the cam/mic off.
   useEffect(() => {
     if (!room || !connected) return;
-    const allowMic = inCall && micOn && canToggleMic;
-    room.localParticipant.setMicrophoneEnabled(allowMic).catch(() => {});
-  }, [room, connected, inCall, micOn, canToggleMic]);
+    let cancelled = false;
+
+    const publishOrToast = async (
+      action: () => Promise<unknown>,
+      label: "Camera" | "Microphone",
+      short: "camera" | "mic",
+    ) => {
+      try {
+        await action();
+      } catch (err) {
+        if (cancelled) return;
+        console.error(`[MainStage] set${label}Enabled failed`, err);
+        const msg = (err as any)?.name === "NotAllowedError"
+          ? `${label} permission denied — enable it in the browser address bar.`
+          : `Could not publish your ${short}. Check permissions or reconnect.`;
+        setMediaError(msg);
+        setTimeout(() => setMediaError((prev) => (prev === msg ? null : prev)), 5000);
+      }
+    };
+
+    (async () => {
+      await publishOrToast(() => room.localParticipant.setCameraEnabled(cameraOn), "Camera", "camera");
+      if (cancelled) return;
+      await publishOrToast(
+        () => room.localParticipant.setMicrophoneEnabled(micOn && canToggleMic),
+        "Microphone",
+        "mic",
+      );
+    })();
+    return () => { cancelled = true; };
+  }, [room, connected, cameraOn, micOn, canToggleMic]);
 
   // Reactions over LiveKit data channel
   useEffect(() => {
@@ -301,11 +418,19 @@ function StageRoom({
   const spawnReaction = useCallback((emoji: string) => {
     const id = (globalThis.crypto as any)?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
     const x = Math.random() * 0.65 + 0.15;
-    setReactions((r) => [...r, { id, emoji, x }]);
+    setReactions((r) => {
+      // Keep at most the newest 24 floating at once — prevents a spammer from
+      // tanking the frame rate on everyone's device.
+      const next = [...r, { id, emoji, x }];
+      return next.length > 24 ? next.slice(-24) : next;
+    });
     setTimeout(() => setReactions((r) => r.filter((x) => x.id !== id)), 2600);
   }, []);
 
   const sendReaction = useCallback((emoji: string) => {
+    const now = Date.now();
+    if (now - lastReactionAtRef.current < 300) return; // throttle
+    lastReactionAtRef.current = now;
     spawnReaction(emoji);
     setShowReactionPicker(false);
     if (!room) return;
@@ -315,9 +440,9 @@ function StageRoom({
     } catch {}
   }, [room, spawnReaction]);
 
-  // Device enumeration
+  // Device enumeration — refreshes on devicechange so new cameras granted
+  // mid-session appear in the picker without toggling.
   useEffect(() => {
-    if (!inCall) return;
     let cancelled = false;
     const loadDevices = async () => {
       try {
@@ -332,7 +457,40 @@ function StageRoom({
       cancelled = true;
       navigator.mediaDevices?.removeEventListener?.("devicechange", loadDevices);
     };
-  }, [inCall]);
+  }, []);
+
+  // Initialise activeCamId from the currently-publishing track so the picker
+  // highlights the right device on first open, not only after a manual switch.
+  // Safari doesn't always expose deviceId via getSettings(); fall back to
+  // matching the track's label against the enumerated device list.
+  useEffect(() => {
+    if (!localParticipant) return;
+    const read = async () => {
+      const pub = localParticipant.getTrackPublication?.(Track.Source.Camera);
+      const mst = pub?.track?.mediaStreamTrack as MediaStreamTrack | undefined;
+      if (!mst) return;
+      const settings = mst.getSettings?.();
+      if (settings && typeof settings.deviceId === "string" && settings.deviceId) {
+        setActiveCamId(settings.deviceId);
+        return;
+      }
+      // Safari fallback: match on label. Device labels are only populated
+      // after getUserMedia has already succeeded, which it has here since
+      // the track is publishing.
+      try {
+        const list = await navigator.mediaDevices.enumerateDevices();
+        const match = list.find((d) => d.kind === "videoinput" && d.label && d.label === mst.label);
+        if (match?.deviceId) setActiveCamId(match.deviceId);
+      } catch {}
+    };
+    read();
+    localParticipant.on("trackPublished" as any, read);
+    localParticipant.on("localTrackPublished" as any, read);
+    return () => {
+      localParticipant.off("trackPublished" as any, read);
+      localParticipant.off("localTrackPublished" as any, read);
+    };
+  }, [localParticipant]);
 
   const switchCamera = useCallback(async (deviceId: string) => {
     if (!room) return;
@@ -342,6 +500,11 @@ function StageRoom({
       setShowDevices(false);
     } catch {}
   }, [room]);
+
+  const flashKnockToast = useCallback((msg: string, ms = 4000) => {
+    setKnockToast(msg);
+    setTimeout(() => setKnockToast((prev) => (prev === msg ? null : prev)), ms);
+  }, []);
 
   // Knock-queue wiring (admins only)
   useEffect(() => {
@@ -356,9 +519,11 @@ function StageRoom({
       setKnockQueue((q) => q.filter((x) => x.userId !== p.targetUserId));
     };
     const onApproved = () => {
+      // MainStage root handles the token swap; here we just flip UI state.
+      // canPublishAudio unlocks via the participant's permissions after the
+      // reconnect with the new token completes.
       setRaiseHand(false);
-      setKnockToast("You were invited to speak! Unmute when ready.");
-      setTimeout(() => setKnockToast(null), 4000);
+      flashKnockToast("You were invited to speak! Unmute when ready.");
     };
     sock.on?.("mainstage:knock:new", onNew);
     sock.on?.("mainstage:knock:resolved", onResolved);
@@ -368,21 +533,19 @@ function StageRoom({
       sock.off?.("mainstage:knock:resolved", onResolved);
       sock.off?.("mainstage:knock:approved", onApproved);
     };
-  }, [isAdmin]);
+  }, [isAdmin, flashKnockToast]);
 
   const handleRaiseHand = useCallback(async () => {
     if (raiseHand) return;
     setRaiseHand(true);
-    setKnockToast("Hand raised — waiting for an admin to invite you.");
-    setTimeout(() => setKnockToast(null), 4000);
+    flashKnockToast("Hand raised — waiting for an admin to invite you.");
     try {
       await knockToSpeak();
     } catch {
       setRaiseHand(false);
-      setKnockToast("Could not send knock. Try again in a moment.");
-      setTimeout(() => setKnockToast(null), 4000);
+      flashKnockToast("Could not send knock. Try again in a moment.");
     }
-  }, [raiseHand]);
+  }, [raiseHand, flashKnockToast]);
 
   const handleApproveKnock = useCallback(async (entry: KnockEntry) => {
     try { await approveKnock(entry.userId); } catch {}
@@ -418,6 +581,16 @@ function StageRoom({
     else setControlsVisible(true);
   }, [isFullscreen, resetControlsTimer]);
 
+  // Clear the pending auto-hide timer if the component unmounts while in fullscreen.
+  useEffect(() => {
+    return () => {
+      if (controlsTimerRef.current) {
+        clearTimeout(controlsTimerRef.current);
+        controlsTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const toggleFullscreen = useCallback(async () => {
     const el = stageRef.current;
     if (!el) return;
@@ -443,14 +616,8 @@ function StageRoom({
     return null;
   }, [activeSpeakerIds, localParticipant?.identity]);
 
-  // Music ducking: drop background music ~9 dB whenever any remote (non-AI) speaker is active.
-  useEffect(() => {
-    const anySpeaker = Array.from(activeSpeakerIds).some(
-      (id) => id !== "cristina-ai" && id !== localParticipant?.identity
-    );
-    setDucking(anySpeaker);
-    return () => setDucking(false);
-  }, [activeSpeakerIds, localParticipant?.identity, setDucking]);
+  // Music ducking — triggers when any remote (non-AI) speaker is active.
+  // Stage CMS video is permanently muted so that branch was removed.
 
   const handleTileSelect = useCallback((id: string) => {
     setFocusedParticipantId((prev) => (prev === id ? null : id));
@@ -471,25 +638,17 @@ function StageRoom({
     );
   };
 
-  // When the stage video is audible, duck the background music so it doesn't
-  // fight with the video's own audio track.
   useEffect(() => {
-    setDucking(!stageVideoMuted);
-    return () => setDucking(false);
-  }, [stageVideoMuted, setDucking]);
+    const anySpeaker = Array.from(activeSpeakerIds).some(
+      (id) => id !== "cristina-ai" && id !== localParticipant?.identity
+    );
+    setDucking(anySpeaker);
+  }, [activeSpeakerIds, localParticipant?.identity, setDucking]);
 
-  const toggleStageVideoAudio = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    const v = stageVideoRef.current;
-    if (!v) return;
-    const nextMuted = !stageVideoMuted;
-    v.muted = nextMuted;
-    // Unmuting requires a user gesture in most browsers — replay if needed.
-    if (!nextMuted) {
-      v.play().catch(() => {});
-    }
-    setStageVideoMuted(nextMuted);
-  }, [stageVideoMuted]);
+  // Restore full music volume only when the stage is torn down.
+  // Previously we returned setDucking(false) from the effect above, which
+  // fired on every dependency change and oscillated the duck gain.
+  useEffect(() => () => setDucking(false), [setDucking]);
 
   const renderCmsVideoTile = (isFocused: boolean = false) => (
     <div
@@ -498,60 +657,82 @@ function StageRoom({
         isFocused ? "ring-4 ring-[#FFB454] shadow-lg shadow-[#FFB454]/20" : "ring-1 ring-white/10"
       }`}
     >
-      {currentVideoSrc && (
+      {currentVideoSrc && !videoGiveUp ? (
         <video
           ref={stageVideoRef}
           key={currentVideoSrc}
           className="w-full h-full object-cover"
           src={currentVideoSrc}
           autoPlay
-          muted={stageVideoMuted}
+          // Stage feature clips are silent by design — the background music
+          // player is the only audio source on the stage.
+          muted
           playsInline
           loop={primeVideos.length === 1}
-          onEnded={() => setVideoIdx((i) => (i + 1) % Math.max(1, primeVideos.length))}
-          onError={() => setVideoIdx((i) => (i + 1) % Math.max(1, primeVideos.length))}
+          onEnded={() => {
+            videoErrorCountRef.current = 0;
+            setVideoIdx((i) => (i + 1) % Math.max(1, primeVideos.length));
+          }}
+          onError={() => {
+            const max = Math.max(2, primeVideos.length * 2);
+            if (++videoErrorCountRef.current >= max) {
+              setVideoGiveUp(true);
+              return;
+            }
+            setVideoIdx((i) => (i + 1) % Math.max(1, primeVideos.length));
+          }}
         />
+      ) : !primeVideosLoaded ? (
+        // Featured clips haven't landed yet — shimmer skeleton so the tile
+        // isn't a silent black rectangle.
+        <div className="w-full h-full bg-gradient-to-br from-[#1C1C1E] via-[#262628] to-[#1C1C1E] animate-pulse flex items-center justify-center">
+          <div className="w-10 h-10 border-2 border-[#FFB454]/30 border-t-[#FFB454] rounded-full animate-spin" />
+        </div>
+      ) : (
+        // Loaded but empty (or give-up after too many errors). Keep the tile
+        // visually useful with a neutral gradient + badge.
+        <div className="w-full h-full bg-gradient-to-br from-[#1C1C1E] to-[#0F0F10] flex items-center justify-center">
+          <svg className="w-8 h-8 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="M10 9.5v5l4-2.5-4-2.5z" fill="currentColor" />
+          </svg>
+        </div>
       )}
       <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-black/60 backdrop-blur-sm pointer-events-none">
         <span className="text-white text-[9px] font-medium">Stage Feature</span>
       </div>
-      {/* Tap-for-sound button — video's own audio; ducks background music when on */}
-      <button
-        type="button"
-        onClick={toggleStageVideoAudio}
-        className="absolute bottom-1.5 right-1.5 flex items-center justify-center w-9 h-9 rounded-full bg-black/70 backdrop-blur-sm text-white hover:bg-black/90 active:scale-90 transition-all ring-1 ring-white/10"
-        aria-label={stageVideoMuted ? "Activar sonido del video" : "Silenciar video"}
-      >
-        {stageVideoMuted ? (
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-          </svg>
-        ) : (
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-          </svg>
-        )}
-      </button>
+    </div>
+  );
+
+  const renderTrackStrip = (
+    tracks: TrackReferenceOrPlaceholder[],
+    isFocusedFn: (id: string) => boolean,
+    prefix?: React.ReactNode,
+  ) => (
+    <div className="h-24 sm:h-28 flex gap-1.5 overflow-x-auto scrollbar-none shrink-0 p-1 pointer-events-auto">
+      {prefix}
+      {tracks.map((t) => (
+        <div key={`${t.participant.identity}-${t.source}`} className="shrink-0 w-32 sm:w-40 aspect-video">
+          {renderTile(t, t.participant.identity === primaryActiveSpeakerId, isFocusedFn(t.participant.identity))}
+        </div>
+      ))}
     </div>
   );
 
   const renderVideoGrid = () => {
-    let activeTracks = userVideoTracks;
-    if (!showSelfView) activeTracks = activeTracks.filter((t) => !t.participant.isLocal);
+    // Remove local from the strip — self-view lives in its own PiP now, so
+    // showing the local track twice is redundant and was confusing when the
+    // PiP briefly looked blank during publication.
+    const remoteTracks = userVideoTracks.filter((t) => !t.participant.isLocal);
+    const activeTracks = remoteTracks;
 
     if (layout === "video") {
       return (
         <div className="w-full h-full flex flex-col gap-1 p-1">
-          <div className="flex-1 min-h-0 relative">{renderCmsVideoTile(focusedParticipantId === "cms-video")}</div>
-          {activeTracks.length > 0 && (
-            <div className="h-24 sm:h-28 flex gap-1.5 overflow-x-auto scrollbar-none shrink-0 p-1 pointer-events-auto">
-              {activeTracks.map((t) => (
-                <div key={`${t.participant.identity}-${t.source}`} className="shrink-0 w-32 sm:w-40 aspect-video">
-                  {renderTile(t, t.participant.identity === primaryActiveSpeakerId, t.participant.identity === focusedParticipantId)}
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="flex-1 min-h-0 relative">
+            {renderCmsVideoTile(focusedParticipantId === "cms-video")}
+          </div>
+          {activeTracks.length > 0 && renderTrackStrip(activeTracks, (id) => id === focusedParticipantId)}
         </div>
       );
     }
@@ -562,20 +743,16 @@ function StageRoom({
         : (primaryActiveSpeakerId || (activeTracks.length > 0 ? activeTracks[0].participant.identity : "cms-video"));
       const primaryTrack = activeTracks.find((t) => t.participant.identity === targetId);
       const stripTracks = activeTracks.filter((t) => t.participant.identity !== targetId);
+      const cmsPrefix = targetId !== "cms-video"
+        ? <div className="shrink-0 w-32 sm:w-40 aspect-video">{renderCmsVideoTile()}</div>
+        : null;
 
       return (
         <div className="w-full h-full flex flex-col gap-1 p-1">
           <div className="flex-1 min-h-0 relative">
             {primaryTrack ? renderTile(primaryTrack, targetId === primaryActiveSpeakerId, true) : renderCmsVideoTile(true)}
           </div>
-          <div className="h-24 sm:h-28 flex gap-1.5 overflow-x-auto scrollbar-none shrink-0 p-1 pointer-events-auto">
-            {targetId !== "cms-video" && <div className="shrink-0 w-32 sm:w-40 aspect-video">{renderCmsVideoTile()}</div>}
-            {stripTracks.map((t) => (
-              <div key={`${t.participant.identity}-${t.source}`} className="shrink-0 w-32 sm:w-40 aspect-video">
-                {renderTile(t, t.participant.identity === primaryActiveSpeakerId, false)}
-              </div>
-            ))}
-          </div>
+          {renderTrackStrip(stripTracks, () => false, cmsPrefix)}
         </div>
       );
     }
@@ -622,6 +799,17 @@ function StageRoom({
       <div className={`relative w-full bg-black overflow-hidden ${isFullscreen ? "flex-1" : "aspect-video rounded-2xl"}`}>
         <div className="absolute inset-0 z-10">{renderVideoGrid()}</div>
 
+        {/* Self-view PiP — visible while camera is on. Attaches the local
+            camera track directly so it doesn't depend on useTracks. */}
+        {showSelfView && cameraOn && (
+          <div className="absolute bottom-16 left-3 z-[150] w-28 sm:w-36 aspect-video pointer-events-auto shadow-2xl rounded-xl overflow-hidden ring-2 ring-[#FFB454]/60">
+            <SelfView participant={localParticipant} />
+            <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-full bg-black/60 backdrop-blur-sm text-white text-[9px] font-medium pointer-events-none">
+              You
+            </div>
+          </div>
+        )}
+
         {/* Reactions overlay */}
         <div className="absolute inset-0 z-[155] pointer-events-none overflow-hidden">
           {reactions.map((r) => (
@@ -660,6 +848,8 @@ function StageRoom({
             type="button"
             onClick={() => setShowAttendants((v) => !v)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-sm border border-white/10 cursor-pointer hover:bg-black/70 transition-colors pointer-events-auto"
+            aria-label={`${totalInRoom} in room — toggle attendants list`}
+            aria-expanded={showAttendants}
           >
             <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
             <span className="text-white text-xs font-semibold">{totalInRoom} in room</span>
@@ -689,6 +879,8 @@ function StageRoom({
                 onClick={() => onLayoutChange(l)}
                 className={`w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-90 ${layout === l ? "bg-[#FFB454]/30 text-[#FFB454]" : "text-white/50 hover:text-white/80"}`}
                 title={l === "video" ? "Video focus" : l === "spotlight" ? "Spotlight" : "Grid"}
+                aria-label={l === "video" ? "Video focus layout" : l === "spotlight" ? "Spotlight layout" : "Grid layout"}
+                aria-pressed={layout === l}
               >
                 {l === "video" && (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -718,6 +910,8 @@ function StageRoom({
             onClick={() => setShowSelfView(!showSelfView)}
             className={`w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-sm border transition-all active:scale-90 pointer-events-auto ${showSelfView ? "bg-[#FFB454]/30 border-[#FFB454]/40 text-[#FFB454]" : "bg-black/60 border-white/10 text-white/50"}`}
             title={showSelfView ? "Hide self-view" : "Show self-view"}
+            aria-label={showSelfView ? "Hide self-view" : "Show self-view"}
+            aria-pressed={showSelfView}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -742,6 +936,13 @@ function StageRoom({
             {knockToast}
           </div>
         )}
+
+        {/* Media permission / publish error toast (cam & mic) */}
+        {mediaError && (
+          <div role="alert" className="absolute left-1/2 -translate-x-1/2 top-28 z-[196] px-4 py-2 rounded-full bg-red-500/90 backdrop-blur-md border border-red-300/40 text-white text-xs font-semibold shadow-lg shadow-red-500/30 pointer-events-none animate-in slide-in-from-top-2 duration-200">
+            ⚠ {mediaError}
+          </div>
+        )}
       </div>
 
       {/* Attendants drawer */}
@@ -750,9 +951,7 @@ function StageRoom({
           <div className="p-4 border-b border-white/10 flex items-center justify-between">
             <span className="text-sm font-bold text-white">Attendants</span>
             <button onClick={() => setShowAttendants(false)} className="text-white/50 hover:text-white p-1">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <CloseIcon className="w-5 h-5" />
             </button>
           </div>
           <div className="overflow-y-auto h-full p-2 space-y-1 pb-20">
@@ -781,9 +980,7 @@ function StageRoom({
           <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between">
             <span className="text-xs font-bold text-white uppercase tracking-wider">Raised hands</span>
             <button onClick={() => setShowKnockTray(false)} className="text-white/50 hover:text-white p-1">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <CloseIcon />
             </button>
           </div>
           <div className="max-h-64 overflow-y-auto p-2 space-y-1.5">
@@ -815,9 +1012,7 @@ function StageRoom({
           <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between">
             <span className="text-[10px] font-bold text-white/60 uppercase tracking-wider">Camera</span>
             <button onClick={() => setShowDevices(false)} className="text-white/50 hover:text-white p-1">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <CloseIcon />
             </button>
           </div>
           <div className="max-h-56 overflow-y-auto p-1">
@@ -856,12 +1051,6 @@ function StageRoom({
         className={`flex items-center justify-center gap-3 sm:gap-4 py-4 px-4 transition-opacity duration-300 ${isFullscreen ? "absolute bottom-0 left-0 right-0 z-[190] bg-gradient-to-t from-black/80 to-transparent pb-8 pt-12" : "relative z-[100] border-t border-white/5"}`}
         style={{ opacity: isFullscreen && !controlsVisible ? 0 : 1, pointerEvents: isFullscreen && !controlsVisible ? "none" : "auto" }}
       >
-        {!inCall ? (
-          <Button onClick={onGoOnStage} className="px-8 h-12 rounded-full shadow-lg shadow-[#FFB454]/20 pointer-events-auto">
-            Join the Stage
-          </Button>
-        ) : (
-          <>
             {/* Mic */}
             <button
               onClick={() => canToggleMic && setMicOn((v) => !v)}
@@ -873,7 +1062,9 @@ function StageRoom({
                   ? "bg-green-500 border-green-500 text-white shadow-lg shadow-green-500/30"
                   : "bg-white/10 border-white/20 text-white/80 hover:bg-white/20"
               }`}
-              title={!canToggleMic ? "Mics reserved for admins & Prime" : micOn ? "Mute mic" : "Unmute mic"}
+              title={!canToggleMic ? (raiseHand ? "Hand raised — waiting for admin to invite you" : "Admin/Prime only — raise hand to request the mic") : micOn ? "Mute mic" : "Unmute mic"}
+              aria-label={!canToggleMic ? (raiseHand ? "Hand raised, waiting for admin to invite you to speak" : "Microphone disabled — raise hand to request the mic") : micOn ? "Mute microphone" : "Unmute microphone"}
+              aria-pressed={micOn}
             >
               {micOn && canToggleMic ? (
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -896,6 +1087,8 @@ function StageRoom({
                   : "bg-red-500/20 border-red-500/40 text-red-400"
               }`}
               title={cameraOn ? "Turn camera off" : "Turn camera on"}
+              aria-label={cameraOn ? "Turn camera off" : "Turn camera on"}
+              aria-pressed={cameraOn}
             >
               {cameraOn ? (
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -914,6 +1107,9 @@ function StageRoom({
               onClick={() => setShowReactionPicker((v) => !v)}
               className={`w-12 h-12 rounded-full flex items-center justify-center border transition-all active:scale-95 pointer-events-auto ${showReactionPicker ? "bg-[#FFB454]/30 border-[#FFB454]/50 text-[#FFB454]" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}
               title="Send a reaction"
+              aria-label="Send a reaction"
+              aria-haspopup="true"
+              aria-expanded={showReactionPicker}
             >
               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
@@ -927,6 +1123,8 @@ function StageRoom({
                 disabled={raiseHand}
                 className={`w-12 h-12 rounded-full flex items-center justify-center border transition-all active:scale-95 pointer-events-auto ${raiseHand ? "bg-amber-500 border-amber-500 text-black shadow-lg shadow-amber-500/30" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}
                 title={raiseHand ? "Hand raised" : "Raise hand to speak"}
+                aria-label={raiseHand ? "Hand raised — waiting for admin approval" : "Raise hand to request the mic"}
+                aria-pressed={raiseHand}
               >
                 <span className={`text-xl ${raiseHand ? "stage-hand-wave" : ""}`}>✋</span>
               </button>
@@ -938,6 +1136,9 @@ function StageRoom({
                 onClick={() => setShowDevices((v) => !v)}
                 className={`w-12 h-12 rounded-full flex items-center justify-center border transition-all active:scale-95 pointer-events-auto ${showDevices ? "bg-[#FFB454]/30 border-[#FFB454]/50 text-[#FFB454]" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}
                 title="Camera & device settings"
+                aria-label="Choose camera"
+                aria-haspopup="true"
+                aria-expanded={showDevices}
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -951,6 +1152,8 @@ function StageRoom({
               onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
               className="w-12 h-12 rounded-full flex items-center justify-center bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all pointer-events-auto"
               title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+              aria-pressed={isFullscreen}
             >
               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 {isFullscreen ? (
@@ -961,18 +1164,21 @@ function StageRoom({
               </svg>
             </button>
 
-            {/* Leave */}
+            {/* Leave — disconnect triggers LiveKitRoom's onDisconnected which
+                is the single writer that clears the token (no double-write). */}
             <button
-              onClick={(e) => { e.stopPropagation(); onLeave(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (room) { room.disconnect().catch(() => {}); } else { onLeave(); }
+              }}
               className="w-12 h-12 rounded-full flex items-center justify-center bg-red-500 text-white hover:bg-red-600 transition-all shadow-lg shadow-red-500/20 pointer-events-auto"
               title="Leave stage"
+              aria-label="Leave stage"
             >
               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
               </svg>
             </button>
-          </>
-        )}
       </div>
     </div>
   );
@@ -981,8 +1187,8 @@ function StageRoom({
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function MainStage() {
-  const { user, isAuthenticated } = useAuth();
-  const { isPrime, isMember, isAdmin } = useTier();
+  const { user } = useAuth();
+  const { isPrime, isAdmin } = useTier();
 
   const [occupancy, setOccupancy] = useState(0);
   const [occupancyUsers, setOccupancyUsers] = useState<Array<any>>([]);
@@ -991,78 +1197,127 @@ export default function MainStage() {
   const [callToken, setCallToken] = useState<string | null>(null);
   const [callRoomName, setCallRoomName] = useState<string | null>(null);
   const [callLivekitUrl, setCallLivekitUrl] = useState("wss://livekit.pnptv.app");
-  const [inCall, setInCall] = useState(false);
   const [activeDm, setActiveDm] = useState<{ id: string; name: string } | null>(null);
-  const autoConnectedRef = useRef(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  // Guards against a second joinHangoutCall while one is already in flight
+  // (e.g. user double-taps "Join the Stage"). Lives on a ref to survive fast
+  // refresh without resetting mid-fetch — not cleaned up at unmount because
+  // MainStage is a top-level page that only unmounts on navigation.
+  const joinInFlightRef = useRef(false);
 
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
   const [primeVideos, setPrimeVideos] = useState<PrimeVideo[]>([]);
+  const [primeVideosLoaded, setPrimeVideosLoaded] = useState(false);
   const [layout, setLayout] = useState<StageLayout>("video");
 
-  const wellnessTips = useMemo(() => [
-    "Hydrate, baby. Water is free self-care — your body deserves it right now.",
-    "Check in with yourself: how\u2019s your breathing? Take three slow, deep breaths with me.",
-    "You don\u2019t have to be productive to deserve rest. Rest is not a reward — it\u2019s a right.",
-    "If you\u2019ve been sitting a while, stretch those legs. Your future self will thank you.",
-    "Reminder: you are enough exactly as you are, right now, in this moment.",
-    "When\u2019s the last time you ate something? Nourish that beautiful body.",
-    "It\u2019s okay to step away from the screen. The stage will be here when you come back.",
-    "Set a boundary today — even a small one. Boundaries are acts of self-love.",
-    "Feeling anxious? Name 5 things you can see, 4 you can touch, 3 you can hear.",
-    "Your community is here for you. You are not alone in this — never forget that.",
-  ], []);
-  const [tipIndex, setTipIndex] = useState(0);
-
+  // One-shot metadata fetches on mount.
   useEffect(() => {
-    const interval = setInterval(() => { setTipIndex((prev) => (prev + 1) % wellnessTips.length); }, 30000);
-    return () => clearInterval(interval);
-  }, [wellnessTips.length]);
-
-  useEffect(() => {
-    getCommunityRoomOccupancy().then((res) => { setOccupancy(res.occupancy?.activeUsers ?? 0); setOccupancyUsers(res.occupancy?.users ?? []); }).catch(() => {});
     getStageState().then((res) => { if (res.stageState) setStageState(res.stageState); }).catch(() => {});
-    getHangoutGroups().then((res) => { const main = (res.groups || []).find((g: any) => g.isMain); if (main) setMainGroup(main); }).catch(() => {});
-    const fetchNP = () => { getRadioNowPlaying().then(setNowPlaying).catch(() => {}); };
-    fetchNP();
-    const npInterval = setInterval(fetchNP, 15000);
-    getFeaturedPrimeVideos(10).then(setPrimeVideos).catch(() => {});
-    return () => clearInterval(npInterval);
+    getMainGroup().then((res) => { if (res?.group) setMainGroup(res.group); }).catch(() => {});
   }, []);
 
+  // When an admin approves a raised-hand request, the server re-mints a
+  // LiveKit token with canPublishAudio=true and pushes it here. Swap the
+  // current token so the LiveKitRoom reconnects with the new grants; the
+  // SFU only honours grants at connect time, there's no in-place upgrade.
   useEffect(() => {
-    if (!mainGroup?.id || autoConnectedRef.current || !isAuthenticated) return;
-    autoConnectedRef.current = true;
-    joinHangoutCall(mainGroup.id).catch(() => startHangoutCall(mainGroup.id)).then((result) => {
-      setCallToken(result.token);
-      setCallRoomName(result.roomName);
-      setCallLivekitUrl(result.livekitUrl || "wss://livekit.pnptv.app");
-    }).catch(() => { autoConnectedRef.current = false; });
-  }, [mainGroup?.id, isAuthenticated]);
+    const sock = getSocket?.();
+    if (!sock) return;
+    const onApproved = (payload?: { token?: string; livekitUrl?: string; roomName?: string }) => {
+      if (!payload?.token) return;
+      if (payload.livekitUrl) setCallLivekitUrl(payload.livekitUrl);
+      if (payload.roomName) setCallRoomName(payload.roomName);
+      setCallToken(payload.token);
+    };
+    sock.on?.("mainstage:knock:approved", onApproved);
+    return () => { sock.off?.("mainstage:knock:approved", onApproved); };
+  }, []);
 
+  // Occupancy — poll every 20s so the pre-join avatars/count stay current.
+  useEffect(() => {
+    const fetchOcc = () => {
+      getCommunityRoomOccupancy()
+        .then((res) => {
+          setOccupancy(res.occupancy?.activeUsers ?? 0);
+          setOccupancyUsers(res.occupancy?.users ?? []);
+        })
+        .catch(() => {});
+    };
+    fetchOcc();
+    const id = setInterval(fetchOcc, 20000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Now-playing metadata — poll every 15s.
+  useEffect(() => {
+    const fetchNP = () => { getRadioNowPlaying().then(setNowPlaying).catch(() => {}); };
+    fetchNP();
+    const id = setInterval(fetchNP, 15000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Featured prime videos — refetch every 10 minutes so newly-published clips
+  // surface without requiring a page reload.
+  useEffect(() => {
+    const fetchVideos = () => {
+      getFeaturedPrimeVideos(10)
+        .then((v) => setPrimeVideos(v))
+        .catch(() => {})
+        .finally(() => setPrimeVideosLoaded(true));
+    };
+    fetchVideos();
+    const id = setInterval(fetchVideos, 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Matches the hangout-dock pattern: only fetch a token when the user has
+  // explicitly opted in. LiveKitRoom mounts with the token → they're on stage.
   const handleJoin = async () => {
-    if (!user || !mainGroup?.id) return;
-    if (callToken) { setInCall(true); return; }
+    if (!user) { setJoinError("Please sign in to join the stage."); return; }
+    if (!mainGroup?.id) { setJoinError("Main stage is unavailable right now — please refresh."); return; }
+    if (callToken || joinInFlightRef.current) return;
+    joinInFlightRef.current = true;
+    setJoinError(null);
     try {
       const result = await joinHangoutCall(mainGroup.id).catch(() => startHangoutCall(mainGroup.id));
       setCallToken(result.token);
       setCallRoomName(result.roomName);
-      setInCall(true);
-    } catch {}
+      setCallLivekitUrl(result.livekitUrl || "wss://livekit.pnptv.app");
+    } catch (err) {
+      const msg = err instanceof Error && err.message ? err.message : "Couldn't join the stage. Please try again.";
+      setJoinError(msg);
+    } finally {
+      joinInFlightRef.current = false;
+    }
   };
+
+  const handleLeave = useCallback(() => {
+    setCallToken(null);
+    setCallRoomName(null);
+    // DMs are started from the attendants drawer; unmount when the user
+    // leaves so a stale floating chat doesn't hover over the pre-room view.
+    setActiveDm(null);
+  }, []);
 
   const currentVideoSrc = primeVideos.length > 0 ? getAssetUrl(primeVideos[0]?.video_file || null) : undefined;
 
-  const liveKitOptions = useMemo(() => ({
-    adaptiveStream: true,
-    dynacast: true,
-    publishDefaults: {
-      simulcast: true,
-      videoCodec: "vp9" as const,
-    },
-    videoCaptureDefaults: {
-      resolution: VideoPresets.h540.resolution,
-    },
-  }), []);
+  const liveKitOptions = useMemo(() => {
+    // Safari <16 can't publish VP9 reliably; fall back to h264 there. Detect
+    // via UA (good enough — we only need to swap the publish codec).
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
+    return {
+      adaptiveStream: true,
+      dynacast: true,
+      publishDefaults: {
+        simulcast: true,
+        videoCodec: (isSafari ? "h264" : "vp9") as "vp9" | "h264",
+      },
+      videoCaptureDefaults: {
+        resolution: VideoPresets.h540.resolution,
+      },
+    };
+  }, []);
 
   return (
     <div className="pb-24 max-w-4xl mx-auto space-y-4 px-4 pt-4">
@@ -1075,24 +1330,24 @@ export default function MainStage() {
             serverUrl={callLivekitUrl}
             connect={true}
             audio={false}
+            // Match the hangout dock: let LiveKit auto-publish the camera on
+            // connect. StageRoom only mounts when the user has committed to
+            // the call, so there's no race with a lobby state anymore.
             video={true}
             options={liveKitOptions}
-            onDisconnected={() => { setInCall(false); setCallToken(null); autoConnectedRef.current = false; }}
+            onDisconnected={handleLeave}
             style={{ display: "contents" }}
           >
             <StageRoom
-              onLeave={() => setInCall(false)}
+              onLeave={handleLeave}
               stageMode={stageState?.mode || "ambient"}
               isAdmin={isAdmin}
               isPrime={isPrime}
-              isMember={isMember}
-              inCall={inCall}
-              onGoOnStage={handleJoin}
               layout={layout}
               onLayoutChange={setLayout}
               primeVideos={primeVideos}
+              primeVideosLoaded={primeVideosLoaded}
               nowPlaying={nowPlaying}
-              wellnessTip={wellnessTips[tipIndex]}
               onOpenDm={(id, name) => setActiveDm({ id, name })}
             />
           </LiveKitRoom>
@@ -1112,7 +1367,12 @@ export default function MainStage() {
                 ))}
                 {occupancy > 5 && <div className="w-12 h-12 rounded-full border-2 border-black bg-white/10 backdrop-blur flex items-center justify-center text-white text-xs font-bold">+{occupancy - 5}</div>}
               </div>
-              <Button onClick={handleJoin} className="px-10 h-14 rounded-full text-lg shadow-2xl shadow-[#FFB454]/30">Join the Room</Button>
+              <Button onClick={handleJoin} className="px-10 h-14 rounded-full text-lg shadow-2xl shadow-[#FFB454]/30">Join the Stage</Button>
+              {joinError && (
+                <div role="alert" className="max-w-sm px-4 py-2 rounded-xl border border-red-500/40 bg-red-500/10 text-sm text-red-300">
+                  {joinError}
+                </div>
+              )}
               {nowPlaying?.track && (
                 <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 backdrop-blur-md border border-white/10">
                   <span className="text-[10px] text-[#FFB454] font-bold uppercase tracking-widest">LIVE MUSIC</span>
@@ -1133,7 +1393,7 @@ export default function MainStage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="flex gap-3">
             <div className="w-8 h-8 rounded-lg bg-[#FFB454]/10 flex items-center justify-center text-[#FFB454]">📷</div>
-            <div><p className="text-sm font-bold text-white">Cams Mandatory</p><p className="text-xs text-white/50">Everyone on stage must have their camera on.</p></div>
+            <div><p className="text-sm font-bold text-white">Cams Encouraged</p><p className="text-xs text-white/50">Being on camera makes the stage feel alive — but you can toggle it off anytime.</p></div>
           </div>
           <div className="flex gap-3">
             <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400">🔇</div>

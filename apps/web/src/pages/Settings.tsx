@@ -26,6 +26,7 @@ import {
   type EraseAccountReceipt,
   type TokenPurchase,
 } from "@/lib/api";
+import IdentityConnections from "@/components/profile/IdentityConnections";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -632,6 +633,9 @@ export default function Settings() {
           </div>
         )}
       </Section>
+
+      {/* ── Identity & Connections ──────────────────────────────────────── */}
+      <IdentityConnections telegramUsername={user?.username || undefined} />
 
       {/* ── App Preferences ──────────────────────────────────────────────── */}
       <Section title={p.appPreferences}>
