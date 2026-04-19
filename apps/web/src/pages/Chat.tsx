@@ -1107,6 +1107,16 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       if (data.success) {
         setGroupDetail(data.group);
         setGroupMembers(data.members || []);
+        // Merge authoritative server state into activeGroup so the video-call
+        // button + dock reflect reality instead of the stale groups-list cache.
+        setActiveGroup((prev) => prev && prev.id === data.group.id ? {
+          ...prev,
+          hasActiveCall: data.group.hasActiveCall,
+          activeCallId: data.group.activeCallId,
+          memberCount: data.group.memberCount ?? prev.memberCount,
+          name: data.group.name ?? prev.name,
+          avatarUrl: data.group.avatarUrl ?? prev.avatarUrl,
+        } : prev);
       }
     } catch { /* silent */ }
   }, []);
@@ -1144,6 +1154,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setShowTelegramDock(true);
       setCallPanelDismissed(false);
     } catch (err: unknown) {
+      console.error("[Chat] Video call start/join failed", err);
       if (err instanceof ApiError) {
         if (err.status === 403) {
           setCallError("You were removed from this hangout.");
@@ -1151,8 +1162,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           loadGroups();
         } else if (err.status === 402) {
           setCallError("This is a paid hangout. You need access to join the video call.");
+        } else if (err.status === 404) {
+          setCallError("No active call and unable to start one. Please retry.");
         } else {
-          setCallError("Could not connect to the call. Please try again.");
+          setCallError(`Could not connect to the call (${err.status}). Please try again.`);
         }
       } else {
         setCallError("Could not connect to the call. Please try again.");
@@ -1170,11 +1183,15 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     if (!activeGroup?.id) return;
     const socket = connectSocket();
 
-    const onCallStarted = (data: { groupId: number; startedBy?: { firstName?: string; username?: string } }) => {
+    const onCallStarted = (data: { groupId: number; callId?: string | number; startedBy?: { firstName?: string; username?: string } }) => {
       if (data.groupId !== activeGroup.id) return;
       setCallStartTime(new Date());
       setCallParticipantCount(0);
       setCallStartedBy(data.startedBy?.firstName || data.startedBy?.username || null);
+      // Sync active-call flags so the call button reflects real state without
+      // waiting for the next poll/refresh.
+      setActiveGroup((prev) => prev && prev.id === data.groupId ? { ...prev, hasActiveCall: true, activeCallId: data.callId != null ? String(data.callId) : (prev.activeCallId ?? null) } : prev);
+      setGroups((prev) => prev.map((g) => g.id === data.groupId ? { ...g, hasActiveCall: true, activeCallId: data.callId != null ? String(data.callId) : (g.activeCallId ?? null) } : g));
     };
 
     const onCallEnded = (data: { groupId: number }) => {
@@ -1186,6 +1203,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setCallStartedBy(null);
       setCallParticipantCount(0);
       setCallDuration("0:00");
+      setActiveGroup((prev) => prev && prev.id === data.groupId ? { ...prev, hasActiveCall: false, activeCallId: null } : prev);
+      setGroups((prev) => prev.map((g) => g.id === data.groupId ? { ...g, hasActiveCall: false, activeCallId: null } : g));
     };
 
     const onParticipantJoined = (data: { groupId: number; count?: number }) => {

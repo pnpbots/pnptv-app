@@ -67,7 +67,7 @@ export function VideoCallButton({
     ? participantCount > 0
       ? `Join active call (${participantCount} participant${participantCount !== 1 ? "s" : ""})`
       : "Join active call"
-    : "Open Telegram call dock";
+    : "Start video call";
 
   if (hasActiveCall) {
     return (
