@@ -9,10 +9,32 @@ import {
   updateCreatorMedia,
   deleteCreatorMedia,
   reorderCreatorMedia,
+  listCreatorRecordings,
+  deleteRecording,
   type CreatorDashboard as DashboardData,
   type CreatorMediaItem,
+  type StreamRecording,
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
+
+function fmtDuration(seconds: number | null): string {
+  if (!seconds) return "--";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function fmtBytes(bytes: number | null): string {
+  if (!bytes) return "";
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
 const TIERS: { key: "ice" | "crystal" | "diamond"; label: string; price: number; emoji: string }[] = [
   { key: "ice", label: "Ice", price: 5, emoji: "❄" },
@@ -137,6 +159,37 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
     } catch {
       // revert on failure
       await loadAlbum();
+    }
+  };
+
+  // ── My Replays ─────────────────────────────────────────────────────────────
+  const [myRecordings, setMyRecordings] = useState<StreamRecording[]>([]);
+  const [recordingsLoading, setRecordingsLoading] = useState(true);
+  const [recordingsError, setRecordingsError] = useState<string | null>(null);
+
+  const loadRecordings = useCallback(async () => {
+    const userId = authUser?.id ? String(authUser.id) : null;
+    if (!userId) { setRecordingsLoading(false); return; }
+    setRecordingsLoading(true);
+    try {
+      const res = await listCreatorRecordings(userId);
+      setMyRecordings(res.recordings || []);
+    } catch {
+      // non-fatal
+    } finally {
+      setRecordingsLoading(false);
+    }
+  }, [authUser?.id]);
+
+  useEffect(() => { loadRecordings(); }, [loadRecordings]);
+
+  const handleDeleteRecording = async (id: string) => {
+    setRecordingsError(null);
+    try {
+      await deleteRecording(id);
+      setMyRecordings((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      setRecordingsError(err instanceof Error ? err.message : "Failed to delete recording.");
     }
   };
 
@@ -490,6 +543,67 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
         >
           {streamRulesSaving ? "Saving..." : "Save Rules"}
         </button>
+      </div>
+
+      {/* ── My Replays ── */}
+      <div className="glass-card-sm p-5">
+        <p className="text-sm font-semibold text-white mb-1">My Replays</p>
+        <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+          Your stream recordings. Replays are available for 7 days after the stream ends.
+          Subscribers see these with a paywall; you can always view and delete your own.
+        </p>
+
+        {recordingsError && (
+          <div className="mb-3 px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+            {recordingsError}
+          </div>
+        )}
+
+        {recordingsLoading ? (
+          <div className="space-y-2">
+            {[1, 2].map((i) => <div key={i} className="h-14 bg-white/5 rounded-lg animate-pulse" />)}
+          </div>
+        ) : myRecordings.length === 0 ? (
+          <p className="text-xs text-center py-6" style={{ color: "#8E8E93" }}>No recordings yet. Start a stream to create replays.</p>
+        ) : (
+          <div className="space-y-2">
+            {myRecordings.map((rec) => (
+              <div
+                key={rec.id}
+                className="flex items-center gap-2 p-2.5 rounded-lg"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-white truncate">
+                    {fmtDate(rec.startedAt)} &mdash; {fmtDuration(rec.durationSeconds)}
+                  </p>
+                  <p className="text-[10px] mt-0.5" style={{ color: "#8E8E93" }}>
+                    {fmtBytes(rec.sizeBytes)}
+                    {rec.endedAt && ` · Expires ${fmtDate(new Date(new Date(rec.endedAt).getTime() + 7 * 86400000).toISOString())}`}
+                  </p>
+                </div>
+                {rec.manifestUrl && (
+                  <a
+                    href={rec.manifestUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 rounded text-[10px] font-semibold transition-colors"
+                    style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}
+                  >
+                    Preview
+                  </a>
+                )}
+                <button
+                  onClick={() => handleDeleteRecording(rec.id)}
+                  className="w-6 h-6 rounded flex items-center justify-center text-red-400/60 hover:text-red-400 transition-colors"
+                  aria-label="Delete recording"
+                >
+                  &times;
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── My Album ── */}
