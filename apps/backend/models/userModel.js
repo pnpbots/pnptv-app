@@ -314,6 +314,30 @@ class UserModel {
   }
 
   /**
+   * Get user by Telegram ID. Webapp users have UUID `id`s with a separate
+   * `telegram` column for the linked Telegram account, so getById('123456')
+   * returns null even though that user exists. Bot middleware should fall
+   * back to this when getById misses to avoid creating duplicate rows.
+   *
+   * @param {string|number} telegramId
+   * @returns {Promise<Object|null>}
+   */
+  static async getByTelegram(telegramId) {
+    try {
+      if (telegramId === undefined || telegramId === null) return null;
+      const result = await query(
+        `SELECT * FROM ${TABLE} WHERE telegram = $1 LIMIT 1`,
+        [String(telegramId)]
+      );
+      if (result.rows.length === 0) return null;
+      return this.mapRowToUser(result.rows[0]);
+    } catch (error) {
+      logger.error('Error getting user by telegram:', error);
+      return null;
+    }
+  }
+
+  /**
    * Get user by email
    * @param {string} email - Email address
    * @returns {Promise<Object|null>} User object or null

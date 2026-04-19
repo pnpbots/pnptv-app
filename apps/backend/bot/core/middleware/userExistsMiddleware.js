@@ -35,8 +35,21 @@ const userExistsMiddleware = () => async (ctx, next) => {
     if (recentlyCreated) {
       return next();
     }
-    // Check if user exists in database
-    const user = await UserModel.getById(userId);
+    // Check if user exists in database. getById matches when the row's `id`
+    // is the bare Telegram numeric id (bot-created users). For webapp users
+    // who signed up first and linked Telegram later, the `id` is a UUID and
+    // the Telegram id lives in the `telegram` column — fall back to that
+    // lookup so we don't try to INSERT a row that violates the
+    // idx_users_telegram_unique constraint.
+    let user = await UserModel.getById(userId);
+    if (!user) {
+      user = await UserModel.getByTelegram(userId);
+      if (user) {
+        // Found via telegram column — short-circuit createOrUpdate. Treat as
+        // an existing user; the username sync block below will run.
+        await cache.set(recentCreateKey, true, 60);
+      }
+    }
 
     if (!user) {
       // User not in database - mark for onboarding

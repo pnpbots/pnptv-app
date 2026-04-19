@@ -28,6 +28,13 @@ class UserService {
   async getOrCreateUser(userId, userData) {
     try {
       let user = await UserModel.getById(userId);
+      // Webapp-first users have UUID `id` and store the bare Telegram id in
+      // a separate `telegram` column. Fall back to that lookup before
+      // creating, otherwise INSERT collides with idx_users_telegram_unique
+      // and the bot's session/userExists middleware crashes on every DM.
+      if (!user && /^[0-9]+$/.test(String(userId))) {
+        user = await UserModel.getByTelegram(userId);
+      }
       if (!user) {
         logger.info('User not found, creating new user', { userId });
         user = await UserModel.createOrUpdate({
