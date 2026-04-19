@@ -23,6 +23,7 @@ const NotificationDigestScheduler = require(path.join(backendPath, 'services/not
 const MeilisearchService = require(path.join(backendPath, 'services/meilisearchService'));
 const AppUserService = require(path.join(backendPath, 'services/userService'));
 const CristinaFeedService = require(path.join(backendPath, 'services/cristinaFeedService'));
+const StreamRecordingService = require(path.join(backendPath, 'services/streamRecordingService'));
 
 /**
  * Initialize and start cron jobs
@@ -402,6 +403,17 @@ const startCronJobs = async (bot = null) => {
         await CristinaFeedService.postFeatureTutorial();
       } catch (error) {
         logger.error('CristinaFeed: tutorial cron error', { error: error.message });
+      }
+    });
+
+    // VOD recording retention — daily at 03:00 UTC
+    // Deletes completed recordings older than 7 days and removes their HLS files.
+    cron.schedule(process.env.RECORDING_EXPIRY_CRON || '0 3 * * *', async () => {
+      try {
+        logger.info('Running VOD recording retention cleanup...');
+        await StreamRecordingService.expireOldRecordings(7);
+      } catch (error) {
+        logger.error('Error in VOD recording retention cron:', error);
       }
     });
 

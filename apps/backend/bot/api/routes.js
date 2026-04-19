@@ -2956,6 +2956,10 @@ const creatorGuard = require('./middleware/creatorGuard');
 app.get('/api/webapp/live/analytics/sessions', requireSessionAuth, creatorGuard, asyncHandler(webappLiveController.getAnalyticsSessions));
 app.get('/api/webapp/live/analytics/summary', requireSessionAuth, creatorGuard, asyncHandler(webappLiveController.getAnalyticsSummary));
 
+// VOD replay recordings
+app.get('/api/webapp/creators/:creatorId/recordings', softAuth, asyncHandler(webappLiveController.listCreatorRecordings));
+app.delete('/api/webapp/recordings/:id', requireSessionAuth, asyncHandler(webappLiveController.deleteRecordingEndpoint));
+
 // Streamer Settings: persistent encoder + filter preferences
 const streamerSettingsController = require('./controllers/streamerSettingsController');
 app.get('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.getSettings));

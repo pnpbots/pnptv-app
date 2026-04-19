@@ -11,6 +11,7 @@ const LiveStreamModel = require('../../models/liveStreamModel');
 const BlockedUser = require('../../models/blockedUser');
 const DmService = require('../../services/dmService');
 const streamAnalyticsService = require('../../services/streamAnalyticsService');
+const streamRecordingService = require('../../services/streamRecordingService');
 
 // ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
 // H4: Replaces the non-atomic decr + conditional set(0) pattern.
@@ -1906,6 +1907,19 @@ function initSocketIO(io) {
                 logger.warn('streamAnalytics: sampleViewers error', { error: sampleErr.message });
               }
             }, 30_000);
+
+            // VOD recording: start capturing HLS to disk (non-blocking, non-fatal)
+            try {
+              const recordingId = await streamRecordingService.startRecording({
+                sessionId,
+                creatorId: user.id,
+                channelRef,
+              });
+              socket.data.recordingId = recordingId;
+              logger.info('streamRecording: attached to session', { recordingId, sessionId });
+            } catch (recErr) {
+              logger.warn('streamRecording: startRecording failed (non-fatal)', { userId: user.id, channelRef, error: recErr.message });
+            }
           } catch (analyticsErr) {
             logger.warn('streamAnalytics: startSession error (non-fatal)', { userId: user.id, channelRef, error: analyticsErr.message });
           }
@@ -2044,6 +2058,14 @@ function initSocketIO(io) {
           const peakViewers = parseInt(countRaw, 10) || 0;
           streamAnalyticsService.endSession(sid, { peakViewers }).catch(e =>
             logger.warn('streamAnalytics: endSession error', { sid, error: e.message })
+          );
+        }
+        // VOD recording: stop ffmpeg
+        if (socket.data.recordingId) {
+          const rid = socket.data.recordingId;
+          socket.data.recordingId = null;
+          streamRecordingService.stopRecording(rid).catch((e) =>
+            logger.warn('streamRecording: stopRecording error (stream:stop)', { rid, error: e.message })
           );
         }
       }
@@ -2362,6 +2384,14 @@ function initSocketIO(io) {
         const peakViewers = parseInt(countRaw, 10) || 0;
         streamAnalyticsService.endSession(sid, { peakViewers }).catch(e =>
           logger.warn('streamAnalytics: endSession(disconnect) error', { sid, error: e.message })
+        );
+      }
+      // VOD recording: stop ffmpeg on disconnect
+      if (socket.data.recordingId) {
+        const rid = socket.data.recordingId;
+        socket.data.recordingId = null;
+        streamRecordingService.stopRecording(rid).catch((e) =>
+          logger.warn('streamRecording: stopRecording error (disconnect)', { rid, error: e.message })
         );
       }
 

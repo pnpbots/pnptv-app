@@ -955,6 +955,8 @@ const getHostedChannel = async (req, res) => {
 // ── Stream Analytics ──────────────────────────────────────────────────────────
 
 const streamAnalyticsService = require('../../../services/streamAnalyticsService');
+const streamRecordingService = require('../../../services/streamRecordingService');
+const EntitlementAccessService = require('../../../services/entitlementAccessService');
 
 /**
  * GET /api/webapp/live/analytics/sessions?limit=20
@@ -1141,6 +1143,99 @@ const buySlotTicket = async (req, res) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// GET /api/webapp/creators/:creatorId/recordings
+// Public with softAuth. Lists completed non-deleted recordings for a creator.
+// manifestUrl exposed only to: the creator themselves, subscribers, admins.
+// ---------------------------------------------------------------------------
+const listCreatorRecordings = async (req, res) => {
+  const { creatorId } = req.params;
+  if (!creatorId) return res.status(400).json({ success: false, error: 'creatorId required' });
+
+  try {
+    const pool = getPool();
+    const { rows } = await pool.query(
+      `SELECT id, session_id, started_at, ended_at, duration_seconds, size_bytes, manifest_url
+       FROM stream_recordings
+       WHERE creator_id = $1
+         AND status = 'completed'
+         AND is_deleted = FALSE
+       ORDER BY started_at DESC
+       LIMIT 50`,
+      [String(creatorId)]
+    );
+
+    const viewer = req.user; // set by softAuth, may be null
+    const viewerId = viewer?.id ? String(viewer.id) : null;
+    const isOwner = viewerId && viewerId === String(creatorId);
+
+    let isAdmin = false;
+    let hasSubscription = false;
+
+    if (viewerId && !isOwner) {
+      // Check admin role
+      const { rows: userRows } = await pool.query(
+        `SELECT role FROM users WHERE id = $1`,
+        [viewerId]
+      );
+      const role = userRows[0]?.role;
+      isAdmin = role === 'admin' || role === 'superadmin';
+
+      if (!isAdmin) {
+        // Check creator subscription entitlement
+        try {
+          const result = await EntitlementAccessService.hasResourceAccess(viewerId, 'creator', String(creatorId));
+          hasSubscription = result.allowed;
+        } catch {
+          hasSubscription = false;
+        }
+      }
+    }
+
+    const canSeeManifest = isOwner || isAdmin || hasSubscription;
+
+    const recordings = rows.map((r) => ({
+      id: String(r.id),
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      durationSeconds: r.duration_seconds,
+      sizeBytes: r.size_bytes ? Number(r.size_bytes) : null,
+      manifestUrl: canSeeManifest ? r.manifest_url : null,
+      requiresSubscription: !canSeeManifest,
+    }));
+
+    return res.json({ success: true, recordings });
+  } catch (err) {
+    logger.error('listCreatorRecordings error', err);
+    return res.status(500).json({ success: false, error: 'Failed to fetch recordings' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// DELETE /api/webapp/recordings/:id
+// requireSessionAuth + owner check.
+// ---------------------------------------------------------------------------
+const deleteRecordingEndpoint = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const { id } = req.params;
+  const recordingId = parseInt(id, 10);
+  if (!recordingId || isNaN(recordingId)) {
+    return res.status(400).json({ success: false, error: 'Invalid recording id' });
+  }
+
+  try {
+    await streamRecordingService.deleteRecording(recordingId, String(req.session.user.id));
+    return res.json({ success: true });
+  } catch (err) {
+    if (err.code === 'NOT_FOUND') return res.status(404).json({ success: false, error: 'Recording not found' });
+    if (err.code === 'FORBIDDEN') return res.status(403).json({ success: false, error: 'You do not own this recording' });
+    logger.error('deleteRecordingEndpoint error', err);
+    return res.status(500).json({ success: false, error: 'Failed to delete recording' });
+  }
+};
+
 module.exports = {
   listStreams,
   getRtmpKey,
@@ -1158,4 +1253,6 @@ module.exports = {
   getAnalyticsSummary,
   getSlotTicketStatus,
   buySlotTicket,
+  listCreatorRecordings,
+  deleteRecordingEndpoint,
 };
