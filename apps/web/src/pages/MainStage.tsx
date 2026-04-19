@@ -303,6 +303,14 @@ function StageRoom({
   const videoErrorCountRef = useRef(0);
   const [videoGiveUp, setVideoGiveUp] = useState(false);
 
+  // setTimeout handles tracked here so unmount can cancel them — otherwise
+  // a navigation away mid-toast leaves stale setState callbacks queued
+  // (harmless after React 18 but generates noisy "setState on unmounted"
+  // warnings in dev and wastes work).
+  const knockToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mediaErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reactionTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
   const participants = useParticipants();
   const totalInRoom = participants.length;
 
@@ -370,7 +378,11 @@ function StageRoom({
           ? `${label} permission denied — enable it in the browser address bar.`
           : `Could not publish your ${short}. Check permissions or reconnect.`;
         setMediaError(msg);
-        setTimeout(() => setMediaError((prev) => (prev === msg ? null : prev)), 5000);
+        if (mediaErrorTimerRef.current) clearTimeout(mediaErrorTimerRef.current);
+        mediaErrorTimerRef.current = setTimeout(() => {
+          setMediaError((prev) => (prev === msg ? null : prev));
+          mediaErrorTimerRef.current = null;
+        }, 5000);
       }
     };
 
@@ -386,7 +398,28 @@ function StageRoom({
     return () => { cancelled = true; };
   }, [room, connected, cameraOn, micOn, canToggleMic]);
 
-  // Reactions over LiveKit data channel
+  // Declared BEFORE the DataReceived effect so the effect can list it in its
+  // deps array without hitting the temporal dead zone (const hoisting).
+  const spawnReaction = useCallback((emoji: string) => {
+    const id = (globalThis.crypto as any)?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    const x = Math.random() * 0.65 + 0.15;
+    setReactions((r) => {
+      // Keep at most the newest 24 floating at once — prevents a spammer from
+      // tanking the frame rate on everyone's device.
+      const next = [...r, { id, emoji, x }];
+      return next.length > 24 ? next.slice(-24) : next;
+    });
+    const handle = setTimeout(() => {
+      setReactions((r) => r.filter((x) => x.id !== id));
+      reactionTimersRef.current.delete(handle);
+    }, 2600);
+    reactionTimersRef.current.add(handle);
+  }, []);
+
+  // Reactions over LiveKit data channel.
+  // spawnReaction is stable (useCallback with [] deps) so re-running this
+  // effect when its identity changes is a no-op — including it in deps just
+  // satisfies the lint rule without re-subscribing in practice.
   useEffect(() => {
     if (!room) return;
     const onData = (payload: Uint8Array) => {
@@ -399,20 +432,7 @@ function StageRoom({
     };
     room.on(RoomEvent.DataReceived, onData);
     return () => { room.off(RoomEvent.DataReceived, onData); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room]);
-
-  const spawnReaction = useCallback((emoji: string) => {
-    const id = (globalThis.crypto as any)?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-    const x = Math.random() * 0.65 + 0.15;
-    setReactions((r) => {
-      // Keep at most the newest 24 floating at once — prevents a spammer from
-      // tanking the frame rate on everyone's device.
-      const next = [...r, { id, emoji, x }];
-      return next.length > 24 ? next.slice(-24) : next;
-    });
-    setTimeout(() => setReactions((r) => r.filter((x) => x.id !== id)), 2600);
-  }, []);
+  }, [room, spawnReaction]);
 
   const sendReaction = useCallback((emoji: string) => {
     const now = Date.now();
@@ -490,7 +510,11 @@ function StageRoom({
 
   const flashKnockToast = useCallback((msg: string, ms = 4000) => {
     setKnockToast(msg);
-    setTimeout(() => setKnockToast((prev) => (prev === msg ? null : prev)), ms);
+    if (knockToastTimerRef.current) clearTimeout(knockToastTimerRef.current);
+    knockToastTimerRef.current = setTimeout(() => {
+      setKnockToast((prev) => (prev === msg ? null : prev));
+      knockToastTimerRef.current = null;
+    }, ms);
   }, []);
 
   // Knock-queue wiring (admins only)
@@ -568,13 +592,18 @@ function StageRoom({
     else setControlsVisible(true);
   }, [isFullscreen, resetControlsTimer]);
 
-  // Clear the pending auto-hide timer if the component unmounts while in fullscreen.
+  // Cancel every outstanding setTimeout when StageRoom unmounts so we don't
+  // queue setState into the void when the user navigates away.
   useEffect(() => {
     return () => {
-      if (controlsTimerRef.current) {
-        clearTimeout(controlsTimerRef.current);
-        controlsTimerRef.current = null;
-      }
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      if (knockToastTimerRef.current) clearTimeout(knockToastTimerRef.current);
+      if (mediaErrorTimerRef.current) clearTimeout(mediaErrorTimerRef.current);
+      for (const h of reactionTimersRef.current) clearTimeout(h);
+      reactionTimersRef.current.clear();
+      controlsTimerRef.current = null;
+      knockToastTimerRef.current = null;
+      mediaErrorTimerRef.current = null;
     };
   }, []);
 
@@ -1177,12 +1206,36 @@ export default function MainStage() {
 
   const [primeVideos, setPrimeVideos] = useState<PrimeVideo[]>([]);
   const [primeVideosLoaded, setPrimeVideosLoaded] = useState(false);
-  const [layout, setLayout] = useState<StageLayout>("video");
+  // Persist the layout choice the same way showSelfView is persisted, so the
+  // user's pick survives reload. Bound to the three known values to avoid
+  // a corrupted localStorage value rendering the page broken.
+  const [layout, setLayoutState] = useState<StageLayout>(() => {
+    try {
+      const v = localStorage.getItem("pnp:stage:layout");
+      return v === "video" || v === "spotlight" || v === "grid" ? v : "video";
+    } catch { return "video"; }
+  });
+  const setLayout = useCallback((next: StageLayout) => {
+    setLayoutState(next);
+    try { localStorage.setItem("pnp:stage:layout", next); } catch {}
+  }, []);
 
   // One-shot metadata fetches on mount.
   useEffect(() => {
     getStageState().then((res) => { if (res.stageState) setStageState(res.stageState); }).catch(() => {});
     getMainGroup().then((res) => { if (res?.group) setMainGroup(res.group); }).catch(() => {});
+  }, []);
+
+  // Join the `mainstage` socket room so this client receives broadcasts
+  // (mainstage:knock:new for admins, mainstage:knock:resolved + mainstage:mode-changed
+  // for everyone). Without this emit, the server-side broadcasts at
+  // communityRoomController.js {435,477,552} reach nobody — admins never see
+  // the raised-hand queue update live, only after a page reload.
+  useEffect(() => {
+    const sock = getSocket?.();
+    if (!sock) return;
+    sock.emit?.("mainstage:join");
+    return () => { sock.emit?.("mainstage:leave"); };
   }, []);
 
   // When an admin approves a raised-hand request, the server re-mints a
