@@ -415,7 +415,6 @@ export default function MeruLinks() {
               {knownProducts.map((p) => (
                 <option key={p} value={p} />
               ))}
-              <option value="lifetime-pass" />
               <option value="lifetime100" />
             </datalist>
           </div>

@@ -5,7 +5,9 @@ const paymentHistoryService = require('./paymentHistoryService');
 
 /**
  * Initialize Meru Link tracking system
- * Creates table and initializes with existing links from lifetime-pass.html
+ * Creates table and seeds with the shared link pool. Both the lifetime-pass
+ * and lifetime100 plans pull from the same Meru codes — they're consolidated
+ * under the 'lifetime100' product label (see migration 195).
  */
 class MeruLinkInitializer {
   async initialize() {
@@ -93,7 +95,7 @@ class MeruLinkInitializer {
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
           code VARCHAR(50) NOT NULL UNIQUE,
           meru_link VARCHAR(255) NOT NULL UNIQUE,
-          product VARCHAR(100) DEFAULT 'lifetime-pass',
+          product VARCHAR(100) DEFAULT 'lifetime100',
           status VARCHAR(50) DEFAULT 'active',
           activation_code VARCHAR(50),
           used_by VARCHAR(255),
@@ -120,7 +122,8 @@ class MeruLinkInitializer {
 
   async initializeKnownLinks() {
     try {
-      // These links are for both lifetime100 and lifetimepass products.
+      // Shared pool — consumable by both the lifetime-pass and lifetime100
+      // plans. All tagged 'lifetime100' since migration 195.
       const knownLinks = [
         { code: 'MoXzNM', url: 'https://pay.getmeru.com/MoXzNM' },
         { code: 'Gps_Vx', url: 'https://pay.getmeru.com/Gps_Vx' },
@@ -132,7 +135,7 @@ class MeruLinkInitializer {
 
       let addedCount = 0;
       for (const link of knownLinks) {
-        const success = await meruLinkService.addLink(link.code, link.url, 'lifetime-pass');
+        const success = await meruLinkService.addLink(link.code, link.url, 'lifetime100');
         if (success) addedCount++;
       }
 

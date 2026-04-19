@@ -206,7 +206,7 @@ class MeruLinkService {
    * @param {string} product - Product type
    * @returns {Promise<boolean>}
    */
-  async addLink(meruCode, meruLink, product = 'lifetime-pass') {
+  async addLink(meruCode, meruLink, product = 'lifetime100') {
     try {
       await query(
         `INSERT INTO meru_payment_links (code, meru_link, product, status)

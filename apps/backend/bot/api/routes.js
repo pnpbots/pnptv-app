@@ -3477,7 +3477,8 @@ async function ensureEmailCredentials(userId, email, language) {
 // Get a random available Meru link for a product
 // Verifies the link is actually unpaid on Meru before serving it
 app.get('/api/meru/random-link', asyncHandler(async (req, res) => {
-  const { product = 'lifetime-pass' } = req.query;
+  // Default to the consolidated 'lifetime100' pool — see migration 195.
+  const { product = 'lifetime100' } = req.query;
   const meruLinkService = require('../../services/meruLinkService');
   const meruPaymentService = require('../../services/meruPaymentService');
 

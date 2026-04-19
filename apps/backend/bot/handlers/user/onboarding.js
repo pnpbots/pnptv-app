@@ -623,8 +623,10 @@ const registerOnboardingHandlers = (bot) => {
       await ctx.saveSession();
 
       try {
-        // Validate code against active links in the database (single source of truth)
-        const availableLinks = await meruLinkService.getAvailableLinks('lifetime-pass');
+        // Validate code against active links in the database (single source of truth).
+        // The Meru link pool is consolidated under 'lifetime100' (migration 195) —
+        // both the lifetime-pass and lifetime100 plans pull from the same codes.
+        const availableLinks = await meruLinkService.getAvailableLinks('lifetime100');
         const matchingLink = availableLinks.find(link => link.code === rawCode);
 
         if (!matchingLink) {
