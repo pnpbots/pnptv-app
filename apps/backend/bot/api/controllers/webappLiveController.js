@@ -2,6 +2,7 @@ const logger = require('../../../utils/logger');
 const { getPool } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
 const axios = require('axios');
+const restreamerService = require('../../../services/restreamerService');
 
 /**
  * Module-level cache for the Restreamer auth token.
@@ -303,8 +304,144 @@ const getRtmpKey = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
+// POST /api/webapp/live/provision-channel
+// Creator-only: self-serve Restreamer channel provisioning.
+//
+// If the creator already has users.live_channel set, returns their existing
+// RTMP details without touching Restreamer.
+//
+// Otherwise:
+//   1. Derives a deterministic refId from username: pnptv-<sanitized_username>
+//   2. Calls restreamerService.createProcess() — idempotent (handles 409 / pre-existing)
+//   3. On success: persists refId to users.live_channel
+//   4. Returns RTMP URL + stream key
+//
+// On Restreamer failure returns 503 — users row is NOT updated.
+//
+// Note: most users self-provision via this endpoint; admins can still override
+// or force-assign channels via POST /api/webapp/admin/live/assign-channel.
+// ---------------------------------------------------------------------------
+const provisionChannel = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const user = req.session.user;
+  if (!['model', 'creator', 'admin', 'superadmin'].includes(user.role)) {
+    return res.status(403).json({
+      success: false,
+      error: 'Creator or admin access required to provision a streaming channel',
+    });
+  }
+
+  if (process.env.RESTREAMER_USER === undefined || process.env.RESTREAMER_PASSWORD === undefined) {
+    return res.status(503).json({ success: false, error: 'Live streaming not configured' });
+  }
+
+  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+  const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
+
+  try {
+    // Look up existing channel assignment first.
+    const { rows } = await getPool().query(
+      'SELECT live_channel, username, first_name, last_name FROM users WHERE id = $1',
+      [user.id]
+    );
+    const dbUser = rows[0];
+    if (!dbUser) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    // If already provisioned, return existing RTMP details without hitting Restreamer.
+    if (dbUser.live_channel) {
+      const publicHost = restreamerPublicUrl.replace(/^https?:\/\//, '');
+      const rtmpUrl = `rtmp://${publicHost}/live`;
+      const safeRef = sanitizeRefId(dbUser.live_channel);
+      const hlsUrl = safeRef ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8` : null;
+
+      logger.info(`provisionChannel: user ${user.id} already has channel '${dbUser.live_channel}' — returning existing`);
+      return res.json({
+        success: true,
+        alreadyProvisioned: true,
+        rtmpUrl,
+        streamKey: dbUser.live_channel, // RTMP name equals refId
+        channelRef: dbUser.live_channel,
+        hlsUrl,
+      });
+    }
+
+    // Derive deterministic refId from username.
+    // Strip characters not allowed in a Restreamer reference, lowercase, prefix 'pnptv-'.
+    const rawUsername = dbUser.username || `user${user.id}`;
+    const slugPart = rawUsername.toLowerCase().replace(/[^a-z0-9_.-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const refId = sanitizeRefId(`pnptv-${slugPart}`);
+    if (!refId) {
+      return res.status(400).json({ success: false, error: 'Could not derive a valid channel ID from your username' });
+    }
+
+    // Derive display title from name fields.
+    const displayName =
+      [dbUser.first_name, dbUser.last_name].filter(Boolean).join(' ') ||
+      dbUser.username ||
+      `Creator ${user.id}`;
+
+    // Create (or confirm existing) Restreamer process.
+    let provisionResult;
+    try {
+      provisionResult = await restreamerService.createProcess({ refId, title: displayName });
+    } catch (err) {
+      logger.warn(`provisionChannel: Restreamer unavailable for user ${user.id}: ${err.message}`);
+      return res.status(503).json({
+        success: false,
+        error: 'Streaming service is currently unavailable. Please try again in a few minutes.',
+      });
+    }
+
+    // Persist the channel assignment.
+    // If another concurrent request already set live_channel (race), keep the
+    // winner's value — return the one that ended up in the DB.
+    const updateResult = await getPool().query(
+      `UPDATE users
+         SET live_channel = $1
+       WHERE id = $2 AND live_channel IS NULL
+       RETURNING live_channel`,
+      [provisionResult.refId, user.id]
+    );
+
+    // If live_channel was already set by a concurrent request, use that value.
+    let finalRef;
+    if (updateResult.rows.length > 0) {
+      finalRef = updateResult.rows[0].live_channel;
+    } else {
+      // Someone else won the race — fetch whatever is in the DB now.
+      const refetch = await getPool().query('SELECT live_channel FROM users WHERE id = $1', [user.id]);
+      finalRef = refetch.rows[0]?.live_channel || provisionResult.refId;
+    }
+
+    const publicHost = restreamerPublicUrl.replace(/^https?:\/\//, '');
+    const rtmpUrl = `rtmp://${publicHost}/live`;
+    const safeRef = sanitizeRefId(finalRef);
+    const hlsUrl = safeRef ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8` : null;
+
+    logger.info(`provisionChannel: user ${user.id} provisioned channel '${finalRef}'`);
+    return res.json({
+      success: true,
+      alreadyProvisioned: false,
+      rtmpUrl,
+      streamKey: finalRef,
+      channelRef: finalRef,
+      hlsUrl,
+    });
+  } catch (err) {
+    logger.error('provisionChannel error', err);
+    return res.status(500).json({ success: false, error: 'Failed to provision streaming channel' });
+  }
+};
+
+// ---------------------------------------------------------------------------
 // POST /api/webapp/admin/live/assign-channel
 // Admin-only: assign a Restreamer channel to a user (or unassign by passing null).
+// Most users now self-provision via POST /api/webapp/live/provision-channel.
+// Use this endpoint for manual overrides (re-assignment, force-assignment, unassign).
 //
 // Body: { userId: number, channelRef: string|null }
 //   channelRef: the Restreamer process reference slug (e.g. 'pnptv-frank'), or null to unassign.
@@ -815,9 +952,199 @@ const getHostedChannel = async (req, res) => {
   }
 };
 
+// ── Stream Analytics ──────────────────────────────────────────────────────────
+
+const streamAnalyticsService = require('../../../services/streamAnalyticsService');
+
+/**
+ * GET /api/webapp/live/analytics/sessions?limit=20
+ * Returns the caller's recent stream sessions.
+ * Requires an active creator profile (checked via creatorGuard middleware on the route).
+ */
+const getAnalyticsSessions = async (req, res) => {
+  const creatorId = String(req.user.id);
+  const limit = parseInt(req.query.limit, 10) || 20;
+  try {
+    const sessions = await streamAnalyticsService.getCreatorSessions(creatorId, limit);
+    return res.json({ success: true, sessions });
+  } catch (err) {
+    logger.error('getAnalyticsSessions error', { creatorId, err });
+    return res.status(500).json({ success: false, error: 'Failed to load sessions' });
+  }
+};
+
+/**
+ * GET /api/webapp/live/analytics/summary?days=30
+ * Returns aggregate stats for the last N days.
+ */
+const getAnalyticsSummary = async (req, res) => {
+  const creatorId = String(req.user.id);
+  const days = parseInt(req.query.days, 10) || 30;
+  try {
+    const summary = await streamAnalyticsService.getCreatorSummary(creatorId, days);
+    return res.json({ success: true, summary });
+  } catch (err) {
+    logger.error('getAnalyticsSummary error', { creatorId, err });
+    return res.status(500).json({ success: false, error: 'Failed to load summary' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// GET /api/webapp/live/slot/:id/ticket-status
+// Returns ticket status for a scheduled live_streams slot.
+// ---------------------------------------------------------------------------
+const getSlotTicketStatus = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const { id } = req.params;
+  if (!id || typeof id !== 'string') {
+    return res.status(400).json({ success: false, error: 'Invalid slot id' });
+  }
+
+  const userId = String(req.session.user.id);
+
+  try {
+    const { rows: slotRows } = await getPool().query(
+      `SELECT id, is_ticketed, ticket_price_usd, ticket_price_tokens
+       FROM live_streams WHERE id = $1`,
+      [id]
+    );
+    if (slotRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Slot not found' });
+    }
+    const slot = slotRows[0];
+
+    let hasTicket = false;
+    if (slot.is_ticketed) {
+      const { rows: ticketRows } = await getPool().query(
+        'SELECT 1 FROM live_show_tickets WHERE slot_id = $1 AND user_id = $2',
+        [id, userId]
+      );
+      hasTicket = ticketRows.length > 0;
+    }
+
+    return res.json({
+      success: true,
+      isTicketed: slot.is_ticketed,
+      priceTokens: slot.ticket_price_tokens,
+      priceUsd: slot.ticket_price_usd,
+      hasTicket,
+    });
+  } catch (err) {
+    logger.error('getSlotTicketStatus error', err);
+    return res.status(500).json({ success: false, error: 'Failed to get ticket status' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// POST /api/webapp/live/slot/:id/buy-ticket
+// Body: { currency: 'tokens' | 'usd' }
+// Tokens: atomic debit from user_token_wallets + ticket insert (same pattern as pnpLiveTipsService).
+// USD: placeholder — 501 until ePayco/Daimo checkout is wired per project payment memory.
+// ---------------------------------------------------------------------------
+const buySlotTicket = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const { id } = req.params;
+  const { currency } = req.body;
+
+  if (!id || typeof id !== 'string') {
+    return res.status(400).json({ success: false, error: 'Invalid slot id' });
+  }
+  if (currency !== 'tokens' && currency !== 'usd') {
+    return res.status(400).json({ success: false, error: "currency must be 'tokens' or 'usd'" });
+  }
+
+  const userId = String(req.session.user.id);
+
+  try {
+    const { rows: slotRows } = await getPool().query(
+      `SELECT id, title, is_ticketed, ticket_price_usd, ticket_price_tokens
+       FROM live_streams WHERE id = $1`,
+      [id]
+    );
+    if (slotRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Slot not found' });
+    }
+    const slot = slotRows[0];
+
+    if (!slot.is_ticketed) {
+      return res.status(400).json({ success: false, error: 'This stream does not require a ticket' });
+    }
+
+    // Idempotency: already owned
+    const { rows: existing } = await getPool().query(
+      'SELECT 1 FROM live_show_tickets WHERE slot_id = $1 AND user_id = $2',
+      [id, userId]
+    );
+    if (existing.length > 0) {
+      return res.json({ success: true, hasTicket: true, alreadyOwned: true });
+    }
+
+    // ── Token purchase path ──────────────────────────────────────────────────
+    if (currency === 'tokens') {
+      const price = slot.ticket_price_tokens;
+      if (!price || price <= 0) {
+        return res.status(400).json({ success: false, error: 'Token price not configured for this slot' });
+      }
+
+      const pool = getPool();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        // Atomic debit — mirrors pnpLiveTipsService pattern
+        const debitResult = await client.query(
+          `UPDATE user_token_wallets
+           SET balance_tokens = balance_tokens - $2,
+               updated_at = NOW()
+           WHERE user_id = $1 AND balance_tokens >= $2
+           RETURNING balance_tokens`,
+          [userId, price]
+        );
+        if (debitResult.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(402).json({ success: false, error: 'Insufficient token balance' });
+        }
+        const newBalance = debitResult.rows[0].balance_tokens;
+
+        await client.query(
+          `INSERT INTO live_show_tickets (slot_id, user_id, price_paid_tokens)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (slot_id, user_id) DO NOTHING`,
+          [id, userId, price]
+        );
+
+        await client.query('COMMIT');
+
+        logger.info('Live ticket purchased (tokens)', { userId, slotId: id, price });
+        return res.json({ success: true, hasTicket: true, newBalance });
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        logger.error('buySlotTicket token transaction error', txErr);
+        return res.status(500).json({ success: false, error: 'Purchase failed — please try again' });
+      } finally {
+        client.release();
+      }
+    }
+
+    // ── USD purchase path ────────────────────────────────────────────────────
+    return res.status(501).json({
+      success: false,
+      error: 'USD ticket purchase not yet available — use tokens',
+    });
+  } catch (err) {
+    logger.error('buySlotTicket error', err);
+    return res.status(500).json({ success: false, error: 'Failed to process ticket purchase' });
+  }
+};
+
 module.exports = {
   listStreams,
   getRtmpKey,
+  provisionChannel,
   assignChannel,
   listChannels,
   getSchedule,
@@ -827,4 +1154,8 @@ module.exports = {
   initiateRaid,
   setHostedChannel,
   getHostedChannel,
+  getAnalyticsSessions,
+  getAnalyticsSummary,
+  getSlotTicketStatus,
+  buySlotTicket,
 };

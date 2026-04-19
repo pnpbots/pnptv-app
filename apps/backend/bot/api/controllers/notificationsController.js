@@ -15,6 +15,7 @@ const ALLOWED_PREF_KEYS = new Set([
   'likes', 'follows', 'replies', 'dms',
   'group_messages', 'group_joins', 'wof',
   'payments', 'announcements', 'hangout_calls',
+  'going_live',
   'quiet_hours',
 ]);
 
@@ -38,6 +39,7 @@ const DEFAULT_PREFS = {
   payments:       { inApp: true,  bot: true,  email: true,  push: true  },
   announcements:  { inApp: true,  bot: true,  email: true,  push: true  },
   hangout_calls:  { inApp: true,  bot: true,  email: false, push: true  },
+  going_live:     { inApp: true,  bot: true,  email: false, push: true  },
   quiet_hours:    { enabled: false, start: '23:00', end: '08:00' },
 };
 

@@ -10,6 +10,7 @@ const NotificationEmitter = require('../../services/notificationEmitter');
 const LiveStreamModel = require('../../models/liveStreamModel');
 const BlockedUser = require('../../models/blockedUser');
 const DmService = require('../../services/dmService');
+const streamAnalyticsService = require('../../services/streamAnalyticsService');
 
 // ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
 // H4: Replaces the non-atomic decr + conditional set(0) pattern.
@@ -1829,6 +1830,23 @@ function initSocketIO(io) {
             socket.data.ffmpegProcess = null;
             socket.data.streamChannelRef = null;
             socket.emit('stream:stopped', { channelRef, reason: code !== 0 ? 'ffmpeg_error' : 'completed' });
+
+            // Analytics: close session on unexpected FFmpeg exit
+            if (socket.data.viewerSamplerInterval) {
+              clearInterval(socket.data.viewerSamplerInterval);
+              socket.data.viewerSamplerInterval = null;
+            }
+            const sid = socket.data.analyticsSessionId;
+            if (sid) {
+              socket.data.analyticsSessionId = null;
+              const redis = getRedis();
+              const endFn = async () => {
+                const countRaw = redis ? await redis.get(`live:viewers:${channelRef}`).catch(() => null) : null;
+                const peakViewers = parseInt(countRaw, 10) || 0;
+                await streamAnalyticsService.endSession(sid, { peakViewers });
+              };
+              endFn().catch(e => logger.warn('streamAnalytics: endSession(ffmpeg close) error', { sid, error: e.message }));
+            }
           }
         });
 
@@ -1870,35 +1888,39 @@ function initSocketIO(io) {
         // RTMP server address and stream key which are server-side concerns only.
         socket.emit('stream:started', { channelRef });
 
-        // Notify followers
-        const { getBotInstance } = require('../core/bot');
-        const bot = getBotInstance();
-        if (bot) {
-          LiveStreamModel.notifyFollowers(
-            user.id,
-            {
-              hostName: user.first_name || user.username,
-              title: 'Live Stream',
-              streamId: channelRef,
-            },
-            async (subscriberId, message, streamId) => {
+        // Analytics: open a session row and start a 30-second viewer sampler.
+        setImmediate(async () => {
+          try {
+            const sessionId = await streamAnalyticsService.startSession(user.id, channelRef);
+            socket.data.analyticsSessionId = sessionId;
+
+            const redis = getRedis();
+            socket.data.viewerSamplerInterval = setInterval(async () => {
               try {
-                await bot.telegram.sendMessage(
-                  subscriberId,
-                  message,
-                  {
-                    parse_mode: 'Markdown',
-                    ...Markup.inlineKeyboard([
-                      [Markup.button.callback('📺 Join Stream', `live_join_${streamId}`)],
-                    ]),
-                  }
-                );
-              } catch (error) {
-                logger.warn('Failed to send notification to follower', { subscriberId, error: error.message });
+                const sid = socket.data.analyticsSessionId;
+                if (!sid) return;
+                const countRaw = redis ? await redis.get(`live:viewers:${channelRef}`) : null;
+                const count = parseInt(countRaw, 10) || 0;
+                await streamAnalyticsService.sampleViewers(sid, count);
+              } catch (sampleErr) {
+                logger.warn('streamAnalytics: sampleViewers error', { error: sampleErr.message });
               }
-            }
-          ).catch(err => logger.error('Error notifying followers:', err));
-        }
+            }, 30_000);
+          } catch (analyticsErr) {
+            logger.warn('streamAnalytics: startSession error (non-fatal)', { userId: user.id, channelRef, error: analyticsErr.message });
+          }
+        });
+
+        // Going-Live broadcast: fan-out Telegram DM + push to opted-in followers.
+        // Runs in background (setImmediate) so it never blocks the stream-start path.
+        setImmediate(() => {
+          const { getBotInstance } = require('../core/bot');
+          const { broadcastGoingLive } = require('../../services/goingLiveBroadcastService');
+          const bot = getBotInstance();
+          broadcastGoingLive(bot, user.id, channelRef).catch((err) => {
+            logger.error('goingLiveBroadcast: unhandled rejection', { userId: user.id, channelRef, error: err.message });
+          });
+        });
 
         // Cristina AI live stream announcement in social feed (non-blocking)
         setImmediate(() => {
@@ -1969,6 +1991,13 @@ function initSocketIO(io) {
     });
 
     socket.on('stream:stop', () => {
+      // Mark explicit stop so disconnect handler won't send the "went offline" DM
+      const channelRefForStop = socket.data.streamChannelRef;
+      if (channelRefForStop) {
+        const redis = getRedis();
+        redis.set(`pnp:live:offline-alert:${user.id}`, '1', 'NX', 'EX', 60).catch(() => {});
+      }
+
       const ffmpeg = socket.data.ffmpegProcess;
       const channelRef = socket.data.streamChannelRef;
 
@@ -2001,6 +2030,22 @@ function initSocketIO(io) {
         socket.data.streamChannelRef = null;
         logger.info(`Browser stream stopped: user ${user.id}, channel '${channelRef}'`);
         socket.emit('stream:stopped', { channelRef, reason: 'user_stopped' });
+
+        // Analytics: close session
+        if (socket.data.viewerSamplerInterval) {
+          clearInterval(socket.data.viewerSamplerInterval);
+          socket.data.viewerSamplerInterval = null;
+        }
+        const sid = socket.data.analyticsSessionId;
+        if (sid) {
+          socket.data.analyticsSessionId = null;
+          const redis = getRedis();
+          const countRaw = redis ? await redis.get(`live:viewers:${channelRef}`).catch(() => null) : null;
+          const peakViewers = parseInt(countRaw, 10) || 0;
+          streamAnalyticsService.endSession(sid, { peakViewers }).catch(e =>
+            logger.warn('streamAnalytics: endSession error', { sid, error: e.message })
+          );
+        }
       }
     });
 
@@ -2273,6 +2318,51 @@ function initSocketIO(io) {
         }
         socket.data.ffmpegProcess = null;
         socket.data.streamChannelRef = null;
+
+        // Telegram DM: notify creator their stream went offline unexpectedly.
+        // Dedup via Redis NX key set by stream:stop (TTL 60s) — don't fire if they stopped intentionally.
+        setImmediate(async () => {
+          try {
+            const redis = getRedis();
+            if (!redis) return;
+            const dedupKey = `pnp:live:offline-alert:${user.id}`;
+            // SET NX: only set if NOT already present (i.e. stream:stop didn't run)
+            const set = await redis.set(dedupKey, '1', 'NX', 'EX', 300);
+            if (!set) return; // explicit stop fired within 60s — skip DM
+            // Fetch creator telegram_id
+            const { rows } = await query('SELECT telegram_id FROM users WHERE id = $1', [String(user.id)]);
+            const telegramId = rows[0]?.telegram_id;
+            if (!telegramId) return;
+            const PNPLiveNotificationService = require('../../services/pnpLiveNotificationService');
+            await PNPLiveNotificationService.sendMessage(
+              telegramId,
+              '\u26a0\ufe0f Your stream went offline. Restart OBS to resume.',
+              { parse_mode: 'Markdown' }
+            );
+            logger.info(`Offline DM sent to creator ${user.id} (channel: ${channelRef})`);
+          } catch (dmErr) {
+            logger.warn('Offline DM error', { userId: user.id, error: dmErr.message });
+          }
+        });
+      }
+
+      // Analytics: clear sampler and close any open session on disconnect
+      if (socket.data.viewerSamplerInterval) {
+        clearInterval(socket.data.viewerSamplerInterval);
+        socket.data.viewerSamplerInterval = null;
+      }
+      if (socket.data.analyticsSessionId) {
+        const sid = socket.data.analyticsSessionId;
+        const channelRefForAnalytics = socket.data.streamChannelRef;
+        socket.data.analyticsSessionId = null;
+        const redis = getRedis();
+        const countRaw = (redis && channelRefForAnalytics)
+          ? await redis.get(`live:viewers:${channelRefForAnalytics}`).catch(() => null)
+          : null;
+        const peakViewers = parseInt(countRaw, 10) || 0;
+        streamAnalyticsService.endSession(sid, { peakViewers }).catch(e =>
+          logger.warn('streamAnalytics: endSession(disconnect) error', { sid, error: e.message })
+        );
       }
 
       if (socket.data.liveRooms && socket.data.liveRooms.size > 0) {

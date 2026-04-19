@@ -2924,11 +2924,14 @@ app.get('/api/webapp/mastodon/feed', requireSessionAuth, asyncHandler(webAppCont
 const liveRulesController = require('./controllers/liveRulesController');
 app.get('/api/webapp/live/rules-status', requireSessionAuth, asyncHandler(liveRulesController.getRulesStatus));
 app.post('/api/webapp/live/acknowledge-rules', requireSessionAuth, asyncHandler(liveRulesController.acknowledgeRules));
+app.post('/api/webapp/live/stream-rules', requireSessionAuth, asyncHandler(liveRulesController.saveStreamRules));
 
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');
 app.get('/api/webapp/live/streams', requireSessionAuth, requireMemberTier, asyncHandler(webappLiveController.listStreams));
 app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
+// Self-serve channel provisioning: creator gets a Restreamer channel on first "Go Live"
+app.post('/api/webapp/live/provision-channel', requireSessionAuth, asyncHandler(webappLiveController.provisionChannel));
 // Raid: creator sends all viewers to another live stream
 app.post('/api/webapp/live/raid', requireSessionAuth, asyncHandler(webappLiveController.initiateRaid));
 // Host mode: embed another channel's stream when offline
@@ -2943,6 +2946,15 @@ app.get('/api/webapp/live/schedule/notify/:slotId', requireSessionAuth, asyncHan
 // Admin: manage Restreamer channel assignments
 app.get('/api/webapp/admin/live/channels', adminGuard, asyncHandler(webappLiveController.listChannels));
 app.post('/api/webapp/admin/live/assign-channel', adminGuard, asyncHandler(webappLiveController.assignChannel));
+
+// Ticketed live shows — ticket status + purchase
+app.get('/api/webapp/live/slot/:id/ticket-status', requireSessionAuth, asyncHandler(webappLiveController.getSlotTicketStatus));
+app.post('/api/webapp/live/slot/:id/buy-ticket', requireSessionAuth, asyncHandler(webappLiveController.buySlotTicket));
+
+// Stream analytics — creator only
+const creatorGuard = require('./middleware/creatorGuard');
+app.get('/api/webapp/live/analytics/sessions', requireSessionAuth, creatorGuard, asyncHandler(webappLiveController.getAnalyticsSessions));
+app.get('/api/webapp/live/analytics/summary', requireSessionAuth, creatorGuard, asyncHandler(webappLiveController.getAnalyticsSummary));
 
 // Streamer Settings: persistent encoder + filter preferences
 const streamerSettingsController = require('./controllers/streamerSettingsController');
@@ -7870,6 +7882,34 @@ app.get('/api/webapp/admin/stage-tv/status', adminGuard, (req, res) => {
 app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
   res.json({ success: true, running: stageTvState.running, hlsUrl: stageTvState.hlsUrl });
 });
+
+// ==========================================
+// CREATOR ALBUM / MEDIA ENDPOINTS
+// ==========================================
+const creatorMediaController = require('./controllers/creatorMediaController');
+
+// Public: list creator album (premium gating applied via canView flag)
+app.get('/api/webapp/creators/:creatorId/media',
+  softAuth,
+  asyncHandler(creatorMediaController.listMedia));
+
+// Creator-only: add, update, delete, reorder
+// reorder must be registered before /:id to avoid param collision
+app.post('/api/webapp/creators/media/reorder',
+  requireSessionAuth, creatorGuard,
+  asyncHandler(creatorMediaController.reorderMedia));
+
+app.post('/api/webapp/creators/media',
+  requireSessionAuth, creatorGuard,
+  asyncHandler(creatorMediaController.addMedia));
+
+app.patch('/api/webapp/creators/media/:id',
+  requireSessionAuth,
+  asyncHandler(creatorMediaController.updateMedia));
+
+app.delete('/api/webapp/creators/media/:id',
+  requireSessionAuth,
+  asyncHandler(creatorMediaController.deleteMedia));
 
 // ==========================================
 // OG / OPEN GRAPH ENDPOINTS
