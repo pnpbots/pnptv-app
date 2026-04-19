@@ -1269,6 +1269,37 @@ class PaymentService {
           return { success: true, type: 'call_package' };
         }
 
+        // Handle live show ticket purchase — insert ticket row, emit socket event
+        if (planIdOrBookingId === 'live_show_ticket' && payment?.metadata?.slotId) {
+          try {
+            const { handleTicketSettlement } = require('../bot/api/controllers/webappLiveController');
+            const slotId = payment.metadata.slotId;
+            const effectiveUserId = userId || payment.user_id;
+            const pricePaidUsd = parseFloat(x_amount || payment.amount || 0);
+            await handleTicketSettlement(effectiveUserId, slotId, 'epayco', pricePaidUsd);
+
+            await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
+              transaction_id: x_transaction_id,
+              reference_code: x_ref_payco,
+              webhook_processed_at: new Date().toISOString(),
+            });
+
+            logger.info('ePayco: live show ticket settled', {
+              paymentId: paymentIdOrType,
+              userId: effectiveUserId,
+              slotId,
+              refPayco: x_ref_payco,
+            });
+          } catch (ticketErr) {
+            logger.error('ePayco live show ticket settlement failed', {
+              error: ticketErr.message,
+              paymentId: paymentIdOrType,
+              refPayco: x_ref_payco,
+            });
+          }
+          return { success: true, type: 'live_show_ticket' };
+        }
+
         // Activate user subscription inside a DB transaction
         if (userId && planIdOrBookingId) {
           const plan = await PlanModel.getById(planIdOrBookingId);

@@ -2956,9 +2956,16 @@ const creatorGuard = require('./middleware/creatorGuard');
 app.get('/api/webapp/live/analytics/sessions', requireSessionAuth, creatorGuard, asyncHandler(webappLiveController.getAnalyticsSessions));
 app.get('/api/webapp/live/analytics/summary', requireSessionAuth, creatorGuard, asyncHandler(webappLiveController.getAnalyticsSummary));
 
+// Creator revenue aggregation (tips + tickets + subs + calls)
+app.get('/api/webapp/creator/revenue', requireSessionAuth, asyncHandler(webappLiveController.getCreatorRevenue));
+
+// Manual going-live broadcast to followers
+app.post('/api/webapp/live/broadcast-live-now', requireSessionAuth, asyncHandler(webappLiveController.broadcastLiveNow));
+
 // VOD replay recordings
 app.get('/api/webapp/creators/:creatorId/recordings', softAuth, asyncHandler(webappLiveController.listCreatorRecordings));
 app.delete('/api/webapp/recordings/:id', requireSessionAuth, asyncHandler(webappLiveController.deleteRecordingEndpoint));
+app.patch('/api/webapp/recordings/:id', requireSessionAuth, asyncHandler(webappLiveController.updateRecordingEndpoint));
 
 // Streamer Settings: persistent encoder + filter preferences
 const streamerSettingsController = require('./controllers/streamerSettingsController');
@@ -6928,6 +6935,49 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       const orderMetadata = order.metadata && typeof order.metadata === 'object'
         ? order.metadata
         : (typeof order.metadata === 'string' ? (() => { try { return JSON.parse(order.metadata); } catch { return null; } })() : null);
+
+      // ── Live show ticket purchase (Dash/BTCPay) ──────────────────────────
+      if (orderMetadata?.resource === 'live_show_ticket' && orderMetadata?.slotId) {
+        // Atomic idempotency — flip status once.
+        const settleTicket = await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW()
+           WHERE id = $1 AND status = 'pending' RETURNING id`,
+          [order.id]
+        );
+        if (settleTicket.rowCount === 0) {
+          return res.json({ success: true, alreadyProcessed: true });
+        }
+        try {
+          const { handleTicketSettlement } = require('../../bot/api/controllers/webappLiveController');
+          await handleTicketSettlement(
+            order.user_id,
+            orderMetadata.slotId,
+            'dash',
+            parseFloat(order.usd_amount || 0)
+          );
+          await markInvoiceProcessed(invoiceId, {
+            userId: order.user_id,
+            slotId: orderMetadata.slotId,
+            source: 'live_show_ticket',
+          });
+          logger.info('BTCPay: live show ticket settled', {
+            invoiceId,
+            userId: order.user_id,
+            slotId: orderMetadata.slotId,
+          });
+          return res.json({ success: true, type: 'live_show_ticket', slotId: orderMetadata.slotId });
+        } catch (ticketErr) {
+          logger.error('BTCPay: live show ticket settlement failed', {
+            invoiceId, orderId: order.id, error: ticketErr.message,
+          });
+          await dbQuery(
+            `UPDATE dash_subscription_orders SET notes = $2 WHERE id = $1`,
+            [order.id, `ticket_settlement_failed: ${ticketErr.message}`.slice(0, 500)]
+          );
+          return res.status(500).json({ success: false, error: 'ticket_settlement_failed', invoiceId });
+        }
+      }
+
       const isScopedPurchase = orderMetadata && (orderMetadata.hangoutGroupId || orderMetadata.channelId);
 
       if (isScopedPurchase) {

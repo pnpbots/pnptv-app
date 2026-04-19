@@ -131,17 +131,24 @@ async function loadPushFollowers(creatorId) {
  * @param {Array<{ telegram: string, id: string }>} followers
  * @param {string} creatorName
  * @param {string} channelRef  — Restreamer channel slug, e.g. 'pnptv-frank'
+ * @param {string|null} [customMessage]  — Optional override message (plain text, no MD escaping needed from caller)
  */
-async function sendTelegramDMs(bot, followers, creatorName, channelRef) {
+async function sendTelegramDMs(bot, followers, creatorName, channelRef, customMessage) {
   const appUrl = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
   const watchPath = channelRef ? `/stream?channel=${encodeURIComponent(channelRef)}` : '/live';
   const watchUrl  = `${appUrl}${watchPath}`;
 
   // Escape for MarkdownV2
   const safeName = creatorName.replace(/[_*[\]()~`>#+=|{}.!\\-]/g, '\\$&');
-  const message =
-    `🔴 *${safeName} is live now on PNPtv\\!*\n\n` +
-    `Watch before the room fills up\\.`;
+  let message;
+  if (customMessage) {
+    const safeCustom = customMessage.replace(/[_*[\]()~`>#+=|{}.!\\-]/g, '\\$&');
+    message = safeCustom;
+  } else {
+    message =
+      `🔴 *${safeName} is live now on PNPtv\\!*\n\n` +
+      `Watch before the room fills up\\.`;
+  }
 
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.url('Watch Now', watchUrl)],
@@ -210,13 +217,15 @@ async function sendPushNotifications(followers, creatorName, channelRef) {
  * @param {import('telegraf').Telegraf} bot
  * @param {string|number} creatorId
  * @param {string} channelRef
+ * @param {{ message?: string }} [opts]  — Optional overrides
+ * @returns {Promise<{ dispatched: number, skippedDedup: boolean }>}
  */
-async function broadcastGoingLive(bot, creatorId, channelRef) {
+async function broadcastGoingLive(bot, creatorId, channelRef, opts = {}) {
   try {
     const alreadyAnnounced = await isAlreadyAnnounced(creatorId);
     if (alreadyAnnounced) {
       logger.info('goingLiveBroadcast: skipped (dedup)', { creatorId, channelRef });
-      return;
+      return { dispatched: 0, skippedDedup: true };
     }
 
     const [creatorName, dmFollowers, pushFollowers] = await Promise.all([
@@ -227,11 +236,13 @@ async function broadcastGoingLive(bot, creatorId, channelRef) {
 
     if (dmFollowers.length === 0 && pushFollowers.length === 0) {
       logger.info('goingLiveBroadcast: no opted-in followers', { creatorId });
-      return;
+      return { dispatched: 0, skippedDedup: false };
     }
 
+    const customMessage = opts?.message || null;
+
     const [dmSent, pushSent] = await Promise.all([
-      bot ? sendTelegramDMs(bot, dmFollowers, creatorName, channelRef) : Promise.resolve(0),
+      bot ? sendTelegramDMs(bot, dmFollowers, creatorName, channelRef, customMessage) : Promise.resolve(0),
       sendPushNotifications(pushFollowers, creatorName, channelRef),
     ]);
 
@@ -243,8 +254,10 @@ async function broadcastGoingLive(bot, creatorId, channelRef) {
       dmSent,
       pushSent,
     });
+    return { dispatched: dmSent + pushSent, skippedDedup: false };
   } catch (err) {
     logger.error('goingLiveBroadcast: error', { creatorId, channelRef, error: err.message });
+    return { dispatched: 0, skippedDedup: false };
   }
 }
 

@@ -1041,9 +1041,11 @@ const getSlotTicketStatus = async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // POST /api/webapp/live/slot/:id/buy-ticket
-// Body: { currency: 'tokens' | 'usd' }
-// Tokens: atomic debit from user_token_wallets + ticket insert (same pattern as pnpLiveTipsService).
-// USD: placeholder — 501 until ePayco/Daimo checkout is wired per project payment memory.
+// Body: { currency: 'tokens' | 'epayco' | 'dash' }
+// tokens  — atomic debit from user_token_wallets + ticket insert.
+// epayco  — create payments row, return checkout URL for ePayco card flow.
+// dash    — create BTCPay invoice via dash_subscription_orders, return checkoutUrl.
+// Webhook settlement for both USD paths calls handleTicketSettlement() below.
 // ---------------------------------------------------------------------------
 const buySlotTicket = async (req, res) => {
   if (!req.session?.user) {
@@ -1055,11 +1057,12 @@ const buySlotTicket = async (req, res) => {
   if (!id || typeof id !== 'string') {
     return res.status(400).json({ success: false, error: 'Invalid slot id' });
   }
-  if (currency !== 'tokens' && currency !== 'usd') {
-    return res.status(400).json({ success: false, error: "currency must be 'tokens' or 'usd'" });
+  if (currency !== 'tokens' && currency !== 'epayco' && currency !== 'dash') {
+    return res.status(400).json({ success: false, error: "currency must be 'tokens', 'epayco', or 'dash'" });
   }
 
   const userId = String(req.session.user.id);
+  const userEmail = req.session.user.email || null;
 
   try {
     const { rows: slotRows } = await getPool().query(
@@ -1122,6 +1125,18 @@ const buySlotTicket = async (req, res) => {
         await client.query('COMMIT');
 
         logger.info('Live ticket purchased (tokens)', { userId, slotId: id, price });
+
+        // Emit real-time event so frontend updates hasTicket optimistically
+        try {
+          const socketSingleton = require('../../../services/socketSingleton');
+          const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+          if (io) {
+            io.to(`user:${userId}`).emit('live:ticket:purchased', { slotId: id, userId });
+          }
+        } catch (emitErr) {
+          logger.warn('buySlotTicket: socket emit failed (non-critical)', { error: emitErr.message });
+        }
+
         return res.json({ success: true, hasTicket: true, newBalance });
       } catch (txErr) {
         await client.query('ROLLBACK');
@@ -1132,14 +1147,192 @@ const buySlotTicket = async (req, res) => {
       }
     }
 
-    // ── USD purchase path ────────────────────────────────────────────────────
-    return res.status(501).json({
-      success: false,
-      error: 'USD ticket purchase not yet available — use tokens',
-    });
+    // ── ePayco card purchase path ────────────────────────────────────────────
+    if (currency === 'epayco') {
+      const priceUsd = parseFloat(slot.ticket_price_usd);
+      if (!priceUsd || priceUsd <= 0) {
+        return res.status(400).json({ success: false, error: 'USD price not configured for this slot' });
+      }
+
+      const PaymentModel = require('../../../models/paymentModel');
+      const { v4: uuidv4 } = require('uuid');
+
+      const paymentId = uuidv4();
+      const usdToCopRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+      const priceInCOP = Math.round(priceUsd * usdToCopRate);
+      const CHECKOUT_DOMAIN = process.env.CHECKOUT_DOMAIN || process.env.WEB_APP_URL || 'https://pnptv.app';
+      const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
+      const EPAYCO_WEBHOOK_DOMAIN = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app';
+
+      const checkoutUrl = `${CHECKOUT_DOMAIN}/payment/${paymentId}`;
+
+      await PaymentModel.create({
+        paymentId,
+        userId,
+        planId: null,
+        provider: 'epayco',
+        sku: `ticket-${id}`,
+        amount: priceUsd,
+        currency: 'USD',
+        status: 'pending',
+        metadata: {
+          type: 'live_show_ticket',
+          resource: 'live_show_ticket',
+          slotId: id,
+          slotTitle: slot.title || null,
+          email: userEmail,
+          expected_epayco_amount: String(priceInCOP),
+          expected_epayco_currency: 'COP',
+          payment_url: checkoutUrl,
+        },
+      });
+
+      // Build the ePayco widget config for the frontend to drive the dialog
+      const crypto = require('crypto');
+      const pKey = process.env.EPAYCO_P_KEY || process.env.EPAYCO_PRIVATE_KEY;
+      const custId = process.env.EPAYCO_P_CUST_ID;
+      const paymentRef = `TKT-${paymentId.substring(0, 8).toUpperCase()}`;
+      let signature = null;
+      if (pKey && custId) {
+        const raw = `${custId}^${pKey}^${paymentRef}^${priceInCOP}^COP`;
+        signature = crypto.createHash('sha256').update(raw).digest('hex');
+      }
+
+      logger.info('Live ticket checkout created (epayco)', { userId, slotId: id, paymentId, priceUsd });
+
+      return res.json({
+        success: true,
+        provider: 'epayco',
+        paymentId,
+        checkoutUrl,
+        epayco: {
+          publicKey: process.env.EPAYCO_PUBLIC_KEY,
+          amount: priceInCOP,
+          currency: 'COP',
+          description: `Ticket: ${slot.title || id}`,
+          invoice: paymentRef,
+          signature,
+          extra1: userId,
+          extra2: 'live_show_ticket',
+          extra3: paymentId,
+          test: process.env.EPAYCO_TEST_MODE === 'true',
+          response: `${WEB_APP_URL}/payment-response?x_extra3=${encodeURIComponent(paymentId)}`,
+          confirmation: `${EPAYCO_WEBHOOK_DOMAIN}/api/webhooks/epayco`,
+        },
+      });
+    }
+
+    // ── Dash / BTCPay crypto purchase path ───────────────────────────────────
+    if (currency === 'dash') {
+      const priceUsd = parseFloat(slot.ticket_price_usd);
+      if (!priceUsd || priceUsd <= 0) {
+        return res.status(400).json({ success: false, error: 'USD price not configured for this slot' });
+      }
+
+      const { createDashInvoice } = require('../../../config/btcpay');
+      const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
+
+      const invoice = await createDashInvoice({
+        usdAmount: priceUsd,
+        userId,
+        orderId: `pnptv-ticket-${userId}-${id}-${Date.now()}`,
+        description: `Live Show Ticket: ${slot.title || id}`,
+        redirectUrl: `${WEB_APP_URL}/live/${id}`,
+      });
+
+      // Store in dash_subscription_orders so the BTCPay webhook can settle it.
+      // metadata.resource = 'live_show_ticket' is the routing key in the webhook handler.
+      await getPool().query(
+        `INSERT INTO dash_subscription_orders
+           (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
+         VALUES ($1, $2, $3, $4, $5, 'pending', $6::jsonb)
+         ON CONFLICT DO NOTHING`,
+        [
+          userId,
+          'live_show_ticket',
+          userEmail,
+          priceUsd,
+          invoice.invoiceId,
+          JSON.stringify({
+            resource: 'live_show_ticket',
+            slotId: id,
+            slotTitle: slot.title || null,
+            userId,
+          }),
+        ]
+      );
+
+      logger.info('Live ticket checkout created (dash)', { userId, slotId: id, invoiceId: invoice.invoiceId, priceUsd });
+
+      return res.json({
+        success: true,
+        provider: 'dash',
+        invoiceId: invoice.invoiceId,
+        checkoutUrl: invoice.checkoutUrl,
+      });
+    }
+
+    // Unreachable — validation gate above covers all cases
+    return res.status(400).json({ success: false, error: 'Invalid currency' });
   } catch (err) {
     logger.error('buySlotTicket error', err);
     return res.status(500).json({ success: false, error: 'Failed to process ticket purchase' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// handleTicketSettlement — called by webhook handlers after payment confirmation.
+// Inserts into live_show_tickets (idempotent via ON CONFLICT DO NOTHING) and
+// emits live:ticket:purchased socket event so the frontend updates in real-time.
+//
+// @param {string} userId
+// @param {string} slotId  — UUID of the live_streams row
+// @param {string} provider — 'epayco' | 'dash'
+// @param {number} pricePaidUsd
+// ---------------------------------------------------------------------------
+const handleTicketSettlement = async (userId, slotId, provider, pricePaidUsd) => {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const result = await client.query(
+      `INSERT INTO live_show_tickets (slot_id, user_id, price_paid_usd)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (slot_id, user_id) DO NOTHING
+       RETURNING id`,
+      [slotId, userId, pricePaidUsd]
+    );
+
+    await client.query('COMMIT');
+
+    const wasInserted = result.rowCount > 0;
+
+    logger.info('handleTicketSettlement', {
+      userId, slotId, provider, pricePaidUsd,
+      wasInserted,
+    });
+
+    if (wasInserted) {
+      // Emit real-time event — fire and forget
+      try {
+        const socketSingleton = require('../../../services/socketSingleton');
+        const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+        if (io) {
+          io.to(`user:${userId}`).emit('live:ticket:purchased', { slotId, userId });
+        }
+      } catch (emitErr) {
+        logger.warn('handleTicketSettlement: socket emit failed (non-critical)', { error: emitErr.message });
+      }
+    }
+
+    return { inserted: wasInserted };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    logger.error('handleTicketSettlement error', { userId, slotId, provider, error: err.message });
+    throw err;
+  } finally {
+    client.release();
   }
 };
 
@@ -1155,7 +1348,7 @@ const listCreatorRecordings = async (req, res) => {
   try {
     const pool = getPool();
     const { rows } = await pool.query(
-      `SELECT id, session_id, started_at, ended_at, duration_seconds, size_bytes, manifest_url
+      `SELECT id, session_id, started_at, ended_at, duration_seconds, size_bytes, manifest_url, thumb_path, title, description
        FROM stream_recordings
        WHERE creator_id = $1
          AND status = 'completed'
@@ -1201,6 +1394,9 @@ const listCreatorRecordings = async (req, res) => {
       durationSeconds: r.duration_seconds,
       sizeBytes: r.size_bytes ? Number(r.size_bytes) : null,
       manifestUrl: canSeeManifest ? r.manifest_url : null,
+      thumbUrl: canSeeManifest ? (r.thumb_path || null) : null,
+      title: r.title || null,
+      description: r.description || null,
       requiresSubscription: !canSeeManifest,
     }));
 
@@ -1236,6 +1432,296 @@ const deleteRecordingEndpoint = async (req, res) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// PATCH /api/webapp/recordings/:id
+// Creator-only: update title and/or description of an owned recording.
+// Body: { title?: string, description?: string }
+// Max: title 120 chars, description 2000 chars. HTML stripped.
+// ---------------------------------------------------------------------------
+const _stripHtml = (str) => str.replace(/<[^>]*>/g, '').trim();
+
+const updateRecordingEndpoint = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+
+  const { id } = req.params;
+  const recordingId = parseInt(id, 10);
+  if (!recordingId || isNaN(recordingId)) {
+    return res.status(400).json({ success: false, error: 'Invalid recording id' });
+  }
+
+  const { title, description } = req.body || {};
+
+  // Must provide at least one field
+  if (title === undefined && description === undefined) {
+    return res.status(400).json({ success: false, error: 'Provide title and/or description' });
+  }
+
+  // Validate and sanitize
+  let safeTitle = undefined;
+  let safeDescription = undefined;
+
+  if (title !== undefined) {
+    if (typeof title !== 'string') {
+      return res.status(400).json({ success: false, error: 'title must be a string' });
+    }
+    safeTitle = _stripHtml(title);
+    if (safeTitle.length > 120) {
+      return res.status(400).json({ success: false, error: 'title must be 120 characters or fewer' });
+    }
+  }
+
+  if (description !== undefined) {
+    if (typeof description !== 'string') {
+      return res.status(400).json({ success: false, error: 'description must be a string' });
+    }
+    safeDescription = _stripHtml(description);
+    if (safeDescription.length > 2000) {
+      return res.status(400).json({ success: false, error: 'description must be 2000 characters or fewer' });
+    }
+  }
+
+  try {
+    const pool = getPool();
+
+    // Owner check
+    const { rows: checkRows } = await pool.query(
+      `SELECT creator_id FROM stream_recordings WHERE id = $1 AND is_deleted = FALSE`,
+      [recordingId]
+    );
+    if (checkRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Recording not found' });
+    }
+    if (String(checkRows[0].creator_id) !== String(req.session.user.id)) {
+      return res.status(403).json({ success: false, error: 'You do not own this recording' });
+    }
+
+    // Build dynamic SET clause — only update provided fields
+    const setClauses = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (safeTitle !== undefined) {
+      setClauses.push(`title = $${paramIdx++}`);
+      params.push(safeTitle || null);
+    }
+    if (safeDescription !== undefined) {
+      setClauses.push(`description = $${paramIdx++}`);
+      params.push(safeDescription || null);
+    }
+
+    params.push(recordingId);
+    const { rows: updated } = await pool.query(
+      `UPDATE stream_recordings SET ${setClauses.join(', ')} WHERE id = $${paramIdx} RETURNING title, description`,
+      params
+    );
+
+    logger.info('updateRecordingEndpoint: updated', { recordingId, userId: req.session.user.id });
+    return res.json({ success: true, title: updated[0].title, description: updated[0].description });
+  } catch (err) {
+    logger.error('updateRecordingEndpoint error', err);
+    return res.status(500).json({ success: false, error: 'Failed to update recording' });
+  }
+};
+
+// ── Creator Revenue ───────────────────────────────────────────────────────────
+
+/**
+ * GET /api/webapp/creator/revenue?days=30[&creatorId=]
+ * Aggregates revenue across tips (tokens), tickets (USD+tokens), subs (USD), calls (USD).
+ * Creator-only; admin can pass ?creatorId= to fetch for another creator.
+ */
+const getCreatorRevenue = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const caller = req.session.user;
+
+  let creatorId;
+  if (req.query.creatorId) {
+    if (caller.role !== 'admin' && caller.role !== 'superadmin') {
+      return res.status(403).json({ success: false, error: 'Admin access required to view another creator revenue' });
+    }
+    creatorId = String(req.query.creatorId);
+  } else {
+    if (!['model', 'creator', 'admin', 'superadmin'].includes(caller.role)) {
+      return res.status(403).json({ success: false, error: 'Creator access required' });
+    }
+    creatorId = String(caller.id);
+  }
+
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+  const pool = getPool();
+
+  try {
+    const [tipsResult, ticketsResult, subsResult, callsResult,
+           allTimeTips, allTimeTickets, allTimeSubs, allTimeCalls] = await Promise.all([
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::bigint AS total_tokens, COUNT(*)::int AS count,
+                DATE_TRUNC('day', created_at)::date::text AS day
+         FROM pnp_tips
+         WHERE performer_id = $1 AND payment_status = 'completed'
+           AND created_at >= NOW() - ($2 || ' days')::interval
+         GROUP BY DATE_TRUNC('day', created_at)::date ORDER BY day ASC`,
+        [creatorId, days]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(lst.price_paid_usd), 0)::numeric(12,2) AS total_usd,
+                COALESCE(SUM(lst.price_paid_tokens), 0)::bigint AS total_tokens,
+                COUNT(*)::int AS count,
+                DATE_TRUNC('day', lst.purchased_at)::date::text AS day
+         FROM live_show_tickets lst
+         JOIN live_streams ls ON ls.id = lst.slot_id
+         WHERE ls.host_id = $1
+           AND lst.purchased_at >= NOW() - ($2 || ' days')::interval
+         GROUP BY DATE_TRUNC('day', lst.purchased_at)::date ORDER BY day ASC`,
+        [creatorId, days]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount_creator), 0)::numeric(12,2) AS total_usd, COUNT(*)::int AS count,
+                DATE_TRUNC('day', created_at)::date::text AS day
+         FROM creator_earnings
+         WHERE creator_id = $1 AND subscription_id IS NOT NULL
+           AND created_at >= NOW() - ($2 || ' days')::interval
+         GROUP BY DATE_TRUNC('day', created_at)::date ORDER BY day ASC`,
+        [creatorId, days]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(cb.price), 0)::numeric(12,2) AS total_usd, COUNT(*)::int AS count,
+                DATE_TRUNC('day', cb.created_at)::date::text AS day
+         FROM call_bookings cb
+         JOIN performers p ON p.id = cb.performer_id
+         WHERE p.user_id = $1 AND cb.payment_status = 'completed'
+           AND cb.created_at >= NOW() - ($2 || ' days')::interval
+         GROUP BY DATE_TRUNC('day', cb.created_at)::date ORDER BY day ASC`,
+        [creatorId, days]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::bigint AS tokens, COUNT(*)::int AS count
+         FROM pnp_tips WHERE performer_id = $1 AND payment_status = 'completed'`,
+        [creatorId]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(lst.price_paid_usd), 0)::numeric(12,2) AS usd,
+                COALESCE(SUM(lst.price_paid_tokens), 0)::bigint AS tokens, COUNT(*)::int AS count
+         FROM live_show_tickets lst JOIN live_streams ls ON ls.id = lst.slot_id
+         WHERE ls.host_id = $1`,
+        [creatorId]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount_creator), 0)::numeric(12,2) AS usd, COUNT(*)::int AS count
+         FROM creator_earnings WHERE creator_id = $1 AND subscription_id IS NOT NULL`,
+        [creatorId]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(cb.price), 0)::numeric(12,2) AS usd, COUNT(*)::int AS count
+         FROM call_bookings cb JOIN performers p ON p.id = cb.performer_id
+         WHERE p.user_id = $1 AND cb.payment_status = 'completed'`,
+        [creatorId]
+      ),
+    ]);
+
+    // Merge byDay across all sources
+    const dayMap = new Map();
+    const ensureDay = (d) => {
+      if (!dayMap.has(d)) dayMap.set(d, { date: d, usd: 0, tokens: 0 });
+      return dayMap.get(d);
+    };
+    for (const r of tipsResult.rows) {
+      const e = ensureDay(r.day); e.tokens += Number(r.total_tokens);
+    }
+    for (const r of ticketsResult.rows) {
+      const e = ensureDay(r.day);
+      e.usd = Math.round((e.usd + Number(r.total_usd)) * 100) / 100;
+      e.tokens += Number(r.total_tokens);
+    }
+    for (const r of subsResult.rows) {
+      const e = ensureDay(r.day);
+      e.usd = Math.round((e.usd + Number(r.total_usd)) * 100) / 100;
+    }
+    for (const r of callsResult.rows) {
+      const e = ensureDay(r.day);
+      e.usd = Math.round((e.usd + Number(r.total_usd)) * 100) / 100;
+    }
+
+    const byDay = Array.from(dayMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+    const at = allTimeTips.rows[0];
+    const ak = allTimeTickets.rows[0];
+    const as_ = allTimeSubs.rows[0];
+    const ac = allTimeCalls.rows[0];
+
+    return res.json({
+      success: true,
+      days,
+      totals: {
+        usd: Math.round((Number(ak.usd) + Number(as_.usd) + Number(ac.usd)) * 100) / 100,
+        tokens: Number(at.tokens) + Number(ak.tokens),
+      },
+      byDay,
+      bySource: {
+        tips:    { count: at.count,  tokens: Number(at.tokens),  usd: 0 },
+        tickets: { count: ak.count,  tokens: Number(ak.tokens),  usd: Number(ak.usd) },
+        subs:    { count: as_.count, tokens: 0,                  usd: Number(as_.usd) },
+        calls:   { count: ac.count,  tokens: 0,                  usd: Number(ac.usd) },
+      },
+    });
+  } catch (err) {
+    logger.error('getCreatorRevenue error', { creatorId, days, err: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to load revenue data' });
+  }
+};
+
+// ── Manual Going-Live Broadcast ───────────────────────────────────────────────
+
+const goingLiveBroadcastService = require('../../../services/goingLiveBroadcastService');
+
+/**
+ * POST /api/webapp/live/broadcast-live-now
+ * Creator-only. Fires the same going-live notification as the auto stream:start event.
+ * Same 6h Redis dedup key — both paths together produce at most one alert per 6h.
+ * Body: { message?: string }  (optional, max 240 chars)
+ */
+const broadcastLiveNow = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const user = req.session.user;
+  if (!['model', 'creator', 'admin', 'superadmin'].includes(user.role)) {
+    return res.status(403).json({ success: false, error: 'Creator access required' });
+  }
+
+  const rawMessage = req.body?.message;
+  if (rawMessage !== undefined && rawMessage !== null) {
+    if (typeof rawMessage !== 'string') {
+      return res.status(400).json({ success: false, error: 'message must be a string' });
+    }
+    if (rawMessage.length > 240) {
+      return res.status(400).json({ success: false, error: 'message exceeds 240 character limit' });
+    }
+  }
+
+  const creatorId = String(user.id);
+  const customMessage = (typeof rawMessage === 'string' && rawMessage.trim()) ? rawMessage.trim() : null;
+
+  try {
+    let channelRef = null;
+    try {
+      const { rows } = await getPool().query('SELECT live_channel FROM users WHERE id = $1', [creatorId]);
+      channelRef = rows[0]?.live_channel || null;
+    } catch { /* non-fatal */ }
+
+    const bot = req.app.get('bot') || null;
+    const result = await goingLiveBroadcastService.broadcastGoingLive(bot, creatorId, channelRef, { message: customMessage });
+
+    logger.info('broadcastLiveNow: manual trigger', { creatorId, channelRef, ...result });
+    return res.json({ success: true, dispatched: result.dispatched, skippedDedup: result.skippedDedup });
+  } catch (err) {
+    logger.error('broadcastLiveNow error', { creatorId, err: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to broadcast notification' });
+  }
+};
+
 module.exports = {
   listStreams,
   getRtmpKey,
@@ -1253,6 +1739,10 @@ module.exports = {
   getAnalyticsSummary,
   getSlotTicketStatus,
   buySlotTicket,
+  handleTicketSettlement,
   listCreatorRecordings,
   deleteRecordingEndpoint,
+  updateRecordingEndpoint,
+  getCreatorRevenue,
+  broadcastLiveNow,
 };

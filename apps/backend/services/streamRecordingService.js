@@ -26,6 +26,9 @@ const _activeProcesses = new Map();
 const RECORDINGS_BASE = '/app/public/uploads/recordings';
 const RESTREAMER_URL = process.env.RESTREAMER_URL || 'http://restreamer:8080';
 
+// Thumbnail capture timeout (ms) — kills hung ffmpeg snapshot after this long
+const THUMB_FFMPEG_TIMEOUT_MS = 30_000;
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
@@ -51,6 +54,120 @@ async function _sumSegmentBytes(dir) {
   } catch {
     return 0;
   }
+}
+
+// ---------------------------------------------------------------------------
+// _captureThumb — one-shot ffmpeg thumbnail attempt
+// Returns true on success, false on any failure.
+// Kills the ffmpeg child after THUMB_FFMPEG_TIMEOUT_MS to prevent hangs.
+// ---------------------------------------------------------------------------
+
+async function _captureThumb(recordingId) {
+  const dir = path.join(RECORDINGS_BASE, String(recordingId));
+  const manifest = path.join(dir, 'index.m3u8');
+  const thumbPath = path.join(dir, 'thumb.jpg');
+  const thumbUrl = `/uploads/recordings/${recordingId}/thumb.jpg`;
+
+  // Verify manifest exists before trying to snapshot it.
+  try {
+    await fs.promises.access(manifest, fs.constants.R_OK);
+  } catch {
+    logger.info('streamRecording: thumb skip — manifest not readable yet', { recordingId });
+    return false;
+  }
+
+  return new Promise((resolve) => {
+    const ffmpegArgs = [
+      '-y',
+      '-i', manifest,
+      '-vframes', '1',
+      '-vf', 'scale=640:-1',
+      '-q:v', '4',
+      thumbPath,
+    ];
+
+    const child = spawn('ffmpeg', ffmpegArgs, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+    });
+
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString().slice(-500); });
+
+    // Kill guard: prevent runaway ffmpeg from blocking indefinitely
+    const killTimer = setTimeout(() => {
+      logger.warn('streamRecording: thumb ffmpeg timeout — killing', { recordingId });
+      try { child.kill('SIGKILL'); } catch {}
+    }, THUMB_FFMPEG_TIMEOUT_MS);
+
+    child.on('close', async (code) => {
+      clearTimeout(killTimer);
+      if (code !== 0) {
+        logger.warn('streamRecording: thumb ffmpeg failed', { recordingId, code, stderr: stderr.trim().slice(0, 300) });
+        resolve(false);
+        return;
+      }
+
+      // Verify file exists with non-zero size
+      try {
+        const stat = await fs.promises.stat(thumbPath);
+        if (stat.size === 0) {
+          logger.warn('streamRecording: thumb file is empty', { recordingId });
+          resolve(false);
+          return;
+        }
+      } catch {
+        logger.warn('streamRecording: thumb file missing after ffmpeg exit 0', { recordingId });
+        resolve(false);
+        return;
+      }
+
+      // Persist thumb_path to DB
+      try {
+        const pool = getPool();
+        await pool.query(
+          `UPDATE stream_recordings SET thumb_path = $1 WHERE id = $2`,
+          [thumbUrl, recordingId]
+        );
+        logger.info('streamRecording: thumbnail captured', { recordingId, thumbUrl });
+      } catch (dbErr) {
+        logger.error('streamRecording: failed to persist thumb_path', { recordingId, error: dbErr.message });
+      }
+
+      resolve(true);
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(killTimer);
+      logger.error('streamRecording: thumb ffmpeg spawn error', { recordingId, error: err.message });
+      resolve(false);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// _scheduleThumbCapture — attempts at 30s, then 90s if first fails.
+// Fire-and-forget; never throws.
+// ---------------------------------------------------------------------------
+
+function _scheduleThumbCapture(recordingId) {
+  setTimeout(async () => {
+    try {
+      const ok = await _captureThumb(recordingId);
+      if (!ok) {
+        // Second attempt at 90s from start (60s after first attempt)
+        setTimeout(async () => {
+          try {
+            await _captureThumb(recordingId);
+          } catch (e) {
+            logger.warn('streamRecording: thumb second attempt threw', { recordingId, error: e.message });
+          }
+        }, 60_000);
+      }
+    } catch (e) {
+      logger.warn('streamRecording: thumb first attempt threw', { recordingId, error: e.message });
+    }
+  }, 30_000);
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +276,10 @@ async function startRecording({ sessionId, creatorId, channelRef }) {
   });
 
   logger.info('streamRecording: started', { recordingId, creatorId, channelRef, inputUrl });
+
+  // Schedule thumbnail capture: attempt at 30s, retry at 90s if first fails.
+  _scheduleThumbCapture(recordingId);
+
   return recordingId;
 }
 
