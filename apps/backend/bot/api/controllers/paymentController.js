@@ -4,6 +4,7 @@ const PlanModel = require('../../../models/planModel');
 const ConfirmationTokenService = require('../../../services/confirmationTokenService');
 const PaymentService = require('../../../services/paymentService');
 const PaymentSecurityService = require('../../../services/paymentSecurityService');
+const FraudDetectionService = require('../../../services/fraudDetectionService');
 const logger = require('../../../utils/logger');
 const { query } = require('../../../config/postgres');
 const { cache } = require('../../../config/redis');
@@ -953,6 +954,50 @@ class PaymentController {
 
       // Get userId for audit logging
       const userId = paymentOwnerForCharge;
+
+      // Fraud detection — runs in shadow mode by default. Set
+      // FRAUD_DETECTION_ENFORCE=true to actually block flagged charges.
+      // All failures are swallowed so a fraud-service outage never breaks payments.
+      try {
+        const fraudEnforce = process.env.FRAUD_DETECTION_ENFORCE === 'true';
+        const paymentAmount = parseFloat(paymentForOwnership.amount) || 0;
+        const [velocity, amountAnomaly, duplicate] = await Promise.all([
+          FraudDetectionService.checkVelocityAbuse(userId),
+          FraudDetectionService.checkAmountAnomaly(userId, paymentAmount),
+          FraudDetectionService.checkDuplicateTransaction(userId, paymentAmount),
+        ]);
+        const namedChecks = [
+          { name: 'Velocity Abuse', ...velocity },
+          { name: 'Amount Anomaly', ...amountAnomaly },
+          { name: 'Duplicate Transaction', ...duplicate },
+        ];
+        const flagged = namedChecks.filter((c) => c.flagged);
+        if (flagged.length) {
+          logger.warn('Fraud checks flagged transaction', {
+            paymentId,
+            userId,
+            enforce: fraudEnforce,
+            flagged: flagged.map((c) => ({ name: c.name, reason: c.reason })),
+          });
+          if (fraudEnforce) {
+            FraudDetectionService.storeFraudFlags(
+              userId,
+              { userId, amount: paymentAmount, email: sanitizedEmail, phone: phone || null, cardLastFour: null },
+              flagged,
+            ).catch(() => {});
+            return res.status(402).json({
+              success: false,
+              error: 'Tu pago requiere revisión adicional. Contacta soporte si el problema persiste.',
+              code: 'FRAUD_REVIEW',
+            });
+          }
+        }
+      } catch (fraudErr) {
+        logger.error('Fraud check failed (non-critical)', {
+          error: fraudErr.message,
+          paymentId,
+        });
+      }
 
       // Security: Audit trail - charge attempted. Never log raw card data.
       PaymentSecurityService.logPaymentEvent({
