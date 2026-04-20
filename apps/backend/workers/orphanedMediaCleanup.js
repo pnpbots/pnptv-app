@@ -64,10 +64,14 @@ async function runOnce() {
 
   try {
     const { rows } = await query(
+      // chat_messages has no updated_at column — use edited_at (set when the
+      // message was last mutated, including the soft-delete edit) with a
+      // created_at fallback so rows deleted before edit tracking existed
+      // still get collected after the full retention window.
       `SELECT id, media_url FROM chat_messages
        WHERE is_deleted = TRUE
          AND media_url IS NOT NULL
-         AND updated_at < NOW() - INTERVAL '30 days'
+         AND COALESCE(edited_at, created_at) < NOW() - INTERVAL '30 days'
        LIMIT $1`,
       [BATCH_LIMIT]
     );

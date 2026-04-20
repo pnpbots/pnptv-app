@@ -63,7 +63,7 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
       ...(body ? { "Content-Type": "application/json" } : {}),
       ...headers,
     },
-    ...(body ? { body: JSON.stringify(body) } : {}),
+    ...(body ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}),
   };
 
   let lastError: unknown;

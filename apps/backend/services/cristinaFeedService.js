@@ -427,14 +427,40 @@ async function generateCallReply({ prompt, userName = 'friend', language = 'bili
 }
 
 /**
- * Pick a video suggestion from non-premium creator_media entries. Returns
- * null if nothing suitable. The chosen URL is broadcast to every client in
- * the call; premium content is excluded so free-tier participants aren't
- * locked out mid-call.
+ * Pick a video suggestion for a hangout call. Primary source is community
+ * social_posts (where most of the platform's video content actually lives);
+ * creator_media is a fallback for when a curator-picked clip exists. Premium
+ * content is excluded so free-tier participants aren't paywalled mid-call.
  */
 async function pickCallVideoSuggestion() {
   try {
     const { rows } = await query(
+      `SELECT sp.id, sp.media_url, sp.video_thumbnail_url, sp.video_title, sp.content,
+              u.username AS creator_username, u.first_name AS creator_first_name
+         FROM social_posts sp
+         LEFT JOIN users u ON u.id = sp.user_id
+        WHERE sp.media_type = 'video'
+          AND sp.media_url IS NOT NULL
+          AND COALESCE(sp.is_deleted, false) = false
+        ORDER BY RANDOM()
+        LIMIT 1`
+    );
+    if (rows.length) {
+      const v = rows[0];
+      const byLine = v.creator_first_name || v.creator_username
+        ? ` — @${v.creator_username || v.creator_first_name}`
+        : '';
+      const baseTitle = v.video_title || (v.content || '').slice(0, 80) || 'Community clip';
+      return {
+        id: `sp-${v.id}`,
+        title: baseTitle.slice(0, 120) + byLine,
+        url: v.media_url,
+        durationSec: null,
+        thumbUrl: v.video_thumbnail_url || null,
+      };
+    }
+    // Fallback: creator_media library
+    const cm = await query(
       `SELECT cm.id, cm.url, cm.thumb_url, cm.caption,
               u.username AS creator_username, u.first_name AS creator_first_name
          FROM creator_media cm
@@ -445,13 +471,13 @@ async function pickCallVideoSuggestion() {
         ORDER BY RANDOM()
         LIMIT 1`
     );
-    if (!rows.length) return null;
-    const v = rows[0];
+    if (!cm.rows.length) return null;
+    const v = cm.rows[0];
     const byLine = v.creator_first_name || v.creator_username
-      ? ` — by ${(v.creator_first_name || v.creator_username)}`
+      ? ` — by ${v.creator_first_name || v.creator_username}`
       : '';
     return {
-      id: String(v.id),
+      id: `cm-${v.id}`,
       title: (v.caption || 'Video suggestion').slice(0, 120) + byLine,
       url: v.url,
       durationSec: null,
