@@ -148,6 +148,113 @@ const onlineUsersMap = new Map();
 // Map<groupId, { trackId, trackUrl, trackTitle, trackArtist, trackArt, isPlaying, position, startedAt }>
 const hangoutMusicState = new Map();
 
+// ── Cristina-in-call state per hangout group ─────────────────────────────────
+// Map<groupId, { callId, tipTimer, videoTimer, latestTip, latestVideo, askCooldownByUser: Map<uid, lastTs> }>
+const hangoutCristinaState = new Map();
+const CRISTINA_TIP_INTERVAL_MS = 10 * 60 * 1000; // 10 min
+const CRISTINA_VIDEO_INTERVAL_MS = 25 * 60 * 1000; // 25 min
+const CRISTINA_ASK_COOLDOWN_MS = 30 * 1000; // 30 s per user
+
+function cristinaStopSession(gid) {
+  const s = hangoutCristinaState.get(gid);
+  if (!s) return;
+  if (s._firstTipTimeout) clearTimeout(s._firstTipTimeout);
+  if (s.tipTimer) clearInterval(s.tipTimer);
+  if (s.videoTimer) clearInterval(s.videoTimer);
+  hangoutCristinaState.delete(gid);
+}
+
+function cristinaStartSession(io, gid) {
+  if (hangoutCristinaState.has(gid)) return hangoutCristinaState.get(gid);
+  let CristinaFeed;
+  try { CristinaFeed = require('../../services/cristinaFeedService'); }
+  catch (e) { logger.warn('cristinaStartSession: service load failed', { error: e.message }); return null; }
+
+  const state = {
+    attachedAt: Date.now(),
+    latestTip: null,
+    latestVideo: null,
+    askCooldownByUser: new Map(),
+    tipTimer: null,
+    videoTimer: null,
+  };
+  hangoutCristinaState.set(gid, state);
+
+  const emitGreeting = async () => {
+    io.to(`hangout:${gid}`).emit('hangout:cristina:joined', {
+      groupId: gid,
+      at: Date.now(),
+      greeting: "Hi everyone, I'm Cristina — I'll drop in with wellness tips and video suggestions while you hang out. Ask me anything via the chip below.",
+    });
+  };
+  emitGreeting().catch(() => {});
+
+  // Auto-stop the session if the hangout room has been empty of sockets for
+  // two consecutive ticks. Prevents Cristina timers from running forever on
+  // orphaned groups after everyone leaves.
+  const isRoomEmpty = () => {
+    const room = io.sockets.adapter.rooms.get(`hangout:${gid}`);
+    return !room || room.size === 0;
+  };
+
+  const tick = async () => {
+    if (!hangoutCristinaState.has(gid)) return;
+    if (isRoomEmpty()) {
+      const s = hangoutCristinaState.get(gid);
+      if (s) s._emptyTicks = (s._emptyTicks || 0) + 1;
+      if (s && s._emptyTicks >= 2) { cristinaStopSession(gid); return; }
+      return;
+    } else {
+      const s = hangoutCristinaState.get(gid);
+      if (s) s._emptyTicks = 0;
+    }
+    try {
+      const content = await CristinaFeed.generateCallWellnessTip();
+      if (!content) return;
+      const tip = { groupId: gid, content, at: Date.now() };
+      const s = hangoutCristinaState.get(gid);
+      if (s) s.latestTip = tip;
+      io.to(`hangout:${gid}`).emit('hangout:cristina:tip', tip);
+    } catch (err) { logger.warn('cristina tip tick error', { gid, error: err.message }); }
+  };
+  // First tip 60s after attach so the call settles first, then on interval.
+  state._firstTipTimeout = setTimeout(tick, 60 * 1000);
+  state.tipTimer = setInterval(tick, CRISTINA_TIP_INTERVAL_MS);
+
+  const videoTick = async () => {
+    if (!hangoutCristinaState.has(gid)) return;
+    try {
+      const suggestion = await CristinaFeed.pickCallVideoSuggestion();
+      if (!suggestion) return;
+      const s = hangoutCristinaState.get(gid);
+      if (s) s.latestVideo = { ...suggestion, at: Date.now() };
+      io.to(`hangout:${gid}`).emit('hangout:cristina:video', { groupId: gid, video: suggestion, at: Date.now() });
+    } catch (err) { logger.warn('cristina video tick error', { gid, error: err.message }); }
+  };
+  state.videoTimer = setInterval(videoTick, CRISTINA_VIDEO_INTERVAL_MS);
+
+  // Persist attach in DB (best-effort, non-fatal)
+  (async () => {
+    try {
+      const { rows } = await query(
+        `SELECT id FROM hangout_video_calls WHERE group_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 1`,
+        [gid]
+      );
+      if (rows.length) {
+        state.callId = rows[0].id;
+        await query(
+          `INSERT INTO hangout_call_cristina_sessions (call_id, group_id, attached_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (call_id) DO UPDATE SET attached_at = EXCLUDED.attached_at`,
+          [state.callId, gid]
+        );
+      }
+    } catch (err) { logger.warn('cristina attach persist failed', { gid, error: err.message }); }
+  })();
+
+  return state;
+}
+
 // ── Random Video Call state ──────────────────────────────────────────────────
 const pendingRandomCalls = new Map(); // callId → { callerId, calleeId, roomId, matrixRoomId, timeout }
 
@@ -1143,6 +1250,109 @@ function initSocketIO(io) {
         hangoutMusicState.delete(gid);
         io.to(`hangout:${gid}`).emit('hangout:music:stop', {});
       } catch (err) { logger.error('hangout:music:stop error', err); }
+    });
+
+    // ── Cristina-in-call handlers ────────────────────────────────────────────
+
+    // Anyone in the hangout room can (re-)attach Cristina. The call lifecycle
+    // is what matters — startCall/endCall also attach/detach server-side.
+    socket.on('hangout:cristina:attach', async ({ groupId } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      try {
+        const member = await query(
+          `SELECT 1 FROM hangout_group_members WHERE group_id = $1 AND user_id = $2 LIMIT 1`,
+          [gid, user.id]
+        );
+        if (!member.rows.length) return;
+        cristinaStartSession(io, gid);
+        const s = hangoutCristinaState.get(gid);
+        if (s?.latestTip) socket.emit('hangout:cristina:tip', s.latestTip);
+        if (s?.latestVideo) socket.emit('hangout:cristina:video', { groupId: gid, video: s.latestVideo, at: s.latestVideo.at });
+      } catch (err) { logger.error('hangout:cristina:attach error', err); }
+    });
+
+    // User asks Cristina a question during the call. Rate-limited per user.
+    socket.on('hangout:cristina:ask', async ({ groupId, prompt } = {}) => {
+      if (!groupId || typeof prompt !== 'string') return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      const cleanPrompt = prompt.trim();
+      if (cleanPrompt.length < 2 || cleanPrompt.length > 400) {
+        socket.emit('hangout:cristina:error', { message: 'Ask must be 2–400 characters.' });
+        return;
+      }
+      try {
+        const s = cristinaStartSession(io, gid);
+        if (!s) return;
+        const now = Date.now();
+        const last = s.askCooldownByUser.get(user.id) || 0;
+        if (now - last < CRISTINA_ASK_COOLDOWN_MS) {
+          const waitSec = Math.ceil((CRISTINA_ASK_COOLDOWN_MS - (now - last)) / 1000);
+          socket.emit('hangout:cristina:error', { message: `Slow down — wait ${waitSec}s before asking again.` });
+          return;
+        }
+        s.askCooldownByUser.set(user.id, now);
+
+        const CristinaFeed = require('../../services/cristinaFeedService');
+        const reply = await CristinaFeed.generateCallReply({
+          prompt: cleanPrompt,
+          userName: user.firstName || user.username || 'friend',
+        });
+        if (!reply) {
+          socket.emit('hangout:cristina:error', { message: "I couldn't come up with a reply — try again?" });
+          return;
+        }
+        const payload = {
+          groupId: gid,
+          userId: user.id,
+          userName: user.firstName || user.username || 'Anonymous',
+          prompt: cleanPrompt,
+          reply,
+          at: Date.now(),
+        };
+        io.to(`hangout:${gid}`).emit('hangout:cristina:reply', payload);
+        query(
+          `UPDATE hangout_call_cristina_sessions SET ask_count = ask_count + 1 WHERE group_id = $1`,
+          [gid]
+        ).catch(() => {});
+      } catch (err) {
+        logger.error('hangout:cristina:ask error', err);
+        socket.emit('hangout:cristina:error', { message: 'Cristina is unavailable right now.' });
+      }
+    });
+
+    // Moderator plays a video (from Cristina's suggestion OR any URL) to
+    // everyone in the hangout. Reuses the music-bar infrastructure pattern.
+    socket.on('hangout:cristina:videoPlay', async ({ groupId, video } = {}) => {
+      if (!groupId || !video || typeof video.url !== 'string') return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      try {
+        const isMod = await isHangoutMod(user.id, gid);
+        if (!isMod) { socket.emit('hangout:error', { message: 'Not a moderator', code: 'NOT_MOD' }); return; }
+        const state = {
+          id: String(video.id || `ext-${Date.now()}`).slice(0, 64),
+          url: String(video.url).slice(0, 1000),
+          title: String(video.title || 'Video').slice(0, 200),
+          thumbUrl: video.thumbUrl ? String(video.thumbUrl).slice(0, 500) : null,
+          startedAt: Date.now(),
+          startedBy: user.firstName || user.username || 'Moderator',
+        };
+        io.to(`hangout:${gid}`).emit('hangout:cristina:videoState', state);
+      } catch (err) { logger.error('hangout:cristina:videoPlay error', err); }
+    });
+
+    socket.on('hangout:cristina:videoStop', async ({ groupId } = {}) => {
+      if (!groupId) return;
+      const gid = parseInt(groupId, 10);
+      if (!Number.isFinite(gid)) return;
+      try {
+        const isMod = await isHangoutMod(user.id, gid);
+        if (!isMod) return;
+        io.to(`hangout:${gid}`).emit('hangout:cristina:videoState', null);
+      } catch (err) { logger.error('hangout:cristina:videoStop error', err); }
     });
 
     // ── Music Auto-Advance ───────────────────────────────────────────────────

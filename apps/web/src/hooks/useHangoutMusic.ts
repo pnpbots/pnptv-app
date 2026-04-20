@@ -13,6 +13,38 @@ export interface HangoutMusicTrackState {
   startedAt: number | null;
 }
 
+// ── Cristina in-call types ───────────────────────────────────────────────────
+export interface CristinaTip {
+  content: string;
+  at: number;
+}
+
+export interface CristinaReply {
+  userId: string;
+  userName: string;
+  prompt: string;
+  reply: string;
+  at: number;
+}
+
+export interface CristinaVideo {
+  id: string;
+  url: string;
+  title: string;
+  thumbUrl: string | null;
+  durationSec: number | null;
+  at: number;
+}
+
+export interface CristinaVideoState {
+  id: string;
+  url: string;
+  title: string;
+  thumbUrl: string | null;
+  startedAt: number;
+  startedBy: string;
+}
+
 interface UseHangoutMusicOptions {
   groupId: number | null;
   isModerator: boolean;
@@ -32,6 +64,13 @@ export function useHangoutMusic({ groupId, isModerator, duckActive }: UseHangout
   });
   const [isLocalPlaying, setIsLocalPlaying] = useState(false);
   const [shuffle, setShuffle] = useState(false);
+
+  // Cristina in-call state
+  const [cristinaTip, setCristinaTip] = useState<CristinaTip | null>(null);
+  const [cristinaReplies, setCristinaReplies] = useState<CristinaReply[]>([]);
+  const [cristinaSuggestion, setCristinaSuggestion] = useState<CristinaVideo | null>(null);
+  const [cristinaVideo, setCristinaVideo] = useState<CristinaVideoState | null>(null);
+  const [cristinaError, setCristinaError] = useState<string | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stateRef = useRef<HangoutMusicTrackState | null>(null);
@@ -236,6 +275,32 @@ export function useHangoutMusic({ groupId, isModerator, duckActive }: UseHangout
       setShuffle(data.shuffle);
     };
 
+    const onCristinaTip = (data: { groupId: number; content: string; at: number }) => {
+      if (data.groupId !== groupIdRef.current) return;
+      setCristinaTip({ content: data.content, at: data.at });
+    };
+    const onCristinaReply = (data: CristinaReply & { groupId: number }) => {
+      if (data.groupId !== groupIdRef.current) return;
+      setCristinaReplies((prev) => [...prev.slice(-9), {
+        userId: data.userId, userName: data.userName, prompt: data.prompt, reply: data.reply, at: data.at,
+      }]);
+    };
+    const onCristinaVideo = (data: { groupId: number; video: Omit<CristinaVideo, "at">; at: number }) => {
+      if (data.groupId !== groupIdRef.current) return;
+      setCristinaSuggestion({ ...data.video, at: data.at });
+    };
+    const onCristinaVideoState = (state: CristinaVideoState | null) => {
+      setCristinaVideo(state);
+    };
+    const onCristinaError = (data: { message: string }) => {
+      setCristinaError(data.message);
+      setTimeout(() => setCristinaError((cur) => (cur === data.message ? null : cur)), 4000);
+    };
+    const onCristinaJoined = (data: { groupId: number; greeting: string; at: number }) => {
+      if (data.groupId !== groupIdRef.current) return;
+      setCristinaTip({ content: data.greeting, at: data.at });
+    };
+
     socket.on("hangout:music:state", onMusicState);
     socket.on("hangout:music:play", onMusicPlay);
     socket.on("hangout:music:pause", onMusicPause);
@@ -243,6 +308,12 @@ export function useHangoutMusic({ groupId, isModerator, duckActive }: UseHangout
     socket.on("hangout:music:seek", onMusicSeek);
     socket.on("hangout:music:stop", onMusicStop);
     socket.on("hangout:music:shuffle", onMusicShuffle);
+    socket.on("hangout:cristina:joined", onCristinaJoined);
+    socket.on("hangout:cristina:tip", onCristinaTip);
+    socket.on("hangout:cristina:reply", onCristinaReply);
+    socket.on("hangout:cristina:video", onCristinaVideo);
+    socket.on("hangout:cristina:videoState", onCristinaVideoState);
+    socket.on("hangout:cristina:error", onCristinaError);
 
     return () => {
       socket.off("hangout:music:state", onMusicState);
@@ -252,6 +323,12 @@ export function useHangoutMusic({ groupId, isModerator, duckActive }: UseHangout
       socket.off("hangout:music:seek", onMusicSeek);
       socket.off("hangout:music:stop", onMusicStop);
       socket.off("hangout:music:shuffle", onMusicShuffle);
+      socket.off("hangout:cristina:joined", onCristinaJoined);
+      socket.off("hangout:cristina:tip", onCristinaTip);
+      socket.off("hangout:cristina:reply", onCristinaReply);
+      socket.off("hangout:cristina:video", onCristinaVideo);
+      socket.off("hangout:cristina:videoState", onCristinaVideoState);
+      socket.off("hangout:cristina:error", onCristinaError);
     };
   }, [groupId, applyState]);
 
@@ -322,6 +399,43 @@ export function useHangoutMusic({ groupId, isModerator, duckActive }: UseHangout
     socket.emit("hangout:music:shuffle", { groupId });
   }, [groupId, isModerator]);
 
+  // ── Cristina actions ──────────────────────────────────────────────────────
+
+  const cristinaAttach = useCallback(() => {
+    if (!groupId) return;
+    const socket = connectSocket();
+    socket.emit("hangout:cristina:attach", { groupId });
+  }, [groupId]);
+
+  const cristinaAsk = useCallback(
+    (prompt: string) => {
+      if (!groupId) return;
+      const trimmed = prompt.trim();
+      if (trimmed.length < 2) return;
+      const socket = connectSocket();
+      socket.emit("hangout:cristina:ask", { groupId, prompt: trimmed });
+    },
+    [groupId]
+  );
+
+  const cristinaPlayVideo = useCallback(
+    (video: { id: string; url: string; title: string; thumbUrl: string | null }) => {
+      if (!groupId || !isModerator) return;
+      const socket = connectSocket();
+      socket.emit("hangout:cristina:videoPlay", { groupId, video });
+    },
+    [groupId, isModerator]
+  );
+
+  const cristinaStopVideo = useCallback(() => {
+    if (!groupId || !isModerator) return;
+    const socket = connectSocket();
+    socket.emit("hangout:cristina:videoStop", { groupId });
+  }, [groupId, isModerator]);
+
+  const dismissCristinaSuggestion = useCallback(() => setCristinaSuggestion(null), []);
+  const dismissCristinaTip = useCallback(() => setCristinaTip(null), []);
+
   return {
     remoteState,
     localVolume,
@@ -334,5 +448,17 @@ export function useHangoutMusic({ groupId, isModerator, duckActive }: UseHangout
     stop,
     shuffle,
     toggleShuffle,
+    // Cristina
+    cristinaTip,
+    cristinaReplies,
+    cristinaSuggestion,
+    cristinaVideo,
+    cristinaError,
+    cristinaAttach,
+    cristinaAsk,
+    cristinaPlayVideo,
+    cristinaStopVideo,
+    dismissCristinaSuggestion,
+    dismissCristinaTip,
   };
 }

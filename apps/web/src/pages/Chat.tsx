@@ -1962,6 +1962,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           participantCount={callParticipantCount}
           durationLabel={callDuration}
           initialChoices={preJoinChoices}
+          isModerator={isOwnerOrMod}
           onCallEnded={() => { setShowTelegramDock(false); setCallToken(null); setCallRoomName(null); }}
         />
 

@@ -7,6 +7,7 @@ import {
 import { CallStage } from "@/pages/CallRoom";
 import { ConnectionState, RoomEvent } from "livekit-client";
 import type { LocalUserChoices } from "@livekit/components-core";
+import { useHangoutMusic } from "@/hooks/useHangoutMusic";
 
 interface LiveKitCallPanelProps {
   open: boolean;
@@ -19,6 +20,8 @@ interface LiveKitCallPanelProps {
   durationLabel?: string;
   initialChoices?: LocalUserChoices | null;
   onCallEnded?: () => void;
+  /** If true, user can play Cristina's video suggestion for everyone. */
+  isModerator?: boolean;
 }
 
 function extractGroupId(name: string | null): number | null {
@@ -139,6 +142,211 @@ function CallOverlay({ startedBy }: { startedBy: string | null }) {
   );
 }
 
+// ── Cristina in-call widget ───────────────────────────────────────────────
+// Non-LiveKit, socket-driven: shows the latest wellness tip from Cristina,
+// lets any participant ask her a question, and surfaces video suggestions
+// that moderators can play for everyone via the same media channel.
+function CristinaWidget({ groupId, isModerator }: { groupId: number | null; isModerator: boolean }) {
+  const {
+    cristinaTip,
+    cristinaReplies,
+    cristinaSuggestion,
+    cristinaVideo,
+    cristinaError,
+    cristinaAttach,
+    cristinaAsk,
+    cristinaPlayVideo,
+    cristinaStopVideo,
+    dismissCristinaSuggestion,
+  } = useHangoutMusic({ groupId, isModerator });
+
+  const [expanded, setExpanded] = useState(false);
+  const [input, setInput] = useState("");
+
+  useEffect(() => {
+    if (groupId != null) cristinaAttach();
+  }, [groupId, cristinaAttach]);
+
+  const lastReply = cristinaReplies[cristinaReplies.length - 1] || null;
+
+  if (groupId == null) return null;
+
+  return (
+    <>
+      {/* Playing video overlay — visible to everyone */}
+      {cristinaVideo && (
+        <div
+          className="absolute z-20 pointer-events-auto"
+          style={{
+            right: "calc(0.5rem + env(safe-area-inset-right, 0px))",
+            bottom: "calc(5.5rem + env(safe-area-inset-bottom, 0px))",
+            width: "min(260px, 40vw)",
+          }}
+        >
+          <div className="rounded-xl overflow-hidden border border-white/15 bg-black/80 backdrop-blur-md shadow-lg">
+            <video
+              src={cristinaVideo.url}
+              poster={cristinaVideo.thumbUrl || undefined}
+              controls
+              autoPlay
+              playsInline
+              className="w-full aspect-video bg-black"
+            />
+            <div className="px-2.5 py-1.5 text-[11px] text-white/80 flex items-center justify-between gap-2">
+              <span className="truncate" title={cristinaVideo.title}>
+                💖 {cristinaVideo.title}
+              </span>
+              {isModerator && (
+                <button
+                  type="button"
+                  onClick={cristinaStopVideo}
+                  className="flex-shrink-0 px-2 py-0.5 rounded-full bg-white/10 hover:bg-white/20 text-white/90"
+                >
+                  Stop
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bottom chip — tap to expand */}
+      <div
+        className="absolute z-20 pointer-events-auto"
+        style={{
+          left: "calc(0.5rem + env(safe-area-inset-left, 0px))",
+          bottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+          maxWidth: "calc(100% - 1rem)",
+        }}
+      >
+        {!expanded ? (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-black/70 backdrop-blur-md border border-white/10 text-white text-[11px] sm:text-xs max-w-[80vw]"
+          >
+            <span aria-hidden>💖</span>
+            <span className="font-medium">Cristina</span>
+            {cristinaTip && (
+              <span className="text-white/80 truncate hidden sm:inline">{cristinaTip.content.slice(0, 60)}</span>
+            )}
+          </button>
+        ) : (
+          <div
+            className="rounded-2xl bg-black/80 backdrop-blur-md border border-white/10 text-white p-3 shadow-xl"
+            style={{ width: "min(320px, calc(100vw - 1rem))" }}
+          >
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold">
+                <span aria-hidden>💖</span>
+                <span>Cristina</span>
+              </div>
+              <button
+                type="button"
+                aria-label="Collapse Cristina"
+                onClick={() => setExpanded(false)}
+                className="text-white/70 hover:text-white text-sm leading-none px-2 py-0.5 rounded-full hover:bg-white/10"
+              >
+                ✕
+              </button>
+            </div>
+
+            {cristinaTip && (
+              <div className="mb-2 text-[11.5px] leading-relaxed text-white/90 bg-white/5 rounded-lg px-2.5 py-2">
+                {cristinaTip.content}
+              </div>
+            )}
+
+            {lastReply && (
+              <div className="mb-2 text-[11px] leading-snug text-white/80 bg-pink-500/10 rounded-lg px-2.5 py-2 border border-pink-500/20">
+                <div className="text-[10px] text-pink-200/80 mb-0.5">
+                  @{lastReply.userName}: "{lastReply.prompt.slice(0, 80)}"
+                </div>
+                <div>{lastReply.reply}</div>
+              </div>
+            )}
+
+            {cristinaSuggestion && (
+              <div className="mb-2 flex items-center gap-2 bg-white/5 rounded-lg p-2 border border-white/10">
+                {cristinaSuggestion.thumbUrl && (
+                  <img src={cristinaSuggestion.thumbUrl} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] font-medium truncate" title={cristinaSuggestion.title}>
+                    🎬 {cristinaSuggestion.title}
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    {isModerator ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          cristinaPlayVideo({
+                            id: cristinaSuggestion.id,
+                            url: cristinaSuggestion.url,
+                            title: cristinaSuggestion.title,
+                            thumbUrl: cristinaSuggestion.thumbUrl,
+                          });
+                          dismissCristinaSuggestion();
+                        }}
+                        className="px-2 py-0.5 rounded-full text-[10px] font-semibold text-white"
+                        style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+                      >
+                        Play for everyone
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-white/50">A mod can play this</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={dismissCristinaSuggestion}
+                      className="px-2 py-0.5 rounded-full text-[10px] text-white/70 hover:bg-white/10"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!input.trim()) return;
+                cristinaAsk(input);
+                setInput("");
+              }}
+              className="flex items-center gap-1.5"
+            >
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Ask Cristina…"
+                maxLength={400}
+                className="flex-1 bg-white/5 border border-white/10 rounded-full px-3 py-1.5 text-[11.5px] placeholder-white/40 focus:outline-none focus:border-pink-400/50"
+              />
+              <button
+                type="submit"
+                disabled={input.trim().length < 2}
+                className="px-3 py-1.5 rounded-full text-[11px] font-semibold text-white disabled:opacity-40"
+                style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+              >
+                Ask
+              </button>
+            </form>
+
+            {cristinaError && (
+              <div className="mt-2 text-[10.5px] text-red-300/90 bg-red-500/10 rounded-lg px-2 py-1 border border-red-500/20">
+                {cristinaError}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 function LiveKitCallPanel({
   open,
   onClose,
@@ -148,6 +356,7 @@ function LiveKitCallPanel({
   startedBy = null,
   initialChoices = null,
   onCallEnded,
+  isModerator = false,
 }: LiveKitCallPanelProps) {
   const [activeToken, setActiveToken] = useState<string | null>(token);
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
@@ -263,6 +472,8 @@ function LiveKitCallPanel({
         <CallStage />
         <CallOverlay startedBy={startedBy} />
       </LiveKitRoom>
+
+      <CristinaWidget groupId={extractGroupId(roomName)} isModerator={isModerator} />
 
       <button
         type="button"
