@@ -2,14 +2,18 @@ import { useState, useEffect, useRef, useCallback, useReducer } from "react";
 import { connectSocket } from "@/lib/socket";
 import {
   getMyChannel,
+  provisionChannel,
   getStreamerSettings,
   updateStreamerSettings,
   getStreamProfile,
   saveStreamProfile,
   startStreamAutoMessages,
   stopStreamAutoMessages,
+  getEarningsHistory,
+  uploadThumbnail,
+  uploadRecording,
 } from "@/lib/api";
-import type { StreamerSettings } from "@/lib/api";
+import type { StreamerSettings, EarningsHistory } from "@/lib/api";
 import type { Socket } from "socket.io-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -223,6 +227,17 @@ export interface UseStreamerReturn {
   // Session earnings
   sessionEarnings: number;
 
+  // Gap 1: Historical earnings
+  earningsHistory: EarningsHistory | null;
+
+  // Gap 2: Persistent thumbnail
+  thumbnailUrl: string | null;
+
+  // Gap 4: Server recording upload
+  serverRecordingUrl: string | null;
+  serverRecordingUploading: boolean;
+  uploadRecordingToServer: () => Promise<void>;
+
   // Filter settings (passed to VideoFilters as props)
   filterSettings: FilterSettingsState;
   setFilterSettings: React.Dispatch<React.SetStateAction<FilterSettingsState>>;
@@ -257,7 +272,7 @@ export interface UseStreamerReturn {
   category: string;
   setCategory: React.Dispatch<React.SetStateAction<string>>;
   thumbnail: string | null;
-  setThumbnail: React.Dispatch<React.SetStateAction<string | null>>;
+  setThumbnail: (dataUrl: string | null) => void;
 
   // Mobile detection
   isMobileDevice: boolean;
@@ -323,19 +338,35 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
   }, [socketProp]);
 
   useEffect(() => {
-    if (!channelProp) {
-      setChannelLoading(true);
-      getMyChannel()
-        .then((res) => {
-          if (res.success && res.channel) {
-            setOwnChannel(res.channel);
-          } else {
-            setChannelError("No streaming channel assigned. Contact an admin.");
-          }
-        })
-        .catch(() => setChannelError("Failed to load channel info."))
-        .finally(() => setChannelLoading(false));
-    }
+    if (channelProp) return;
+    let cancelled = false;
+    setChannelLoading(true);
+    (async () => {
+      try {
+        const res = await getMyChannel();
+        if (!cancelled && res.success && res.channel) {
+          setOwnChannel(res.channel);
+          return;
+        }
+        // No channel yet — self-provision (same path as Creator Studio).
+        const prov = await provisionChannel();
+        if (cancelled) return;
+        if (prov.success && prov.rtmpUrl && prov.streamKey && prov.channelRef) {
+          setOwnChannel({
+            ref: prov.channelRef,
+            streamKey: prov.streamKey,
+            rtmpUrl: prov.rtmpUrl,
+          });
+        } else {
+          setChannelError(prov.error || "Could not set up your streaming channel.");
+        }
+      } catch {
+        if (!cancelled) setChannelError("Failed to load channel info.");
+      } finally {
+        if (!cancelled) setChannelLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [channelProp]);
 
   // ── Reducer ──────────────────────────────────────────────────────────────
@@ -360,6 +391,16 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
 
   const [sessionEarnings, setSessionEarnings] = useState(0);
 
+  // ── Gap 1: Historical earnings ────────────────────────────────────────────
+  const [earningsHistory, setEarningsHistory] = useState<EarningsHistory | null>(null);
+
+  // ── Gap 2: Persistent thumbnail URL ──────────────────────────────────────
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+
+  // ── Gap 4: Server recording upload state ─────────────────────────────────
+  const [serverRecordingUrl, setServerRecordingUrl] = useState<string | null>(null);
+  const [serverRecordingUploading, setServerRecordingUploading] = useState(false);
+
   // ── Persistent settings (load on mount, debounced save on change) ────────
   const [filterSettings, setFilterSettings] = useState<FilterSettingsState>({
     filterPreset: "None",
@@ -378,7 +419,7 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     getStreamerSettings()
       .then((res) => {
         if (!res.success || !res.settings) return;
-        const s = res.settings;
+        const s = res.settings as StreamerSettings & { thumbnailUrl?: string | null };
         const preset = QUALITY_PRESETS.find((p) => p.id === s.qualityPreset) || QUALITY_PRESETS[0];
         dispatch({ type: "SET_PRESET", payload: preset });
         if (s.fps === 24 || s.fps === 30 || s.fps === 60) {
@@ -397,12 +438,28 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
           filterSharpness: s.filterSharpness,
           beautyMode: s.beautyMode,
         });
+        // Gap 2: Hydrate thumbnail from persistent URL
+        if (s.thumbnailUrl) {
+          setThumbnailUrl(s.thumbnailUrl);
+          setThumbnail(s.thumbnailUrl);
+        }
         settingsLoadedRef.current = true;
       })
       .catch(() => {
         settingsLoadedRef.current = true;
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Gap 1: Fetch earnings history once on mount (non-blocking)
+  useEffect(() => {
+    getEarningsHistory()
+      .then((res) => {
+        if (res.success) setEarningsHistory(res);
+      })
+      .catch(() => {
+        // Non-fatal — panel shows nothing gracefully
+      });
   }, []);
 
   // Debounced auto-save when persistable settings change
@@ -463,7 +520,23 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
   const [streamTitle, setStreamTitle] = useState("");
   const [streamDesc, setStreamDesc] = useState("");
   const [category, setCategory] = useState("tagChat");
-  const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const [thumbnail, setThumbnailRaw] = useState<string | null>(null);
+
+  // Gap 2: setThumbnail triggers a background upload to persist the URL server-side
+  const setThumbnail = useCallback((dataUrl: string | null) => {
+    setThumbnailRaw(dataUrl);
+    if (!dataUrl) return;
+    // Fire-and-forget — non-blocking for UX
+    uploadThumbnail(dataUrl)
+      .then((res) => {
+        if (res.success && res.url) {
+          setThumbnailUrl(res.url);
+        }
+      })
+      .catch(() => {
+        // Non-fatal — preview still works locally
+      });
+  }, []);
 
   // ── Mobile detection ──────────────────────────────────────────────────────
   const isMobileDevice = window.innerWidth < 768 || "ontouchstart" in window;
@@ -493,6 +566,10 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
   const frameCountRef = useRef(0);
   const frameTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Gap 3: Metrics telemetry interval (emits stream:metrics every 5s while live)
+  const metricsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Ref to always reflect the latest stats without needing stable closure deps
+  const latestStatsRef = useRef<StreamStats>({ bitrate: 0, fps: 0, droppedFrames: 0, bytesSent: 0, latency: 0 });
 
   // ── Processed stream refs (scene → filters → audio → final) ─────────────
   const sceneStreamRef = useRef<MediaStream | null>(null);
@@ -501,10 +578,11 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
 
   // ── Cleanup helpers ───────────────────────────────────────────────────────
   const clearAllTimers = useCallback(() => {
-    if (durationTimerRef.current) { clearInterval(durationTimerRef.current); durationTimerRef.current = null; }
-    if (statsTimerRef.current)    { clearInterval(statsTimerRef.current);    statsTimerRef.current = null; }
-    if (frameTimerRef.current)    { clearInterval(frameTimerRef.current);    frameTimerRef.current = null; }
-    if (pingTimerRef.current)     { clearInterval(pingTimerRef.current);     pingTimerRef.current = null; }
+    if (durationTimerRef.current)  { clearInterval(durationTimerRef.current);  durationTimerRef.current = null; }
+    if (statsTimerRef.current)     { clearInterval(statsTimerRef.current);     statsTimerRef.current = null; }
+    if (frameTimerRef.current)     { clearInterval(frameTimerRef.current);     frameTimerRef.current = null; }
+    if (pingTimerRef.current)      { clearInterval(pingTimerRef.current);      pingTimerRef.current = null; }
+    if (metricsTimerRef.current)   { clearInterval(metricsTimerRef.current);   metricsTimerRef.current = null; }
   }, []);
 
   const stopRecorder = useCallback((ref: React.MutableRefObject<MediaRecorder | null>) => {
@@ -680,6 +758,7 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
       // FPS counter (count frames per second by sampling recorderRef chunks)
       frameTimerRef.current = setInterval(() => {
         dispatch({ type: "UPDATE_STATS", payload: { fps: frameCountRef.current } });
+        latestStatsRef.current = { ...latestStatsRef.current, fps: frameCountRef.current };
         frameCountRef.current = 0;
       }, 1000);
 
@@ -694,6 +773,8 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
           type: "UPDATE_STATS",
           payload: { bitrate: kbps, bytesSent: bytesSentTotalRef.current },
         });
+        // Gap 3: keep latest stats ref current
+        latestStatsRef.current = { ...latestStatsRef.current, bitrate: kbps, bytesSent: bytesSentTotalRef.current };
         setBitrateSamples((prev) => {
           const next = [...prev, kbps];
           return next.length > 30 ? next.slice(next.length - 30) : next;
@@ -704,7 +785,22 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
       pingTimerRef.current = setInterval(() => {
         const pingStart = Date.now();
         socket.emit("ping", () => {
-          dispatch({ type: "UPDATE_STATS", payload: { latency: Date.now() - pingStart } });
+          const latency = Date.now() - pingStart;
+          dispatch({ type: "UPDATE_STATS", payload: { latency } });
+          latestStatsRef.current = { ...latestStatsRef.current, latency };
+        });
+      }, 5000);
+
+      // Gap 3: Metrics telemetry — emit latest sample every 5 seconds
+      metricsTimerRef.current = setInterval(() => {
+        if (!socket?.connected) return;
+        const s = latestStatsRef.current;
+        socket.emit("stream:metrics", {
+          sessionId: null,          // server resolves from socket.data.analyticsSessionId
+          kbps: s.bitrate || null,
+          fps: s.fps || null,
+          dropped: s.droppedFrames || null,
+          rtt: s.latency || null,
         });
       }, 5000);
     };
@@ -817,6 +913,8 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
       description: streamDesc,
       tags: [category],
       thumbnailDataUrl: thumbnail,
+      // Gap 2: also send persistent URL so backend can prefer it over the data URL
+      thumbnailUrl: thumbnailUrl,
     });
 
     // Use processed stream (scene→filters→audio) when available, else raw camera
@@ -987,6 +1085,23 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     URL.revokeObjectURL(url);
   }, [recordingBlob]);
 
+  // ── Gap 4: Upload local recording to server ───────────────────────────────
+  const uploadRecordingToServer = useCallback(async () => {
+    if (!recordingBlob || serverRecordingUploading) return;
+    setServerRecordingUploading(true);
+    setServerRecordingUrl(null);
+    try {
+      const res = await uploadRecording(recordingBlob, null, durationSec);
+      if (res.success) {
+        setServerRecordingUrl(res.publicUrl);
+      }
+    } catch {
+      // Errors surface via serverRecordingUrl remaining null — caller can show error toast
+    } finally {
+      setServerRecordingUploading(false);
+    }
+  }, [recordingBlob, serverRecordingUploading, durationSec]);
+
   // ── Go Live button handler (with confirmation for stop) ───────────────────
   const handleGoLiveClick = useCallback(() => {
     if (state.isLive) {
@@ -1083,6 +1198,17 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
 
     // Session earnings
     sessionEarnings,
+
+    // Gap 1: Historical earnings
+    earningsHistory,
+
+    // Gap 2: Persistent thumbnail URL
+    thumbnailUrl,
+
+    // Gap 4: Server recording upload
+    serverRecordingUrl,
+    serverRecordingUploading,
+    uploadRecordingToServer,
 
     // Filter settings
     filterSettings,

@@ -190,7 +190,10 @@ export function StudioCanvas({
                 className="px-2 py-0.5 rounded-lg text-[10px] font-bold text-pnp-accent border border-pnp-accent/30"
                 style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
               >
-                {t[category as keyof typeof t] || category}
+                {(() => {
+                  const v = t[category as keyof typeof t];
+                  return typeof v === "string" ? v : category;
+                })()}
               </span>
             )}
           </div>

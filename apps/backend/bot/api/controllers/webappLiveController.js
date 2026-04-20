@@ -1722,6 +1722,342 @@ const broadcastLiveNow = async (req, res) => {
   }
 };
 
+// ── Gap 1: Earnings history ───────────────────────────────────────────────────
+
+/**
+ * GET /api/webapp/live/earnings
+ * Returns past-session earnings aggregates for the authenticated creator.
+ * Response: { totalAllTime, totalLast30Days, recentSessions: [{ sessionId, startedAt, endedAt, earnings, viewerPeak }] }
+ */
+const getEarningsHistory = async (req, res) => {
+  const creatorId = String(req.user.id);
+  try {
+    // Totals — all-time and last 30 days
+    const totalsResult = await getPool().query(
+      `SELECT
+         COALESCE(SUM(ce.amount_gross), 0)::numeric(12,2)                              AS total_all_time,
+         COALESCE(SUM(ce.amount_gross) FILTER (WHERE ce.created_at >= NOW() - INTERVAL '30 days'), 0)::numeric(12,2) AS total_last_30
+       FROM creator_earnings ce
+       WHERE ce.creator_id = $1`,
+      [creatorId]
+    );
+
+    const totals = totalsResult.rows[0];
+
+    // Recent sessions with per-session tip totals
+    const sessionsResult = await getPool().query(
+      `SELECT
+         ss.id                                                                 AS session_id,
+         ss.started_at,
+         ss.ended_at,
+         ss.peak_viewers                                                       AS viewer_peak,
+         COALESCE(
+           (SELECT SUM(ce2.amount_gross)
+            FROM creator_earnings ce2
+            WHERE ce2.creator_id = ss.creator_id
+              AND ce2.created_at BETWEEN ss.started_at AND COALESCE(ss.ended_at, NOW())
+           ), 0
+         )::numeric(10,2)                                                      AS earnings
+       FROM stream_sessions ss
+       WHERE ss.creator_id = $1
+       ORDER BY ss.started_at DESC
+       LIMIT 20`,
+      [creatorId]
+    );
+
+    return res.json({
+      success: true,
+      totalAllTime: parseFloat(totals.total_all_time),
+      totalLast30Days: parseFloat(totals.total_last_30),
+      recentSessions: sessionsResult.rows.map((r) => ({
+        sessionId: String(r.session_id),
+        startedAt: r.started_at,
+        endedAt: r.ended_at,
+        earnings: parseFloat(r.earnings),
+        viewerPeak: r.viewer_peak,
+      })),
+    });
+  } catch (err) {
+    logger.error('getEarningsHistory error', { creatorId, err: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to load earnings history' });
+  }
+};
+
+// ── Gap 4: Local recording upload ────────────────────────────────────────────
+
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+
+const RECORDING_UPLOAD_DIR = '/opt/pnptvapp/storage/stream-recordings';
+const MAX_LOCAL_RECORDINGS_PER_USER = 5;
+
+// Ensure upload directory exists at module load time (non-fatal)
+try { fs.mkdirSync(RECORDING_UPLOAD_DIR, { recursive: true }); } catch { /* ok */ }
+
+const localRecordingUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, RECORDING_UPLOAD_DIR),
+    filename: (req, file, cb) => {
+      const userId = req.user?.id || 'unknown';
+      const ts = Date.now();
+      const ext = file.mimetype === 'video/mp4' ? '.mp4' : '.webm';
+      cb(null, `${userId}-${ts}${ext}`);
+    },
+  }),
+  limits: { fileSize: 3 * 1024 * 1024 * 1024 }, // 3 GB max
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'video/webm' || file.mimetype === 'video/mp4') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only webm and mp4 video files are accepted'));
+    }
+  },
+}).single('file');
+
+/**
+ * POST /api/webapp/live/recording
+ * Multipart: field "file" (video/webm or video/mp4), optional text fields "sessionId", "durationSec".
+ * Saves to disk, inserts row into stream_local_uploads, caps at 5 per user (deletes oldest).
+ */
+const uploadLocalRecording = (req, res) => {
+  localRecordingUpload(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      if (uploadErr.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ success: false, error: 'File exceeds 3 GB limit' });
+      }
+      return res.status(400).json({ success: false, error: uploadErr.message });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
+
+    const userId = BigInt(req.user.id);
+    const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId.slice(0, 128) : null;
+    const durationSec = req.body?.durationSec ? parseInt(req.body.durationSec, 10) || null : null;
+    const storagePath = req.file.path;
+    const sizeBytes = req.file.size;
+    const mimeType = req.file.mimetype;
+    const filename = req.file.filename;
+    const publicUrl = `/static/stream-recordings/${filename}`;
+
+    try {
+      // Insert new recording row
+      const insertResult = await getPool().query(
+        `INSERT INTO stream_local_uploads (user_id, session_id, storage_path, public_url, size_bytes, duration_sec, mime_type)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id`,
+        [String(userId), sessionId, storagePath, publicUrl, sizeBytes, durationSec, mimeType]
+      );
+
+      const newId = insertResult.rows[0].id;
+
+      // Enforce max 5 recordings per user — delete oldest file + row on overflow
+      const allRows = await getPool().query(
+        `SELECT id, storage_path FROM stream_local_uploads WHERE user_id = $1 ORDER BY created_at ASC`,
+        [String(userId)]
+      );
+
+      if (allRows.rows.length > MAX_LOCAL_RECORDINGS_PER_USER) {
+        const toDelete = allRows.rows.slice(0, allRows.rows.length - MAX_LOCAL_RECORDINGS_PER_USER);
+        for (const old of toDelete) {
+          try { fs.unlinkSync(old.storage_path); } catch { /* file may already be gone */ }
+          await getPool().query('DELETE FROM stream_local_uploads WHERE id = $1', [old.id]);
+        }
+      }
+
+      return res.json({ success: true, id: String(newId), publicUrl, sizeBytes });
+    } catch (err) {
+      // Clean up the uploaded file on DB error
+      try { fs.unlinkSync(storagePath); } catch { /* ok */ }
+      logger.error('uploadLocalRecording DB error', { userId: String(userId), err: err.message });
+      return res.status(500).json({ success: false, error: 'Failed to save recording' });
+    }
+  });
+};
+
+// ── Gap 5: Scene & Mixer presets ─────────────────────────────────────────────
+
+/**
+ * GET /api/webapp/live/scene-presets
+ */
+const getScenePresets = async (req, res) => {
+  const userId = String(req.user.id);
+  try {
+    const { rows } = await getPool().query(
+      `SELECT id, name, config, is_default, updated_at
+       FROM stream_scene_presets WHERE user_id = $1
+       ORDER BY updated_at DESC`,
+      [userId]
+    );
+    return res.json({
+      success: true,
+      presets: rows.map((r) => ({
+        id: String(r.id),
+        name: r.name,
+        config: r.config,
+        isDefault: r.is_default,
+        updatedAt: r.updated_at,
+      })),
+    });
+  } catch (err) {
+    logger.error('getScenePresets error', { userId, err: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to load scene presets' });
+  }
+};
+
+/**
+ * POST /api/webapp/live/scene-presets
+ * Body: { name: string, config: object, isDefault?: boolean }
+ * Upserts on (user_id, name). If isDefault=true, clears other defaults first (transaction).
+ */
+const saveScenePreset = async (req, res) => {
+  const userId = String(req.user.id);
+  const { name, config, isDefault = false } = req.body || {};
+
+  if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    return res.status(400).json({ success: false, error: 'name is required' });
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return res.status(400).json({ success: false, error: 'config must be a JSON object' });
+  }
+
+  const trimmedName = name.trim().slice(0, 100);
+  const pool = getPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    if (isDefault) {
+      await client.query(
+        'UPDATE stream_scene_presets SET is_default = FALSE WHERE user_id = $1',
+        [userId]
+      );
+    }
+
+    const { rows } = await client.query(
+      `INSERT INTO stream_scene_presets (user_id, name, config, is_default, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (user_id, name) DO UPDATE
+         SET config     = EXCLUDED.config,
+             is_default = EXCLUDED.is_default,
+             updated_at = NOW()
+       RETURNING id, name, config, is_default, updated_at`,
+      [userId, trimmedName, JSON.stringify(config), Boolean(isDefault)]
+    );
+
+    await client.query('COMMIT');
+    const row = rows[0];
+    return res.json({
+      success: true,
+      preset: {
+        id: String(row.id),
+        name: row.name,
+        config: row.config,
+        isDefault: row.is_default,
+        updatedAt: row.updated_at,
+      },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    logger.error('saveScenePreset error', { userId, name: trimmedName, err: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to save scene preset' });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * GET /api/webapp/live/mixer-presets
+ */
+const getMixerPresets = async (req, res) => {
+  const userId = String(req.user.id);
+  try {
+    const { rows } = await getPool().query(
+      `SELECT id, name, config, is_default, updated_at
+       FROM stream_mixer_presets WHERE user_id = $1
+       ORDER BY updated_at DESC`,
+      [userId]
+    );
+    return res.json({
+      success: true,
+      presets: rows.map((r) => ({
+        id: String(r.id),
+        name: r.name,
+        config: r.config,
+        isDefault: r.is_default,
+        updatedAt: r.updated_at,
+      })),
+    });
+  } catch (err) {
+    logger.error('getMixerPresets error', { userId, err: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to load mixer presets' });
+  }
+};
+
+/**
+ * POST /api/webapp/live/mixer-presets
+ * Body: { name: string, config: object, isDefault?: boolean }
+ */
+const saveMixerPreset = async (req, res) => {
+  const userId = String(req.user.id);
+  const { name, config, isDefault = false } = req.body || {};
+
+  if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    return res.status(400).json({ success: false, error: 'name is required' });
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return res.status(400).json({ success: false, error: 'config must be a JSON object' });
+  }
+
+  const trimmedName = name.trim().slice(0, 100);
+  const pool = getPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    if (isDefault) {
+      await client.query(
+        'UPDATE stream_mixer_presets SET is_default = FALSE WHERE user_id = $1',
+        [userId]
+      );
+    }
+
+    const { rows } = await client.query(
+      `INSERT INTO stream_mixer_presets (user_id, name, config, is_default, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (user_id, name) DO UPDATE
+         SET config     = EXCLUDED.config,
+             is_default = EXCLUDED.is_default,
+             updated_at = NOW()
+       RETURNING id, name, config, is_default, updated_at`,
+      [userId, trimmedName, JSON.stringify(config), Boolean(isDefault)]
+    );
+
+    await client.query('COMMIT');
+    const row = rows[0];
+    return res.json({
+      success: true,
+      preset: {
+        id: String(row.id),
+        name: row.name,
+        config: row.config,
+        isDefault: row.is_default,
+        updatedAt: row.updated_at,
+      },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    logger.error('saveMixerPreset error', { userId, name: trimmedName, err: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to save mixer preset' });
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   listStreams,
   getRtmpKey,
@@ -1745,4 +2081,13 @@ module.exports = {
   updateRecordingEndpoint,
   getCreatorRevenue,
   broadcastLiveNow,
+  // Gap 1
+  getEarningsHistory,
+  // Gap 4
+  uploadLocalRecording,
+  // Gap 5
+  getScenePresets,
+  saveScenePreset,
+  getMixerPresets,
+  saveMixerPreset,
 };

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LiveKitRoom,
-  VideoConference,
   useRoomContext,
   useParticipants,
 } from "@livekit/components-react";
+import { CallStage } from "@/pages/CallRoom";
 import { ConnectionState, RoomEvent } from "livekit-client";
 import type { LocalUserChoices } from "@livekit/components-core";
 
@@ -226,6 +226,7 @@ function LiveKitCallPanel({
   return (
     <div
       className="lk-pnptv-call mx-3 mt-2 mb-1 md:mx-auto md:my-3 md:self-center flex-shrink-0 rounded-2xl overflow-hidden relative w-auto md:w-full"
+      data-call-container
       data-lk-theme="default"
       style={{
         // Adaptive sizing: fits landscape phones (min-height shrinks with dvh)
@@ -259,7 +260,7 @@ function LiveKitCallPanel({
         onDisconnected={handleDisconnected}
         style={{ display: "contents" }}
       >
-        <VideoConference />
+        <CallStage />
         <CallOverlay startedBy={startedBy} />
       </LiveKitRoom>
 

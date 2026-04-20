@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { handleCallback } from "@/lib/auth";
+import { handleCallback, consumeReturnTo } from "@/lib/auth";
 import { redeemReferralCode } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -45,6 +45,13 @@ export default function AuthCallback() {
         if (refCode) {
           localStorage.removeItem("pnptv:pendingRef");
           redeemReferralCode(refCode).catch(() => {});
+        }
+
+        // Prefer an explicit returnTo (e.g. user came from studio.pnptv.app)
+        const returnTo = consumeReturnTo();
+        if (returnTo) {
+          window.location.replace(returnTo);
+          return;
         }
 
         // If the user came from the admin panel, redirect back there

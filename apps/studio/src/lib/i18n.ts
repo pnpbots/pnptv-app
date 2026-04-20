@@ -207,5 +207,5 @@ export type StudioStrings = typeof strings.en & { lang: string };
 
 export function useI18n(): StudioStrings {
   const lang = navigator.language?.startsWith("es") ? "es" : "en";
-  return { ...strings[lang], lang };
+  return { ...(strings[lang] as StudioStrings), lang };
 }

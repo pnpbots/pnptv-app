@@ -25,7 +25,6 @@ import {
   browseCreatorChannels,
   getChannelDetail,
   getLiveStreams,
-  getWebRTCStreams,
   getFeaturedPerformers,
   getUpcomingEvents,
   searchVideorama,
@@ -231,8 +230,7 @@ export default function Media() {
       Promise.all([
         getFeaturedPerformers().catch(() => ({ performers: [] })),
         getLiveStreams().catch(() => ({ streams: [] })),
-        getWebRTCStreams().catch(() => ({ streams: [] })),
-      ]).then(([perfData, hlsData, webrtcData]) => {
+      ]).then(([perfData, hlsData]) => {
         const performers = perfData.performers || [];
         // Find Santino in performers
         const santino = performers.find((p: FeaturedPerformer) =>
@@ -241,9 +239,7 @@ export default function Media() {
         );
         if (santino) setSantinoPerformer(santino);
 
-        const hlsStreams = (hlsData.streams || []).filter((s: LiveStream) => s.isLive);
-        const webrtcStreams = (webrtcData.streams || []).filter((s: any) => s.isLive);
-        const allStreams = [...webrtcStreams, ...hlsStreams];
+        const allStreams = (hlsData.streams || []).filter((s: LiveStream) => s.isLive);
 
         // Check if Santino is live
         const santinoStream = allStreams.find((s: any) =>

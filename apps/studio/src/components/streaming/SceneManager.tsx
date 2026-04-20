@@ -6,6 +6,8 @@ import React, {
   useMemo,
   useId,
 } from "react";
+import { getScenePresets, saveScenePreset } from "@/lib/api";
+import type { StreamPreset } from "@/lib/api";
 
 // ─── Inline SVG Icons ─────────────────────────────────────────────────────────
 
@@ -1126,6 +1128,58 @@ export default function SceneManager({
   const [sourcePanelOpen, setSourcePanelOpen] = useState(true);
   const [renamingSceneId, setRenamingSceneId] = useState<string | null>(null);
 
+  // Gap 5: Scene preset bar state
+  const [scenePresets, setScenePresets] = useState<StreamPreset[]>([]);
+  const [presetSaveName, setPresetSaveName] = useState("");
+  const [presetSaveMode, setPresetSaveMode] = useState(false);
+  const [presetSaving, setPresetSaving] = useState(false);
+
+  // Load presets on mount
+  useEffect(() => {
+    getScenePresets()
+      .then((res) => { if (res.success) setScenePresets(res.presets); })
+      .catch(() => { /* non-fatal */ });
+  }, []);
+
+  // Load a preset config into scene state
+  const loadScenePreset = useCallback((preset: StreamPreset) => {
+    const cfg = preset.config;
+    if (!cfg || typeof cfg !== "object") return;
+    // Config shape: { scenes: Scene[], activeSceneId: string }
+    const loadedScenes = cfg.scenes as Scene[] | undefined;
+    const loadedActiveId = cfg.activeSceneId as string | undefined;
+    if (!Array.isArray(loadedScenes) || loadedScenes.length === 0) return;
+    setScenes(loadedScenes);
+    setActiveSceneId(loadedActiveId || loadedScenes[0].id);
+    setSelectedSourceId(null);
+  }, []);
+
+  // Save current state as a named preset
+  const handleSaveScenePreset = useCallback(async () => {
+    const name = presetSaveName.trim();
+    if (!name) return;
+    setPresetSaving(true);
+    try {
+      const config = { scenes, activeSceneId };
+      const res = await saveScenePreset({ name, config });
+      if (res.success) {
+        setScenePresets((prev) => {
+          const exists = prev.findIndex((p) => p.id === res.preset.id);
+          if (exists >= 0) {
+            const next = [...prev];
+            next[exists] = res.preset;
+            return next;
+          }
+          return [res.preset, ...prev];
+        });
+        setPresetSaveName("");
+        setPresetSaveMode(false);
+      }
+    } catch { /* non-fatal */ } finally {
+      setPresetSaving(false);
+    }
+  }, [presetSaveName, scenes, activeSceneId]);
+
   // Derived
   const activeScene = useMemo(
     () => scenes.find((s) => s.id === activeSceneId) ?? scenes[0],
@@ -1596,6 +1650,80 @@ export default function SceneManager({
             </button>
           )}
         </div>
+      </div>
+
+      {/* ── Gap 5: Scene Preset Bar ────────────────────────────────── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Preset dropdown */}
+        {scenePresets.length > 0 && (
+          <div className="relative flex-1 min-w-0">
+            <select
+              className="w-full appearance-none rounded-lg px-2.5 py-1.5 pr-7 text-xs bg-pnp-surface border border-pnp-border text-pnp-textPrimary focus:outline-none focus:border-pnp-accent transition-colors"
+              defaultValue=""
+              onChange={(e) => {
+                const preset = scenePresets.find((p) => p.id === e.target.value);
+                if (preset) loadScenePreset(preset);
+                e.target.value = "";
+              }}
+              aria-label="Load scene preset"
+            >
+              <option value="" disabled>Load preset…</option>
+              {scenePresets.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <IconChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-pnp-textSecondary" />
+          </div>
+        )}
+
+        {/* Save preset */}
+        {!isLive && (
+          presetSaveMode ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={presetSaveName}
+                onChange={(e) => setPresetSaveName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveScenePreset();
+                  if (e.key === "Escape") { setPresetSaveMode(false); setPresetSaveName(""); }
+                }}
+                placeholder="Preset name…"
+                maxLength={60}
+                autoFocus
+                className="rounded-lg px-2 py-1.5 text-xs bg-pnp-background border border-pnp-accent text-pnp-textPrimary focus:outline-none w-28"
+                style={{ WebkitUserSelect: "text", userSelect: "text" } as React.CSSProperties}
+              />
+              <button
+                type="button"
+                onClick={handleSaveScenePreset}
+                disabled={presetSaving || !presetSaveName.trim()}
+                className="p-1 text-pnp-accent disabled:opacity-40 transition-opacity"
+                aria-label="Confirm save"
+              >
+                <IconCheck className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => { setPresetSaveMode(false); setPresetSaveName(""); }}
+                className="p-1 text-pnp-textSecondary hover:opacity-80 transition-opacity"
+                aria-label="Cancel"
+              >
+                <IconX className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPresetSaveMode(true)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-pnp-textSecondary bg-pnp-surface border border-pnp-border hover:text-pnp-textPrimary hover:bg-pnp-surfaceHover transition-all shrink-0"
+              title="Save current scene layout as preset"
+            >
+              <IconCheck className="w-3 h-3" />
+              Save as…
+            </button>
+          )
+        )}
       </div>
 
       {/* ── Source Layer Panel ─────────────────────────────────────── */}

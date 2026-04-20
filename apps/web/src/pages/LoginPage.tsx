@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { telegramWidgetAuth, type TelegramWidgetUser } from "@/lib/api";
-import { login as oidcLogin } from "@/lib/auth";
+import { login as oidcLogin, rememberReturnTo, sanitizeReturnTo } from "@/lib/auth";
 import { getI18n, getLang } from "@/lib/i18n";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -138,11 +138,18 @@ export function LoginPage() {
 
   const [lastMethod, setLastMethod] = useState<string | null>(null);
   const [lastUsername, setLastUsername] = useState<string | null>(null);
+  const [returnTo, setReturnTo] = useState<string | null>(null);
   useEffect(() => {
     const storedMethod = localStorage.getItem("pnptv_last_auth");
     const storedUser = localStorage.getItem("pnptv_last_username");
     if (storedMethod) setLastMethod(storedMethod);
     if (storedUser) setLastUsername(storedUser);
+    const raw = new URLSearchParams(window.location.search).get("returnTo");
+    const safe = sanitizeReturnTo(raw);
+    if (safe) {
+      setReturnTo(safe);
+      rememberReturnTo(safe);
+    }
   }, []);
 
   const methodLabel = (method: string | null): string | null => {
@@ -185,7 +192,7 @@ export function LoginPage() {
           if (result.user?.username)
             localStorage.setItem("pnptv_last_username", result.user.username);
           await refreshUser();
-          window.location.href = "/";
+          window.location.href = returnTo || "/";
         } else {
           setWidgetStatus("error");
           setWidgetError(result.error || t.telegramWidgetError);
@@ -197,7 +204,7 @@ export function LoginPage() {
         setWidgetError(message);
       }
     },
-    [refreshUser, t],
+    [refreshUser, returnTo, t],
   );
 
   const handleWidgetLoadError = useCallback(() => {

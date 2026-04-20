@@ -18,7 +18,6 @@ import { getUpcomingEvents, getCastingStatus, submitCastingApplication, type Cas
 import {
   getFeaturedPerformers,
   getLiveStreams,
-  getWebRTCStreams,
   getWalletBalance,
   getTokenPackages,
   buyTokens,
@@ -133,24 +132,10 @@ export default function Live() {
     socketBalanceReceived,
   } = useLiveSocket(null);
 
-  // Load performers + streams (merge WebRTC + Restreamer HLS)
   const fetchStreams = useCallback(() => {
-    return Promise.all([
-      getLiveStreams().catch(() => ({ streams: [] })),
-      getWebRTCStreams().catch(() => ({ streams: [] })),
-    ]).then(([hlsData, webrtcData]) => {
-      const hlsStreams = (hlsData.streams || []).filter((s: LiveStream) => s.isLive);
-      const webrtcStreams = (webrtcData.streams || [])
-        .filter((s: any) => s.isLive)
-        .map((s: any) => ({ ...s, hlsUrl: "" })); // WebRTC streams don't use hlsUrl
-      // Merge: WebRTC streams take priority over HLS for the same channel
-      const webrtcIds = new Set(webrtcStreams.map((s: any) => s.channelRef || s.id));
-      const merged = [
-        ...webrtcStreams,
-        ...hlsStreams.filter((s: any) => !webrtcIds.has(s.id)),
-      ];
-      return merged;
-    });
+    return getLiveStreams()
+      .catch(() => ({ streams: [] }))
+      .then((data) => (data.streams || []).filter((s: LiveStream) => s.isLive));
   }, []);
 
   const loadLiveEvents = useCallback(() => {

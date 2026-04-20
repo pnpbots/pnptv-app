@@ -16,12 +16,14 @@ export default function StudioLayout() {
   }
 
   if (!isAuthenticated) {
+    const returnTo = typeof window !== "undefined" ? window.location.href : "https://studio.pnptv.app/";
+    const loginHref = `https://pnptv.app/login?returnTo=${encodeURIComponent(returnTo)}`;
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-pnp-background px-4 text-center">
         <h1 className="text-xl font-bold text-white mb-2">PNPtv! Studio</h1>
         <p className="text-sm text-pnp-textSecondary mb-6">{t.notAuthenticated}</p>
         <a
-          href="https://pnptv.app/login"
+          href={loginHref}
           className="px-6 py-3 rounded-xl text-sm font-bold text-white btn-gradient"
         >
           {t.goToLogin}

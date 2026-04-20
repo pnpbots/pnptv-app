@@ -151,22 +151,15 @@ export function getMyChannel(): Promise<{
   return request("/api/webapp/live/my-channel");
 }
 
-// ── WebRTC Streaming (JaaS) ──────────────────────────────────────────────────
-
-export interface WebRTCStreamConfig {
-  token: string;
-  meetingUrl: string;
-  roomName: string;
-  channelRef: string;
+export function provisionChannel(): Promise<{
+  success: boolean;
+  alreadyProvisioned?: boolean;
+  rtmpUrl?: string;
+  streamKey?: string;
+  channelRef?: string;
   error?: string;
-}
-
-export function getWebRTCStreamerConfig(): Promise<{ success: boolean } & WebRTCStreamConfig> {
-  return request("/api/webapp/live/webrtc/config");
-}
-
-export function endWebRTCStream(): Promise<{ success: boolean }> {
-  return request("/api/webapp/live/webrtc/end", { method: "POST" });
+}> {
+  return request("/api/webapp/live/provision-channel", { method: "POST" });
 }
 
 // ── Streamer Settings ─────────────────────────────────────────────────────────
@@ -260,4 +253,106 @@ export function getStreamHistory(): Promise<{
   summary: StreamHistorySummary;
 }> {
   return request("/api/webapp/live/stream-history");
+}
+
+// ── Gap 1: Earnings history ───────────────────────────────────────────────────
+
+export interface EarningsSession {
+  sessionId: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  earnings: number;
+  viewerPeak: number;
+}
+
+export interface EarningsHistory {
+  success: boolean;
+  totalAllTime: number;
+  totalLast30Days: number;
+  recentSessions: EarningsSession[];
+}
+
+export function getEarningsHistory(): Promise<EarningsHistory> {
+  return request("/api/webapp/live/earnings");
+}
+
+// ── Gap 2: Thumbnail upload ───────────────────────────────────────────────────
+
+export function uploadThumbnail(dataUrl: string): Promise<{ success: boolean; url: string }> {
+  return request("/api/webapp/live/thumbnail", {
+    method: "POST",
+    body: { dataUrl },
+  });
+}
+
+// ── Gap 4: Local recording server upload ─────────────────────────────────────
+
+export async function uploadRecording(
+  blob: Blob,
+  sessionId: string | null,
+  durationSec: number
+): Promise<{ success: boolean; publicUrl: string }> {
+  const form = new FormData();
+  form.append("file", blob, "recording.webm");
+  if (sessionId) form.append("sessionId", sessionId);
+  form.append("durationSec", String(Math.round(durationSec)));
+
+  const res = await fetch(`${API_BASE}/api/webapp/live/recording`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+    // No Content-Type header — browser sets multipart/form-data with boundary automatically
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    const msg = typeof error.error === "string" ? error.error : `Upload error ${res.status}`;
+    throw new ApiError(msg, res.status);
+  }
+
+  return res.json();
+}
+
+// ── Gap 5: Scene & Mixer presets ─────────────────────────────────────────────
+
+export interface StreamPreset {
+  id: string;
+  name: string;
+  config: Record<string, unknown>;
+  isDefault: boolean;
+  updatedAt: string;
+}
+
+export interface PresetsResponse {
+  success: boolean;
+  presets: StreamPreset[];
+}
+
+export interface SavePresetResponse {
+  success: boolean;
+  preset: StreamPreset;
+}
+
+export function getScenePresets(): Promise<PresetsResponse> {
+  return request("/api/webapp/live/scene-presets");
+}
+
+export function saveScenePreset(data: {
+  name: string;
+  config: Record<string, unknown>;
+  isDefault?: boolean;
+}): Promise<SavePresetResponse> {
+  return request("/api/webapp/live/scene-presets", { method: "POST", body: data });
+}
+
+export function getMixerPresets(): Promise<PresetsResponse> {
+  return request("/api/webapp/live/mixer-presets");
+}
+
+export function saveMixerPreset(data: {
+  name: string;
+  config: Record<string, unknown>;
+  isDefault?: boolean;
+}): Promise<SavePresetResponse> {
+  return request("/api/webapp/live/mixer-presets", { method: "POST", body: data });
 }

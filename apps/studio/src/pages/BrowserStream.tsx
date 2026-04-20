@@ -83,6 +83,12 @@ export default function BrowserStream() {
     // Stream title
     streamTitle,
     setStreamTitle,
+    streamDesc,
+    setStreamDesc,
+    category,
+    setCategory,
+    thumbnail,
+    setThumbnail,
 
     // Stream profile / auto-chat
     streamProfile,

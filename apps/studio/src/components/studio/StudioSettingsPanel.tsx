@@ -3,6 +3,22 @@ import type { QualityPreset } from "@/hooks/useStreamer";
 import { QUALITY_PRESETS } from "@/hooks/useStreamer";
 import { Toggle, DownloadIcon, CheckIcon } from "./shared";
 
+function UploadIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
+      <polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} points="16 16 12 12 8 16" />
+      <line strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} x1="12" y1="12" x2="12" y2="21" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+    </svg>
+  );
+}
+
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 export interface StudioSettingsPanelProps {
@@ -21,6 +37,10 @@ export interface StudioSettingsPanelProps {
   onToggleLocalRecord: () => void;
   recordingBlob: Blob | null;
   onDownloadRecording: () => void;
+  // Gap 4: server recording upload
+  onUploadRecordingToServer?: () => void;
+  serverRecordingUploading?: boolean;
+  serverRecordingUrl?: string | null;
   channel: { ref: string; streamKey: string; rtmpUrl: string } | null;
   streamProfile: { boundaries: string; turnOns: string; streamGoal: string };
   onStreamProfileChange: (fn: (prev: any) => any) => void;
@@ -127,6 +147,9 @@ export function StudioSettingsPanel({
   onToggleLocalRecord,
   recordingBlob,
   onDownloadRecording,
+  onUploadRecordingToServer,
+  serverRecordingUploading = false,
+  serverRecordingUrl,
   channel,
   streamProfile,
   onStreamProfileChange,
@@ -258,23 +281,65 @@ export function StudioSettingsPanel({
         />
       </section>
 
-      {/* ── 4. Download recording (conditional) ──────────────────────────── */}
+      {/* ── 4. Download / Upload recording (conditional) ─────────────────── */}
       {recordingBlob && (
-        <button
-          onClick={onDownloadRecording}
-          className="
-            w-full flex items-center justify-center gap-2
-            py-2.5 rounded-xl text-sm font-semibold text-white
-            border border-pnp-accent/40
-            transition-all duration-150 hover:opacity-90 active:scale-[0.98]
-            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
-            min-h-[44px]
-          "
-          style={{ background: "rgba(212,0,122,0.15)" }}
-        >
-          <DownloadIcon className="w-4 h-4" aria-hidden="true" />
-          Download Recording
-        </button>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={onDownloadRecording}
+            className="
+              w-full flex items-center justify-center gap-2
+              py-2.5 rounded-xl text-sm font-semibold text-white
+              border border-pnp-accent/40
+              transition-all duration-150 hover:opacity-90 active:scale-[0.98]
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
+              min-h-[44px]
+            "
+            style={{ background: "rgba(212,0,122,0.15)" }}
+          >
+            <DownloadIcon className="w-4 h-4" aria-hidden="true" />
+            Download Recording
+          </button>
+
+          {/* Gap 4: Upload to server */}
+          {onUploadRecordingToServer && (
+            <button
+              onClick={onUploadRecordingToServer}
+              disabled={serverRecordingUploading || !!serverRecordingUrl}
+              className="
+                w-full flex items-center justify-center gap-2
+                py-2.5 rounded-xl text-sm font-semibold text-white
+                border border-pnp-border
+                transition-all duration-150 hover:opacity-90 active:scale-[0.98]
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
+                disabled:opacity-50 disabled:cursor-not-allowed
+                min-h-[44px]
+              "
+              style={{ background: "rgba(255,255,255,0.06)" }}
+            >
+              {serverRecordingUploading ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4l-3 3 3 3H4z" />
+                  </svg>
+                  Uploading…
+                </>
+              ) : serverRecordingUrl ? (
+                <>
+                  <CheckIcon className="w-4 h-4" style={{ color: "#5ED1C4" }} aria-hidden="true" />
+                  <span className="truncate text-pnp-textSecondary text-xs max-w-[180px]" title={serverRecordingUrl}>
+                    Saved to server
+                  </span>
+                </>
+              ) : (
+                <>
+                  <UploadIcon className="w-4 h-4" aria-hidden="true" />
+                  Upload to Server
+                </>
+              )}
+            </button>
+          )}
+        </div>
       )}
 
       {/* ── 5. RTMP Credentials ──────────────────────────────────────────── */}

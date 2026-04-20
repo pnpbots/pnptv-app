@@ -1705,7 +1705,7 @@ function initSocketIO(io) {
     // The user's assigned live_channel is verified against channelRef before
     // spawning FFmpeg.
 
-    socket.on('stream:start', async ({ channelRef, videoBitrate, audioBitrate, fps, title, description, tags, thumbnailDataUrl } = {}) => {
+    socket.on('stream:start', async ({ channelRef, videoBitrate, audioBitrate, fps, title, description, tags, thumbnailDataUrl, thumbnailUrl } = {}) => {
       // Reject if already streaming — one stream per connection
       if (socket.data.ffmpegProcess) {
         socket.emit('stream:error', { message: 'Already streaming. Stop the current stream first.' });
@@ -1873,12 +1873,19 @@ function initSocketIO(io) {
               ? tags.filter(tg => typeof tg === 'string').slice(0, 7).map(tg => tg.slice(0, 32))
               : [];
             await redis.set(`stream:meta:${channelRef}`, JSON.stringify({ title: safeTitle, description: safeDesc, tags: safeTags }), 'EX', 43200);
-            if (
-              typeof thumbnailDataUrl === 'string' &&
-              thumbnailDataUrl.startsWith('data:image/jpeg;base64,') &&
-              thumbnailDataUrl.length < 200 * 1024
-            ) {
-              await redis.set(`stream:thumb:${channelRef}`, thumbnailDataUrl, 'EX', 43200);
+            // Prefer persistent thumbnailUrl (stored in DB via /api/webapp/live/thumbnail);
+            // fall back to one-time thumbnailDataUrl for backward compatibility.
+            const thumbToStore = (typeof thumbnailUrl === 'string' && thumbnailUrl.startsWith('/'))
+              ? thumbnailUrl
+              : (
+                typeof thumbnailDataUrl === 'string' &&
+                thumbnailDataUrl.startsWith('data:image/jpeg;base64,') &&
+                thumbnailDataUrl.length < 200 * 1024
+                  ? thumbnailDataUrl
+                  : null
+              );
+            if (thumbToStore) {
+              await redis.set(`stream:thumb:${channelRef}`, thumbToStore, 'EX', 43200);
             }
           }
         } catch (metaErr) {
@@ -2004,7 +2011,37 @@ function initSocketIO(io) {
       }
     });
 
-    socket.on('stream:stop', () => {
+    // ── Gap 3: Bitrate/FPS telemetry samples ────────────────────────────────
+    // Rate-limited: ignore if a sample was already stored in the last 3 seconds.
+    socket.on('stream:metrics', async ({ sessionId, kbps, fps, dropped, rtt } = {}) => {
+      if (!socket.data.streamChannelRef) return; // must be live
+
+      const now = Date.now();
+      const lastSample = socket.data.lastMetricsSample || 0;
+      if (now - lastSample < 3000) return; // rate-limit: 3 s per session
+      socket.data.lastMetricsSample = now;
+
+      // Basic validation — all fields optional but must be numbers when present
+      const safeKbps    = Number.isFinite(Number(kbps))    ? Math.max(0, Math.round(Number(kbps)))    : null;
+      const safeFps     = Number.isFinite(Number(fps))      ? Math.max(0, Number(fps))                 : null;
+      const safeDropped = Number.isFinite(Number(dropped))  ? Math.max(0, Math.round(Number(dropped))) : null;
+      const safeRtt     = Number.isFinite(Number(rtt))      ? Math.max(0, Math.round(Number(rtt)))     : null;
+      const safeSession = typeof sessionId === 'string' ? sessionId.slice(0, 128) : String(socket.data.analyticsSessionId || '');
+
+      if (!safeSession) return;
+
+      try {
+        await query(
+          `INSERT INTO stream_metrics_samples (session_id, user_id, kbps, fps, dropped_frames, rtt_ms)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [safeSession, String(user.id), safeKbps, safeFps, safeDropped, safeRtt]
+        );
+      } catch (err) {
+        logger.warn('stream:metrics insert error', { userId: user.id, err: err.message });
+      }
+    });
+
+    socket.on('stream:stop', async () => {
       // Mark explicit stop so disconnect handler won't send the "went offline" DM
       const channelRefForStop = socket.data.streamChannelRef;
       if (channelRefForStop) {

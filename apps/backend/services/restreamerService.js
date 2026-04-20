@@ -148,51 +148,46 @@ async function getProcess(refId) {
  */
 function _buildProcessConfig(refId, title) {
   const processId = `restreamer-ui:ingest:${refId}`;
+  // The bot's socket stream handler pushes to rtmp://restreamer:1935/live/<streamKey>
+  // where streamKey strips the 'pnptv-' prefix (see socketHandlers.js:1770). The
+  // Restreamer input {rtmp,name=X} MUST match that stripped name, or FFmpeg fails
+  // to open its input and the HLS output never produces segments.
+  const rtmpName = refId.startsWith('pnptv-') ? refId.slice('pnptv-'.length) : refId;
 
+  // Restreamer's /api/v3/process validator expects the ProcessConfig fields
+  // (id, type, input, output, ...) at the top level — NOT nested under `config`.
   return {
     id: processId,
+    type: 'ffmpeg',
     reference: refId,
-    config: {
-      id: processId,
-      type: 'ffmpeg',
-      input: [
-        {
-          id: 'input_0',
-          address: `{rtmp,name=${refId}}`,
-          options: ['-fflags', '+genpts'],
-        },
-      ],
-      output: [
-        {
-          id: 'output_0',
-          address: `{memfs}/${refId}.m3u8`,
-          options: [
-            '-codec', 'copy',
-            '-f', 'hls',
-            '-hls_time', '2',
-            '-hls_list_size', '6',
-            '-hls_flags', 'delete_segments+append_list',
-            '-hls_delete_threshold', '4',
-            '-hls_segment_filename', `{memfs}/${refId}_%04d.ts`,
-            '-method', 'PUT',
-          ],
-        },
-      ],
-      options: ['-err_detect', 'ignore_err'],
-      reconnect: true,
-      reconnect_delay_seconds: 10,
-      autostart: true,
-      staleTimeout: 30,
-    },
-    metadata: {
-      'restreamer-ui': {
-        meta: {
-          name: title || refId,
-          description: `PNPtv Live — ${title || refId}`,
-        },
-        version: '1.0.0',
+    input: [
+      {
+        id: 'input_0',
+        address: `{rtmp,name=${rtmpName}}`,
+        options: ['-fflags', '+genpts'],
       },
-    },
+    ],
+    output: [
+      {
+        id: 'output_0',
+        address: `{memfs}/${refId}.m3u8`,
+        options: [
+          '-codec', 'copy',
+          '-f', 'hls',
+          '-hls_time', '2',
+          '-hls_list_size', '6',
+          '-hls_flags', 'delete_segments+append_list',
+          '-hls_delete_threshold', '4',
+          '-hls_segment_filename', `{memfs}/${refId}_%04d.ts`,
+          '-method', 'PUT',
+        ],
+      },
+    ],
+    options: ['-err_detect', 'ignore_err'],
+    reconnect: true,
+    reconnect_delay_seconds: 10,
+    autostart: true,
+    stale_timeout_seconds: 30,
   };
 }
 

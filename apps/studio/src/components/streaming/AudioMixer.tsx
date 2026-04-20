@@ -5,6 +5,8 @@ import React, {
   useCallback,
   useLayoutEffect,
 } from "react";
+import { getMixerPresets, saveMixerPreset } from "@/lib/api";
+import type { StreamPreset } from "@/lib/api";
 
 // ─── Inline SVG icons (matches BrowserStreamer.tsx pattern) ──────────────────
 
@@ -335,6 +337,72 @@ export default function AudioMixer({
 
   // ── Noise suppression ────────────────────────────────────────────────────
   const [noiseSuppression, setNoiseSuppression] = useState(true);
+
+  // Gap 5: Mixer presets (declared after gain state so getMixerConfig can capture them)
+  const [mixerPresets, setMixerPresets] = useState<StreamPreset[]>([]);
+  const [presetSaveMode, setPresetSaveMode] = useState(false);
+  const [presetSaveName, setPresetSaveName] = useState("");
+  const [presetSaving, setPresetSaving] = useState(false);
+
+  // Load presets on mount
+  useEffect(() => {
+    getMixerPresets()
+      .then((res) => { if (res.success) setMixerPresets(res.presets); })
+      .catch(() => { /* non-fatal */ });
+  }, []);
+
+  // Capture current mixer state as serializable config
+  const getMixerConfig = useCallback(() => ({
+    micGainPct,
+    bgGainPct,
+    masterGainPct,
+    micMuted,
+    bgMuted,
+    noiseSuppression,
+  }), [micGainPct, bgGainPct, masterGainPct, micMuted, bgMuted, noiseSuppression]);
+
+  // Apply a loaded preset config
+  const loadMixerPreset = useCallback((preset: StreamPreset) => {
+    const cfg = preset.config as Partial<{
+      micGainPct: number;
+      bgGainPct: number;
+      masterGainPct: number;
+      micMuted: boolean;
+      bgMuted: boolean;
+      noiseSuppression: boolean;
+    }>;
+    if (typeof cfg.micGainPct === "number") setMicGainPct(cfg.micGainPct);
+    if (typeof cfg.bgGainPct === "number") setBgGainPct(cfg.bgGainPct);
+    if (typeof cfg.masterGainPct === "number") setMasterGainPct(cfg.masterGainPct);
+    if (typeof cfg.micMuted === "boolean") setMicMuted(cfg.micMuted);
+    if (typeof cfg.bgMuted === "boolean") setBgMuted(cfg.bgMuted);
+    if (typeof cfg.noiseSuppression === "boolean") setNoiseSuppression(cfg.noiseSuppression);
+  }, []);
+
+  const handleSaveMixerPreset = useCallback(async () => {
+    const name = presetSaveName.trim();
+    if (!name) return;
+    setPresetSaving(true);
+    try {
+      const config = getMixerConfig();
+      const res = await saveMixerPreset({ name, config });
+      if (res.success) {
+        setMixerPresets((prev) => {
+          const exists = prev.findIndex((p) => p.id === res.preset.id);
+          if (exists >= 0) {
+            const next = [...prev];
+            next[exists] = res.preset;
+            return next;
+          }
+          return [res.preset, ...prev];
+        });
+        setPresetSaveName("");
+        setPresetSaveMode(false);
+      }
+    } catch { /* non-fatal */ } finally {
+      setPresetSaving(false);
+    }
+  }, [presetSaveName, getMixerConfig]);
 
   // ── BG music state ───────────────────────────────────────────────────────
   const [bgFileName, setBgFileName] = useState<string | null>(
@@ -1146,6 +1214,87 @@ export default function AudioMixer({
                 </button>
               </div>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Gap 5: Mixer preset bar — shown when panel is expanded */}
+      {expanded && (
+        <div className="px-4 pb-3 flex items-center gap-2 flex-wrap border-t border-pnp-border pt-2">
+          {mixerPresets.length > 0 && (
+            <div className="relative flex-1 min-w-0">
+              <select
+                className="w-full appearance-none rounded-lg px-2.5 py-1.5 pr-7 text-xs bg-pnp-background border border-pnp-border text-pnp-textPrimary focus:outline-none focus:border-pnp-accent transition-colors"
+                defaultValue=""
+                onChange={(e) => {
+                  const preset = mixerPresets.find((p) => p.id === e.target.value);
+                  if (preset) loadMixerPreset(preset);
+                  e.target.value = "";
+                }}
+                aria-label="Load mixer preset"
+              >
+                <option value="" disabled>Load mixer preset…</option>
+                {mixerPresets.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-pnp-textSecondary" />
+            </div>
+          )}
+
+          {presetSaveMode ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={presetSaveName}
+                onChange={(e) => setPresetSaveName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveMixerPreset();
+                  if (e.key === "Escape") { setPresetSaveMode(false); setPresetSaveName(""); }
+                }}
+                placeholder="Preset name…"
+                maxLength={60}
+                autoFocus
+                className="rounded-lg px-2 py-1.5 text-xs bg-pnp-background border border-pnp-accent text-pnp-textPrimary focus:outline-none w-28"
+                style={{ WebkitUserSelect: "text", userSelect: "text" } as React.CSSProperties}
+                aria-label="Mixer preset name"
+              />
+              <button
+                type="button"
+                onClick={handleSaveMixerPreset}
+                disabled={presetSaving || !presetSaveName.trim()}
+                className="p-1 text-pnp-accent disabled:opacity-40 transition-opacity"
+                aria-label="Confirm save preset"
+              >
+                {/* inline check icon */}
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setPresetSaveMode(false); setPresetSaveName(""); }}
+                className="p-1 text-pnp-textSecondary hover:opacity-80 transition-opacity"
+                aria-label="Cancel"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPresetSaveMode(true)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-pnp-textSecondary bg-pnp-background border border-pnp-border hover:text-pnp-textPrimary hover:bg-pnp-surface transition-all shrink-0"
+              title="Save current mixer settings as preset"
+            >
+              {/* inline save icon */}
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              Save as…
+            </button>
           )}
         </div>
       )}

@@ -756,33 +756,6 @@ export function provisionChannel(): Promise<{
   return request("/api/webapp/live/provision-channel", { method: "POST" });
 }
 
-// ── WebRTC Streaming (JaaS) ───────────────────────────────────────────────────
-
-export function getWebRTCStreams(): Promise<{
-  success: boolean;
-  streams: Array<{
-    id: string;
-    channelRef: string;
-    name: string;
-    description: string;
-    isLive: boolean;
-    viewerCount: number;
-    userId: string | null;
-    photoUrl: string | null;
-  }>;
-}> {
-  return request("/api/webapp/live/webrtc/streams");
-}
-
-export function getWebRTCStreamStatus(channelRef: string): Promise<{
-  success: boolean;
-  isLive: boolean;
-  participantCount: number;
-  streamerConnected: boolean;
-}> {
-  return request(`/api/webapp/live/webrtc/status/${encodeURIComponent(channelRef)}`);
-}
-
 // Profile
 export interface UserProfile {
   id: string;

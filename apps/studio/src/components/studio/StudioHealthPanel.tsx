@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import type { StreamStats } from "@/hooks/useStreamer";
+import type { EarningsHistory } from "@/lib/api";
 import { BitrateSparkline, StatRow, formatDuration, ShareIcon, ExternalLinkIcon } from "./shared";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -14,6 +15,8 @@ export interface StudioHealthPanelProps {
   viewerCount: number;
   sessionEarnings: number;
   channel: { ref: string } | null;
+  // Gap 1: historical earnings (optional — panel degrades gracefully if null)
+  earningsHistory?: EarningsHistory | null;
 }
 
 // ─── Health color helper ────────────────────────────────────────────────────────
@@ -36,6 +39,7 @@ export function StudioHealthPanel({
   viewerCount,
   sessionEarnings,
   channel,
+  earningsHistory,
 }: StudioHealthPanelProps) {
   const hColor = healthColor(health);
   const [copied, setCopied] = useState(false);
@@ -128,6 +132,28 @@ export function StudioHealthPanel({
           monospace
         />
       </dl>
+
+      {/* Gap 1: Historical earnings — two compact stat cards */}
+      {earningsHistory && (
+        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-pnp-border/30">
+          <div className="rounded-lg bg-pnp-background border border-pnp-border/50 px-2.5 py-2">
+            <p className="text-[9px] font-semibold text-pnp-textSecondary uppercase tracking-wider mb-0.5">
+              30-day
+            </p>
+            <p className="text-xs font-bold text-pnp-textPrimary tabular-nums">
+              ${earningsHistory.totalLast30Days.toFixed(2)}
+            </p>
+          </div>
+          <div className="rounded-lg bg-pnp-background border border-pnp-border/50 px-2.5 py-2">
+            <p className="text-[9px] font-semibold text-pnp-textSecondary uppercase tracking-wider mb-0.5">
+              All-time
+            </p>
+            <p className="text-xs font-bold text-pnp-textPrimary tabular-nums">
+              ${earningsHistory.totalAllTime.toFixed(2)}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Actions (improvement #10) */}
       {channel && (

@@ -2971,6 +2971,22 @@ app.patch('/api/webapp/recordings/:id', requireSessionAuth, asyncHandler(webappL
 const streamerSettingsController = require('./controllers/streamerSettingsController');
 app.get('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.getSettings));
 app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.updateSettings));
+// Gap 2: Persistent thumbnail upload
+app.post('/api/webapp/live/thumbnail', requireSessionAuth, asyncHandler(streamerSettingsController.uploadThumbnail));
+
+// Gap 1: Past-session earnings history for studio panel
+app.get('/api/webapp/live/earnings', requireSessionAuth, asyncHandler(webappLiveController.getEarningsHistory));
+
+// Gap 4: User-uploaded local recording blob
+app.post('/api/webapp/live/recording', requireSessionAuth, webappLiveController.uploadLocalRecording);
+
+// Gap 5: Scene presets
+app.get('/api/webapp/live/scene-presets', requireSessionAuth, asyncHandler(webappLiveController.getScenePresets));
+app.post('/api/webapp/live/scene-presets', requireSessionAuth, asyncHandler(webappLiveController.saveScenePreset));
+
+// Gap 5: Mixer presets
+app.get('/api/webapp/live/mixer-presets', requireSessionAuth, asyncHandler(webappLiveController.getMixerPresets));
+app.post('/api/webapp/live/mixer-presets', requireSessionAuth, asyncHandler(webappLiveController.saveMixerPreset));
 
 // Stream Bridge: browser → RTMP via WebSocket+FFmpeg (legacy — kept for backward compat)
 const streamBridgeController = require('./controllers/streamBridgeController');
@@ -7586,6 +7602,18 @@ app.post('/api/complete-onboarding', asyncHandler(async (req, res) => {
     logger.error(`Complete onboarding error: ${error.message}`);
     res.status(500).json({ success: false, error: 'Failed to complete onboarding' });
   }
+}));
+
+// ==========================================
+// Static storage mounts (Gap 2 & 4 — stream thumbnails and local recording uploads)
+// ==========================================
+app.use('/static/stream-thumbs', express.static('/opt/pnptvapp/storage/stream-thumbs', {
+  maxAge: '7d',
+  dotfiles: 'deny',
+}));
+app.use('/static/stream-recordings', express.static('/opt/pnptvapp/storage/stream-recordings', {
+  maxAge: '7d',
+  dotfiles: 'deny',
 }));
 
 // ==========================================

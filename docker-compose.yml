@@ -901,13 +901,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: "pnptvapp_pnptvapp_net"
-      traefik.http.routers.pnptv-studio.rule: "Host(`studio.pnptv.app`)"
-      traefik.http.routers.pnptv-studio.entrypoints: "websecure"
-      traefik.http.routers.pnptv-studio.tls.certresolver: "letsencrypt"
-      traefik.http.services.pnptv-studio.loadbalancer.server.port: "80"
 
   # ===========================================
   # BLOCK J - Backend Bot + API (Node.js)
