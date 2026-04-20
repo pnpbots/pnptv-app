@@ -1877,6 +1877,101 @@ const uploadLocalRecording = (req, res) => {
   });
 };
 
+// ── Gap 2 (snapshots): Snapshot upload & persistence ─────────────────────────
+
+const SNAPSHOT_DIR = '/opt/pnptvapp/storage/stream-snapshots';
+try { require('fs').mkdirSync(SNAPSHOT_DIR, { recursive: true }); } catch { /* ok */ }
+
+const SNAPSHOT_MAX_BYTES  = 4 * 1024 * 1024;  // 4 MB decoded
+const SNAPSHOT_MAX_RETAIN = 30;                // per-user retention cap
+
+/**
+ * POST /api/webapp/live/snapshot
+ * Body: { dataUrl: string, sessionId?: string }
+ * Converts to WebP via sharp, stores under SNAPSHOT_DIR, inserts into
+ * stream_snapshots and caps per-user rows at 30 (deletes oldest + files).
+ */
+const uploadSnapshot = async (req, res) => {
+  let sharp;
+  try {
+    sharp = require('sharp');
+  } catch {
+    return res.status(500).json({ success: false, error: 'Image processing unavailable' });
+  }
+
+  const userId = req.user.pnptvId || req.user.id;
+  if (!userId) {
+    return res.status(401).json({ success: false, error: 'Not authenticated' });
+  }
+
+  const { dataUrl, sessionId } = req.body || {};
+  if (!dataUrl || typeof dataUrl !== 'string') {
+    return res.status(400).json({ success: false, error: 'dataUrl is required' });
+  }
+
+  const commaIdx = dataUrl.indexOf(',');
+  if (commaIdx === -1) {
+    return res.status(400).json({ success: false, error: 'Invalid dataUrl format' });
+  }
+  const imageBuffer = Buffer.from(dataUrl.slice(commaIdx + 1), 'base64');
+
+  if (imageBuffer.byteLength > SNAPSHOT_MAX_BYTES) {
+    return res.status(413).json({ success: false, error: 'Snapshot exceeds 4 MB limit' });
+  }
+
+  const pool = getPool();
+  const fs   = require('fs');
+  const path = require('path');
+
+  const filename  = `${userId}-${Date.now()}.webp`;
+  const filePath  = path.join(SNAPSHOT_DIR, filename);
+  const publicUrl = `/static/stream-snapshots/${filename}`;
+
+  try {
+    const info = await sharp(imageBuffer)
+      .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 85 })
+      .toFile(filePath);
+
+    const sizeBytes = info.size || imageBuffer.byteLength;
+
+    const { rows: inserted } = await pool.query(
+      `INSERT INTO stream_snapshots (user_id, session_id, storage_path, public_url, size_bytes)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [String(userId), sessionId || null, filePath, publicUrl, sizeBytes]
+    );
+    const newId = inserted[0].id;
+
+    // Enforce per-user retention cap: keep only newest SNAPSHOT_MAX_RETAIN rows
+    const { rows: oldRows } = await pool.query(
+      `SELECT id, storage_path FROM stream_snapshots
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       OFFSET $2`,
+      [String(userId), SNAPSHOT_MAX_RETAIN]
+    );
+
+    if (oldRows.length > 0) {
+      const oldIds = oldRows.map((r) => r.id);
+      await pool.query(
+        `DELETE FROM stream_snapshots WHERE id = ANY($1::bigint[])`,
+        [oldIds]
+      );
+      for (const row of oldRows) {
+        try { fs.unlinkSync(row.storage_path); } catch { /* already gone — skip */ }
+      }
+    }
+
+    return res.json({ success: true, id: String(newId), publicUrl });
+  } catch (err) {
+    // Clean up partial file if write failed
+    try { require('fs').unlinkSync(filePath); } catch { /* ok */ }
+    logger.error('uploadSnapshot error', { userId, err: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to process snapshot' });
+  }
+};
+
 // ── Gap 5: Scene & Mixer presets ─────────────────────────────────────────────
 
 /**
@@ -2083,6 +2178,8 @@ module.exports = {
   broadcastLiveNow,
   // Gap 1
   getEarningsHistory,
+  // Gap 2 (snapshots)
+  uploadSnapshot,
   // Gap 4
   uploadLocalRecording,
   // Gap 5

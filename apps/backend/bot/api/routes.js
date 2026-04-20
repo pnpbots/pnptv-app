@@ -2973,6 +2973,7 @@ app.get('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSe
 app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.updateSettings));
 // Gap 2: Persistent thumbnail upload
 app.post('/api/webapp/live/thumbnail', requireSessionAuth, asyncHandler(streamerSettingsController.uploadThumbnail));
+app.post('/api/webapp/live/snapshot', requireSessionAuth, asyncHandler(webappLiveController.uploadSnapshot));
 
 // Gap 1: Past-session earnings history for studio panel
 app.get('/api/webapp/live/earnings', requireSessionAuth, asyncHandler(webappLiveController.getEarningsHistory));
@@ -7612,6 +7613,10 @@ app.use('/static/stream-thumbs', express.static('/opt/pnptvapp/storage/stream-th
   dotfiles: 'deny',
 }));
 app.use('/static/stream-recordings', express.static('/opt/pnptvapp/storage/stream-recordings', {
+  maxAge: '7d',
+  dotfiles: 'deny',
+}));
+app.use('/static/stream-snapshots', express.static('/opt/pnptvapp/storage/stream-snapshots', {
   maxAge: '7d',
   dotfiles: 'deny',
 }));

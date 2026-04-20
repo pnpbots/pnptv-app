@@ -178,6 +178,8 @@ export interface StreamerSettings {
   filterWarmth: number;
   filterSharpness: number;
   beautyMode: boolean;
+  lastStreamTitle?: string | null;
+  lastStreamDescription?: string | null;
 }
 
 export function getStreamerSettings(): Promise<{ success: boolean; settings: StreamerSettings }> {
@@ -282,6 +284,18 @@ export function uploadThumbnail(dataUrl: string): Promise<{ success: boolean; ur
   return request("/api/webapp/live/thumbnail", {
     method: "POST",
     body: { dataUrl },
+  });
+}
+
+// ── Gap 2 (snapshots): Snapshot persistence ───────────────────────────────────
+
+export function uploadSnapshot(
+  dataUrl: string,
+  sessionId?: string | null
+): Promise<{ success: boolean; id: string; publicUrl: string }> {
+  return request("/api/webapp/live/snapshot", {
+    method: "POST",
+    body: { dataUrl, sessionId: sessionId ?? undefined },
   });
 }
 

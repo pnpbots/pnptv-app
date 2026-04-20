@@ -2108,6 +2108,19 @@ function initSocketIO(io) {
       }
     });
 
+    // ── BRB broadcast ───────────────────────────────────────────────────────
+    // Emitted by the streamer's Studio when they toggle BRB mode.
+    // Validates that the socket is the active streamer for their channel, then
+    // broadcasts `live:brb` to all viewers in the live room.
+    socket.on('stream:brb', ({ on } = {}) => {
+      const channelRef = socket.data.streamChannelRef;
+      if (!channelRef) {
+        // Socket is not currently streaming — silently ignore
+        return;
+      }
+      io.to(`live:${channelRef}`).emit('live:brb', { on: !!on });
+    });
+
     // ── Random Video Call ────────────────────────────────────────────────────
 
     socket.on('randomcall:initiate', async ({ context } = {}) => {

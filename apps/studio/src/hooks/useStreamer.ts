@@ -12,6 +12,7 @@ import {
   getEarningsHistory,
   uploadThumbnail,
   uploadRecording,
+  uploadSnapshot,
 } from "@/lib/api";
 import type { StreamerSettings, EarningsHistory } from "@/lib/api";
 import type { Socket } from "socket.io-client";
@@ -443,6 +444,11 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
           setThumbnailUrl(s.thumbnailUrl);
           setThumbnail(s.thumbnailUrl);
         }
+        // Gap 5: Hydrate stream title/description from last saved values
+        // Only populate if the user has not already typed something
+        const sWithMeta = s as StreamerSettings & { lastStreamTitle?: string | null; lastStreamDescription?: string | null };
+        if (sWithMeta.lastStreamTitle) setStreamTitle((prev) => prev || sWithMeta.lastStreamTitle!);
+        if (sWithMeta.lastStreamDescription) setStreamDesc((prev) => prev || sWithMeta.lastStreamDescription!);
         settingsLoadedRef.current = true;
       })
       .catch(() => {
@@ -491,6 +497,8 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     saveSettings(filterSettings);
   }, [filterSettings, saveSettings]);
 
+  const titleSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── Local UI state ────────────────────────────────────────────────────────
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -521,6 +529,18 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
   const [streamDesc, setStreamDesc] = useState("");
   const [category, setCategory] = useState("tagChat");
   const [thumbnail, setThumbnailRaw] = useState<string | null>(null);
+
+  // Gap 5: stream title/description auto-save. Debounce 1000ms; only fires
+  // after settings are loaded to avoid stomping persisted values on mount.
+  useEffect(() => {
+    if (!settingsLoadedRef.current) return;
+    if (titleSaveTimerRef.current) clearTimeout(titleSaveTimerRef.current);
+    titleSaveTimerRef.current = setTimeout(() => {
+      updateStreamerSettings({ lastStreamTitle: streamTitle, lastStreamDescription: streamDesc }).catch(() => {});
+    }, 1000);
+    return () => { if (titleSaveTimerRef.current) clearTimeout(titleSaveTimerRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamTitle, streamDesc]);
 
   // Gap 2: setThumbnail triggers a background upload to persist the URL server-side
   const setThumbnail = useCallback((dataUrl: string | null) => {
@@ -1025,9 +1045,22 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
 
   // ── BRB Scene ─────────────────────────────────────────────────────────────
   const brb = useCallback(() => {
-    if (!state.isCameraOff) dispatch({ type: "TOGGLE_CAMERA" });
-    if (!state.isMuted) dispatch({ type: "TOGGLE_MUTE" });
-  }, [state.isCameraOff, state.isMuted]);
+    // Compute the NEW camera-off state (true = entering BRB, false = leaving)
+    const newCameraOff = !state.isCameraOff;
+    if (newCameraOff) {
+      // Entering BRB: ensure camera + mic are off
+      if (!state.isCameraOff) dispatch({ type: "TOGGLE_CAMERA" });
+      if (!state.isMuted) dispatch({ type: "TOGGLE_MUTE" });
+    } else {
+      // Leaving BRB: restore camera + mic
+      if (state.isCameraOff) dispatch({ type: "TOGGLE_CAMERA" });
+      if (state.isMuted) dispatch({ type: "TOGGLE_MUTE" });
+    }
+    // Broadcast BRB state to all viewers via Socket.IO
+    if (socket?.connected) {
+      socket.emit("stream:brb", { on: newCameraOff });
+    }
+  }, [state.isCameraOff, state.isMuted, socket]);
 
   // ── Snapshot ──────────────────────────────────────────────────────────────
   const snapshot = useCallback(() => {
@@ -1043,12 +1076,23 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob((blob) => {
       if (!blob) return;
+      // Browser download (existing behaviour)
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `snapshot-${Date.now()}.png`;
       a.click();
       URL.revokeObjectURL(url);
+
+      // Background server upload — fire-and-forget; silently ignore failures
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string;
+        if (dataUrl) {
+          uploadSnapshot(dataUrl, null).catch(() => {});
+        }
+      };
+      reader.readAsDataURL(blob);
     }, "image/png");
   }, []);
 

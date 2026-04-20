@@ -27,9 +27,11 @@ const getSettings = async (req, res) => {
     }
 
     const settings = await streamerSettingsService.getSettings(String(userId));
-    // Expose thumbnailUrl (snake_case from DB) as camelCase to frontend
+    // Expose snake_case DB columns as camelCase to frontend
     const thumbnailUrl = settings.thumbnail_url || null;
-    return res.json({ success: true, settings: { ...settings, thumbnailUrl } });
+    const lastStreamTitle = settings.last_stream_title ?? null;
+    const lastStreamDescription = settings.last_stream_description ?? null;
+    return res.json({ success: true, settings: { ...settings, thumbnailUrl, lastStreamTitle, lastStreamDescription } });
   } catch (err) {
     logger.error('streamerSettingsController.getSettings error', err);
     return res.status(500).json({ success: false, error: 'Failed to retrieve streamer settings' });
@@ -113,8 +115,15 @@ const updateSettings = async (req, res) => {
       return res.status(401).json({ success: false, error: 'Not authenticated' });
     }
 
-    const settings = await streamerSettingsService.upsertSettings(String(userId), req.body || {});
-    return res.json({ success: true, settings });
+    // Translate camelCase body keys to snake_case before passing to service
+    const raw = req.body || {};
+    const translated = { ...raw };
+    if ('lastStreamTitle' in raw)       { translated.last_stream_title       = raw.lastStreamTitle;       delete translated.lastStreamTitle; }
+    if ('lastStreamDescription' in raw) { translated.last_stream_description = raw.lastStreamDescription; delete translated.lastStreamDescription; }
+    const settings = await streamerSettingsService.upsertSettings(String(userId), translated);
+    const lastStreamTitle = settings.last_stream_title ?? null;
+    const lastStreamDescription = settings.last_stream_description ?? null;
+    return res.json({ success: true, settings: { ...settings, lastStreamTitle, lastStreamDescription } });
   } catch (err) {
     logger.error('streamerSettingsController.updateSettings error', err);
     return res.status(500).json({ success: false, error: 'Failed to update streamer settings' });

@@ -15,19 +15,21 @@ const VALID_FILTER_PRESETS = ['None', 'Vivid', 'Warm', 'Cool', 'B&W', 'Cinematic
 // receives the same shape regardless of whether a row exists yet.
 // ---------------------------------------------------------------------------
 const DEFAULTS = {
-  quality_preset:    '720p',
-  fps:               30,
-  auto_reconnect:    true,
-  low_latency:       true,
-  hardware_accel:    false,
-  local_record:      false,
-  filter_preset:     'None',
-  filter_brightness: 0,
-  filter_contrast:   0,
-  filter_saturation: 0,
-  filter_warmth:     0,
-  filter_sharpness:  0,
-  beauty_mode:       false,
+  quality_preset:         '720p',
+  fps:                    30,
+  auto_reconnect:         true,
+  low_latency:            true,
+  hardware_accel:         false,
+  local_record:           false,
+  filter_preset:          'None',
+  filter_brightness:      0,
+  filter_contrast:        0,
+  filter_saturation:      0,
+  filter_warmth:          0,
+  filter_sharpness:       0,
+  beauty_mode:            false,
+  last_stream_title:      null,
+  last_stream_description: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -95,6 +97,18 @@ function sanitize(raw) {
     s.filter_sharpness  = clampInt(raw.filter_sharpness,    0,  100, DEFAULTS.filter_sharpness);
 
   if (raw.beauty_mode !== undefined) s.beauty_mode = Boolean(raw.beauty_mode);
+
+  // Gap 5: last stream title / description (nullable text, max 500 chars)
+  if (raw.last_stream_title !== undefined) {
+    s.last_stream_title = raw.last_stream_title === null
+      ? null
+      : String(raw.last_stream_title).slice(0, 500);
+  }
+  if (raw.last_stream_description !== undefined) {
+    s.last_stream_description = raw.last_stream_description === null
+      ? null
+      : String(raw.last_stream_description).slice(0, 500);
+  }
 
   return s;
 }

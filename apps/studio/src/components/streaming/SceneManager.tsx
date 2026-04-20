@@ -1134,12 +1134,44 @@ export default function SceneManager({
   const [presetSaveMode, setPresetSaveMode] = useState(false);
   const [presetSaving, setPresetSaving] = useState(false);
 
-  // Load presets on mount
+  // Track whether initial hydration is complete (prevents auto-save on first render)
+  const sceneHydratedRef = useRef(false);
+
+  // Load presets on mount; restore __auto__ preset if one exists
   useEffect(() => {
     getScenePresets()
-      .then((res) => { if (res.success) setScenePresets(res.presets); })
-      .catch(() => { /* non-fatal */ });
+      .then((res) => {
+        if (res.success) {
+          setScenePresets(res.presets);
+          const auto = res.presets.find((p) => p.name === "__auto__");
+          if (auto) {
+            const cfg = auto.config;
+            const loadedScenes = (cfg as { scenes?: Scene[] }).scenes;
+            const loadedActiveId = (cfg as { activeSceneId?: string }).activeSceneId;
+            if (Array.isArray(loadedScenes) && loadedScenes.length > 0) {
+              setScenes(loadedScenes);
+              setActiveSceneId(loadedActiveId || loadedScenes[0].id);
+              setSelectedSourceId(null);
+            }
+          }
+        }
+      })
+      .catch(() => { /* non-fatal */ })
+      .finally(() => {
+        sceneHydratedRef.current = true;
+      });
   }, []);
+
+  // Auto-save scenes to __auto__ preset (debounced 500ms) whenever scenes change
+  const sceneAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!sceneHydratedRef.current) return;
+    if (sceneAutoSaveTimerRef.current) clearTimeout(sceneAutoSaveTimerRef.current);
+    sceneAutoSaveTimerRef.current = setTimeout(() => {
+      saveScenePreset({ name: "__auto__", config: { scenes, activeSceneId }, isDefault: false }).catch(() => {});
+    }, 500);
+    return () => { if (sceneAutoSaveTimerRef.current) clearTimeout(sceneAutoSaveTimerRef.current); };
+  }, [scenes, activeSceneId]);
 
   // Load a preset config into scene state
   const loadScenePreset = useCallback((preset: StreamPreset) => {

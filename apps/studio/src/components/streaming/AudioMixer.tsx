@@ -344,11 +344,38 @@ export default function AudioMixer({
   const [presetSaveName, setPresetSaveName] = useState("");
   const [presetSaving, setPresetSaving] = useState(false);
 
-  // Load presets on mount
+  // Track whether initial hydration is complete (prevents auto-save on first render)
+  const mixerHydratedRef = useRef(false);
+
+  // Load presets on mount; restore __auto__ preset if one exists
   useEffect(() => {
     getMixerPresets()
-      .then((res) => { if (res.success) setMixerPresets(res.presets); })
-      .catch(() => { /* non-fatal */ });
+      .then((res) => {
+        if (res.success) {
+          setMixerPresets(res.presets);
+          const auto = res.presets.find((p) => p.name === "__auto__");
+          if (auto) {
+            const cfg = auto.config as Partial<{
+              micGainPct: number;
+              bgGainPct: number;
+              masterGainPct: number;
+              micMuted: boolean;
+              bgMuted: boolean;
+              noiseSuppression: boolean;
+            }>;
+            if (typeof cfg.micGainPct === "number") setMicGainPct(cfg.micGainPct);
+            if (typeof cfg.bgGainPct === "number") setBgGainPct(cfg.bgGainPct);
+            if (typeof cfg.masterGainPct === "number") setMasterGainPct(cfg.masterGainPct);
+            if (typeof cfg.micMuted === "boolean") setMicMuted(cfg.micMuted);
+            if (typeof cfg.bgMuted === "boolean") setBgMuted(cfg.bgMuted);
+            if (typeof cfg.noiseSuppression === "boolean") setNoiseSuppression(cfg.noiseSuppression);
+          }
+        }
+      })
+      .catch(() => { /* non-fatal */ })
+      .finally(() => {
+        mixerHydratedRef.current = true;
+      });
   }, []);
 
   // Capture current mixer state as serializable config
@@ -403,6 +430,17 @@ export default function AudioMixer({
       setPresetSaving(false);
     }
   }, [presetSaveName, getMixerConfig]);
+
+  // Auto-save mixer state to __auto__ preset (debounced 500ms)
+  const mixerAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!mixerHydratedRef.current) return;
+    if (mixerAutoSaveTimerRef.current) clearTimeout(mixerAutoSaveTimerRef.current);
+    mixerAutoSaveTimerRef.current = setTimeout(() => {
+      saveMixerPreset({ name: "__auto__", config: getMixerConfig(), isDefault: false }).catch(() => {});
+    }, 500);
+    return () => { if (mixerAutoSaveTimerRef.current) clearTimeout(mixerAutoSaveTimerRef.current); };
+  }, [micGainPct, bgGainPct, masterGainPct, micMuted, bgMuted, noiseSuppression, getMixerConfig]);
 
   // ── BG music state ───────────────────────────────────────────────────────
   const [bgFileName, setBgFileName] = useState<string | null>(
