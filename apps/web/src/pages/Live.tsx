@@ -94,6 +94,7 @@ export default function Live() {
   const [performersLoading, setPerformersLoading] = useState(true);
   const [liveStreams, setLiveStreams] = useState<LiveStream[]>([]);
   const [loadError, setLoadError] = useState(false);
+  const [prime247Live, setPrime247Live] = useState(false);
 
   // Dash token wallet
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
@@ -142,6 +143,26 @@ export default function Live() {
     getUpcomingEvents({ type: "live_stream", limit: 8 })
       .then((res) => { if (res.success) setLiveEvents(res.events); })
       .catch(() => {});
+  }, []);
+
+  // Probe the 24/7 Prime channel HLS manifest so the tile only renders when
+  // the backend broadcaster is actually pushing. Restreamer's master playlist
+  // references a .ts chunk when segments exist — that's our proof of life.
+  useEffect(() => {
+    let cancelled = false;
+    const probe = async () => {
+      try {
+        const res = await fetch("https://live.pnptv.app/memfs/pnptv-main.m3u8", { cache: "no-store" });
+        if (!res.ok) { if (!cancelled) setPrime247Live(false); return; }
+        const text = await res.text();
+        if (!cancelled) setPrime247Live(/\.ts/.test(text) || /\.m3u8\?/.test(text));
+      } catch {
+        if (!cancelled) setPrime247Live(false);
+      }
+    };
+    probe();
+    const iv = setInterval(probe, 45_000);
+    return () => { cancelled = true; clearInterval(iv); };
   }, []);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -712,6 +733,49 @@ export default function Live() {
           </div>
         );
       })()}
+
+      {/* ── PNPtv! 24/7 tile (only when the broadcaster is actually pushing) ── */}
+      {prime247Live && (
+        <div className="mb-4">
+          <h2 className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">
+            Now playing
+          </h2>
+          <button
+            type="button"
+            onClick={() => navigate("/live/pnptv-main")}
+            className="group relative w-full overflow-hidden rounded-2xl border border-pnp-accent/30 bg-pnp-surface transition-all active:scale-[0.99] hover:border-pnp-accent/60"
+            style={{
+              background: "linear-gradient(135deg, rgba(212,0,122,0.14), rgba(123,97,255,0.14))",
+            }}
+          >
+            <div className="flex items-center gap-3 p-4">
+              <div
+                className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)" }}
+              >
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1 text-left">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-white">PNPtv! 24/7</span>
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" aria-hidden />
+                    LIVE
+                  </span>
+                </div>
+                <div className="text-xs text-pnp-textSecondary truncate">
+                  Always-on channel — curated Prime videos, all day.
+                </div>
+              </div>
+              <svg className="w-4 h-4 text-pnp-textSecondary group-hover:text-pnp-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </button>
+        </div>
+      )}
 
       {/* ── Performer Grid ── */}
       {performersLoading ? (

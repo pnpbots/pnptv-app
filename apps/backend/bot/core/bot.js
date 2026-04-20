@@ -1910,6 +1910,15 @@ const startBot = async () => {
       logger.warn(`Orphaned media cleanup worker initialization failed: ${error.message}`);
     }
 
+    // 24/7 Prime channel broadcaster (env-gated; FFmpeg loop → pnptv-main)
+    try {
+      const prime247 = require('../../workers/prime247Broadcaster');
+      prime247.start();
+      logger.info('✓ Prime 24/7 broadcaster initialized');
+    } catch (error) {
+      logger.warn(`Prime 24/7 broadcaster initialization failed: ${error.message}`);
+    }
+
     // Register commands with Telegram
     try {
       const commands = [
