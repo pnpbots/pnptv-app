@@ -357,7 +357,9 @@ const shareToX = async (req, res) => {
 
     // ── 3. Fetch the social post ───────────────────────────────────────────
     const { rows: postRows } = await query(
-      `SELECT id, user_id, content, media_type, media_url, media_urls, video_thumbnail_url FROM social_posts WHERE id = $1 AND is_deleted = false`,
+      `SELECT id, user_id, content, media_type, media_url, media_urls,
+              video_thumbnail_url, video_title, video_description
+       FROM social_posts WHERE id = $1 AND is_deleted = false`,
       [postId],
       { cache: false }
     );
@@ -444,54 +446,52 @@ const shareToX = async (req, res) => {
     }
 
     // ── 7. Build tweet text ────────────────────────────────────────────────
-    // Reserve 24 chars for the PNPtv link (23 T.co-shortened + 1 space),
-    // leaving 256 chars for the post content.
-    // Always use /v/:id — the backend renders post-specific OG tags (rich X cards)
-    // for all post types (video → player card, image/text → summary_large_image).
-    const postLink = `${PNPTV_APP_URL}/v/${postId}`;
-    const linkLength = 24; // T.co wraps all links to 23 chars + 1 space separator
-    const maxContent = X_MAX_TEXT_LENGTH - linkLength;
-
-    let content = (post.content || '').trim();
-    if (content.length > maxContent) {
-      content = content.slice(0, maxContent - 1).trimEnd() + '\u2026'; // …
-    }
-
-    const tweetText = content ? `${content}\n${postLink}` : postLink;
+    // Use structured template: 🎬 title + description + UTM URL + hashtags + creator mention
+    const XPostService = require('../../../services/xPostService');
+    const creatorXHandle = await XPostService.lookupCreatorXHandle(post.user_id);
+    const shareUrl = XPostService.buildShareUrl(postId, {
+      campaign: 'share',
+      title: post.video_title || null,
+    });
+    const tweetText = XPostService.buildVideoTweetText({
+      title: post.video_title || null,
+      description: post.video_description || post.content || null,
+      tags: [],
+      creatorXHandle,
+      url: shareUrl,
+      limit: X_MAX_TEXT_LENGTH,
+    });
 
     // ── 8. Post to X (with media upload if available) ────────────────────
     let xResponse;
     try {
-      // Resolve media URL for native X upload (image or video thumbnail)
-      // For video posts, upload the thumbnail image instead of the full video file —
-      // it is much smaller, posts reliably, and the tweet text already includes the
-      // /v/:id link so viewers can click through to watch on PNPtv.
-      let mediaUrl = null;
+      // Resolve thumbnail URL for native X upload (prefer video_thumbnail_url).
+      // For video posts we upload the thumbnail image (small, reliable) so the
+      // tweet has a visual — the UTM link in text drives viewers to the full video.
+      let thumbnailUrl = null;
       if (post.media_type === 'video' && post.video_thumbnail_url) {
-        mediaUrl = post.video_thumbnail_url.startsWith('http')
+        thumbnailUrl = post.video_thumbnail_url.startsWith('http')
           ? post.video_thumbnail_url
           : `${PNPTV_APP_URL}${post.video_thumbnail_url}`;
-      } else if (post.media_url) {
-        mediaUrl = post.media_url.startsWith('http')
+      } else if (post.media_type === 'image' && post.media_url) {
+        thumbnailUrl = post.media_url.startsWith('http')
           ? post.media_url
           : `${PNPTV_APP_URL}${post.media_url}`;
       } else if (post.media_urls) {
         try {
           const parsed = typeof post.media_urls === 'string' ? JSON.parse(post.media_urls) : post.media_urls;
           const first = Array.isArray(parsed) ? parsed[0] : null;
-          const firstUrl = first?.url || first;
+          const firstUrl = first?.thumbnail_url || first?.url || first;
           if (firstUrl) {
-            mediaUrl = firstUrl.startsWith('http') ? firstUrl : `${PNPTV_APP_URL}${firstUrl}`;
+            thumbnailUrl = firstUrl.startsWith('http') ? firstUrl : `${PNPTV_APP_URL}${firstUrl}`;
           }
         } catch (_) { /* ignore parse errors */ }
       }
 
-      if (mediaUrl) {
-        // Upload media natively to X for rich embedding
-        const XPostService = require('../../../services/xPostService');
+      if (thumbnailUrl) {
         let mediaId = null;
         try {
-          mediaId = await XPostService.uploadMediaToX({ accessToken, mediaUrl });
+          mediaId = await XPostService.uploadMediaToX({ accessToken, mediaUrl: thumbnailUrl });
         } catch (uploadErr) {
           logger.warn('[X Share] Media upload failed, posting text-only', {
             postId, error: uploadErr.message,
@@ -499,6 +499,19 @@ const shareToX = async (req, res) => {
         }
 
         if (mediaId) {
+          // Set descriptive alt text for accessibility + SEO (fire-and-forget)
+          const altText = [post.video_title, post.video_description || post.content]
+            .filter(Boolean).join(' — ').slice(0, 1000) || 'PNPtv! community video';
+          try {
+            await axios.post(
+              'https://upload.twitter.com/1.1/media/metadata/create.json',
+              { media_id: String(mediaId), alt_text: { text: altText } },
+              { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+            );
+          } catch (altErr) {
+            logger.warn('[X Share] Failed to set media alt_text', { mediaId, error: altErr.message });
+          }
+
           xResponse = await axios.post(
             `${X_API_BASE}/tweets`,
             { text: tweetText, media: { media_ids: [String(mediaId)] } },

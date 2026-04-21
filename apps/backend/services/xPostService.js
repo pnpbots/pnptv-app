@@ -1611,5 +1611,183 @@ class XPostService {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Shared tweet-building helpers (exported for xShareController + xAutoCampaignService)
+// ---------------------------------------------------------------------------
+
+const PNPTV_APP_URL_BASE = 'https://pnptv.app';
+const PNPTV_X_SITE_HANDLE = process.env.PNPTV_X_HANDLE || '@pnptv';
+
+/**
+ * Convert a string to a URL-safe slug: lowercase, a-z0-9 and dashes only, max 60 chars.
+ */
+function slugify(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // strip diacritics
+    .replace(/[^a-z0-9\s-]/g, '')    // strip non-alnum except spaces/dashes
+    .trim()
+    .replace(/\s+/g, '-')            // spaces → dashes
+    .replace(/-+/g, '-')             // collapse consecutive dashes
+    .slice(0, 60)
+    .replace(/-$/, '');              // strip trailing dash from slice
+}
+
+/**
+ * Build the canonical share URL for a post.
+ * Campaign defaults to 'share' (user-initiated). Use 'auto' for auto-campaigns.
+ */
+function buildShareUrl(postId, { campaign = 'share', title = null } = {}) {
+  const slug = slugify(title || '');
+  const pathPart = slug ? `/v/${postId}/${slug}` : `/v/${postId}`;
+  return `${PNPTV_APP_URL_BASE}${pathPart}?utm_source=twitter&utm_medium=social&utm_campaign=${campaign}`;
+}
+
+/**
+ * Derive hashtag string from a tags array (up to max tags).
+ * Sanitizes to CamelCase, strips non-alnum. Falls back to platform defaults.
+ */
+function deriveHashtags(tags = [], max = 3) {
+  const valid = (Array.isArray(tags) ? tags : [])
+    .map((t) => {
+      if (!t || typeof t !== 'string') return null;
+      // CamelCase multi-word: split on spaces/dashes, capitalize each word
+      const words = t.trim().split(/[\s\-_]+/).filter(Boolean);
+      return words
+        .map((w) => w.replace(/[^a-z0-9]/gi, ''))
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join('');
+    })
+    .filter(Boolean)
+    .slice(0, max);
+
+  if (valid.length === 0) return '#PNPtv #QueerCommunity';
+  return valid.map((t) => `#${t}`).join(' ');
+}
+
+/**
+ * Compose a structured tweet for a video post, trimmed to `limit` characters.
+ *
+ * Template:
+ *   🎬 {title}
+ *
+ *   {description}
+ *
+ *   {url}
+ *
+ *   {hashtags}{creator_mention}
+ *
+ * URL and at least one hashtag are always preserved.
+ * Description is trimmed first; title is trimmed second if still over limit.
+ */
+function buildVideoTweetText({ title, description, tags = [], creatorXHandle = null, url, limit = 280 }) {
+  const hashtags = deriveHashtags(tags);
+  const mention = creatorXHandle
+    ? ` @${creatorXHandle.replace(/^@/, '')}`
+    : '';
+  const suffix = `\n\n${url}\n\n${hashtags}${mention}`;
+
+  // suffix is non-negotiable — calculate how many chars remain for body
+  const suffixLen = suffix.length;
+  const titlePrefix = title ? `🎬 ${title}` : null;
+
+  // Start building from maximum allowed content
+  let body = '';
+  if (description) {
+    const maxDescLen = limit - suffixLen - (titlePrefix ? titlePrefix.length + 2 : 0);
+    if (maxDescLen > 10) {
+      body = description.length <= maxDescLen
+        ? description
+        : `${description.slice(0, maxDescLen - 1).trimEnd()}\u2026`;
+    }
+  }
+
+  // Build candidate text
+  let candidate;
+  if (titlePrefix && body) {
+    candidate = `${titlePrefix}\n\n${body}${suffix}`;
+  } else if (titlePrefix) {
+    candidate = `${titlePrefix}${suffix}`;
+  } else if (body) {
+    candidate = `${body}${suffix}`;
+  } else {
+    candidate = suffix.trimStart();
+  }
+
+  // If still over limit (edge case: very long title), trim title
+  if (candidate.length > limit && titlePrefix) {
+    const maxTitleLen = limit - suffixLen - (body ? body.length + 2 : 0) - 3; // 3 = "🎬 "
+    const trimmedTitle = maxTitleLen > 5
+      ? `🎬 ${titlePrefix.slice(3, 3 + maxTitleLen - 1).trimEnd()}\u2026`
+      : '';
+    candidate = trimmedTitle && body
+      ? `${trimmedTitle}\n\n${body}${suffix}`
+      : trimmedTitle
+        ? `${trimmedTitle}${suffix}`
+        : body
+          ? `${body}${suffix}`
+          : suffix.trimStart();
+  }
+
+  // Hard truncate safety net — never goes over limit
+  return candidate.slice(0, limit).trim();
+}
+
+/**
+ * Fetch a thumbnail URL to a Buffer using global fetch. Returns { buffer, contentType } or null.
+ * 10-second timeout. Never throws — logs and returns null on failure.
+ */
+async function downloadThumbnailBuffer(thumbnailUrl) {
+  if (!thumbnailUrl || typeof thumbnailUrl !== 'string') return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    let response;
+    try {
+      response = await fetch(thumbnailUrl, { signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!response.ok) {
+      logger.warn('[xPostService] Thumbnail fetch failed', { url: thumbnailUrl, status: response.status });
+      return null;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    return { buffer, contentType };
+  } catch (err) {
+    logger.warn('[xPostService] downloadThumbnailBuffer error', { url: thumbnailUrl, error: err.message });
+    return null;
+  }
+}
+
+/**
+ * Look up a user's linked X handle from the users table.
+ * Returns the handle string (without @) or null if not linked.
+ */
+async function lookupCreatorXHandle(userId) {
+  if (!userId) return null;
+  try {
+    const result = await db.query(
+      `SELECT x_username FROM users WHERE id = $1 LIMIT 1`,
+      [userId]
+    );
+    return result.rows[0]?.x_username || null;
+  } catch (err) {
+    logger.warn('[xPostService] lookupCreatorXHandle error', { userId, error: err.message });
+    return null;
+  }
+}
+
 module.exports = XPostService;
 module.exports.refreshAccountTokens = refreshAccountTokens;
+module.exports.slugify = slugify;
+module.exports.buildShareUrl = buildShareUrl;
+module.exports.deriveHashtags = deriveHashtags;
+module.exports.buildVideoTweetText = buildVideoTweetText;
+module.exports.downloadThumbnailBuffer = downloadThumbnailBuffer;
+module.exports.lookupCreatorXHandle = lookupCreatorXHandle;

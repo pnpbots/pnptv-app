@@ -233,13 +233,28 @@ const LATAM_COUNTRIES = new Set([
 // Paths exempt from geo-blocking (webhooks, health checks, etc.)
 const GEO_EXEMPT_PATHS = ['/pnp/webhook/', '/health', '/api/health', '/api/webapp/auth/', '/auth/oidc/', '/auth/', '/api/auth-status'];
 
-const GEO_BLOCKED_HTML = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PNPtv - Not Available</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0a0a0a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:2rem}
-.c{max-width:480px}.t{font-size:2rem;margin-bottom:1rem;background:linear-gradient(135deg,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.m{color:#999;line-height:1.6;margin-bottom:1.5rem}.s{font-size:.85rem;color:#555}</style></head>
-<body><div class="c"><h1 class="t">PNPtv</h1><p class="m">PNPtv is not yet available in your country.<br>We're working on expanding access &mdash; please check back soon!</p><p class="s">Thank you for your patience.</p></div></body></html>`;
+// LATAM "landing mode": non-grandfathered visitors from LATAM are allowed to
+// reach the marketing landing page and the become-a-performer flow only.
+// Everything else redirects to /landing with a performer-focused CTA.
+const LATAM_ALLOWED_EXACT = new Set([
+  '/', '/landing', '/join', '/auth',
+  '/become-a-model', '/become-model', '/apply', '/creator',
+  '/about', '/blog', '/careers', '/resources', '/download',
+  '/terms', '/privacy', '/cookies', '/community-guidelines',
+  '/content-policy', '/refunds', '/subscriptions', '/creator-terms',
+  '/dmca', '/safety', '/contact',
+]);
+
+const LATAM_ALLOWED_PREFIXES = [
+  '/assets/', '/static/', '/locales/', '/flags/', '/public/',
+  '/page/', '/blog/',
+  '/auth/', '/api/webapp/auth/', '/api/webapp/geo',
+  '/api/auth-status', '/api/logout', '/api/accept-terms',
+  '/api/cms/', '/api/webapp/cms/',
+  '/api/webapp/creator/apply', '/api/creator/apply',
+];
+
+const LATAM_STATIC_ASSET_RE = /\.(js|mjs|css|map|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|eot|json|txt|xml|mp4|webm|mp3)$/i;
 
 async function latamGeoBlock(req, res, next) {
   const ip = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
@@ -258,7 +273,7 @@ async function latamGeoBlock(req, res, next) {
       const cached = await redis.get(cacheKey);
 
       if (cached === '1') return next();       // Cached as exempt
-      if (cached === '0') return geoBlockResponse(req, res); // Cached as blocked
+      if (cached === '0') return latamLandingResponse(req, res, next, geo.country); // Cached as non-exempt
 
       // Cache miss — check DB
       const pool = getPool();
@@ -280,15 +295,31 @@ async function latamGeoBlock(req, res, next) {
     }
   }
 
-  return geoBlockResponse(req, res);
+  return latamLandingResponse(req, res, next, geo.country);
 }
 
-function geoBlockResponse(req, res) {
-  const isApi = req.path.startsWith('/api/') || req.headers.accept?.includes('application/json');
+function latamLandingResponse(req, res, next, countryCode) {
+  const p = req.path;
+
+  // Static assets — always allow (CSS, JS, images, fonts, etc.)
+  if (LATAM_STATIC_ASSET_RE.test(p)) return next();
+
+  // Exact or prefix-based allowlist for landing + performer flow
+  if (LATAM_ALLOWED_EXACT.has(p)) return next();
+  if (LATAM_ALLOWED_PREFIXES.some(prefix => p.startsWith(prefix))) return next();
+
+  // Not allowed — API gets 451 JSON, HTML gets redirected to landing
+  const isApi = p.startsWith('/api/') || req.headers.accept?.includes('application/json');
   if (isApi) {
-    return res.status(451).json({ error: 'not_available_in_region', message: 'PNPtv is not yet available in your country. Please check back soon!' });
+    return res.status(451).json({
+      error: 'not_available_in_region',
+      message: 'PNPtv is not yet fully available in your country. You can still join as a performer.',
+      country: countryCode,
+      landingUrl: `/landing?country=${countryCode}&focus=performer`,
+    });
   }
-  return res.status(451).send(GEO_BLOCKED_HTML);
+
+  return res.redirect(302, `/landing?country=${countryCode}&focus=performer`);
 }
 
 // ── Geo country detection endpoint ──────────────────────────────────────────
@@ -423,7 +454,41 @@ app.get('/api/webapp/geo', asyncHandler(async (req, res) => {
   const geo = geoip.lookup(ip);
   const country = geo?.country || null;
   const isLatam = country ? LATAM_COUNTRIES.has(country) : false;
-  return res.json({ country, isLatam });
+
+  // landingMode: LATAM visitor who is NOT a grandfathered active user.
+  // Used by the SPA to self-redirect static HTML routes (which bypass the
+  // Express geo-block middleware) to /landing?focus=performer.
+  let landingMode = false;
+  if (isLatam) {
+    landingMode = true;
+    const userId = req.session?.user?.id;
+    if (userId) {
+      try {
+        const redis = getRedis();
+        const cacheKey = `geo:exempt:${userId}`;
+        const cached = await redis.get(cacheKey);
+        if (cached === '1') {
+          landingMode = false;
+        } else if (cached !== '0') {
+          const pool = getPool();
+          const { rows } = await pool.query(`SELECT last_login_at FROM users WHERE id = $1`, [userId]);
+          const lastLogin = rows[0]?.last_login_at;
+          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+          if (lastLogin && new Date(lastLogin) >= thirtyDaysAgo) {
+            await redis.set(cacheKey, '1', 'EX', 3600);
+            landingMode = false;
+          } else {
+            await redis.set(cacheKey, '0', 'EX', 3600);
+          }
+        }
+      } catch {
+        // On redis/DB error, fail open so we don't accidentally trap legit users.
+        landingMode = false;
+      }
+    }
+  }
+
+  return res.json({ country, isLatam, landingMode });
 }));
 
 
@@ -4713,6 +4778,8 @@ app.get('/api/webapp/users/mention-search', requireSessionAuth, asyncHandler(men
 
 // ── Emoji Reactions ──────────────────────────────────────────────────────────
 const reactionController = require('./controllers/reactionController');
+// Share post to hangout groups
+app.post('/api/webapp/social/posts/:postId/share-to-hangouts', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.sharePostToHangouts));
 // Post reactions
 app.post('/api/webapp/social/posts/:postId/react', requireSessionAuth, socialActionLimiter, asyncHandler(reactionController.reactToPost));
 app.get('/api/webapp/social/posts/:postId/reactions', asyncHandler(reactionController.getPostReactions));
@@ -8166,8 +8233,48 @@ app.delete('/api/webapp/creators/media/:id',
 // Crawlers (Twitterbot, Facebot, etc.) hit /og/* to get proper previews.
 // Real browsers are immediately meta-refreshed to the SPA URL.
 const ogController = require('./controllers/ogController');
-// Video preview page for X sharing — standalone branded page with OG tags
-app.get('/v/:postId', asyncHandler(ogController.renderVideoPreview));
+const XPostServiceForSlug = require('../../services/xPostService');
+
+/**
+ * Compute the canonical slug for a post by fetching its video_title from the DB.
+ * Returns empty string if no title or on any error.
+ */
+async function _resolvePostSlug(postId) {
+  try {
+    const { query: dbQuery } = require('../../config/postgres');
+    const result = await dbQuery(
+      `SELECT video_title FROM social_posts WHERE id = $1 AND is_deleted = false LIMIT 1`,
+      [postId]
+    );
+    const title = result.rows[0]?.video_title || '';
+    return XPostServiceForSlug.slugify(title);
+  } catch (_) {
+    return '';
+  }
+}
+
+// Video preview page for X sharing — standalone branded page with OG tags.
+// Accepts /v/:postId and /v/:postId/:slug — slug is cosmetic (SEO only).
+// If the slug is missing or stale, issue a 301 redirect to the canonical URL.
+app.get('/v/:postId/:slug?', asyncHandler(async (req, res, next) => {
+  const postId = parseInt(req.params.postId, 10);
+  if (!Number.isFinite(postId) || postId <= 0) {
+    return ogController.renderVideoPreview(req, res);
+  }
+
+  const canonicalSlug = await _resolvePostSlug(postId);
+  const incomingSlug = req.params.slug || '';
+
+  if (canonicalSlug && incomingSlug !== canonicalSlug) {
+    // Build canonical URL with query string preserved
+    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    const canonicalPath = `/v/${postId}/${canonicalSlug}${qs}`;
+    return res.redirect(301, canonicalPath);
+  }
+
+  return ogController.renderVideoPreview(req, res);
+}));
+
 // Player endpoint must be registered BEFORE the wildcard /og/* route
 app.get('/og/player/:postId', asyncHandler(ogController.renderPlayer));
 app.get('/og/*', asyncHandler(ogController.renderOG));

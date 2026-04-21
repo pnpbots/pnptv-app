@@ -156,8 +156,8 @@ const resolveOgData = async (strippedPath) => {
     };
   }
 
-  // /v/:postId (video preview for X sharing)
-  m = strippedPath.match(/^\/v\/(\d+)\/?$/);
+  // /v/:postId or /v/:postId/:slug (video preview for X sharing — slug is purely cosmetic)
+  m = strippedPath.match(/^\/v\/(\d+)(?:\/[^/]*)?\/?$/);
   if (m) {
     return {
       ogData: await ogService.getVideoPreviewOG(m[1]),
@@ -325,6 +325,15 @@ const renderPlayer = async (req, res) => {
 // Standalone page served at /v/:postId — contains OG tags for X crawlers
 // AND a branded video player + CTA for real browsers.
 
+/**
+ * Safely escape a string for inline JSON embedded in HTML.
+ * Prevents </script> injection and other XSS vectors.
+ */
+const escJson = (obj) => JSON.stringify(obj)
+  .replace(/</g, '\\u003c')
+  .replace(/>/g, '\\u003e')
+  .replace(/&/g, '\\u0026');
+
 const renderVideoPreview = async (req, res) => {
   const postId = parseInt(req.params.postId, 10);
 
@@ -333,7 +342,7 @@ const renderVideoPreview = async (req, res) => {
       ? await ogService.getVideoPreviewOG(postId)
       : ogService.getDefaultOG();
 
-    // Fetch the actual video URL for the player
+    // Fetch the actual video URL for the player (og already has thumbnail + media url via service)
     let videoUrl = null;
     let thumbUrl = null;
     if (Number.isFinite(postId) && postId > 0) {
@@ -359,6 +368,9 @@ const renderVideoPreview = async (req, res) => {
       }
     }
 
+    // Canonical URL with slug (og.url already contains it from ogService)
+    const canonicalUrl = og.url || `${APP_BASE_URL}/v/${postId}`;
+
     const playerMeta = og.playerUrl
       ? `
     <meta name="twitter:player" content="${escAttr(og.playerUrl)}" />
@@ -374,6 +386,44 @@ const renderVideoPreview = async (req, res) => {
     <meta property="og:video:width" content="${escAttr(String(og.videoWidth || 1280))}" />
     <meta property="og:video:height" content="${escAttr(String(og.videoHeight || 720))}" />`
       : '';
+
+    // twitter:creator — only emit when the author has a linked X handle
+    const twitterCreatorMeta = og.creatorXHandle
+      ? `\n  <meta name="twitter:creator" content="${escAttr(`@${og.creatorXHandle.replace(/^@/, '')}`)}" />`
+      : '';
+
+    // og:video:release_date
+    const releaseDateMeta = og.createdAt
+      ? `\n  <meta property="og:video:release_date" content="${escAttr(og.createdAt)}" />`
+      : '';
+
+    // og:video:duration (omit when unknown)
+    const durationMeta = og.videoDuration != null && Number.isFinite(og.videoDuration)
+      ? `\n  <meta property="og:video:duration" content="${escAttr(String(Math.round(og.videoDuration)))}" />`
+      : '';
+
+    // JSON-LD VideoObject / CreativeWork
+    const jsonLdObj = {
+      '@context': 'https://schema.org',
+      '@type': og.video ? 'VideoObject' : 'CreativeWork',
+      name: og.title,
+      description: og.description,
+      thumbnailUrl: og.thumbnailUrl ? [og.thumbnailUrl] : undefined,
+      uploadDate: og.createdAt || undefined,
+      contentUrl: og.video || undefined,
+      embedUrl: og.playerUrl ? `${APP_BASE_URL}/og/player/${postId}` : undefined,
+      duration: (og.videoDuration != null && Number.isFinite(og.videoDuration))
+        ? `PT${Math.round(og.videoDuration)}S`
+        : undefined,
+      author: {
+        '@type': 'Person',
+        name: og.authorName || 'PNPtv! user',
+        url: og.authorProfileUrl || APP_BASE_URL,
+      },
+    };
+    // Remove undefined keys for clean JSON
+    const jsonLdClean = JSON.parse(JSON.stringify(jsonLdObj));
+    const jsonLdScript = `\n  <script type="application/ld+json">${escJson(jsonLdClean)}</script>`;
 
     const videoPlayerHtml = videoUrl
       ? `<video
@@ -403,18 +453,18 @@ const renderVideoPreview = async (req, res) => {
   <meta property="og:image" content="${escAttr(og.image)}" />
   <meta property="og:image:width" content="${escAttr(String(og.imageWidth || 1200))}" />
   <meta property="og:image:height" content="${escAttr(String(og.imageHeight || 630))}" />
-  <meta property="og:url" content="${escAttr(og.url || `${APP_BASE_URL}/v/${postId}`)}" />
-  <meta property="og:type" content="${escAttr(og.type || 'website')}" />${videoMeta}
+  <meta property="og:url" content="${escAttr(canonicalUrl)}" />
+  <meta property="og:type" content="${escAttr(og.type || 'website')}" />${videoMeta}${releaseDateMeta}${durationMeta}
 
   <!-- Twitter / X Card -->
   <meta name="twitter:card" content="${escAttr(og.twitterCard || 'summary_large_image')}" />
-  <meta name="twitter:site" content="@pnptv" />
+  <meta name="twitter:site" content="@pnptv" />${twitterCreatorMeta}
   <meta name="twitter:title" content="${escAttr(og.title)}" />
   <meta name="twitter:description" content="${escAttr(og.description)}" />
   <meta name="twitter:image" content="${escAttr(og.image)}" />${playerMeta}
 
   <!-- Canonical -->
-  <link rel="canonical" href="${escAttr(og.url || `${APP_BASE_URL}/v/${postId}`)}" />
+  <link rel="canonical" href="${escAttr(canonicalUrl)}" />${jsonLdScript}
 
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }

@@ -256,9 +256,37 @@ class XAutoCampaignService {
     const handle = await this._getAccountHandle(campaign);
     const isPnpTelevision = handle === 'pnptelevision';
 
+    // Enrich prompt with video/post metadata when available
+    let sourceTitle = null;
+    let sourceDescription = null;
+    let sourceThumbnailUrl = null;
+    let sourcePostId = null;
+    if (campaign.source_post_id) {
+      try {
+        const postRes = await db.query(
+          `SELECT id, video_title, video_description, content, video_thumbnail_url
+           FROM social_posts WHERE id = $1 AND is_deleted = false LIMIT 1`,
+          [campaign.source_post_id]
+        );
+        if (postRes.rows[0]) {
+          const sp = postRes.rows[0];
+          sourcePostId = sp.id;
+          sourceTitle = sp.video_title || null;
+          sourceDescription = sp.video_description || sp.content || null;
+          sourceThumbnailUrl = sp.video_thumbnail_url || null;
+        }
+      } catch (err) {
+        logger.warn('Failed to load source_post for campaign', { campaignId: campaign.campaign_id, error: err.message });
+      }
+    }
+
+    const videoContext = sourceTitle || sourceDescription
+      ? `\n\nVideo metadata:\nTitle: ${sourceTitle || '(none)'}\nDescription: ${sourceDescription ? sourceDescription.slice(0, 500) : '(none)'}`
+      : '';
+
     const prompt = campaign.custom_prompt
-      ? `${campaign.topic}\n\nAdditional instructions: ${campaign.custom_prompt}`
-      : campaign.topic;
+      ? `${campaign.topic}${videoContext}\n\nAdditional instructions: ${campaign.custom_prompt}`
+      : `${campaign.topic}${videoContext}`;
 
     const langMap = { es: 'Spanish', en: 'English', bilingual: 'Spanish' };
     const grokLanguage = langMap[campaign.language] || 'Spanish';
@@ -285,47 +313,66 @@ class XAutoCampaignService {
     }
     const mediaUrl = media ? media.url : null;
 
+    // Resolve thumbnail: prefer source_post thumbnail, then Directus media thumbnail
+    const resolvedThumbnailUrl = sourceThumbnailUrl
+      || (media && media.thumbnailUrl ? media.thumbnailUrl : null);
+
     // A/B test mode: in xPost mode, queue ALL 3 options at staggered intervals
     // and record them in x_ab_tests for performance tracking.
     if (campaign.grok_mode === 'xPost' && campaign.ab_test_mode) {
-      return this._generateAndQueueABTest(campaign, grokResponse, media);
+      return this._generateAndQueueABTest(campaign, grokResponse, media, {
+        sourceTitle, sourceDescription, sourcePostId, resolvedThumbnailUrl,
+      });
     }
 
     // For xPost mode, Grok returns 3 options (A/B/C) — pick one randomly
     // For all other modes, still strip any label artifacts Grok may have included
-    let postText;
+    let rawOptionText;
     if (campaign.grok_mode === 'xPost') {
-      postText = this._extractRandomOption(grokResponse);
+      rawOptionText = this._extractRandomOption(grokResponse);
     } else {
-      postText = this._stripOptionLabel(grokResponse);
+      rawOptionText = this._stripOptionLabel(grokResponse);
     }
 
-    // X campaigns post to X only — no in-app social feed entry.
-    const socialPostLink = 'https://pnptv.app';
-
-    // Smart truncation: X allows 280 chars, URLs count as 23 via t.co.
-    // Reserve 24 chars (23 for link + 1 newline) for the link.
-    const X_TEXT_BUDGET = 280 - 24; // 256 chars for text body
-    if (postText.length > X_TEXT_BUDGET) {
-      logger.warn('Post text exceeds X limit, smart-truncating', {
-        campaignId: campaign.campaign_id,
-        originalLength: postText.length,
-        budget: X_TEXT_BUDGET,
+    // Wrap Grok output in the structured video tweet template when we have a source post.
+    // Grok's output becomes the description; the template adds title + UTM URL + hashtags.
+    let normalizedText;
+    if (sourcePostId) {
+      const shareUrl = XPostService.buildShareUrl(sourcePostId, {
+        campaign: 'auto',
+        title: sourceTitle || null,
       });
-      postText = this._smartTruncate(postText, X_TEXT_BUDGET);
+      normalizedText = XPostService.buildVideoTweetText({
+        title: sourceTitle || null,
+        description: rawOptionText,
+        tags: [],
+        creatorXHandle: null,
+        url: shareUrl,
+        limit: 280,
+      });
+    } else {
+      // No source post — use legacy ensureRequiredLinks path with pnptv.app root
+      const socialPostLink = 'https://pnptv.app';
+      const X_TEXT_BUDGET = 280 - 24;
+      let postText = rawOptionText;
+      if (postText.length > X_TEXT_BUDGET) {
+        logger.warn('Post text exceeds X limit, smart-truncating', {
+          campaignId: campaign.campaign_id, originalLength: postText.length, budget: X_TEXT_BUDGET,
+        });
+        postText = this._smartTruncate(postText, X_TEXT_BUDGET);
+      }
+      ({ text: normalizedText } = XPostService.ensureRequiredLinks(postText, [socialPostLink]));
     }
-
-    // Normalize for X character limits and ensure required links
-    const requiredLinks = [socialPostLink];
-    const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, requiredLinks);
 
     // Queue into existing x_post_jobs pipeline
+    // When a source post has a thumbnail, pass it as mediaUrl so postToX uploads it
+    const jobMediaUrl = resolvedThumbnailUrl || mediaUrl;
     const postId = await XPostService.createPostJob({
       accountId: campaign.account_id,
       adminId: campaign.created_by,
       adminUsername: campaign.created_by_username || 'auto-campaign',
       text: normalizedText,
-      mediaUrl,
+      mediaUrl: jobMediaUrl,
       scheduledAt: new Date(),
       status: 'scheduled',
     });
@@ -373,8 +420,10 @@ class XAutoCampaignService {
    * Records a single x_ab_tests row linking all 3 variants.
    * Returns the post_id of variant A (the first one).
    */
-  static async _generateAndQueueABTest(campaign, grokResponse, media) {
+  static async _generateAndQueueABTest(campaign, grokResponse, media, sourceContext = {}) {
     const mediaUrl = media ? media.url : null;
+    const { sourceTitle = null, sourceDescription: _srcDesc = null, sourcePostId = null, resolvedThumbnailUrl = null } = sourceContext;
+    const jobMediaUrl = resolvedThumbnailUrl || mediaUrl;
     const optionRegex = /(?:OPCI[OÓ]N|OPTION)\s+[ABC][\s:.\-—]*([\s\S]*?)(?=(?:OPCI[OÓ]N|OPTION)\s+[ABC]|$)/gi;
     const options = [];
     let match;
@@ -390,18 +439,34 @@ class XAutoCampaignService {
 
     const intervalMs = (campaign.interval_minutes || 240) * 60 * 1000;
     const stagger = Math.floor(intervalMs / 3);
-    const X_TEXT_BUDGET = 280 - 24;
     const now = new Date();
 
     const postIds = [];
     for (let i = 0; i < Math.min(options.length, 3); i++) {
-      let postText = options[i];
+      const rawOptionText = options[i];
 
-      // X campaigns post to X only — no in-app social feed entry.
-      const socialPostLink = 'https://pnptv.app';
+      let normalizedText;
+      if (sourcePostId) {
+        const shareUrl = XPostService.buildShareUrl(sourcePostId, {
+          campaign: 'auto',
+          title: sourceTitle || null,
+        });
+        normalizedText = XPostService.buildVideoTweetText({
+          title: sourceTitle || null,
+          description: rawOptionText,
+          tags: [],
+          creatorXHandle: null,
+          url: shareUrl,
+          limit: 280,
+        });
+      } else {
+        const socialPostLink = 'https://pnptv.app';
+        const X_TEXT_BUDGET = 280 - 24;
+        let postText = rawOptionText;
+        if (postText.length > X_TEXT_BUDGET) postText = this._smartTruncate(postText, X_TEXT_BUDGET);
+        ({ text: normalizedText } = XPostService.ensureRequiredLinks(postText, [socialPostLink]));
+      }
 
-      if (postText.length > X_TEXT_BUDGET) postText = this._smartTruncate(postText, X_TEXT_BUDGET);
-      const { text: normalizedText } = XPostService.ensureRequiredLinks(postText, [socialPostLink]);
       const scheduledAt = new Date(now.getTime() + i * stagger);
 
       const postId = await XPostService.createPostJob({
@@ -409,7 +474,7 @@ class XAutoCampaignService {
         adminId: campaign.created_by,
         adminUsername: campaign.created_by_username || 'auto-campaign',
         text: normalizedText,
-        mediaUrl,
+        mediaUrl: jobMediaUrl,
         scheduledAt,
         status: 'scheduled',
       });

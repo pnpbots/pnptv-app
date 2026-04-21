@@ -466,11 +466,12 @@ const getVideoPreviewOG = async (postId) => {
   if (cached) return cached;
 
   try {
-    // Join users so we can build a post-specific, author-aware title
+    // Join users so we can build a post-specific, author-aware title.
+    // Also pull x_username so we can emit twitter:creator.
     const result = await query(
-      `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls,
-              sp.video_thumbnail_url, sp.video_title, sp.video_description,
-              u.username, u.first_name
+      `SELECT sp.id, sp.user_id, sp.content, sp.media_url, sp.media_type, sp.media_urls,
+              sp.video_thumbnail_url, sp.video_title, sp.video_description, sp.created_at,
+              u.username, u.first_name, u.x_username
        FROM social_posts sp
        JOIN users u ON sp.user_id = u.id
        WHERE sp.id = $1
@@ -515,6 +516,24 @@ const getVideoPreviewOG = async (postId) => {
     const description = contentSnippet
       || `Watch ${authorName}'s latest post on PNPtv! — the queer PNP community streaming platform.`;
 
+    // Canonical slug for the URL — matches buildShareUrl logic
+    const slugify = (str) => {
+      if (!str) return '';
+      return str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-')
+        .slice(0, 60).replace(/-$/, '');
+    };
+    const titleSlug = slugify(post.video_title || '');
+    const canonicalUrl = titleSlug
+      ? `${APP_BASE_URL}/v/${id}/${titleSlug}`
+      : `${APP_BASE_URL}/v/${id}`;
+
+    const createdAtIso = post.created_at ? new Date(post.created_at).toISOString() : null;
+    const creatorXHandle = post.x_username || null;
+    const authorProfileUrl = post.username
+      ? `${APP_BASE_URL}/profile/${post.user_id}`
+      : `${APP_BASE_URL}`;
+
     let ogData;
     if (isVideo && absoluteMediaUrl) {
       const ext = (absoluteMediaUrl.match(/\.(mp4|mov|webm|3gp|m4v)(\?|$)/i) || [])[1];
@@ -527,7 +546,7 @@ const getVideoPreviewOG = async (postId) => {
         image: absoluteThumbUrl || `${APP_BASE_URL}/og-default.png`,
         imageWidth: 1280,
         imageHeight: 720,
-        url: `${APP_BASE_URL}/v/${id}`,
+        url: canonicalUrl,
         type: 'video.other',
         video: absoluteMediaUrl,
         videoType,
@@ -535,6 +554,13 @@ const getVideoPreviewOG = async (postId) => {
         videoHeight: 720,
         twitterCard: 'player',
         playerUrl: `${APP_BASE_URL}/og/player/${id}`,
+        // Extra fields for JSON-LD + twitter:creator
+        createdAt: createdAtIso,
+        videoDuration: null, // no duration column in social_posts
+        creatorXHandle,
+        authorName,
+        authorProfileUrl,
+        thumbnailUrl: absoluteThumbUrl || `${APP_BASE_URL}/og-default.png`,
       };
     } else {
       // Image or text post — still use the preview page
@@ -544,7 +570,7 @@ const getVideoPreviewOG = async (postId) => {
         image: absoluteThumbUrl || toAbsoluteUrl(effectiveMediaUrl) || `${APP_BASE_URL}/og-default.png`,
         imageWidth: 1200,
         imageHeight: 630,
-        url: `${APP_BASE_URL}/v/${id}`,
+        url: canonicalUrl,
         type: 'website',
         video: null,
         videoType: null,
@@ -552,6 +578,13 @@ const getVideoPreviewOG = async (postId) => {
         videoHeight: null,
         twitterCard: 'summary_large_image',
         playerUrl: null,
+        // Extra fields
+        createdAt: createdAtIso,
+        videoDuration: null,
+        creatorXHandle,
+        authorName,
+        authorProfileUrl,
+        thumbnailUrl: absoluteThumbUrl || toAbsoluteUrl(effectiveMediaUrl) || `${APP_BASE_URL}/og-default.png`,
       };
     }
 
