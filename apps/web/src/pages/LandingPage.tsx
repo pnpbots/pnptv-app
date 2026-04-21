@@ -278,6 +278,17 @@ export function LandingPage() {
   const [activeSheet, setActiveSheet] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // LATAM performer-focus mode — backend redirects non-grandfathered LATAM
+  // visitors here with ?focus=performer and surfaces the performer CTA banner.
+  const performerFocus = (() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("focus") === "performer";
+  })();
+  const performerCountry = (() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("country") || null;
+  })();
+
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   useEffect(() => {
@@ -385,6 +396,37 @@ export function LandingPage() {
             <p className="text-gradient text-xs font-bold uppercase tracking-widest mb-1">The Clouds &amp; Rush Network</p>
             <p className="text-pnp-textSecondary text-xs">The #1 queer PNP community</p>
           </div>
+
+          {/* Performer focus banner — shown to LATAM visitors redirected by the
+             backend geo gate. Puts the "Become a Performer" flow front-and-center. */}
+          {performerFocus && (
+            <div className="w-full rounded-2xl border border-pnp-accent/30 bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-orange-500/10 p-4 space-y-3 text-left">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🎬</span>
+                <p className="text-xs font-bold uppercase tracking-widest text-gradient">
+                  {performerCountry === "CO" ? "Colombia · Only performers" : "Only performers in your region"}
+                </p>
+              </div>
+              <p className="text-[13px] leading-relaxed text-white font-medium">
+                The full PNPtv app isn't available here yet — but you can apply to become a performer.
+              </p>
+              <p className="text-xs text-pnp-textSecondary leading-relaxed">
+                Stream, post exclusive content, and keep <span className="text-white font-semibold">80%</span> of everything you earn. Verified performers get full access.
+              </p>
+              <Link
+                to="/become-a-model"
+                className="btn-gradient block w-full text-center py-3 rounded-xl text-sm font-bold text-white hover:opacity-90 active:scale-[0.98] transition-all"
+              >
+                Become a Performer →
+              </Link>
+              <Link
+                to="/apply"
+                className="block w-full text-center text-xs text-pnp-textSecondary/80 hover:text-white transition-colors"
+              >
+                Already have an account? Apply now
+              </Link>
+            </div>
+          )}
 
           {/* Join existing — accordion */}
           <div className="w-full">

@@ -381,14 +381,6 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
-      {
-        path: "become-a-model",
-        element: (
-          <ModuleLoader>
-            <BecomeModel />
-          </ModuleLoader>
-        ),
-      },
       { path: "creator", element: <Navigate to="/creators" replace /> },
       { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "hangouts/invite/:code", element: <HangoutInviteRedirect /> },
@@ -738,6 +730,18 @@ export const router = createBrowserRouter([
         <LandingPage />
       </ModuleLoader>
     ),
+  },
+  {
+    path: "/become-a-model",
+    element: (
+      <ModuleLoader>
+        <BecomeModel />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/become-model",
+    element: <Navigate to="/become-a-model" replace />,
   },
   {
     path: "/page/:slug",
