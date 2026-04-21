@@ -17,8 +17,9 @@
     "@pnptv/ui-kit": "*",
     "@types/react-window": "^1.8.8",
     "clsx": "^2.1.1",
-    "dompurify": "^3.3.2",
+    "dompurify": "^3.4.1",
     "hls.js": "^1.5.0",
+    "invariant": "^2.2.4",
     "leaflet": "^1.9.0",
     "livekit-client": "^2.18.1",
     "matrix-js-sdk": "^41.1.0",
@@ -26,10 +27,12 @@
     "qrcode.react": "^4.2.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
+    "react-fast-compare": "^3.2.2",
     "react-helmet-async": "^2.0.5",
     "react-leaflet": "^4.2.0",
     "react-router-dom": "^6.28.0",
     "react-window": "^2.2.7",
+    "shallowequal": "^1.1.0",
     "socket.io-client": "^4.7.0"
   },
   "devDependencies": {
