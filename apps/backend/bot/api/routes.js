@@ -3554,13 +3554,70 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
   }
 }));
 
+// Validate a promo code for the logged-in user without claiming the spot.
+// Returns pricing + eligibility so the Subscribe page can show strikethrough
+// price before the user commits. Redemption (spot claim) happens during
+// /api/webapp/payments/create when promoCode is passed in.
+app.get('/api/webapp/promos/:code', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user?.id) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+
+  const code = String(req.params.code || '').trim();
+  if (!code || code.length > 64) {
+    return res.status(400).json({ success: false, error: 'Invalid promo code' });
+  }
+
+  const PromoService = require('../../services/promoService');
+  const PromoModel = require('../../models/promoModel');
+  const PlanModel = require('../../models/planModel');
+
+  const userId = String(user.telegramId || user.telegram_id || user.id);
+  const result = await PromoService.getPromoForUser(code, userId);
+  if (!result.success) {
+    return res.status(404).json({ success: false, error: result.error, message: result.message });
+  }
+
+  // For any-plan promos, let the caller pick a plan via ?planId=…
+  const queryPlanId = typeof req.query.planId === 'string' ? req.query.planId.trim() : '';
+  let pricing = result.pricing;
+  let basePlan = result.basePlan;
+
+  if (PromoModel.isAnyPlanPromo(result.promo) && queryPlanId) {
+    const plan = await PlanModel.getById(queryPlanId);
+    if (!plan || plan.active === false) {
+      return res.status(404).json({ success: false, error: 'plan_not_found', message: 'Plan not found' });
+    }
+    pricing = PromoModel.calculatePriceForPlan(result.promo, plan);
+    basePlan = plan;
+  }
+
+  res.json({
+    success: true,
+    code: result.promo.code,
+    name: result.promo.name,
+    nameEs: result.promo.nameEs,
+    description: result.promo.description,
+    descriptionEs: result.promo.descriptionEs,
+    isAnyPlan: PromoModel.isAnyPlanPromo(result.promo),
+    basePlanId: result.promo.basePlanId,
+    discountType: result.promo.discountType,
+    discountValue: result.promo.discountValue,
+    pricing,
+    basePlan: basePlan ? { id: basePlan.id, name: basePlan.display_name || basePlan.name, price: basePlan.price } : null,
+    remainingSpots: result.remainingSpots,
+    validUntil: result.promo.validUntil,
+  });
+}));
+
 app.post('/api/webapp/payments/create', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user?.id) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
   }
 
-  const { planId, provider, creatorId, email } = req.body;
+  const { planId, provider, creatorId, email, promoCode } = req.body;
   if (!planId) {
     return res.status(400).json({ success: false, error: 'planId is required' });
   }
@@ -3570,17 +3627,47 @@ app.post('/api/webapp/payments/create', requireSessionAuth, asyncHandler(async (
   if (email && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254)) {
     return res.status(400).json({ success: false, error: 'Invalid email address' });
   }
+  if (promoCode != null) {
+    if (typeof promoCode !== 'string' || !/^[A-Za-z0-9_-]{3,64}$/.test(promoCode.trim())) {
+      return res.status(400).json({ success: false, error: 'Invalid promo code' });
+    }
+  }
 
   const userId = String(user.telegramId || user.telegram_id || user.id);
   const language = user.language || 'es';
+  const resolvedProvider = provider || 'epayco';
 
-  const result = await PaymentService.createPayment({
-    userId,
-    planId,
-    provider: provider || 'epayco',
-    chatId: user.telegramId || user.telegram_id || null,
-    creatorId: creatorId || null,
-  });
+  // Promo path — delegate to PromoService.initiatePromoPayment so spot claim,
+  // eligibility, and discount pricing go through the canonical flow used by
+  // the bot. This is the only place user-submitted promo codes get applied.
+  let result;
+  if (promoCode) {
+    const PromoService = require('../../services/promoService');
+    result = await PromoService.initiatePromoPayment(
+      promoCode.trim(),
+      userId,
+      resolvedProvider,
+      user.telegramId || user.telegram_id || null,
+      planId,
+    );
+    if (!result.success) {
+      const status = ({
+        not_found: 404, expired: 410, sold_out: 409, inactive: 410,
+        already_redeemed: 409, not_churned: 403, not_new_user: 403,
+        not_free_user: 403, user_not_found: 404, missing_plan: 400,
+        plan_not_found: 404, promo_not_valid: 410,
+      })[result.error] || 400;
+      return res.status(status).json(result);
+    }
+  } else {
+    result = await PaymentService.createPayment({
+      userId,
+      planId,
+      provider: resolvedProvider,
+      chatId: user.telegramId || user.telegram_id || null,
+      creatorId: creatorId || null,
+    });
+  }
 
   // Only provision email credentials if email was provided
   if (email) {

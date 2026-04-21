@@ -96,6 +96,14 @@ const strings = {
     activationError: "Activation error",
     pleaseEnterValidEmailAbove: "Please enter a valid email address above",
 
+    // ── Promo code (discount) ────────────────────────────────────────────────
+    promoHaveCode: "Have a discount code?",
+    promoCodePlaceholder: "Enter your code",
+    promoApply: "Apply",
+    promoApplied: "Discount applied",
+    promoRemove: "Remove",
+    promoInvalid: "This code isn't valid or has expired.",
+
     // ── Payment polling ───────────────────────────────────────────────────────
     waitingForPayment: "Processing your payment...",
     completePaymentInWindow: "Complete the payment on the checkout page. This page will update automatically.",
@@ -207,6 +215,13 @@ const strings = {
     activationFailed: "Error en la activación",
     activationError: "Error al activar",
     pleaseEnterValidEmailAbove: "Por favor ingresa un correo electrónico válido arriba",
+
+    promoHaveCode: "¿Tienes un código de descuento?",
+    promoCodePlaceholder: "Ingresa tu código",
+    promoApply: "Aplicar",
+    promoApplied: "Descuento aplicado",
+    promoRemove: "Quitar",
+    promoInvalid: "Este código no es válido o ha expirado.",
 
     waitingForPayment: "Procesando tu pago...",
     completePaymentInWindow: "Completa el pago en la página de pago. Esta página se actualizará automáticamente.",

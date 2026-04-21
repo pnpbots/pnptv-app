@@ -864,6 +864,20 @@ export interface SocialPostItem {
   hangout_group_name?: string | null;
   hangout_group_avatar?: string | null;
   source_message_id?: number | null;
+  // Emoji reactions (aggregated top 3 by count)
+  reactions?: Array<{ emoji: string; count: number; reacted_by_me?: boolean }>;
+  my_reaction?: string | null;
+}
+
+export interface PostCardSnapshot {
+  authorUsername?: string | null;
+  authorFirstName?: string | null;
+  authorAvatar?: string | null;
+  content?: string | null;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
+  mediaThumbUrl?: string | null;
+  createdAt?: string | null;
 }
 
 export interface XStatus {
@@ -883,6 +897,39 @@ export function sharePostToX(postId: number): Promise<{
   error?: string;
 }> {
   return request(`/api/webapp/social/posts/${postId}/share-x`, { method: "POST" });
+}
+
+export function reactToPost(
+  postId: number,
+  emoji: string
+): Promise<{
+  success: boolean;
+  added: boolean;
+  reactions: Array<{ emoji: string; count: number; reacted_by_me?: boolean; users?: Array<{ id: string; username: string }> }>;
+}> {
+  return request(`/api/webapp/social/posts/${postId}/react`, {
+    method: "POST",
+    body: { emoji },
+  });
+}
+
+export function sharePostToHangouts(
+  postId: number,
+  groupIds: number[],
+  note?: string
+): Promise<{
+  success: boolean;
+  results: Array<{
+    groupId: number;
+    status: "sent" | "skipped";
+    messageId?: number;
+    reason?: string;
+  }>;
+}> {
+  return request(`/api/webapp/social/posts/${postId}/share-to-hangouts`, {
+    method: "POST",
+    body: { groupIds, ...(note?.trim() ? { note: note.trim() } : {}) },
+  });
 }
 
 export function getProfile(): Promise<{ success: boolean; profile: UserProfile }> {
@@ -1322,7 +1369,18 @@ export interface HangoutGroup {
   // Moderation / posting controls (returned at top-level by hangoutGroupController)
   isReadOnly?: boolean;
   slowModeSeconds?: number;
+  // Per-user thread state (DM parity: pin/mute/archive/read)
+  isPinned?: boolean;
+  isUserMuted?: boolean;
+  userMuteUntil?: string | null;
+  isArchived?: boolean;
+  archivedAt?: string | null;
+  lastReadMessageId?: number | null;
 }
+
+export type ForwardTarget =
+  | { type: "dm"; userId: string }
+  | { type: "hangout"; groupId: number };
 
 export interface MessageReaction {
   emoji: string;
@@ -1354,6 +1412,8 @@ export interface GroupMessage {
   is_deleted?: boolean;
   is_pinned?: boolean;
   reactions?: MessageReaction[];
+  message_type?: "text" | "post_card" | string;
+  meta?: { postId?: number; snapshot?: PostCardSnapshot } | null;
 }
 
 export interface GroupMember {
@@ -1573,6 +1633,71 @@ export async function sendGroupMediaMessage(
 
 export function markGroupAsRead(groupId: number): Promise<{ success: boolean }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/read`, { method: "POST" });
+}
+
+// ── Hangout thread state (DM-parity: pin / mute / archive / read) ────────────
+
+export function pinHangoutGroup(
+  groupId: number,
+  pinned: boolean
+): Promise<{ success: boolean; pinned: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/pin`, {
+    method: "PUT",
+    body: { pinned },
+  });
+}
+
+export function muteHangoutGroupForUser(
+  groupId: number,
+  until: string | "forever" | null
+): Promise<{ success: boolean; mutedUntil: string | null }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/mute`, {
+    method: "PUT",
+    body: { until },
+  });
+}
+
+export function archiveHangoutGroup(
+  groupId: number,
+  archived: boolean
+): Promise<{ success: boolean; archived: boolean; archivedAt: string | null }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/archive`, {
+    method: "PUT",
+    body: { archived },
+  });
+}
+
+export function markHangoutMessageRead(
+  groupId: number,
+  messageId: number
+): Promise<{ success: boolean; lastReadMessageId: number }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/read-message`, {
+    method: "PUT",
+    body: { messageId },
+  });
+}
+
+export function forwardHangoutMessage(
+  messageId: number,
+  targets: ForwardTarget[],
+  note?: string
+): Promise<{
+  success: boolean;
+  results: Array<{
+    target: ForwardTarget;
+    status: "sent" | "skipped";
+    messageId?: number;
+    reason?: string;
+  }>;
+}> {
+  return request(`/api/webapp/hangouts/messages/${messageId}/forward`, {
+    method: "POST",
+    body: { targets, ...(note?.trim() ? { note: note.trim() } : {}) },
+  });
+}
+
+export function getArchivedHangouts(): Promise<{ success: boolean; groups: HangoutGroup[] }> {
+  return request("/api/webapp/hangouts/groups?archived=true");
 }
 
 // ── Hangout Group Management ────────────────────────────────────────────────
@@ -2534,19 +2659,54 @@ export function getMyAccess(): Promise<MyAccessResponse> {
 export function createPayment(
   planId: string,
   provider: "epayco" | "dash",
-  email?: string
+  email?: string,
+  promoCode?: string
 ): Promise<{
   success: boolean;
   paymentUrl: string;
   paymentId: string;
+  finalPrice?: number;
   error?: string;
+  message?: string;
 }> {
   const body: Record<string, string> = { planId, provider };
   if (email) body.email = email;
+  if (promoCode) body.promoCode = promoCode;
   return request("/api/webapp/payments/create", {
     method: "POST",
     body,
   });
+}
+
+export type PromoPricing = {
+  originalPrice: number | null;
+  discountAmount: number | null;
+  finalPrice: number | null;
+  basePlan: unknown;
+  isAnyPlan?: boolean;
+};
+
+export function validatePromoCode(
+  code: string,
+  planId?: string
+): Promise<{
+  success: boolean;
+  code?: string;
+  name?: string;
+  description?: string;
+  isAnyPlan?: boolean;
+  basePlanId?: string;
+  discountType?: "percentage" | "fixed_price";
+  discountValue?: number;
+  pricing?: PromoPricing | null;
+  basePlan?: { id: string; name: string; price: number } | null;
+  remainingSpots?: number | null;
+  validUntil?: string;
+  error?: string;
+  message?: string;
+}> {
+  const qs = planId ? `?planId=${encodeURIComponent(planId)}` : "";
+  return request(`/api/webapp/promos/${encodeURIComponent(code)}${qs}`);
 }
 
 export function updatePaymentEmail(
@@ -6389,4 +6549,48 @@ export function moderateMainStage(
   identity: string
 ): Promise<{ success: boolean }> {
   return request("/api/main-stage/moderate", { method: "POST", body: { action, identity } });
+}
+
+// ── Cash-out / USDT off-ramp ──────────────────────────────────────────────────
+
+export interface CashoutBalance {
+  holding_usd: number;
+  holding_count: number;
+  available_usd: number;
+  available_count: number;
+  earliest_available_at: string | null;
+}
+
+export interface CashoutRequestBody {
+  amount_usd: number;
+  lane: "onchain_usdt" | "bitrefill" | "transak";
+  destination: Record<string, unknown>;
+}
+
+export interface CashoutRequestResponse {
+  order_id: string;
+  status: "pending" | "processing";
+  provider_ref?: string;
+  provider_meta?: Record<string, unknown>;
+}
+
+export interface CashoutHistoryItem {
+  id: string;
+  amount_usd: number;
+  lane: "onchain_usdt" | "bitrefill" | "transak";
+  status: string;
+  requested_at: string;
+  settled_at: string | null;
+}
+
+export function getCashoutBalance(): Promise<CashoutBalance> {
+  return request("/api/cashout/balance");
+}
+
+export function requestCashout(body: CashoutRequestBody): Promise<CashoutRequestResponse> {
+  return request("/api/cashout/request", { method: "POST", body });
+}
+
+export function getCashoutHistory(): Promise<CashoutHistoryItem[]> {
+  return request("/api/cashout/history");
 }

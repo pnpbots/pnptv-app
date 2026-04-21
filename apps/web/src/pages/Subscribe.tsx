@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card, Skeleton } from "@pnptv/ui-kit";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -14,6 +14,7 @@ import {
   activateMeruCode,
   getLabelColor,
   assertPaymentUrl,
+  validatePromoCode,
   type SubscriptionPlan,
 } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -58,6 +59,7 @@ function isLifetimePlan(plan: SubscriptionPlan): boolean {
 
 export default function Subscribe() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, refreshUser } = useAuth();
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("subscribe");
   const t = useI18n();
@@ -70,6 +72,19 @@ export default function Subscribe() {
   const [provider, setProvider] = useState<Provider>("epayco");
   const [submitting, setSubmitting] = useState(false);
   const [showCOP, setShowCOP] = useState(false);
+
+  // Promo code state — driven by ?promo= URL param or the "Have a code?" input
+  const [promoInput, setPromoInput] = useState(searchParams.get("promo") || "");
+  const [appliedPromo, setAppliedPromo] = useState<{
+    code: string;
+    finalPrice: number;
+    originalPrice: number;
+    discountAmount: number;
+    basePlanId: string | null;
+    isAnyPlan: boolean;
+  } | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoValidating, setPromoValidating] = useState(false);
 
   // Payment polling state
   const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
@@ -131,6 +146,89 @@ export default function Subscribe() {
       }
     } catch {}
   }, []);
+
+  // Validate a promo code server-side. For base-plan promos, we lock the
+  // selected plan to the promo's base plan so the displayed price matches.
+  const applyPromo = useCallback(async (rawCode: string, planId?: string | null) => {
+    const code = rawCode.trim();
+    if (!code) {
+      setAppliedPromo(null);
+      setPromoError(null);
+      return;
+    }
+    setPromoValidating(true);
+    setPromoError(null);
+    try {
+      const res = await validatePromoCode(code, planId || undefined);
+      if (!res.success) {
+        setAppliedPromo(null);
+        setPromoError(res.message || s.promoInvalid);
+        return;
+      }
+      // For any-plan promos without a planId yet, we can't compute finalPrice — defer.
+      if (res.isAnyPlan && (!res.pricing || res.pricing.finalPrice == null)) {
+        setAppliedPromo({
+          code: res.code || code,
+          finalPrice: 0,
+          originalPrice: 0,
+          discountAmount: 0,
+          basePlanId: null,
+          isAnyPlan: true,
+        });
+        setPromoError(null);
+        return;
+      }
+      if (!res.pricing || res.pricing.finalPrice == null || res.pricing.originalPrice == null) {
+        setAppliedPromo(null);
+        setPromoError(s.promoInvalid);
+        return;
+      }
+      setAppliedPromo({
+        code: res.code || code,
+        finalPrice: res.pricing.finalPrice,
+        originalPrice: res.pricing.originalPrice,
+        discountAmount: res.pricing.discountAmount || (res.pricing.originalPrice - res.pricing.finalPrice),
+        basePlanId: res.basePlanId || null,
+        isAnyPlan: !!res.isAnyPlan,
+      });
+      // Lock selection to the promo's base plan if it's a single-plan promo
+      if (!res.isAnyPlan && res.basePlanId) {
+        setSelectedPlan(res.basePlanId);
+      }
+    } catch (err) {
+      setAppliedPromo(null);
+      setPromoError(err instanceof Error ? err.message : s.promoInvalid);
+    } finally {
+      setPromoValidating(false);
+    }
+  }, [s]);
+
+  // Auto-apply promo from URL once plans load — need plans first so we can lock selection
+  const autoAppliedRef = useRef(false);
+  useEffect(() => {
+    if (autoAppliedRef.current) return;
+    const urlPromo = searchParams.get("promo");
+    if (!urlPromo || plans.length === 0) return;
+    autoAppliedRef.current = true;
+    applyPromo(urlPromo, null);
+  }, [plans, searchParams, applyPromo]);
+
+  // When selectedPlan changes and an any-plan promo is applied, re-validate
+  // to get the correct discounted price for the new plan.
+  useEffect(() => {
+    if (!appliedPromo?.isAnyPlan || !selectedPlan) return;
+    applyPromo(appliedPromo.code, selectedPlan);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPlan]);
+
+  function clearPromo() {
+    setAppliedPromo(null);
+    setPromoInput("");
+    setPromoError(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete("promo");
+    setSearchParams(next, { replace: true });
+  }
 
   // Poll payment status after Daimo checkout opens
   useEffect(() => {
@@ -295,14 +393,24 @@ export default function Subscribe() {
           }
         }
       } else {
-        const result = await createPayment(selectedPlan, provider);
+        const result = await createPayment(
+          selectedPlan,
+          provider,
+          undefined,
+          appliedPromo?.code,
+        );
         if (result.success && result.paymentUrl) {
           window.open(assertPaymentUrl(result.paymentUrl), "_blank", "noopener,noreferrer");
           if (result.paymentId) {
             setPollingPaymentId(result.paymentId);
           }
         } else {
-          setError(result.error || s.failedToCreatePayment);
+          // If the promo got rejected at claim-time (e.g. already_redeemed),
+          // surface the message and clear the applied promo so the user can retry.
+          setError(result.message || result.error || s.failedToCreatePayment);
+          if (result.error && /promo|claim|redeem/.test(result.error)) {
+            setAppliedPromo(null);
+          }
         }
       }
     } catch (err: unknown) {
@@ -533,6 +641,72 @@ export default function Subscribe() {
 
       {/* Current tier status banner */}
       {renderTierBanner()}
+
+      {/* Promo code banner — applied state */}
+      {appliedPromo && (
+        <div
+          className="mb-4 rounded-xl px-4 py-3 border flex items-center justify-between gap-3"
+          style={{ borderColor: "rgba(212,0,122,0.4)", background: "rgba(212,0,122,0.10)" }}
+        >
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-pnp-accent uppercase tracking-wider">
+              {s.promoApplied}
+            </p>
+            <p className="text-sm font-mono text-pnp-textPrimary truncate">
+              {appliedPromo.code}
+            </p>
+            {appliedPromo.originalPrice > 0 && (
+              <p className="text-xs text-pnp-textSecondary mt-0.5">
+                <span className="line-through">{formatPrice(appliedPromo.originalPrice, "USD")}</span>
+                <span className="mx-2">→</span>
+                <span className="text-pnp-accent font-semibold">{formatPrice(appliedPromo.finalPrice, "USD")}</span>
+              </p>
+            )}
+          </div>
+          <button
+            onClick={clearPromo}
+            className="shrink-0 text-xs text-pnp-textSecondary hover:text-pnp-textPrimary underline decoration-dotted"
+            aria-label={s.promoRemove}
+          >
+            {s.promoRemove}
+          </button>
+        </div>
+      )}
+
+      {/* Promo code input — shown only when no promo is applied yet */}
+      {!appliedPromo && (
+        <details className="mb-4 rounded-xl px-4 py-3 border border-white/10 bg-white/[0.02]">
+          <summary className="cursor-pointer text-xs font-semibold text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors select-none">
+            {s.promoHaveCode}
+          </summary>
+          <div className="flex gap-2 mt-3">
+            <input
+              type="text"
+              value={promoInput}
+              onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyPromo(promoInput, selectedPlan);
+                }
+              }}
+              placeholder={s.promoCodePlaceholder}
+              maxLength={64}
+              className="flex-1 px-3 py-2 rounded-lg bg-pnp-surface border border-white/10 text-sm text-pnp-textPrimary placeholder:text-pnp-textSecondary/60 focus:outline-none focus:border-pnp-accent/50"
+            />
+            <button
+              onClick={() => applyPromo(promoInput, selectedPlan)}
+              disabled={promoValidating || !promoInput.trim()}
+              className="px-4 py-2 rounded-lg bg-pnp-accent text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {promoValidating ? "…" : s.promoApply}
+            </button>
+          </div>
+          {promoError && (
+            <p className="mt-2 text-xs text-red-400">{promoError}</p>
+          )}
+        </details>
+      )}
 
       {/* Currency toggle */}
       <div className="flex justify-center mb-4">
