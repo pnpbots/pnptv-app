@@ -72,6 +72,9 @@ const canvaRoutes = require('./routes/canvaRoutes');
 // Courtesy invite links — admin/model create, any authenticated user redeems
 const courtesyInviteRoutes = require('./routes/courtesyInviteRoutes');
 
+// Main Stage — 24/7 LiveKit room
+const mainStageController = require('./controllers/mainStageController');
+
 
 // JaaS token generation (viewer, moderator, live streaming) — handled by jaasStreamController
 
@@ -8156,6 +8159,92 @@ app.get('/v/:postId', asyncHandler(ogController.renderVideoPreview));
 // Player endpoint must be registered BEFORE the wildcard /og/* route
 app.get('/og/player/:postId', asyncHandler(ogController.renderPlayer));
 app.get('/og/*', asyncHandler(ogController.renderOG));
+
+// ── Main Stage (24/7 LiveKit room) ────────────────────────────────────────────
+
+const mainStageAdminLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many admin requests. Slow down.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const mainStageTokenLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,   // 30 token mints per user per minute — covers reconnects but blocks floods
+  keyGenerator: (req) => req.user?.id || req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many token requests. Please wait.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Public state — IP-rate-limited so a pre-cache-warm burst doesn't stampede Redis.
+// The controller keeps a 2-second in-process cache on top of this.
+const mainStageStateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  keyGenerator: (req) => req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many state requests.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.get('/api/main-stage/state', mainStageStateLimiter, mainStageController.getState);
+
+// Auth required — issue a LiveKit token
+app.post(
+  '/api/main-stage/token',
+  authenticateUser,
+  mainStageTokenLimiter,
+  mainStageController.token
+);
+
+// Admin writes — auth + role guard + rate limit
+app.post(
+  '/api/main-stage/mode',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageAdminLimiter,
+  mainStageController.setMode
+);
+
+app.post(
+  '/api/main-stage/media',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageAdminLimiter,
+  mainStageController.setMedia
+);
+
+app.post(
+  '/api/main-stage/volume',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageAdminLimiter,
+  mainStageController.setVolume
+);
+
+app.post(
+  '/api/main-stage/spotlight',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageAdminLimiter,
+  mainStageController.setSpotlight
+);
+
+app.post(
+  '/api/main-stage/moderate',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageAdminLimiter,
+  mainStageController.moderate
+);
+
+// ── End Main Stage ────────────────────────────────────────────────────────────
 
 // Sentry error handler - must be last
 if (process.env.SENTRY_DSN) {

@@ -268,9 +268,30 @@ function emitGroupPresence(io, gid) {
   io.to(`hangout:${gid}`).emit('hangout:presence', { groupId: gid, online });
 }
 
+// ── Main Stage service ────────────────────────────────────────────────────────
+// Loaded lazily to avoid circular-require issues at module parse time.
+let _mainStageService = null;
+function getMainStageService() {
+  if (!_mainStageService) {
+    try {
+      _mainStageService = require('../../services/mainStageService');
+    } catch (e) {
+      logger.error('socketHandlers: failed to load mainStageService', { error: e.message });
+    }
+  }
+  return _mainStageService;
+}
+
 // ── Socket.IO initialisation ──────────────────────────────────────────────────
 
 function initSocketIO(io) {
+  // Wire up the Main Stage service io reference so it can emit state broadcasts.
+  // Called once at boot; safe to call even if mainStageService fails to load.
+  const ms = getMainStageService();
+  if (ms && typeof ms.setIo === 'function') {
+    ms.setIo(io);
+    logger.info('socketHandlers: mainStageService.setIo wired');
+  }
   // Auth middleware: reject connections with no valid session
   io.use(async (socket, next) => {
     const user = await getUserFromSocket(socket);
@@ -357,6 +378,76 @@ function initSocketIO(io) {
 
     // Join personal room for DMs and targeted notifications
     socket.join(`user:${user.id}`);
+
+    // ── Main Stage — everyone auto-joins for state broadcasts ────────────────
+    socket.join('mainstage');
+
+    // Send the current state to the joining socket
+    const _ms = getMainStageService();
+    if (_ms) {
+      _ms.getState().then(state => {
+        socket.emit('mainstage:state', state);
+      }).catch(() => {});
+    }
+
+    // mainstage:join-cammer — called by cammers who want to publish video
+    socket.on('mainstage:join-cammer', async () => {
+      const ms2 = getMainStageService();
+      if (!ms2) return;
+
+      const userRole = (user.role || '').toLowerCase();
+      const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
+
+      // Non-admin cammers must hold pnp-member entitlement
+      if (!isAdminUser) {
+        try {
+          const hasMember = await getCachedEntitlement(socket, user.id, 'pnp-member');
+          if (!hasMember) {
+            socket.emit('mainstage:error', {
+              code: 'MEMBER_REQUIRED',
+              message: 'Active membership required to go live on Main Stage',
+            });
+            return;
+          }
+        } catch (err) {
+          logger.error('mainstage:join-cammer entitlement check failed', { userId: user.id, error: err.message });
+          socket.emit('mainstage:error', {
+            code: 'ENTITLEMENT_CHECK_FAILED',
+            message: 'Access check failed. Please try again.',
+          });
+          return;
+        }
+      }
+
+      try {
+        const state = await ms2.getState();
+        const queue  = state.spotlight.queue;
+        if (!queue.includes(String(user.id)) && queue.length >= ms2.MAX_CAMMERS) {
+          socket.emit('mainstage:error', {
+            code: 'CAMMER_CAP_REACHED',
+            message: `Cammer slots full (max ${ms2.MAX_CAMMERS})`,
+          });
+          return;
+        }
+        await ms2.addCammer(String(user.id));
+        socket.emit('mainstage:cammer-joined', { identity: String(user.id) });
+      } catch (err) {
+        logger.error('mainstage:join-cammer error', { userId: user.id, error: err.message });
+        socket.emit('mainstage:error', { code: 'SERVER_ERROR', message: 'Failed to join as cammer' });
+      }
+    });
+
+    // mainstage:leave-cammer — client cleans up when they stop publishing
+    socket.on('mainstage:leave-cammer', async () => {
+      const ms2 = getMainStageService();
+      if (!ms2) return;
+      try {
+        await ms2.removeCammer(String(user.id));
+      } catch (err) {
+        logger.warn('mainstage:leave-cammer error', { userId: user.id, error: err.message });
+      }
+    });
+    // ── End Main Stage socket handlers ───────────────────────────────────────
 
     // Register user in the global presence map.
     // SOCK-H3: If the user already has an entry (another open tab / socket),

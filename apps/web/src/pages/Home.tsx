@@ -219,7 +219,35 @@ export default function Home() {
         <NearbyWidget />
 
         {/* Quick access cards */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-4 gap-3">
+          {/* Main Stage */}
+          <button
+            onClick={() => navigate("/main-stage")}
+            className="group rounded-2xl p-4 text-left transition-all hover:scale-[1.02] relative"
+            style={{
+              background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(123,97,255,0.09))",
+              border: "1px solid rgba(212,0,122,0.25)",
+            }}
+          >
+            {/* Live badge */}
+            <div className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold" style={{ background: "rgba(212,0,122,0.20)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.30)" }}>
+              <span className="w-1 h-1 rounded-full bg-red-500 animate-pulse" aria-hidden />
+              LIVE
+            </div>
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
+              style={{ background: "rgba(212,0,122,0.18)" }}
+            >
+              <svg className="w-5 h-5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
+              </svg>
+            </div>
+            <h3 className="text-sm font-bold text-white mb-0.5">Main Stage</h3>
+            <p className="text-[11px] leading-relaxed" style={{ color: "#8E8E93" }}>
+              24/7 live performers
+            </p>
+          </button>
+
           {/* PNP Bank */}
           <button
             onClick={() => navigate("/bank")}

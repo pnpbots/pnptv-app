@@ -84,6 +84,8 @@ const CommunityResourcesPage = lazy(() => import("@/pages/CommunityResourcesPage
 const ShopPage = lazy(() => import("@/pages/ShopPage"));
 const DownloadPage = lazy(() => import("@/pages/DownloadPage"));
 const DashBankPage = lazy(() => import("@/pages/DashBankPage"));
+const MainStage = lazy(() => import("@/pages/MainStage"));
+const MainStageAdmin = lazy(() => import("@/pages/MainStageAdmin"));
 
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
@@ -241,7 +243,23 @@ export const router = createBrowserRouter([
       },
       {
         path: "main-stage",
-        element: <Navigate to="/?view=hangouts" replace />,
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <MainStage />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "main-stage/admin",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <MainStageAdmin standalone />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
       },
       {
         path: "dm",

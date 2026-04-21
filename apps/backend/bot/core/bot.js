@@ -1919,6 +1919,30 @@ const startBot = async () => {
       logger.warn(`Prime 24/7 broadcaster initialization failed: ${error.message}`);
     }
 
+    // Main Stage — start distributed spotlight rotation lock
+    try {
+      const mainStageService = require('../../services/mainStageService');
+      mainStageService.startRotation().catch(err =>
+        logger.warn(`Main Stage rotation start failed: ${err.message}`)
+      );
+      logger.info('✓ Main Stage rotation started');
+    } catch (error) {
+      logger.warn(`Main Stage rotation initialization failed: ${error.message}`);
+    }
+
+    // Main Stage media broadcaster (env-gated; FFmpeg → LiveKit WHIP)
+    if (String(process.env.MAIN_STAGE_MEDIA_ENABLED ?? 'true').toLowerCase() !== 'false') {
+      try {
+        const mainStageMedia = require('../../workers/mainStageMediaBroadcaster');
+        mainStageMedia.start().catch(err =>
+          logger.warn(`Main Stage media broadcaster start failed: ${err.message}`)
+        );
+        logger.info('✓ Main Stage media broadcaster initialized');
+      } catch (error) {
+        logger.warn(`Main Stage media broadcaster initialization failed: ${error.message}`);
+      }
+    }
+
     // Register commands with Telegram
     try {
       const commands = [

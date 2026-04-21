@@ -6175,3 +6175,75 @@ export function updateRecording(
     body: JSON.stringify(data),
   });
 }
+
+// ============================================================================
+// Main Stage
+// ============================================================================
+
+export interface MainStageState {
+  mode: "spotlight" | "cinema" | "equal";
+  spotlight: {
+    cammer: string | null;
+    nextAt: number | null;
+  };
+  media: {
+    kind: "video" | "music" | "off";
+    src: string | null;
+    playing: boolean;
+    volume: number;
+    startedAt: number | null;
+  };
+  cams: {
+    volume: number;
+  };
+  counts: {
+    cammers: number;
+    viewers: number;
+  };
+}
+
+export interface MainStageTokenResponse {
+  token: string;
+  livekitUrl: string;
+  roomName: string;
+  role: "admin" | "cammer" | "viewer";
+}
+
+export function getMainStageState(): Promise<MainStageState> {
+  return request("/api/main-stage/state");
+}
+
+export function getMainStageToken(body: { asCammer?: boolean }): Promise<MainStageTokenResponse> {
+  return request("/api/main-stage/token", { method: "POST", body });
+}
+
+export function setMainStageMode(mode: MainStageState["mode"]): Promise<{ success: boolean }> {
+  return request("/api/main-stage/mode", { method: "POST", body: { mode } });
+}
+
+export function setMainStageMedia(payload: {
+  kind: "video" | "music" | "off";
+  src?: string | null;
+  playing?: boolean;
+  volume?: number;
+}): Promise<{ success: boolean }> {
+  return request("/api/main-stage/media", { method: "POST", body: payload });
+}
+
+export function setMainStageVolume(payload: {
+  cams?: number;
+  media?: number;
+}): Promise<{ success: boolean }> {
+  return request("/api/main-stage/volume", { method: "POST", body: payload });
+}
+
+export function setMainStageSpotlight(cammer: string): Promise<{ success: boolean }> {
+  return request("/api/main-stage/spotlight", { method: "POST", body: { cammer } });
+}
+
+export function moderateMainStage(
+  action: "skip" | "mute" | "kick",
+  identity: string
+): Promise<{ success: boolean }> {
+  return request("/api/main-stage/moderate", { method: "POST", body: { action, identity } });
+}
