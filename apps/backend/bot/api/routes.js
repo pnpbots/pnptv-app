@@ -675,20 +675,6 @@ app.get('/checkout/:paymentId', (req, res) => {
   sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
-// Daimo checkout landing — retired. Returns 410 so any stale link in an old
-// email/Telegram message tells the user clearly that this method is gone.
-app.get('/daimo-checkout/:paymentId', (req, res) => {
-  res.status(410).type('html').send(
-    '<!doctype html><meta charset="utf-8"><title>Payment method retired</title>' +
-    '<body style="font-family:sans-serif;padding:32px;max-width:520px;margin:auto;background:#0d0d0d;color:#eee">' +
-    '<h1 style="background:linear-gradient(135deg,#D4007A,#E69138);-webkit-background-clip:text;-webkit-text-fill-color:transparent">PNPtv!</h1>' +
-    '<h2>This crypto checkout has been retired</h2>' +
-    '<p>Daimo / USDC payments are no longer supported. Please open the app to pay with <strong>Card</strong> or <strong>Dash</strong>.</p>' +
-    '<p><a href="https://app.pnptv.app/subscribe" style="display:inline-block;background:linear-gradient(135deg,#D4007A,#E69138);color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Open the app</a></p>' +
-    '</body>'
-  );
-});
-
 app.get('/api/pnp/checkout', (req, res) => {
   sendCheckoutHtml(res, 'payment-checkout.html');
 });
@@ -998,29 +984,9 @@ app.get('/pnp/meet-greet/checkout/:bookingId', pageLimiter, (req, res) => {
   sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
-app.get('/pnp/meet-greet/daimo-checkout/:bookingId', pageLimiter, (req, res) => {
-  res.status(410).type('html').send(
-    '<!doctype html><meta charset="utf-8"><title>Payment method retired</title>' +
-    '<body style="font-family:sans-serif;padding:32px;max-width:520px;margin:auto;background:#0d0d0d;color:#eee">' +
-    '<h2>Daimo / USDC payments retired</h2>' +
-    '<p>Please book your meet & greet again from the app — pay with Card or Dash.</p>' +
-    '<p><a href="https://app.pnptv.app/live" style="color:#D4007A">Open PNP Live</a></p></body>'
-  );
-});
-
 // PNP Live Checkout pages (all use unified payment-checkout.html)
 app.get('/pnp/live/checkout/:bookingId', pageLimiter, (req, res) => {
   sendCheckoutHtml(res, 'payment-checkout.html');
-});
-
-app.get('/pnp/live/daimo-checkout/:bookingId', pageLimiter, (req, res) => {
-  res.status(410).type('html').send(
-    '<!doctype html><meta charset="utf-8"><title>Payment method retired</title>' +
-    '<body style="font-family:sans-serif;padding:32px;max-width:520px;margin:auto;background:#0d0d0d;color:#eee">' +
-    '<h2>Daimo / USDC payments retired</h2>' +
-    '<p>Please book your PNP Live session again from the app — pay with Card or Dash.</p>' +
-    '<p><a href="https://app.pnptv.app/live" style="color:#D4007A">Open PNP Live</a></p></body>'
-  );
 });
 
 // (Security middleware moved to top of middleware chain, before route registration)
@@ -1036,7 +1002,6 @@ app.use((req, res, next) => {
       '/pnp/webhook/telegram',
       '/webhook/telegram',
       '/checkout/',
-      '/daimo-checkout/',
       '/payment/',
       '/api/pnp/checkout', // NEW: Allow the API checkout page
       '/terms',
@@ -1727,18 +1692,6 @@ app.post('/api/webhook/epayco', webhookLimiter, webhookController.handleEpaycoWe
 app.post('/checkout/pnp', webhookLimiter, webhookController.handleEpaycoWebhook);
 app.post('/checkout/pnp/confirmation', webhookLimiter, webhookController.handleEpaycoWebhook);
 
-// Daimo webhook — RETIRED. Daimo Pay is no longer accepted; any straggler
-// delivery is acknowledged (200) so Daimo doesn't retry forever, but no
-// settlement work is performed. If a real Daimo settlement ever arrives after
-// this date it would mean an in-flight session we missed — investigate via the
-// dashboard at https://pay.daimo.com.
-app.post('/api/webhooks/daimo', webhookLimiter, (req, res) => {
-  logger.warn('Daimo webhook hit after retirement (no-op)', {
-    ip: req.ip,
-    headers: { 'user-agent': req.get('user-agent') },
-  });
-  res.status(200).json({ ok: true, retired: true });
-});
 // LiveKit webhook — participant_joined, participant_left, room_finished
 // express.raw() is required — livekit-server-sdk verifies the raw body signature
 app.post(
@@ -3313,115 +3266,9 @@ app.post('/api/admin/support/cristina/run', verifyAdminJWT, asyncHandler(async (
 
 // Web App Payments (session auth → PaymentService)
 
-// Helper: HTML-escape for safe email template interpolation
-function escapeHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-// Helper: ensure user has email + password credentials (for all payment flows)
-async function ensureEmailCredentials(userId, email, language) {
-  const crypto = require('crypto');
-  const { query } = require('../../config/postgres');
-  const EmailService = require('../../services/emailservice');
-
-  // 1. Check if another user already has this email (UNIQUE constraint)
-  const { rows: emailConflict } = await query(
-    'SELECT id FROM users WHERE email = $1 AND id != $2', [email, String(userId)]
-  );
-  if (emailConflict.length > 0) {
-    throw new Error('This email is already associated with another account');
-  }
-
-  // 2. Check if user already has credentials — if so, just update email if different
-  const { rows: existing } = await query('SELECT email, password_hash FROM users WHERE id = $1', [String(userId)]);
-  if (!existing.length) {
-    logger.warn('ensureEmailCredentials: user not found', { userId });
-    return { created: false };
-  }
-
-  if (existing[0].password_hash) {
-    // Already has password — update email if different, skip credential generation
-    if (existing[0].email !== email) {
-      await query('UPDATE users SET email = $1 WHERE id = $2', [email, String(userId)]);
-    }
-    return { created: false };
-  }
-
-  // 3. Generate 12-char random password (9 bytes → 12 base64url chars, 72 bits entropy)
-  const plainPassword = crypto.randomBytes(9).toString('base64url');
-
-  // 4. Hash with crypto.scrypt (same salt:hash pattern as webAppController.js)
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = await new Promise((resolve, reject) =>
-    crypto.scrypt(plainPassword, salt, 64, (err, key) => (err ? reject(err) : resolve(key.toString('hex'))))
-  );
-  const passwordHash = `${salt}:${hash}`;
-
-  // 5. Atomic conditional update — only sets credentials if password_hash is still NULL
-  //    Prevents race condition where two concurrent requests both generate passwords
-  const { rowCount } = await query(
-    `UPDATE users SET email = $1, password_hash = $2, email_verified = true
-     WHERE id = $3 AND (password_hash IS NULL OR password_hash = '')
-     RETURNING id`,
-    [email, passwordHash, String(userId)]
-  );
-
-  // If another request already wrote credentials, skip email
-  if (rowCount === 0) {
-    return { created: false };
-  }
-
-  // 6. Send credentials email (only after DB write confirmed)
-  const isEs = (language || 'es').startsWith('es');
-  const safeEmail = escapeHtml(email);
-  try {
-    const transporter = EmailService.transporters?.pnptv;
-    if (!transporter) {
-      logger.warn('PNPtv SMTP transporter not available, credentials email not sent', { to: email });
-    } else {
-    await transporter.sendMail({
-      from: process.env.PNPTV_FROM_EMAIL || 'noreply@pnptv.app',
-      to: email,
-      subject: isEs ? 'Tus credenciales de acceso PNPtv' : 'Your PNPtv Login Credentials',
-      html: isEs
-        ? `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1C1C1E;color:#F5F5F7;border-radius:12px;">
-            <h2 style="color:#D4007A;margin-top:0;">Bienvenido a PNPtv!</h2>
-            <p>Ahora puedes iniciar sesi&oacute;n en la web con estas credenciales:</p>
-            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-              <tr><td style="padding:8px 0;color:#A1A1A6;">Email:</td><td style="padding:8px 0;font-weight:bold;">${safeEmail}</td></tr>
-              <tr><td style="padding:8px 0;color:#A1A1A6;">Contrase&ntilde;a:</td><td style="padding:8px 0;font-weight:bold;font-family:monospace;font-size:16px;">${plainPassword}</td></tr>
-            </table>
-            <div style="background: rgba(255,180,84,0.1); border-left: 4px solid #FFB454; padding: 12px; margin: 16px 0; border-radius: 4px;">
-              <p style="margin: 0; color: #FFB454; font-weight: bold; font-size: 14px;">🔑 ID de Recuperaci&oacute;n:</p>
-              <p style="margin: 4px 0 0 0; font-family: monospace; font-size: 16px;">${userId}</p>
-              <p style="margin: 8px 0 0 0; font-size: 12px; color: #A1A1A6;"><strong>IMPORTANTE:</strong> Guarda este ID en un lugar seguro. Es la &uacute;nica forma de recuperar tu cuenta si pierdes el acceso.</p>
-            </div>
-            <p style="font-size:13px;color:#A1A1A6;">Puedes cambiar tu contrase&ntilde;a en cualquier momento desde tu perfil.</p>
-            <a href="https://pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Iniciar sesi&oacute;n</a>
-          </div>`
-        : `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1C1C1E;color:#F5F5F7;border-radius:12px;">
-            <h2 style="color:#D4007A;margin-top:0;">Welcome to PNPtv!</h2>
-            <p>You can now log in to the web app with these credentials:</p>
-            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-              <tr><td style="padding:8px 0;color:#A1A1A6;">Email:</td><td style="padding:8px 0;font-weight:bold;">${safeEmail}</td></tr>
-              <tr><td style="padding:8px 0;color:#A1A1A6;">Password:</td><td style="padding:8px 0;font-weight:bold;font-family:monospace;font-size:16px;">${plainPassword}</td></tr>
-            </table>
-            <div style="background: rgba(255,180,84,0.1); border-left: 4px solid #FFB454; padding: 12px; margin: 16px 0; border-radius: 4px;">
-              <p style="margin: 0; color: #FFB454; font-weight: bold; font-size: 14px;">🔑 Recovery ID:</p>
-              <p style="margin: 4px 0 0 0; font-family: monospace; font-size: 16px;">${userId}</p>
-              <p style="margin: 8px 0 0 0; font-size: 12px; color: #A1A1A6;"><strong>IMPORTANT:</strong> Save this ID in a safe place. It is the only way to recover your account if you lose access.</p>
-            </div>
-            <p style="font-size:13px;color:#A1A1A6;">You can change your password anytime from your profile settings.</p>
-            <a href="https://pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Log In</a>
-          </div>`,
-    });
-    }
-  } catch (emailErr) {
-    logger.warn('Failed to send credentials email (non-critical)', { to: email, error: emailErr.message });
-  }
-
-  return { created: true };
-}
+// ensureEmailCredentials lives in services/userService — single source of truth
+// shared with apps/backend/bot/api/routes/paymentRoutes.js
+const { ensureEmailCredentials } = require('../../services/userService');
 
 // Get a random available Meru link for a product
 // Verifies the link is actually unpaid on Meru before serving it
@@ -3717,8 +3564,8 @@ app.post('/api/webapp/payments/create', requireSessionAuth, asyncHandler(async (
   if (!planId) {
     return res.status(400).json({ success: false, error: 'planId is required' });
   }
-  if (provider && !['epayco', 'daimo'].includes(provider)) {
-    return res.status(400).json({ success: false, error: 'Invalid provider. Must be epayco or daimo' });
+  if (provider && !['epayco'].includes(provider)) {
+    return res.status(400).json({ success: false, error: 'Invalid provider. Must be epayco' });
   }
   if (email && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254)) {
     return res.status(400).json({ success: false, error: 'Invalid email address' });
@@ -4466,6 +4313,12 @@ app.post(
 );
 // Mark group messages as read
 app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.markAsRead));
+// DM-parity: pin, user-mute, archive, message-read cursor, forward
+app.put('/api/webapp/hangouts/groups/:id/pin', requireSessionAuth, asyncHandler(hangoutGroupController.pinGroup));
+app.put('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, asyncHandler(hangoutGroupController.muteGroupForUser));
+app.put('/api/webapp/hangouts/groups/:id/archive', requireSessionAuth, asyncHandler(hangoutGroupController.archiveGroup));
+app.put('/api/webapp/hangouts/groups/:id/read-message', requireSessionAuth, asyncHandler(hangoutGroupController.markMessageRead));
+app.post('/api/webapp/hangouts/messages/:messageId/forward', requireSessionAuth, asyncHandler(hangoutGroupController.forwardMessage));
 // Hangout group management (kick is registered above at line 4268 — duplicate removed)
 app.post('/api/webapp/hangouts/groups/:id/ban', requireSessionAuth, asyncHandler(hangoutGroupController.banMember));
 app.post('/api/webapp/hangouts/groups/:id/unban', requireSessionAuth, asyncHandler(hangoutGroupController.unbanMember));
@@ -6086,10 +5939,6 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
     return res.status(400).json({ success: false, error: `Amount must be one of: ${validAmounts.join(', ')}` });
   }
 
-  // Daimo retired — silently re-route any legacy 'daimo' selection to 'dash'
-  // so older clients that still send the old value keep working.
-  if (paymentMethod === 'daimo') paymentMethod = 'dash';
-
   if (!['tokens', 'dash'].includes(paymentMethod)) {
     return res.status(400).json({ success: false, error: 'paymentMethod must be tokens or dash' });
   }
@@ -6504,35 +6353,7 @@ app.post('/api/wallet/buy-card', asyncHandler(async (req, res) => {
   }
 }));
 
-// POST /api/wallet/buy-wallet — purchase tokens via Daimo crypto wallet checkout
-app.post('/api/wallet/buy-wallet', asyncHandler(async (req, res) => {
-  const user = req.session?.user;
-  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
-
-  const { packageId } = req.body;
-  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
-
-  const userId = String(user.telegram_id || user.id);
-
-  try {
-    const result = await TokenCheckoutService.createWalletCheckout(userId, packageId);
-    res.json(result);
-  } catch (err) {
-    logger.error(`Wallet buy-wallet error: ${err.message}`);
-    if (err.code === 'INVALID_PACKAGE') {
-      return res.status(400).json({ success: false, error: 'Invalid package ID' });
-    }
-    if (err.code === 'DAIMO_ERROR') {
-      return res.status(503).json({ success: false, error: err.message, code: 'DAIMO_ERROR' });
-    }
-    if (err.message?.includes('DAIMO_TREASURY_ADDRESS')) {
-      return res.status(503).json({ success: false, error: 'Crypto wallet payments are not yet configured.', code: 'DAIMO_NOT_CONFIGURED' });
-    }
-    res.status(500).json({ success: false, error: 'Failed to create wallet checkout. Please try again.' });
-  }
-}));
-
-// GET /api/token-checkout/:purchaseId — return checkout page data (ePayco widget config or Daimo session)
+// GET /api/token-checkout/:purchaseId — return checkout page data (ePayco widget config)
 app.get('/api/token-checkout/:purchaseId', requireSessionAuth, asyncHandler(async (req, res) => {
   const { purchaseId } = req.params;
   // Strict UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
@@ -6570,9 +6391,7 @@ app.get('/api/token-checkout/:purchaseId', requireSessionAuth, asyncHandler(asyn
 }));
 
 // GET /token-checkout/:purchaseId — redirect to the React SPA token-checkout
-// page. The legacy public/token-checkout.html embedded the retired Daimo SDK
-// so we no longer serve it; the React version handles ePayco only and shows
-// a clear error for any orphaned Daimo purchase.
+// page. The React version handles ePayco only.
 app.get('/token-checkout/:purchaseId', (req, res) => {
   const purchaseId = encodeURIComponent(req.params.purchaseId);
   const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
@@ -7327,7 +7146,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       logger.info('BTCPay: subscription activated', { userId: order.user_id, planId: order.plan_id, invoiceId });
 
       // Grant entitlements — sole source of truth for access control (users.tier is display only).
-      // This matches the post-payment flow used by ePayco and Daimo.
+      // This matches the post-payment flow used by ePayco.
       try {
         const PaymentService = require('../../services/paymentService');
         await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay');

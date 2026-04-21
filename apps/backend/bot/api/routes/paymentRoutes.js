@@ -56,23 +56,9 @@ router.post('/:paymentId/email', authenticateUser, asyncHandler(async (req, res)
   }
 }));
 
-router.post('/tokenized-charge', authenticateUser, asyncHandler(async (req, res) => {
-  // After charge completes, provision email credentials from the card form email
-  const originalJson = res.json.bind(res);
-  res.json = function(data) {
-    // Fire-and-forget email credential provisioning after successful charge
-    if (data && data.success && req.body?.email && req.session?.user) {
-      const email = String(req.body.email).trim();
-      const userId = String(req.session.user.telegramId || req.session.user.telegram_id || req.session.user.id);
-      const language = req.session.user.language || 'es';
-      ensureEmailCredentials(userId, email, language)
-        .then(() => { req.session.user = { ...req.session.user, email }; })
-        .catch((err) => logger.warn('ensureEmailCredentials after tokenized-charge (non-critical)', { userId, error: err.message }));
-    }
-    return originalJson(data);
-  };
-  return paymentController.processTokenizedCharge(req, res);
-}));
+// Email-credential provisioning lives inside paymentController.processTokenizedCharge
+// after the response is sent, so a throw in that path can never corrupt a charge result.
+router.post('/tokenized-charge', authenticateUser, asyncHandler(paymentController.processTokenizedCharge));
 
 router.post('/verify-2fa', authenticateUser, asyncHandler(paymentController.verify2FA));
 router.post('/complete-3ds-2', authenticateUser, asyncHandler(paymentController.complete3DS2Authentication));

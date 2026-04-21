@@ -1,4 +1,3 @@
-// Daimo retired — DaimoConfig require removed.
 const PaymentModel = require('../../../models/paymentModel');
 const PlanModel = require('../../../models/planModel');
 const ConfirmationTokenService = require('../../../services/confirmationTokenService');
@@ -13,6 +12,7 @@ const InvoiceService = require('../../../services/invoiceservice');
 const EmailService = require('../../../services/emailservice');
 const PaymentNotificationService = require('../../../services/paymentNotificationService');
 const BusinessNotificationService = require('../../../services/businessNotificationService');
+const { ensureEmailCredentials } = require('../../../services/userService');
 
 /**
  * Payment Controller - Handles payment-related API endpoints
@@ -234,22 +234,6 @@ class PaymentController {
           if (!tokenPaymentData.epaycoSignature) {
             return res.status(500).json({ success: false, error: 'Error de configuración del pago.' });
           }
-        } else if (provider === 'daimo') {
-          // Daimo retired — only return an existing session for legacy in-flight
-          // lookups. Never create a NEW Daimo session; tell the user to start
-          // over with Card or Dash.
-          const existingSessionId = payment.metadata?.daimo_payment_id || payment.daimo_payment_id;
-          const existingClientSecret = payment.metadata?.daimo_client_secret || payment.daimo_client_secret;
-          if (existingSessionId && existingClientSecret) {
-            tokenPaymentData.daimoSessionId = existingSessionId;
-            tokenPaymentData.daimoClientSecret = existingClientSecret;
-          } else {
-            return res.status(410).json({
-              success: false,
-              error: 'Daimo / USDC checkout has been retired. Please start a new token purchase with Card or Dash.',
-              code: 'DAIMO_RETIRED',
-            });
-          }
         }
 
         logger.info('Token purchase payment info retrieved', { paymentId, userId, tokenAmount });
@@ -365,22 +349,6 @@ class PaymentController {
           return res.status(500).json({
             success: false,
             error: 'Error de configuración del pago. Por favor, genera un nuevo enlace desde el bot.',
-          });
-        }
-      } else if (provider === 'daimo') {
-        // Daimo retired — return session data only for legacy in-flight lookups
-        // (so historical receipts can still load). NEVER create a new session;
-        // tell the user to start over with Card or Dash.
-        const existingSessionId = payment.metadata?.daimo_payment_id || payment.daimo_payment_id;
-        const existingClientSecret = payment.metadata?.daimo_client_secret || payment.daimo_client_secret;
-        if (existingSessionId && existingClientSecret) {
-          basePaymentData.daimoSessionId = existingSessionId;
-          basePaymentData.daimoClientSecret = existingClientSecret;
-        } else {
-          return res.status(410).json({
-            success: false,
-            code: 'DAIMO_RETIRED',
-            error: 'Daimo / USDC checkout has been retired. Please start a new subscription with Card or Dash.',
           });
         }
       }
@@ -582,21 +550,7 @@ class PaymentController {
         return res.json(response);
       }
 
-      // Payment is pending — branch by provider
-      const provider = payment.provider || (payment.metadata?.provider);
-
-      // Daimo real-time status check — RETIRED. Any historical Daimo payment
-      // that's still queryable returns its DB-recorded status; no API call to
-      // Daimo is made (the `pending` Daimo rows are abandoned by definition).
-      if (provider === 'daimo') {
-        return res.json({
-          success: true,
-          status: payment.status || 'pending',
-          message: 'Daimo Pay has been retired. If your payment was completed before retirement, contact support@pnptv.app.',
-        });
-      }
-
-      // ePayco flow — check if it's stuck or waiting for webhook
+      // Payment is pending — ePayco flow — check if it's stuck or waiting for webhook
       if (!refPayco) {
         return res.json({
           success: true,
@@ -1014,6 +968,26 @@ class PaymentController {
         }).catch(() => {});
 
         res.json(result);
+
+        // Provision email credentials out-of-band. Isolated from the HTTP response:
+        // a throw here (missing service, SMTP failure, anything) can never corrupt the
+        // already-sent response. This replaces the fragile res.json wrapper that
+        // caused TOKENIZED_CHARGE_ERROR on 2026-04-21.
+        try {
+          const sessionUser = req.session?.user;
+          if (sessionUser && sanitizedEmail) {
+            const credUserId = String(sessionUser.telegramId || sessionUser.telegram_id || sessionUser.id);
+            const language = sessionUser.language || 'es';
+            Promise.resolve()
+              .then(() => ensureEmailCredentials(credUserId, sanitizedEmail, language))
+              .then(() => { req.session.user = { ...req.session.user, email: sanitizedEmail }; })
+              .catch((err) => logger.warn('ensureEmailCredentials after tokenized-charge (non-critical)', {
+                userId: credUserId, error: err?.message,
+              }));
+          }
+        } catch (credErr) {
+          logger.warn('ensureEmailCredentials setup failed (non-critical)', { error: credErr?.message });
+        }
       } else {
         if (result.status === 'rejected') {
           return res.status(402).json(result);
@@ -1040,6 +1014,27 @@ class PaymentController {
         errorMessage: error.message,
         stackTrace: error.stack,
       }).catch(() => {});
+
+      // Payment-error watchdog: DM admin when the same error_message fires 3+ times
+      // in an hour. Added after the 2026-04-21 ensureEmailCredentials incident, which
+      // silently failed 4 times before anyone noticed. Redis-counter based so it adds
+      // no scheduler overhead and alerts within seconds of the threshold crossing.
+      (async () => {
+        try {
+          const crypto = require('crypto');
+          const adminId = process.env.ADMIN_ID?.trim();
+          if (!adminId || !error?.message) return;
+          const hash = crypto.createHash('md5').update(error.message).digest('hex').slice(0, 10);
+          const key = `pnpapp:payerr:${hash}`;
+          const count = await cache.incr(key, 3600);
+          if (count === 3) {
+            const botModule = require('../../core/bot');
+            const bot = botModule?.bot || botModule;
+            const msg = `🚨 ePayco alert: 3× "${error.message.slice(0, 140)}" in the last hour. Check payment_errors + recent paymentId ${req.body?.paymentId || 'n/a'}.`;
+            await bot.telegram.sendMessage(adminId, msg).catch(() => {});
+          }
+        } catch (_) { /* watchdog must never impact the response */ }
+      })();
 
       res.status(500).json({
         success: false,
