@@ -39,12 +39,18 @@ const MAX_BACKOFF_MS     = 5 * 60_000;
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
-let stopping    = false;
-let backoffMs   = MIN_BACKOFF_MS;
-let currentSrc  = null;
-let isPlaying   = false;
-let ingressId   = null;
-let retryTimer  = null;
+let stopping        = false;
+let backoffMs       = MIN_BACKOFF_MS;
+let currentSrc      = null;
+let isPlaying       = false;
+let ingressId       = null;
+let retryTimer      = null;
+// If the LiveKit server's ingress service is not provisioned (no ingress
+// binary / no Redis), createIngress returns "ingress not connected". Retrying
+// won't help until infra is fixed, so we latch here and skip further attempts
+// until either the process restarts or an admin hits play after the infra
+// change (which resets the latch).
+let ingressDisabled = false;
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -124,6 +130,11 @@ async function createUrlIngress(src) {
  *   - no src or not playing → ensure no ingress
  *   - playing + src         → ensure an ingress exists pointing at src
  */
+function isIngressInfraError(err) {
+  const msg = (err && err.message) || '';
+  return /ingress not connected|redis required|ingress.*unavailable/i.test(msg);
+}
+
 async function reconcile() {
   if (stopping) return;
   clearRetry();
@@ -135,7 +146,11 @@ async function reconcile() {
     return;
   }
 
-  // desired === 'active'
+  if (ingressDisabled) {
+    logger.warn('[MainStageMedia] ingress latched off — admin play ignored until infra is fixed and bot restarts');
+    return;
+  }
+
   try {
     // Always recreate so a source change is reflected. LiveKit's URL_INPUT
     // doesn't support updating the URL in-place.
@@ -143,6 +158,15 @@ async function reconcile() {
     await createUrlIngress(currentSrc);
     backoffMs = MIN_BACKOFF_MS;
   } catch (err) {
+    if (isIngressInfraError(err)) {
+      ingressDisabled = true;
+      logger.error(
+        '[MainStageMedia] LiveKit ingress service is not provisioned on this server ' +
+        '(err: "' + err.message + '"). Media playback is disabled until livekit-ingress ' +
+        'is deployed. The rest of Main Stage (rooms, cammers, rotation, admin) works normally.',
+      );
+      return;
+    }
     logger.error('[MainStageMedia] reconcile failed — will retry', { error: err.message, backoffMs });
     retryTimer = setTimeout(() => {
       backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);

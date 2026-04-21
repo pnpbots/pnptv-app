@@ -61,6 +61,38 @@ export function useMainStage(): UseMainStageReturn {
     return () => { mountedRef.current = false; };
   }, []);
 
+  // Track whether the current token was minted as cammer so the refresh
+  // timer re-mints with the same grants.
+  const tokenAsCammerRef = useRef(false);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Schedule a silent re-mint 30 min before the 6h token expires so a session
+  // open past the TTL doesn't get silently kicked off LiveKit.
+  const scheduleTokenRefresh = useCallback(() => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    const REFRESH_MS = (6 * 60 - 30) * 60 * 1000; // 5h30m
+    refreshTimerRef.current = setTimeout(async () => {
+      if (!mountedRef.current) return;
+      try {
+        const res = await getMainStageToken({ asCammer: tokenAsCammerRef.current });
+        if (!mountedRef.current) return;
+        setToken(res.token);
+        setRole(res.role);
+        scheduleTokenRefresh();
+      } catch {
+        // If refresh fails, retry in 5 minutes. The user can also hit
+        // "Go on cam" / reload to force a new token.
+        refreshTimerRef.current = setTimeout(scheduleTokenRefresh, 5 * 60 * 1000);
+      }
+    }, REFRESH_MS);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
+
   // Initial state + viewer token fetch
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -79,6 +111,8 @@ export function useMainStage(): UseMainStageReturn {
         setState(stateRes);
         setToken(tokenRes.token);
         setRole(tokenRes.role);
+        tokenAsCammerRef.current = false;
+        scheduleTokenRefresh();
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to connect to Main Stage");
@@ -115,13 +149,15 @@ export function useMainStage(): UseMainStageReturn {
       if (mountedRef.current) {
         setToken(res.token);
         setRole(res.role);
+        tokenAsCammerRef.current = true;
+        scheduleTokenRefresh();
       }
     } catch (err) {
       if (mountedRef.current) {
         setError(err instanceof Error ? err.message : "Failed to join as cammer");
       }
     }
-  }, []);
+  }, [scheduleTokenRefresh]);
 
   const leaveCammer = useCallback(async () => {
     // Re-mint as viewer to demote from cammer role
@@ -130,11 +166,13 @@ export function useMainStage(): UseMainStageReturn {
       if (mountedRef.current) {
         setToken(res.token);
         setRole(res.role);
+        tokenAsCammerRef.current = false;
+        scheduleTokenRefresh();
       }
     } catch {
       // silent — user still sees the feed
     }
-  }, []);
+  }, [scheduleTokenRefresh]);
 
   const adminSetMode = useCallback(async (mode: MainStageState["mode"]) => {
     await setMainStageMode(mode);
