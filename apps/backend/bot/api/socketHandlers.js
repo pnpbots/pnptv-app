@@ -465,6 +465,32 @@ function initSocketIO(io) {
       });
     }
 
+    // ── Redis presence: mark online + notify DM partners ─────────────────────
+    try { await DmService.setOnline(user.id); } catch (_) {}
+    setImmediate(async () => {
+      try {
+        const { rows: dmPartnerRows } = await query(
+          `SELECT CASE WHEN user_a = $1 THEN user_b ELSE user_a END AS partner_id
+           FROM dm_threads WHERE user_a = $1 OR user_b = $1
+           ORDER BY last_message_at DESC LIMIT 50`,
+          [user.id]
+        );
+        for (const r of dmPartnerRows) {
+          io.to(`user:${r.partner_id}`).emit('presence:update', {
+            userId: String(user.id),
+            online: true,
+            lastSeen: null,
+          });
+        }
+      } catch (_) {}
+    });
+
+    // Heartbeat: client sends this every ~30s to keep the Redis TTL alive
+    socket.on('presence:heartbeat', async () => {
+      if (!user || !user.id) return;
+      try { await DmService.refreshOnline(user.id); } catch (_) {}
+    });
+
     // ── Nearby Real-Time ────────────────────────────────────────────────────
 
     socket.on('nearby:join-grid', ({ lat, lng } = {}) => {
@@ -1482,7 +1508,7 @@ function initSocketIO(io) {
 
     // ── Direct Messages ──────────────────────────────────────────────────────
 
-    socket.on('dm:send', async ({ recipientId, content } = {}) => {
+    socket.on('dm:send', async ({ recipientId, content, replyToId } = {}) => {
       if (!recipientId || !content || !content.trim()) return;
       if (content.length > 4000) { socket.emit('dm:error', { error: 'Message too long' }); return; }
       if (recipientId === user.id) return;
@@ -1521,7 +1547,12 @@ function initSocketIO(io) {
       try {
         // ── PG insert via DmService (handles blocks, privacy, thread upsert, push) ──
         const isAdmin = user.role === 'admin' || user.role === 'superadmin';
-        const message = await DmService.sendMessage(user.id, recipientId, { content: content.trim() }, { isAdmin });
+        const message = await DmService.sendMessage(
+          user.id,
+          recipientId,
+          { content: content.trim(), replyToId: replyToId ? Number(replyToId) : null },
+          { isAdmin }
+        );
 
         // Emit to recipient's personal room for real-time delivery
         io.to(`user:${recipientId}`).emit('dm:message', {
@@ -2776,6 +2807,27 @@ function initSocketIO(io) {
           for (const gid of groupIds) {
             setImmediate(() => emitGroupPresence(io, gid));
           }
+
+          // ── Redis presence: mark offline + notify DM partners ───────────────
+          try { await DmService.setOffline(user.id); } catch (_) {}
+          setImmediate(async () => {
+            try {
+              const { rows: dmPartnerRows } = await query(
+                `SELECT CASE WHEN user_a = $1 THEN user_b ELSE user_a END AS partner_id
+                 FROM dm_threads WHERE user_a = $1 OR user_b = $1
+                 ORDER BY last_message_at DESC LIMIT 50`,
+                [user.id]
+              );
+              const lastSeen = new Date().toISOString();
+              for (const r of dmPartnerRows) {
+                io.to(`user:${r.partner_id}`).emit('presence:update', {
+                  userId: String(user.id),
+                  online: false,
+                  lastSeen,
+                });
+              }
+            } catch (_) {}
+          });
         }
       }
     });

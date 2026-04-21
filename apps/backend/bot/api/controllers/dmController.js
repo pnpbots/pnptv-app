@@ -38,19 +38,68 @@ const getThreads = async (req, res) => {
               dt.unread_for_a, dt.unread_for_b,
               CASE WHEN dt.user_a = $1 THEN dt.user_b ELSE dt.user_a END as partner_id,
               u.username as partner_username, u.first_name as partner_first_name,
-              u.photo_file_id as partner_photo
+              u.photo_file_id as partner_photo, u.pnptv_id as partner_pnptv_id,
+              lm.id AS last_message_id,
+              lm.sender_id AS last_message_sender_id,
+              lm.media_type AS last_message_media_type,
+              lm.is_read AS last_message_is_read,
+              s.pinned_at, s.muted_until, s.archived_at, s.pinned_message_id
        FROM dm_threads dt
        JOIN users u ON u.id = CASE WHEN dt.user_a = $1 THEN dt.user_b ELSE dt.user_a END
+       LEFT JOIN dm_thread_state s
+         ON s.user_id = $1
+        AND s.partner_id = CASE WHEN dt.user_a = $1 THEN dt.user_b ELSE dt.user_a END
+       LEFT JOIN LATERAL (
+         SELECT id, sender_id, media_type, is_read
+           FROM direct_messages
+          WHERE ((sender_id = $1 AND recipient_id = CASE WHEN dt.user_a = $1 THEN dt.user_b ELSE dt.user_a END)
+              OR (sender_id = CASE WHEN dt.user_a = $1 THEN dt.user_b ELSE dt.user_a END AND recipient_id = $1))
+          ORDER BY created_at DESC LIMIT 1
+       ) lm ON true
        WHERE dt.user_a = $1 OR dt.user_b = $1
-       ORDER BY dt.last_message_at DESC
-       LIMIT 50`,
+       ORDER BY (s.pinned_at IS NOT NULL) DESC, s.pinned_at DESC NULLS LAST, dt.last_message_at DESC
+       LIMIT 100`,
       [user.id]
     );
-    // Attach unread count per thread for the current user
-    const threads = rows.map(r => ({
-      ...r,
-      unread: user.id === r.user_a ? r.unread_for_a : r.unread_for_b,
-    }));
+
+    const partnerIds = rows.map((r) => String(r.partner_id));
+    const presenceList = await DmService.getPresence(partnerIds);
+    const presenceMap = new Map(presenceList.map((p) => [String(p.id), p]));
+
+    const threads = rows.map((r) => {
+      const partnerIdStr = String(r.partner_id);
+      const presence = presenceMap.get(partnerIdStr) || { online: false, lastSeen: null };
+      const isMineLast = r.last_message_sender_id != null && String(r.last_message_sender_id) === String(user.id);
+      // "Read by other" only meaningful when the last message is mine
+      const lastMessageReadByOther = isMineLast ? !!r.last_message_is_read : false;
+      const unread = String(user.id) === String(r.user_a) ? r.unread_for_a : r.unread_for_b;
+      return {
+        // canonical (new) field names
+        partnerId: partnerIdStr,
+        partnerUsername: r.partner_username || '',
+        partnerFirstName: r.partner_first_name || '',
+        partnerPhoto: r.partner_photo || null,
+        partnerPnptvId: r.partner_pnptv_id || null,
+        lastMessage: r.last_message || '',
+        lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : null,
+        lastMessageSenderId: r.last_message_sender_id ? String(r.last_message_sender_id) : null,
+        lastMessageMediaType: r.last_message_media_type || null,
+        lastMessageReadByOther,
+        unread,
+        pinnedAt: r.pinned_at ? new Date(r.pinned_at).toISOString() : null,
+        mutedUntil: r.muted_until ? new Date(r.muted_until).toISOString() : null,
+        archivedAt: r.archived_at ? new Date(r.archived_at).toISOString() : null,
+        pinnedMessageId: r.pinned_message_id ? Number(r.pinned_message_id) : null,
+        online: !!presence.online,
+        lastSeen: presence.lastSeen || null,
+        // legacy aliases used by older callers (Layout.tsx, etc.)
+        userId: partnerIdStr,
+        username: r.partner_username || '',
+        firstName: r.partner_first_name || '',
+        photoUrl: r.partner_photo || null,
+        unreadCount: unread,
+      };
+    });
     return res.json({ success: true, threads });
   } catch (err) {
     logger.error('getThreads error', err);
@@ -63,14 +112,13 @@ const getConversation = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
   const { cursor } = req.query;
-  const currentUserId = String(user.id);
   try {
     const { rows } = await query(
       `SELECT dm.id, dm.sender_id, dm.recipient_id,
               dm.content, dm.is_deleted, dm.edited_at,
               dm.media_url, dm.media_type, dm.media_mime, dm.media_thumb_url,
-              dm.is_read, dm.created_at,
-              rxn.reactions
+              dm.is_read, dm.read_at, dm.created_at, dm.reply_to_id,
+              rxn.reactions, rpv.reply_preview
        FROM direct_messages dm
        LEFT JOIN LATERAL (
          SELECT json_agg(json_build_object(
@@ -88,6 +136,17 @@ const getConversation = async (req, res) => {
            GROUP BY dr.emoji
          ) sub
        ) rxn ON true
+       LEFT JOIN LATERAL (
+         SELECT json_build_object(
+           'id', rdm.id,
+           'senderId', rdm.sender_id,
+           'content', LEFT(COALESCE(rdm.content, ''), 80),
+           'mediaType', rdm.media_type,
+           'isDeleted', rdm.is_deleted
+         ) AS reply_preview
+         FROM direct_messages rdm
+         WHERE rdm.id = dm.reply_to_id
+       ) rpv ON dm.reply_to_id IS NOT NULL
        WHERE ((dm.sender_id=$1 AND dm.recipient_id=$2) OR (dm.sender_id=$2 AND dm.recipient_id=$1))
          ${cursor ? 'AND dm.created_at < $3' : ''}
        ORDER BY dm.created_at DESC LIMIT 30`,
@@ -99,10 +158,11 @@ const getConversation = async (req, res) => {
       ...m,
       content: m.is_deleted ? null : m.content,
       reactions: Array.isArray(m.reactions) ? m.reactions : [],
+      replyPreview: m.reply_preview || null,
     }));
 
-    // Mark messages as read
-    await DmService.markAsRead(user.id, partnerId);
+    // Mark messages as read (and emit dm:message:read so sender's checkmarks flip)
+    await DmService.markAsRead(user.id, partnerId, req.app.get('io') || null);
 
     return res.json({ success: true, messages });
   } catch (err) {
@@ -462,6 +522,157 @@ const searchDmMessages = async (req, res) => {
   }
 };
 
+// ─── Telegram-style: pin / mute / archive / mark unread / pin message ───
+
+const pinThread = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
+  try {
+    const states = await DmService.getThreadStates(user.id);
+    const current = states.get(String(partnerId));
+    const next = !(current && current.pinnedAt);
+    const r = await DmService.setThreadFlag(user.id, partnerId, { pinned: next });
+    return res.json({ success: true, pinned: next, pinnedAt: r.pinnedAt });
+  } catch (err) {
+    logger.error('pinThread error', err);
+    return res.status(500).json({ error: 'Failed to pin thread' });
+  }
+};
+
+const muteThread = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
+  let { untilIso } = req.body || {};
+  try {
+    let mutedUntil = null;
+    if (untilIso === 'forever') mutedUntil = '2099-01-01T00:00:00Z';
+    else if (untilIso) {
+      const d = new Date(untilIso);
+      if (!Number.isFinite(d.getTime())) return res.status(400).json({ error: 'Invalid untilIso' });
+      mutedUntil = d.toISOString();
+    }
+    const r = await DmService.setThreadFlag(user.id, partnerId, { mutedUntil });
+    return res.json({ success: true, mutedUntil: r.mutedUntil });
+  } catch (err) {
+    logger.error('muteThread error', err);
+    return res.status(500).json({ error: 'Failed to mute thread' });
+  }
+};
+
+const archiveThread = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
+  try {
+    const states = await DmService.getThreadStates(user.id);
+    const current = states.get(String(partnerId));
+    const next = !(current && current.archivedAt);
+    const r = await DmService.setThreadFlag(user.id, partnerId, { archived: next });
+    return res.json({ success: true, archived: next, archivedAt: r.archivedAt });
+  } catch (err) {
+    logger.error('archiveThread error', err);
+    return res.status(500).json({ error: 'Failed to archive thread' });
+  }
+};
+
+const markUnread = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
+  try {
+    const [a, b] = [String(user.id), String(partnerId)].sort();
+    const col = String(user.id) === a ? 'unread_for_a' : 'unread_for_b';
+    await query(
+      `UPDATE dm_threads SET ${col} = GREATEST(1, ${col}) WHERE user_a = $1 AND user_b = $2`,
+      [a, b]
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('markUnread error', err);
+    return res.status(500).json({ error: 'Failed to mark unread' });
+  }
+};
+
+const pinMessage = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
+  const messageId = req.body?.messageId == null ? null : Number(req.body.messageId);
+  if (messageId !== null && !Number.isFinite(messageId)) {
+    return res.status(400).json({ error: 'Invalid messageId' });
+  }
+  try {
+    if (messageId !== null) {
+      // Validate message belongs to this conversation
+      const { rows } = await query(
+        `SELECT 1 FROM direct_messages
+         WHERE id = $1 AND ((sender_id = $2 AND recipient_id = $3) OR (sender_id = $3 AND recipient_id = $2))
+         LIMIT 1`,
+        [messageId, user.id, partnerId]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Message not in this conversation' });
+    }
+    const r = await DmService.setThreadFlag(user.id, partnerId, { pinnedMessageId: messageId });
+    return res.json({ success: true, pinnedMessageId: r.pinnedMessageId });
+  } catch (err) {
+    logger.error('pinMessage error', err);
+    return res.status(500).json({ error: 'Failed to pin message' });
+  }
+};
+
+// ─── Global DM search ───
+
+const searchAllDms = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ success: true, results: [] });
+  if (q.length > 200) return res.status(400).json({ error: 'Query too long' });
+  try {
+    const results = await DmService.searchAllMessages(user.id, q, 50);
+    return res.json({ success: true, results });
+  } catch (err) {
+    logger.error('searchAllDms error', err);
+    return res.status(500).json({ error: 'Search failed' });
+  }
+};
+
+// ─── Forward ───
+
+const forwardMessage = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const messageId = Number(req.body?.messageId);
+  const recipientIds = Array.isArray(req.body?.recipientIds) ? req.body.recipientIds : [];
+  const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 500) : '';
+  if (!Number.isFinite(messageId)) return res.status(400).json({ error: 'Invalid messageId' });
+  if (!recipientIds.length || recipientIds.length > 5) return res.status(400).json({ error: 'recipientIds must be 1..5' });
+  try {
+    const result = await DmService.forwardMessage(user.id, messageId, recipientIds, note);
+    // Best-effort socket fanout — let recipients see the new message immediately
+    const io = req.app.get('io');
+    if (io && Array.isArray(result.sent)) {
+      for (const item of result.sent) {
+        try { io.to(`user:${item.recipientId}`).emit('dm:message', { id: item.messageId }); } catch (_) {}
+      }
+    }
+    return res.json(result);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    logger.error('forwardMessage error', err);
+    return res.status(500).json({ error: 'Forward failed' });
+  }
+};
+
+// ─── Presence ───
+
+const getPresence = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const ids = String(req.query.ids || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 50);
+  try {
+    const presence = await DmService.getPresence(ids);
+    return res.json({ success: true, presence });
+  } catch (err) {
+    logger.error('getPresence error', err);
+    return res.status(500).json({ error: 'Failed to load presence' });
+  }
+};
+
 module.exports = {
   getThreads,
   getConversation,
@@ -472,4 +683,12 @@ module.exports = {
   editDmMessage,
   deleteDmMessage,
   searchDmMessages,
+  pinThread,
+  muteThread,
+  archiveThread,
+  markUnread,
+  pinMessage,
+  searchAllDms,
+  forwardMessage,
+  getPresence,
 };

@@ -4590,6 +4590,18 @@ app.post('/api/webapp/admin/trials/revoke-unused', adminGuard, asyncHandler(asyn
 
 // DM threads & conversations
 app.get('/api/webapp/dm/threads', requireSessionAuth, asyncHandler(dmController.getThreads));
+// Global DM search — MUST be before :partnerId wildcard routes
+app.get('/api/webapp/dm/search', requireSessionAuth, asyncHandler(dmController.searchAllDms));
+// Presence endpoint — MUST be before wildcard routes
+app.get('/api/webapp/dm/presence', requireSessionAuth, asyncHandler(dmController.getPresence));
+// Forward a message to one or more recipients
+app.post('/api/webapp/dm/forward', requireSessionAuth, asyncHandler(dmController.forwardMessage));
+// Per-thread state (pin / mute / archive / unread / pin-message) — register BEFORE :partnerId wildcard
+app.put('/api/webapp/dm/thread/:partnerId/pin', requireSessionAuth, asyncHandler(dmController.pinThread));
+app.put('/api/webapp/dm/thread/:partnerId/mute', requireSessionAuth, asyncHandler(dmController.muteThread));
+app.put('/api/webapp/dm/thread/:partnerId/archive', requireSessionAuth, asyncHandler(dmController.archiveThread));
+app.put('/api/webapp/dm/thread/:partnerId/unread', requireSessionAuth, asyncHandler(dmController.markUnread));
+app.put('/api/webapp/dm/thread/:partnerId/pin-message', requireSessionAuth, asyncHandler(dmController.pinMessage));
 // search MUST be registered before :partnerId wildcard routes to avoid collision
 app.get('/api/webapp/dm/conversation/:partnerId/search', requireSessionAuth, asyncHandler(dmController.searchDmMessages));
 app.get('/api/webapp/dm/conversation/:partnerId', requireSessionAuth, asyncHandler(dmController.getConversation));

@@ -8,10 +8,21 @@ import { useI18n } from "@/lib/i18n";
 import { PermissionGate } from "@/components/PermissionGate";
 import {
   createDmVideoCall,
-  getMessageThreads,
+  getDmThreads,
   joinDmVideoCall,
   markThreadAsRead,
   toggleDmMessageReaction,
+  editDmMessage,
+  pinDmThread,
+  muteDmThread,
+  archiveDmThread,
+  markDmThreadUnread,
+  pinDmMessage as pinDmMessageApi,
+  searchAllDms,
+  forwardDmMessage,
+  getDmPresence,
+  searchUsersForNewChat,
+  type DmSearchResult,
   type DmVideoCallSession,
   type MessageThread,
 } from "@/lib/api";
@@ -29,6 +40,14 @@ interface DmReaction {
   users: Array<{ id: string; username: string }>;
 }
 
+interface ReplyPreview {
+  id: number;
+  senderId: string;
+  content: string;
+  mediaType: "image" | "video" | "audio" | null;
+  isDeleted: boolean;
+}
+
 interface DmMessage {
   id: number;
   sender_id: string;
@@ -42,6 +61,9 @@ interface DmMessage {
   is_deleted?: boolean;
   created_at: string;
   edited_at?: string | null;
+  read_at?: string | null;
+  reply_to_id?: number | null;
+  replyPreview?: ReplyPreview | null;
   reactions?: DmReaction[];
 }
 
@@ -63,6 +85,69 @@ function timeAgo(dateStr: string): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h`;
   return `${Math.floor(hrs / 24)}d`;
+}
+
+// Telegram-style smart timestamp for thread list rows
+function smartTimestamp(dateStr: string): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return "Yesterday";
+  const diffDays = (now.getTime() - d.getTime()) / 86400000;
+  if (diffDays < 7) return d.toLocaleDateString([], { weekday: "short" });
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString([], { day: "2-digit", month: "short" });
+  return d.toLocaleDateString([], { day: "2-digit", month: "short", year: "2-digit" });
+}
+
+// Date separator label between message groups
+function dayLabel(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return "Today";
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return "Yesterday";
+  const diffDays = (now.getTime() - d.getTime()) / 86400000;
+  if (diffDays < 7) return d.toLocaleDateString([], { weekday: "long" });
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString([], { day: "2-digit", month: "long" });
+  return d.toLocaleDateString([], { day: "2-digit", month: "long", year: "numeric" });
+}
+
+// "Last seen 5m" formatter (presence subtitle)
+function lastSeenLabel(iso: string | null): string {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60_000) return "last seen recently";
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `last seen ${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `last seen ${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `last seen ${days}d ago`;
+  return `last seen ${new Date(iso).toLocaleDateString([], { day: "2-digit", month: "short" })}`;
+}
+
+// Format last-message preview line for thread list ("You: 📷 Photo")
+function buildPreview(t: MessageThread, myDbId: string): string {
+  const isMine = t.lastMessageSenderId && String(t.lastMessageSenderId) === String(myDbId);
+  const prefix = isMine ? "You: " : "";
+  const mediaType = t.lastMessageMediaType;
+  if (mediaType === "image") return prefix + (t.lastMessage ? `📷 ${t.lastMessage}` : "📷 Photo");
+  if (mediaType === "video") return prefix + (t.lastMessage ? `🎥 ${t.lastMessage}` : "🎥 Video");
+  if (mediaType === "audio") return prefix + "🎤 Voice message";
+  return prefix + (t.lastMessage || "…");
+}
+
+// Compute partner identity from MessageThread (handle legacy + new keys)
+function partnerOf(t: MessageThread): { id: string; name: string; photo: string | null } {
+  return {
+    id: String(t.partnerId ?? t.userId ?? ""),
+    name: t.partnerFirstName || t.partnerUsername || t.firstName || t.username || "User",
+    photo: (t.partnerPhoto ?? t.photoUrl ?? null) as string | null,
+  };
 }
 
 // ─── Emoji data ───────────────────────────────────────────────────────────────
@@ -189,6 +274,26 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
   const [emojiPickerPos, setEmojiPickerPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [recentlyReacted, setRecentlyReacted] = useState<Set<string>>(new Set());
 
+  // Telegram-style: presence, reply, edit, forward, pin, scroll-to-bottom, in-chat search, more-menu
+  const [partnerOnline, setPartnerOnline] = useState(false);
+  const [partnerLastSeen, setPartnerLastSeen] = useState<string | null>(null);
+  const [partnerMutedUntil, setPartnerMutedUntil] = useState<string | null>(null);
+  const [pinnedMessageId, setPinnedMessageId] = useState<number | null>(null);
+  const [replyTo, setReplyTo] = useState<DmMessage | null>(null);
+  const [editingMsg, setEditingMsg] = useState<DmMessage | null>(null);
+  const [forwardingMsg, setForwardingMsg] = useState<DmMessage | null>(null);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const [inChatSearch, setInChatSearch] = useState<{ open: boolean; q: string; results: DmMessage[]; idx: number } | null>(null);
+  const [scrolledUpBy, setScrolledUpBy] = useState(0);
+  const [newMessagesWhileScrolledUp, setNewMessagesWhileScrolledUp] = useState(0);
+  const [partnerReadAt, setPartnerReadAt] = useState<string | null>(null);
+  const [highlightId, setHighlightId] = useState<number | null>(null);
+  const swipeState = useRef<{ id: number | null; startX: number; startY: number; dx: number }>({ id: null, startX: 0, startY: 0, dx: 0 });
+  const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const jumpToParam = searchParams.get("jumpTo");
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -241,6 +346,28 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
         if (data?.success && data.user) {
           setPartnerName(data.user.first_name || data.user.username || "User");
           setPartnerPhoto(data.user.photo_file_id || null);
+        }
+      })
+      .catch(() => {});
+
+    // Initial presence
+    getDmPresence([userId])
+      .then((r) => {
+        const entry = r.presence?.[0];
+        if (entry) {
+          setPartnerOnline(!!entry.online);
+          setPartnerLastSeen(entry.lastSeen || null);
+        }
+      })
+      .catch(() => {});
+
+    // Thread state (pinnedMessageId / mutedUntil) — derive from threads list
+    getDmThreads()
+      .then((r) => {
+        const t = (r.threads || []).find((x) => String(partnerOf(x).id) === String(userId));
+        if (t) {
+          setPinnedMessageId(t.pinnedMessageId || null);
+          setPartnerMutedUntil(t.mutedUntil || null);
         }
       })
       .catch(() => {});
@@ -349,6 +476,17 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
       }
     };
 
+    const onPresenceUpdate = (data: { userId: string; online: boolean; lastSeen: string | null }) => {
+      if (String(data.userId) !== String(userId)) return;
+      setPartnerOnline(!!data.online);
+      setPartnerLastSeen(data.lastSeen || null);
+    };
+
+    const onDmReadByPartner = (data: { partnerId: string; readAt: string }) => {
+      if (String(data.partnerId) !== String(userId)) return;
+      setPartnerReadAt(data.readAt);
+    };
+
     socket.on("dm:message", onDmMessage);
     socket.on("dm:sent", onDmSent);
     socket.on("dm:typing", onDmTyping);
@@ -358,6 +496,13 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     socket.on("dm:error", onDmError);
     socket.on("dm:call:incoming", onDmCallIncoming);
     socket.on("dm:call:declined", onDmCallDeclined);
+    socket.on("presence:update", onPresenceUpdate);
+    socket.on("dm:message:read", onDmReadByPartner);
+
+    // Heartbeat so the server keeps me marked online while this tab is open
+    heartbeatRef.current = setInterval(() => {
+      try { socket.emit("presence:heartbeat"); } catch { /* ignore */ }
+    }, 45_000);
 
     return () => {
       socket.off("dm:message", onDmMessage);
@@ -369,6 +514,9 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
       socket.off("dm:error", onDmError);
       socket.off("dm:call:incoming", onDmCallIncoming);
       socket.off("dm:call:declined", onDmCallDeclined);
+      socket.off("presence:update", onPresenceUpdate);
+      socket.off("dm:message:read", onDmReadByPartner);
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
       // Clear any pending long-press timer to avoid state updates after unmount
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
@@ -460,6 +608,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
       const formData = new FormData();
       formData.append("media", file);
       if (caption) formData.append("content", caption);
+      if (replyTo) formData.append("replyToId", String(replyTo.id));
       const xhr = new XMLHttpRequest();
       xhr.open("POST", `${API_BASE}/api/webapp/dm/media/${userId}`);
       xhr.withCredentials = true;
@@ -485,6 +634,20 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     setSendingMessage(true);
     setChatError(null);
     try {
+      // Edit mode: just patch the message via API
+      if (editingMsg) {
+        const trimmed = messageInput.trim();
+        if (!trimmed) { setSendingMessage(false); return; }
+        await editDmMessage(editingMsg.id, trimmed);
+        setMessages((prev) => prev.map((m) =>
+          m.id === editingMsg.id ? { ...m, content: trimmed, edited_at: new Date().toISOString() } : m
+        ));
+        setEditingMsg(null);
+        setMessageInput("");
+        setSendingMessage(false);
+        return;
+      }
+
       if (mediaFile) {
         setUploadProgress(0);
         const data = await uploadMediaWithProgress(mediaFile, messageInput.trim());
@@ -492,11 +655,14 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
         setMediaFile(null);
         if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
         setMessageInput("");
+        setReplyTo(null);
       } else {
+        const body: { content: string; replyToId?: number } = { content: messageInput.trim() };
+        if (replyTo) body.replyToId = replyTo.id;
         const res = await fetch(`${API_BASE}/api/webapp/dm/send/${userId}`, {
           method: "POST", credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: messageInput.trim() }),
+          body: JSON.stringify(body),
         });
         if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err as { error?: string }).error || "Failed to send"); }
         const data = await res.json();
@@ -505,8 +671,12 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
           if (data.message) setMessages((prev) => [...prev, data.message, { id: Date.now(), sender_id: "cristina-ai", recipient_id: userId, content: data.ticketNotice, is_read: true, created_at: new Date().toISOString() } as any]);
           setMessageInput("");
         } else {
-          if (data.message) setMessages((prev) => prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]);
+          if (data.message) {
+            const augmented = replyTo ? { ...data.message, replyPreview: { id: replyTo.id, senderId: replyTo.sender_id, content: (replyTo.content || "").slice(0, 80), mediaType: replyTo.media_type, isDeleted: !!replyTo.is_deleted } } : data.message;
+            setMessages((prev) => prev.some((m) => m.id === augmented.id) ? prev : [...prev, augmented]);
+          }
           setMessageInput("");
+          setReplyTo(null);
         }
       }
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
@@ -673,6 +843,149 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     connectSocket().emit("dm:message:delete", { messageId: msg.id });
   };
 
+  const handleReply = (msg: DmMessage) => {
+    setContextMenu(null);
+    setEditingMsg(null);
+    setReplyTo(msg);
+  };
+
+  const handleStartEdit = (msg: DmMessage) => {
+    setContextMenu(null);
+    setReplyTo(null);
+    setEditingMsg(msg);
+    setMessageInput(msg.content || "");
+  };
+
+  const handleCopyMsg = async (msg: DmMessage) => {
+    setContextMenu(null);
+    if (!msg.content) return;
+    try { await navigator.clipboard.writeText(msg.content); } catch { /* ignore */ }
+  };
+
+  const handleForwardMsg = (msg: DmMessage) => {
+    setContextMenu(null);
+    setForwardingMsg(msg);
+  };
+
+  const handlePinMsg = async (msg: DmMessage) => {
+    setContextMenu(null);
+    const isPinning = pinnedMessageId !== msg.id;
+    setPinnedMessageId(isPinning ? msg.id : null);
+    try {
+      await pinDmMessageApi(userId, isPinning ? msg.id : null);
+    } catch {
+      // revert on failure
+      setPinnedMessageId(pinnedMessageId);
+    }
+  };
+
+  const scrollToMessage = useCallback((id: number) => {
+    const el = messageRefs.current.get(id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightId(id);
+    setTimeout(() => setHighlightId((curr) => (curr === id ? null : curr)), 1600);
+  }, []);
+
+  // Handle ?jumpTo=:id query
+  useEffect(() => {
+    if (!jumpToParam || isLoading || !messages.length) return;
+    const id = Number(jumpToParam);
+    if (Number.isFinite(id)) {
+      setTimeout(() => scrollToMessage(id), 200);
+      // Strip the param so reload doesn't re-jump
+      const next = new URLSearchParams(searchParams);
+      next.delete("jumpTo");
+      setSearchParams(next, { replace: true });
+    }
+  }, [jumpToParam, isLoading, messages.length, scrollToMessage, searchParams, setSearchParams]);
+
+  // Track scroll position for scroll-to-bottom FAB and new-message badge
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setScrolledUpBy(distanceFromBottom);
+    if (distanceFromBottom < 60) setNewMessagesWhileScrolledUp(0);
+    if (el.scrollTop < 60 && hasMore && !loadingMore) loadMoreMessages();
+  };
+
+  // Bump new-message badge if a message arrived while scrolled up
+  useEffect(() => {
+    if (scrolledUpBy > 200 && messages.length > 0) {
+      const last = messages[messages.length - 1];
+      if (last && String(last.sender_id) !== String(myDbId)) {
+        setNewMessagesWhileScrolledUp((n) => n + 1);
+      }
+    }
+    // intentionally only watch messages length
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
+
+  // Swipe-to-reply on mobile
+  const handleBubbleTouchStart = (msg: DmMessage, e: React.TouchEvent<HTMLDivElement>) => {
+    if (msg.is_deleted) return;
+    const touch = e.touches[0];
+    swipeState.current = { id: msg.id, startX: touch.clientX, startY: touch.clientY, dx: 0 };
+  };
+  const handleBubbleTouchMove = (msg: DmMessage, e: React.TouchEvent<HTMLDivElement>) => {
+    if (swipeState.current.id !== msg.id) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - swipeState.current.startX;
+    const dy = Math.abs(touch.clientY - swipeState.current.startY);
+    if (dy > 20) { swipeState.current.id = null; return; }
+    if (dx > 0 && dx < 100) {
+      swipeState.current.dx = dx;
+      const el = e.currentTarget as HTMLElement;
+      el.style.transform = `translateX(${dx * 0.6}px)`;
+    }
+  };
+  const handleBubbleTouchEnd = (msg: DmMessage, e: React.TouchEvent<HTMLDivElement>) => {
+    const el = e.currentTarget as HTMLElement;
+    el.style.transform = "";
+    if (swipeState.current.id === msg.id && swipeState.current.dx > 50) {
+      handleReply(msg);
+    }
+    swipeState.current = { id: null, startX: 0, startY: 0, dx: 0 };
+  };
+
+  // In-chat search
+  const runInChatSearch = async (q: string) => {
+    setInChatSearch((curr) => ({ open: true, q, results: curr?.results || [], idx: 0 }));
+    if (q.trim().length < 2) {
+      setInChatSearch({ open: true, q, results: [], idx: 0 });
+      return;
+    }
+    try {
+      const r = await fetch(`${API_BASE}/api/webapp/dm/conversation/${userId}/search?q=${encodeURIComponent(q.trim())}`, { credentials: "include" });
+      const data = await r.json();
+      if (data.success) {
+        setInChatSearch({ open: true, q, results: data.messages || [], idx: 0 });
+        if ((data.messages || []).length > 0) scrollToMessage(data.messages[0].id);
+      }
+    } catch { /* silent */ }
+  };
+
+  const isPartnerMuted = !!(partnerMutedUntil && new Date(partnerMutedUntil).getTime() > Date.now());
+
+  const handleToggleMute = async () => {
+    setShowHeaderMenu(false);
+    try {
+      const r = await muteDmThread(userId, isPartnerMuted ? null : "forever");
+      setPartnerMutedUntil(r.mutedUntil);
+    } catch { /* silent */ }
+  };
+
+  // Forward submit
+  const submitForward = async (recipientIds: string[], note: string) => {
+    if (!forwardingMsg) return;
+    try {
+      await forwardDmMessage(forwardingMsg.id, recipientIds, note || undefined);
+      setForwardingMsg(null);
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Failed to forward");
+    }
+  };
+
   const isValidPhoto = (p: string | null | undefined) => p && (p.startsWith("/") || p.startsWith("http"));
 
   const renderMessageContent = (content: string | null) => {
@@ -733,10 +1046,28 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
           <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A", display: isValidPhoto(partnerPhoto) ? "none" : undefined }}>
             {(partnerName || "?")[0].toUpperCase()}
           </div>
+          {partnerOnline && (
+            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-400 ring-2 ring-pnp-background" aria-label="online" />
+          )}
         </button>
         <button onClick={() => navigate(`/profile/${userId}`)} className="flex-1 min-w-0 text-left">
-          <p className="text-sm font-bold text-pnp-textPrimary truncate leading-tight">{partnerName || "Conversation"}</p>
-          <p className="text-[11px] text-pnp-textSecondary leading-tight">Tap to view profile</p>
+          <p className="text-sm font-bold text-pnp-textPrimary truncate leading-tight flex items-center gap-1">
+            {partnerName || "Conversation"}
+            {isPartnerMuted && (
+              <svg className="w-3 h-3 text-pnp-textSecondary/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l4-4m0 4l-4-4" /></svg>
+            )}
+          </p>
+          <p className="text-[11px] leading-tight">
+            {isTyping ? (
+              <span className="italic text-pnp-accent">typing…</span>
+            ) : partnerOnline ? (
+              <span className="text-green-400">online</span>
+            ) : partnerLastSeen ? (
+              <span className="text-pnp-textSecondary">{lastSeenLabel(partnerLastSeen)}</span>
+            ) : (
+              <span className="text-pnp-textSecondary">Tap to view profile</span>
+            )}
+          </p>
         </button>
         <button
           type="button"
@@ -757,7 +1088,103 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
             </svg>
           )}
         </button>
+        <div className="relative flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowHeaderMenu((v) => !v)}
+            className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all"
+            aria-label="More"
+          >
+            <svg className="w-5 h-5 text-pnp-textPrimary" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="4" r="1.5" /><circle cx="10" cy="10" r="1.5" /><circle cx="10" cy="16" r="1.5" /></svg>
+          </button>
+          {showHeaderMenu && (
+            <>
+              <div className="fixed inset-0 z-[40]" onClick={() => setShowHeaderMenu(false)} />
+              <div className="absolute right-0 mt-1 w-52 z-[41] rounded-2xl shadow-2xl overflow-hidden" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+                <button onClick={() => { setShowHeaderMenu(false); setInChatSearch({ open: true, q: "", results: [], idx: 0 }); }} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+                  Search in chat
+                </button>
+                <button onClick={handleToggleMute} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                  {isPartnerMuted ? "Unmute" : "Mute notifications"}
+                </button>
+                <button onClick={() => { setShowHeaderMenu(false); navigate(`/profile/${userId}`); }} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                  View profile
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
+      {inChatSearch?.open && (
+        <div className="px-3 py-2 border-b border-pnp-border flex items-center gap-2 flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
+          <input
+            type="text"
+            autoFocus
+            value={inChatSearch.q}
+            onChange={(e) => runInChatSearch(e.target.value)}
+            placeholder="Search in this chat…"
+            className="flex-1 bg-white/5 text-pnp-textPrimary placeholder-pnp-textSecondary/50 rounded-xl px-3 py-2 outline-none focus:ring-1 focus:ring-pnp-accent/50"
+            style={{ fontSize: "16px" }}
+          />
+          {inChatSearch.results.length > 0 && (
+            <span className="text-[11px] text-pnp-textSecondary tabular-nums px-1">
+              {inChatSearch.idx + 1}/{inChatSearch.results.length}
+            </span>
+          )}
+          <button
+            onClick={() => {
+              if (!inChatSearch.results.length) return;
+              const next = (inChatSearch.idx + 1) % inChatSearch.results.length;
+              setInChatSearch({ ...inChatSearch, idx: next });
+              scrollToMessage(inChatSearch.results[next].id);
+            }}
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 disabled:opacity-30"
+            disabled={!inChatSearch.results.length}
+            aria-label="Next match"
+          >
+            <svg className="w-4 h-4 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <button onClick={() => setInChatSearch(null)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95" aria-label="Close search">
+            <svg className="w-4 h-4 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+      {pinnedMessageId && (() => {
+        const pinned = messages.find((m) => m.id === pinnedMessageId);
+        if (!pinned) return null;
+        const label = pinned.is_deleted
+          ? "(deleted)"
+          : pinned.media_type === "image"
+            ? `📷 ${pinned.content || "Photo"}`
+            : pinned.media_type === "video"
+              ? `🎥 ${pinned.content || "Video"}`
+              : pinned.media_type === "audio"
+                ? "🎤 Voice message"
+                : (pinned.content || "");
+        return (
+          <button
+            onClick={() => scrollToMessage(pinned.id)}
+            className="w-full px-3 py-2 border-b border-pnp-border flex items-center gap-2 flex-shrink-0 text-left hover:bg-white/5 transition-colors"
+            style={{ background: "rgba(212,0,122,0.06)" }}
+          >
+            <div className="w-1 h-8 rounded-full" style={{ background: "linear-gradient(180deg, #D4007A, #E69138)" }} />
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold text-pnp-accent uppercase tracking-wider">📌 Pinned message</p>
+              <p className="text-xs text-pnp-textPrimary truncate">{label}</p>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); void pinDmMessageApi(userId, null).then(() => setPinnedMessageId(null)); }}
+              className="w-6 h-6 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10"
+              aria-label="Unpin"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </button>
+        );
+      })()}
 
       {inviteRoomFromQuery && !activeCall && (
         <div className="px-3 py-2 border-b border-pnp-border bg-[#101114] flex items-center justify-between gap-3 flex-shrink-0">
@@ -840,7 +1267,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
       )}
 
       {/* Messages */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-2" onScroll={(e) => { if (e.currentTarget.scrollTop < 60 && hasMore && !loadingMore) loadMoreMessages(); }}>
+      <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-2 relative" onScroll={handleScroll}>
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-8 h-8 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" />
@@ -871,15 +1298,27 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
               const sameSenderAsPrev = prev && String(prev.sender_id) === String(msg.sender_id);
               const timeDiff = prev ? new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime() : Infinity;
               const isGrouped = sameSenderAsPrev && timeDiff < 60000;
+              const showDaySeparator = !prev || new Date(msg.created_at).toDateString() !== new Date(prev.created_at).toDateString();
+              const wasReadByPartner = isMe && (msg.read_at != null || (partnerReadAt != null && new Date(msg.created_at).getTime() <= new Date(partnerReadAt).getTime()));
+              const isHighlighted = highlightId === msg.id;
 
               return (
+                <React.Fragment key={msg.id}>
+                  {showDaySeparator && (
+                    <div className="flex justify-center my-3 sticky top-0 z-[1] pointer-events-none">
+                      <span className="px-3 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary" style={{ background: "rgba(20,20,22,0.85)", backdropFilter: "blur(6px)" }}>
+                        {dayLabel(msg.created_at)}
+                      </span>
+                    </div>
+                  )}
                 <div
-                  key={msg.id}
-                  className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${isGrouped ? "!mt-0.5" : ""}`}
+                  ref={(el) => { if (el) messageRefs.current.set(msg.id, el); else messageRefs.current.delete(msg.id); }}
+                  className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${isGrouped ? "!mt-0.5" : ""} transition-all`}
                   onContextMenu={(e) => handleContextMenu(msg, e)}
-                  onTouchStart={(e) => handleTouchStart(msg, e)}
-                  onTouchEnd={handleTouchEnd}
-                  onTouchMove={handleTouchEnd}
+                  onTouchStart={(e) => { handleTouchStart(msg, e); handleBubbleTouchStart(msg, e); }}
+                  onTouchEnd={(e) => { handleTouchEnd(); handleBubbleTouchEnd(msg, e); }}
+                  onTouchMove={(e) => { handleTouchEnd(); handleBubbleTouchMove(msg, e); }}
+                  style={{ transition: "transform 200ms ease-out", background: isHighlighted ? "rgba(212,0,122,0.12)" : undefined, borderRadius: isHighlighted ? "12px" : undefined }}
                 >
                   <div className={`max-w-[78%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
                     {msg.is_deleted ? (
@@ -891,15 +1330,49 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                         className={`rounded-2xl px-3 py-2 text-sm break-words ${isMe ? "text-white rounded-br-md" : "bg-white/10 text-white rounded-bl-md"}`}
                         style={isMe ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}
                       >
-                        {msg.media_url && msg.media_type && (
+                        {msg.replyPreview && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); scrollToMessage(msg.replyPreview!.id); }}
+                            className="w-full text-left mb-1.5 pl-2 border-l-2 rounded-r"
+                            style={{ borderColor: isMe ? "rgba(255,255,255,0.6)" : "#D4007A", background: isMe ? "rgba(255,255,255,0.1)" : "rgba(212,0,122,0.08)" }}
+                          >
+                            <p className={`text-[11px] font-semibold ${isMe ? "text-white/90" : "text-pnp-accent"}`}>
+                              {String(msg.replyPreview.senderId) === String(myDbId) ? "You" : (partnerName || "Them")}
+                            </p>
+                            <p className={`text-[11px] truncate ${isMe ? "text-white/70" : "text-pnp-textSecondary"}`}>
+                              {msg.replyPreview.isDeleted ? "(deleted)" : msg.replyPreview.mediaType === "image" ? "📷 Photo" : msg.replyPreview.mediaType === "video" ? "🎥 Video" : msg.replyPreview.mediaType === "audio" ? "🎤 Voice" : (msg.replyPreview.content || "")}
+                            </p>
+                          </button>
+                        )}
+                        {msg.media_url && msg.media_type === "audio" ? (
+                          <VoiceBubble src={msg.media_url} id={msg.id} isMe={isMe} />
+                        ) : msg.media_url && msg.media_type ? (
                           <div className="mb-1">
                             <MediaMessage mediaUrl={msg.media_url} mediaType={msg.media_type} thumbUrl={msg.media_thumb_url} onExpandImage={(url) => setLightboxUrl(url)} isMe={isMe} />
                           </div>
-                        )}
+                        ) : null}
                         {renderMessageContent(msg.content)}
                         <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
+                          {msg.id === pinnedMessageId && (
+                            <svg className={`w-2.5 h-2.5 ${isMe ? "text-white/50" : "text-pnp-textSecondary/60"}`} fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v3.586l1.707 1.707a1 1 0 01.293.707V13a1 1 0 01-1 1h-2v4a1 1 0 11-2 0v-4H6a1 1 0 01-1-1V9a1 1 0 01.293-.707L7 6.586V3a1 1 0 011-1h2z" /></svg>
+                          )}
                           <span className={`text-[10px] ${isMe ? "text-white/50" : "text-pnp-textSecondary/60"}`}>{timeStr}</span>
                           {msg.edited_at && <span className={`text-[10px] ${isMe ? "text-white/40" : "text-pnp-textSecondary/50"}`}>(edited)</span>}
+                          {isMe && (
+                            <span aria-label={wasReadByPartner ? "read" : "sent"} title={wasReadByPartner ? "Read" : "Sent"}>
+                              {wasReadByPartner ? (
+                                <svg className="w-3.5 h-3.5" viewBox="0 0 20 12" fill="none">
+                                  <path d="M1 6.5L5 10L13.5 1" stroke="#7BE2FF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                  <path d="M6 6.5L10 10L18.5 1" stroke="#7BE2FF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              ) : (
+                                <svg className="w-3 h-3" viewBox="0 0 14 12" fill="none">
+                                  <path d="M1 6.5L5 10L13.5 1" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              )}
+                            </span>
+                          )}
                         </div>
                       </div>
                     )}
@@ -929,10 +1402,29 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                     )}
                   </div>
                 </div>
+                </React.Fragment>
               );
             })}
             <div ref={messagesEndRef} />
           </>
+        )}
+        {scrolledUpBy > 200 && (
+          <button
+            type="button"
+            onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })}
+            className="sticky bottom-2 ml-auto mr-1 w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90 z-[5]"
+            style={{ background: "rgba(28,28,30,0.95)", border: "1px solid rgba(255,255,255,0.1)", float: "right" }}
+            aria-label="Scroll to bottom"
+          >
+            <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            </svg>
+            {newMessagesWhileScrolledUp > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+                {newMessagesWhileScrolledUp > 99 ? "99+" : newMessagesWhileScrolledUp}
+              </span>
+            )}
+          </button>
         )}
       </div>
 
@@ -947,6 +1439,36 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
             </span>
             <span className="text-[11px] text-pnp-textSecondary">{partnerName}</span>
           </div>
+        </div>
+      )}
+
+      {/* Reply preview bar */}
+      {replyTo && !editingMsg && (
+        <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-3 flex-shrink-0 bg-pnp-background">
+          <div className="w-1 self-stretch rounded-full" style={{ background: "linear-gradient(180deg, #D4007A, #E69138)" }} />
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-bold text-pnp-accent uppercase tracking-wider">Replying to {String(replyTo.sender_id) === String(myDbId) ? "yourself" : (partnerName || "Them")}</p>
+            <p className="text-xs text-pnp-textPrimary truncate">
+              {replyTo.is_deleted ? "(deleted)" : replyTo.media_type === "image" ? "📷 Photo" : replyTo.media_type === "video" ? "🎥 Video" : replyTo.media_type === "audio" ? "🎤 Voice message" : (replyTo.content || "")}
+            </p>
+          </div>
+          <button onClick={() => setReplyTo(null)} className="w-7 h-7 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10" aria-label="Cancel reply">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
+      {/* Edit preview bar */}
+      {editingMsg && (
+        <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-3 flex-shrink-0 bg-pnp-background">
+          <svg className="w-4 h-4 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-bold text-pnp-accent uppercase tracking-wider">Editing message</p>
+            <p className="text-xs text-pnp-textSecondary truncate">{editingMsg.content || ""}</p>
+          </div>
+          <button onClick={() => { setEditingMsg(null); setMessageInput(""); }} className="w-7 h-7 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10" aria-label="Cancel edit">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
         </div>
       )}
 
@@ -1055,10 +1577,12 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
             disabled={sendingMessage}
             className="p-2.5 rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30"
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-            aria-label="Send message"
+            aria-label={editingMsg ? "Save edit" : "Send message"}
           >
             {sendingMessage ? (
               <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+            ) : editingMsg ? (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
             ) : (
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
             )}
@@ -1102,11 +1626,35 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                 </svg>
               </button>
             </div>
+            <button onClick={() => handleReply(contextMenu.msg)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
+              Reply
+            </button>
+            {contextMenu.msg.content && (
+              <button onClick={() => handleCopyMsg(contextMenu.msg)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                Copy text
+              </button>
+            )}
+            {String(contextMenu.msg.sender_id) === String(myDbId) && contextMenu.msg.content && !contextMenu.msg.media_url && (
+              <button onClick={() => handleStartEdit(contextMenu.msg)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                Edit
+              </button>
+            )}
+            <button onClick={() => handleForwardMsg(contextMenu.msg)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+              Forward
+            </button>
+            <button onClick={() => handlePinMsg(contextMenu.msg)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v3.586l1.707 1.707a1 1 0 01.293.707V13a1 1 0 01-1 1h-2v4a1 1 0 11-2 0v-4H6a1 1 0 01-1-1V9a1 1 0 01.293-.707L7 6.586V3a1 1 0 011-1h2z" /></svg>
+              {pinnedMessageId === contextMenu.msg.id ? "Unpin from chat" : "Pin in chat"}
+            </button>
             {/* Delete option — sender only */}
             {String(contextMenu.msg.sender_id) === String(myDbId) && (
               <button
                 onClick={() => handleDeleteMsg(contextMenu.msg)}
-                className="w-full px-4 py-2.5 text-sm text-left text-red-400 hover:bg-white/10 transition-colors flex items-center gap-3"
+                className="w-full px-4 py-2.5 text-sm text-left text-red-400 hover:bg-white/10 transition-colors flex items-center gap-3 border-t border-white/5"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1116,6 +1664,16 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
             )}
           </div>
         </>
+      )}
+
+      {/* Forward modal */}
+      {forwardingMsg && (
+        <ForwardModal
+          msg={forwardingMsg}
+          onClose={() => setForwardingMsg(null)}
+          onSubmit={submitForward}
+          myDbId={myDbId}
+        />
       )}
 
       {/* Full emoji picker */}
@@ -1190,34 +1748,434 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
   );
 }
 
+// ─── Voice note bubble (waveform + play/pause + scrubber) ────────────────────
+
+function VoiceBubble({ src, id, isMe }: { src: string; id: number; isMe: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  // Stable per-message bar pattern
+  const bars = React.useMemo(() => {
+    const out: number[] = [];
+    let seed = id;
+    for (let i = 0; i < 28; i++) {
+      seed = (seed * 9301 + 49297) % 233280;
+      out.push(0.25 + (seed / 233280) * 0.75);
+    }
+    return out;
+  }, [id]);
+
+  const toggle = () => {
+    const a = audioRef.current; if (!a) return;
+    if (playing) { a.pause(); } else { a.play().catch(() => {}); }
+  };
+
+  useEffect(() => {
+    const a = audioRef.current; if (!a) return;
+    const onTime = () => setCurrentTime(a.currentTime);
+    const onLoaded = () => setDuration(Number.isFinite(a.duration) ? a.duration : 0);
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => { setPlaying(false); setCurrentTime(0); };
+    a.addEventListener("timeupdate", onTime);
+    a.addEventListener("loadedmetadata", onLoaded);
+    a.addEventListener("play", onPlay);
+    a.addEventListener("pause", onPause);
+    a.addEventListener("ended", onEnded);
+    return () => {
+      a.removeEventListener("timeupdate", onTime);
+      a.removeEventListener("loadedmetadata", onLoaded);
+      a.removeEventListener("play", onPlay);
+      a.removeEventListener("pause", onPause);
+      a.removeEventListener("ended", onEnded);
+    };
+  }, []);
+
+  const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
+  const progressColor = isMe ? "rgba(255,255,255,0.95)" : "#D4007A";
+  const restColor = isMe ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.3)";
+
+  const fmt = (s: number) => {
+    if (!Number.isFinite(s)) return "0:00";
+    const m = Math.floor(s / 60);
+    const r = Math.floor(s % 60);
+    return `${m}:${String(r).padStart(2, "0")}`;
+  };
+
+  return (
+    <div className="flex items-center gap-2 mb-1 min-w-[200px]">
+      <button
+        type="button"
+        onClick={toggle}
+        className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 active:scale-90 transition-all"
+        style={{ background: isMe ? "rgba(255,255,255,0.25)" : "rgba(212,0,122,0.85)" }}
+        aria-label={playing ? "Pause" : "Play"}
+      >
+        {playing ? (
+          <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M6 4h3v12H6zM11 4h3v12h-3z" /></svg>
+        ) : (
+          <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3.868v12.264a1 1 0 001.555.832l9-6.132a1 1 0 000-1.664l-9-6.132A1 1 0 005 3.868z" /></svg>
+        )}
+      </button>
+      <div className="flex-1 flex flex-col gap-0.5">
+        <div className="flex items-end gap-[2px] h-7">
+          {bars.map((h, i) => {
+            const filled = i / bars.length < progress;
+            return <span key={i} className="w-[2px] rounded-full" style={{ height: `${h * 100}%`, background: filled ? progressColor : restColor }} />;
+          })}
+        </div>
+        <span className={`text-[10px] tabular-nums ${isMe ? "text-white/70" : "text-pnp-textSecondary"}`}>{fmt(playing || currentTime > 0 ? currentTime : duration)}</span>
+      </div>
+      <audio ref={audioRef} src={src} preload="metadata" />
+    </div>
+  );
+}
+
+// ─── Forward modal ───────────────────────────────────────────────────────────
+
+function ForwardModal({ msg, onClose, onSubmit, myDbId }: { msg: DmMessage; onClose: () => void; onSubmit: (recipientIds: string[], note: string) => Promise<void>; myDbId: string }) {
+  const [threads, setThreads] = useState<MessageThread[]>([]);
+  const [search, setSearch] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    getDmThreads().then((r) => { if (r.success) setThreads(r.threads); }).catch(() => {});
+  }, []);
+
+  const filtered = search.trim()
+    ? threads.filter((t) => {
+        const p = partnerOf(t);
+        return p.name.toLowerCase().includes(search.toLowerCase()) || (t.partnerUsername || t.username || "").toLowerCase().includes(search.toLowerCase());
+      })
+    : threads;
+
+  const toggle = (id: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < 5) next.add(id);
+      return next;
+    });
+  };
+
+  const submit = async () => {
+    if (picked.size === 0 || submitting) return;
+    setSubmitting(true);
+    await onSubmit(Array.from(picked), note);
+    setSubmitting(false);
+  };
+
+  const preview = msg.media_type === "image" ? "📷 Photo" : msg.media_type === "video" ? "🎥 Video" : msg.media_type === "audio" ? "🎤 Voice message" : (msg.content || "");
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md max-h-[80vh] flex flex-col rounded-t-3xl sm:rounded-2xl overflow-hidden" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
+        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-bold text-pnp-textPrimary">Forward to…</h3>
+            <p className="text-[11px] text-pnp-textSecondary truncate max-w-[260px]">{preview}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10" aria-label="Close">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div className="px-3 py-2 border-b border-white/5">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search conversations…"
+            className="w-full bg-white/5 text-pnp-textPrimary placeholder-pnp-textSecondary/50 rounded-xl px-3 py-2 outline-none focus:ring-1 focus:ring-pnp-accent/50"
+            style={{ fontSize: "16px" }}
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="text-sm text-pnp-textSecondary text-center py-8">No conversations.</p>
+          ) : filtered.map((t) => {
+            const p = partnerOf(t);
+            const isPicked = picked.has(p.id);
+            return (
+              <button
+                key={p.id}
+                onClick={() => toggle(p.id)}
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+              >
+                {p.photo && (p.photo.startsWith("/") || p.photo.startsWith("http")) ? (
+                  <img src={p.photo} alt="" className="w-10 h-10 rounded-full object-cover" />
+                ) : (
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>{p.name[0]?.toUpperCase() || "?"}</div>
+                )}
+                <span className="flex-1 min-w-0 text-sm font-semibold text-pnp-textPrimary truncate">{p.name}</span>
+                <span className={`w-5 h-5 rounded-full border flex items-center justify-center ${isPicked ? "border-pnp-accent" : "border-white/30"}`} style={{ background: isPicked ? "linear-gradient(135deg, #D4007A, #E69138)" : "transparent" }}>
+                  {isPicked && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="px-3 py-2 border-t border-white/10 flex items-end gap-2">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Add a comment…"
+            rows={1}
+            className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-3 py-2 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-20"
+            style={{ fontSize: "16px" }}
+          />
+          <button
+            onClick={submit}
+            disabled={picked.size === 0 || submitting}
+            className="px-4 py-2 rounded-2xl text-sm font-semibold text-white transition-all active:scale-95 disabled:opacity-30 flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            {submitting ? "Sending…" : `Send${picked.size > 0 ? ` (${picked.size})` : ""}`}
+          </button>
+        </div>
+      </div>
+      {/* Suppress unused variable warnings for myDbId */}
+      <span className="hidden">{myDbId}</span>
+    </div>
+  );
+}
+
+// ─── New chat modal (user picker) ────────────────────────────────────────────
+
+function NewChatModal({ onClose }: { onClose: () => void }) {
+  const navigate = useNavigate();
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<Array<{ id: string; username: string; first_name: string; photo_file_id: string | null }>>([]);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!q.trim() || q.trim().length < 2) { setResults([]); return; }
+    debounceRef.current = setTimeout(() => {
+      setLoading(true);
+      searchUsersForNewChat(q.trim(), 20)
+        .then((r) => setResults(r.users || []))
+        .catch(() => setResults([]))
+        .finally(() => setLoading(false));
+    }, 250);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [q]);
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md max-h-[80vh] flex flex-col rounded-t-3xl sm:rounded-2xl overflow-hidden" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
+        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+          <h3 className="text-base font-bold text-pnp-textPrimary">New message</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10" aria-label="Close">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div className="px-3 py-2 border-b border-white/5">
+          <input
+            autoFocus
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search users by name or @username…"
+            className="w-full bg-white/5 text-pnp-textPrimary placeholder-pnp-textSecondary/50 rounded-xl px-3 py-2 outline-none focus:ring-1 focus:ring-pnp-accent/50"
+            style={{ fontSize: "16px" }}
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto min-h-[200px]">
+          {loading ? (
+            <div className="flex items-center justify-center py-8"><div className="w-6 h-6 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" /></div>
+          ) : !q.trim() ? (
+            <p className="text-sm text-pnp-textSecondary text-center py-8 px-6">Type to search for someone to message.</p>
+          ) : results.length === 0 ? (
+            <p className="text-sm text-pnp-textSecondary text-center py-8 px-6">No users found.</p>
+          ) : results.map((u) => {
+            const name = u.first_name || u.username || "User";
+            const photo = u.photo_file_id;
+            return (
+              <button
+                key={u.id}
+                onClick={() => { onClose(); navigate(`/dm/${u.id}`); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+              >
+                {photo && (photo.startsWith("/") || photo.startsWith("http")) ? (
+                  <img src={photo} alt="" className="w-10 h-10 rounded-full object-cover" />
+                ) : (
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>{name[0]?.toUpperCase()}</div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-pnp-textPrimary truncate">{name}</p>
+                  {u.username && <p className="text-[11px] text-pnp-textSecondary truncate">@{u.username}</p>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Thread List View (all conversations) ────────────────────────────────────
 
-function ThreadListView() {
+type ListFilter = "all" | "unread" | "archived";
+
+function ThreadListView({ myDbId }: { myDbId: string }) {
   const navigate = useNavigate();
   const { dm: t } = useI18n();
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<ListFilter>("all");
+  const [searchResults, setSearchResults] = useState<DmSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [rowMenu, setRowMenu] = useState<{ thread: MessageThread; x: number; y: number } | null>(null);
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [muteSubmenu, setMuteSubmenu] = useState<MessageThread | null>(null);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const refresh = () => {
+    getDmThreads()
+      .then((res) => { if (res.success) setThreads(res.threads); })
+      .catch(() => {});
+  };
 
   useEffect(() => {
-    getMessageThreads()
-      .then((res) => { if (res.success) setThreads(res.threads); })
-      .catch(() => {})
-      .finally(() => setIsLoading(false));
+    refresh();
+    setIsLoading(false);
   }, []);
 
-  // Listen for new messages to update thread list
+  // Realtime updates
   useEffect(() => {
     const socket = connectSocket();
-    const onDmMessage = () => {
-      getMessageThreads().then((res) => { if (res.success) setThreads(res.threads); }).catch(() => {});
+    const onChange = () => refresh();
+    const onPresence = (data: { userId: string; online: boolean; lastSeen: string | null }) => {
+      setThreads((prev) => prev.map((t) => {
+        if (String(partnerOf(t).id) !== String(data.userId)) return t;
+        return { ...t, online: !!data.online, lastSeen: data.lastSeen };
+      }));
     };
-    socket.on("dm:message", onDmMessage);
-    socket.on("dm:sent", onDmMessage);
-    return () => { socket.off("dm:message", onDmMessage); socket.off("dm:sent", onDmMessage); };
+    const onRead = (data: { partnerId: string }) => {
+      setThreads((prev) => prev.map((t) =>
+        String(partnerOf(t).id) === String(data.partnerId) ? { ...t, lastMessageReadByOther: true } : t
+      ));
+    };
+    socket.on("dm:message", onChange);
+    socket.on("dm:sent", onChange);
+    socket.on("presence:update", onPresence);
+    socket.on("dm:message:read", onRead);
+    return () => {
+      socket.off("dm:message", onChange);
+      socket.off("dm:sent", onChange);
+      socket.off("presence:update", onPresence);
+      socket.off("dm:message:read", onRead);
+    };
   }, []);
 
+  // Global DM search (server-side, debounced) when ≥2 chars
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (search.trim().length < 2) { setSearchResults([]); return; }
+    searchDebounceRef.current = setTimeout(() => {
+      setSearching(true);
+      searchAllDms(search.trim())
+        .then((r) => setSearchResults(r.results || []))
+        .catch(() => setSearchResults([]))
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [search]);
+
   const isValidPhoto = (p: string | null | undefined) => p && (p.startsWith("/") || p.startsWith("http"));
+
+  const counts = React.useMemo(() => {
+    const total = threads.length;
+    const unread = threads.filter((t) => (t.unread ?? t.unreadCount ?? 0) > 0 && !t.archivedAt).length;
+    const archived = threads.filter((t) => !!t.archivedAt).length;
+    return { total, unread, archived };
+  }, [threads]);
+
+  // Apply filter pill + name filter (search)
+  const visibleThreads = React.useMemo(() => {
+    let arr = threads.slice();
+    if (filter === "archived") arr = arr.filter((x) => !!x.archivedAt);
+    else arr = arr.filter((x) => !x.archivedAt);
+    if (filter === "unread") arr = arr.filter((x) => (x.unread ?? x.unreadCount ?? 0) > 0);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      arr = arr.filter((x) => {
+        const p = partnerOf(x);
+        return p.name.toLowerCase().includes(q) || (x.partnerUsername || x.username || "").toLowerCase().includes(q);
+      });
+    }
+    // Sort: pinned (by pinnedAt desc) first, then unpinned by lastMessageAt desc
+    arr.sort((a, b) => {
+      const ap = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
+      const bp = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
+      if (ap !== bp) return bp - ap;
+      const at = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+      const bt = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+      return bt - at;
+    });
+    return arr;
+  }, [threads, filter, search]);
+
+  const longPressFiredRef = useRef(false);
+
+  const handleRowContextMenu = (thread: MessageThread, e: React.MouseEvent) => {
+    e.preventDefault();
+    setRowMenu({ thread, x: e.clientX, y: e.clientY });
+  };
+  const handleRowTouchStart = (thread: MessageThread, e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    longPressFiredRef.current = false;
+    longPressRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      setRowMenu({ thread, x: touch.clientX, y: touch.clientY });
+    }, 500);
+  };
+  const handleRowTouchEnd = () => { if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null; } };
+  // Suppress the click that fires after a long-press triggered the row menu.
+  const handleRowClick = (thread: MessageThread, e: React.MouseEvent) => {
+    if (longPressFiredRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      longPressFiredRef.current = false;
+      return;
+    }
+    navigate(`/dm/${partnerOf(thread).id}`);
+  };
+
+  const togglePin = async (thread: MessageThread) => {
+    const id = partnerOf(thread).id;
+    setRowMenu(null);
+    setThreads((prev) => prev.map((x) => partnerOf(x).id === id ? { ...x, pinnedAt: x.pinnedAt ? null : new Date().toISOString() } : x));
+    try { await pinDmThread(id); } catch { refresh(); }
+  };
+  const toggleArchive = async (thread: MessageThread) => {
+    const id = partnerOf(thread).id;
+    setRowMenu(null);
+    setThreads((prev) => prev.map((x) => partnerOf(x).id === id ? { ...x, archivedAt: x.archivedAt ? null : new Date().toISOString() } : x));
+    try { await archiveDmThread(id); } catch { refresh(); }
+  };
+  const markUnreadRow = async (thread: MessageThread) => {
+    const id = partnerOf(thread).id;
+    setRowMenu(null);
+    setThreads((prev) => prev.map((x) => partnerOf(x).id === id ? { ...x, unread: Math.max(1, x.unread ?? 0), unreadCount: Math.max(1, x.unreadCount ?? 0) } : x));
+    try { await markDmThreadUnread(id); } catch { refresh(); }
+  };
+  const muteFor = async (thread: MessageThread, untilIso: string | null | "forever") => {
+    const id = partnerOf(thread).id;
+    setRowMenu(null); setMuteSubmenu(null);
+    try {
+      const r = await muteDmThread(id, untilIso);
+      setThreads((prev) => prev.map((x) => partnerOf(x).id === id ? { ...x, mutedUntil: r.mutedUntil } : x));
+    } catch { refresh(); }
+  };
 
   if (isLoading) {
     return (
@@ -1226,38 +2184,6 @@ function ThreadListView() {
       </div>
     );
   }
-
-  if (threads.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 px-6">
-        <p className="text-4xl mb-3">💬</p>
-        <p className="text-lg font-semibold text-pnp-textPrimary mb-1">{t.noConversations || "No conversations yet"}</p>
-        <p className="text-sm text-pnp-textSecondary text-center mb-6">Visit someone's profile to start a conversation.</p>
-        <div className="flex gap-3">
-          <button
-            onClick={() => navigate("/nearby")}
-            className="px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all active:scale-95"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-          >
-            Find People Nearby
-          </button>
-          <button
-            onClick={() => navigate("/")}
-            className="px-4 py-2 rounded-xl text-sm font-semibold text-pnp-textPrimary border border-pnp-border hover:bg-white/5 transition-all active:scale-95"
-          >
-            Browse Feed
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const filteredThreads = search.trim()
-    ? threads.filter((t) =>
-        (t.firstName || "").toLowerCase().includes(search.toLowerCase()) ||
-        (t.username || "").toLowerCase().includes(search.toLowerCase())
-      )
-    : threads;
 
   return (
     <div className="relative">
@@ -1269,67 +2195,225 @@ function ThreadListView() {
         </div>
       </div>
 
-      {/* Search bar */}
-      {threads.length > 3 && (
-        <div className="px-4 pt-3 pb-1">
-          <div className="relative">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pnp-textSecondary pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search conversations..."
-              className="w-full bg-white/5 text-pnp-textPrimary placeholder-pnp-textSecondary/50 rounded-xl pl-9 pr-3 py-2 outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
-              style={{ fontSize: "16px" }}
-            />
-            {search && (
-              <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-pnp-textSecondary hover:text-white">
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+      {/* Search bar — always visible */}
+      <div className="px-4 pt-1 pb-2">
+        <div className="relative">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pnp-textSecondary pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search conversations and messages…"
+            className="w-full bg-white/5 text-pnp-textPrimary placeholder-pnp-textSecondary/50 rounded-xl pl-9 pr-3 py-2 outline-none focus:ring-1 focus:ring-pnp-accent/50 transition-colors"
+            style={{ fontSize: "16px" }}
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-pnp-textSecondary hover:text-white">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Filter pills */}
+      <div className="px-4 pb-2 flex items-center gap-2 overflow-x-auto">
+        {([
+          ["all", "All", counts.total],
+          ["unread", "Unread", counts.unread],
+          ["archived", "Archived", counts.archived],
+        ] as Array<[ListFilter, string, number]>).map(([key, label, count]) => {
+          const active = filter === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setFilter(key)}
+              className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 flex items-center gap-1.5 flex-shrink-0"
+              style={active
+                ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "white" }
+                : { background: "rgba(255,255,255,0.05)", color: "var(--pnp-textSecondary, rgba(255,255,255,0.7))" }
+              }
+            >
+              {label}
+              {count > 0 && <span className={`text-[10px] tabular-nums ${active ? "text-white/80" : "text-pnp-textSecondary/60"}`}>{count}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {threads.length === 0 && !search.trim() ? (
+        <div className="flex flex-col items-center justify-center py-20 px-6">
+          <p className="text-4xl mb-3">💬</p>
+          <p className="text-lg font-semibold text-pnp-textPrimary mb-1">{t.noConversations || "No conversations yet"}</p>
+          <p className="text-sm text-pnp-textSecondary text-center mb-6">Tap the pencil to start a new chat.</p>
+          <button
+            onClick={() => setShowNewChat(true)}
+            className="px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all active:scale-95"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            New message
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="divide-y divide-pnp-border">
+            {visibleThreads.map((thread) => {
+              const p = partnerOf(thread);
+              const muted = !!(thread.mutedUntil && new Date(thread.mutedUntil).getTime() > Date.now());
+              const unread = thread.unread ?? thread.unreadCount ?? 0;
+              const isMine = thread.lastMessageSenderId && String(thread.lastMessageSenderId) === String(myDbId);
+              return (
+                <button
+                  key={p.id}
+                  onClick={(e) => handleRowClick(thread, e)}
+                  onContextMenu={(e) => handleRowContextMenu(thread, e)}
+                  onTouchStart={(e) => handleRowTouchStart(thread, e)}
+                  onTouchEnd={handleRowTouchEnd}
+                  onTouchMove={handleRowTouchEnd}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left"
+                >
+                  <div className="relative flex-shrink-0">
+                    {isValidPhoto(p.photo) ? (
+                      <img src={p.photo!} alt="" className="w-12 h-12 rounded-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }} />
+                    ) : null}
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A", display: isValidPhoto(p.photo) ? "none" : undefined }}>
+                      {p.name[0]?.toUpperCase() || "?"}
+                    </div>
+                    {thread.online && (
+                      <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-green-400 ring-2 ring-pnp-background" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-pnp-textPrimary truncate flex items-center gap-1">
+                        {thread.pinnedAt && (
+                          <svg className="w-3 h-3 text-pnp-textSecondary" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v3.586l1.707 1.707a1 1 0 01.293.707V13a1 1 0 01-1 1h-2v4a1 1 0 11-2 0v-4H6a1 1 0 01-1-1V9a1 1 0 01.293-.707L7 6.586V3a1 1 0 011-1h2z" /></svg>
+                        )}
+                        {p.name}
+                        {muted && (
+                          <svg className="w-3 h-3 text-pnp-textSecondary/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l4-4m0 4l-4-4" /></svg>
+                        )}
+                      </p>
+                      <span className="text-[11px] text-pnp-textSecondary flex-shrink-0">
+                        {smartTimestamp(thread.lastMessageAt)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <p className="text-xs text-pnp-textSecondary truncate flex items-center gap-1">
+                        {isMine && thread.lastMessageReadByOther && (
+                          <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 12" fill="none">
+                            <path d="M1 6.5L5 10L13.5 1" stroke="#7BE2FF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M6 6.5L10 10L18.5 1" stroke="#7BE2FF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                        <span className="truncate">{buildPreview(thread, myDbId)}</span>
+                      </p>
+                      {unread > 0 && (
+                        <span className={`min-w-[20px] h-5 px-1 rounded-full text-[10px] font-bold flex items-center justify-center flex-shrink-0 ${muted ? "bg-white/20 text-white/70" : "text-white"}`} style={muted ? undefined : { background: "#D4007A" }}>
+                          {unread > 99 ? "99+" : unread}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Global message search results */}
+          {search.trim().length >= 2 && (
+            <div className="border-t border-pnp-border mt-2">
+              <div className="px-4 pt-3 pb-1 flex items-center justify-between">
+                <p className="text-[10px] font-bold text-pnp-textSecondary uppercase tracking-wider">In messages</p>
+                {searching && <div className="w-3 h-3 border border-white/20 border-t-pnp-accent rounded-full animate-spin" />}
+              </div>
+              {!searching && searchResults.length === 0 && (
+                <p className="text-xs text-pnp-textSecondary px-4 py-3">No matches in your messages.</p>
+              )}
+              {searchResults.map((r) => (
+                <button
+                  key={`${r.id}-${r.partnerId}`}
+                  onClick={() => navigate(`/dm/${r.partnerId}?jumpTo=${r.id}`)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                >
+                  {r.partnerPhoto && (r.partnerPhoto.startsWith("/") || r.partnerPhoto.startsWith("http")) ? (
+                    <img src={r.partnerPhoto} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>{r.partnerName[0]?.toUpperCase() || "?"}</div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-pnp-textPrimary truncate">{r.partnerName}</p>
+                      <span className="text-[10px] text-pnp-textSecondary flex-shrink-0">{smartTimestamp(r.createdAt)}</span>
+                    </div>
+                    <p className="text-xs text-pnp-textSecondary truncate mt-0.5">
+                      {r.isMine ? "You: " : ""}{r.mediaType === "image" ? "📷 " : r.mediaType === "video" ? "🎥 " : r.mediaType === "audio" ? "🎤 " : ""}{r.snippet}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Row context menu */}
+      {rowMenu && (
+        <>
+          <div className="fixed inset-0 z-[50]" onClick={() => { setRowMenu(null); setMuteSubmenu(null); }} />
+          <div className="fixed z-[51] rounded-2xl shadow-2xl overflow-hidden" style={{
+            left: Math.min(rowMenu.x, Math.max(8, window.innerWidth - 220 - 8)),
+            top: Math.min(rowMenu.y, window.innerHeight - 280 - 8),
+            minWidth: 200,
+            background: "#2C2C2E",
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}>
+            <button onClick={() => togglePin(rowMenu.thread)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v3.586l1.707 1.707a1 1 0 01.293.707V13a1 1 0 01-1 1h-2v4a1 1 0 11-2 0v-4H6a1 1 0 01-1-1V9a1 1 0 01.293-.707L7 6.586V3a1 1 0 011-1h2z" /></svg>
+              {rowMenu.thread.pinnedAt ? "Unpin" : "Pin to top"}
+            </button>
+            <button onClick={() => setMuteSubmenu(rowMenu.thread)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+              {rowMenu.thread.mutedUntil && new Date(rowMenu.thread.mutedUntil).getTime() > Date.now() ? "Unmute" : "Mute…"}
+            </button>
+            <button onClick={() => toggleArchive(rowMenu.thread)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
+              {rowMenu.thread.archivedAt ? "Unarchive" : "Archive"}
+            </button>
+            {(rowMenu.thread.unread ?? rowMenu.thread.unreadCount ?? 0) === 0 && (
+              <button onClick={() => markUnreadRow(rowMenu.thread)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="3" /></svg>
+                Mark as unread
               </button>
             )}
           </div>
-        </div>
+        </>
       )}
-      <div className="divide-y divide-pnp-border">
-      {filteredThreads.map((thread) => (
-        <button
-          key={thread.userId}
-          onClick={() => navigate(`/dm/${thread.userId}`)}
-          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left"
-        >
-          {isValidPhoto(thread.photoUrl) ? (
-            <img src={thread.photoUrl!} alt="" className="w-12 h-12 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }} />
-          ) : null}
-          <div className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A", display: isValidPhoto(thread.photoUrl) ? "none" : undefined }}>
-            {(thread.firstName || thread.username || "?")[0].toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-pnp-textPrimary truncate">
-                {thread.firstName || thread.username || "User"}
-              </p>
-              <span className="text-[11px] text-pnp-textSecondary flex-shrink-0">
-                {timeAgo(thread.lastMessageAt)}
-              </span>
+
+      {muteSubmenu && (() => {
+        const isCurrentlyMuted = muteSubmenu.mutedUntil && new Date(muteSubmenu.mutedUntil).getTime() > Date.now();
+        return (
+          <>
+            <div className="fixed inset-0 z-[60]" onClick={() => setMuteSubmenu(null)} />
+            <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] rounded-2xl shadow-2xl overflow-hidden w-72" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+              <p className="px-4 pt-3 pb-2 text-[11px] font-bold text-pnp-textSecondary uppercase tracking-wider">Mute notifications</p>
+              {isCurrentlyMuted && (
+                <button onClick={() => muteFor(muteSubmenu, null)} className="w-full px-4 py-2.5 text-sm text-left text-green-400 hover:bg-white/10 transition-colors">Unmute</button>
+              )}
+              <button onClick={() => muteFor(muteSubmenu, new Date(Date.now() + 60 * 60 * 1000).toISOString())} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors">For 1 hour</button>
+              <button onClick={() => muteFor(muteSubmenu, new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString())} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors">For 8 hours</button>
+              <button onClick={() => muteFor(muteSubmenu, "forever")} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors">Until I turn it back on</button>
+              <button onClick={() => setMuteSubmenu(null)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textSecondary hover:bg-white/10 transition-colors border-t border-white/5">Cancel</button>
             </div>
-            <p className="text-xs text-pnp-textSecondary truncate mt-0.5">
-              {thread.lastMessage || "..."}
-            </p>
-          </div>
-          {thread.unreadCount > 0 && (
-            <span className="min-w-[20px] h-5 px-1 bg-[#D4007A] rounded-full text-[10px] font-bold text-white flex items-center justify-center flex-shrink-0">
-              {thread.unreadCount > 99 ? "99+" : thread.unreadCount}
-            </span>
-          )}
-        </button>
-      ))}
-      </div>
-      {/* FAB — New Message (above bottom nav) */}
+          </>
+        );
+      })()}
+
+      {/* FAB — New Chat modal */}
       <button
-        onClick={() => navigate("/nearby")}
-        title="Find people to message"
+        onClick={() => setShowNewChat(true)}
+        title="New message"
         className="fixed bottom-20 lg:bottom-6 right-4 w-12 h-12 rounded-full text-white flex items-center justify-center shadow-lg active:scale-95 transition-all z-30"
         style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
         aria-label="New Message"
@@ -1338,6 +2422,8 @@ function ThreadListView() {
           <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
         </svg>
       </button>
+
+      {showNewChat && <NewChatModal onClose={() => setShowNewChat(false)} />}
     </div>
   );
 }
@@ -1373,7 +2459,7 @@ export default function DirectMessages() {
         {activeUserId ? (
           <DmChatView userId={activeUserId} myDbId={user?.dbId ?? user?.id ?? ""} myUserId={user?.id ?? ""} />
         ) : (
-          <ThreadListView />
+          <ThreadListView myDbId={user?.dbId ?? user?.id ?? ""} />
         )}
       </div>
     </>

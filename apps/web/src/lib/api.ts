@@ -2113,13 +2113,45 @@ export function reviewAdminAppeal(
 // ============================================================================
 
 export interface MessageThread {
-  userId: string;
-  username: string;
-  firstName: string;
-  photoUrl: string | null;
+  // identity
+  partnerId: string;
+  partnerUsername: string;
+  partnerFirstName: string;
+  partnerPhoto: string | null;
+  partnerPnptvId?: string | null;
+
+  // last message preview
   lastMessage: string;
   lastMessageAt: string;
-  unreadCount: number;
+  lastMessageSenderId: string | null;
+  lastMessageMediaType: 'image' | 'video' | 'audio' | null;
+  lastMessageReadByOther: boolean;
+
+  // counts
+  unread: number;
+
+  // per-user thread state
+  pinnedAt: string | null;
+  mutedUntil: string | null;
+  archivedAt: string | null;
+  pinnedMessageId: number | null;
+
+  // presence
+  online: boolean;
+  lastSeen: string | null;
+
+  // legacy aliases for backwards compatibility — keep these so older code paths
+  // that still read `userId` / `username` / `firstName` / `photoUrl` / `unreadCount`
+  // do not break. The new server payload includes both shapes.
+  userId?: string;
+  username?: string;
+  firstName?: string;
+  photoUrl?: string | null;
+  unreadCount?: number;
+}
+
+export function getDmThreads(): Promise<{ success: boolean; threads: MessageThread[] }> {
+  return request('/api/webapp/dm/threads');
 }
 
 export function getMessageThreads(): Promise<{
@@ -2127,7 +2159,7 @@ export function getMessageThreads(): Promise<{
   threads: MessageThread[];
   count: number;
 }> {
-  return request("/api/webapp/messages/threads");
+  return getDmThreads().then(r => ({ ...r, count: r.threads?.length || 0 }));
 }
 
 export function markThreadAsRead(otherUserId: string): Promise<{
@@ -2137,6 +2169,117 @@ export function markThreadAsRead(otherUserId: string): Promise<{
   return request(`/api/webapp/messages/thread/${otherUserId}/read`, {
     method: "PUT",
   });
+}
+
+// ── DM Thread management (pin / mute / archive / mark-unread) ────────────────
+
+export function pinDmThread(
+  partnerId: string
+): Promise<{ success: boolean; pinned: boolean; pinnedAt: string | null }> {
+  return request(`/api/webapp/dm/thread/${encodeURIComponent(partnerId)}/pin`, { method: 'PUT' });
+}
+
+export function muteDmThread(
+  partnerId: string,
+  untilIso: string | null | 'forever'
+): Promise<{ success: boolean; mutedUntil: string | null }> {
+  return request(`/api/webapp/dm/thread/${encodeURIComponent(partnerId)}/mute`, { method: 'PUT', body: { untilIso } });
+}
+
+export function archiveDmThread(
+  partnerId: string
+): Promise<{ success: boolean; archived: boolean; archivedAt: string | null }> {
+  return request(`/api/webapp/dm/thread/${encodeURIComponent(partnerId)}/archive`, { method: 'PUT' });
+}
+
+export function markDmThreadUnread(
+  partnerId: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/dm/thread/${encodeURIComponent(partnerId)}/unread`, { method: 'PUT' });
+}
+
+export function pinDmMessage(
+  partnerId: string,
+  messageId: number | null
+): Promise<{ success: boolean; pinnedMessageId: number | null }> {
+  return request(`/api/webapp/dm/thread/${encodeURIComponent(partnerId)}/pin-message`, { method: 'PUT', body: { messageId } });
+}
+
+// ── DM Global search ─────────────────────────────────────────────────────────
+
+export interface DmSearchResult {
+  id: number;
+  partnerId: string;
+  partnerName: string;
+  partnerPhoto: string | null;
+  snippet: string;
+  mediaType: 'image' | 'video' | 'audio' | null;
+  createdAt: string;
+  isMine: boolean;
+}
+
+export function searchAllDms(
+  q: string
+): Promise<{ success: boolean; results: DmSearchResult[] }> {
+  return request(`/api/webapp/dm/search?q=${encodeURIComponent(q)}`);
+}
+
+// ── DM Forward ───────────────────────────────────────────────────────────────
+
+export function forwardDmMessage(
+  messageId: number,
+  recipientIds: string[],
+  note?: string
+): Promise<{ success: boolean; sent: Array<{ recipientId: string; messageId: number }> }> {
+  return request('/api/webapp/dm/forward', { method: 'POST', body: { messageId, recipientIds, note } });
+}
+
+// ── DM Presence ──────────────────────────────────────────────────────────────
+
+export interface PresenceInfo {
+  id: string;
+  online: boolean;
+  lastSeen: string | null;
+}
+
+export function getDmPresence(
+  ids: string[]
+): Promise<{ success: boolean; presence: PresenceInfo[] }> {
+  if (!ids.length) return Promise.resolve({ success: true, presence: [] });
+  return request(`/api/webapp/dm/presence?ids=${ids.map(encodeURIComponent).join(',')}`);
+}
+
+// ── User picker for new chat (reuses existing searchUsers endpoint) ───────────
+
+export function searchUsersForNewChat(
+  q: string,
+  limit = 20
+): Promise<{
+  success: boolean;
+  users: Array<{
+    id: string;
+    username: string;
+    first_name: string;
+    last_name: string | null;
+    photo_file_id: string | null;
+    pnptv_id: string;
+  }>;
+}> {
+  return searchUsers(q, limit);
+}
+
+// ── DM Send with reply support ────────────────────────────────────────────────
+
+export interface SendDmOptions {
+  content?: string;
+  replyToId?: number | null;
+}
+
+export function sendDm(
+  recipientId: string,
+  opts: SendDmOptions
+): Promise<{ success: boolean; message?: any }> {
+  return request(`/api/webapp/dm/send/${encodeURIComponent(recipientId)}`, { method: 'POST', body: opts });
 }
 
 // ── DM Telegram-style features ───────────────────────────────────────────────

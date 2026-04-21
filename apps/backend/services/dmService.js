@@ -160,16 +160,215 @@ class DmService {
     return message;
   }
 
-  static async markAsRead(userId, otherUserId) {
+  static async markAsRead(userId, otherUserId, io = null) {
     const resolvedOtherId = await resolveUserId(otherUserId);
     if (!resolvedOtherId) return;
-    await query(
-      `UPDATE direct_messages SET is_read = true WHERE recipient_id = $1 AND sender_id = $2 AND is_read = false`,
+    const { rows } = await query(
+      `UPDATE direct_messages
+       SET is_read = true, read_at = now()
+       WHERE recipient_id = $1 AND sender_id = $2 AND is_read = false
+       RETURNING id`,
       [userId, resolvedOtherId]
     );
     const [a, b] = [userId, resolvedOtherId].sort();
-    const resetColumn = userId === a ? 'unread_for_a = 0' : 'unread_for_b = 0';
+    const resetColumn = String(userId) === String(a) ? 'unread_for_a = 0' : 'unread_for_b = 0';
     await query(`UPDATE dm_threads SET ${resetColumn} WHERE user_a = $1 AND user_b = $2`, [a, b]);
+
+    // Notify the other party that their messages have been read
+    let targetIo = io;
+    if (!targetIo) {
+      try { targetIo = require('./socketSingleton').get(); } catch (_) { targetIo = null; }
+    }
+    if (targetIo && rows.length > 0) {
+      const readAt = new Date().toISOString();
+      const lastReadMessageId = rows[rows.length - 1].id;
+      try {
+        targetIo.to(`user:${resolvedOtherId}`).emit('dm:message:read', {
+          partnerId: String(userId),
+          lastReadMessageId,
+          readAt,
+        });
+      } catch (_) { /* ignore */ }
+    }
+  }
+
+  // ─── Telegram-style: per-user thread state (pin / mute / archive / pin-message) ───
+
+  static async setThreadFlag(userId, partnerId, patch) {
+    const partnerResolved = await resolveUserId(partnerId) || partnerId;
+    // Load existing row (if any)
+    const { rows } = await query(
+      `SELECT pinned_at, muted_until, archived_at, pinned_message_id
+         FROM dm_thread_state WHERE user_id = $1 AND partner_id = $2`,
+      [userId, partnerResolved]
+    );
+    const existing = rows[0] || { pinned_at: null, muted_until: null, archived_at: null, pinned_message_id: null };
+
+    const now = new Date();
+    let pinnedAt = existing.pinned_at;
+    if (patch.pinned === true) pinnedAt = pinnedAt || now;
+    else if (patch.pinned === false) pinnedAt = null;
+
+    let mutedUntil = existing.muted_until;
+    if (patch.mutedUntil !== undefined) mutedUntil = patch.mutedUntil; // null clears mute
+
+    let archivedAt = existing.archived_at;
+    if (patch.archived === true) archivedAt = archivedAt || now;
+    else if (patch.archived === false) archivedAt = null;
+
+    let pinnedMessageId = existing.pinned_message_id;
+    if (patch.pinnedMessageId !== undefined) pinnedMessageId = patch.pinnedMessageId;
+
+    await query(
+      `INSERT INTO dm_thread_state (user_id, partner_id, pinned_at, muted_until, archived_at, pinned_message_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (user_id, partner_id) DO UPDATE SET
+         pinned_at = EXCLUDED.pinned_at,
+         muted_until = EXCLUDED.muted_until,
+         archived_at = EXCLUDED.archived_at,
+         pinned_message_id = EXCLUDED.pinned_message_id,
+         updated_at = now()`,
+      [userId, partnerResolved, pinnedAt, mutedUntil, archivedAt, pinnedMessageId]
+    );
+    return { pinnedAt, mutedUntil, archivedAt, pinnedMessageId };
+  }
+
+  static async getThreadStates(userId) {
+    const { rows } = await query(
+      `SELECT partner_id, pinned_at, muted_until, archived_at, pinned_message_id
+       FROM dm_thread_state WHERE user_id = $1`,
+      [userId]
+    );
+    const map = new Map();
+    for (const r of rows) {
+      map.set(String(r.partner_id), {
+        pinnedAt: r.pinned_at ? new Date(r.pinned_at).toISOString() : null,
+        mutedUntil: r.muted_until ? new Date(r.muted_until).toISOString() : null,
+        archivedAt: r.archived_at ? new Date(r.archived_at).toISOString() : null,
+        pinnedMessageId: r.pinned_message_id ? Number(r.pinned_message_id) : null,
+      });
+    }
+    return map;
+  }
+
+  // ─── Global DM search (FTS) ───
+
+  static async searchAllMessages(userId, q, limit = 30) {
+    const term = String(q || '').trim();
+    if (term.length < 2) return [];
+    const { rows } = await query(
+      `SELECT dm.id, dm.sender_id, dm.recipient_id, dm.content, dm.media_type, dm.created_at,
+              u.id AS partner_id, u.username AS partner_username, u.first_name AS partner_first_name,
+              u.photo_file_id AS partner_photo,
+              ts_rank(to_tsvector('simple', COALESCE(dm.content, '')), plainto_tsquery('simple', $2)) AS rank
+         FROM direct_messages dm
+         JOIN users u ON u.id = CASE WHEN dm.sender_id = $1 THEN dm.recipient_id ELSE dm.sender_id END
+        WHERE (dm.sender_id = $1 OR dm.recipient_id = $1)
+          AND dm.is_deleted = false
+          AND dm.content IS NOT NULL
+          AND to_tsvector('simple', dm.content) @@ plainto_tsquery('simple', $2)
+        ORDER BY rank DESC, dm.created_at DESC
+        LIMIT $3`,
+      [userId, term, limit]
+    );
+    return rows.map((r) => ({
+      id: Number(r.id),
+      partnerId: String(r.partner_id),
+      partnerName: r.partner_first_name || r.partner_username || 'User',
+      partnerPhoto: r.partner_photo || null,
+      snippet: (r.content || '').slice(0, 160),
+      mediaType: r.media_type || null,
+      createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+      isMine: String(r.sender_id) === String(userId),
+    }));
+  }
+
+  // ─── Forward ───
+
+  static async forwardMessage(userId, sourceMessageId, recipientIds, note) {
+    const ids = (Array.isArray(recipientIds) ? recipientIds : []).slice(0, 5);
+    if (!ids.length) return { success: true, sent: [] };
+
+    // Validate sender is a party to the source message
+    const { rows: srcRows } = await query(
+      `SELECT id, sender_id, recipient_id, content, media_url, media_type, media_mime, media_thumb_url
+         FROM direct_messages WHERE id = $1 LIMIT 1`,
+      [sourceMessageId]
+    );
+    const src = srcRows[0];
+    if (!src) throw { statusCode: 404, message: 'Source message not found' };
+    if (String(src.sender_id) !== String(userId) && String(src.recipient_id) !== String(userId)) {
+      throw { statusCode: 403, message: 'Cannot forward this message' };
+    }
+
+    const sent = [];
+    for (const rid of ids) {
+      const resolvedRid = (await resolveUserId(rid)) || rid;
+      const baseContent = src.content || '';
+      const content = note && note.trim() ? `${note.trim()}\n\n${baseContent}`.trim() : baseContent;
+      try {
+        const msg = await DmService.sendMessage(
+          userId,
+          resolvedRid,
+          {
+            content: content || null,
+            mediaUrl: src.media_url || null,
+            mediaType: src.media_type || null,
+            mediaMime: src.media_mime || null,
+            mediaThumbUrl: src.media_thumb_url || null,
+          },
+          {}
+        );
+        sent.push({ recipientId: String(resolvedRid), messageId: msg.id });
+      } catch (err) {
+        logger.warn('forwardMessage per-recipient failed', { rid: resolvedRid, err: err.message || err });
+      }
+    }
+    return { success: true, sent };
+  }
+
+  // ─── Presence (Redis-backed) ───
+
+  static async setOnline(userId) {
+    try {
+      const { getRedis } = require('../config/redis');
+      await getRedis().set(`presence:online:${userId}`, '1', 'EX', 60);
+    } catch (_) { /* ignore */ }
+  }
+  static async refreshOnline(userId) {
+    try {
+      const { getRedis } = require('../config/redis');
+      await getRedis().expire(`presence:online:${userId}`, 60);
+    } catch (_) { /* ignore */ }
+  }
+  static async setOffline(userId) {
+    try {
+      const { getRedis } = require('../config/redis');
+      const redis = getRedis();
+      await redis.del(`presence:online:${userId}`);
+      await redis.set(`presence:lastseen:${userId}`, new Date().toISOString(), 'EX', 60 * 60 * 24 * 30);
+    } catch (_) { /* ignore */ }
+  }
+  static async getPresence(userIds) {
+    const ids = (Array.isArray(userIds) ? userIds : []).map(String).filter(Boolean).slice(0, 100);
+    if (!ids.length) return [];
+    try {
+      const { getRedis } = require('../config/redis');
+      const redis = getRedis();
+      const results = [];
+      for (const id of ids) {
+        const onlineFlag = await redis.get(`presence:online:${id}`).catch(() => null);
+        if (onlineFlag) {
+          results.push({ id, online: true, lastSeen: null });
+        } else {
+          const lastSeen = await redis.get(`presence:lastseen:${id}`).catch(() => null);
+          results.push({ id, online: false, lastSeen: lastSeen || null });
+        }
+      }
+      return results;
+    } catch (_) {
+      return ids.map((id) => ({ id, online: false, lastSeen: null }));
+    }
   }
 
   static async deleteMessage(userId, messageId) {

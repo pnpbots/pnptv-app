@@ -140,13 +140,13 @@ function MobileConversationList({
 }: MobileConversationListProps) {
   const dmItems: ConversationItem[] = threads.map((th) => ({
     type: "dm",
-    id: th.userId,
-    name: th.firstName || th.username,
-    photoUrl: th.photoUrl,
+    id: th.userId ?? th.partnerId,
+    name: (th.firstName ?? th.partnerFirstName) || (th.username ?? th.partnerUsername),
+    photoUrl: th.photoUrl ?? th.partnerPhoto,
     lastMessage: th.lastMessage,
     lastActivity: th.lastMessageAt,
-    unreadCount: th.unreadCount,
-    path: `/dm/${th.userId}`,
+    unreadCount: th.unreadCount ?? th.unread,
+    path: `/dm/${th.userId ?? th.partnerId}`,
   }));
 
   const hangoutItems: ConversationItem[] = hangoutGroups.map((g) => ({
@@ -833,7 +833,7 @@ export function Layout() {
         .then((res) => {
           if (res.success) {
             setThreads(res.threads);
-            setDmUnread(res.threads.filter((th) => th.unreadCount > 0).length);
+            setDmUnread(res.threads.filter((th) => (th.unreadCount ?? th.unread) > 0).length);
           }
         })
         .catch(() => {});

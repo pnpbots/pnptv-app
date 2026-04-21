@@ -48,6 +48,7 @@ const sendDmMediaMessage = async (req, res) => {
   try {
     const mediaResult = await processChatMedia(req.file, user.id);
     const caption = (req.body?.content || '').trim().slice(0, 500) || null;
+    const replyToId = req.body?.replyToId ? Number(req.body.replyToId) : null;
 
     // Send via DmService — handles blocks, privacy, thread upsert, DB row, push notif
     const isAdmin = user.role === 'admin' || user.role === 'superadmin';
@@ -60,6 +61,7 @@ const sendDmMediaMessage = async (req, res) => {
         mediaType: mediaResult.mediaType,
         mediaMime: mediaResult.mediaMime || (mediaResult.mediaType === 'video' ? 'video/mp4' : mediaResult.mediaType === 'audio' ? 'audio/webm' : 'image/webp'),
         mediaThumbUrl: mediaResult.thumbUrl || null,
+        replyToId,
       },
       { isAdmin }
     );
