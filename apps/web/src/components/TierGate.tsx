@@ -2,7 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
-import { useTier, useLatam } from "@/hooks/useTier";
+import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 
 interface TierGateProps {
@@ -258,24 +258,14 @@ function LatamUpsell() {
 }
 
 // ---------------------------------------------------------------------------
-// LatamPrimeGate — blocks LATAM users unless they hold PRIME (or are admin)
+// LatamPrimeGate — compatibility wrapper after geo access restrictions removal
 // ---------------------------------------------------------------------------
 interface LatamPrimeGateProps {
   children: React.ReactNode;
 }
 
 export function LatamPrimeGate({ children }: LatamPrimeGateProps) {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { isPrime, isAdmin } = useTier();
-  const { isLatam, isLatamLoading } = useLatam();
-
-  if (authLoading || isLatamLoading) return <Spinner />;
-  if (!isAuthenticated) return <Spinner />;
-
-  // PRIME members and admins always pass through
-  if (isPrime || isAdmin || !isLatam) return <>{children}</>;
-
-  return <LatamUpsell />;
+  return <>{children}</>;
 }
 
 // ---------------------------------------------------------------------------

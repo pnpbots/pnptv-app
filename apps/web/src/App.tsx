@@ -12,60 +12,6 @@ import { PermissionOnboarding } from "@/components/PermissionOnboarding";
 import { useAuth } from "@/hooks/useAuth";
 import { getSocket, connectSocket, disconnectSocket } from "@/lib/socket";
 
-// ── LATAM landing-mode guard ──────────────────────────────────────────────────
-// The backend's Express geo-block middleware can't run for static SPA HTML
-// routes (pnptv-web nginx serves them directly), so the SPA has to self-check
-// and redirect LATAM visitors to /landing?focus=performer. Grandfathered
-// active users (signaled by landingMode=false from /api/webapp/geo) pass through.
-const LANDING_MODE_ALLOWED = new Set([
-  "/", "/landing", "/join", "/auth",
-  "/become-a-model", "/become-model", "/apply",
-  "/about", "/blog", "/careers", "/resources", "/download",
-  "/terms", "/privacy", "/cookies", "/community-guidelines",
-  "/content-policy", "/refunds", "/subscriptions", "/creator-terms",
-  "/dmca", "/safety", "/contact",
-]);
-const LANDING_MODE_PREFIXES = ["/page/", "/blog/", "/auth/"];
-
-function useLatamLandingGuard() {
-  useEffect(() => {
-    const CACHE_KEY = "pnptv_landing_mode";
-    const path = window.location.pathname;
-
-    const pathAllowed =
-      LANDING_MODE_ALLOWED.has(path) ||
-      LANDING_MODE_PREFIXES.some(p => path.startsWith(p));
-
-    const redirectIfNeeded = (payload: { country: string | null; landingMode: boolean }) => {
-      if (!payload.landingMode) return;
-      if (pathAllowed) return;
-      const qs = new URLSearchParams({ focus: "performer" });
-      if (payload.country) qs.set("country", payload.country);
-      window.location.replace(`/landing?${qs.toString()}`);
-    };
-
-    // Try cache first — avoids a redirect flash on repeat navigations
-    try {
-      const cached = sessionStorage.getItem(CACHE_KEY);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        redirectIfNeeded(parsed);
-        if (parsed.landingMode && !pathAllowed) return; // already redirecting
-      }
-    } catch { /* ignore */ }
-
-    fetch("/api/webapp/geo", { credentials: "include" })
-      .then(r => (r.ok ? r.json() : null))
-      .then(data => {
-        if (!data) return;
-        const payload = { country: data.country, landingMode: !!data.landingMode };
-        try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload)); } catch { /* ignore */ }
-        redirectIfNeeded(payload);
-      })
-      .catch(() => { /* fail open — user sees app */ });
-  }, []);
-}
-
 function useScreenCaptureGuard() {
   useEffect(() => {
     const root = document.getElementById("root");
@@ -233,7 +179,6 @@ function AppOverlays() {
 }
 
 export default function App() {
-  useLatamLandingGuard();
   useScreenCaptureGuard();
 
   return (

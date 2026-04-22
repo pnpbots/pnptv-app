@@ -449,47 +449,13 @@ app.use(ipTracker); // Log every authenticated request IP for security
 
 // express-session handles Set-Cookie automatically — no custom middleware needed
 
-// Geo country detection — used by frontend LATAM feature gate
+// Geo country detection endpoint retained for compatibility.
+// Country-based access restrictions are disabled, so access flags always fail open.
 app.get('/api/webapp/geo', asyncHandler(async (req, res) => {
   const ip = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
   const geo = geoip.lookup(ip);
   const country = geo?.country || null;
-  const isLatam = country ? LATAM_COUNTRIES.has(country) : false;
-
-  // landingMode: LATAM visitor who is NOT a grandfathered active user.
-  // Used by the SPA to self-redirect static HTML routes (which bypass the
-  // Express geo-block middleware) to /landing?focus=performer.
-  let landingMode = false;
-  if (isLatam) {
-    landingMode = true;
-    const userId = req.session?.user?.id;
-    if (userId) {
-      try {
-        const redis = getRedis();
-        const cacheKey = `geo:exempt:${userId}`;
-        const cached = await redis.get(cacheKey);
-        if (cached === '1') {
-          landingMode = false;
-        } else if (cached !== '0') {
-          const pool = getPool();
-          const { rows } = await pool.query(`SELECT last_login_at FROM users WHERE id = $1`, [userId]);
-          const lastLogin = rows[0]?.last_login_at;
-          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-          if (lastLogin && new Date(lastLogin) >= thirtyDaysAgo) {
-            await redis.set(cacheKey, '1', 'EX', 3600);
-            landingMode = false;
-          } else {
-            await redis.set(cacheKey, '0', 'EX', 3600);
-          }
-        }
-      } catch {
-        // On redis/DB error, fail open so we don't accidentally trap legit users.
-        landingMode = false;
-      }
-    }
-  }
-
-  return res.json({ country, isLatam, landingMode });
+  return res.json({ country, isLatam: false, landingMode: false });
 }));
 
 
