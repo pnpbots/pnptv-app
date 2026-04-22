@@ -2231,6 +2231,102 @@ const getReactions = async (req, res) => {
   }
 };
 
+// ── Per-user hangout thread state: pin / mute / archive / read-message ──────
+// All use PUT with the schema columns already on hangout_group_members:
+//   is_pinned, is_user_muted, is_archived, archived_at, last_read_message_id
+
+// PUT /api/webapp/hangouts/groups/:id/pin  body: { pinned: boolean }
+const pinGroup = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group id' });
+  const pinned = req.body?.pinned === true;
+
+  const { rowCount } = await query(
+    `UPDATE hangout_group_members
+        SET is_pinned = $3
+      WHERE group_id = $1 AND user_id = $2`,
+    [groupId, user.id, pinned]
+  );
+  if (rowCount === 0) return res.status(403).json({ error: 'Not a member of this group' });
+  return res.json({ success: true, pinned });
+};
+
+// PUT /api/webapp/hangouts/groups/:id/mute  body: { until: ISOString | "forever" | null }
+const muteGroupForUser = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group id' });
+  const until = req.body?.until;
+
+  let mutedUntil = null;
+  let isMuted = false;
+  if (until === 'forever') {
+    isMuted = true;
+    mutedUntil = null; // muted indefinitely
+  } else if (typeof until === 'string' && until.length > 0) {
+    const d = new Date(until);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid until timestamp' });
+    isMuted = d > new Date();
+    mutedUntil = d.toISOString();
+  } else if (until === null) {
+    isMuted = false;
+    mutedUntil = null;
+  } else {
+    return res.status(400).json({ error: 'until must be ISO string, "forever", or null' });
+  }
+
+  const { rowCount } = await query(
+    `UPDATE hangout_group_members
+        SET is_user_muted = $3,
+            muted_until  = $4
+      WHERE group_id = $1 AND user_id = $2`,
+    [groupId, user.id, isMuted, mutedUntil]
+  );
+  if (rowCount === 0) return res.status(403).json({ error: 'Not a member of this group' });
+  return res.json({ success: true, mutedUntil });
+};
+
+// PUT /api/webapp/hangouts/groups/:id/archive  body: { archived: boolean }
+const archiveGroup = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group id' });
+  const archived = req.body?.archived === true;
+  const archivedAt = archived ? new Date().toISOString() : null;
+
+  const { rowCount } = await query(
+    `UPDATE hangout_group_members
+        SET is_archived = $3,
+            archived_at = $4
+      WHERE group_id = $1 AND user_id = $2`,
+    [groupId, user.id, archived, archivedAt]
+  );
+  if (rowCount === 0) return res.status(403).json({ error: 'Not a member of this group' });
+  return res.json({ success: true, archived, archivedAt });
+};
+
+// PUT /api/webapp/hangouts/groups/:id/read-message  body: { messageId: number }
+const markMessageRead = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  const messageId = parseInt(req.body?.messageId, 10);
+  if (!Number.isFinite(groupId) || !Number.isFinite(messageId) || messageId <= 0) {
+    return res.status(400).json({ error: 'Invalid group id or messageId' });
+  }
+
+  // Only advance the pointer forward — never rewind
+  const { rowCount } = await query(
+    `UPDATE hangout_group_members
+        SET last_read_message_id = $3,
+            last_read_at         = NOW()
+      WHERE group_id = $1 AND user_id = $2
+        AND (last_read_message_id IS NULL OR last_read_message_id < $3)`,
+    [groupId, user.id, messageId]
+  );
+  return res.json({ success: true, lastReadMessageId: messageId, updated: rowCount > 0 });
+};
+
 // ── Forward a hangout chat message to DMs and/or other hangouts ──────────────
 // POST /api/webapp/hangouts/messages/:messageId/forward
 // Body: { targets: Array<{type:'dm', userId}|{type:'hangout', groupId}>, note?: string }
@@ -2440,6 +2536,10 @@ module.exports = {
   endCall,
   leaveCall,
   forwardMessage,
+  pinGroup,
+  muteGroupForUser,
+  archiveGroup,
+  markMessageRead,
 };
 
 // ── LiveKit video calls ──────────────────────────────────────────────────────
