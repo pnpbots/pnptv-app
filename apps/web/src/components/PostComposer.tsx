@@ -282,8 +282,12 @@ export function PostComposer({
     checkAuthStatus()
       .then((status) => {
         if (status.authenticated && status.user) {
+          // Locked creators lose access to monetization (exclusive) content
+          // during onboarding. Admin/superadmin bypass the lock.
+          const isLockedCreator =
+            status.user.creator_status === "active" && status.user.creator_locked === true;
           setIsActiveCreator(
-            status.user.creator_status === "active" ||
+            (!isLockedCreator && status.user.creator_status === "active") ||
               status.user.role === "model" ||
               status.user.role === "admin" ||
               status.user.role === "superadmin"

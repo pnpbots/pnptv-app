@@ -236,11 +236,39 @@ export default function CreatorLayout() {
       {/* Main content */}
       <main className="lg:pl-56">
         <div className="max-w-7xl mx-auto px-4 py-6">
+          {user?.creator_locked && <CreatorOnboardingLockBanner lang={user?.language === "es" ? "es" : "en"} />}
           <Outlet />
         </div>
       </main>
 
       <Toast />
+    </div>
+  );
+}
+
+function CreatorOnboardingLockBanner({ lang }: { lang: "es" | "en" }) {
+  const copy = lang === "es"
+    ? {
+        title: "Tus herramientas de creador están en pausa",
+        body: "Serás parte del primer grupo que incorporaremos, justo después de nuestro piloto esta semana. Tu onboarding oficial comienza en ~2 semanas (te compartiremos la fecha exacta muy pronto). Mientras tanto, puedes ver tu panel, pero las herramientas y los cobros a usuarios están temporalmente pausados. Hacemos esto porque queremos invertir de verdad en tu bienestar y éxito como creador.",
+      }
+    : {
+        title: "Your creator tools are temporarily paused",
+        body: "You'll be in our first onboarding group — right after this week's pilot. Your official onboarding begins in ~2 weeks (exact date shared very soon). Until then, you can browse your dashboard, but tools and member payments are temporarily paused. We do this because we genuinely want to invest in your wellness and success as a creator.",
+      };
+  return (
+    <div
+      role="alert"
+      className="mb-6 rounded-xl border p-4 flex gap-3 items-start"
+      style={{ background: "rgba(245, 158, 11, 0.08)", borderColor: "rgba(245, 158, 11, 0.35)" }}
+    >
+      <svg className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: "#F59E0B" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M12 21a9 9 0 110-18 9 9 0 010 18z" />
+      </svg>
+      <div>
+        <p className="text-sm font-semibold" style={{ color: "#F59E0B" }}>{copy.title}</p>
+        <p className="text-xs text-pnp-textSecondary mt-1 leading-relaxed">{copy.body}</p>
+      </div>
     </div>
   );
 }

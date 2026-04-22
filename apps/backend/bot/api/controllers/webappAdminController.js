@@ -202,7 +202,7 @@ const getUser = async (req, res) => {
               last_payment_date, last_payment_method, last_payment_amount,
               last_login_at, last_login_method, last_active,
               telegram, twitter, x_username, pnptv_id, language, location_name,
-              creator_status, creator_type, creator_price_usd, live_channel
+              creator_status, creator_type, creator_price_usd, creator_locked, live_channel
          FROM users WHERE id = $1`,
       [userId]
     );
@@ -2095,6 +2095,41 @@ const deleteMeruLink = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/webapp/admin/users/:id/creator-lock
+ * Toggle the creator_locked flag that suspends creator tools pending onboarding.
+ * Body: { locked: boolean }
+ */
+const setCreatorLock = async (req, res) => {
+  const admin = req.user;
+  const { id: userId } = req.params;
+  const locked = req.body?.locked;
+  if (typeof locked !== 'boolean') {
+    return res.status(400).json({ error: 'Body must be { locked: boolean }' });
+  }
+  try {
+    const { rows } = await query(
+      `UPDATE users SET creator_locked = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, username, creator_status, creator_locked`,
+      [locked, userId]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    logger.info('Admin toggled creator_locked', {
+      adminId: admin?.id,
+      targetUserId: userId,
+      locked,
+      username: rows[0].username,
+    });
+    return res.json({ success: true, user: rows[0] });
+  } catch (error) {
+    logger.error('setCreatorLock error', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getStats,
   getDemographics,
@@ -2116,6 +2151,8 @@ module.exports = {
   deletePlan,
   // Admin push broadcast
   sendPushNotification,
+  // Creator onboarding lock
+  setCreatorLock,
   // User push subscription
   subscribePush,
   unsubscribePush,

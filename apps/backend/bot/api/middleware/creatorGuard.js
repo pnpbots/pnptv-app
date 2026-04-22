@@ -3,13 +3,51 @@
 const { getPool } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 
+const LOCKED_RESPONSE = {
+  success: false,
+  error: {
+    code: 'CREATOR_LOCKED',
+    message: 'Your creator tools are temporarily paused pending onboarding. Our team will contact you with an exact date within 2 weeks.',
+  },
+};
+
+/**
+ * creatorLockGuard
+ * Lightweight middleware that rejects requests from creators whose tools are
+ * temporarily locked pending onboarding. Does NOT require an active creator
+ * profile — used on CMS / channel routes where non-approved creators are
+ * still permitted (e.g. pending applicants preparing drafts).
+ */
+async function creatorLockGuard(req, res, next) {
+  const sessionUser = req.session?.user;
+  if (!sessionUser) return next(); // leave auth enforcement to authGuard upstream
+
+  try {
+    const { rows } = await getPool().query(
+      'SELECT creator_locked FROM users WHERE id = $1',
+      [sessionUser.id]
+    );
+    if (rows.length > 0 && rows[0].creator_locked === true) {
+      logger.info('creatorLockGuard: access denied — onboarding lock active', {
+        userId: sessionUser.id,
+        path: req.path,
+      });
+      return res.status(423).json(LOCKED_RESPONSE);
+    }
+    return next();
+  } catch (error) {
+    logger.error('creatorLockGuard DB error:', error);
+    return res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Internal server error' } });
+  }
+}
+
 /**
  * Creator Guard Middleware
  * Protects routes that require an active creator profile.
  * Validates creator_status directly from the DB on every request — never trusts
  * the stale session value. Mirrors the pattern used by roleGuard.js.
  */
-module.exports = async function creatorGuard(req, res, next) {
+async function creatorGuard(req, res, next) {
   const sessionUser = req.session?.user;
 
   if (!sessionUser) {
@@ -24,7 +62,7 @@ module.exports = async function creatorGuard(req, res, next) {
 
   try {
     const result = await getPool().query(
-      'SELECT creator_status FROM users WHERE id = $1',
+      'SELECT creator_status, creator_locked FROM users WHERE id = $1',
       [sessionUser.id]
     );
 
@@ -38,7 +76,7 @@ module.exports = async function creatorGuard(req, res, next) {
       });
     }
 
-    const { creator_status } = result.rows[0];
+    const { creator_status, creator_locked } = result.rows[0];
 
     if (creator_status !== 'active') {
       logger.warn('creatorGuard: access denied — creator profile not active', {
@@ -56,8 +94,22 @@ module.exports = async function creatorGuard(req, res, next) {
       });
     }
 
+    if (creator_locked === true) {
+      logger.info('creatorGuard: access denied — creator onboarding lock active', {
+        userId: sessionUser.id,
+        path: req.path,
+      });
+      return res.status(423).json({
+        success: false,
+        error: {
+          code: 'CREATOR_LOCKED',
+          message: 'Your creator tools are temporarily paused pending onboarding. Our team will contact you with an exact date within 2 weeks.',
+        },
+      });
+    }
+
     // Attach fresh creator_status to req.user so downstream handlers can rely on it
-    req.user = { ...sessionUser, creator_status };
+    req.user = { ...sessionUser, creator_status, creator_locked: false };
     next();
   } catch (error) {
     logger.error('creatorGuard DB error:', error);
@@ -69,4 +121,8 @@ module.exports = async function creatorGuard(req, res, next) {
       },
     });
   }
-};
+}
+
+module.exports = creatorGuard;
+module.exports.creatorGuard = creatorGuard;
+module.exports.creatorLockGuard = creatorLockGuard;

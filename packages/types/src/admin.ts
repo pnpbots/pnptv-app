@@ -32,6 +32,8 @@ export interface AdminUser {
   creator_status?: string;
   creator_type?: string;
   creator_price_usd?: number;
+  /** True when an approved creator is temporarily blocked from using tools pending onboarding. */
+  creator_locked?: boolean;
   live_channel?: string;
 }
 

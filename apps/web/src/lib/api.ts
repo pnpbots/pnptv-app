@@ -130,6 +130,8 @@ export interface TelegramAuthResponse {
     photo_url?: string | null;
     creator_status?: string;
     creator_type?: string | null;
+    /** True when an approved creator is temporarily blocked from using tools pending onboarding. */
+    creator_locked?: boolean;
     contentDisclaimer?: boolean;
     hasSeenTutorial?: boolean;
     last_login_method?: string | null;
@@ -4206,6 +4208,8 @@ export interface AdminUser {
   // Creator / Live Performer fields
   creator_status?: string;
   creator_type?: string;
+  /** True when an approved creator is temporarily blocked from using tools pending onboarding. */
+  creator_locked?: boolean;
   creator_price_usd?: number;
   live_channel?: string;
 }
@@ -4363,6 +4367,13 @@ export function banAdminUser(
   reason?: string
 ): Promise<{ success: boolean; user: AdminUser; action: string }> {
   return request(`/api/webapp/admin/users/${id}/ban`, { method: "POST", body: { ban, reason } });
+}
+
+export function setCreatorLock(
+  id: string,
+  locked: boolean
+): Promise<{ success: boolean; user: { id: string; username: string; creator_status: string; creator_locked: boolean } }> {
+  return request(`/api/webapp/admin/users/${id}/creator-lock`, { method: "POST", body: { locked } });
 }
 
 export function bulkUpdateMemberships(

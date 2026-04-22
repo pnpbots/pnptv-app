@@ -244,6 +244,7 @@ function buildSession(user, extra = {}) {
     language: user.language,
     role: user.role || 'user',
     creator_status: user.creator_status || 'none',
+    creator_locked: user.creator_locked === true,
     contentDisclaimer: user.content_disclaimer || false,
     // X identity
     xHandle: user.twitter || user.x_username || extra.xHandle || null,

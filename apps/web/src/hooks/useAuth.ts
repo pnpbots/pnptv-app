@@ -21,6 +21,8 @@ interface PnptvUser {
   role: string;
   creator_status?: string;
   creator_type?: string | null;
+  /** True when an approved creator is temporarily blocked from using tools pending onboarding. */
+  creator_locked?: boolean;
   contentDisclaimer?: boolean;
   hasSeenTutorial?: boolean;
   lastLoginMethod?: string | null;
@@ -63,6 +65,7 @@ function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUse
     role: u.role || "user",
     creator_status: u.creator_status,
     creator_type: u.creator_type,
+    creator_locked: u.creator_locked === true,
     contentDisclaimer: u.contentDisclaimer || false,
     hasSeenTutorial: u.hasSeenTutorial || false,
     lastLoginMethod: u.last_login_method ?? null,

@@ -29,6 +29,14 @@ class PNPLiveTipsService {
       throw err;
     }
 
+    // Block tips while the target performer/model is in the temporary
+    // onboarding-lock state — they cannot monetize their content yet.
+    const lockTarget = performerId || modelId;
+    if (lockTarget) {
+      const CreatorService = require('./creatorService');
+      await CreatorService.assertCreatorUnlocked(lockTarget);
+    }
+
     try {
       const result = await query(
         `INSERT INTO pnp_tips
@@ -64,6 +72,14 @@ class PNPLiveTipsService {
       const err = new Error('Tip amount must be a positive integer and cannot exceed 100,000');
       err.name = 'ValidationError';
       throw err;
+    }
+
+    // Block tips while the performer is in the temporary onboarding-lock
+    // state. Tokens must not be debited from the sender if the recipient
+    // cannot receive — fail fast before BEGIN.
+    if (performerId) {
+      const CreatorService = require('./creatorService');
+      await CreatorService.assertCreatorUnlocked(performerId);
     }
 
     let client;

@@ -268,15 +268,41 @@ class CreatorService {
 
   // ── Subscriptions ──────────────────────────────────────────────────────────
 
+  /**
+   * Reject any monetization action whose target creator is in the temporary
+   * onboarding-lock state. Called from subscribe/tip/book-call paths so users
+   * cannot pay a locked creator. Throws a tagged Error the controllers can
+   * surface as a 423.
+   */
+  static async assertCreatorUnlocked(targetUserId) {
+    if (!targetUserId) return;
+    const { rows } = await query(
+      'SELECT creator_locked FROM users WHERE id = $1',
+      [targetUserId]
+    );
+    if (rows.length > 0 && rows[0].creator_locked === true) {
+      const err = new Error('This creator is completing onboarding and cannot receive payments yet.');
+      err.code = 'CREATOR_LOCKED';
+      err.statusCode = 423;
+      throw err;
+    }
+  }
+
   static async subscribeToCreator(subscriberId, creatorId, paymentId) {
     // Validate creator is active
     const creatorRes = await query(
-      'SELECT creator_status, creator_price_usd FROM users WHERE id = $1',
+      'SELECT creator_status, creator_locked, creator_price_usd FROM users WHERE id = $1',
       [creatorId]
     );
     const creator = creatorRes.rows[0];
     if (!creator || creator.creator_status !== 'active') {
       throw new Error('Creator is not active');
+    }
+    if (creator.creator_locked === true) {
+      const err = new Error('This creator is completing onboarding and cannot accept new subscriptions yet.');
+      err.code = 'CREATOR_LOCKED';
+      err.statusCode = 423;
+      throw err;
     }
 
     // Validate subscriber has PRIME entitlement (live check, not stale users.tier)

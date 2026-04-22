@@ -6,6 +6,7 @@ const creatorController = require('../controllers/creatorController');
 const cmsCreatorController = require('../controllers/cmsCreatorController');
 const authGuard = require('../middleware/authGuard');
 const creatorGuard = require('../middleware/creatorGuard');
+const { creatorLockGuard } = require('../middleware/creatorGuard');
 const roleGuard = require('../middleware/roleGuard');
 const { adminGuard } = require('../../../middleware/guards');
 
@@ -52,38 +53,41 @@ router.post('/wallet', authGuard, creatorController.saveWalletAddress);
 router.post('/change-tier', authGuard, creatorController.changeTier);
 
 // ── CMS routes (active creators only) ────────────────────────────────────────
+// GETs stay open so locked creators can still review their own content.
+// Write operations require that the creator is not onboarding-locked.
 router.get('/cms/profile', authGuard, cmsCreatorController.getProfile);
-router.put('/cms/profile', authGuard, cmsCreatorController.updateProfile);
+router.put('/cms/profile', authGuard, creatorLockGuard, cmsCreatorController.updateProfile);
 
 router.get('/cms/content', authGuard, cmsCreatorController.listContent);
-router.post('/cms/content', authGuard, cmsCreatorController.createContent);
-router.patch('/cms/content/:id', authGuard, cmsCreatorController.updateContent);
-router.delete('/cms/content/:id', authGuard, cmsCreatorController.deleteContent);
+router.post('/cms/content', authGuard, creatorLockGuard, cmsCreatorController.createContent);
+router.patch('/cms/content/:id', authGuard, creatorLockGuard, cmsCreatorController.updateContent);
+router.delete('/cms/content/:id', authGuard, creatorLockGuard, cmsCreatorController.deleteContent);
 
 router.get('/cms/shows', authGuard, cmsCreatorController.listShows);
-router.post('/cms/shows', authGuard, cmsCreatorController.createShow);
-router.patch('/cms/shows/:id', authGuard, cmsCreatorController.updateShow);
-router.delete('/cms/shows/:id', authGuard, cmsCreatorController.deleteShow);
+router.post('/cms/shows', authGuard, creatorLockGuard, cmsCreatorController.createShow);
+router.patch('/cms/shows/:id', authGuard, creatorLockGuard, cmsCreatorController.updateShow);
+router.delete('/cms/shows/:id', authGuard, creatorLockGuard, cmsCreatorController.deleteShow);
 
-router.post('/cms/upload', authGuard, ...cmsCreatorController.uploadMedia);
+router.post('/cms/upload', authGuard, creatorLockGuard, ...cmsCreatorController.uploadMedia);
 
 // ── Channel management (active creators) ─────────────────────────────────────
 router.get('/channels', authGuard, creatorController.listOwnChannels);
-router.post('/channels', authGuard, creatorController.createChannel);
-router.patch('/channels/:id', authGuard, creatorController.updateChannel);
-router.delete('/channels/:id', authGuard, creatorController.deleteChannel);
+router.post('/channels', authGuard, creatorLockGuard, creatorController.createChannel);
+router.patch('/channels/:id', authGuard, creatorLockGuard, creatorController.updateChannel);
+router.delete('/channels/:id', authGuard, creatorLockGuard, creatorController.deleteChannel);
 
 // Direct video upload: file → creator's private Directus folder → channel post.
 router.post(
   '/channels/:id/video',
   authGuard,
+  creatorLockGuard,
   cmsCreatorController.channelVideoUpload.single('video'),
   creatorController.uploadChannelVideo,
 );
 
 // ── Channel collaborators (owner-only mutation) ───────────────────────────────
-router.post('/channels/:id/collaborators', authGuard, creatorController.addCollaborator);
-router.delete('/channels/:id/collaborators', authGuard, creatorController.removeCollaborator);
+router.post('/channels/:id/collaborators', authGuard, creatorLockGuard, creatorController.addCollaborator);
+router.delete('/channels/:id/collaborators', authGuard, creatorLockGuard, creatorController.removeCollaborator);
 
 // ── Milestone routes (auth required) ─────────────────────────────────────────
 // IMPORTANT: must come BEFORE /:creatorId/* param routes

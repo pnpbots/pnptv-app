@@ -145,6 +145,21 @@ async function bookCall(req, res) {
       return res.status(400).json({ success: false, error: 'You cannot book a call with yourself' });
     }
 
+    // Block bookings while creator is in the temporary onboarding-lock state.
+    try {
+      const CreatorService = require('../../../services/creatorService');
+      await CreatorService.assertCreatorUnlocked(creatorId);
+    } catch (lockErr) {
+      if (lockErr.code === 'CREATOR_LOCKED') {
+        return res.status(lockErr.statusCode || 423).json({
+          success: false,
+          error: lockErr.message,
+          code: 'CREATOR_LOCKED',
+        });
+      }
+      throw lockErr;
+    }
+
     const parsedDuration = Number(durationMinutes);
     if (![30, 60].includes(parsedDuration)) {
       return res.status(400).json({ error: 'durationMinutes must be 30 or 60' });

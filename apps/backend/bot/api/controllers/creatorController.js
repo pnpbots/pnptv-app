@@ -123,6 +123,9 @@ const subscribeToCreator = async (req, res) => {
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('subscribeToCreator error', err);
+    if (err.code === 'CREATOR_LOCKED') {
+      return res.status(err.statusCode || 423).json({ error: err.message, code: 'CREATOR_LOCKED' });
+    }
     return res.status(400).json({ error: err.message });
   }
 };

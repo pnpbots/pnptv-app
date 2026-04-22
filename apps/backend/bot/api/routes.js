@@ -4022,6 +4022,7 @@ app.post('/api/webapp/admin/users/bulk-update', adminGuard, asyncHandler(webappA
 app.get('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.getUser));
 app.put('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.updateUser));
 app.post('/api/webapp/admin/users/:id/ban', adminGuard, asyncHandler(webappAdminController.banUser));
+app.post('/api/webapp/admin/users/:id/creator-lock', adminGuard, asyncHandler(webappAdminController.setCreatorLock));
 app.get('/api/webapp/admin/users/:id/payments', adminGuard, asyncHandler(webappAdminController.getUserPayments));
 app.delete('/api/webapp/admin/users/:id', adminGuard, asyncHandler(webappAdminController.deleteUser));
 app.get('/api/webapp/admin/posts', adminGuard, asyncHandler(webappAdminController.listPosts));

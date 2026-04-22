@@ -4,6 +4,7 @@ import {
   getAdminLiveChannels,
   makeAdminUserCreator,
   revokeAdminUserCreator,
+  setCreatorLock,
   type AdminUser,
   type AdminChannel,
 } from "@/lib/api";
@@ -65,6 +66,29 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
   const [revokeConfirm, setRevokeConfirm] = useState(false);
   const [revokeLoading, setRevokeLoading] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+
+  // Creator onboarding-lock toggle
+  const [lockLoading, setLockLoading] = useState(false);
+  const [lockError, setLockError] = useState<string | null>(null);
+
+  const handleToggleLock = async () => {
+    if (!user.id) return;
+    setLockLoading(true);
+    setLockError(null);
+    try {
+      const next = !user.creator_locked;
+      const res = await setCreatorLock(user.id, next);
+      if (res.success) {
+        onUpdated({ creator_locked: res.user.creator_locked });
+      } else {
+        setLockError("Failed to update onboarding lock");
+      }
+    } catch (err) {
+      setLockError(err instanceof Error ? err.message : "Failed to update onboarding lock");
+    } finally {
+      setLockLoading(false);
+    }
+  };
 
   const loadChannels = async () => {
     setChannelsLoading(true);
@@ -204,6 +228,34 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
             <span className="text-xs text-pnp-textPrimary font-medium">
               ${Number(user.creator_price_usd).toFixed(2)}/mo
             </span>
+          </>
+        )}
+
+        {user.creator_status === "active" && (
+          <>
+            <span className="text-xs text-pnp-textSecondary">Onboarding</span>
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${
+                user.creator_locked
+                  ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                  : "bg-green-500/15 text-green-400 border-green-500/20"
+              }`}
+            >
+              {user.creator_locked ? "Locked (pending onboarding)" : "Unlocked"}
+            </span>
+            <button
+              onClick={handleToggleLock}
+              disabled={lockLoading}
+              className={`px-2 py-0.5 rounded-full text-xs font-semibold border transition-colors disabled:opacity-50 ${
+                user.creator_locked
+                  ? "bg-green-500/10 text-green-400 border-green-500/30 hover:bg-green-500/20"
+                  : "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
+              }`}
+              title={user.creator_locked ? "Unlock creator tools (onboarding complete)" : "Lock creator tools pending onboarding"}
+            >
+              {lockLoading ? "…" : user.creator_locked ? "Unlock tools" : "Lock tools"}
+            </button>
+            {lockError && <span className="text-xs text-red-400">{lockError}</span>}
           </>
         )}
       </div>
