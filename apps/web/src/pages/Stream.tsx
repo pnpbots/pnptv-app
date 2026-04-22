@@ -634,8 +634,8 @@ export default function Stream() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ePayco = (window as any).ePayco;
         if (!ePayco || typeof ePayco.checkout?.configure !== "function") {
-          // Fallback: redirect to hosted checkout page
-          window.open(result.checkoutUrl, "_blank", "noopener,noreferrer");
+          // Fallback: redirect to hosted checkout page (host-allowlisted)
+          window.open(assertPaymentUrl(result.checkoutUrl), "_blank", "noopener,noreferrer");
           return;
         }
         const handler = ePayco.checkout.configure({

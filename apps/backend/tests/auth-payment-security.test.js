@@ -115,7 +115,6 @@ jest.mock('../bot/api/middleware/ipTracker', () => (req, res, next) => next());
 // Stub payment controllers that have heavy dependencies
 jest.mock('../bot/api/controllers/webhookController', () => ({
   handleEpaycoWebhook: jest.fn((req, res) => res.json({ success: true })),
-  handleDaimoWebhook: jest.fn((req, res) => res.json({ success: true })),
   handlePaymentResponse: jest.fn((req, res) => res.send('<html>ok</html>')),
 }));
 // visaCybersourceWebhookController was removed — the visaCybersource integration
@@ -206,7 +205,8 @@ function buildEpaycoPayload(overrides = {}) {
   const epaycoKey = process.env.EPAYCO_P_KEY || 'test_epayco_key';
   const sig = crypto
     .createHash('sha256')
-    .update(`${epaycoKey}^${base.x_cust_id_client}^${base.x_ref_payco}^${base.x_amount}^${base.x_currency_code}^${base.x_transaction_state}`)
+    // Production format (paymentService.js:710): custId^pKey^refPayco^transactionId^amount^currency
+    .update(`${base.x_cust_id_client}^${epaycoKey}^${base.x_ref_payco}^${base.x_transaction_id}^${base.x_amount}^${base.x_currency_code}`)
     .digest('hex');
   return { ...base, x_signature: sig };
 }
@@ -287,7 +287,6 @@ function buildTestApp() {
     legacyHeaders: false,
   });
   app.post('/api/webhooks/epayco', webhookLimiter, (req, res) => res.json({ success: true }));
-  app.post('/api/webhooks/daimo', webhookLimiter, (req, res) => res.json({ success: true }));
   app.post('/api/webhooks/btcpay', webhookLimiter, (req, res) => res.json({ success: true }));
   app.post('/api/webhooks/visa-cybersource', webhookLimiter, (req, res) => res.json({ success: true }));
 
@@ -897,12 +896,14 @@ describe('ePayco Signature Verification', () => {
     // a minimal harness that calls PaymentService.verifyEpaycoSignature.
     // Rather than loading the full service (which has many deps), we test
     // the hash math directly as the service implements it.
+    // Mirrors PaymentService.verifyEpaycoSignature (apps/backend/services/paymentService.js:710):
+    //   SHA256(custId ^ pKey ^ x_ref_payco ^ x_transaction_id ^ x_amount ^ x_currency_code)
     verifyEpaycoSignature = (body) => {
-      const { x_cust_id_client, x_ref_payco, x_amount, x_currency_code, x_transaction_state, x_signature } = body;
+      const { x_cust_id_client, x_ref_payco, x_transaction_id, x_amount, x_currency_code, x_signature } = body;
       if (!x_signature) return false;
       const computed = crypto
         .createHash('sha256')
-        .update(`${EPAYCO_P_KEY}^${x_cust_id_client}^${x_ref_payco}^${x_amount}^${x_currency_code}^${x_transaction_state}`)
+        .update(`${x_cust_id_client}^${EPAYCO_P_KEY}^${x_ref_payco}^${x_transaction_id}^${x_amount}^${x_currency_code}`)
         .digest('hex');
       return computed === x_signature;
     };
@@ -910,10 +911,10 @@ describe('ePayco Signature Verification', () => {
 
   it('should verify a correctly signed payload', () => {
     const payload = buildEpaycoPayload();
-    // Re-compute with test key
+    // Re-compute with test key using production signature format
     const sig = crypto
       .createHash('sha256')
-      .update(`${EPAYCO_P_KEY}^${payload.x_cust_id_client}^${payload.x_ref_payco}^${payload.x_amount}^${payload.x_currency_code}^${payload.x_transaction_state}`)
+      .update(`${payload.x_cust_id_client}^${EPAYCO_P_KEY}^${payload.x_ref_payco}^${payload.x_transaction_id}^${payload.x_amount}^${payload.x_currency_code}`)
       .digest('hex');
     payload.x_signature = sig;
     expect(verifyEpaycoSignature(payload)).toBe(true);
@@ -923,7 +924,7 @@ describe('ePayco Signature Verification', () => {
     const payload = buildEpaycoPayload();
     const sig = crypto
       .createHash('sha256')
-      .update(`${EPAYCO_P_KEY}^${payload.x_cust_id_client}^${payload.x_ref_payco}^${payload.x_amount}^${payload.x_currency_code}^${payload.x_transaction_state}`)
+      .update(`${payload.x_cust_id_client}^${EPAYCO_P_KEY}^${payload.x_ref_payco}^${payload.x_transaction_id}^${payload.x_amount}^${payload.x_currency_code}`)
       .digest('hex');
     payload.x_signature = sig;
     payload.x_amount = '0.01'; // tamper amount AFTER signing
@@ -986,42 +987,6 @@ describe('BTCPay Signature Verification', () => {
     const sig = computeBtcpaySig(BTCPAY_SECRET, originalBody);
     const tamperedBody = JSON.stringify({ type: 'InvoiceSettled', invoiceId: 'inv456' }); // different id
     expect(validateWebhookSignature(tamperedBody, sig)).toBe(false);
-  });
-});
-
-describe('Daimo Signature Verification', () => {
-  const DAIMO_SECRET = 'daimo-webhook-secret-test-value';
-
-  // Mirror DaimoService.verifyWebhookSignature (HMAC-SHA256 over JSON body)
-  function verifyDaimoSignature(body, authHeader, secret = DAIMO_SECRET) {
-    if (!authHeader || !secret) return false;
-    const rawBody = typeof body === 'string' ? body : JSON.stringify(body);
-    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-    const provided = authHeader.replace(/^sha256=/, '');
-    try {
-      return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(provided, 'hex'));
-    } catch {
-      return false;
-    }
-  }
-
-  it('should accept a correctly signed Daimo webhook', () => {
-    const body = { id: 'pay-001', status: 'paid', metadata: {} };
-    const raw = JSON.stringify(body);
-    const sig = 'sha256=' + crypto.createHmac('sha256', DAIMO_SECRET).update(raw).digest('hex');
-    expect(verifyDaimoSignature(body, sig)).toBe(true);
-  });
-
-  it('should reject a missing Authorization header', () => {
-    const body = { id: 'pay-001', status: 'paid', metadata: {} };
-    expect(verifyDaimoSignature(body, null)).toBe(false);
-  });
-
-  it('should reject a forged signature from a different secret', () => {
-    const body = { id: 'pay-001', status: 'paid', metadata: {} };
-    const raw = JSON.stringify(body);
-    const wrongSig = 'sha256=' + crypto.createHmac('sha256', 'attacker-secret').update(raw).digest('hex');
-    expect(verifyDaimoSignature(body, wrongSig)).toBe(false);
   });
 });
 
