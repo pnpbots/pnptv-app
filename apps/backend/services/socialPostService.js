@@ -581,19 +581,25 @@ class SocialPostService {
   // ── Toggle Like ───────────────────────────────────────────────────────────
 
   static async toggleLike(postId, userId) {
-    const { rows } = await query(
+    // likes_count is maintained by trigger trg_social_post_likes_count
+    // (migration 222). We only insert/delete the row here; the trigger
+    // keeps social_posts.likes_count in sync on INSERT and DELETE.
+    await query(
       `WITH del AS (
         DELETE FROM social_post_likes WHERE post_id=$1 AND user_id=$2 RETURNING post_id
-      ),
-      ins AS (
-        INSERT INTO social_post_likes (post_id, user_id) SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM del) ON CONFLICT DO NOTHING RETURNING post_id
       )
-      UPDATE social_posts SET likes_count = CASE
-        WHEN (SELECT COUNT(*) FROM ins) > 0 THEN likes_count + 1
-        WHEN (SELECT COUNT(*) FROM del) > 0 THEN GREATEST(0, likes_count - 1)
-        ELSE likes_count
-      END WHERE id = $1 AND is_deleted = false
-      RETURNING (SELECT COUNT(*) FROM ins) > 0 AS liked, likes_count`,
+      INSERT INTO social_post_likes (post_id, user_id)
+        SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM del)
+      ON CONFLICT DO NOTHING`,
+      [postId, userId]
+    );
+
+    // Separate query = fresh snapshot so trigger's count update is visible.
+    const { rows } = await query(
+      `SELECT
+         EXISTS(SELECT 1 FROM social_post_likes WHERE post_id=$1 AND user_id=$2) AS liked,
+         likes_count
+         FROM social_posts WHERE id=$1`,
       [postId, userId]
     );
     if (!rows[0]) return { liked: false, likes_count: 0 };
