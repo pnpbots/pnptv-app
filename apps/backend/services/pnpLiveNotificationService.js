@@ -1,6 +1,7 @@
 const logger = require('../utils/logger');
 const { query } = require('../config/postgres');
 const { Markup } = require('telegraf');
+const { CREATOR_REVENUE_RATE } = require('../config/monetizationConfig');
 
 /**
  * PNP Television Live Notification Service
@@ -233,7 +234,7 @@ class PNPLiveNotificationService {
         { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
       );
 
-      const earnings = booking.model_earnings || (booking.price_usd * 0.6);
+      const earnings = booking.model_earnings || (booking.price_usd * CREATOR_REVENUE_RATE);
 
       const message = lang === 'es'
         ? `💃 *¡Nueva Reserva!*\n\n` +

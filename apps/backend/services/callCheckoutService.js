@@ -17,6 +17,7 @@ const callPackageService = require('./callPackageService');
 const { sendNotificationViaTelegram } = require('./notificationBotDelivery');
 const emailService = require('./emailservice');
 const logger = require('../utils/logger');
+const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
 
 // Loaded lazily to avoid circular-require on startup
 function getBtcpay() {
@@ -300,14 +301,14 @@ async function onCallPaymentSuccess(paymentId) {
     try {
       const pkg = pkgResult.rows[0];
       const grossAmount = parseFloat(pkg.price_usd);
-      const amountCreator = Math.round(grossAmount * 0.70 * 100) / 100;
-      const amountPlatform = Math.round(grossAmount * 0.30 * 100) / 100;
+      const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
+      const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
       await query(
-        `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, period_month)
-         VALUES ($1, $2, $3, $4, 'available', date_trunc('month', CURRENT_DATE))`,
-        [creator_id, grossAmount, amountCreator, amountPlatform]
+        `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+         VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+        [creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId || null]
       );
-      logger.info('[callCheckoutService] creator earnings recorded', {
+      logger.info('[callCheckoutService] creator earnings recorded (holding)', {
         creatorId: creator_id, grossAmount, amountCreator, amountPlatform,
       });
     } catch (earningsErr) {

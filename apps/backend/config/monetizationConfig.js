@@ -3,7 +3,22 @@
  * Centralized configuration for all monetization features
  */
 
+// ── Revenue-split constants ──────────────────────────────────────────────────
+// Single source of truth for the 70/30 platform commission split.
+// CREATOR_REVENUE_RATE + PLATFORM_COMMISSION_RATE MUST equal exactly 1.
+const PLATFORM_COMMISSION_RATE = 0.30;
+const CREATOR_REVENUE_RATE = 0.70; // must equal 1 - PLATFORM_COMMISSION_RATE
+
+// Earnings hold period: newly-recorded earnings sit in 'holding' status for this
+// many hours before maturing to 'available'. This gives the platform time to
+// process any refund or chargeback before paying out the creator.
+const EARNINGS_HOLD_HOURS = 72;
+
 module.exports = {
+  // Exported as top-level named constants for direct destructured imports.
+  PLATFORM_COMMISSION_RATE,
+  CREATOR_REVENUE_RATE,
+  EARNINGS_HOLD_HOURS,
   // ==========================================
   // SUBSCRIPTION SETTINGS
   // ==========================================

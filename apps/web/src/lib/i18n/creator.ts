@@ -244,6 +244,70 @@ const strings = {
     withdrawConfirmTitle: "Confirm Withdrawal",
     withdrawConfirmMsg: (amount: string) => `Withdraw $${amount} to your configured payout method? This action cannot be undone.`,
 
+    // Cash-out USDT off-ramp — balance card
+    cashoutHoldingLabel: "Holding",
+    cashoutAvailableLabel: "Available",
+    cashoutHoldingCount: (n: number) => `${n} earning${n !== 1 ? "s" : ""}`,
+    cashoutAvailableIn: (h: number, m: number) => `Available in ${h}h ${m}m`,
+    cashoutHoldingTooltip: "Earnings are held for 72 hours to cover refunds.",
+    cashoutMinimum: "Minimum $5.00",
+    cashoutCashOutBtn: "Cash out",
+    cashoutNoEarnings: "No earnings yet — start creating content to earn.",
+    cashoutBalanceError: "Could not load balance.",
+    cashoutRetry: "Retry",
+
+    // Cash-out modal — general
+    cashoutModalTitle: "Cash Out USDT",
+    cashoutTabOnchain: "On-chain USDT",
+    cashoutTabGiftCards: "Gift Cards",
+    cashoutTabBank: "Bank Transfer",
+    cashoutAmountLabel: "Amount (USD)",
+    cashoutAmountPlaceholder: "e.g. 50.00",
+    cashoutAmountMin: "Minimum $5.00",
+    cashoutAmountMinBank: "Minimum $20.00",
+    cashoutAmountMax: (max: string) => `Maximum $${max} (available balance)`,
+    cashoutConfirmBtn: "Confirm",
+    cashoutProcessing: "Processing…",
+    cashoutSuccessToast: "Withdrawal queued — usually settled within 24 hours (currently manual settlement).",
+    cashoutErrorGeneric: "Something went wrong. Please try again.",
+
+    // Cash-out modal — on-chain tab
+    cashoutOnchainDesc: "Send USDT to your own wallet. No KYC, no fees beyond network gas.",
+    cashoutChainLabel: "Network",
+    cashoutChainTron: "Tron (TRC-20)",
+    cashoutChainBase: "Base",
+    cashoutChainEthereum: "Ethereum",
+    cashoutChainTronBadge: "Lowest fees — recommended",
+    cashoutAddressLabel: "Wallet Address",
+    cashoutAddressPlaceholder: "Your USDT wallet address",
+    cashoutAddressErrorTron: "Tron address must start with T and be 34 characters long.",
+    cashoutAddressErrorEvm: "Address must start with 0x followed by 40 hex characters.",
+    cashoutAddressRequired: "Wallet address is required.",
+
+    // Cash-out modal — gift cards tab
+    cashoutGiftDesc: "Convert to Amazon, Netflix, groceries, or mobile top-up. No KYC, instant delivery.",
+    cashoutGiftComingSoon: "Coming soon — our Bitrefill integration activates next week.",
+
+    // Cash-out modal — bank transfer tab
+    cashoutBankDesc: "Send to your bank account. Phone verification only below $250.",
+    cashoutBankCountryLabel: "Country",
+    cashoutBankContinueBtn: "Continue in Transak",
+    cashoutBankNotConfigured: "Cash-to-bank is not configured yet — contact support@pnptv.app to activate.",
+    cashoutTransakOrderFailed: "Transak order failed. Please try again.",
+    cashoutTransakSuccess: "Bank transfer initiated successfully.",
+
+    // Cash-out history
+    cashoutHistoryTitle: "Cash-out History",
+    cashoutHistoryEmpty: "No cash-outs yet.",
+    cashoutHistoryLoadError: "Could not load history.",
+    cashoutStatusPending: "Pending",
+    cashoutStatusProcessing: "Processing",
+    cashoutStatusSettled: "Settled",
+    cashoutStatusFailed: "Failed",
+    cashoutLaneOnchain: "On-chain USDT",
+    cashoutLaneGiftCards: "Gift Cards",
+    cashoutLaneBank: "Bank Transfer",
+
     // BookCallModal — step titles
     stepTitleChooseModel: "Choose a Model",
     stepTitleBookCall: "Book a Call",
@@ -587,6 +651,70 @@ const strings = {
     // Withdrawal confirmation
     withdrawConfirmTitle: "Confirmar Retiro",
     withdrawConfirmMsg: (amount: string) => `¿Retirar $${amount} a tu método de pago configurado? Esta acción no se puede deshacer.`,
+
+    // Cash-out USDT off-ramp — balance card
+    cashoutHoldingLabel: "En espera",
+    cashoutAvailableLabel: "Disponible",
+    cashoutHoldingCount: (n: number) => `${n} ganancia${n !== 1 ? "s" : ""}`,
+    cashoutAvailableIn: (h: number, m: number) => `Disponible en ${h}h ${m}m`,
+    cashoutHoldingTooltip: "Las ganancias se retienen 72 horas para cubrir reembolsos.",
+    cashoutMinimum: "Mínimo $5.00",
+    cashoutCashOutBtn: "Retirar",
+    cashoutNoEarnings: "Aún no tienes ganancias — empieza a crear contenido.",
+    cashoutBalanceError: "No se pudo cargar el saldo.",
+    cashoutRetry: "Reintentar",
+
+    // Cash-out modal — general
+    cashoutModalTitle: "Retirar en USDT",
+    cashoutTabOnchain: "USDT On-chain",
+    cashoutTabGiftCards: "Tarjetas de regalo",
+    cashoutTabBank: "Transferencia bancaria",
+    cashoutAmountLabel: "Monto (USD)",
+    cashoutAmountPlaceholder: "ej. 50.00",
+    cashoutAmountMin: "Mínimo $5.00",
+    cashoutAmountMinBank: "Mínimo $20.00",
+    cashoutAmountMax: (max: string) => `Máximo $${max} (saldo disponible)`,
+    cashoutConfirmBtn: "Confirmar",
+    cashoutProcessing: "Procesando…",
+    cashoutSuccessToast: "Retiro en cola — generalmente se liquida en 24 horas (actualmente liquidación manual).",
+    cashoutErrorGeneric: "Algo salió mal. Por favor intenta de nuevo.",
+
+    // Cash-out modal — on-chain tab
+    cashoutOnchainDesc: "Envía USDT a tu propia billetera. Sin KYC, sin comisiones más allá del gas de la red.",
+    cashoutChainLabel: "Red",
+    cashoutChainTron: "Tron (TRC-20)",
+    cashoutChainBase: "Base",
+    cashoutChainEthereum: "Ethereum",
+    cashoutChainTronBadge: "Comisiones más bajas — recomendado",
+    cashoutAddressLabel: "Dirección de billetera",
+    cashoutAddressPlaceholder: "Tu dirección de billetera USDT",
+    cashoutAddressErrorTron: "La dirección Tron debe comenzar con T y tener 34 caracteres.",
+    cashoutAddressErrorEvm: "La dirección debe comenzar con 0x seguido de 40 caracteres hexadecimales.",
+    cashoutAddressRequired: "La dirección de billetera es obligatoria.",
+
+    // Cash-out modal — gift cards tab
+    cashoutGiftDesc: "Convierte a Amazon, Netflix, supermercados o recarga de celular. Sin KYC, entrega instantánea.",
+    cashoutGiftComingSoon: "Próximamente — nuestra integración con Bitrefill se activa la próxima semana.",
+
+    // Cash-out modal — bank transfer tab
+    cashoutBankDesc: "Envía a tu cuenta bancaria. Solo verificación telefónica por debajo de $250.",
+    cashoutBankCountryLabel: "País",
+    cashoutBankContinueBtn: "Continuar en Transak",
+    cashoutBankNotConfigured: "La transferencia bancaria aún no está configurada — contacta support@pnptv.app para activarla.",
+    cashoutTransakOrderFailed: "El pedido de Transak falló. Por favor intenta de nuevo.",
+    cashoutTransakSuccess: "Transferencia bancaria iniciada exitosamente.",
+
+    // Cash-out history
+    cashoutHistoryTitle: "Historial de retiros USDT",
+    cashoutHistoryEmpty: "Aún no hay retiros.",
+    cashoutHistoryLoadError: "No se pudo cargar el historial.",
+    cashoutStatusPending: "Pendiente",
+    cashoutStatusProcessing: "Procesando",
+    cashoutStatusSettled: "Liquidado",
+    cashoutStatusFailed: "Fallido",
+    cashoutLaneOnchain: "USDT On-chain",
+    cashoutLaneGiftCards: "Tarjetas de regalo",
+    cashoutLaneBank: "Transferencia bancaria",
 
     // BookCallModal — step titles
     stepTitleChooseModel: "Elige un modelo",

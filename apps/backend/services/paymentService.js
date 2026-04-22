@@ -13,6 +13,7 @@ const { query, getClient } = require('../config/postgres');
 const logger = require('../utils/logger');
 const crypto = require('crypto');
 const { Telegraf } = require('telegraf');
+const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
 
 // Singleton bot instance — avoids spawning a new Telegraf per payment event.
 let _botInstance = null;
@@ -1866,6 +1867,31 @@ class PaymentService {
           }
         }
 
+        // Reverse any creator_earnings rows that were sourced from this payment.
+        // Rows still in 'holding' (within the 72-hour hold window) become 'void'.
+        // Rows already in 'refund_review' (a prior dispute notification came first) also become 'void'.
+        if (paymentIdOrType) {
+          try {
+            const reverseResult = await query(
+              `UPDATE creator_earnings
+                  SET status = 'void'
+                WHERE source_payment_id = $1
+                  AND status IN ('holding', 'refund_review')
+               RETURNING id`,
+              [String(paymentIdOrType)]
+            );
+            if (reverseResult.rows.length > 0) {
+              logger.info('creator_earnings voided after payment reversal', {
+                paymentId: paymentIdOrType, count: reverseResult.rows.length,
+              });
+            }
+          } catch (earningsReverseErr) {
+            logger.warn('Failed to void creator_earnings after payment reversal (non-critical)', {
+              paymentId: paymentIdOrType, error: earningsReverseErr.message,
+            });
+          }
+        }
+
         // H3: Notify the user their payment has been reversed/refunded.
         if (userId) {
           try {
@@ -3709,14 +3735,15 @@ class PaymentService {
           );
           if (channelRes.rows[0]) {
             const grossAmount = parseFloat(channelRes.rows[0].price_usd);
-            const amountCreator = Math.round(grossAmount * 0.70 * 100) / 100;
-            const amountPlatform = Math.round(grossAmount * 0.30 * 100) / 100;
+            const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
+            const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
+            const sourcePaymentId = paymentMetadata?.paymentId || null;
             await query(
-              `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, period_month)
-               VALUES ($1, $2, $3, $4, 'available', date_trunc('month', CURRENT_DATE))`,
-              [channelRes.rows[0].creator_id, grossAmount, amountCreator, amountPlatform]
+              `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+               VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+              [channelRes.rows[0].creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
             );
-            logger.info('Channel access earnings recorded (70/30)', {
+            logger.info('Channel access earnings recorded (70/30, holding)', {
               creatorId: channelRes.rows[0].creator_id, channelId: paymentMetadata.channelId, grossAmount, amountCreator,
             });
           }

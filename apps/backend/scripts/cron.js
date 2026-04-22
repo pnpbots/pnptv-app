@@ -237,9 +237,29 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // ── Creator earnings maturation — hourly ─────────────────────────────────
+    // Flips 'holding' earnings rows to 'available' once their available_at has passed.
+    // This enforces the 72-hour hold window between earning record insertion and payout eligibility.
+    const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
+    cron.schedule('0 * * * *', async () => {
+      try {
+        const { rows } = await pgQuery(`
+          UPDATE creator_earnings
+             SET status = 'available'
+           WHERE status = 'holding'
+             AND available_at <= NOW()
+          RETURNING id, creator_id, amount_creator
+        `);
+        if (rows.length > 0) {
+          logger.info('creator earnings matured', { count: rows.length });
+        }
+      } catch (error) {
+        logger.error('Error in creator earnings maturation cron:', error);
+      }
+    });
+
     // Hangout subgroup inactivity cleanup - hourly
     // Deletes user-created hangout groups inactive for 72+ hours (CASCADE handles members, calls, messages)
-    const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
     cron.schedule('0 * * * *', async () => {
       try {
         logger.info('Running hangout inactivity cleanup...');

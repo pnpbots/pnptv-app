@@ -66,6 +66,7 @@ const matrixMessageController = {
 const creatorRoutes = require('./routes/creatorRoutes');
 const gamificationRoutes = require('./routes/gamificationRoutes');
 const canvaRoutes = require('./routes/canvaRoutes');
+const cashoutRoutes = require('./routes/cashoutRoutes');
 
 
 
@@ -1721,6 +1722,11 @@ app.post(
 
 // Payment API routes (modularized)
 app.use('/api/payment', paymentRoutes);
+
+// Creator USDT cash-out off-ramp (auth+creatorGuard enforced inside the router)
+app.use('/api/cashout', cashoutRoutes);
+app.post('/api/webhooks/bitrefill', cashoutRoutes.bitrefillWebhook);
+app.post('/api/webhooks/transak', cashoutRoutes.transakWebhook);
 
 // PNP Live API routes (formerly Meet & Greet, now consolidated)
 const PNPLiveService = require('../../services/pnpLiveService');

@@ -13,9 +13,13 @@ const userService = require('./userService');
 const { query, getClient } = require('../config/postgres');
 const { cache } = require('../config/redis');
 
+const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
+
 const STREAM_HEARTBEAT_COST = 1;
-const STREAM_HEARTBEAT_REVENUE = 0.70; // 70% to creator, 30% platform
-const STREAM_HEARTBEAT_PLATFORM = 0.30;
+// STREAM_HEARTBEAT_REVENUE and STREAM_HEARTBEAT_PLATFORM derive from the canonical
+// revenue-split constants. Their sum MUST equal STREAM_HEARTBEAT_COST at 70/30.
+const STREAM_HEARTBEAT_REVENUE = Math.round(STREAM_HEARTBEAT_COST * CREATOR_REVENUE_RATE * 1000) / 1000;   // 0.7
+const STREAM_HEARTBEAT_PLATFORM = Math.round(STREAM_HEARTBEAT_COST * PLATFORM_COMMISSION_RATE * 1000) / 1000; // 0.3
 
 /**
  * Checks if a user has at least a certain number of tokens.
@@ -178,13 +182,12 @@ async function processStreamHeartbeat(viewerId, channelRef) {
       [String(streamer.id), STREAM_HEARTBEAT_REVENUE]
     );
 
-    // 3. Log the earning record
-    // Using a simple earnings record for now. If a specific table for tip/heartbeat
-    // exists, it should be used here.
+    // 3. Log the earning record (holding status — matures after EARNINGS_HOLD_HOURS)
+    // Note: heartbeats are micro-transactions with no external payment ID; source_payment_id stays NULL.
     await client.query(
-      `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, period_month)
-       VALUES ($1, $2, $3, $4, 'available', date_trunc('month', CURRENT_DATE))`,
-      [String(streamer.id), STREAM_HEARTBEAT_COST, STREAM_HEARTBEAT_REVENUE, STREAM_HEARTBEAT_PLATFORM]
+      `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, period_month)
+       VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, date_trunc('month', CURRENT_DATE))`,
+      [String(streamer.id), STREAM_HEARTBEAT_COST, STREAM_HEARTBEAT_REVENUE, STREAM_HEARTBEAT_PLATFORM, String(EARNINGS_HOLD_HOURS)]
     );
 
     await client.query('COMMIT');

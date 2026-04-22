@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
 const NotificationEmitter = require('./notificationEmitter');
+const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
 
 const TEASER_SECRET = process.env.TEASER_SECRET || 'pnptv-teaser-salt-2026';
 
@@ -324,14 +325,14 @@ class CreatorService {
       logger.warn('subscribeToCreator: failed to write entitlement', { subscriberId, creatorId, error: entErr.message });
     }
 
-    // Record earnings (70/30 split)
-    const amountCreator = Math.round(priceUsd * 0.70 * 100) / 100;
-    const amountPlatform = Math.round(priceUsd * 0.30 * 100) / 100;
+    // Record earnings (70/30 split) — held for EARNINGS_HOLD_HOURS before maturing to 'available'
+    const amountCreator = Math.round(priceUsd * CREATOR_REVENUE_RATE * 100) / 100;
+    const amountPlatform = Math.round(priceUsd * PLATFORM_COMMISSION_RATE * 100) / 100;
 
     await query(
-      `INSERT INTO creator_earnings (creator_id, subscription_id, amount_gross, amount_creator, amount_platform, period_month)
-       VALUES ($1, $2, $3, $4, $5, date_trunc('month', CURRENT_DATE)::date)`,
-      [creatorId, rows[0].id, priceUsd, amountCreator, amountPlatform]
+      `INSERT INTO creator_earnings (creator_id, subscription_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+       VALUES ($1, $2, $3, $4, $5, 'holding', NOW() + ($6 || ' hours')::interval, $7, date_trunc('month', CURRENT_DATE)::date)`,
+      [creatorId, rows[0].id, priceUsd, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId || null]
     );
 
     // Notify subscriber's frontend to refresh subscription state
