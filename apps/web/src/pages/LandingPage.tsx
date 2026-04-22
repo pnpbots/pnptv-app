@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { telegramWidgetAuth, recoverAccount, TelegramWidgetUser } from "@/lib/api";
+import { telegramWidgetAuth, recoverAccount, resendVerificationEmail, TelegramWidgetUser } from "@/lib/api";
 import { login as oidcLogin } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
 import { LanguageSelector } from "@/components/LanguageSelector";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 const AUTHENTIK_URL = import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app";
+const ENROLLMENT_FLOW_URL = `${AUTHENTIK_URL}/if/flow/pnptv-enrollment/`;
+const RECOVERY_FLOW_URL = `${AUTHENTIK_URL}/if/flow/pnptv-recovery/`;
 
 function getBotUsername(): string {
   const raw = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "PNPLatinoTV_Bot";
@@ -269,6 +271,13 @@ export function LandingPage() {
   const [passVal, setPassVal] = useState("");
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailNotVerified, setEmailNotVerified] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
+
+  // Signup / email-capture (primary CTA)
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupEmailError, setSignupEmailError] = useState<string | null>(null);
 
   const [recoverEmail, setRecoverEmail] = useState("");
   const [recoverLoading, setRecoverLoading] = useState(false);
@@ -342,6 +351,8 @@ export function LandingPage() {
     if (!emailVal.trim() || !passVal) { setEmailError("Email and password are required"); return; }
     setEmailLoading(true);
     setEmailError(null);
+    setEmailNotVerified(false);
+    setResendSent(false);
     try {
       const res = await fetch(`${API_BASE}/api/webapp/auth/email/login`, {
         method: "POST", credentials: "include",
@@ -352,11 +363,43 @@ export function LandingPage() {
       if (res.ok && data.authenticated) {
         localStorage.setItem("pnptv_last_auth", "email");
         window.location.href = "/";
+      } else if (res.status === 403 && data.error === "email_not_verified") {
+        setEmailNotVerified(true);
+        setEmailError(null);
       } else {
-        setEmailError(data.error || data.message || "Login failed");
+        // Normalize Spanish-only backend messages to friendly English
+        const raw = data.error || data.message || "Login failed";
+        setEmailError(
+          raw === "email_not_verified"
+            ? "Please verify your email before logging in."
+            : raw
+        );
       }
     } catch { setEmailError("Connection error. Try again."); }
     finally { setEmailLoading(false); }
+  };
+
+  const handleResendVerification = async () => {
+    if (!emailVal.trim()) return;
+    setResendLoading(true);
+    try {
+      await resendVerificationEmail(emailVal.trim().toLowerCase());
+      setResendSent(true);
+    } catch {
+      // Non-fatal — user can try again
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  const handleCreateAccount = (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = signupEmail.trim();
+    if (!email) { setSignupEmailError("Please enter your email to continue"); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setSignupEmailError("That doesn't look like a valid email"); return; }
+    setSignupEmailError(null);
+    try { localStorage.setItem("pnptv_signup_email", email); } catch { /* ignore */ }
+    window.location.href = `${ENROLLMENT_FLOW_URL}?email=${encodeURIComponent(email)}`;
   };
 
   const handleRecover = async () => {
@@ -428,13 +471,42 @@ export function LandingPage() {
             </div>
           )}
 
+          {/* ── PRIMARY CTA: Join PNPtv (email capture → Authentik enrollment) ── */}
+          <form onSubmit={handleCreateAccount} noValidate className="w-full space-y-2">
+            <div className="glass-card-sm p-4 space-y-3">
+              <p className="text-sm font-bold text-white text-center">Join PNPtv today</p>
+              <input
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={signupEmail}
+                onChange={(e) => { setSignupEmail(e.target.value); setSignupEmailError(null); }}
+                placeholder="your@email.com"
+                aria-label="Email address"
+                aria-invalid={!!signupEmailError}
+                className="w-full px-3 py-3 rounded-xl text-sm text-white bg-pnp-surface placeholder-pnp-textSecondary/50 focus:outline-none focus:border-pnp-accent transition-colors"
+                style={{ border: signupEmailError ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.1)" }}
+              />
+              {signupEmailError && (
+                <p className="text-xs text-red-400">{signupEmailError}</p>
+              )}
+              <button
+                type="submit"
+                className="btn-gradient w-full py-3 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 hover:brightness-110 active:scale-[0.98] transition-all"
+              >
+                Create my account →
+              </button>
+              <p className="text-center text-[11px] text-pnp-textSecondary">Free. Takes 30 seconds.</p>
+            </div>
+          </form>
+
           {/* Join existing — accordion */}
           <div className="w-full">
             <button
               onClick={() => { setLoginOpen(v => !v); setLoginView("options"); }}
               className="w-full py-3.5 rounded-xl text-sm font-semibold text-pnp-textSecondary border border-pnp-border hover:border-white/30 hover:text-white flex items-center justify-center gap-2 transition-colors"
             >
-              Members Access
+              Already a member? Log in
               <svg className={`w-4 h-4 transition-transform duration-200 ${loginOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
               </svg>
@@ -499,10 +571,17 @@ export function LandingPage() {
 
                     <p className="text-center text-xs text-pnp-textSecondary pt-1">
                       New here?{" "}
-                      <a href={`${AUTHENTIK_URL}/if/flow/default-enrollment-flow/`} className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all">
+                      <a href={ENROLLMENT_FLOW_URL} className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all">
                         Create a PNPtv ID
                       </a>
                     </p>
+
+                    <a
+                      href={RECOVERY_FLOW_URL}
+                      className="block text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1 underline"
+                    >
+                      Forgot password?
+                    </a>
 
                     <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1">
                       Had an X (Twitter) account? Recover it here
@@ -589,11 +668,36 @@ export function LandingPage() {
                     <input type="password" placeholder="Password" value={passVal} onChange={e => setPassVal(e.target.value)} onKeyDown={e => e.key === "Enter" && handleEmail()}
                       className="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50 transition-colors" />
                     {emailError && <p className="text-pnp-error text-xs">{emailError}</p>}
+                    {emailNotVerified && (
+                      <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(230,145,56,0.1)", border: "1px solid rgba(230,145,56,0.3)" }}>
+                        <p className="text-xs text-white">
+                          <strong>Almost there!</strong> Please verify your email before logging in. Check your inbox for the link we sent.
+                        </p>
+                        {resendSent ? (
+                          <p className="text-xs text-green-400">✓ Verification email resent. Check your inbox.</p>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleResendVerification}
+                            disabled={resendLoading}
+                            className="w-full text-xs font-semibold underline text-pnp-accent hover:brightness-125 transition-all disabled:opacity-60"
+                          >
+                            {resendLoading ? "Sending…" : "Resend verification email"}
+                          </button>
+                        )}
+                      </div>
+                    )}
                     <button onClick={handleEmail} disabled={emailLoading}
                       className="btn-gradient w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 flex items-center justify-center gap-2">
                       {emailLoading && <Spinner />}
                       {emailLoading ? "Logging in…" : "Log in"}
                     </button>
+                    <a
+                      href={RECOVERY_FLOW_URL}
+                      className="block text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1 underline"
+                    >
+                      Forgot password?
+                    </a>
                   </div>
                 )}
 

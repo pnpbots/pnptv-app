@@ -760,17 +760,16 @@ app.get('/subscription', (req, res) => {
 });
 
 // Shorthand alias → lifetime100
-app.get('/lifetime', (req, res) => {
-  res.redirect(301, '/lifetime100');
-});
+app.get('/lifetime', (req, res) => res.redirect(302, 'https://app.pnptv.app/lifetime100'));
 
-// LIFETIME100 pass promo page
-app.get('/lifetime100', pageLimiter, (req, res) => {
+// LIFETIME100 — redirect to the React SPA, preserving any query string
+app.get('/lifetime100', (req, res) => {
   const host = req.get('host') || '';
   if (host.includes('easybots.store') || host.includes('easybots')) {
     return res.status(404).send('Not found');
   }
-  res.sendFile(path.join(__dirname, '../../../../public/lifetime-pass.html'));
+  const qs = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
+  return res.redirect(302, 'https://app.pnptv.app/lifetime100' + qs);
 });
 
 // ── CMS asset proxy — LATAM geo-block handled globally via latamGeoBlock ─────
@@ -3427,6 +3426,253 @@ app.get('/api/meru/random-link', asyncHandler(async (req, res) => {
   } catch (error) {
     logger.error('Error in /api/meru/random-link:', error);
     res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+}));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public founder-lifetime flow (no auth required)
+// ─────────────────────────────────────────────────────────────────────────────
+const lifetime100ReserveLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3,
+  message: { success: false, error: 'Too many reservation attempts. Try again in an hour.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip,
+});
+const lifetime100ActivateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { success: false, error: 'Too many activation attempts. Try again in an hour.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip,
+});
+
+// GET /api/public/lifetime100/availability — returns { success, available }
+app.get('/api/public/lifetime100/availability', asyncHandler(async (req, res) => {
+  const { query: dbQuery } = require('../../config/postgres');
+  const { rows } = await dbQuery(
+    `SELECT COUNT(*)::int AS n FROM meru_payment_links
+      WHERE product='lifetime100' AND status='active'
+        AND (reserved_until IS NULL OR reserved_until < NOW())`
+  );
+  return res.json({ success: true, available: rows[0]?.n || 0 });
+}));
+
+// POST /api/public/lifetime100/reserve — capture email, reserve a code, email the user
+app.post('/api/public/lifetime100/reserve', lifetime100ReserveLimiter, asyncHandler(async (req, res) => {
+  const { email: rawEmail, language: rawLang } = req.body || {};
+  const email = String(rawEmail || '').trim().toLowerCase();
+  const language = (rawLang === 'en' ? 'en' : 'es');
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+    return res.status(400).json({ success: false, error: 'A valid email address is required' });
+  }
+
+  // Per-email soft rate-limit: max 2 reservations per hour via Redis incr
+  const emailRateKey = `lifetime100:reserve:email:${email}`;
+  const emailRate = await cache.incr(emailRateKey, 60 * 60);
+  if (emailRate > 2) {
+    return res.status(429).json({ success: false, error: 'Too many reservations for this email. Try again later.' });
+  }
+
+  const meruLinkService = require('../../services/meruLinkService');
+  const EmailService = require('../../services/emailservice');
+  const { ensureEmailCredentials } = require('../../services/userService');
+  const { query: dbQuery } = require('../../config/postgres');
+  const crypto = require('crypto');
+
+  // 1) Find or create user record
+  const existingUser = await dbQuery(
+    `SELECT id FROM users WHERE LOWER(email)=LOWER($1) AND COALESCE(is_deleted,false)=false LIMIT 1`,
+    [email]
+  );
+  let userId;
+  if (existingUser.rows.length > 0) {
+    userId = existingUser.rows[0].id;
+  } else {
+    userId = crypto.randomUUID();
+    const firstName = email.split('@')[0].slice(0, 80) || 'Founder';
+    await dbQuery(
+      `INSERT INTO users (id, email, first_name, tier, role, subscription_status, created_at, updated_at)
+       VALUES ($1, $2, $3, 'free', 'user', 'free', NOW(), NOW())`,
+      [userId, email, firstName]
+    );
+  }
+
+  // 2) Ensure credentials exist (skip email — we send one combined founder email)
+  let credResult;
+  try {
+    credResult = await ensureEmailCredentials(userId, email, language, { skipEmail: true });
+  } catch (credErr) {
+    if (String(credErr.message || '').includes('already associated')) {
+      return res.status(409).json({ success: false, error: credErr.message });
+    }
+    logger.error('lifetime100 reserve: credential error', { email, error: credErr.message });
+    return res.status(500).json({ success: false, error: 'Failed to provision account' });
+  }
+
+  // Only include plaintext password in email for newly-created accounts
+  const includeCreds = !!(credResult?.created && credResult?.plainPassword);
+
+  // 3) Atomically reserve a code
+  const reservation = await meruLinkService.reserveRandomLink({
+    product: 'lifetime100',
+    email,
+    userId,
+    minutes: 60,
+  });
+  if (!reservation) {
+    return res.status(409).json({
+      success: false,
+      error: 'All founder codes are currently reserved. Please try again in about an hour.',
+    });
+  }
+
+  // 4) Send combined welcome + code email
+  const activationUrl = `https://app.pnptv.app/lifetime100/activate?code=${encodeURIComponent(reservation.code)}`;
+  try {
+    await EmailService.sendFounderLifetimeEmail({
+      to: email,
+      language,
+      meruCode: reservation.code,
+      meruUrl: reservation.meru_link,
+      loginEmail: email,
+      loginPassword: includeCreds ? credResult.plainPassword : '(use your existing password)',
+      recoveryId: userId,
+      activationUrl,
+    });
+  } catch (emailErr) {
+    // Non-critical — the code is still reserved; user can retry via the page
+    logger.error('lifetime100 reserve: email send failed', { email, code: reservation.code, error: emailErr.message });
+  }
+
+  return res.json({
+    success: true,
+    message: 'Founder code sent to your email. It is valid for 60 minutes.',
+    expiresAt: reservation.reserved_until,
+  });
+}));
+
+// POST /api/public/lifetime100/activate — verify Meru payment, claim code, grant membership, log in
+app.post('/api/public/lifetime100/activate', lifetime100ActivateLimiter, asyncHandler(async (req, res) => {
+  const code = String(req.body?.code || '').trim();
+  if (!code || code.length > 100 || !/^[A-Za-z0-9_\-]+$/.test(code)) {
+    return res.status(400).json({ success: false, error: 'A valid code is required' });
+  }
+
+  const meruLinkService = require('../../services/meruLinkService');
+  const meruPaymentService = require('../../services/meruPaymentService');
+  const { getPool } = require('../../config/postgres');
+  const pool = getPool();
+
+  const meruLockKey = `meru:activate:${code}`;
+  const gotLock = await cache.acquireLock(meruLockKey, 30);
+  if (!gotLock) {
+    return res.status(409).json({ success: false, error: 'Activation already in progress for this code' });
+  }
+
+  try {
+    // Validate reservation state
+    const reservation = await meruLinkService.getReservation(code);
+    if (!reservation) {
+      return res.status(404).json({ success: false, error: 'Code not found' });
+    }
+    if (reservation.status === 'used') {
+      return res.status(409).json({ success: false, error: 'Code already used' });
+    }
+    if (reservation.status !== 'reserved' || !reservation.reserved_until || new Date(reservation.reserved_until) < new Date()) {
+      return res.status(410).json({ success: false, error: 'Code expired. Request a new one at /lifetime100' });
+    }
+    const userId = reservation.reserved_for_user_id;
+    const email = reservation.reserved_for_email;
+    if (!userId) {
+      return res.status(500).json({ success: false, error: 'Reservation is missing an owner. Contact support.' });
+    }
+
+    // Verify payment on Meru (Puppeteer)
+    const verification = await meruPaymentService.verifyPayment(code);
+    if (!verification.isPaid) {
+      return res.status(402).json({ success: false, error: 'Payment not yet completed on Meru. Please complete payment first.' });
+    }
+
+    // Atomic claim — marks status='used'
+    const claim = await meruLinkService.claimReservedCode({ code, userId, username: null, email });
+    if (!claim.success) {
+      return res.status(409).json({ success: false, error: claim.message || 'Code not found, expired, or already used' });
+    }
+
+    // Grant membership — mirrors the existing /api/webapp/activate/meru pattern
+    const UserModel = require('../../models/userModel');
+    const primeExpiry = new Date();
+    primeExpiry.setDate(primeExpiry.getDate() + 60);
+    await UserModel.updateSubscription(userId, { status: 'active', planId: 'lifetime100', expiry: null });
+    await pool.query(
+      `UPDATE users SET tier='PRIME', plan_expiry=$2, updated_at=NOW() WHERE id=$1`,
+      [userId, primeExpiry.toISOString()]
+    );
+
+    // Grant entitlements — pnp-member (lifetime) + prime (60 days)
+    try {
+      const EntitlementModel = require('../../models/entitlementModel');
+      const EntitlementAccessService = require('../../services/entitlementAccessService');
+      await EntitlementModel.grantEntitlement(userId, 'pnp-member', {
+        isLifetime: true, source: 'meru', actorId: 'system',
+        reason: 'Meru lifetime100 activation (public flow)',
+      });
+      await EntitlementModel.grantEntitlement(userId, 'prime', {
+        isLifetime: false, durationDays: 60, source: 'meru', actorId: 'system',
+        reason: 'Meru lifetime100 activation — 2 month PRIME bonus (public)',
+      });
+      await EntitlementAccessService.invalidateCache(userId);
+    } catch (entErr) {
+      logger.error('public lifetime100 activate: entitlement grant failed', { userId, error: entErr.message });
+    }
+
+    // Create session so the user is logged in on return
+    try {
+      const { rows: freshUser } = await pool.query(
+        `SELECT id, email, username, first_name, tier, role FROM users WHERE id=$1`,
+        [userId]
+      );
+      if (freshUser.length > 0 && req.session) {
+        req.session.user = {
+          id: freshUser[0].id,
+          telegramId: null,
+          email: freshUser[0].email,
+          username: freshUser[0].username,
+          first_name: freshUser[0].first_name,
+          tier: freshUser[0].tier,
+          role: freshUser[0].role,
+          language: 'es',
+        };
+        await new Promise((resolve) => req.session.save(() => resolve()));
+      }
+    } catch (sessErr) {
+      logger.warn('public lifetime100 activate: session creation failed (non-critical)', { userId, error: sessErr.message });
+    }
+
+    // Record payment history (non-critical)
+    try {
+      const PaymentHistoryService = require('../../services/paymentHistoryService');
+      await PaymentHistoryService.recordPayment({
+        userId, paymentMethod: 'meru', amount: 100, currency: 'USD',
+        planId: 'lifetime100', planName: 'Lifetime Member + 2 Months PRIME',
+        product: 'lifetime100', paymentReference: code,
+        metadata: { activated_via: 'public_webapp', prime_bonus_expires: primeExpiry.toISOString() },
+        ipAddress: req.ip, userAgent: req.get('user-agent'),
+      });
+    } catch (e) {
+      logger.warn('public lifetime100 activate: payment history failed', { code, error: e.message });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Founder membership activated',
+      redirect: '/',
+    });
+  } finally {
+    await cache.releaseLock(meruLockKey).catch(() => {});
   }
 }));
 

@@ -614,6 +614,118 @@ class EmailService {
       `.trim();
     }
   }
+
+  /**
+   * Send the combined Founder Lifetime email: Meru code + login credentials + Recovery ID.
+   * Bilingual (en/es). Includes 1-hour expiry warning, Pay button, and Activate button.
+   * @param {Object} opts
+   * @param {string} opts.to - Recipient email address
+   * @param {string} [opts.language='es'] - 'en' or 'es'
+   * @param {string} opts.meruCode - The reserved Meru code (displayed prominently)
+   * @param {string} opts.meruUrl - Full Meru payment link URL
+   * @param {string} opts.loginEmail - The user's login email
+   * @param {string} opts.loginPassword - Plaintext password (new accounts only)
+   * @param {string} opts.recoveryId - User UUID for account recovery
+   * @param {string} opts.activationUrl - Deep-link back to /lifetime100/activate?code=...
+   * @returns {Promise<{success: boolean, messageId?: string, error?: string}>}
+   */
+  async sendFounderLifetimeEmail({ to, language = 'es', meruCode, meruUrl, loginEmail, loginPassword, recoveryId, activationUrl }) {
+    try {
+      if (!this.transporters.pnptv) {
+        logger.warn('PNPtv transporter not configured, skipping founder email');
+        return { success: false, error: 'Transporter not configured' };
+      }
+      const isEs = language === 'es';
+      const subject = isEs
+        ? 'Tu Código de Activación PNPtv Founder — Válido 1 Hora'
+        : 'Your PNPtv Founder Activation Code — Valid 1 Hour';
+
+      const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      const safeCode = esc(meruCode);
+      const safeMeruUrl = esc(meruUrl);
+      const safeActivation = esc(activationUrl);
+      const safeEmail = esc(loginEmail);
+      const safePassword = esc(loginPassword);
+      const safeRecovery = esc(recoveryId);
+
+      const html = isEs ? `
+<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:28px 24px;background:#120d14;color:#F5F5F7;border-radius:16px;">
+  <h2 style="color:#FFB454;margin:0 0 6px;font-size:22px;">¡Bienvenido, Founder! 🚀</h2>
+  <p style="margin:0 0 18px;font-size:14px;line-height:1.6;">Gracias por apoyarnos mientras terminamos PNPtv. Aquí está tu código de activación de por vida:</p>
+  <div style="background:rgba(255,180,84,0.10);border:2px dashed #FFB454;border-radius:12px;padding:20px;text-align:center;margin:18px 0;">
+    <p style="margin:0 0 6px;font-size:11px;letter-spacing:0.1em;color:#FFB454;text-transform:uppercase;font-weight:700;">Tu código Founder</p>
+    <p style="margin:0;font-family:'Courier New',monospace;font-size:28px;font-weight:900;letter-spacing:2px;color:#fff;">${safeCode}</p>
+    <p style="margin:10px 0 0;font-size:12px;color:#ff3377;font-weight:700;">⏱ Válido solo por 1 hora</p>
+  </div>
+  <ol style="font-size:14px;line-height:1.7;padding-left:20px;margin:18px 0;">
+    <li><strong>Paga $100 en Meru</strong> usando el botón abajo.</li>
+    <li><strong>Regresa y activa</strong> con el código arriba.</li>
+    <li>¡Listo! Miembro de por vida + 2 meses PRIME.</li>
+  </ol>
+  <div style="text-align:center;margin:22px 0;">
+    <a href="${safeMeruUrl}" style="display:inline-block;padding:14px 28px;background:#ff3377;color:#fff;text-decoration:none;border-radius:10px;font-weight:700;font-size:15px;margin:4px;">💳 Pagar $100 en Meru</a>
+    <br/>
+    <a href="${safeActivation}" style="display:inline-block;padding:14px 28px;background:#FFB454;color:#120d14;text-decoration:none;border-radius:10px;font-weight:700;font-size:15px;margin:4px;">✓ Ya pagué — Activar</a>
+  </div>
+  <div style="border-top:1px solid rgba(255,255,255,0.08);margin-top:24px;padding-top:18px;">
+    <p style="margin:0 0 10px;font-size:13px;color:#A1A1A6;font-weight:700;">Tus credenciales de acceso:</p>
+    <table style="width:100%;font-size:13px;">
+      <tr><td style="padding:3px 0;color:#A1A1A6;">Email:</td><td style="padding:3px 0;font-weight:700;">${safeEmail}</td></tr>
+      <tr><td style="padding:3px 0;color:#A1A1A6;">Contraseña:</td><td style="padding:3px 0;font-family:monospace;font-weight:700;">${safePassword}</td></tr>
+    </table>
+    <div style="margin-top:12px;padding:10px;background:rgba(255,180,84,0.08);border-left:3px solid #FFB454;border-radius:4px;">
+      <p style="margin:0;font-size:11px;color:#FFB454;font-weight:700;">🔑 ID de Recuperación</p>
+      <p style="margin:4px 0 0;font-family:monospace;font-size:13px;">${safeRecovery}</p>
+    </div>
+  </div>
+  <p style="font-size:11px;color:#8E8E93;margin-top:20px;line-height:1.5;">Si tu código expira antes de completar el pago, solicita uno nuevo en pnptv.app/lifetime100. Precio especial para ayudarnos a terminar la app — algunas funciones aún están en desarrollo.</p>
+</div>`
+        : `
+<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:28px 24px;background:#120d14;color:#F5F5F7;border-radius:16px;">
+  <h2 style="color:#FFB454;margin:0 0 6px;font-size:22px;">Welcome, Founder! 🚀</h2>
+  <p style="margin:0 0 18px;font-size:14px;line-height:1.6;">Thanks for backing us while we finish building PNPtv. Here's your lifetime activation code:</p>
+  <div style="background:rgba(255,180,84,0.10);border:2px dashed #FFB454;border-radius:12px;padding:20px;text-align:center;margin:18px 0;">
+    <p style="margin:0 0 6px;font-size:11px;letter-spacing:0.1em;color:#FFB454;text-transform:uppercase;font-weight:700;">Your Founder Code</p>
+    <p style="margin:0;font-family:'Courier New',monospace;font-size:28px;font-weight:900;letter-spacing:2px;color:#fff;">${safeCode}</p>
+    <p style="margin:10px 0 0;font-size:12px;color:#ff3377;font-weight:700;">⏱ Valid for 1 hour only</p>
+  </div>
+  <ol style="font-size:14px;line-height:1.7;padding-left:20px;margin:18px 0;">
+    <li><strong>Pay $100 on Meru</strong> using the button below.</li>
+    <li><strong>Return and activate</strong> with the code above.</li>
+    <li>Done! Lifetime member + 2 months PRIME.</li>
+  </ol>
+  <div style="text-align:center;margin:22px 0;">
+    <a href="${safeMeruUrl}" style="display:inline-block;padding:14px 28px;background:#ff3377;color:#fff;text-decoration:none;border-radius:10px;font-weight:700;font-size:15px;margin:4px;">💳 Pay $100 on Meru</a>
+    <br/>
+    <a href="${safeActivation}" style="display:inline-block;padding:14px 28px;background:#FFB454;color:#120d14;text-decoration:none;border-radius:10px;font-weight:700;font-size:15px;margin:4px;">✓ Already paid — Activate</a>
+  </div>
+  <div style="border-top:1px solid rgba(255,255,255,0.08);margin-top:24px;padding-top:18px;">
+    <p style="margin:0 0 10px;font-size:13px;color:#A1A1A6;font-weight:700;">Your login credentials:</p>
+    <table style="width:100%;font-size:13px;">
+      <tr><td style="padding:3px 0;color:#A1A1A6;">Email:</td><td style="padding:3px 0;font-weight:700;">${safeEmail}</td></tr>
+      <tr><td style="padding:3px 0;color:#A1A1A6;">Password:</td><td style="padding:3px 0;font-family:monospace;font-weight:700;">${safePassword}</td></tr>
+    </table>
+    <div style="margin-top:12px;padding:10px;background:rgba(255,180,84,0.08);border-left:3px solid #FFB454;border-radius:4px;">
+      <p style="margin:0;font-size:11px;color:#FFB454;font-weight:700;">🔑 Recovery ID</p>
+      <p style="margin:4px 0 0;font-family:monospace;font-size:13px;">${safeRecovery}</p>
+    </div>
+  </div>
+  <p style="font-size:11px;color:#8E8E93;margin-top:20px;line-height:1.5;">If your code expires before you complete payment, request a new one at pnptv.app/lifetime100. Special fundraising price to help us finish building — some features are still in development.</p>
+</div>`;
+
+      const result = await this.transporters.pnptv.sendMail({
+        from: '"PNPtv Founder" <noreply@pnptv.app>',
+        to,
+        subject,
+        html,
+      });
+      logger.info('Founder lifetime email sent', { to, meruCode, messageId: result.messageId });
+      return { success: true, messageId: result.messageId };
+    } catch (error) {
+      logger.error('sendFounderLifetimeEmail error:', { error: error.message, to });
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 // Export singleton instance

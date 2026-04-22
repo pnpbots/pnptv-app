@@ -457,6 +457,19 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // Release expired Meru reservations back to the active pool every 5 minutes
+    const meruLinkService = require(path.join(backendPath, 'services/meruLinkService'));
+    cron.schedule(process.env.MERU_RESERVATION_CLEANUP_CRON || '*/5 * * * *', async () => {
+      try {
+        const released = await meruLinkService.releaseExpiredReservations();
+        if (released > 0) {
+          logger.info('Meru reservation cleanup', { released });
+        }
+      } catch (error) {
+        logger.error('Meru reservation cleanup error:', error);
+      }
+    });
+
     logger.info('✓ Cron jobs started successfully');
     return true;
   } catch (error) {

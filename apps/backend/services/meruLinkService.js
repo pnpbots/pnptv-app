@@ -58,8 +58,8 @@ class MeruLinkService {
   }
 
   /**
-   * Get all active/available Meru links for randomizer
-   * Excludes used, expired, or invalid links
+   * Get all active/available Meru links for randomizer.
+   * Excludes used, expired, invalid links AND active-but-still-reserved rows.
    * @param {string} product - Product type
    * @returns {Promise<Array>}
    */
@@ -73,6 +73,7 @@ class MeruLinkService {
         `SELECT id, code, meru_link, product, status, created_at
          FROM meru_payment_links
          WHERE status = 'active' AND product = $1
+           AND (reserved_until IS NULL OR reserved_until < NOW())
          ORDER BY created_at ASC`,
         [product]
       );
@@ -85,7 +86,8 @@ class MeruLinkService {
   }
 
   /**
-   * Get a random available link for new users
+   * Get a random available link for new users.
+   * Excludes active-but-reserved rows whose reservation has not yet expired.
    * @param {string} product - Product type
    * @returns {Promise<{code: string, meru_link: string} | null>}
    */
@@ -98,6 +100,7 @@ class MeruLinkService {
       const result = await query(
         `SELECT code, meru_link FROM meru_payment_links
          WHERE status = 'active' AND product = $1
+           AND (reserved_until IS NULL OR reserved_until < NOW())
          ORDER BY RANDOM()
          LIMIT 1`,
         [product]
@@ -107,6 +110,143 @@ class MeruLinkService {
     } catch (error) {
       logger.error('Error getting random Meru link:', error);
       return null;
+    }
+  }
+
+  /**
+   * Atomically reserve a random available link for a user. Uses
+   * FOR UPDATE SKIP LOCKED so parallel callers can never collide on the
+   * same row. Recycles reservations whose TTL has elapsed.
+   * @param {Object} opts
+   * @param {string} opts.product
+   * @param {string} opts.email
+   * @param {string} opts.userId
+   * @param {number} [opts.minutes=60]
+   * @returns {Promise<{code: string, meru_link: string, reserved_until: Date}|null>}
+   */
+  async reserveRandomLink({ product, email, userId, minutes = 60 }) {
+    if (!product || !email || !userId) {
+      logger.error('reserveRandomLink: product/email/userId required');
+      return null;
+    }
+    try {
+      // First, release any prior active reservation for this email so a user
+      // who reserves twice always gets a fresh code instead of two pending.
+      await query(
+        `UPDATE meru_payment_links
+           SET status='active', reserved_until=NULL, reserved_for_email=NULL,
+               reserved_for_user_id=NULL, reserved_at=NULL
+         WHERE product=$1 AND status='reserved'
+           AND LOWER(reserved_for_email)=LOWER($2)`,
+        [product, email]
+      );
+
+      const result = await query(
+        `UPDATE meru_payment_links
+           SET status='reserved',
+               reserved_until=NOW() + ($4::int * INTERVAL '1 minute'),
+               reserved_for_email=$2,
+               reserved_for_user_id=$3,
+               reserved_at=NOW()
+         WHERE id = (
+           SELECT id FROM meru_payment_links
+           WHERE product=$1
+             AND (status='active'
+                  OR (status='reserved' AND reserved_until < NOW()))
+           ORDER BY RANDOM()
+           LIMIT 1
+           FOR UPDATE SKIP LOCKED
+         )
+         RETURNING id, code, meru_link, reserved_until`,
+        [product, email, userId, minutes]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('reserveRandomLink error:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Atomically claim a reserved code when the user returns to activate.
+   * Only succeeds if code is still within reservation TTL and matches the
+   * email/userId that reserved it (to prevent cross-account claims).
+   * Returns the meru_link on success for downstream payment verification.
+   * @param {Object} opts
+   * @param {string} opts.code
+   * @param {string} opts.userId
+   * @param {string|null} opts.username
+   * @param {string|null} opts.email
+   * @returns {Promise<{success: boolean, link?: Object, message?: string}>}
+   */
+  async claimReservedCode({ code, userId, username, email }) {
+    if (!code) return { success: false, message: 'Code required' };
+    try {
+      const result = await query(
+        `UPDATE meru_payment_links
+           SET status='used', used_by=$2, used_by_username=$3, used_at=NOW()
+         WHERE code=$1
+           AND status='reserved'
+           AND reserved_until > NOW()
+           AND (reserved_for_user_id=$2 OR LOWER(reserved_for_email)=LOWER($4))
+         RETURNING id, code, meru_link`,
+        [code, userId, username || null, email || null]
+      );
+      if (result.rows.length === 0) {
+        return { success: false, message: 'Code not found, expired, or not owned by this account' };
+      }
+      return { success: true, link: result.rows[0] };
+    } catch (error) {
+      logger.error('claimReservedCode error:', error);
+      return { success: false, message: error.message };
+    }
+  }
+
+  /**
+   * Look up a reserved code's owner (email + userId) without consuming it.
+   * Used by the public activate endpoint to hydrate session state.
+   * @param {string} code
+   * @returns {Promise<Object|null>}
+   */
+  async getReservation(code) {
+    if (!code) return null;
+    try {
+      const result = await query(
+        `SELECT id, code, meru_link, status, reserved_until,
+                reserved_for_email, reserved_for_user_id
+           FROM meru_payment_links
+          WHERE code=$1
+          LIMIT 1`,
+        [code]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('getReservation error:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Cron-friendly. Releases reservations whose TTL has elapsed back to
+   * the active pool.
+   * @returns {Promise<number>} count released
+   */
+  async releaseExpiredReservations() {
+    try {
+      const result = await query(
+        `UPDATE meru_payment_links
+           SET status='active', reserved_until=NULL,
+               reserved_for_email=NULL, reserved_for_user_id=NULL, reserved_at=NULL
+         WHERE status='reserved' AND reserved_until < NOW()
+         RETURNING code`
+      );
+      if (result.rows.length > 0) {
+        logger.info('Released expired Meru reservations', { count: result.rows.length });
+      }
+      return result.rows.length;
+    } catch (error) {
+      logger.error('releaseExpiredReservations error:', error);
+      return 0;
     }
   }
 
@@ -122,7 +262,8 @@ class MeruLinkService {
            COUNT(CASE WHEN status = 'active' THEN 1 END) as active,
            COUNT(CASE WHEN status = 'used' THEN 1 END) as used,
            COUNT(CASE WHEN status = 'expired' THEN 1 END) as expired,
-           COUNT(CASE WHEN status = 'invalid' THEN 1 END) as invalid
+           COUNT(CASE WHEN status = 'invalid' THEN 1 END) as invalid,
+           COUNT(CASE WHEN status = 'reserved' AND reserved_until > NOW() THEN 1 END) as reserved
          FROM meru_payment_links`
       );
 
@@ -135,6 +276,7 @@ class MeruLinkService {
         used: 0,
         expired: 0,
         invalid: 0,
+        reserved: 0,
       };
     }
   }

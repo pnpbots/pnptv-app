@@ -11,7 +11,6 @@ import {
   getDashSubscriptionStatus,
   getDashAvailable,
   getDashPaymentDetails,
-  activateMeruCode,
   getLabelColor,
   assertPaymentUrl,
   validatePromoCode,
@@ -113,11 +112,6 @@ export default function Subscribe() {
   const [dashSecondsLeft, setDashSecondsLeft] = useState(900);
   const [dashPaymentSuccess, setDashPaymentSuccess] = useState(false);
   const dashCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Meru code activation
-  const [meruCode, setMeruCode] = useState("");
-  const [meruSubmitting, setMeruSubmitting] = useState(false);
-  const [meruError, setMeruError] = useState<string | null>(null);
 
   useEffect(() => {
     getSubscriptionPlans()
@@ -418,37 +412,6 @@ export default function Subscribe() {
       setError(message);
     } finally {
       setSubmitting(false);
-    }
-  }
-
-  // Meru email (only used for Meru code activation)
-  const [meruEmail, setMeruEmail] = useState("");
-
-  async function handleMeruActivate() {
-    if (!meruCode.trim() || meruSubmitting) return;
-    const trimmedEmail = meruEmail.trim();
-    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail) || trimmedEmail.length > 254) {
-      setMeruError(s.invalidEmail);
-      return;
-    }
-
-    setMeruSubmitting(true);
-    setMeruError(null);
-
-    try {
-      const result = await activateMeruCode(meruCode.trim(), trimmedEmail);
-
-      if (result.success) {
-        await refreshUser();
-        navigate("/welcome");
-      } else {
-        setMeruError(result.error || s.activationFailed);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : s.activationError;
-      setMeruError(message);
-    } finally {
-      setMeruSubmitting(false);
     }
   }
 
@@ -1091,71 +1054,6 @@ export default function Subscribe() {
           </button>
         </div>
       )}
-
-      {/* Lifetime100 promo + Meru code */}
-      <div className="mb-6">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="flex-1 h-px bg-white/10" />
-          <span className="text-xs text-pnp-textSecondary">{s.or}</span>
-          <div className="flex-1 h-px bg-white/10" />
-        </div>
-
-        {/* Lifetime100 promo */}
-        <div className="rounded-xl p-4 border border-[#FFB454]/30 bg-[#FFB454]/5 mb-4">
-          <p className="text-sm text-pnp-textPrimary font-medium mb-1">
-            {s.wantBestDeal}
-          </p>
-          <p className="text-xs text-pnp-textSecondary mb-3">
-            {s.lifetime100Desc}
-          </p>
-          <a
-            href="/subscribe?promo=lifetime100"
-            className="inline-block text-xs font-semibold text-[#FFB454] hover:text-[#ffcc80] transition-colors border-b border-[#FFB454]/50"
-          >
-            {s.checkoutLifetime100}
-          </a>
-        </div>
-
-        {/* Meru code */}
-        <label className="text-sm font-medium text-pnp-textPrimary mb-2 block">
-          {s.haveMeruCode}
-        </label>
-        <input
-          type="email"
-          value={meruEmail}
-          onChange={(e) => { setMeruEmail(e.target.value); setMeruError(null); }}
-          placeholder={s.emailPlaceholder}
-          disabled={meruSubmitting}
-          className="w-full rounded-xl px-4 py-2.5 mb-2 bg-white/5 border border-white/10 text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors disabled:opacity-50"
-          style={{ fontSize: "16px" }}
-        />
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={meruCode}
-            onChange={(e) => { setMeruCode(e.target.value); setMeruError(null); }}
-            placeholder={s.meruCodePlaceholder}
-            disabled={meruSubmitting}
-            className="flex-1 rounded-xl px-4 py-2.5 bg-white/5 border border-white/10 text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:border-[#D4007A] transition-colors disabled:opacity-50"
-            style={{ fontSize: "16px" }}
-          />
-          <button
-            onClick={handleMeruActivate}
-            disabled={!meruCode.trim() || !meruEmail.trim() || meruSubmitting}
-            className="btn-gradient px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-          >
-            {meruSubmitting ? s.verifying : s.activate}
-          </button>
-        </div>
-        {meruSubmitting && (
-          <p className="mt-2 text-xs text-pnp-textSecondary">
-            {s.verifyingPayment}
-          </p>
-        )}
-        {meruError && (
-          <p className="mt-2 text-xs text-red-400">{meruError}</p>
-        )}
-      </div>
 
       {/* Payment polling indicator */}
       {pollingPaymentId && (
