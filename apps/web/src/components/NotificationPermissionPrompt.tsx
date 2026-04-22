@@ -3,18 +3,33 @@ import { subscribeToPush } from "@/lib/pushNotifications";
 import { useI18n } from "@/lib/i18n";
 
 const DISMISS_KEY = "push_notif_prompt_dismissed_v2";
-const ONBOARDING_KEY = "pnptv_permissions_onboarded_v1";
+const IOS_DISMISS_KEY = "ios_install_prompt_dismissed_v1";
 const DISMISS_DAYS = 3;
-const SHOW_DELAY_MS = 8000;
+const IOS_DISMISS_DAYS = 7;
+const SHOW_DELAY_MS = 4000;
 
-function isDismissed(): boolean {
-  const until = localStorage.getItem(DISMISS_KEY);
+function isDismissed(key: string): boolean {
+  const until = localStorage.getItem(key);
   if (!until) return false;
   return Date.now() < Number(until);
 }
 
-function dismiss(days: number = DISMISS_DAYS) {
-  localStorage.setItem(DISMISS_KEY, String(Date.now() + days * 24 * 60 * 60 * 1000));
+function dismiss(key: string, days: number) {
+  localStorage.setItem(key, String(Date.now() + days * 24 * 60 * 60 * 1000));
+}
+
+// iOS push requires the site be installed to Home Screen (iOS 16.4+).
+function detectIOSNotInstalled(): boolean {
+  const ua = navigator.userAgent;
+  const isIOS =
+    /iPad|iPhone|iPod/.test(ua) ||
+    // iPadOS 13+ reports as Mac; detect via touch
+    (/Mac/.test(ua) && "ontouchend" in document);
+  if (!isIOS) return false;
+  const isStandalone =
+    window.matchMedia?.("(display-mode: standalone)").matches ||
+    (navigator as unknown as { standalone?: boolean }).standalone === true;
+  return !isStandalone;
 }
 
 interface Props {
@@ -24,6 +39,7 @@ interface Props {
 export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
   const t = useI18n();
   const [show, setShow] = useState(false);
+  const [mode, setMode] = useState<"browser" | "ios">("browser");
   const [requesting, setRequesting] = useState(false);
   const [granted, setGranted] = useState(false);
 
@@ -33,13 +49,27 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
 
   useEffect(() => {
     if (!isAuthenticated) return;
+
+    // iOS Safari (non-installed) path — show Add-to-Home-Screen instructions
+    // regardless of Notification.permission (which is reported "denied" for
+    // non-installed iOS PWAs).
+    if (detectIOSNotInstalled()) {
+      if (isDismissed(IOS_DISMISS_KEY)) return;
+      setMode("ios");
+      showTimerRef.current = setTimeout(() => setShow(true), SHOW_DELAY_MS);
+      return () => {
+        if (showTimerRef.current) clearTimeout(showTimerRef.current);
+        if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+      };
+    }
+
+    // Standard browser path
     if (!("Notification" in window)) return;
     if (Notification.permission === "granted") return;
     if (Notification.permission === "denied") return;
-    if (isDismissed()) return;
-    // Don't show if the permission onboarding already handled notifications
-    if (localStorage.getItem(ONBOARDING_KEY) === "done") return;
+    if (isDismissed(DISMISS_KEY)) return;
 
+    setMode("browser");
     showTimerRef.current = setTimeout(() => setShow(true), SHOW_DELAY_MS);
 
     return () => {
@@ -54,14 +84,14 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
       const success = await subscribeToPush();
       if (success) {
         setGranted(true);
-        dismiss(365);
+        dismiss(DISMISS_KEY, 365);
         closeTimerRef.current = setTimeout(() => setShow(false), 1500);
       } else {
-        dismiss(7);
+        dismiss(DISMISS_KEY, 7);
         setShow(false);
       }
     } catch {
-      dismiss(1);
+      dismiss(DISMISS_KEY, 1);
       setShow(false);
     } finally {
       setRequesting(false);
@@ -69,9 +99,9 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
   }, []);
 
   const handleDismiss = useCallback(() => {
-    dismiss();
+    dismiss(mode === "ios" ? IOS_DISMISS_KEY : DISMISS_KEY, mode === "ios" ? IOS_DISMISS_DAYS : DISMISS_DAYS);
     setShow(false);
-  }, []);
+  }, [mode]);
 
   const featureItems = [
     t.notifications.featureMessages,
@@ -81,6 +111,93 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
   ];
 
   if (!show) return null;
+
+  // iOS install mode — notifications on iOS require Add-to-Home-Screen.
+  if (mode === "ios") {
+    return (
+      <div
+        className="fixed inset-0 z-[9998] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4 pb-4 sm:pb-0"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="notif-prompt-title"
+      >
+        <div className="w-full max-w-sm rounded-2xl p-6 space-y-5 animate-fade-in-up bg-pnp-surface border border-white/10">
+          {/* Icon — phone with + */}
+          <div className="flex justify-center">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center bg-gradient-to-br from-[#D4007A]/20 to-[#E69138]/20">
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="url(#iosGrad)"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <defs>
+                  <linearGradient id="iosGrad" x1="0" y1="0" x2="24" y2="24">
+                    <stop offset="0%" stopColor="#D4007A" />
+                    <stop offset="100%" stopColor="#E69138" />
+                  </linearGradient>
+                </defs>
+                <rect x="5" y="2" width="14" height="20" rx="3" />
+                <path d="M9 18h6" />
+                <path d="M12 8v4M10 10h4" />
+              </svg>
+            </div>
+          </div>
+
+          {/* Title + description */}
+          <div className="text-center">
+            <h2 id="notif-prompt-title" className="text-lg font-bold text-pnp-textPrimary">
+              Install PNPtv for notifications
+            </h2>
+            <p className="text-sm mt-2 text-pnp-textSecondary">
+              On iPhone and iPad, push notifications only work when PNPtv is added to your Home Screen.
+            </p>
+          </div>
+
+          {/* Steps */}
+          <ol className="space-y-3 text-sm text-white/90">
+            <li className="flex items-start gap-3">
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/80 text-xs font-bold flex items-center justify-center">1</span>
+              <span className="flex items-center gap-1.5 pt-0.5">
+                Tap the Share button
+                <svg className="w-4 h-4 inline-block" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-label="Share">
+                  <path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" />
+                  <polyline points="16 6 12 2 8 6" />
+                  <line x1="12" y1="2" x2="12" y2="15" />
+                </svg>
+                at the bottom of Safari
+              </span>
+            </li>
+            <li className="flex items-start gap-3">
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/80 text-xs font-bold flex items-center justify-center">2</span>
+              <span className="pt-0.5">Scroll and tap <strong className="text-white">Add to Home Screen</strong></span>
+            </li>
+            <li className="flex items-start gap-3">
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/80 text-xs font-bold flex items-center justify-center">3</span>
+              <span className="pt-0.5">Open PNPtv from your Home Screen and allow notifications when prompted</span>
+            </li>
+          </ol>
+
+          <p className="text-[11px] text-pnp-textSecondary/70 text-center">
+            Requires iOS 16.4 or later.
+          </p>
+
+          {/* Dismiss only — there's no Allow button here, the user has to install */}
+          <button
+            onClick={handleDismiss}
+            className="w-full py-2.5 rounded-xl text-sm font-medium transition-colors hover:bg-white/5 active:bg-white/10 text-pnp-textSecondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-surface"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
