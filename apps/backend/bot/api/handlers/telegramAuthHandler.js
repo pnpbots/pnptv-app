@@ -370,20 +370,7 @@ const handleTelegramAuth = async (req, res) => {
         logger.warn(`[Auth] Matrix provisioning failed (non-blocking): ${err.message}`);
       }
 
-      // 3. PDS / Bluesky — ATProto identity (optional service, non-blocking)
-      try {
-        let pdsPath;
-        try { pdsPath = require.resolve('../../services/PDSProvisioningService'); } catch { pdsPath = null; }
-        if (pdsPath) {
-          const PDSProvisioningService = require(pdsPath);
-          await PDSProvisioningService.createOrLinkPDS(user);
-          logger.info(`[Auth] PDS provisioned for user ${user.id}`);
-        }
-      } catch (err) {
-        logger.warn(`[Auth] PDS provisioning failed (non-blocking): ${err.message}`);
-      }
-
-      // 4. Default follows (idempotent)
+      // 3. Default follows (idempotent)
       enforceDefaultFollows(user.id).catch(() => {});
     });
 
@@ -496,10 +483,9 @@ const checkAuthStatus = async (req, res) => {
       logger.warn('checkAuthStatus: DB refresh failed, using session values', dbErr.message);
     }
 
-    // Build auth_methods from session data (hybrid session: Telegram + ATProto may coexist)
+    // Build auth_methods from session data
     const authMethods = user.auth_methods || {
       telegram: !!(user.telegramId || user.telegram),
-      atproto: !!user.atproto_did,
     };
 
     res.json({
@@ -519,9 +505,6 @@ const checkAuthStatus = async (req, res) => {
         tier: user.tier || 'free',
         role: user.role || 'user',
         photo_url: user.photoUrl || null,
-        // ATProto / Bluesky identity
-        atproto_did: user.atproto_did || null,
-        atproto_handle: user.atproto_handle || null,
         // Creator status
         creator_status: user.creator_status || 'none',
         creator_type: user.creator_type || null,

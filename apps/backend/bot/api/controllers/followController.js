@@ -276,7 +276,7 @@ const getFollowingFeed = async (req, res) => {
     const result = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url,
               sp.video_title, sp.video_description,
-              sp.bluesky_uri, sp.bluesky_cid, sp.source_channel,
+              sp.source_channel,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count,
               sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
@@ -330,8 +330,6 @@ const getFollowingFeed = async (req, res) => {
         video_thumbnail_url: r.video_thumbnail_url,
         video_title: r.video_title,
         video_description: r.video_description,
-        bluesky_uri: r.bluesky_uri,
-        bluesky_cid: r.bluesky_cid,
         source_channel: r.source_channel,
         reply_to_id: r.reply_to_id,
         repost_of_id: r.repost_of_id,

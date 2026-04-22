@@ -1327,7 +1327,6 @@ const getPost = async (req, res) => {
     const viewerId = req.session?.user?.id || null;
     const { rows } = await dbQuery(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url,
-              sp.bluesky_uri, sp.bluesky_cid,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count,
               sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.is_promoted, sp.created_at,

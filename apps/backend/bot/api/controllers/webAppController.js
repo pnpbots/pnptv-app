@@ -133,8 +133,7 @@ async function createWebUser({ id, firstName, lastName, username, email, passwor
  */
 async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName, lastName, username, photoFileId } = {}) {
   const RETURN_COLS = `id, pnptv_id, first_name, last_name, username, email,
-    subscription_status, tier, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role,
-    atproto_did, atproto_handle, atproto_pds_url`;
+    subscription_status, tier, terms_accepted, photo_file_id, bio, language, telegram, twitter, x_id, role`;
 
   let user = null;
 

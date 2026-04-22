@@ -2408,8 +2408,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
   const subLookup = await pool.query(
     `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
             tier, terms_accepted, photo_file_id, bio, language, role,
-            creator_status, content_disclaimer, telegram, atproto_did,
-            atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
+            creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
             email, last_login_method
      FROM users
      WHERE pnptv_id = $1 AND is_deleted = false
@@ -2437,8 +2436,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     const emailLookup = await pool.query(
       `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
               tier, terms_accepted, photo_file_id, bio, language, role,
-              creator_status, content_disclaimer, telegram, atproto_did,
-              atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
+              creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
               email, last_login_method
        FROM users
        WHERE LOWER(email) = LOWER($1) AND is_deleted = false
@@ -2494,8 +2492,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
                'user', 'oidc', NOW(), NOW(), NOW())
        RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
                  tier, terms_accepted, photo_file_id, bio, language, role,
-                 creator_status, content_disclaimer, telegram, atproto_did,
-                 atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
+                 creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
                  email, last_login_method`,
       [
         newUserId,
@@ -2537,10 +2534,6 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     role: userRow.role || 'user',
     creator_status: userRow.creator_status || 'none',
     contentDisclaimer: userRow.content_disclaimer || false,
-    // ATProto identity (preserved for hybrid session)
-    atproto_did: userRow.atproto_did || null,
-    atproto_handle: userRow.atproto_handle || null,
-    atproto_pds_url: userRow.atproto_pds_url || null,
     // X identity
     xHandle: userRow.twitter || userRow.x_username || null,
     // Authentik OIDC identity — refresh_token stored server-side in session only
@@ -2549,7 +2542,6 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     // Hybrid auth method flags
     auth_methods: {
       telegram: !!(userRow.telegram),
-      atproto: !!(userRow.atproto_did),
       x: !!(userRow.twitter || userRow.x_user_id || userRow.x_id),
       oidc: true,
     },
@@ -2643,7 +2635,7 @@ app.post('/api/webapp/auth/oidc/logout', requireSessionAuth, asyncHandler(async 
 
   const hasOtherAuth = user.auth_methods?.telegram
     || user.auth_methods?.x
-    || user.auth_methods?.atproto;
+    ;
 
   if (!hasOtherAuth) {
     // Full logout — no other auth method linked

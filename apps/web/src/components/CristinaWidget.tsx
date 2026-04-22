@@ -256,7 +256,7 @@ const PAGE_CONTEXT: { match: (p: string) => boolean; ctx: PageContext }[] = [
       chips: [
         { icon: "📝", en: "How do I create a post?", es: "¿Cómo creo una publicación?" },
         { icon: "🔐", en: "How do exclusive/PRIME-only posts work?", es: "¿Cómo funcionan las publicaciones exclusivas PRIME?" },
-        { icon: "🌐", en: "Can I cross-post to X or Bluesky?", es: "¿Puedo publicar en X o Bluesky a la vez?" },
+        { icon: "🌐", en: "Can I cross-post to X?", es: "¿Puedo publicar en X a la vez?" },
         { icon: "💬", en: "How do comments and replies work?", es: "¿Cómo funcionan los comentarios y respuestas?" },
       ],
     },

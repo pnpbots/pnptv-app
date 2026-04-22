@@ -434,7 +434,6 @@ const strings = {
       pushSubscribers: "Push Subscribers",
       notificationsSent: "Notifications Sent",
       xLinked: "X / Twitter Linked",
-      blueskyLinked: "Bluesky Linked",
       percentUsers: "% of users",
     },
     // External Services
@@ -1244,7 +1243,6 @@ const strings = {
       pushSubscribers: "Suscriptores Push",
       notificationsSent: "Notificaciones Enviadas",
       xLinked: "X / Twitter Vinculado",
-      blueskyLinked: "Bluesky Vinculado",
       percentUsers: "% de usuarios",
     },
     services: {

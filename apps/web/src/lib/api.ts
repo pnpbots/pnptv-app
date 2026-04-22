@@ -143,14 +143,11 @@ export interface TelegramAuthResponse {
 
 export interface AuthMethods {
   telegram: boolean;
-  atproto: boolean;
 }
 
 export interface AuthStatusResponse {
   authenticated: boolean;
   user?: TelegramAuthResponse["user"] & {
-    atproto_did?: string | null;
-    atproto_handle?: string | null;
     auth_methods?: AuthMethods;
     creator_status?: string;
     creator_type?: string | null;
@@ -462,24 +459,6 @@ export function buySlotTicket(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ currency }),
   });
-}
-
-// Social proxy (Bluesky)
-export interface SocialPost {
-  uri: string;
-  cid: string;
-  author: {
-    handle: string;
-    displayName?: string;
-    avatar?: string;
-  };
-  record: {
-    text: string;
-    createdAt: string;
-  };
-  likeCount?: number;
-  repostCount?: number;
-  replyCount?: number;
 }
 
 // Nearby geolocation
@@ -865,8 +844,6 @@ export interface SocialPostItem {
   author_creator_price?: number;
   // Sharing control
   is_shareable?: boolean;
-  bsky_author_avatar?: string | null;
-  bsky_author_display_name?: string | null;
   // Tier-gating fields (free-tier users see blurred posts)
   blurred?: boolean;
   content_locked?: boolean;
@@ -1127,7 +1104,6 @@ export function getPostsByHashtag(
 export function createSocialPost(
   content: string,
   mediaFiles?: File | File[],
-  crossPostBluesky?: boolean,
   isExclusive?: boolean,
   isShareable?: boolean,
 ): Promise<{ success: boolean; post: SocialPostItem }> {
@@ -1142,7 +1118,6 @@ export function createSocialPost(
     const formData = new FormData();
     formData.append("content", content);
     filesArray.forEach((f) => formData.append("media", f));
-    if (crossPostBluesky) formData.append("crossPostBluesky", "true");
     if (isExclusive) formData.append("isExclusive", "true");
     if (isShareable === false) formData.append("isShareable", "false");
     return fetch(`${API_BASE}/api/webapp/social/posts/with-multi-media`, {
@@ -1163,7 +1138,6 @@ export function createSocialPost(
     const formData = new FormData();
     formData.append("content", content);
     formData.append("media", filesArray[0]);
-    if (crossPostBluesky) formData.append("crossPostBluesky", "true");
     if (isExclusive) formData.append("isExclusive", "true");
     if (isShareable === false) formData.append("isShareable", "false");
     return fetch(`${API_BASE}/api/webapp/social/posts/with-media`, {
@@ -1182,7 +1156,7 @@ export function createSocialPost(
   // Text-only path
   return request("/api/webapp/social/posts", {
     method: "POST",
-    body: { content, crossPostBluesky: crossPostBluesky ?? false, isExclusive: isExclusive ?? false, isShareable: isShareable ?? true },
+    body: { content, isExclusive: isExclusive ?? false, isShareable: isShareable ?? true },
   });
 }
 
@@ -4334,7 +4308,6 @@ export interface AdminDemographics {
     hangoutMembers: number; streams: number; notificationsSent: number; follows: number;
     mediaPlays: number; mediaFavorites: number; tips: number; pushSubscribers: number;
     xLinked: number;
-    blueskyLinked: number;
   };
   insights: { type: string; title: string; body: string }[];
 }

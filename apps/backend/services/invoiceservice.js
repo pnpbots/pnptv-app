@@ -264,7 +264,7 @@ class InvoiceService {
       {
         icon: '💬',
         title: 'Social Feed',
-        desc: 'Publica contenido, da likes, reposts y comenta. Conecta con la comunidad y comparte tus momentos. Tambien puedes hacer crosspost a Bluesky.',
+        desc: 'Publica contenido, da likes, reposts y comenta. Conecta con la comunidad y comparte tus momentos. ',
       },
     ] : [
       {
@@ -285,7 +285,7 @@ class InvoiceService {
       {
         icon: '💬',
         title: 'Social Feed',
-        desc: 'Post content, like, repost, and comment. Connect with the community and share your moments. You can also crosspost to Bluesky.',
+        desc: 'Post content, like, repost, and comment. Connect with the community and share your moments. ',
       },
     ];
 
@@ -327,7 +327,7 @@ class InvoiceService {
       {
         icon: '👤',
         title: 'Perfil y Temas',
-        desc: 'Personaliza tu perfil con foto, bio, badges y temas de color. Configura tu privacidad, conecta tu cuenta de Bluesky o X, y gestiona tus preferencias.',
+        desc: 'Personaliza tu perfil con foto, bio, badges y temas de color. Configura tu privacidad, conecta tu cuenta de X, y gestiona tus preferencias.',
       },
       {
         icon: '⭐',
@@ -358,7 +358,7 @@ class InvoiceService {
       {
         icon: '👤',
         title: 'Profile & Themes',
-        desc: 'Customize your profile with a photo, bio, badges, and color themes. Set your privacy, connect your Bluesky or X account, and manage preferences.',
+        desc: 'Customize your profile with a photo, bio, badges, and color themes. Set your privacy, connect your X account, and manage preferences.',
       },
       {
         icon: '⭐',

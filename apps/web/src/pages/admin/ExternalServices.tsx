@@ -80,13 +80,6 @@ const SECTIONS: Section[] = [
         badge: "Chat",
         external: true,
       },
-      {
-        title: "Bluesky PDS",
-        description: "AT Protocol personal data server",
-        url: "https://social.pnptv.app",
-        badge: "ATProto",
-        external: true,
-      },
     ],
   },
   {

@@ -60,7 +60,7 @@ const strings = {
       },
       {
         title: "Profile",
-        desc: "Customize your profile with themes, badges, and bio. Connect Bluesky or X.",
+        desc: "Customize your profile with themes, badges, and bio. Connect X.",
       },
       {
         title: "PRIME Channel",
@@ -142,7 +142,7 @@ const strings = {
       },
       {
         title: "Perfil",
-        desc: "Personaliza tu perfil con temas, badges y bio. Conecta Bluesky o X.",
+        desc: "Personaliza tu perfil con temas, badges y bio. Conecta X.",
       },
       {
         title: "Canal PRIME",
@@ -221,7 +221,7 @@ const strings = {
       },
       {
         title: "Perfil",
-        desc: "Personalize seu perfil com temas, badges e bio. Conecte Bluesky ou X.",
+        desc: "Personalize seu perfil com temas, badges e bio. Conecte X.",
       },
       {
         title: "Canal PRIME",
@@ -300,7 +300,7 @@ const strings = {
       },
       {
         title: "个人资料",
-        desc: "用主题、徽章和个人简介定制您的资料。连接 Bluesky 或 X。",
+        desc: "用主题、徽章和个人简介定制您的资料。连接 X。",
       },
       {
         title: "PRIME 频道",
@@ -379,7 +379,7 @@ const strings = {
       },
       {
         title: "個人資料",
-        desc: "用主題、徽章和個人簡介自訂您的資料。連結 Bluesky 或 X。",
+        desc: "用主題、徽章和個人簡介自訂您的資料。連結 X。",
       },
       {
         title: "PRIME 頻道",
@@ -458,7 +458,7 @@ const strings = {
       },
       {
         title: "Profil",
-        desc: "Personnalisez votre profil avec des thèmes, badges et bio. Connectez Bluesky ou X.",
+        desc: "Personnalisez votre profil avec des thèmes, badges et bio. Connectez X.",
       },
       {
         title: "Canal PRIME",
@@ -537,7 +537,7 @@ const strings = {
       },
       {
         title: "Profil",
-        desc: "Passe dein Profil mit Themes, Badges und Bio an. Verbinde Bluesky oder X.",
+        desc: "Passe dein Profil mit Themes, Badges und Bio an. Verbinde X.",
       },
       {
         title: "PRIME-Kanal",
@@ -616,7 +616,7 @@ const strings = {
       },
       {
         title: "โปรไฟล์",
-        desc: "ปรับแต่งโปรไฟล์ด้วยธีม แบดจ์ และประวัติ เชื่อมต่อ Bluesky หรือ X",
+        desc: "ปรับแต่งโปรไฟล์ด้วยธีม แบดจ์ และประวัติ เชื่อมต่อ X",
       },
       {
         title: "ช่อง PRIME",
@@ -695,7 +695,7 @@ const strings = {
       },
       {
         title: "Profilo",
-        desc: "Personalizza il tuo profilo con temi, badge e bio. Collega Bluesky o X.",
+        desc: "Personalizza il tuo profilo con temi, badge e bio. Collega X.",
       },
       {
         title: "Canale PRIME",
@@ -774,7 +774,7 @@ const strings = {
       },
       {
         title: "Profil",
-        desc: "Profilini tema, rozet ve biyografi ile özelleştir. Bluesky veya X'i bağla.",
+        desc: "Profilini tema, rozet ve biyografi ile özelleştir. X'i bağla.",
       },
       {
         title: "PRIME Kanalı",
@@ -853,7 +853,7 @@ const strings = {
       },
       {
         title: "Профиль",
-        desc: "Настройте профиль с темами, значками и описанием. Подключите Bluesky или X.",
+        desc: "Настройте профиль с темами, значками и описанием. Подключите X.",
       },
       {
         title: "PRIME-канал",
@@ -932,7 +932,7 @@ const strings = {
       },
       {
         title: "Profiel",
-        desc: "Personaliseer je profiel met thema's, badges en bio. Koppel Bluesky of X.",
+        desc: "Personaliseer je profiel met thema's, badges en bio. Koppel X.",
       },
       {
         title: "PRIME-kanaal",
@@ -1011,7 +1011,7 @@ const strings = {
       },
       {
         title: "Hồ sơ",
-        desc: "Tùy chỉnh hồ sơ với chủ đề, huy hiệu và tiểu sử. Kết nối Bluesky hoặc X.",
+        desc: "Tùy chỉnh hồ sơ với chủ đề, huy hiệu và tiểu sử. Kết nối X.",
       },
       {
         title: "Kênh PRIME",
@@ -1090,7 +1090,7 @@ const strings = {
       },
       {
         title: "プロフィール",
-        desc: "テーマ、バッジ、プロフィール文でプロフィールをカスタマイズ。Bluesky や X と連携しよう。",
+        desc: "テーマ、バッジ、プロフィール文でプロフィールをカスタマイズ。X と連携しよう。",
       },
       {
         title: "PRIME チャンネル",
@@ -1169,7 +1169,7 @@ const strings = {
       },
       {
         title: "Profil",
-        desc: "Sesuaikan profilmu dengan tema, lencana, dan bio. Hubungkan Bluesky atau X.",
+        desc: "Sesuaikan profilmu dengan tema, lencana, dan bio. Hubungkan X.",
       },
       {
         title: "Saluran PRIME",
@@ -1248,7 +1248,7 @@ const strings = {
       },
       {
         title: "الملف الشخصي",
-        desc: "خصّص ملفك الشخصي بالسمات والشارات والسيرة الذاتية. اربط Bluesky أو X.",
+        desc: "خصّص ملفك الشخصي بالسمات والشارات والسيرة الذاتية. اربط X.",
       },
       {
         title: "قناة PRIME",

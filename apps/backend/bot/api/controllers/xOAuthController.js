@@ -379,7 +379,6 @@ const handleCallback = async (req, res) => {
         xHandle,
         auth_methods: {
           telegram: !!(user.telegram),
-          atproto: false,
           x: true,
         },
       };

@@ -1202,8 +1202,7 @@ const getDemographics = async (req, res) => {
         (SELECT COUNT(*) FROM notifications) as notifications_sent,
         (SELECT COUNT(*) FROM user_follows) as follows,
         (SELECT COUNT(*) FROM push_subscriptions) as push_subs,
-        (SELECT COUNT(*) FROM x_accounts) as x_linked,
-        (SELECT COUNT(*) FROM user_pds_mapping) as bluesky_linked
+        (SELECT COUNT(*) FROM x_accounts) as x_linked
       `),
 
       // Subscription type
@@ -1332,7 +1331,6 @@ const getDemographics = async (req, res) => {
           tips,
           pushSubscribers: toInt(features.push_subs),
           xLinked: toInt(features.x_linked),
-          blueskyLinked: toInt(features.bluesky_linked),
         },
         insights,
       },

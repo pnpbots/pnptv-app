@@ -356,7 +356,6 @@ export default function AdminDemographics() {
               <FeatureRow label={t.demographics.pushSubscribers} value={data.features.pushSubscribers} icon="🔔" total={total} />
               <FeatureRow label={t.demographics.notificationsSent} value={data.features.notificationsSent} icon="📣" total={total} />
               <FeatureRow label={t.demographics.xLinked} value={data.features.xLinked} icon="𝕏" total={total} />
-              <FeatureRow label={t.demographics.blueskyLinked} value={data.features.blueskyLinked} icon="🦋" total={total} />
             </div>
           </div>
         </Section>
