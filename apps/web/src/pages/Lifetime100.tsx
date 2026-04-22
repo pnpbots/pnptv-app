@@ -707,8 +707,6 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange }: Her
         minHeight: "100vh",
         background: "#120d14",
         color: "#ffffff",
-        fontFamily:
-          "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         display: "flex",
         flexDirection: "column",
         overflowX: "hidden",
@@ -744,18 +742,7 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange }: Her
         }}
       >
         <a href="/" aria-label="PNPtv! home" style={{ display: "flex" }}>
-          <span
-            style={{
-              fontSize: 18,
-              fontWeight: 900,
-              letterSpacing: "-0.02em",
-              background: "linear-gradient(90deg, #ff3377, #ff9933)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-            }}
-          >
-            PNPtv!
-          </span>
+          <img src="/logo-header.png" alt="PNPtv!" style={{ height: 36, width: "auto" }} />
         </a>
         <LangToggle lang={lang} onChange={onLangChange} />
       </header>
@@ -1239,8 +1226,6 @@ export default function Lifetime100() {
           minHeight: "100vh",
           background: "#120d14",
           color: "#ffffff",
-          fontFamily:
-            "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
           position: "relative",
           overflowX: "hidden",
           paddingBottom: 96, // clearance for fixed NavFooter
@@ -1256,18 +1241,7 @@ export default function Lifetime100() {
           }}
         >
           <a href="/" aria-label="PNPtv! home" style={{ display: "flex" }}>
-            <span
-              style={{
-                fontSize: 18,
-                fontWeight: 900,
-                letterSpacing: "-0.02em",
-                background: "linear-gradient(90deg, #ff3377, #ff9933)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-              }}
-            >
-              PNPtv!
-            </span>
+            <img src="/logo-header.png" alt="PNPtv!" style={{ height: 36, width: "auto" }} />
           </a>
           <LangToggle lang={lang} onChange={handleLangChange} />
         </header>
