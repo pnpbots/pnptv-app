@@ -284,7 +284,13 @@ export function LandingPage() {
   const [recoverSent, setRecoverSent] = useState(false);
   const [recoverError, setRecoverError] = useState<string | null>(null);
 
-  const [activeSheet, setActiveSheet] = useState<string | null>(null);
+  const [activeSheet, setActiveSheet] = useState<string | null>(() => {
+    // Deep-link support: /landing?sheet=feed opens the Feed sheet on mount
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get("sheet");
+    const valid = new Set(["about", "feed", "hangouts", "live", "nearby", "creators", "payments", "safety"]);
+    return requested && valid.has(requested) ? requested : null;
+  });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // LATAM performer-focus mode — backend redirects non-grandfathered LATAM

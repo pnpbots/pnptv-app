@@ -1050,6 +1050,117 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange }: Her
   );
 }
 
+// ── Bottom nav + legal footer (mirrors LandingPage.tsx style) ─────────────────
+// Pills deep-link to /landing?sheet=X so the user lands on the relevant bottom
+// sheet on the main Landing page.
+
+const NAV_ITEMS = [
+  { id: "about",    emoji: "👋", label: "About" },
+  { id: "feed",     emoji: "📣", label: "Feed" },
+  { id: "hangouts", emoji: "🎙️", label: "Hangouts" },
+  { id: "live",     emoji: "🔴", label: "Live" },
+  { id: "nearby",   emoji: "📍", label: "Connect" },
+  { id: "creators", emoji: "💰", label: "Creators" },
+  { id: "payments", emoji: "💳", label: "Payments" },
+  { id: "safety",   emoji: "🛡️", label: "Safety" },
+] as const;
+
+const LEGAL_LINKS = [
+  { label: "Terms", href: "/terms" },
+  { label: "Privacy", href: "/privacy" },
+  { label: "Cookies", href: "/cookies" },
+  { label: "Content Policy", href: "/content-policy" },
+  { label: "DMCA", href: "/dmca" },
+  { label: "Refunds", href: "/refunds" },
+  { label: "Contact", href: "/contact" },
+];
+
+function NavFooter() {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 40,
+        background: "rgba(18, 13, 20, 0.92)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+        borderTop: "1px solid rgba(255,255,255,0.08)",
+      }}
+    >
+      <nav style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }} aria-label="Explore PNPtv">
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px", height: 48, width: "max-content" }}>
+          {NAV_ITEMS.map((item) => (
+            <a
+              key={item.id}
+              href={`/landing?sheet=${item.id}`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                borderRadius: 9999,
+                fontSize: 12,
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+                border: "1px solid rgba(255,255,255,0.12)",
+                color: "#cfcfd4",
+                textDecoration: "none",
+                flexShrink: 0,
+                transition: "color 0.15s, border-color 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "#ffffff";
+                e.currentTarget.style.borderColor = "rgba(255,255,255,0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "#cfcfd4";
+                e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)";
+              }}
+            >
+              <span>{item.emoji}</span>
+              <span>{item.label}</span>
+            </a>
+          ))}
+        </div>
+      </nav>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "center",
+          columnGap: 12,
+          rowGap: 2,
+          padding: "8px 16px",
+          borderTop: "1px solid rgba(255,255,255,0.08)",
+          paddingBottom: "max(8px, env(safe-area-inset-bottom))",
+        }}
+      >
+        {LEGAL_LINKS.map((l) => (
+          <a
+            key={l.href}
+            href={l.href}
+            style={{
+              fontSize: 10,
+              color: "rgba(207,207,212,0.4)",
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+              transition: "color 0.15s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#cfcfd4"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(207,207,212,0.4)"; }}
+          >
+            {l.label}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Root page ──────────────────────────────────────────────────────────────────
 
 export default function Lifetime100() {
@@ -1132,6 +1243,7 @@ export default function Lifetime100() {
             "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
           position: "relative",
           overflowX: "hidden",
+          paddingBottom: 96, // clearance for fixed NavFooter
         }}
       >
         {/* Header with lang toggle */}
@@ -1161,17 +1273,21 @@ export default function Lifetime100() {
         </header>
 
         <ActivateView s={s} initialCode={codeParam} />
+        <NavFooter />
       </div>
     );
   }
 
   return (
-    <HeroView
-      s={s}
-      available={available}
-      availabilityLoading={availabilityLoading}
-      lang={lang}
-      onLangChange={handleLangChange}
-    />
+    <>
+      <HeroView
+        s={s}
+        available={available}
+        availabilityLoading={availabilityLoading}
+        lang={lang}
+        onLangChange={handleLangChange}
+      />
+      <NavFooter />
+    </>
   );
 }
