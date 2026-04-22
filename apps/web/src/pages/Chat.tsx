@@ -23,9 +23,7 @@ import {
   markGroupAsRead,
   pinHangoutGroup,
   muteHangoutGroupForUser,
-  archiveHangoutGroup,
   forwardHangoutMessage,
-  getArchivedHangouts,
   joinHangoutGroup,
   discoverHangoutGroups,
   requestJoinGroup,
@@ -87,6 +85,7 @@ import { MediaUploadButton } from "@/components/hangouts/MediaUploadButton";
 import { VideoCallButton } from "@/components/hangouts/VideoCallButton";
 import LiveKitCallDock from "@/components/hangouts/LiveKitCallDock";
 import { ForwardTargetPicker } from "@/components/forwarding/ForwardTargetPicker";
+import { MentionText } from "@/components/MentionText";
 
 type View = "list" | "chat";
 
@@ -156,7 +155,6 @@ function HangoutChatPanel({
   );
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const mediaInputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastTypingEmit = useRef(0);
@@ -177,6 +175,8 @@ function HangoutChatPanel({
 
   // Animated reaction state — key is "${msgId}-${emoji}"
   const [recentlyReacted, setRecentlyReacted] = useState<Set<string>>(new Set());
+  // Floating-emoji overlays — one per tap, removed after animation ends
+  const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; msgId: number; emoji: string }>>([]);
 
   // Build memberMap: userId → displayName
   const memberMap = React.useMemo<Record<string, string>>(() => {
@@ -203,14 +203,19 @@ function HangoutChatPanel({
 
   const handleReactionWithAnimation = async (msgId: number, emoji: string) => {
     const key = `${msgId}-${emoji}`;
+    const floatId = `${key}-${Date.now()}`;
     setRecentlyReacted((prev) => new Set(prev).add(key));
+    setFloatingReactions((prev) => [...prev, { id: floatId, msgId, emoji }]);
     setTimeout(() => {
       setRecentlyReacted((prev) => {
         const next = new Set(prev);
         next.delete(key);
         return next;
       });
-    }, 300);
+    }, 380);
+    setTimeout(() => {
+      setFloatingReactions((prev) => prev.filter((f) => f.id !== floatId));
+    }, 1000);
     await handleReaction(msgId, emoji);
   };
 
@@ -372,12 +377,25 @@ function HangoutChatPanel({
     }
   };
 
-  const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleMediaFilePicked = (file: File, previewUrl: string) => {
     setMediaFile(file);
-    setMediaPreview(file.type.startsWith("image/") ? URL.createObjectURL(file) : null);
-    e.target.value = "";
+    setMediaPreview(file.type.startsWith("image/") ? previewUrl : null);
+  };
+
+  const handleVoiceRecorded = async (blob: Blob, durationSeconds: number) => {
+    if (!durationSeconds) return;
+    const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
+    const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type || "audio/webm" });
+    setSending(true);
+    setChatError(null);
+    try {
+      await sendGroupMediaMessage(groupId, file);
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Failed to send voice note");
+    } finally {
+      setSending(false);
+    }
   };
 
   const cancelMedia = () => {
@@ -596,52 +614,77 @@ function HangoutChatPanel({
                           )}
                           {msg.message_type === "post_card" && msg.meta?.postId ? (() => {
                             const snap = msg.meta.snapshot || {};
-                            const handle = snap.authorUsername
+                            const handleName = snap.authorUsername
                               ? `@${snap.authorUsername}`
                               : (snap.authorFirstName || "User");
                             const preview = snap.content || "";
                             const isVideo = snap.mediaType === "video";
+                            const authorPath = snap.authorUsername
+                              ? `/profile/${snap.authorUsername}`
+                              : null;
                             return (
                               <>
-                                {snap.note && <p className="mb-1.5">{snap.note}</p>}
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); navigate(`/post/${msg.meta!.postId}`); }}
-                                  className="w-full text-left rounded-lg overflow-hidden border border-white/15 hover:border-white/25 bg-black/20 transition-colors"
-                                >
+                                {snap.note && (
+                                  <p className="mb-1.5">
+                                    <MentionText text={snap.note} />
+                                  </p>
+                                )}
+                                <div className="w-full rounded-lg overflow-hidden border border-white/15 hover:border-white/25 bg-black/20 transition-colors">
                                   {snap.mediaUrl && (
-                                    <div className="relative w-full bg-black/40" style={{ aspectRatio: "16/9" }}>
-                                      {isVideo ? (
-                                        <video src={snap.mediaUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-                                      ) : (
-                                        <img src={snap.mediaUrl} alt="" className="w-full h-full object-cover" />
-                                      )}
-                                      {isVideo && (
-                                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                          <span className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
-                                            <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); navigate(`/post/${msg.meta!.postId}`); }}
+                                      className="w-full text-left"
+                                      aria-label="View post"
+                                    >
+                                      <div className="relative w-full bg-black/40" style={{ aspectRatio: "16/9" }}>
+                                        {isVideo ? (
+                                          <video src={snap.mediaUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                                        ) : (
+                                          <img src={snap.mediaUrl} alt="" className="w-full h-full object-cover" />
+                                        )}
+                                        {isVideo && (
+                                          <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                            <span className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
+                                              <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                            </span>
                                           </span>
-                                        </span>
-                                      )}
-                                    </div>
+                                        )}
+                                      </div>
+                                    </button>
                                   )}
                                   <div className="px-2.5 py-2">
-                                    <div className="text-[11px] font-semibold" style={{ color: isMe ? "rgba(255,255,255,0.95)" : "#5ED1C4" }}>
-                                      📎 {handle}
-                                    </div>
-                                    {preview && (
-                                      <div className={`text-xs mt-0.5 line-clamp-3 ${isMe ? "text-white/85" : "text-white/80"}`}>
-                                        {preview}
+                                    {authorPath ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); navigate(authorPath); }}
+                                        className="text-[11px] font-semibold hover:underline"
+                                        style={{ color: isMe ? "rgba(255,255,255,0.95)" : "#5ED1C4" }}
+                                      >
+                                        📎 {handleName}
+                                      </button>
+                                    ) : (
+                                      <div className="text-[11px] font-semibold" style={{ color: isMe ? "rgba(255,255,255,0.95)" : "#5ED1C4" }}>
+                                        📎 {handleName}
                                       </div>
                                     )}
-                                    <div className={`text-[10px] mt-1 ${isMe ? "text-white/55" : "text-pnp-textSecondary"}`}>
-                                      Tap to view post
-                                    </div>
+                                    {preview && (
+                                      <div className={`text-xs mt-0.5 line-clamp-3 ${isMe ? "text-white/85" : "text-white/80"}`}>
+                                        <MentionText text={preview} />
+                                      </div>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); navigate(`/post/${msg.meta!.postId}`); }}
+                                      className={`text-[10px] mt-1 hover:underline ${isMe ? "text-white/70" : "text-pnp-accent"}`}
+                                    >
+                                      Tap to view post →
+                                    </button>
                                   </div>
-                                </button>
+                                </div>
                               </>
                             );
-                          })() : msg.content && <p>{msg.content}</p>}
+                          })() : msg.content && <p><MentionText text={msg.content} /></p>}
                           <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
                             <span className={`text-[10px] ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>{timeStr}</span>
                             {msg.edited_at && <span className={`text-[10px] ${isMe ? "text-white/40" : "text-pnp-textSecondary/60"}`}>(edited)</span>}
@@ -667,8 +710,10 @@ function HangoutChatPanel({
 
                         {/* Reactions display */}
                         {msg.reactions && (msg.reactions as MessageReaction[]).length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-0.5 px-1">
+                          <div className="relative flex flex-wrap gap-1 mt-1 px-1">
                             {(msg.reactions as MessageReaction[]).map((r) => {
+                              const myId = String(user?.id ?? "");
+                              const isReacted = myId && Array.isArray(r.users) && r.users.map(String).includes(myId);
                               const reactorNames = (r.users || [])
                                 .map((uid: string) => memberMap[String(uid)] || "User")
                                 .filter(Boolean);
@@ -680,16 +725,18 @@ function HangoutChatPanel({
                                 <div key={r.emoji} className="relative group/rxn">
                                   <button
                                     onClick={() => handleReactionWithAnimation(msg.id, r.emoji)}
-                                    className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] transition-all active:scale-95 ${
-                                      recentlyReacted.has(animKey) ? "scale-110" : ""
+                                    aria-pressed={isReacted ? "true" : "false"}
+                                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all active:scale-95 ${
+                                      recentlyReacted.has(animKey) ? "chat-reaction-pop" : ""
                                     } ${
-                                      r.reacted_by_me
-                                        ? "bg-pnp-accent/20 ring-1 ring-pnp-accent/40"
-                                        : "bg-white/5 hover:bg-white/10"
+                                      isReacted
+                                        ? "ring-1 ring-pnp-accent/70 shadow-[0_0_0_1px_rgba(212,0,122,0.25),0_2px_8px_-2px_rgba(212,0,122,0.45)]"
+                                        : "bg-white/[0.06] hover:bg-white/10 ring-1 ring-white/5"
                                     }`}
+                                    style={isReacted ? { background: "linear-gradient(135deg, rgba(212,0,122,0.22), rgba(230,145,56,0.18))" } : undefined}
                                   >
-                                    <span>{r.emoji}</span>
-                                    <span className="text-[10px] text-pnp-textSecondary">{r.count}</span>
+                                    <span className="leading-none text-[13px]">{r.emoji}</span>
+                                    <span className={`text-[11px] tabular-nums font-semibold ${isReacted ? "text-white" : "text-pnp-textSecondary"}`}>{r.count}</span>
                                   </button>
                                   {reactorNames.length > 0 && (
                                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover/rxn:block z-50 pointer-events-none">
@@ -705,6 +752,16 @@ function HangoutChatPanel({
                                 </div>
                               );
                             })}
+                            {/* Floating-emoji overlays for this message */}
+                            {floatingReactions.filter((f) => f.msgId === msg.id).map((f) => (
+                              <span
+                                key={f.id}
+                                className="chat-reaction-float pointer-events-none absolute left-4 bottom-0 text-xl"
+                                aria-hidden="true"
+                              >
+                                {f.emoji}
+                              </span>
+                            ))}
                           </div>
                         )}
 
@@ -971,14 +1028,14 @@ function HangoutChatPanel({
       {/* Input bar */}
       <div className="flex items-end gap-1.5 px-2 py-1.5 border-t border-pnp-border flex-shrink-0 bg-pnp-background">
         {!editingMsg && (
-          <>
-            <input ref={mediaInputRef} type="file" accept="image/*,video/*,audio/*" className="hidden" onChange={handleMediaSelect} />
-            <button type="button" onClick={() => mediaInputRef.current?.click()} className="w-10 h-10 flex items-center justify-center rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0 mb-0.5" aria-label="Attach media">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
-              </svg>
-            </button>
-          </>
+          <div className="flex items-end gap-1 mb-0.5">
+            <MediaUploadButton
+              onFileSelect={handleMediaFilePicked}
+              onError={(msg) => setChatError(msg)}
+              onVoiceRecord={handleVoiceRecorded}
+              disabled={sending}
+            />
+          </div>
         )}
         <textarea
           ref={(el) => {
@@ -1060,11 +1117,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [groups, setGroups] = useState<HangoutGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Archived list state + Active/Archived view toggle
-  const [listMode, setListMode] = useState<"active" | "archived">("active");
-  const [archivedGroups, setArchivedGroups] = useState<HangoutGroup[]>([]);
-  const [archivedLoading, setArchivedLoading] = useState(false);
 
   // Create group
   const [showCreate, setShowCreate] = useState(false);
@@ -1208,6 +1260,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [callError, setCallError] = useState<string | null>(null);
   const [showCallPreview, setShowCallPreview] = useState(false);
   const [preJoinChoices, setPreJoinChoices] = useState<LocalUserChoices | null>(null);
+  // Prefetched call token — kicked off when the preview opens so the
+  // "Join Call" tap in PreJoin feels instant instead of waiting on a round-trip.
+  const prefetchedCallRef = useRef<Promise<{ token: string; livekitUrl: string; roomName: string }> | null>(null);
+  const prefetchedGroupIdRef = useRef<number | null>(null);
 
   // SpotlightStrip — hangout events
   const [hangoutEvents, setHangoutEvents] = useState<EventItem[]>([]);
@@ -1228,21 +1284,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     }
   }, []);
 
-  const loadArchivedGroups = useCallback(async () => {
-    setArchivedLoading(true);
-    try {
-      const data = await getArchivedHangouts();
-      setArchivedGroups(data.groups || []);
-    } catch { /* silent */ }
-    setArchivedLoading(false);
-  }, []);
-
-  // Auto-load archived list when the tab is first opened
-  useEffect(() => {
-    if (listMode === "archived" && archivedGroups.length === 0) loadArchivedGroups();
-  }, [listMode, archivedGroups.length, loadArchivedGroups]);
-
-  // ─── Per-row actions: pin / mute / archive ──────────────────────────
+  // ─── Per-row actions: pin / mute ────────────────────────────────────
 
   const handleTogglePin = useCallback(async (group: HangoutGroup) => {
     const next = !group.isPinned;
@@ -1273,29 +1315,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     }
   }, []);
 
-  const handleToggleArchive = useCallback(async (group: HangoutGroup) => {
-    const next = !group.isArchived;
-    if (next) {
-      setGroups((prev) => prev.filter((g) => g.id !== group.id));
-      setArchivedGroups((prev) => [{ ...group, isArchived: true }, ...prev]);
-    } else {
-      setArchivedGroups((prev) => prev.filter((g) => g.id !== group.id));
-      setGroups((prev) => [{ ...group, isArchived: false }, ...prev]);
-    }
-    setGroupCardMenuId(null);
-    try {
-      await archiveHangoutGroup(group.id, next);
-    } catch {
-      if (next) {
-        setArchivedGroups((prev) => prev.filter((g) => g.id !== group.id));
-        setGroups((prev) => [{ ...group, isArchived: false }, ...prev]);
-      } else {
-        setGroups((prev) => prev.filter((g) => g.id !== group.id));
-        setArchivedGroups((prev) => [{ ...group, isArchived: true }, ...prev]);
-      }
-    }
-  }, []);
-
   const loadGroupDetail = useCallback(async (groupId: number) => {
     try {
       const data = await getHangoutGroup(groupId);
@@ -1323,12 +1342,35 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   }, []);
 
   // ─── LiveKit call handlers ────────────────────────────────────────────────
-  // Button click opens the pre-join card; the network call is deferred until
-  // the user confirms their mic/cam in `handleConfirmJoinCall` below.
+  // Button click opens the pre-join card AND prefetches the LiveKit token in
+  // parallel, so when the user confirms mic/cam the dock mounts with no wait.
   const handleStartCall = useCallback(() => {
     if (!activeGroup?.id) return;
     setCallError(null);
     setShowCallPreview(true);
+
+    const gid = activeGroup.id;
+    const hasActive = activeGroup.hasActiveCall;
+    // Reuse an in-flight prefetch for the same group; otherwise kick off a new one.
+    if (prefetchedGroupIdRef.current !== gid || !prefetchedCallRef.current) {
+      prefetchedGroupIdRef.current = gid;
+      prefetchedCallRef.current = (async () => {
+        if (hasActive) {
+          try {
+            return await joinHangoutCall(gid);
+          } catch (err: unknown) {
+            if (err instanceof ApiError && err.status === 404) {
+              return await startHangoutCall(gid);
+            }
+            throw err;
+          }
+        }
+        return await startHangoutCall(gid);
+      })();
+      // Swallow unhandled-rejection noise — the error will surface in the
+      // confirm handler where it can be shown to the user in-context.
+      prefetchedCallRef.current.catch(() => {});
+    }
   }, [activeGroup]);
 
   const handleConfirmJoinCall = useCallback(async (choices: LocalUserChoices) => {
@@ -1341,21 +1383,28 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     setShowCallPreview(false);
     try {
       setCallError(null);
-      const hasActive = activeGroup.hasActiveCall;
       let result: { token: string; livekitUrl: string; roomName: string };
-      if (hasActive) {
-        try {
-          result = await joinHangoutCall(activeGroup.id);
-        } catch (joinErr: unknown) {
-          // 404 means the active call already ended — fall through to start
-          if (joinErr instanceof ApiError && joinErr.status === 404) {
-            result = await startHangoutCall(activeGroup.id);
-          } else {
-            throw joinErr;
-          }
-        }
+      // Use the prefetch from handleStartCall; if it's missing or for a
+      // different group (shouldn't happen, but guard), fall back to a fresh call.
+      if (prefetchedCallRef.current && prefetchedGroupIdRef.current === activeGroup.id) {
+        result = await prefetchedCallRef.current;
+        prefetchedCallRef.current = null;
+        prefetchedGroupIdRef.current = null;
       } else {
-        result = await startHangoutCall(activeGroup.id);
+        const hasActive = activeGroup.hasActiveCall;
+        if (hasActive) {
+          try {
+            result = await joinHangoutCall(activeGroup.id);
+          } catch (joinErr: unknown) {
+            if (joinErr instanceof ApiError && joinErr.status === 404) {
+              result = await startHangoutCall(activeGroup.id);
+            } else {
+              throw joinErr;
+            }
+          }
+        } else {
+          result = await startHangoutCall(activeGroup.id);
+        }
       }
       console.log("[Chat] Got LiveKit token", { roomName: result.roomName, livekitUrl: result.livekitUrl });
       setCallToken(result.token);
@@ -1396,6 +1445,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
   const handleCancelCallPreview = useCallback(() => {
     setShowCallPreview(false);
+    // Drop the prefetched token — next open will fetch fresh (token may expire).
+    prefetchedCallRef.current = null;
+    prefetchedGroupIdRef.current = null;
   }, []);
 
   const handleLeaveCall = useCallback(() => {
@@ -3453,36 +3505,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         </div>
       )}
 
-      {/* Active / Archived toggle */}
-      <div className="flex gap-1 p-1 rounded-lg mb-3" style={{ background: "rgba(255,255,255,0.04)" }}>
-        <button
-          type="button"
-          onClick={() => setListMode("active")}
-          className="flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors"
-          style={
-            listMode === "active"
-              ? { background: "#D4007A", color: "#fff" }
-              : { background: "transparent", color: "#8E8E93" }
-          }
-        >
-          Active
-        </button>
-        <button
-          type="button"
-          onClick={() => setListMode("archived")}
-          className="flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors"
-          style={
-            listMode === "archived"
-              ? { background: "#D4007A", color: "#fff" }
-              : { background: "transparent", color: "#8E8E93" }
-          }
-        >
-          Archived {archivedGroups.length > 0 && <span className="opacity-60">({archivedGroups.length})</span>}
-        </button>
-      </div>
-
       {/* Loading skeletons */}
-      {(listMode === "active" ? isLoading : archivedLoading) ? (
+      {isLoading ? (
         <div className="space-y-3" aria-label="Loading groups" aria-busy="true">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="glass-card-sm p-4 animate-pulse">
@@ -3496,7 +3520,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             </div>
           ))}
         </div>
-      ) : (listMode === "active" ? groups : archivedGroups).length === 0 ? (
+      ) : groups.length === 0 ? (
         /* Empty state */
         <div className="glass-card-sm p-8 text-center space-y-4">
           <div className="w-20 h-20 mx-auto rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(123,97,255,0.12))" }}>
@@ -3538,7 +3562,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       ) : (
         /* Group list */
         <div className="space-y-2">
-          {(listMode === "active" ? groups : archivedGroups).map((group) => (
+          {groups.map((group) => (
             <div
               key={group.id}
               onClick={() => openChat(group)}

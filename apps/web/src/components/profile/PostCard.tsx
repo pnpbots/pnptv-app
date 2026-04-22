@@ -4,6 +4,7 @@ import {
   togglePostLike,
   getReplies,
   createReply,
+  editSocialPost,
   type SocialPostItem,
 } from "@/lib/api";
 import { translateText } from "@/lib/feedI18n";
@@ -82,6 +83,11 @@ export default function PostCard({
   const p = t.profile;
   const { feed: ft } = useI18n();
   const [deleting, setDeleting] = useState(false);
+  // Edit post state (owner only) — mirrors SocialPostCard
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(post.content || "");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [localContent, setLocalContent] = useState<string | null>(null);
   const photoUrl = resolvePhotoUrl(post.author_photo);
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
   const [disclaimerAccepting, setDisclaimerAccepting] = useState(false);
@@ -113,6 +119,32 @@ export default function PostCard({
   const optimisticIdRef = useRef(-Date.now());
 
   const canDelete = isOwn || isAdmin;
+
+  const handleStartEdit = useCallback(() => {
+    setEditContent(localContent ?? post.content ?? "");
+    setIsEditing(true);
+  }, [localContent, post.content]);
+
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setEditContent(localContent ?? post.content ?? "");
+  }, [localContent, post.content]);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (savingEdit) return;
+    const trimmed = editContent.trim();
+    if (!trimmed) return;
+    setSavingEdit(true);
+    try {
+      const res = await editSocialPost(post.id, trimmed);
+      if (res.success) {
+        setLocalContent(res.content ?? trimmed);
+        setTranslatedContent(null);
+        setIsEditing(false);
+      }
+    } catch { /* silent */ }
+    setSavingEdit(false);
+  }, [post.id, editContent, savingEdit]);
 
   const handleShare = useCallback(() => {
     setShowShareModal(true);
@@ -467,13 +499,43 @@ export default function PostCard({
             )}
           </div>
 
-          {/* Post body — @mentions rendered as clickable links */}
-          <MentionText
-            text={translatedContent ?? post.content}
-            className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed block"
-            maxLength={200}
-          />
-          {translatedContent && (
+          {/* Post body — inline editor when editing, otherwise @mentions/URLs clickable */}
+          {isEditing ? (
+            <div className="mt-1.5">
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-white/30 resize-none"
+                rows={3}
+                maxLength={5000}
+                disabled={savingEdit}
+                autoFocus
+              />
+              <div className="flex gap-2 mt-2 justify-end">
+                <button
+                  onClick={handleCancelEdit}
+                  disabled={savingEdit}
+                  className="text-xs px-3 py-1.5 rounded-md text-pnp-textSecondary hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={savingEdit || !editContent.trim()}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-md disabled:opacity-40 btn-gradient text-white"
+                >
+                  {savingEdit ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <MentionText
+              text={translatedContent ?? localContent ?? post.content}
+              className="text-sm text-white/90 mt-1.5 whitespace-pre-wrap leading-relaxed block"
+              maxLength={200}
+            />
+          )}
+          {translatedContent && !isEditing && (
             <button
               onClick={() => setTranslatedContent(null)}
               className="text-xs mt-0.5"
@@ -482,6 +544,35 @@ export default function PostCard({
               {ft.showOriginal}
             </button>
           )}
+
+          {/* Link preview card — only when post has no attached media */}
+          {!isEditing && !post.media_url && (() => {
+            const contentStr = translatedContent ?? localContent ?? post.content ?? "";
+            const urlMatch = contentStr.match(/https?:\/\/[^\s<>"]+/);
+            if (!urlMatch) return null;
+            const rawUrl = urlMatch[0].replace(/[.,;:!?)\]]+$/, "");
+            let host = rawUrl;
+            try { host = new URL(rawUrl).host.replace(/^www\./, ""); } catch { /* noop */ }
+            return (
+              <a
+                href={rawUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="mt-3 block rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/[0.08] transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#5ED1C4" }} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] uppercase tracking-wide font-semibold text-pnp-textSecondary">{host}</div>
+                    <div className="text-xs text-white/80 truncate">{rawUrl}</div>
+                  </div>
+                </div>
+              </a>
+            );
+          })()}
 
           {/* Media */}
           {post.media_url && (
@@ -635,6 +726,21 @@ export default function PostCard({
               </button>
             )}
 
+            {/* Edit (owner only, not while editing) */}
+            {isOwn && !isEditing && !post.blurred && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleStartEdit(); }}
+                className="ml-auto text-xs hover:text-cyan-400 transition-colors"
+                style={{ color: "#8E8E93" }}
+                aria-label="Edit post"
+                title="Edit post"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                </svg>
+              </button>
+            )}
+
             {/* Delete (owner or admin) */}
             {canDelete && (
               <button
@@ -643,7 +749,7 @@ export default function PostCard({
                   onDelete(post.id);
                 }}
                 disabled={deleting}
-                className={`${!isOwn && onReport ? "" : "ml-auto"} text-xs hover:text-red-400 transition-colors`}
+                className={`${(isOwn && !isEditing && !post.blurred) || (!isOwn && onReport) ? "" : "ml-auto"} text-xs hover:text-red-400 transition-colors`}
                 title={p.deletePost}
                 aria-label={p.deletePost}
               >

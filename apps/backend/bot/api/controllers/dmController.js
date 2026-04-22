@@ -118,6 +118,7 @@ const getConversation = async (req, res) => {
       `SELECT dm.id, dm.sender_id, dm.recipient_id,
               dm.content, dm.is_deleted, dm.edited_at,
               dm.media_url, dm.media_type, dm.media_mime, dm.media_thumb_url,
+              dm.message_type, dm.meta,
               dm.is_read, dm.read_at, dm.created_at, dm.reply_to_id,
               rxn.reactions, rpv.reply_preview
        FROM direct_messages dm

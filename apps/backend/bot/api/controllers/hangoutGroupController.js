@@ -5,7 +5,6 @@ const logger = require('../../../utils/logger');
 const { getRedis } = require('../../../config/redis');
 const socketSingleton = require('../../../services/socketSingleton');
 const userService = require('../../../services/userService');
-const VideoCallModel = require('../../../models/videoCallModel');
 const NotificationEmitter = require('../../../services/notificationEmitter');
 const { hasAccess } = require('../../../services/accessService');
 // Matrix removed — no-op stub; fire-and-forget calls silently resolve
@@ -2187,11 +2186,14 @@ const toggleReaction = async (req, res) => {
 
     const reactions = await fetchReactions(msgId, user.id);
 
+    // reacted_by_me is per-viewer — strip it from the broadcast so each client
+    // derives their own from users[]. The HTTP response keeps it for the actor.
     const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
     if (io) {
+      const broadcastReactions = reactions.map(({ reacted_by_me, ...rest }) => rest);
       io.to(`hangout:${groupId}`).emit('hangout:reaction:updated', {
         messageId: msgId,
-        reactions,
+        reactions: broadcastReactions,
       });
     }
 
@@ -2231,9 +2233,10 @@ const getReactions = async (req, res) => {
   }
 };
 
-// ── Per-user hangout thread state: pin / mute / archive / read-message ──────
-// All use PUT with the schema columns already on hangout_group_members:
-//   is_pinned, is_user_muted, is_archived, archived_at, last_read_message_id
+// ── Per-user hangout thread state: pin / mute / read-message ────────────────
+// All use PUT with schema columns on hangout_group_members:
+//   is_pinned, is_user_muted, last_read_message_id
+// (is_archived/archived_at remain on the table but are unused.)
 
 // PUT /api/webapp/hangouts/groups/:id/pin  body: { pinned: boolean }
 const pinGroup = async (req, res) => {
@@ -2285,25 +2288,6 @@ const muteGroupForUser = async (req, res) => {
   );
   if (rowCount === 0) return res.status(403).json({ error: 'Not a member of this group' });
   return res.json({ success: true, mutedUntil });
-};
-
-// PUT /api/webapp/hangouts/groups/:id/archive  body: { archived: boolean }
-const archiveGroup = async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
-  const groupId = parseInt(req.params.id, 10);
-  if (!Number.isFinite(groupId)) return res.status(400).json({ error: 'Invalid group id' });
-  const archived = req.body?.archived === true;
-  const archivedAt = archived ? new Date().toISOString() : null;
-
-  const { rowCount } = await query(
-    `UPDATE hangout_group_members
-        SET is_archived = $3,
-            archived_at = $4
-      WHERE group_id = $1 AND user_id = $2`,
-    [groupId, user.id, archived, archivedAt]
-  );
-  if (rowCount === 0) return res.status(403).json({ error: 'Not a member of this group' });
-  return res.json({ success: true, archived, archivedAt });
 };
 
 // PUT /api/webapp/hangouts/groups/:id/read-message  body: { messageId: number }
@@ -2415,15 +2399,23 @@ const forwardMessage = async (req, res) => {
           results.push({ target, status: 'skipped', reason: 'self' });
           continue;
         }
+        // For post_card sources, promote the snapshot's media into DM columns
+        // so the media preview renders via the existing DM renderer even if the
+        // recipient's client doesn't yet understand post_card meta.
+        const srcSnap = (src.meta && src.meta.snapshot) || null;
+        const dmMediaUrl = src.media_url || (src.message_type === 'post_card' ? (srcSnap?.mediaUrl || null) : null);
+        const dmMediaType = src.media_type || (src.message_type === 'post_card' ? (srcSnap?.mediaType || null) : null);
         const msg = await DmService.sendMessage(
           user.id,
           resolvedRid,
           {
             content: content || null,
-            mediaUrl: src.media_url || null,
-            mediaType: src.media_type || null,
+            mediaUrl: dmMediaUrl,
+            mediaType: dmMediaType,
             mediaMime: src.media_mime || null,
             mediaThumbUrl: src.media_thumb_url || null,
+            messageType: src.message_type === 'post_card' ? 'post_card' : 'text',
+            meta: src.message_type === 'post_card' ? src.meta : null,
           },
           {}
         );
@@ -2538,7 +2530,6 @@ module.exports = {
   forwardMessage,
   pinGroup,
   muteGroupForUser,
-  archiveGroup,
   markMessageRead,
 };
 

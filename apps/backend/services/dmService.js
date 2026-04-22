@@ -14,7 +14,7 @@ class DmService {
    * Send a direct message (text or media)
    */
   static async sendMessage(senderId, recipientId, data, options = {}) {
-    const { content, mediaUrl, mediaType, mediaMime, mediaThumbUrl } = data;
+    const { content, mediaUrl, mediaType, mediaMime, mediaThumbUrl, messageType, meta } = data;
     const { isAdmin = false } = options;
 
     const resolvedRecipientId = await resolveUserId(recipientId);
@@ -112,12 +112,14 @@ class DmService {
     }
 
     const text = content ? String(content).trim().slice(0, 4000) : null;
+    const mType = (messageType === 'post_card' ? 'post_card' : 'text');
+    const metaJson = meta ? JSON.stringify(meta) : null;
     const { rows } = await query(
       `INSERT INTO direct_messages
-         (sender_id, recipient_id, content, media_url, media_type, media_mime, media_thumb_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (sender_id, recipient_id, content, media_url, media_type, media_mime, media_thumb_url, message_type, meta)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
        RETURNING *`,
-      [senderId, resolvedRecipientId, text, mediaUrl || null, mediaType || null, mediaMime || null, mediaThumbUrl || null]
+      [senderId, resolvedRecipientId, text, mediaUrl || null, mediaType || null, mediaMime || null, mediaThumbUrl || null, mType, metaJson]
     );
 
     const message = rows[0];
@@ -316,7 +318,7 @@ class DmService {
 
     // Validate sender is a party to the source message
     const { rows: srcRows } = await query(
-      `SELECT id, sender_id, recipient_id, content, media_url, media_type, media_mime, media_thumb_url
+      `SELECT id, sender_id, recipient_id, content, media_url, media_type, media_mime, media_thumb_url, message_type, meta
          FROM direct_messages WHERE id = $1 LIMIT 1`,
       [sourceMessageId]
     );
@@ -341,6 +343,9 @@ class DmService {
             mediaType: src.media_type || null,
             mediaMime: src.media_mime || null,
             mediaThumbUrl: src.media_thumb_url || null,
+            // Preserve post_card type + meta so forwarded shares keep rich rendering
+            messageType: src.message_type || 'text',
+            meta: src.meta || null,
           },
           {}
         );
@@ -350,6 +355,36 @@ class DmService {
       }
     }
     return { success: true, sent };
+  }
+
+  // ─── Share a feed post to a DM (renders as post_card in the thread) ────
+  static async sharePostToDm(senderId, recipientId, post, note) {
+    const authorHandle = post.authorUsername ? `@${post.authorUsername}` : (post.authorFirstName || 'User');
+    const preview = (post.content || '').trim().slice(0, 180);
+    const noteText = typeof note === 'string' ? note.trim().slice(0, 500) : '';
+    const bodyParts = [];
+    if (noteText) bodyParts.push(noteText);
+    bodyParts.push(`📎 ${authorHandle}:`);
+    if (preview) bodyParts.push(preview + (post.content && post.content.length > 180 ? '…' : ''));
+    bodyParts.push(`https://app.pnptv.app/post/${post.id}`);
+    const content = bodyParts.join('\n');
+    const meta = {
+      postId: post.id,
+      snapshot: {
+        authorUsername: post.authorUsername || null,
+        authorFirstName: post.authorFirstName || null,
+        content: preview || null,
+        mediaUrl: post.mediaUrl || null,
+        mediaType: post.mediaType || null,
+        note: noteText || null,
+      },
+    };
+    return DmService.sendMessage(
+      senderId,
+      recipientId,
+      { content, mediaUrl: null, mediaType: null, messageType: 'post_card', meta },
+      {}
+    );
   }
 
   // ─── Presence (Redis-backed) ───
