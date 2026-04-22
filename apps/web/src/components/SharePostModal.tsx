@@ -12,7 +12,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { getXLoginUrl, getXStatus, sharePostToX, getHangoutGroups, sharePostToHangouts, type XStatus, type HangoutGroup } from "@/lib/api";
+import { getXLoginUrl, getXStatus, sharePostToX, getHangoutGroups, sharePostToHangouts, getDmThreads, sharePostToDm, type XStatus, type HangoutGroup, type MessageThread } from "@/lib/api";
 
 const APP_BASE = "https://pnptv.app";
 
@@ -92,6 +92,18 @@ export function SharePostModal({
   // Tracks whether groups were fetched at least once this modal-open lifecycle
   const hangoutsFetchedRef = useRef(false);
 
+  // DMs section state (mirror of hangouts)
+  const [dmsExpanded, setDmsExpanded] = useState(false);
+  const [dmsLoadState, setDmsLoadState] = useState<HangoutsLoadState>("idle");
+  const [dmsLoadError, setDmsLoadError] = useState<string | null>(null);
+  const [dmThreads, setDmThreads] = useState<MessageThread[]>([]);
+  const [selectedDmPartnerIds, setSelectedDmPartnerIds] = useState<string[]>([]);
+  const [dmNote, setDmNote] = useState("");
+  const [dmsShareState, setDmsShareState] = useState<HangoutsShareState>("idle");
+  const [dmsShareError, setDmsShareError] = useState<string | null>(null);
+  const [dmsSharedCount, setDmsSharedCount] = useState(0);
+  const dmsFetchedRef = useRef(false);
+
   // Focus management
   const firstButtonRef = useRef<HTMLButtonElement>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -118,6 +130,18 @@ export function SharePostModal({
     setHangoutsShareError(null);
     setHangoutsSharedCount(0);
     hangoutsFetchedRef.current = false;
+
+    // Reset DMs section
+    setDmsExpanded(false);
+    setDmsLoadState("idle");
+    setDmsLoadError(null);
+    setDmThreads([]);
+    setSelectedDmPartnerIds([]);
+    setDmNote("");
+    setDmsShareState("idle");
+    setDmsShareError(null);
+    setDmsSharedCount(0);
+    dmsFetchedRef.current = false;
 
     getXStatus()
       .then((res) => {
@@ -244,6 +268,57 @@ export function SharePostModal({
       setHangoutsShareState("error");
     }
   }, [postId, selectedHangoutIds, hangoutNote, hangoutsShareState]);
+
+  // ── DM share — lazy fetch recent threads, multi-select up to 5, per-partner POST ──
+  const loadDmThreads = useCallback(async () => {
+    if (dmsFetchedRef.current) return;
+    dmsFetchedRef.current = true;
+    setDmsLoadState("loading");
+    setDmsLoadError(null);
+    try {
+      const res = await getDmThreads();
+      setDmThreads(res.threads || []);
+      setDmsLoadState("loaded");
+    } catch (err: unknown) {
+      setDmsLoadError(err instanceof Error ? err.message : "Failed to load DMs");
+      setDmsLoadState("error");
+      dmsFetchedRef.current = false;
+    }
+  }, []);
+
+  const handleToggleDmsSection = useCallback(() => {
+    setDmsExpanded((prev) => {
+      const next = !prev;
+      if (next) loadDmThreads();
+      return next;
+    });
+  }, [loadDmThreads]);
+
+  const handleToggleDmPartner = useCallback((partnerId: string) => {
+    setSelectedDmPartnerIds((prev) => {
+      if (prev.includes(partnerId)) return prev.filter((x) => x !== partnerId);
+      if (prev.length >= 5) return prev;
+      return [...prev, partnerId];
+    });
+  }, []);
+
+  const handleShareToDms = useCallback(async () => {
+    if (selectedDmPartnerIds.length === 0 || dmsShareState === "sending") return;
+    setDmsShareState("sending");
+    setDmsShareError(null);
+    const results = await Promise.allSettled(
+      selectedDmPartnerIds.map((pid) => sharePostToDm(pid, postId, dmNote || undefined))
+    );
+    const sent = results.filter((r) => r.status === "fulfilled" && (r as PromiseFulfilledResult<{ success: boolean }>).value.success).length;
+    if (sent > 0) {
+      setDmsSharedCount(sent);
+      setDmsShareState("success");
+      setDmsExpanded(false);
+    } else {
+      setDmsShareError("Failed to share — please retry");
+      setDmsShareState("error");
+    }
+  }, [postId, selectedDmPartnerIds, dmNote, dmsShareState]);
 
   const handleNativeShare = useCallback(async () => {
     const displayName = authorName || "Someone";
@@ -773,6 +848,193 @@ export function SharePostModal({
     );
   };
 
+  // ── DMs section render — compact mirror of Hangouts ────────────────────────
+  const renderDmsSection = () => {
+    if (dmsShareState === "success") {
+      return (
+        <div
+          className="flex items-center gap-3 p-3 rounded-xl"
+          style={{ background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.2)" }}
+        >
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(52,199,89,0.15)" }}>
+            <svg className="w-4 h-4" style={{ color: "#34C759" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold" style={{ color: "#34C759" }}>
+              Shared to {dmsSharedCount} DM{dmsSharedCount !== 1 ? "s" : ""}!
+            </p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>
+              Your post was sent to the selected conversations
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <button
+          type="button"
+          onClick={handleToggleDmsSection}
+          className="w-full flex items-center gap-3 p-3 rounded-xl transition-all active:scale-[0.98]"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+          aria-expanded={dmsExpanded}
+        >
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(94,209,196,0.12)" }}>
+            <svg className="w-4 h-4" style={{ color: "#5ED1C4" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0 text-left">
+            <p className="text-sm font-semibold text-white">Share to DM</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>
+              Send this post to your direct-message conversations
+            </p>
+          </div>
+          <svg
+            className="w-4 h-4 flex-shrink-0 transition-transform duration-200"
+            style={{ color: "#555", transform: dmsExpanded ? "rotate(180deg)" : "rotate(0deg)" }}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {dmsExpanded && (
+          <div className="mt-2 space-y-2">
+            <div className="rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              {dmsLoadState === "loading" ? (
+                <div className="p-3 space-y-2">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="flex items-center gap-3 animate-pulse">
+                      <div className="w-9 h-9 rounded-full bg-white/10 flex-shrink-0" />
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-3 w-1/2 bg-white/10 rounded" />
+                        <div className="h-2.5 w-2/3 bg-white/5 rounded" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : dmsLoadState === "error" ? (
+                <div className="p-4 text-center">
+                  <p className="text-xs text-red-400 mb-2">{dmsLoadError || "Failed to load"}</p>
+                  <button
+                    type="button"
+                    onClick={() => { dmsFetchedRef.current = false; loadDmThreads(); }}
+                    className="text-xs font-semibold text-pnp-accent hover:underline"
+                  >
+                    Try again
+                  </button>
+                </div>
+              ) : dmThreads.length === 0 ? (
+                <div className="p-4 text-center">
+                  <p className="text-xs" style={{ color: "#8E8E93" }}>
+                    You don't have any direct messages yet
+                  </p>
+                </div>
+              ) : (
+                <div className="max-h-[36vh] overflow-y-auto">
+                  {dmThreads.map((t) => {
+                    const partnerId = String(t.partnerId);
+                    const isChecked = selectedDmPartnerIds.includes(partnerId);
+                    const isDisabled = !isChecked && selectedDmPartnerIds.length >= 5;
+                    const name = t.partnerFirstName || t.partnerUsername || "User";
+                    return (
+                      <button
+                        key={partnerId}
+                        type="button"
+                        onClick={() => !isDisabled && handleToggleDmPartner(partnerId)}
+                        disabled={isDisabled}
+                        role="option"
+                        aria-selected={isChecked}
+                        aria-disabled={isDisabled}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 transition-colors ${isDisabled ? "opacity-40 cursor-not-allowed" : "hover:bg-white/5"}`}
+                      >
+                        {t.partnerPhoto ? (
+                          <img src={t.partnerPhoto} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                        ) : (
+                          <div
+                            className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 text-white"
+                            style={{ background: "linear-gradient(135deg,#D4007A,#E69138)" }}
+                          >
+                            {name[0]?.toUpperCase() || "?"}
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0 text-left">
+                          <p className="text-sm font-semibold text-white truncate">{name}</p>
+                          {t.partnerUsername && <p className="text-[11px] truncate" style={{ color: "#8E8E93" }}>@{t.partnerUsername}</p>}
+                        </div>
+                        <div
+                          className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                          style={{
+                            background: isChecked ? "#5ED1C4" : "transparent",
+                            border: isChecked ? "none" : "1.5px solid rgba(255,255,255,0.2)",
+                          }}
+                        >
+                          {isChecked && (
+                            <svg className="w-3 h-3 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {dmThreads.length > 0 && dmsLoadState === "loaded" && (
+              <>
+                <div>
+                  <textarea
+                    value={dmNote}
+                    onChange={(e) => setDmNote(e.target.value.slice(0, 500))}
+                    placeholder="Add a note (optional)"
+                    rows={2}
+                    className="w-full text-sm bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder:text-pnp-textSecondary/50 outline-none focus:border-white/30 resize-none"
+                  />
+                  <div className="text-[10px] text-right mt-0.5" style={{ color: "#8E8E93" }}>
+                    {dmNote.length} / 500
+                  </div>
+                </div>
+
+                {dmsShareError && (
+                  <div className="flex items-center gap-2 p-2 rounded-lg" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+                    <p className="text-xs text-red-400 flex-1">{dmsShareError}</p>
+                    <button type="button" onClick={() => setDmsShareState("idle")} className="text-xs font-semibold text-red-400 hover:underline">Retry</button>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleShareToDms}
+                  disabled={selectedDmPartnerIds.length === 0 || dmsShareState === "sending"}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition-opacity flex items-center justify-center gap-2"
+                  style={{ background: "linear-gradient(135deg, #5ED1C4, #2AAEA4)" }}
+                >
+                  {dmsShareState === "sending" ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+                        <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      </svg>
+                      Sending…
+                    </>
+                  ) : (
+                    `Send to ${selectedDmPartnerIds.length || ""} DM${selectedDmPartnerIds.length === 1 ? "" : "s"}`.trim()
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -868,6 +1130,9 @@ export function SharePostModal({
 
         {/* Share to Hangouts */}
         {renderHangoutsSection()}
+
+        {/* Share to DM */}
+        {renderDmsSection()}
 
         {/* Native Share API — only shown when available */}
         {typeof navigator !== "undefined" && "share" in navigator && (

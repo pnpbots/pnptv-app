@@ -576,6 +576,58 @@ const archiveThread = async (req, res) => {
   }
 };
 
+// Share a feed post to a DM thread — inserts as message_type='post_card'
+// POST /api/webapp/dm/thread/:partnerId/share-post/:postId  body: { note?: string }
+const shareDmPost = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
+  const postId = parseInt(req.params.postId, 10);
+  if (!Number.isFinite(postId) || postId <= 0) {
+    return res.status(400).json({ error: 'Invalid postId' });
+  }
+  const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 500) : '';
+
+  // Fetch post (+ shareability + author display fields)
+  const { rows: postRows } = await query(
+    `SELECT sp.id, sp.user_id, sp.content, sp.media_url, sp.media_type,
+            sp.is_deleted, sp.is_shareable,
+            u.username AS author_username, u.first_name AS author_first_name
+       FROM social_posts sp
+       JOIN users u ON u.id = sp.user_id
+      WHERE sp.id = $1`,
+    [postId]
+  );
+  const post = postRows[0];
+  if (!post || post.is_deleted) return res.status(404).json({ error: 'Post not found' });
+  if (post.is_shareable === false) return res.status(403).json({ error: 'Post is not shareable' });
+
+  try {
+    const msg = await DmService.sharePostToDm(
+      user.id,
+      partnerId,
+      {
+        id: post.id,
+        authorUsername: post.author_username || null,
+        authorFirstName: post.author_first_name || null,
+        content: post.content || null,
+        mediaUrl: post.media_url || null,
+        mediaType: post.media_type || null,
+      },
+      note
+    );
+    // Socket fanout to recipient
+    const io = req.app.get('io');
+    if (io) {
+      try { io.to(`user:${partnerId}`).emit('dm:message', { id: msg.id }); } catch (_) { /* ignore */ }
+    }
+    return res.json({ success: true, messageId: msg.id });
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    logger.error('shareDmPost error', err);
+    return res.status(500).json({ error: 'Failed to share post to DM' });
+  }
+};
+
 // N-07: toggle per-thread read-receipts visibility
 // PUT /api/webapp/dm/thread/:partnerId/read-receipts  body: { hide: boolean }
 const setReadReceipts = async (req, res) => {
@@ -709,4 +761,5 @@ module.exports = {
   forwardMessage,
   getPresence,
   setReadReceipts,
+  shareDmPost,
 };

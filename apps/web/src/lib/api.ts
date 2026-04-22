@@ -2336,6 +2336,18 @@ export function setDmReadReceipts(
   return request(`/api/webapp/dm/thread/${encodeURIComponent(partnerId)}/read-receipts`, { method: 'PUT', body: { hide } });
 }
 
+// Share a feed post to a DM thread (renders as post_card on the recipient's side)
+export function sharePostToDm(
+  partnerId: string,
+  postId: number,
+  note?: string
+): Promise<{ success: boolean; messageId: number }> {
+  return request(`/api/webapp/dm/thread/${encodeURIComponent(partnerId)}/share-post/${postId}`, {
+    method: 'POST',
+    body: note?.trim() ? { note: note.trim() } : {},
+  });
+}
+
 // ── DM Global search ─────────────────────────────────────────────────────────
 
 export interface DmSearchResult {

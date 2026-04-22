@@ -4939,6 +4939,7 @@ app.put('/api/webapp/dm/thread/:partnerId/archive', requireSessionAuth, asyncHan
 app.put('/api/webapp/dm/thread/:partnerId/unread', requireSessionAuth, asyncHandler(dmController.markUnread));
 app.put('/api/webapp/dm/thread/:partnerId/pin-message', requireSessionAuth, asyncHandler(dmController.pinMessage));
 app.put('/api/webapp/dm/thread/:partnerId/read-receipts', requireSessionAuth, asyncHandler(dmController.setReadReceipts));
+app.post('/api/webapp/dm/thread/:partnerId/share-post/:postId', requireSessionAuth, socialActionLimiter, asyncHandler(dmController.shareDmPost));
 // search MUST be registered before :partnerId wildcard routes to avoid collision
 app.get('/api/webapp/dm/conversation/:partnerId/search', requireSessionAuth, asyncHandler(dmController.searchDmMessages));
 app.get('/api/webapp/dm/conversation/:partnerId', requireSessionAuth, asyncHandler(dmController.getConversation));
