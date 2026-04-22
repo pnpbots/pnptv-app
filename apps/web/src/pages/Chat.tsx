@@ -594,7 +594,54 @@ function HangoutChatPanel({
                               <span className="font-semibold">{msg.reply_to.name}</span>: {msg.reply_to.content?.slice(0, 80)}
                             </div>
                           )}
-                          {msg.content && <p>{msg.content}</p>}
+                          {msg.message_type === "post_card" && msg.meta?.postId ? (() => {
+                            const snap = msg.meta.snapshot || {};
+                            const handle = snap.authorUsername
+                              ? `@${snap.authorUsername}`
+                              : (snap.authorFirstName || "User");
+                            const preview = snap.content || "";
+                            const isVideo = snap.mediaType === "video";
+                            return (
+                              <>
+                                {snap.note && <p className="mb-1.5">{snap.note}</p>}
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); navigate(`/post/${msg.meta!.postId}`); }}
+                                  className="w-full text-left rounded-lg overflow-hidden border border-white/15 hover:border-white/25 bg-black/20 transition-colors"
+                                >
+                                  {snap.mediaUrl && (
+                                    <div className="relative w-full bg-black/40" style={{ aspectRatio: "16/9" }}>
+                                      {isVideo ? (
+                                        <video src={snap.mediaUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                                      ) : (
+                                        <img src={snap.mediaUrl} alt="" className="w-full h-full object-cover" />
+                                      )}
+                                      {isVideo && (
+                                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                          <span className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
+                                            <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                          </span>
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  <div className="px-2.5 py-2">
+                                    <div className="text-[11px] font-semibold" style={{ color: isMe ? "rgba(255,255,255,0.95)" : "#5ED1C4" }}>
+                                      📎 {handle}
+                                    </div>
+                                    {preview && (
+                                      <div className={`text-xs mt-0.5 line-clamp-3 ${isMe ? "text-white/85" : "text-white/80"}`}>
+                                        {preview}
+                                      </div>
+                                    )}
+                                    <div className={`text-[10px] mt-1 ${isMe ? "text-white/55" : "text-pnp-textSecondary"}`}>
+                                      Tap to view post
+                                    </div>
+                                  </div>
+                                </button>
+                              </>
+                            );
+                          })() : msg.content && <p>{msg.content}</p>}
                           <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
                             <span className={`text-[10px] ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>{timeStr}</span>
                             {msg.edited_at && <span className={`text-[10px] ${isMe ? "text-white/40" : "text-pnp-textSecondary/60"}`}>(edited)</span>}

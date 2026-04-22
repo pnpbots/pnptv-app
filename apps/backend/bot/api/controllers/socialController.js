@@ -1739,13 +1739,14 @@ const sharePostToHangouts = async (req, res) => {
 
   const meta = {
     postId: post.id,
-    authorId: post.user_id,
-    authorUsername: post.author_username || null,
-    authorFirstName: post.author_first_name || null,
-    contentPreview: preview,
-    mediaUrl: post.media_url || null,
-    mediaType: post.media_type || null,
-    note: noteText || null,
+    snapshot: {
+      authorUsername: post.author_username || null,
+      authorFirstName: post.author_first_name || null,
+      content: preview || null,
+      mediaUrl: post.media_url || null,
+      mediaType: post.media_type || null,
+      note: noteText || null,
+    },
   };
 
   // Look up sender display fields once

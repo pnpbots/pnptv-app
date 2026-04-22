@@ -878,6 +878,8 @@ export interface PostCardSnapshot {
   mediaType?: string | null;
   mediaThumbUrl?: string | null;
   createdAt?: string | null;
+  /** Forward/share note prepended by the sharer */
+  note?: string | null;
 }
 
 export interface XStatus {
