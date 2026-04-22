@@ -1646,7 +1646,7 @@ export function markGroupAsRead(groupId: number): Promise<{ success: boolean }> 
   return request(`/api/webapp/hangouts/groups/${groupId}/read`, { method: "POST" });
 }
 
-// ── Hangout thread state (DM-parity: pin / mute / archive / read) ────────────
+// ── Hangout thread state (pin / mute / read) ────────────────────────────────
 
 export function pinHangoutGroup(
   groupId: number,
