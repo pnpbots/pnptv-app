@@ -1682,4 +1682,144 @@ const getHashtagFeed = async (req, res) => {
   }
 };
 
-module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, editPost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost, searchMentions, assignPostToChannel, unassignPostFromChannel, getHangoutFeed, dropToFeed, getUserHangoutActivity, getHashtagFeed };
+// ── Share a post to one or more hangouts ─────────────────────────────────────
+// POST /api/webapp/social/posts/:postId/share-to-hangouts
+// Body: { groupIds: number[] (max 10), note?: string }
+// Response: { success, results: [{ groupId, status: "sent"|"skipped", messageId?, reason? }] }
+const sharePostToHangouts = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const postId = parseInt(req.params.postId, 10);
+  if (!Number.isFinite(postId) || postId <= 0) {
+    return res.status(400).json({ error: 'Invalid postId' });
+  }
+
+  const { groupIds, note } = req.body || {};
+  if (!Array.isArray(groupIds) || groupIds.length === 0) {
+    return res.status(400).json({ error: 'groupIds required' });
+  }
+  if (groupIds.length > 10) {
+    return res.status(400).json({ error: 'Max 10 hangouts per share' });
+  }
+
+  const normalizedIds = Array.from(new Set(
+    groupIds.map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n) && n > 0)
+  ));
+  if (normalizedIds.length === 0) {
+    return res.status(400).json({ error: 'No valid groupIds' });
+  }
+
+  // Fetch source post
+  const { rows: postRows } = await dbQuery(
+    `SELECT sp.id, sp.user_id, sp.content, sp.media_url, sp.media_type, sp.is_deleted, sp.is_shareable,
+            u.username AS author_username, u.first_name AS author_first_name
+       FROM social_posts sp
+       JOIN users u ON u.id = sp.user_id
+      WHERE sp.id = $1`,
+    [postId]
+  );
+  const post = postRows[0];
+  if (!post || post.is_deleted) {
+    return res.status(404).json({ error: 'Post not found' });
+  }
+  if (post.is_shareable === false) {
+    return res.status(403).json({ error: 'This post is not shareable' });
+  }
+
+  const noteText = typeof note === 'string' ? note.trim().slice(0, 500) : '';
+  const authorHandle = post.author_username ? `@${post.author_username}` : (post.author_first_name || 'User');
+  const preview = (post.content || '').trim().slice(0, 180);
+  const postUrl = `https://app.pnptv.app/post/${post.id}`;
+
+  // Build the message body — visible to any client that doesn't know post_card type
+  const bodyParts = [];
+  if (noteText) bodyParts.push(noteText);
+  bodyParts.push(`📎 ${authorHandle}:`);
+  if (preview) bodyParts.push(preview + (post.content && post.content.length > 180 ? '…' : ''));
+  bodyParts.push(postUrl);
+  const content = bodyParts.join('\n');
+
+  const meta = {
+    postId: post.id,
+    authorId: post.user_id,
+    authorUsername: post.author_username || null,
+    authorFirstName: post.author_first_name || null,
+    contentPreview: preview,
+    mediaUrl: post.media_url || null,
+    mediaType: post.media_type || null,
+    note: noteText || null,
+  };
+
+  // Look up sender display fields once
+  const { rows: senderRows } = await dbQuery(
+    `SELECT photo_file_id, username, first_name FROM users WHERE id = $1`,
+    [user.id]
+  );
+  const senderPhoto = senderRows[0]?.photo_file_id && (senderRows[0].photo_file_id.startsWith('/') || senderRows[0].photo_file_id.startsWith('http'))
+    ? senderRows[0].photo_file_id : null;
+  const senderUsername = senderRows[0]?.username || user.username || null;
+  const senderFirstName = senderRows[0]?.first_name || user.firstName || user.first_name || null;
+
+  const io = req.app.get('io');
+  const results = [];
+
+  for (const groupId of normalizedIds) {
+    try {
+      // Membership check
+      const { rows: memberRows } = await dbQuery(
+        `SELECT is_banned, is_muted, muted_until FROM hangout_group_members
+          WHERE group_id = $1 AND user_id = $2`,
+        [groupId, user.id]
+      );
+      if (memberRows.length === 0) {
+        results.push({ groupId, status: 'skipped', reason: 'not_a_member' });
+        continue;
+      }
+      if (memberRows[0].is_banned) {
+        results.push({ groupId, status: 'skipped', reason: 'banned' });
+        continue;
+      }
+      if (memberRows[0].is_muted && (!memberRows[0].muted_until || new Date(memberRows[0].muted_until) > new Date())) {
+        results.push({ groupId, status: 'skipped', reason: 'muted' });
+        continue;
+      }
+
+      // Read-only check (allow if user is owner/mod)
+      const { rows: gsRows } = await dbQuery(
+        `SELECT hg.is_read_only,
+                (EXISTS(SELECT 1 FROM hangout_group_members m
+                         WHERE m.group_id = hg.id AND m.user_id = $2
+                           AND m.role IN ('owner','mod'))) AS is_mod_or_owner
+           FROM hangout_groups hg WHERE hg.id = $1`,
+        [groupId, user.id]
+      );
+      if (gsRows[0]?.is_read_only && !gsRows[0].is_mod_or_owner) {
+        results.push({ groupId, status: 'skipped', reason: 'read_only' });
+        continue;
+      }
+
+      const room = `hangout:${groupId}`;
+      const { rows: msgRows } = await dbQuery(
+        `INSERT INTO chat_messages
+           (room, user_id, username, first_name, photo_url, content, message_type, meta)
+         VALUES ($1, $2, $3, $4, $5, $6, 'post_card', $7::jsonb)
+         RETURNING id, room, user_id, username, first_name, photo_url, content,
+                   media_url, media_type, message_type, meta, created_at`,
+        [room, user.id, senderUsername, senderFirstName, senderPhoto, content, JSON.stringify(meta)]
+      );
+      const msg = msgRows[0];
+
+      await dbQuery('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [groupId]);
+
+      if (io) io.to(room).emit('chat:message', msg);
+
+      results.push({ groupId, status: 'sent', messageId: msg.id });
+    } catch (err) {
+      logger.error('sharePostToHangouts per-group failed', { groupId, error: err.message });
+      results.push({ groupId, status: 'skipped', reason: 'server_error' });
+    }
+  }
+
+  return res.json({ success: true, results });
+};
+
+module.exports = { getFeed, getHomeFeed, getWofFeed, getWall, createPost, toggleLike, deletePost, editPost, getReplies, postToMastodon, createPostWithMedia, createPostWithMultiMedia, getPublicProfile, requestWofDeletion, bulkCreateVideos, getWofLeaderboard, getWofStats, adminFlagWof, adminUnflagWof, getPost, getPublicPost, searchMentions, assignPostToChannel, unassignPostFromChannel, getHangoutFeed, dropToFeed, getUserHangoutActivity, getHashtagFeed, sharePostToHangouts };
