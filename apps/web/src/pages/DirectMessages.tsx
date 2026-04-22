@@ -16,6 +16,7 @@ import {
   pinDmThread,
   muteDmThread,
   archiveDmThread,
+  setDmReadReceipts,
   markDmThreadUnread,
   pinDmMessage as pinDmMessageApi,
   searchAllDms,
@@ -278,6 +279,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
   const [partnerOnline, setPartnerOnline] = useState(false);
   const [partnerLastSeen, setPartnerLastSeen] = useState<string | null>(null);
   const [partnerMutedUntil, setPartnerMutedUntil] = useState<string | null>(null);
+  const [hideReadReceipts, setHideReadReceipts] = useState<boolean>(false);
   const [pinnedMessageId, setPinnedMessageId] = useState<number | null>(null);
   const [replyTo, setReplyTo] = useState<DmMessage | null>(null);
   const [editingMsg, setEditingMsg] = useState<DmMessage | null>(null);
@@ -368,6 +370,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
         if (t) {
           setPinnedMessageId(t.pinnedMessageId || null);
           setPartnerMutedUntil(t.mutedUntil || null);
+          setHideReadReceipts(t.hideReadReceipts === true);
         }
       })
       .catch(() => {});
@@ -975,6 +978,19 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     } catch { /* silent */ }
   };
 
+  // N-07: toggle per-thread read-receipts visibility
+  const handleToggleReadReceipts = async () => {
+    setShowHeaderMenu(false);
+    const next = !hideReadReceipts;
+    setHideReadReceipts(next); // optimistic
+    try {
+      const r = await setDmReadReceipts(userId, next);
+      setHideReadReceipts(r.hideReadReceipts);
+    } catch {
+      setHideReadReceipts(!next); // revert on failure
+    }
+  };
+
   // Forward submit
   const submitForward = async (recipientIds: string[], note: string) => {
     if (!forwardingMsg) return;
@@ -1108,6 +1124,19 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                 <button onClick={handleToggleMute} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
                   {isPartnerMuted ? "Unmute" : "Mute notifications"}
+                </button>
+                <button onClick={handleToggleReadReceipts} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    {hideReadReceipts ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                    ) : (
+                      <>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </>
+                    )}
+                  </svg>
+                  {hideReadReceipts ? "Show read receipts" : "Hide read receipts"}
                 </button>
                 <button onClick={() => { setShowHeaderMenu(false); navigate(`/profile/${userId}`); }} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>

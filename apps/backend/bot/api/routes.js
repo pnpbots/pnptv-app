@@ -27,7 +27,8 @@ const playlistController = require('./controllers/playlistController');
 const podcastController = require('./controllers/podcastController');
 const ageVerificationController = require('./controllers/ageVerificationController');
 const healthController = require('./controllers/healthController');
-const hangoutsController = require('./controllers/hangoutsController');
+// hangoutsController removed — legacy Agora routes disabled. Use /api/webapp/hangouts routes instead.
+// const hangoutsController = require('./controllers/hangoutsController');
 const eventsController = require('./controllers/eventsController');
 const { adminGuard, superadminGuard } = require('../../middleware/guards');
 const xOAuthRoutes = require('./xOAuthRoutes');
@@ -1828,10 +1829,10 @@ app.get('/api/subscription/stats', verifyAdminJWT, asyncHandler(subscriptionCont
 
 // ==========================================
 // Hangouts API (PROTECTED: create/join require authentication)
-// ==========================================
-app.get('/api/hangouts/public', requireSessionAuth, asyncHandler(hangoutsController.listPublic));
-app.post('/api/hangouts/create', authenticateUser, asyncHandler(hangoutsController.create));
-app.post('/api/hangouts/join/:callId', authenticateUser, asyncHandler(hangoutsController.join));
+// Legacy Agora-based hangouts routes (DEPRECATED)
+app.get('/api/hangouts/public', requireSessionAuth, (req, res) => res.json({ success: true, rooms: [], count: 0, note: 'Moved to /api/webapp/hangouts/groups' }));
+app.post('/api/hangouts/create', authenticateUser, (req, res) => res.status(410).json({ success: false, error: 'Legacy video calls are disabled. Use WebApp hangouts.' }));
+app.post('/api/hangouts/join/:callId', authenticateUser, (req, res) => res.status(410).json({ success: false, error: 'Legacy video calls are disabled. Use WebApp hangouts.' }));
 
 // ==========================================
 // Media Library API (for Videorama)
@@ -4551,7 +4552,7 @@ app.get('/api/webapp/admin/prime-mirror/log', adminGuard, asyncHandler(PrimeMirr
 
 app.get('/api/prime/latest', asyncHandler(primeController.getLatestPrimeVideo));
 app.get('/api/videorama/latest', asyncHandler(primeController.getLatestVideoramaVideo));
-app.get('/api/hangouts/most-active', asyncHandler(hangoutsController.getMostActiveHangout));
+app.get('/api/hangouts/most-active', (req, res) => res.json({ success: true, data: { title: 'Community Hangout', currentParticipants: 0, link: '/hangouts' } }));
 
 // Live streaming endpoint for featured content
 app.get('/api/livestream/active', asyncHandler(async (req, res) => {
@@ -4731,10 +4732,9 @@ app.post(
 );
 // Mark group messages as read
 app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.markAsRead));
-// DM-parity: pin, user-mute, archive, message-read cursor, forward
+// Per-user thread state: pin, user-mute, message-read cursor, forward
 app.put('/api/webapp/hangouts/groups/:id/pin', requireSessionAuth, asyncHandler(hangoutGroupController.pinGroup));
 app.put('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, asyncHandler(hangoutGroupController.muteGroupForUser));
-app.put('/api/webapp/hangouts/groups/:id/archive', requireSessionAuth, asyncHandler(hangoutGroupController.archiveGroup));
 app.put('/api/webapp/hangouts/groups/:id/read-message', requireSessionAuth, asyncHandler(hangoutGroupController.markMessageRead));
 app.post('/api/webapp/hangouts/messages/:messageId/forward', requireSessionAuth, asyncHandler(hangoutGroupController.forwardMessage));
 // Hangout group management (kick is registered above at line 4268 — duplicate removed)
@@ -4938,6 +4938,7 @@ app.put('/api/webapp/dm/thread/:partnerId/mute', requireSessionAuth, asyncHandle
 app.put('/api/webapp/dm/thread/:partnerId/archive', requireSessionAuth, asyncHandler(dmController.archiveThread));
 app.put('/api/webapp/dm/thread/:partnerId/unread', requireSessionAuth, asyncHandler(dmController.markUnread));
 app.put('/api/webapp/dm/thread/:partnerId/pin-message', requireSessionAuth, asyncHandler(dmController.pinMessage));
+app.put('/api/webapp/dm/thread/:partnerId/read-receipts', requireSessionAuth, asyncHandler(dmController.setReadReceipts));
 // search MUST be registered before :partnerId wildcard routes to avoid collision
 app.get('/api/webapp/dm/conversation/:partnerId/search', requireSessionAuth, asyncHandler(dmController.searchDmMessages));
 app.get('/api/webapp/dm/conversation/:partnerId', requireSessionAuth, asyncHandler(dmController.getConversation));

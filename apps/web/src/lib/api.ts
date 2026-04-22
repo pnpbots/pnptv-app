@@ -1382,12 +1382,10 @@ export interface HangoutGroup {
   // Moderation / posting controls (returned at top-level by hangoutGroupController)
   isReadOnly?: boolean;
   slowModeSeconds?: number;
-  // Per-user thread state (DM parity: pin/mute/archive/read)
+  // Per-user thread state (pin/mute/read)
   isPinned?: boolean;
   isUserMuted?: boolean;
   userMuteUntil?: string | null;
-  isArchived?: boolean;
-  archivedAt?: string | null;
   lastReadMessageId?: number | null;
 }
 
@@ -1670,16 +1668,6 @@ export function muteHangoutGroupForUser(
   });
 }
 
-export function archiveHangoutGroup(
-  groupId: number,
-  archived: boolean
-): Promise<{ success: boolean; archived: boolean; archivedAt: string | null }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/archive`, {
-    method: "PUT",
-    body: { archived },
-  });
-}
-
 export function markHangoutMessageRead(
   groupId: number,
   messageId: number
@@ -1707,10 +1695,6 @@ export function forwardHangoutMessage(
     method: "POST",
     body: { targets, ...(note?.trim() ? { note: note.trim() } : {}) },
   });
-}
-
-export function getArchivedHangouts(): Promise<{ success: boolean; groups: HangoutGroup[] }> {
-  return request("/api/webapp/hangouts/groups?archived=true");
 }
 
 // ── Hangout Group Management ────────────────────────────────────────────────
@@ -2273,6 +2257,7 @@ export interface MessageThread {
   mutedUntil: string | null;
   archivedAt: string | null;
   pinnedMessageId: number | null;
+  hideReadReceipts?: boolean;
 
   // presence
   online: boolean;
@@ -2341,6 +2326,14 @@ export function pinDmMessage(
   messageId: number | null
 ): Promise<{ success: boolean; pinnedMessageId: number | null }> {
   return request(`/api/webapp/dm/thread/${encodeURIComponent(partnerId)}/pin-message`, { method: 'PUT', body: { messageId } });
+}
+
+// N-07: per-thread read-receipts privacy toggle
+export function setDmReadReceipts(
+  partnerId: string,
+  hide: boolean
+): Promise<{ success: boolean; hideReadReceipts: boolean }> {
+  return request(`/api/webapp/dm/thread/${encodeURIComponent(partnerId)}/read-receipts`, { method: 'PUT', body: { hide } });
 }
 
 // ── DM Global search ─────────────────────────────────────────────────────────

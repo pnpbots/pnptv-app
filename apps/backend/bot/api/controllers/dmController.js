@@ -43,7 +43,7 @@ const getThreads = async (req, res) => {
               lm.sender_id AS last_message_sender_id,
               lm.media_type AS last_message_media_type,
               lm.is_read AS last_message_is_read,
-              s.pinned_at, s.muted_until, s.archived_at, s.pinned_message_id
+              s.pinned_at, s.muted_until, s.archived_at, s.pinned_message_id, s.hide_read_receipts
        FROM dm_threads dt
        JOIN users u ON u.id = CASE WHEN dt.user_a = $1 THEN dt.user_b ELSE dt.user_a END
        LEFT JOIN dm_thread_state s
@@ -90,6 +90,7 @@ const getThreads = async (req, res) => {
         mutedUntil: r.muted_until ? new Date(r.muted_until).toISOString() : null,
         archivedAt: r.archived_at ? new Date(r.archived_at).toISOString() : null,
         pinnedMessageId: r.pinned_message_id ? Number(r.pinned_message_id) : null,
+        hideReadReceipts: r.hide_read_receipts === true,
         online: !!presence.online,
         lastSeen: presence.lastSeen || null,
         // legacy aliases used by older callers (Layout.tsx, etc.)
@@ -574,6 +575,21 @@ const archiveThread = async (req, res) => {
   }
 };
 
+// N-07: toggle per-thread read-receipts visibility
+// PUT /api/webapp/dm/thread/:partnerId/read-receipts  body: { hide: boolean }
+const setReadReceipts = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
+  const hide = req.body?.hide === true;
+  try {
+    const r = await DmService.setThreadFlag(user.id, partnerId, { hideReadReceipts: hide });
+    return res.json({ success: true, hideReadReceipts: r.hideReadReceipts });
+  } catch (err) {
+    logger.error('setReadReceipts error', err);
+    return res.status(500).json({ error: 'Failed to update read-receipts preference' });
+  }
+};
+
 const markUnread = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
@@ -691,4 +707,5 @@ module.exports = {
   searchAllDms,
   forwardMessage,
   getPresence,
+  setReadReceipts,
 };

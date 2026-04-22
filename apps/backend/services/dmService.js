@@ -163,18 +163,35 @@ class DmService {
   static async markAsRead(userId, otherUserId, io = null) {
     const resolvedOtherId = await resolveUserId(otherUserId);
     if (!resolvedOtherId) return;
-    const { rows } = await query(
-      `UPDATE direct_messages
-       SET is_read = true, read_at = now()
-       WHERE recipient_id = $1 AND sender_id = $2 AND is_read = false
-       RETURNING id`,
-      [userId, resolvedOtherId]
-    );
+
+    // N-07 privacy: if this user has hide_read_receipts=true for partner, still
+    // clear unread badges locally, but don't stamp read_at or notify partner.
+    let hideReceipts = false;
+    try {
+      const { rows: prefRows } = await query(
+        `SELECT hide_read_receipts FROM dm_thread_state
+          WHERE user_id = $1 AND partner_id = $2`,
+        [userId, resolvedOtherId]
+      );
+      hideReceipts = prefRows[0]?.hide_read_receipts === true;
+    } catch (_) { /* column may not exist yet pre-migration */ }
+
+    const updateSql = hideReceipts
+      ? `UPDATE direct_messages SET is_read = true
+           WHERE recipient_id = $1 AND sender_id = $2 AND is_read = false
+         RETURNING id`
+      : `UPDATE direct_messages SET is_read = true, read_at = now()
+           WHERE recipient_id = $1 AND sender_id = $2 AND is_read = false
+         RETURNING id`;
+
+    const { rows } = await query(updateSql, [userId, resolvedOtherId]);
+
     const [a, b] = [userId, resolvedOtherId].sort();
     const resetColumn = String(userId) === String(a) ? 'unread_for_a = 0' : 'unread_for_b = 0';
     await query(`UPDATE dm_threads SET ${resetColumn} WHERE user_a = $1 AND user_b = $2`, [a, b]);
 
-    // Notify the other party that their messages have been read
+    if (hideReceipts) return; // skip ✓✓ fanout
+
     let targetIo = io;
     if (!targetIo) {
       try { targetIo = require('./socketSingleton').get(); } catch (_) { targetIo = null; }
@@ -198,11 +215,14 @@ class DmService {
     const partnerResolved = await resolveUserId(partnerId) || partnerId;
     // Load existing row (if any)
     const { rows } = await query(
-      `SELECT pinned_at, muted_until, archived_at, pinned_message_id
+      `SELECT pinned_at, muted_until, archived_at, pinned_message_id, hide_read_receipts
          FROM dm_thread_state WHERE user_id = $1 AND partner_id = $2`,
       [userId, partnerResolved]
     );
-    const existing = rows[0] || { pinned_at: null, muted_until: null, archived_at: null, pinned_message_id: null };
+    const existing = rows[0] || {
+      pinned_at: null, muted_until: null, archived_at: null,
+      pinned_message_id: null, hide_read_receipts: false,
+    };
 
     const now = new Date();
     let pinnedAt = existing.pinned_at;
@@ -219,23 +239,27 @@ class DmService {
     let pinnedMessageId = existing.pinned_message_id;
     if (patch.pinnedMessageId !== undefined) pinnedMessageId = patch.pinnedMessageId;
 
+    let hideReadReceipts = existing.hide_read_receipts === true;
+    if (patch.hideReadReceipts !== undefined) hideReadReceipts = !!patch.hideReadReceipts;
+
     await query(
-      `INSERT INTO dm_thread_state (user_id, partner_id, pinned_at, muted_until, archived_at, pinned_message_id, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())
+      `INSERT INTO dm_thread_state (user_id, partner_id, pinned_at, muted_until, archived_at, pinned_message_id, hide_read_receipts, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
        ON CONFLICT (user_id, partner_id) DO UPDATE SET
          pinned_at = EXCLUDED.pinned_at,
          muted_until = EXCLUDED.muted_until,
          archived_at = EXCLUDED.archived_at,
          pinned_message_id = EXCLUDED.pinned_message_id,
+         hide_read_receipts = EXCLUDED.hide_read_receipts,
          updated_at = now()`,
-      [userId, partnerResolved, pinnedAt, mutedUntil, archivedAt, pinnedMessageId]
+      [userId, partnerResolved, pinnedAt, mutedUntil, archivedAt, pinnedMessageId, hideReadReceipts]
     );
-    return { pinnedAt, mutedUntil, archivedAt, pinnedMessageId };
+    return { pinnedAt, mutedUntil, archivedAt, pinnedMessageId, hideReadReceipts };
   }
 
   static async getThreadStates(userId) {
     const { rows } = await query(
-      `SELECT partner_id, pinned_at, muted_until, archived_at, pinned_message_id
+      `SELECT partner_id, pinned_at, muted_until, archived_at, pinned_message_id, hide_read_receipts
        FROM dm_thread_state WHERE user_id = $1`,
       [userId]
     );
@@ -246,6 +270,7 @@ class DmService {
         mutedUntil: r.muted_until ? new Date(r.muted_until).toISOString() : null,
         archivedAt: r.archived_at ? new Date(r.archived_at).toISOString() : null,
         pinnedMessageId: r.pinned_message_id ? Number(r.pinned_message_id) : null,
+        hideReadReceipts: r.hide_read_receipts === true,
       });
     }
     return map;
