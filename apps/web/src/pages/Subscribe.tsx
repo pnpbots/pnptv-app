@@ -71,6 +71,16 @@ export default function Subscribe() {
   const [provider, setProvider] = useState<Provider>("epayco");
   const [submitting, setSubmitting] = useState(false);
   const [showCOP, setShowCOP] = useState(false);
+  // Per-plan benefits expand state — plans start collapsed (N-06)
+  const [expandedPlans, setExpandedPlans] = useState<Set<string>>(new Set());
+  const togglePlanBenefits = (planId: string) => {
+    setExpandedPlans((prev) => {
+      const next = new Set(prev);
+      if (next.has(planId)) next.delete(planId);
+      else next.add(planId);
+      return next;
+    });
+  };
 
   // Promo code state — driven by ?promo= URL param or the "Have a code?" input
   const [promoInput, setPromoInput] = useState(searchParams.get("promo") || "");
@@ -731,16 +741,34 @@ export default function Subscribe() {
                 </div>
                 <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
               </div>
-              <ul className="space-y-1">
-                {features.map((f, i) => (
-                  <li key={i} className="flex items-center gap-2 text-xs text-pnp-textSecondary">
-                    <svg className="w-3 h-3 text-[#D4007A] flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                    {f}
-                  </li>
-                ))}
-              </ul>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); togglePlanBenefits(plan.id); }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); e.preventDefault(); togglePlanBenefits(plan.id); } }}
+                className="inline-flex items-center gap-1 mt-1 text-xs font-semibold text-[#D4007A] hover:text-[#E69138] transition-colors cursor-pointer"
+                aria-expanded={expandedPlans.has(plan.id)}
+              >
+                {expandedPlans.has(plan.id) ? s.hideBenefits : s.showBenefits}
+                <svg
+                  className={`w-3 h-3 transition-transform ${expandedPlans.has(plan.id) ? "rotate-180" : ""}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </span>
+              {expandedPlans.has(plan.id) && (
+                <ul className="space-y-1 mt-2">
+                  {features.map((f, i) => (
+                    <li key={i} className="flex items-center gap-2 text-xs text-pnp-textSecondary">
+                      <svg className="w-3 h-3 text-[#D4007A] flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {hasAddOns && (
                 <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-1.5 flex-wrap">
                   <span className="text-[10px] text-pnp-textSecondary/70">{s.includesAddOns}</span>
@@ -826,19 +854,39 @@ export default function Subscribe() {
                 </div>
               </div>
 
-              {/* "Everything in Member plus:" header for PRIME plans */}
-              <p className="text-[10px] text-pnp-textSecondary/70 mb-1.5">{s.everythingInMemberPlus}</p>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); togglePlanBenefits(plan.id); }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); e.preventDefault(); togglePlanBenefits(plan.id); } }}
+                className="inline-flex items-center gap-1 mt-1 text-xs font-semibold text-[#D4007A] hover:text-[#E69138] transition-colors cursor-pointer"
+                aria-expanded={expandedPlans.has(plan.id)}
+              >
+                {expandedPlans.has(plan.id) ? s.hideBenefits : s.showBenefits}
+                <svg
+                  className={`w-3 h-3 transition-transform ${expandedPlans.has(plan.id) ? "rotate-180" : ""}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </span>
+              {expandedPlans.has(plan.id) && (
+                <>
+                  {/* "Everything in Member plus:" header for PRIME plans */}
+                  <p className="text-[10px] text-pnp-textSecondary/70 mt-2 mb-1.5">{s.everythingInMemberPlus}</p>
 
-              <ul className="space-y-1">
-                {features.map((f, i) => (
-                  <li key={i} className="flex items-center gap-2 text-xs text-pnp-textSecondary">
-                    <svg className="w-3 h-3 text-[#D4007A] flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                    {f}
-                  </li>
-                ))}
-              </ul>
+                  <ul className="space-y-1">
+                    {features.map((f, i) => (
+                      <li key={i} className="flex items-center gap-2 text-xs text-pnp-textSecondary">
+                        <svg className="w-3 h-3 text-[#D4007A] flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
 
               {hasAddOns && (
                 <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-1.5 flex-wrap">

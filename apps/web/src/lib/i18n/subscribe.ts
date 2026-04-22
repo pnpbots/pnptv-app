@@ -35,6 +35,8 @@ const strings = {
 
     // ── Entitlement-driven features ───────────────────────────────────────────
     everythingInMemberPlus: "Everything in Member, plus:",
+    showBenefits: "Show benefits",
+    hideBenefits: "Hide benefits",
     platformAccess: "Platform access",
     primeAccess: "Full PRIME access",
     includesAddOns: "Includes:",
@@ -164,6 +166,8 @@ const strings = {
     bestValue: "Mejor precio",
 
     everythingInMemberPlus: "Todo lo del plan Miembro, más:",
+    showBenefits: "Ver beneficios",
+    hideBenefits: "Ocultar beneficios",
     platformAccess: "Acceso a la plataforma",
     primeAccess: "Acceso PRIME completo",
     includesAddOns: "Incluye:",
@@ -283,6 +287,8 @@ const strings = {
     bestValue: "Melhor Custo-Benefício",
 
     everythingInMemberPlus: "Tudo do plano Membro, mais:",
+    showBenefits: "Ver benefícios",
+    hideBenefits: "Ocultar benefícios",
     platformAccess: "Acesso à plataforma",
     primeAccess: "Acesso PRIME completo",
     includesAddOns: "Inclui:",
@@ -395,6 +401,8 @@ const strings = {
     bestValue: "最超值",
 
     everythingInMemberPlus: "包含会员所有功能，另外还有：",
+    showBenefits: "查看权益",
+    hideBenefits: "隐藏权益",
     platformAccess: "平台访问",
     primeAccess: "完整 PRIME 访问",
     includesAddOns: "包含：",
@@ -507,6 +515,8 @@ const strings = {
     bestValue: "最超值",
 
     everythingInMemberPlus: "包含會員所有功能，另外還有：",
+    showBenefits: "查看權益",
+    hideBenefits: "隱藏權益",
     platformAccess: "平台存取",
     primeAccess: "完整 PRIME 存取",
     includesAddOns: "包含：",
@@ -619,6 +629,8 @@ const strings = {
     bestValue: "Meilleur Rapport Qualité-Prix",
 
     everythingInMemberPlus: "Tout du plan Membre, plus :",
+    showBenefits: "Voir les avantages",
+    hideBenefits: "Masquer les avantages",
     platformAccess: "Accès à la plateforme",
     primeAccess: "Accès PRIME complet",
     includesAddOns: "Inclut :",
@@ -731,6 +743,8 @@ const strings = {
     bestValue: "Bestes Angebot",
 
     everythingInMemberPlus: "Alles aus dem Mitglied-Plan, plus:",
+    showBenefits: "Vorteile anzeigen",
+    hideBenefits: "Vorteile ausblenden",
     platformAccess: "Plattformzugang",
     primeAccess: "Vollständiger PRIME-Zugang",
     includesAddOns: "Enthält:",
@@ -843,6 +857,8 @@ const strings = {
     bestValue: "คุ้มที่สุด",
 
     everythingInMemberPlus: "Everything in Member, plus:",
+    showBenefits: "Show benefits",
+    hideBenefits: "Hide benefits",
     platformAccess: "Platform access",
     primeAccess: "Full PRIME access",
     includesAddOns: "Includes:",
@@ -955,6 +971,8 @@ const strings = {
     bestValue: "Miglior Rapporto Qualità-Prezzo",
 
     everythingInMemberPlus: "Tutto del piano Membro, più:",
+    showBenefits: "Mostra i vantaggi",
+    hideBenefits: "Nascondi i vantaggi",
     platformAccess: "Accesso alla piattaforma",
     primeAccess: "Accesso PRIME completo",
     includesAddOns: "Include:",
@@ -1067,6 +1085,8 @@ const strings = {
     bestValue: "En İyi Değer",
 
     everythingInMemberPlus: "Üye planındaki her şey, artı:",
+    showBenefits: "Faydaları göster",
+    hideBenefits: "Faydaları gizle",
     platformAccess: "Platform erişimi",
     primeAccess: "Tam PRIME erişimi",
     includesAddOns: "İçerir:",
@@ -1179,6 +1199,8 @@ const strings = {
     bestValue: "Лучшая Цена",
 
     everythingInMemberPlus: "Всё из плана Участник, плюс:",
+    showBenefits: "Показать преимущества",
+    hideBenefits: "Скрыть преимущества",
     platformAccess: "Доступ к платформе",
     primeAccess: "Полный PRIME-доступ",
     includesAddOns: "Включает:",
@@ -1291,6 +1313,8 @@ const strings = {
     bestValue: "Beste Prijs-Kwaliteit",
 
     everythingInMemberPlus: "Alles van het Lid-plan, plus:",
+    showBenefits: "Voordelen tonen",
+    hideBenefits: "Voordelen verbergen",
     platformAccess: "Platformtoegang",
     primeAccess: "Volledige PRIME-toegang",
     includesAddOns: "Bevat:",
@@ -1403,6 +1427,8 @@ const strings = {
     bestValue: "Giá Trị Nhất",
 
     everythingInMemberPlus: "Tất cả gói Thành viên, cộng thêm:",
+    showBenefits: "Xem lợi ích",
+    hideBenefits: "Ẩn lợi ích",
     platformAccess: "Truy cập nền tảng",
     primeAccess: "Truy cập PRIME đầy đủ",
     includesAddOns: "Bao gồm:",
@@ -1515,6 +1541,8 @@ const strings = {
     bestValue: "最もお得",
 
     everythingInMemberPlus: "メンバープランの全て、さらに：",
+    showBenefits: "特典を表示",
+    hideBenefits: "特典を非表示",
     platformAccess: "プラットフォームアクセス",
     primeAccess: "完全 PRIME アクセス",
     includesAddOns: "含まれる：",
@@ -1627,6 +1655,8 @@ const strings = {
     bestValue: "Nilai Terbaik",
 
     everythingInMemberPlus: "Semua dari paket Anggota, plus:",
+    showBenefits: "Lihat manfaat",
+    hideBenefits: "Sembunyikan manfaat",
     platformAccess: "Akses platform",
     primeAccess: "Akses PRIME penuh",
     includesAddOns: "Termasuk:",
@@ -1739,6 +1769,8 @@ const strings = {
     bestValue: "أفضل قيمة",
 
     everythingInMemberPlus: "كل ما في خطة العضو، بالإضافة إلى:",
+    showBenefits: "عرض المزايا",
+    hideBenefits: "إخفاء المزايا",
     platformAccess: "الوصول إلى المنصة",
     primeAccess: "وصول PRIME كامل",
     includesAddOns: "يتضمن:",
