@@ -6608,3 +6608,99 @@ export function requestCashout(body: CashoutRequestBody): Promise<CashoutRequest
 export function getCashoutHistory(): Promise<CashoutHistoryItem[]> {
   return request("/api/cashout/history");
 }
+
+// ─── Duplicate Account Management ──────────────────────────────────────────
+
+export interface MergeUserSnapshot {
+  id: string;
+  username: string | null;
+  firstName: string | null;
+  email: string | null;
+  tier: string;
+  planId: string | null;
+  planExpiry: string | null;
+  createdAt: string | null;
+  lastActive: string | null;
+  telegram: string | null;
+  pnptvId: string | null;
+  activeEntitlements: number;
+  paymentCount: number;
+}
+
+export interface MergeCandidate {
+  sourceId: string;
+  targetId: string;
+  dimension: "email" | "telegram" | "x_id" | "pnptv_id" | "manual";
+  confidence: number;
+  sourceSnapshot: MergeUserSnapshot;
+  targetSnapshot: MergeUserSnapshot;
+}
+
+export interface MergePreview {
+  sourceSnapshot: MergeUserSnapshot;
+  targetSnapshot: MergeUserSnapshot;
+  tablesAffected: Record<string, number>;
+  warnings: string[];
+}
+
+export interface MergeLogEntry {
+  id: number;
+  loser_id: string;
+  winner_id: string;
+  merge_reason: string;
+  dimension: string;
+  rows_transferred: Record<string, number>;
+  merged_at: string;
+  performed_by: string;
+  loser_username: string | null;
+  loser_first_name: string | null;
+  winner_username: string | null;
+  winner_first_name: string | null;
+  performed_by_username: string | null;
+}
+
+export interface MergeResult {
+  success: boolean;
+  mergeLogId: number;
+  rowsTransferred: Record<string, number>;
+}
+
+export function getDuplicateAccounts(limit = 50): Promise<{
+  success: boolean;
+  candidates: MergeCandidate[];
+  mergeLog: MergeLogEntry[];
+}> {
+  return request(`/api/webapp/admin/duplicate-accounts?limit=${limit}`);
+}
+
+export function previewAccountMerge(
+  sourceId: string,
+  targetId: string
+): Promise<{ success: boolean; preview: MergePreview }> {
+  return request("/api/webapp/admin/duplicate-accounts/preview", {
+    method: "POST",
+    body: { sourceId, targetId },
+  });
+}
+
+export function mergeAccounts(
+  sourceId: string,
+  targetId: string,
+  reason: string,
+  dimension: string
+): Promise<MergeResult> {
+  return request("/api/webapp/admin/duplicate-accounts/merge", {
+    method: "POST",
+    body: { sourceId, targetId, reason, dimension },
+  });
+}
+
+export function renameAccountToTelegramId(
+  sourceId: string,
+  telegramId: string
+): Promise<{ success: boolean; mergeLogId: number }> {
+  return request("/api/webapp/admin/duplicate-accounts/rename", {
+    method: "POST",
+    body: { sourceId, telegramId },
+  });
+}

@@ -115,6 +115,8 @@ const AccessMatrix = lazy(() => import("@/pages/admin/AccessMatrix"));
 const CreatorSubscriptions = lazy(() => import("@/pages/admin/CreatorSubscriptions"));
 const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 const MeruLinks = lazy(() => import("@/pages/admin/MeruLinks"));
+const DuplicateAccounts = lazy(() => import("@/pages/admin/DuplicateAccounts"));
+const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
 
 // Creator Studio pages
 const CreatorLayout = lazy(() => import("@/components/creators/CreatorLayout"));
@@ -576,6 +578,14 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
+      {
+        path: "duplicate-accounts",
+        element: (
+          <ModuleLoader>
+            <DuplicateAccounts />
+          </ModuleLoader>
+        ),
+      },
     ],
   },
   // Creator Studio section
@@ -742,6 +752,22 @@ export const router = createBrowserRouter([
   {
     path: "/become-model",
     element: <Navigate to="/become-a-model" replace />,
+  },
+  {
+    path: "/lifetime100",
+    element: (
+      <ModuleLoader>
+        <Lifetime100 />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/lifetime100/activate",
+    element: (
+      <ModuleLoader>
+        <Lifetime100 />
+      </ModuleLoader>
+    ),
   },
   {
     path: "/page/:slug",

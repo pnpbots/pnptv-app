@@ -29,7 +29,7 @@ const ageVerificationController = require('./controllers/ageVerificationControll
 const healthController = require('./controllers/healthController');
 const hangoutsController = require('./controllers/hangoutsController');
 const eventsController = require('./controllers/eventsController');
-const { adminGuard } = require('../../middleware/guards');
+const { adminGuard, superadminGuard } = require('../../middleware/guards');
 const xOAuthRoutes = require('./xOAuthRoutes');
 const adminUserRoutes = require('./routes/adminUserRoutes');
 const userManagementRoutes = require('./routes/userManagementRoutes');
@@ -4274,6 +4274,12 @@ app.get('/api/webapp/admin/meru-links/stats', requireSessionAuth, adminGuard, as
 app.get('/api/webapp/admin/meru-links', requireSessionAuth, adminGuard, asyncHandler(webappAdminController.listMeruLinks));
 app.post('/api/webapp/admin/meru-links', requireSessionAuth, adminGuard, asyncHandler(webappAdminController.addMeruLinks));
 app.delete('/api/webapp/admin/meru-links/:id', requireSessionAuth, adminGuard, asyncHandler(webappAdminController.deleteMeruLink));
+// Duplicate account management — superadmin only (merge/rename are destructive)
+const duplicateAccountsController = require('./controllers/duplicateAccountsController');
+app.get('/api/webapp/admin/duplicate-accounts',          superadminGuard, asyncHandler(duplicateAccountsController.listCandidates));
+app.post('/api/webapp/admin/duplicate-accounts/preview', superadminGuard, asyncHandler(duplicateAccountsController.previewMerge));
+app.post('/api/webapp/admin/duplicate-accounts/merge',   superadminGuard, asyncHandler(duplicateAccountsController.mergeDuplicates));
+app.post('/api/webapp/admin/duplicate-accounts/rename',  superadminGuard, asyncHandler(duplicateAccountsController.renameTelegramId));
 // User-facing entitlements
 app.get('/api/webapp/my-entitlements', requireSessionAuth, asyncHandler(webappAdminController.getMyEntitlements));
 // Structured access map for the My Access page (joined with channel/hangout/creator metadata)
@@ -4428,7 +4434,7 @@ app.put('/api/webapp/admin/media-library/:id/prime', adminGuard, asyncHandler(as
 // ==========================================
 // Role-Based Access Control (RBAC) Routes
 // ==========================================
-const { superadminGuard } = require('../../middleware/guards');
+// superadminGuard is imported at the top of this file alongside adminGuard
 const roleController = require('./controllers/roleController');
 const auditLogController = require('./controllers/auditLogController');
 // Note: auditLog middleware is registered earlier (after /api/admin/check) to cover
