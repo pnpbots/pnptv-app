@@ -133,6 +133,20 @@ export default function Settings() {
   const [notifPrefs, setNotifPrefs] = useState<NotifPrefs | null>(null);
   const [notifLoading, setNotifLoading] = useState(true);
 
+  // N-02 Sound toggle — local-only preference, lives in localStorage.
+  // Default ON; opt-out by writing "0".
+  const [notifSoundEnabled, setNotifSoundEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem("pnp.notifSound") !== "0";
+  });
+  const handleNotifSoundToggle = useCallback(() => {
+    setNotifSoundEnabled((prev) => {
+      const next = !prev;
+      try { window.localStorage.setItem("pnp.notifSound", next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   // ── Delete account state ──────────────────────────────────────────────────
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -1394,6 +1408,24 @@ export default function Settings() {
                 checked={(notifPrefs.quiet_hours as { enabled: boolean })?.enabled === true}
                 onChange={handleQuietHoursToggle}
                 accentColor="#667eea"
+              />
+            </div>
+
+            {/* Sound on incoming notifications (N-02) — local-only localStorage flag */}
+            <div
+              className="flex items-center justify-between rounded-lg px-3 py-3 mt-2"
+              style={{ background: "rgba(94,209,196,0.06)", border: "1px solid rgba(94,209,196,0.15)" }}
+            >
+              <div className="flex-1 min-w-0 mr-3">
+                <p className="text-sm font-medium text-white">{p.notifSoundTitle || "Notification sound"}</p>
+                <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                  {p.notifSoundDesc || "Play a short sound when a new notification arrives on this device."}
+                </p>
+              </div>
+              <Toggle
+                checked={notifSoundEnabled}
+                onChange={handleNotifSoundToggle}
+                accentColor="#5ED1C4"
               />
             </div>
           </>

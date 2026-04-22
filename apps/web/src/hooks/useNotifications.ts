@@ -17,6 +17,34 @@ import {
 } from "@/lib/api";
 import { subscribeToPush, isPushSubscribed } from "@/lib/pushNotifications";
 
+// Short pleasant beep via Web Audio API — no asset file needed.
+// Two-tone chirp (830 → 1040 Hz), ~280ms total, -18dB gain.
+function playNotificationSound() {
+  try {
+    const AudioCtx =
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).AudioContext ||
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(830, now);
+    osc.frequency.exponentialRampToValueAtTime(1040, now + 0.12);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.12, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.3);
+    setTimeout(() => ctx.close().catch(() => undefined), 500);
+  } catch {
+    /* fully non-fatal — autoplay may be blocked until first user gesture */
+  }
+}
+
 interface ToastData {
   id: number;
   message: string;
@@ -138,6 +166,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
       setNotifications((prev) => [notif, ...prev]);
       setUnreadCount((prev) => prev + 1);
+
+      // N-02 Notification sound — opt-out via localStorage pnp.notifSound === "0"
+      try {
+        if (typeof window !== "undefined" && window.localStorage.getItem("pnp.notifSound") !== "0") {
+          playNotificationSound();
+        }
+      } catch { /* ignore */ }
 
       // Show toast for high-priority notifications.
       // The auto-dismiss timer is owned entirely by the Toast component so it

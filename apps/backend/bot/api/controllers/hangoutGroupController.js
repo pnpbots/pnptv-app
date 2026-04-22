@@ -2231,6 +2231,166 @@ const getReactions = async (req, res) => {
   }
 };
 
+// ── Forward a hangout chat message to DMs and/or other hangouts ──────────────
+// POST /api/webapp/hangouts/messages/:messageId/forward
+// Body: { targets: Array<{type:'dm', userId}|{type:'hangout', groupId}>, note?: string }
+// Response: { success, results: [{ target, status:'sent'|'skipped', messageId?, reason? }] }
+const forwardMessage = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const messageId = parseInt(req.params.messageId, 10);
+  if (!Number.isFinite(messageId) || messageId <= 0) {
+    return res.status(400).json({ error: 'Invalid messageId' });
+  }
+
+  const rawTargets = Array.isArray(req.body?.targets) ? req.body.targets : [];
+  if (rawTargets.length === 0) return res.status(400).json({ error: 'targets required' });
+  if (rawTargets.length > 10) return res.status(400).json({ error: 'Max 10 targets per forward' });
+  const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 500) : '';
+
+  // Normalize + dedupe targets
+  const seen = new Set();
+  const targets = [];
+  for (const t of rawTargets) {
+    if (!t || typeof t !== 'object') continue;
+    if (t.type === 'dm' && t.userId) {
+      const key = `dm:${t.userId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push({ type: 'dm', userId: String(t.userId) });
+    } else if (t.type === 'hangout' && Number.isFinite(parseInt(t.groupId, 10))) {
+      const gid = parseInt(t.groupId, 10);
+      const key = `hg:${gid}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push({ type: 'hangout', groupId: gid });
+    }
+  }
+  if (targets.length === 0) return res.status(400).json({ error: 'No valid targets' });
+
+  // Fetch source message — must be in a hangout room and sender must belong there
+  const { rows: srcRows } = await query(
+    `SELECT id, room, user_id, username, first_name, content, media_url, media_type,
+            media_mime, media_thumb_url, message_type, meta, is_deleted
+       FROM chat_messages WHERE id = $1 LIMIT 1`,
+    [messageId]
+  );
+  const src = srcRows[0];
+  if (!src || src.is_deleted) return res.status(404).json({ error: 'Message not found' });
+  if (!src.room || !src.room.startsWith('hangout:')) {
+    return res.status(400).json({ error: 'Not a hangout message' });
+  }
+  const srcGroupId = parseInt(src.room.split(':')[1], 10);
+  // Sender must be a member of the source hangout to forward from it
+  const { rows: srcMemberRows } = await query(
+    `SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND COALESCE(is_banned,false)=false`,
+    [srcGroupId, user.id]
+  );
+  if (srcMemberRows.length === 0) {
+    return res.status(403).json({ error: 'Not a member of the source hangout' });
+  }
+
+  // Sender profile for hangout destination inserts
+  const { rows: senderRows } = await query(
+    `SELECT photo_file_id, username, first_name FROM users WHERE id = $1`,
+    [user.id]
+  );
+  const senderPhoto = senderRows[0]?.photo_file_id && isValidPhotoUrl(senderRows[0].photo_file_id)
+    ? senderRows[0].photo_file_id : null;
+  const senderUsername = senderRows[0]?.username || user.username || null;
+  const senderFirstName = senderRows[0]?.first_name || user.firstName || user.first_name || null;
+
+  // Build forwarded content (prepend note if provided)
+  const baseContent = src.content || '';
+  const content = note ? (baseContent ? `${note}\n\n${baseContent}` : note) : baseContent;
+  // Preserve post_card meta + text fallback so shared-post forwards keep working
+  const messageType = src.message_type === 'post_card' ? 'post_card' : 'text';
+  const meta = src.meta || null;
+
+  const io = req.app.get('io');
+  const DmService = require('../../../services/dmService');
+  const { resolveUserId } = require('../utils/helpers');
+  const results = [];
+
+  for (const target of targets) {
+    try {
+      if (target.type === 'dm') {
+        const resolvedRid = (await resolveUserId(target.userId)) || target.userId;
+        if (String(resolvedRid) === String(user.id)) {
+          results.push({ target, status: 'skipped', reason: 'self' });
+          continue;
+        }
+        const msg = await DmService.sendMessage(
+          user.id,
+          resolvedRid,
+          {
+            content: content || null,
+            mediaUrl: src.media_url || null,
+            mediaType: src.media_type || null,
+            mediaMime: src.media_mime || null,
+            mediaThumbUrl: src.media_thumb_url || null,
+          },
+          {}
+        );
+        if (io) {
+          try { io.to(`user:${resolvedRid}`).emit('dm:message', { id: msg.id }); } catch (_) {}
+        }
+        results.push({ target, status: 'sent', messageId: msg.id });
+      } else {
+        // hangout target
+        const gid = target.groupId;
+        const { rows: memberRows } = await query(
+          `SELECT is_banned, is_muted, muted_until FROM hangout_group_members
+            WHERE group_id=$1 AND user_id=$2`,
+          [gid, user.id]
+        );
+        if (memberRows.length === 0) { results.push({ target, status: 'skipped', reason: 'not_a_member' }); continue; }
+        if (memberRows[0].is_banned) { results.push({ target, status: 'skipped', reason: 'banned' }); continue; }
+        if (memberRows[0].is_muted && (!memberRows[0].muted_until || new Date(memberRows[0].muted_until) > new Date())) {
+          results.push({ target, status: 'skipped', reason: 'muted' }); continue;
+        }
+        const { rows: gsRows } = await query(
+          `SELECT hg.is_read_only,
+                  (EXISTS(SELECT 1 FROM hangout_group_members m
+                           WHERE m.group_id = hg.id AND m.user_id = $2
+                             AND m.role IN ('owner','mod'))) AS is_mod_or_owner
+             FROM hangout_groups hg WHERE hg.id = $1`,
+          [gid, user.id]
+        );
+        if (gsRows[0]?.is_read_only && !gsRows[0].is_mod_or_owner) {
+          results.push({ target, status: 'skipped', reason: 'read_only' }); continue;
+        }
+
+        const room = `hangout:${gid}`;
+        const { rows: insRows } = await query(
+          `INSERT INTO chat_messages
+             (room, user_id, username, first_name, photo_url, content,
+              media_url, media_type, media_mime, media_thumb_url, message_type, meta)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+           RETURNING id, room, user_id, username, first_name, photo_url, content,
+                     media_url, media_type, media_mime, media_thumb_url,
+                     message_type, meta, created_at`,
+          [
+            room, user.id, senderUsername, senderFirstName, senderPhoto,
+            content || null,
+            src.media_url || null, src.media_type || null,
+            src.media_mime || null, src.media_thumb_url || null,
+            messageType, meta ? JSON.stringify(meta) : null,
+          ]
+        );
+        const newMsg = insRows[0];
+        await query('UPDATE hangout_groups SET last_activity_at = NOW() WHERE id = $1', [gid]);
+        if (io) io.to(room).emit('chat:message', newMsg);
+        results.push({ target, status: 'sent', messageId: newMsg.id });
+      }
+    } catch (err) {
+      logger.warn('forwardMessage per-target failed', { target, error: err.message });
+      results.push({ target, status: 'skipped', reason: 'server_error' });
+    }
+  }
+
+  return res.json({ success: true, results });
+};
+
 module.exports = {
   listGroups,
   createGroup,
@@ -2279,6 +2439,7 @@ module.exports = {
   joinCall,
   endCall,
   leaveCall,
+  forwardMessage,
 };
 
 // ── LiveKit video calls ──────────────────────────────────────────────────────
@@ -2404,7 +2565,13 @@ async function startCall(req, res) {
 
       const ownerModJoin = await isOwnerOrMod(groupId, user.id);
       const joinTtl = ownerModJoin ? 4 * 3600 : 2 * 3600;
-      const token = await livekitService.generateToken(activeRoomName, String(user.id), displayName, false, { ttlSeconds: joinTtl });
+      const token = await livekitService.generateToken(
+        activeRoomName,
+        String(user.id),
+        displayName,
+        ownerModJoin,
+        { ttlSeconds: joinTtl }
+      );
       await query(
         `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
          VALUES ($1, $2, $3, NOW())
@@ -2435,7 +2602,13 @@ async function startCall(req, res) {
           const displayName = user.firstName || user.first_name || user.username || 'User';
           const ownerModRace = await isOwnerOrMod(groupId, user.id);
           const raceTtl = ownerModRace ? 4 * 3600 : 2 * 3600;
-          const token = await livekitService.generateToken(race[0].room_name, String(user.id), displayName, false, { ttlSeconds: raceTtl });
+          const token = await livekitService.generateToken(
+            race[0].room_name,
+            String(user.id),
+            displayName,
+            ownerModRace,
+            { ttlSeconds: raceTtl }
+          );
           await query(
             `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
              VALUES ($1, $2, $3, NOW())

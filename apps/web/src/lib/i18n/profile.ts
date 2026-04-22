@@ -331,6 +331,8 @@ const strings = {
     notifHangoutCalls: "Hangout Calls",
     quietHours: "Quiet Hours",
     quietHoursDesc: "No push or bot notifications during quiet hours (11 PM - 8 AM)",
+    notifSoundTitle: "Notification sound",
+    notifSoundDesc: "Play a short sound when a new notification arrives on this device.",
 
     // ── Content disclaimer ────────────────────────────────────────────────────
     contentDisclaimerAccepted: "Accepted. This cannot be reverted.",
@@ -733,6 +735,8 @@ const strings = {
     notifHangoutCalls: "Llamadas de Hangout",
     quietHours: "Horas de silencio",
     quietHoursDesc: "Sin notificaciones push o bot durante las horas de silencio (11 PM - 8 AM)",
+    notifSoundTitle: "Sonido de notificaciones",
+    notifSoundDesc: "Reproduce un sonido corto cuando llega una notificación en este dispositivo.",
 
     // ── Content disclaimer ────────────────────────────────────────────────────
     contentDisclaimerAccepted: "Aceptado. Esto no se puede revertir.",
