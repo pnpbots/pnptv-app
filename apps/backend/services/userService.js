@@ -562,15 +562,31 @@ function escapeHtml(s) {
 
 // Ensure user has email + password credentials (used by all payment flows and email-capture step).
 // Idempotent: no-ops if user already has a password; atomically sets credentials and emails them otherwise.
-async function ensureEmailCredentials(userId, email, language) {
+async function ensureEmailCredentials(userId, email, language, options = {}) {
+  const { skipEmail = false } = options;
   const crypto = require('crypto');
   const EmailService = require('./emailservice');
 
+  // Case-insensitive conflict check — excludes soft-deleted rows
   const { rows: emailConflict } = await query(
-    'SELECT id FROM users WHERE email = $1 AND id != $2', [email, String(userId)]
+    'SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id != $2 AND COALESCE(is_deleted, false) = false',
+    [email, String(userId)]
   );
   if (emailConflict.length > 0) {
     throw new Error('This email is already associated with another account');
+  }
+
+  // Warn if the email matches a soft-deleted row (allow reuse, but log for auditing)
+  const { rows: deletedConflict } = await query(
+    'SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id != $2 AND COALESCE(is_deleted, false) = true',
+    [email, String(userId)]
+  );
+  if (deletedConflict.length > 0) {
+    logger.warn('ensureEmailCredentials: email reused from a soft-deleted account', {
+      email,
+      deletedUserId: deletedConflict[0].id,
+      newUserId: String(userId),
+    });
   }
 
   const { rows: existing } = await query('SELECT email, password_hash FROM users WHERE id = $1', [String(userId)]);
@@ -605,55 +621,57 @@ async function ensureEmailCredentials(userId, email, language) {
     return { created: false };
   }
 
-  const isEs = (language || 'es').startsWith('es');
-  const safeEmail = escapeHtml(email);
-  try {
-    const transporter = EmailService.transporters?.pnptv;
-    if (!transporter) {
-      logger.warn('PNPtv SMTP transporter not available, credentials email not sent', { to: email });
-    } else {
-      await transporter.sendMail({
-        from: process.env.PNPTV_FROM_EMAIL || 'noreply@pnptv.app',
-        to: email,
-        subject: isEs ? 'Tus credenciales de acceso PNPtv' : 'Your PNPtv Login Credentials',
-        html: isEs
-          ? `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1C1C1E;color:#F5F5F7;border-radius:12px;">
-              <h2 style="color:#D4007A;margin-top:0;">Bienvenido a PNPtv!</h2>
-              <p>Ahora puedes iniciar sesi&oacute;n en la web con estas credenciales:</p>
-              <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-                <tr><td style="padding:8px 0;color:#A1A1A6;">Email:</td><td style="padding:8px 0;font-weight:bold;">${safeEmail}</td></tr>
-                <tr><td style="padding:8px 0;color:#A1A1A6;">Contrase&ntilde;a:</td><td style="padding:8px 0;font-weight:bold;font-family:monospace;font-size:16px;">${plainPassword}</td></tr>
-              </table>
-              <div style="background: rgba(255,180,84,0.1); border-left: 4px solid #FFB454; padding: 12px; margin: 16px 0; border-radius: 4px;">
-                <p style="margin: 0; color: #FFB454; font-weight: bold; font-size: 14px;">🔑 ID de Recuperaci&oacute;n:</p>
-                <p style="margin: 4px 0 0 0; font-family: monospace; font-size: 16px;">${userId}</p>
-                <p style="margin: 8px 0 0 0; font-size: 12px; color: #A1A1A6;"><strong>IMPORTANTE:</strong> Guarda este ID en un lugar seguro. Es la &uacute;nica forma de recuperar tu cuenta si pierdes el acceso.</p>
-              </div>
-              <p style="font-size:13px;color:#A1A1A6;">Puedes cambiar tu contrase&ntilde;a en cualquier momento desde tu perfil.</p>
-              <a href="https://pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Iniciar sesi&oacute;n</a>
-            </div>`
-          : `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1C1C1E;color:#F5F5F7;border-radius:12px;">
-              <h2 style="color:#D4007A;margin-top:0;">Welcome to PNPtv!</h2>
-              <p>You can now log in to the web app with these credentials:</p>
-              <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-                <tr><td style="padding:8px 0;color:#A1A1A6;">Email:</td><td style="padding:8px 0;font-weight:bold;">${safeEmail}</td></tr>
-                <tr><td style="padding:8px 0;color:#A1A1A6;">Password:</td><td style="padding:8px 0;font-weight:bold;font-family:monospace;font-size:16px;">${plainPassword}</td></tr>
-              </table>
-              <div style="background: rgba(255,180,84,0.1); border-left: 4px solid #FFB454; padding: 12px; margin: 16px 0; border-radius: 4px;">
-                <p style="margin: 0; color: #FFB454; font-weight: bold; font-size: 14px;">🔑 Recovery ID:</p>
-                <p style="margin: 4px 0 0 0; font-family: monospace; font-size: 16px;">${userId}</p>
-                <p style="margin: 8px 0 0 0; font-size: 12px; color: #A1A1A6;"><strong>IMPORTANT:</strong> Save this ID in a safe place. It is the only way to recover your account if you lose access.</p>
-              </div>
-              <p style="font-size:13px;color:#A1A1A6;">You can change your password anytime from your profile settings.</p>
-              <a href="https://pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Log In</a>
-            </div>`,
-      });
+  if (!skipEmail) {
+    const isEs = (language || 'es').startsWith('es');
+    const safeEmail = escapeHtml(email);
+    try {
+      const transporter = EmailService.transporters?.pnptv;
+      if (!transporter) {
+        logger.warn('PNPtv SMTP transporter not available, credentials email not sent', { to: email });
+      } else {
+        await transporter.sendMail({
+          from: process.env.PNPTV_FROM_EMAIL || 'noreply@pnptv.app',
+          to: email,
+          subject: isEs ? 'Tus credenciales de acceso PNPtv' : 'Your PNPtv Login Credentials',
+          html: isEs
+            ? `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1C1C1E;color:#F5F5F7;border-radius:12px;">
+                <h2 style="color:#D4007A;margin-top:0;">Bienvenido a PNPtv!</h2>
+                <p>Ahora puedes iniciar sesi&oacute;n en la web con estas credenciales:</p>
+                <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                  <tr><td style="padding:8px 0;color:#A1A1A6;">Email:</td><td style="padding:8px 0;font-weight:bold;">${safeEmail}</td></tr>
+                  <tr><td style="padding:8px 0;color:#A1A1A6;">Contrase&ntilde;a:</td><td style="padding:8px 0;font-weight:bold;font-family:monospace;font-size:16px;">${plainPassword}</td></tr>
+                </table>
+                <div style="background: rgba(255,180,84,0.1); border-left: 4px solid #FFB454; padding: 12px; margin: 16px 0; border-radius: 4px;">
+                  <p style="margin: 0; color: #FFB454; font-weight: bold; font-size: 14px;">🔑 ID de Recuperaci&oacute;n:</p>
+                  <p style="margin: 4px 0 0 0; font-family: monospace; font-size: 16px;">${userId}</p>
+                  <p style="margin: 8px 0 0 0; font-size: 12px; color: #A1A1A6;"><strong>IMPORTANTE:</strong> Guarda este ID en un lugar seguro. Es la &uacute;nica forma de recuperar tu cuenta si pierdes el acceso.</p>
+                </div>
+                <p style="font-size:13px;color:#A1A1A6;">Puedes cambiar tu contrase&ntilde;a en cualquier momento desde tu perfil.</p>
+                <a href="https://pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Iniciar sesi&oacute;n</a>
+              </div>`
+            : `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1C1C1E;color:#F5F5F7;border-radius:12px;">
+                <h2 style="color:#D4007A;margin-top:0;">Welcome to PNPtv!</h2>
+                <p>You can now log in to the web app with these credentials:</p>
+                <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                  <tr><td style="padding:8px 0;color:#A1A1A6;">Email:</td><td style="padding:8px 0;font-weight:bold;">${safeEmail}</td></tr>
+                  <tr><td style="padding:8px 0;color:#A1A1A6;">Password:</td><td style="padding:8px 0;font-weight:bold;font-family:monospace;font-size:16px;">${plainPassword}</td></tr>
+                </table>
+                <div style="background: rgba(255,180,84,0.1); border-left: 4px solid #FFB454; padding: 12px; margin: 16px 0; border-radius: 4px;">
+                  <p style="margin: 0; color: #FFB454; font-weight: bold; font-size: 14px;">🔑 Recovery ID:</p>
+                  <p style="margin: 4px 0 0 0; font-family: monospace; font-size: 16px;">${userId}</p>
+                  <p style="margin: 8px 0 0 0; font-size: 12px; color: #A1A1A6;"><strong>IMPORTANT:</strong> Save this ID in a safe place. It is the only way to recover your account if you lose access.</p>
+                </div>
+                <p style="font-size:13px;color:#A1A1A6;">You can change your password anytime from your profile settings.</p>
+                <a href="https://pnptv.app/login" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#D4007A;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Log In</a>
+              </div>`,
+        });
+      }
+    } catch (emailErr) {
+      logger.warn('Failed to send credentials email (non-critical)', { to: email, error: emailErr.message });
     }
-  } catch (emailErr) {
-    logger.warn('Failed to send credentials email (non-critical)', { to: email, error: emailErr.message });
   }
 
-  return { created: true };
+  return { created: true, plainPassword };
 }
 
 const userService = new UserService();

@@ -798,6 +798,29 @@ class AuthentikService {
   }
 
   /**
+   * Generate a one-time password-recovery link for an Authentik user.
+   * Requires the default brand to have `flow_recovery_id` set.
+   * Returns the fully-qualified recovery URL, or null on failure.
+   *
+   * @param {number} userPk — Authentik user PK (integer)
+   * @returns {string|null}
+   */
+  static async generateRecoveryLink(userPk) {
+    if (!AUTHENTIK_TOKEN || !userPk) return null;
+    try {
+      const res = await axios.post(
+        `${AUTHENTIK_URL}/api/v3/core/users/${userPk}/recovery/`,
+        {},
+        { headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` }, timeout: 10000 }
+      );
+      return res.data?.link || null;
+    } catch (err) {
+      logger.error('[Authentik] generateRecoveryLink failed:', err.response?.data || err.message);
+      return null;
+    }
+  }
+
+  /**
    * Trigger a password reset flow in Authentik for the given email.
    * This sends an email to the user with a recovery link.
    */

@@ -290,13 +290,24 @@ class AuthController {
         });
       }
 
-      // Check if email exists
+      // Check if email exists (case-insensitive)
       const existingUser = await query(
-        `SELECT id FROM users WHERE email = $1`,
-        [email.toLowerCase()]
+        `SELECT id, telegram FROM users WHERE LOWER(email) = LOWER($1) AND COALESCE(is_deleted, false) = false`,
+        [email]
       );
 
       if (existingUser.rows.length > 0) {
+        const existingRow = existingUser.rows[0];
+        // If the conflicting account is linked to a Telegram user, direct them there instead
+        if (existingRow.telegram) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: 'USE_TELEGRAM_LOGIN',
+              message: 'An account with this email is already linked to Telegram. Please log in via Telegram instead.',
+            },
+          });
+        }
         return res.status(400).json({
           success: false,
           error: {

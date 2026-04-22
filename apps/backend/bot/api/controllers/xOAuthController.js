@@ -275,20 +275,53 @@ const handleCallback = async (req, res) => {
         user = rows[0];
         logger.info(`Linked X @${xHandle} to existing session user ${user.id}`);
       } else {
-        // Lookup by x_id first, then twitter handle
-        let result = await query(`SELECT ${RETURN_COLS} FROM users WHERE x_id = $1`, [xId]);
+        // Lookup priority: x_id → twitter handle → email (if X provides it)
+        let result = xId
+          ? await query(`SELECT ${RETURN_COLS} FROM users WHERE x_id = $1 AND COALESCE(is_deleted, false) = false`, [xId])
+          : { rows: [] };
+
         if (result.rows.length === 0) {
-          result = await query(`SELECT ${RETURN_COLS} FROM users WHERE twitter = $1`, [xHandle]);
+          result = await query(
+            `SELECT ${RETURN_COLS} FROM users WHERE twitter = $1 AND COALESCE(is_deleted, false) = false`,
+            [xHandle]
+          );
+        }
+
+        // X v2 API may provide email under extended scopes — check if available
+        const xEmail = xData?.email ? String(xData.email).toLowerCase().trim() : null;
+        if (result.rows.length === 0 && xEmail) {
+          result = await query(
+            `SELECT ${RETURN_COLS} FROM users WHERE LOWER(email) = $1 AND COALESCE(is_deleted, false) = false`,
+            [xEmail]
+          );
+          if (result.rows.length > 0) {
+            logger.info(`[X OAuth] Matched existing account by email for @${xHandle} — linking X identity`);
+          }
         }
 
         if (result.rows.length > 0) {
           user = result.rows[0];
-          // Update x_id if missing
+          // Backfill any missing X identity fields onto the found account
+          const identityUpdates = [];
+          const identityVals = [];
+          let idx = 1;
           if (xId && !user.x_id) {
-            await query(`UPDATE users SET x_id = $1, updated_at = NOW() WHERE id = $2`, [xId, user.id]);
+            identityUpdates.push(`x_id = $${idx++}`);
+            identityVals.push(xId);
+          }
+          if (xHandle && user.twitter !== xHandle) {
+            identityUpdates.push(`twitter = $${idx++}`);
+            identityVals.push(xHandle);
+          }
+          if (identityUpdates.length > 0) {
+            identityVals.push(user.id);
+            await query(
+              `UPDATE users SET ${identityUpdates.join(', ')}, updated_at = NOW() WHERE id = $${idx}`,
+              identityVals
+            );
           }
         } else {
-          // Create new user with username
+          // Create new user — only reached when all lookups fail
           const [firstName, ...rest] = (xName || xHandle).split(' ');
           const { rows } = await query(
             `INSERT INTO users (id, pnptv_id, first_name, last_name, username, twitter, x_id,

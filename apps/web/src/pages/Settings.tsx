@@ -22,6 +22,7 @@ import {
   subscribePush,
   unsubscribePush,
   getUpcomingBookings,
+  enablePnptvIdLogin,
   type ReferralStats,
   type BlockedUser,
   type EraseAccountReceipt,
@@ -101,6 +102,13 @@ export default function Settings() {
   // ── Profile data ──────────────────────────────────────────────────────────
   const [memberSince, setMemberSince] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [profileEmail, setProfileEmail] = useState<string | null>(null);
+
+  // ── Enable PNPtv ID login (for Telegram-only users) ─────────────────────
+  const [enablePnptvIdEmail, setEnablePnptvIdEmail] = useState("");
+  const [enablePnptvIdSaving, setEnablePnptvIdSaving] = useState(false);
+  const [enablePnptvIdError, setEnablePnptvIdError] = useState<string | null>(null);
+  const [enablePnptvIdSuccess, setEnablePnptvIdSuccess] = useState<string | null>(null);
 
   // ── App Preferences state ─────────────────────────────────────────────────
   // selectedLang: the value shown in the language <select> (may briefly differ
@@ -236,6 +244,7 @@ export default function Settings() {
 
         const profile = profileRes.profile;
         setMemberSince(profile.memberSince ?? null);
+        setProfileEmail(profile.email ?? null);
         setWofConsent(profile.wofPhotoConsent ?? false);
         setContentDisclaimer(profile.contentDisclaimer ?? false);
         setAutoShareToX(profile.autoShareToX ?? false);
@@ -651,6 +660,118 @@ export default function Settings() {
           </div>
         )}
       </Section>
+
+      {/* ── Enable PNPtv ID login (Telegram-only users) ─────────────────── */}
+      {!profileLoading &&
+        (!profileEmail || profileEmail.endsWith("@telegram.pnptv.app")) && (
+          <Section title="Enable PNPtv ID login">
+            <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+              Right now you sign in with Telegram. Add an email and password so
+              you can also log in with a <strong>PNPtv ID</strong>—useful if
+              you lose access to Telegram.
+            </p>
+            {enablePnptvIdSuccess ? (
+              <div
+                className="rounded-xl p-3 text-sm"
+                style={{
+                  background: "rgba(34,197,94,0.1)",
+                  border: "1px solid rgba(34,197,94,0.3)",
+                  color: "#86efac",
+                }}
+              >
+                ✓ {enablePnptvIdSuccess}
+              </div>
+            ) : (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const email = enablePnptvIdEmail.trim();
+                  setEnablePnptvIdError(null);
+                  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    setEnablePnptvIdError("Please enter a valid email address.");
+                    return;
+                  }
+                  setEnablePnptvIdSaving(true);
+                  try {
+                    const res = await enablePnptvIdLogin(email);
+                    if (res.success) {
+                      setEnablePnptvIdSuccess(
+                        res.message ||
+                          `Check ${email} for a link to set your password.`,
+                      );
+                      setEnablePnptvIdEmail("");
+                      // Refresh profile so the card hides next time
+                      refreshUser().catch(() => {});
+                      setProfileEmail(email);
+                    } else {
+                      setEnablePnptvIdError(
+                        res.message ||
+                          "Something went wrong. Please try again.",
+                      );
+                    }
+                  } catch (err: unknown) {
+                    const msg =
+                      err instanceof Error
+                        ? err.message
+                        : "Connection error. Please try again.";
+                    setEnablePnptvIdError(msg);
+                  } finally {
+                    setEnablePnptvIdSaving(false);
+                  }
+                }}
+                className="space-y-3"
+                noValidate
+              >
+                <input
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  value={enablePnptvIdEmail}
+                  onChange={(e) => {
+                    setEnablePnptvIdEmail(e.target.value);
+                    setEnablePnptvIdError(null);
+                  }}
+                  placeholder="your@email.com"
+                  aria-label="Email address"
+                  aria-invalid={!!enablePnptvIdError}
+                  disabled={enablePnptvIdSaving}
+                  className="w-full py-3 px-4 rounded-xl text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 transition-all disabled:opacity-60"
+                  style={{
+                    background: "rgba(255,255,255,0.06)",
+                    border: enablePnptvIdError
+                      ? "1px solid #ef4444"
+                      : "1px solid rgba(255,255,255,0.1)",
+                  }}
+                />
+                {enablePnptvIdError && (
+                  <p className="text-xs text-red-400 px-1">
+                    {enablePnptvIdError}
+                  </p>
+                )}
+                <button
+                  type="submit"
+                  disabled={enablePnptvIdSaving || !enablePnptvIdEmail.trim()}
+                  className="w-full py-3 px-4 rounded-xl font-semibold text-sm text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #D4007A, #E69138)",
+                  }}
+                >
+                  {enablePnptvIdSaving
+                    ? "Sending set-password link..."
+                    : "Send me a set-password link"}
+                </button>
+                <p
+                  className="text-center text-[11px]"
+                  style={{ color: "#8E8E93" }}
+                >
+                  We'll update your email and send a one-time link to create
+                  your password.
+                </p>
+              </form>
+            )}
+          </Section>
+        )}
 
       {/* ── Identity & Connections ──────────────────────────────────────── */}
       <IdentityConnections telegramUsername={user?.username || undefined} />

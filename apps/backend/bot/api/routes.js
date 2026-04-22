@@ -2468,7 +2468,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     userRow.first_name = displayName || userRow.first_name;
     userRow.last_login_method = 'oidc';
   } else if (email) {
-    // No existing OIDC link — check if an account with this email already exists
+    // No existing OIDC link — check if an account with this email already exists (case-insensitive)
     const emailLookup = await pool.query(
       `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
               tier, terms_accepted, photo_file_id, bio, language, role,
@@ -2476,9 +2476,9 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
               atproto_handle, atproto_pds_url, twitter, x_user_id, x_id,
               email, last_login_method
        FROM users
-       WHERE email = $1 AND is_deleted = false
+       WHERE LOWER(email) = LOWER($1) AND is_deleted = false
        LIMIT 1`,
-      [email.toLowerCase()]
+      [email]
     );
     if (emailLookup.rows.length > 0) {
       userRow = emailLookup.rows[0];
@@ -2708,6 +2708,118 @@ app.post('/api/webapp/auth/oidc/logout', requireSessionAuth, asyncHandler(async 
   });
 
   res.json({ success: true, message: 'OIDC session revoked, other sessions retained' });
+}));
+
+// Rate limiter — 5 enable-pnptv-id attempts per hour per IP
+const enablePnptvIdLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  handler: (req, res) => res.status(429).json({ error: 'Too many attempts. Try again later.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
+ * POST /api/webapp/auth/enable-pnptv-id
+ * For Telegram-registered users who want to enable email+password (PNPtv ID) login.
+ * Flow: validates email → updates Authentik email + PNPtv DB email → generates
+ * one-time recovery link → emails link via our SMTP so user can set a password.
+ *
+ * Body: { email: string }
+ * Auth: session required
+ */
+app.post('/api/webapp/auth/enable-pnptv-id', requireSessionAuth, enablePnptvIdLimiter, asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+
+  if (!rawEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
+    return res.status(400).json({ success: false, error: 'INVALID_EMAIL', message: 'Please provide a valid email address.' });
+  }
+
+  if (rawEmail.endsWith('@telegram.pnptv.app')) {
+    return res.status(400).json({ success: false, error: 'INVALID_EMAIL', message: 'Please use your real email address, not the placeholder.' });
+  }
+
+  if (!user.pnptvId && !user.pnptv_id) {
+    return res.status(400).json({ success: false, error: 'NO_AUTHENTIK_SUB', message: 'No Authentik identity linked to this account.' });
+  }
+
+  const sub = user.pnptvId || user.pnptv_id;
+  const pool = getPool();
+
+  // Guard: email not already used by another PNPtv account
+  const dup = await pool.query(
+    `SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id != $2 AND COALESCE(is_deleted, false) = false LIMIT 1`,
+    [rawEmail, user.id]
+  );
+  if (dup.rows.length > 0) {
+    return res.status(409).json({ success: false, error: 'EMAIL_TAKEN', message: 'That email is already linked to another PNPtv account.' });
+  }
+
+  // Resolve Authentik user pk from our stored sub
+  const authentikPk = await AuthentikService._getUserPkBySub(sub);
+  if (!authentikPk) {
+    logger.error('[enable-pnptv-id] Authentik user not found for sub', { userId: user.id, sub });
+    return res.status(500).json({ success: false, error: 'AUTHENTIK_LOOKUP_FAILED', message: 'Could not locate your identity in our identity provider.' });
+  }
+
+  // Update Authentik email
+  const emailUpdated = await AuthentikService.updateUserEmail(authentikPk, rawEmail);
+  if (!emailUpdated) {
+    return res.status(500).json({ success: false, error: 'AUTHENTIK_UPDATE_FAILED', message: 'Failed to update your email at our identity provider.' });
+  }
+
+  // Mirror the email change in the PNPtv DB
+  try {
+    await pool.query(
+      `UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2`,
+      [rawEmail, user.id]
+    );
+  } catch (dbErr) {
+    logger.error('[enable-pnptv-id] Failed to update PNPtv DB email (Authentik already updated)', { userId: user.id, error: dbErr.message });
+    // Non-fatal — Authentik is the source of truth for login
+  }
+
+  // Generate a one-time recovery link at Authentik and email it via our SMTP
+  const recoveryLink = await AuthentikService.generateRecoveryLink(authentikPk);
+  if (!recoveryLink) {
+    return res.status(500).json({ success: false, error: 'RECOVERY_LINK_FAILED', message: 'Could not generate a set-password link. Please try again.' });
+  }
+
+  try {
+    const EmailService = require('../../services/emailservice');
+    const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    const displayName = user.displayName || user.firstName || user.username || 'there';
+    await EmailService.send({
+      to: rawEmail,
+      subject: 'Set your PNPtv ID password',
+      html: `
+        <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111;">
+          <h2 style="color:#D4007A;margin:0 0 16px;">Welcome to PNPtv ID login</h2>
+          <p>Hey ${escape(displayName)},</p>
+          <p>You asked to enable <strong>email + password</strong> login for your PNPtv account. Click the button below to set a password — the link is one-time use and expires shortly.</p>
+          <p style="text-align:center;margin:28px 0;">
+            <a href="${escape(recoveryLink)}" style="display:inline-block;background:linear-gradient(135deg,#D4007A,#E69138);color:#fff;text-decoration:none;padding:14px 28px;border-radius:10px;font-weight:700;">Set my password</a>
+          </p>
+          <p style="color:#666;font-size:13px;">If the button doesn't work, paste this link into your browser:<br><span style="word-break:break-all;">${escape(recoveryLink)}</span></p>
+          <p style="color:#666;font-size:13px;">If you didn't request this, you can ignore this email — your account stays as it was.</p>
+          <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+          <p style="color:#999;font-size:12px;">PNPtv! · <a href="https://pnptv.app" style="color:#999;">pnptv.app</a></p>
+        </div>
+      `,
+    });
+  } catch (mailErr) {
+    logger.error('[enable-pnptv-id] Failed to send recovery email', { userId: user.id, error: mailErr.message });
+    return res.status(500).json({ success: false, error: 'EMAIL_SEND_FAILED', message: 'We saved your email but could not send the set-password link. Please try again.' });
+  }
+
+  logger.info('[enable-pnptv-id] PNPtv ID login enabled for user', { userId: user.id, sub });
+
+  res.json({
+    success: true,
+    message: 'Check your email for a link to set your password.',
+    email: rawEmail,
+  });
 }));
 
 // ── End Authentik OIDC Routes ─────────────────────────────────────────────────

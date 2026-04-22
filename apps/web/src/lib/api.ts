@@ -1005,6 +1005,20 @@ export function resendVerificationEmail(email: string): Promise<{ success: boole
   return request("/api/webapp/auth/resend-verification", { method: "POST", body: { email } });
 }
 
+export interface EnablePnptvIdResponse {
+  success: boolean;
+  message?: string;
+  email?: string;
+  error?: string;
+}
+
+export function enablePnptvIdLogin(email: string): Promise<EnablePnptvIdResponse> {
+  return request("/api/webapp/auth/enable-pnptv-id", {
+    method: "POST",
+    body: { email },
+  });
+}
+
 export function deleteAccount(): Promise<{ success: boolean }> {
   return request("/api/webapp/account", { method: "DELETE" });
 }
