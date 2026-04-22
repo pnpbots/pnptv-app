@@ -563,20 +563,10 @@ const handleLiveKitWebhook = async (req, res) => {
     if (roomName.startsWith(HANGOUT_ROOM_PREFIX)) {
       const groupId = roomName.slice(HANGOUT_ROOM_PREFIX.length);
 
-      if (eventType === 'participant_joined') {
-        await query(
-          `UPDATE hangout_video_calls
-           SET participant_count = participant_count + 1
-           WHERE group_id = $1 AND status = 'active'`,
-          [groupId]
-        );
-      } else if (eventType === 'participant_left') {
-        await query(
-          `UPDATE hangout_video_calls
-           SET participant_count = GREATEST(participant_count - 1, 0)
-           WHERE group_id = $1 AND status = 'active'`,
-          [groupId]
-        );
+      if (eventType === 'participant_joined' || eventType === 'participant_left') {
+        // Participant rows and the DB trigger own participant_count. The webhook
+        // only observes transport events, which can arrive after REST writes or
+        // disconnect races; mutating the counter here causes drift/double-counts.
       } else if (eventType === 'room_finished') {
         await query(
           `UPDATE hangout_video_calls
