@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { RadioPanel, EqualizerBars } from "@/components/RadioWidget";
-import { NearbyPanel } from "@/components/NearbyWidget";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
@@ -36,7 +35,7 @@ interface ChatMessage {
 }
 
 type WidgetView = "helpCenter" | "chat" | "tutorial" | "ticketForm" | "ticketView" | "paymentVerify" | "meruActivate";
-type CristinaTab = "ai" | "vj" | "nearby";
+type CristinaTab = "ai" | "vj";
 
 interface CristinaWidgetProps {
   mode?: "widget" | "page";
@@ -132,7 +131,7 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
       { title: "Pay with Credit/Debit Card", description: "On the Subscribe page, select your plan and tap 'Pay with Card'. This uses ePayco and supports Visa, Mastercard, and other major cards. You can pay in USD or COP (Colombian pesos). Follow the secure checkout form." },
       { title: "Pay with Crypto (Daimo)", description: "Select your plan and tap 'Pay with Crypto'. A Daimo checkout modal appears with a QR code and wallet address. Send USDC to the address. Your PRIME activates automatically when the payment confirms on-chain." },
       { title: "Pay with Dash/BTCPay", description: "If available, you'll see a 'Pay with Dash' option. This creates a BTCPay invoice for anonymous cryptocurrency payment. Scan the QR code with your Dash wallet. The system polls for payment confirmation." },
-      { title: "Use an Activation Code", description: "Have a Meru activation code? On the Subscribe page, enter it in the activation code field. Codes are distributed via email, promotions, or referral rewards. Your plan activates instantly on valid code entry." },
+      { title: "Use an Activation Code", description: "Have a Meru activation code? On the Subscribe page, enter it in the activation code field. If you forgot your code, you must provide a bank statement screenshot showing the amount, date, and exact hour of payment via support ticket." },
       { title: "Check Your Membership Status", description: "Go to Profile → Settings → Membership section. You'll see your current tier (FREE, Member, or PRIME), your plan name, expiry date, and subscription status. This refreshes automatically from the database.", action: "Go to Profile" },
       { title: "FREE vs PRIME Comparison", description: "FREE: basic Social Feed, public Hangouts, basic Nearby, limited Videorama, 3 DMs/day, Cristina AI support. PRIME adds: unlimited DMs, exclusive content, private Hangouts hosting, HD streaming, full Videorama, priority Nearby, VIP support." },
     ],
@@ -161,7 +160,7 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
       { title: "Crypto via Daimo (USDC)", description: "Tap 'Pay with Crypto' after selecting a plan. A Daimo checkout modal appears showing a QR code and wallet address. Open your crypto wallet (Coinbase, MetaMask, any USDC wallet), scan the QR or paste the address, and send the exact USDC amount shown." },
       { title: "Daimo: Payment Confirmation", description: "After sending USDC, the app monitors the blockchain for your payment. Once confirmed (usually within a few minutes), your PRIME activates automatically. You'll see a confirmation screen." },
       { title: "Anonymous Crypto via Dash/BTCPay", description: "If available, tap 'Pay with Dash'. A BTCPay invoice is generated with a QR code. Open your Dash wallet, scan the code, and send the amount. The system polls for confirmation. Good for maximum privacy — no personal info required." },
-      { title: "Activation Codes (Meru)", description: "If you have a Meru code (from email, promotions, or referrals), go to Subscribe and enter it in the activation code field. Tap 'Activate'. If the code is valid, your plan activates instantly." },
+      { title: "Activation Codes (Meru)", description: "If you have a Meru code (from email, promotions, or referrals), go to Subscribe and enter it in the activation code field. Tap 'Activate'. If you forgot your code, you must provide a bank statement screenshot showing the amount, date, and hour of payment via support ticket to recover it." },
       { title: "Payment Issues?", description: "If your payment fails: check your card has sufficient funds, ensure 3D Secure popup wasn't blocked, or try a different payment method. For crypto, make sure you sent the exact amount to the correct address. Contact Cristina AI or email support@pnptv.app for help." },
     ],
   },
@@ -360,7 +359,6 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   // FAB auto-cycles through tab colors when closed
   const FAB_COLORS = [
     "linear-gradient(135deg, #8B5CF6, #D946EF)",  // purple (VJ)
-    "linear-gradient(135deg, #FBFF00, #F5D800)",  // yellow (Nearby)
     "linear-gradient(135deg, #5BC8F5, #00D4E8)",  // cyan (AI)
   ] as const;
   const [fabColorIdx, setFabColorIdx] = useState(0);
@@ -368,7 +366,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
     if (isOpen) return;
     // Skip animation cycling if user prefers reduced motion
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const timer = setInterval(() => setFabColorIdx((i) => (i + 1) % 3), 3000);
+    const timer = setInterval(() => setFabColorIdx((i) => (i + 1) % 2), 3000);
     return () => clearInterval(timer);
   }, [isOpen]);
   const fabGradient = FAB_COLORS[fabColorIdx];
@@ -406,6 +404,28 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   const [meruSubmitting, setMeruSubmitting] = useState(false);
   const [meruError, setMeruError] = useState<string | null>(null);
   const [meruSuccess, setMeruSuccess] = useState(false);
+
+  // Cache loaded tracks per mode so we don't re-fetch
+  const modeCacheRef = useRef<Record<string, any[]>>({});
+  const [loadingMode, setLoadingMode] = useState<string | null>(null);
+  const { play } = useMusicPlayer();
+
+  const handleRadioModeSelect = useCallback(async (mode: "takeoff" | "flying" | "landing") => {
+    setActiveTab("vj");
+    setLoadingMode(mode);
+    try {
+      let modeTracks = modeCacheRef.current[mode];
+      if (!modeTracks) {
+        const res = await getMediaTracks(0, 500, mode);
+        modeTracks = res.success ? res.tracks : [];
+        modeCacheRef.current[mode] = modeTracks;
+      }
+      if (modeTracks.length > 0) {
+        play(modeTracks[Math.floor(Math.random() * modeTracks.length)], modeTracks);
+      }
+    } catch { /* silent */ }
+    setLoadingMode(null);
+  }, [play]);
 
   const handleMeruActivate = useCallback(async () => {
     const trimmedCode = meruCode.trim();
@@ -927,7 +947,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
         className="flex border-b flex-shrink-0"
         style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(25,25,38,0.95)" }}
         onKeyDown={(e) => {
-          const tabs: CristinaTab[] = ["ai", "vj", "nearby"];
+          const tabs: CristinaTab[] = ["ai", "vj"];
           const idx = tabs.indexOf(activeTab);
           if (e.key === "ArrowRight") {
             e.preventDefault();
@@ -962,28 +982,24 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
         >
           {musicIsPlaying ? <><EqualizerBars color="#8B5CF6" size="sm" /> Radio</> : "🛫 Radio"}
         </button>
-        <button
-          id="tab-nearby"
-          role="tab"
-          aria-selected={activeTab === "nearby"}
-          aria-controls="tabpanel-nearby"
-          tabIndex={activeTab === "nearby" ? 0 : -1}
-          onClick={() => setActiveTab("nearby")}
-          className={`flex-1 py-2 text-[11px] font-semibold text-center transition-colors ${activeTab === "nearby" ? "text-yellow-400" : "text-gray-500 hover:text-gray-300"}`}
-          style={activeTab === "nearby" ? { borderBottom: "2px solid #FBFF00" } : { borderBottom: "2px solid transparent" }}
-        >
-          📍 Nearby
-        </button>
       </div>
 
       {/* ── VJ Tab (Radio Panel) ──────────────────────────────────────── */}
       <div id="tabpanel-vj" role="tabpanel" aria-labelledby="tab-vj" style={{ display: activeTab === "vj" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
+        {/* Return to support strip */}
+        <div className="bg-pnp-bg/90 border-b border-white/5 py-1.5 px-3 flex items-center justify-between">
+          <button
+            onClick={() => setActiveTab("ai")}
+            className="text-[10px] font-bold text-cyan-400 flex items-center gap-1 hover:text-cyan-300 transition-colors uppercase tracking-wider"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 18-6-6 6-6"/>
+            </svg>
+            Return to Support
+          </button>
+          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-tighter">VJ Player Mode</span>
+        </div>
         <RadioPanel onClose={() => setIsOpen(false)} />
-      </div>
-
-      {/* ── Travel Tab (Nearby Panel) ─────────────────────────────────── */}
-      <div id="tabpanel-nearby" role="tabpanel" aria-labelledby="tab-nearby" style={{ display: activeTab === "nearby" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
-        <NearbyPanel onClose={() => setIsOpen(false)} />
       </div>
 
       {/* ── AI Chat Tab ───────────────────────────────────────────────── */}
@@ -1036,7 +1052,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           )}
 
           {/* 2x2 category grid */}
-          <div className="grid grid-cols-3 gap-2 mb-4">
+          <div className="grid grid-cols-2 gap-2 mb-2">
             {/* Membership */}
             <button
               onClick={() => {
@@ -1099,27 +1115,36 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
               <p className="text-xs font-semibold text-white leading-tight">{t.catWellness}</p>
               <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{t.catWellnessDesc}</p>
             </button>
+          </div>
 
-            {/* VJ / Music */}
+          {/* Radio Buttons Row */}
+          <div className="flex gap-1.5 mb-4">
             <button
-              onClick={() => setActiveTab("vj")}
-              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
+              onClick={() => handleRadioModeSelect("takeoff")}
+              disabled={loadingMode === "takeoff"}
+              className="flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
               style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)" }}
             >
-              <span className="text-xl mb-1.5">🛫</span>
-              <p className="text-xs font-semibold text-white leading-tight">{lang === "es" ? "PNP Radio" : "PNP Radio"}</p>
-              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{lang === "es" ? "Take Off · Flying · Landing" : "Take Off · Flying · Landing"}</p>
+              {loadingMode === "takeoff" ? <div className="w-3.5 h-3.5 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin mb-1" /> : <span className="text-base mb-0.5">🛫</span>}
+              <span className="text-[10px] font-bold text-white uppercase tracking-tighter">Take Off</span>
             </button>
-
-            {/* Travel / Nearby */}
             <button
-              onClick={() => setActiveTab("nearby")}
-              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
-              style={{ background: "rgba(251,255,0,0.06)", border: "1px solid rgba(251,255,0,0.2)" }}
+              onClick={() => handleRadioModeSelect("flying")}
+              disabled={loadingMode === "flying"}
+              className="flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+              style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)" }}
             >
-              <span className="text-xl mb-1.5">📍</span>
-              <p className="text-xs font-semibold text-white leading-tight">{lang === "es" ? "Gente Cerca" : "People Nearby"}</p>
-              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{lang === "es" ? "Descubre gente y lugares cerca" : "Discover people & places near you"}</p>
+              {loadingMode === "flying" ? <div className="w-3.5 h-3.5 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin mb-1" /> : <span className="text-base mb-0.5">🚀</span>}
+              <span className="text-[10px] font-bold text-white uppercase tracking-tighter">Flying</span>
+            </button>
+            <button
+              onClick={() => handleRadioModeSelect("landing")}
+              disabled={loadingMode === "landing"}
+              className="flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+              style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)" }}
+            >
+              {loadingMode === "landing" ? <div className="w-3.5 h-3.5 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin mb-1" /> : <span className="text-base mb-0.5">🛬</span>}
+              <span className="text-[10px] font-bold text-white uppercase tracking-tighter">Landing</span>
             </button>
           </div>
 
@@ -2021,6 +2046,33 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
               {meruError && (
                 <p className="mt-3 text-xs text-red-400">{meruError}</p>
               )}
+
+              {/* Recovery link */}
+              <div className="mt-6 pt-4 border-t border-white/5">
+                <p className="text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-semibold">
+                  {lang === "es" ? "¿Problemas con tu código?" : "Having issues with your code?"}
+                </p>
+                <button
+                  onClick={() => {
+                    setView("ticketForm");
+                    setSelectedCategory("payment");
+                    setTicketDescription(lang === "es" 
+                      ? "Hola, olvidé anotar mi código Meru. Adjunto el screenshot de mi movimiento bancario donde se ve monto, fecha y hora exacta del pago.\n\n[POR FAVOR ADJUNTA TU SCREENSHOT EN EL SIGUIENTE MENSAJE]"
+                      : "Hi, I forgot to write down my Meru code. I'm attaching the screenshot of my bank transaction showing amount, date, and exact hour of payment.\n\n[PLEASE ATTACH YOUR SCREENSHOT IN THE NEXT MESSAGE]");
+                  }}
+                  className="w-full py-2 px-3 rounded-lg text-xs font-medium text-[#FFB454] border border-[#FFB454]/20 hover:bg-[#FFB454]/5 transition-colors text-left flex items-center justify-between"
+                >
+                  <span>{lang === "es" ? "🔑 Recuperar mi código Meru" : "🔑 Recover my Meru code"}</span>
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+                <p className="mt-2 text-[10px] text-gray-500 leading-tight">
+                  {lang === "es"
+                    ? "Si olvidaste tu código, es OBLIGATORIO enviar un screenshot del pago para recuperarlo. No se acepta otro tipo de soporte."
+                    : "If you forgot your code, it is MANDATORY to send a payment screenshot to recover it. No other support is accepted."}
+                </p>
+              </div>
             </>
           )}
         </div>

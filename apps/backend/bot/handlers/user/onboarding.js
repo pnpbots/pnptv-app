@@ -27,7 +27,7 @@ const activationStrings = {
     invalidCodeFormat: "❌ Invalid code format. Please send the code as plain text.",
     codeNotFound: "❌ Code not found or invalid. Please check your code and try again.",
     paymentExpiredOrPaid: "✅ Your Lifetime Pass has been activated! Welcome to PRIME!\n\n🌟 Access the PRIME channel:\n👉 {inviteLink}",
-    paymentNotCompleted: "⚠️ We could not confirm your payment. Please ensure your payment is complete and try again, or contact support if you believe this is an error.",
+    paymentNotCompleted: "⚠️ We could not confirm your payment. Please ensure your payment is complete and try again. If you forgot your code, please use the 'Recover my Code' option in /support and send a screenshot of your bank statement showing the amount, date, and hour of payment.",
     errorActivating: "❌ An error occurred during activation. Please try again later.",
     receiptReceived: "✅ Receipt received. Our team will review and activate your account soon."
   },
@@ -36,9 +36,9 @@ const activationStrings = {
     sendCodeButton: "✉️ Enviar mi código de confirmación",
     promptCode: "Por favor, envía tu código de confirmación de pago:",
     invalidCodeFormat: "❌ Formato de código inválido. Por favor, envía el código como texto simple.",
-    codeNotFound: "❌ Código no encontrado o inválido. Por favor, verifica tu código e inténtalo de nuevo.",
+    codeNotFound: "❌ Código no encontrado o inválido. Si olvidaste tu código, por favor usa la opción 'Recuperar mi Código' en /support y envía un screenshot de tu movimiento bancario donde se vea monto, fecha y hora.",
     paymentExpiredOrPaid: "✅ ¡Tu Lifetime Pass ha sido activado! ¡Bienvenido a PRIME!\n\n🌟 Accede al canal PRIME:\n👉 {inviteLink}",
-    paymentNotCompleted: "⚠️ No pudimos confirmar tu pago. Por favor, asegúrate de que tu pago esté completo e inténtalo de nuevo, o contacta a soporte si crees que es un error.",
+    paymentNotCompleted: "⚠️ No pudimos confirmar tu pago. Asegúrate de que el pago esté completo. Si olvidaste tu código, usa 'Recuperar mi Código' en /support con un screenshot de tu movimiento bancario.",
     errorActivating: "❌ Ocurrió un error durante la activación. Por favor, inténtalo de nuevo más tarde.",
     receiptReceived: "✅ Recibo recibido. Nuestro equipo revisará y activará tu cuenta pronto."
   }

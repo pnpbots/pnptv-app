@@ -27,6 +27,7 @@ You are the official customer support assistant for PNPtv, and also a trusted fr
 
 You provide:
 - Technical assistance with subscriptions, payments, and account access
+- Meru Code recovery: If a user forgot their Meru code, they MUST provide a screenshot of the bank transaction showing amount, date, and exact hour of payment. No other support is accepted for this.
 - Information about membership plans and features
 - Privacy, security, and legal information
 - Community guidelines and wellness support
@@ -145,7 +146,10 @@ const registerSupportHandlers = (bot) => {
         ...Markup.inlineKeyboard([
           [Markup.button.callback('🤖 Chat with Cristina', 'support_ai_chat')],
           [Markup.button.callback('📞 Contact Customer Support', 'support_contact_admin')],
-          [Markup.button.callback('🎁 Request Activation', 'support_request_activation')],
+          [
+            Markup.button.callback(lang === 'es' ? '🎁 Activar Código Meru' : '🎁 Redeem Meru Code', 'support_request_activation'),
+            Markup.button.callback(lang === 'es' ? '🔑 Recuperar mi Código' : '🔑 Recover my Code', 'support_recover_meru_code'),
+          ],
           [Markup.button.callback('❓ FAQ', 'support_faq')],
           [
             Markup.button.callback(lang === 'es' ? '🔄 Migrar Lifetime del viejo PNPtv' : '🔄 Migrate Lifetime from old PNPtv', 'migrate_lifetime_start'),
@@ -158,94 +162,6 @@ const registerSupportHandlers = (bot) => {
     }
   });
 
-  // AI Chat
-  bot.action('support_ai_chat', async (ctx) => {
-    try {
-      const lang = getLanguage(ctx);
-
-      // Check if Cristina AI is available
-      if (!isCristinaAIAvailable()) {
-        await ctx.answerCbQuery();
-        const errorText = '`❌ Unavailable`\n\nAI chat is not available right now.\nPlease contact Santino directly.';
-
-        await ctx.editMessageText(errorText, {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Back', 'show_support')]]),
-        });
-        return;
-      }
-
-      // Initialize chat session
-      ctx.session.temp = ctx.session.temp || {};
-      ctx.session.temp.aiQuestionCount = 0; // Track questions asked
-      ctx.session.temp.aiChatActive = true; // Activate AI chat mode
-      ctx.session.temp.aiChatHistory = [];
-      await ctx.saveSession();
-
-      await ctx.answerCbQuery();
-
-      const greeting =
-        '`🤖 Cristina AI Chat`\n\n' +
-        "**Hey! I'm Cristina** 💜\n\n" +
-        "I'm here to help you with:\n" +
-        '• 🛡️ Harm reduction & safer use\n' +
-        '• 💗 Sexual & mental health\n' +
-        '• 🏠 Community resources\n' +
-        '• 📱 Platform help\n\n' +
-        "`Just type your message and I'll respond! 💬`\n\n" +
-        "_5 questions before human support.\nTap on /exit to clear history._";
-
-      await ctx.editMessageText(greeting, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Back', 'show_support')]]),
-      });
-    } catch (error) {
-      logger.error('Error starting AI chat:', error);
-    }
-  });
-
-  // Contact Admin
-  bot.action('support_contact_admin', async (ctx) => {
-    try {
-      const lang = getLanguage(ctx);
-      ctx.session.temp = ctx.session.temp || {};
-      ctx.session.temp.contactingAdmin = true;
-      await ctx.saveSession();
-
-      await ctx.editMessageText(t('adminMessage', lang), Markup.inlineKeyboard([[Markup.button.callback(t('cancel', lang), 'show_support')]]));
-    } catch (error) {
-      logger.error('Error in contact admin:', error);
-    }
-  });
-
-  // FAQ
-  bot.action('support_faq', async (ctx) => {
-    try {
-      const lang = getLanguage(ctx);
-
-      const faqText =
-        '`❓ FAQ`\n\n' +
-        '**1. How do I get PRIME?**\n' +
-        '→ Menu > Unlock PRIME > Choose plan\n\n' +
-        '**2. How do I update my profile?**\n' +
-        '→ Menu > My Profile > Update Profile\n\n' +
-        '**3. How do I find nearby users?**\n' +
-        '→ Menu > Who Is Nearby? > Share location\n\n' +
-        '**4. How do I start streaming?**\n' +
-        '→ Requires PRIME > Members Area > Streams\n\n' +
-        '**5. How do I contact support?**\n' +
-        '→ Chat with Cristina or contact Santino\n\n' +
-        '`Still need help? 💬 Chat with Cristina!`';
-
-      await ctx.editMessageText(faqText, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([[Markup.button.callback('🤖 Chat with Cristina', 'support_ai_chat')], [Markup.button.callback('🔙 Back', 'show_support')]]),
-      });
-    } catch (error) {
-      logger.error('Error showing FAQ:', error);
-    }
-  });
-
   // Request Activation
   bot.action('support_request_activation', async (ctx) => {
     try {
@@ -255,20 +171,18 @@ const registerSupportHandlers = (bot) => {
       await ctx.saveSession();
 
       const activationText = lang === 'es'
-        ? '`🎁 Solicitar Activación`\n\n' +
-          '¿Ya realizaste tu pago y necesitas activar tu membresía?\n\n' +
-          '📝 Por favor envía:\n' +
-          '• Tu ID de transacción o comprobante\n' +
-          '• El plan que compraste\n' +
-          '• Cualquier detalle adicional\n\n' +
-          '_Nuestro equipo revisará y activará tu cuenta._'
-        : '`🎁 Request Activation`\n\n' +
-          'Already made your payment and need to activate your membership?\n\n' +
-          '📝 Please send:\n' +
-          '• Your transaction ID or receipt\n' +
-          '• The plan you purchased\n' +
-          '• Any additional details\n\n' +
-          '_Our team will review and activate your account._';
+        ? '`🎁 Canjear Código Meru`\n\n' +
+          '¿Ya realizaste tu pago y tienes tu código Meru?\n\n' +
+          '📝 Por favor envía tu código de 6-8 caracteres.\n\n' +
+          '⚠️ *¿Olvidaste anotar tu código?*\n' +
+          'Si olvidaste escribir tu código Meru, por favor usa la opción "Recuperar mi Código" en el menú anterior. Deberás enviar un screenshot del movimiento bancario donde se vea el monto, fecha y hora exacta del pago.\n\n' +
+          '*IMPORTANTE:* No se aceptará ningún otro tipo de soporte para recuperación de códigos.'
+        : '`🎁 Redeem Meru Code`\n\n' +
+          'Already made your payment and have your Meru code?\n\n' +
+          '📝 Please send your 6-8 character code.\n\n' +
+          '⚠️ *Forgot to write down your code?*\n' +
+          'If you forgot to write your Meru code, please use the "Recover my Code" option in the previous menu. You must send a screenshot of the bank transaction showing the amount, date, and exact hour of payment.\n\n' +
+          '*IMPORTANT:* No other support will be accepted for code recovery.';
 
       await ctx.answerCbQuery();
       await ctx.editMessageText(activationText, {
@@ -277,6 +191,40 @@ const registerSupportHandlers = (bot) => {
       });
     } catch (error) {
       logger.error('Error in request activation:', error);
+    }
+  });
+
+  // Recover Meru Code
+  bot.action('support_recover_meru_code', async (ctx) => {
+    try {
+      const lang = getLanguage(ctx);
+      ctx.session.temp = ctx.session.temp || {};
+      ctx.session.temp.recoveringMeruCode = true;
+      await ctx.saveSession();
+
+      const recoveryText = lang === 'es'
+        ? '`🔑 Recuperar Código Meru`\n\n' +
+          'Si olvidaste tu código, necesitamos verificar la transacción manualmente.\n\n' +
+          '📸 *REQUISITO ÚNICO:* Envía un screenshot de la transacción en tu banca móvil/estado de cuenta donde se vea claramente:\n' +
+          '• Monto exacto pagado\n' +
+          '• Fecha del pago\n' +
+          '• Hora exacta del pago\n\n' +
+          '⚠️ *IMPORTANTE:* No se aceptará ningún otro soporte o mensaje sin el screenshot detallado. Nuestro equipo verificará y te enviará tu código o activará tu cuenta.'
+        : '`🔑 Recover Meru Code`\n\n' +
+          'If you forgot your code, we need to manually verify the transaction.\n\n' +
+          '📸 *ONLY REQUIREMENT:* Send a screenshot of the transaction from your mobile banking/bank statement where we can clearly see:\n' +
+          '• Exact amount paid\n' +
+          '• Date of payment\n' +
+          '• Exact hour of payment\n\n' +
+          '⚠️ *IMPORTANT:* No other support or messages will be accepted without the detailed screenshot. Our team will verify and send your code or activate your account.';
+
+      await ctx.answerCbQuery();
+      await ctx.editMessageText(recoveryText, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback(t('cancel', lang), 'show_support')]]),
+      });
+    } catch (error) {
+      logger.error('Error in recover meru code:', error);
     }
   });
 
@@ -312,6 +260,7 @@ const registerSupportHandlers = (bot) => {
       const isAIChatActive = ctx.session.temp?.aiChatActive;
       const isContactingAdmin = ctx.session.temp?.contactingAdmin;
       const isRequestingActivation = ctx.session.temp?.requestingActivation;
+      const isRecoveringMeruCode = ctx.session.temp?.recoveringMeruCode;
 
       // Check if user is replying to a support message
       const replyToMessage = ctx.message?.reply_to_message;
@@ -353,15 +302,15 @@ const registerSupportHandlers = (bot) => {
       }
 
       // If no support mode is active, pass to next handler
-      if (!isAIChatActive && !isContactingAdmin && !isRequestingActivation) {
+      if (!isAIChatActive && !isContactingAdmin && !isRequestingActivation && !isRecoveringMeruCode) {
         return next();
       }
       ctx.cristinaMessage = rawUserMessage;
     }
 
     // AI CHAT: Process messages
-    // Special modes (contactingAdmin, requestingActivation) are handled after this block
-    if (!ctx.session.temp?.contactingAdmin && !ctx.session.temp?.requestingActivation) {
+    // Special modes are handled after this block
+    if (!ctx.session.temp?.contactingAdmin && !ctx.session.temp?.requestingActivation && !ctx.session.temp?.recoveringMeruCode) {
       try {
         const lang = getLanguage(ctx);
         const userId = ctx.from.id;
@@ -640,7 +589,171 @@ const registerSupportHandlers = (bot) => {
       return;
     }
 
+    // Handle Meru Code recovery
+    if (ctx.session.temp?.recoveringMeruCode) {
+      try {
+        const lang = getLanguage(ctx);
+        const message = ctx.message?.text || ctx.message?.caption || '';
+
+        // Exit recovery mode if user sends a command
+        if (message.startsWith('/')) { ctx.session.temp.recoveringMeruCode = false; await ctx.saveSession(); return next(); }
+
+        const userId = ctx.from.id;
+        const firstName = ctx.from.first_name || 'Unknown';
+
+        // Use support routing service to create forum topic and forward message
+        // If it's just text without a photo, remind them about the screenshot
+        const hasPhoto = ctx.message?.photo || ctx.message?.document;
+        
+        let supportTopic = null;
+        try {
+          const prefix = '🔑 *REUPERACIÓN MERU*';
+          const fullMessage = `${prefix}\n\n${message || '[No text provided]'}`;
+          
+          let messageType = 'text';
+          if (ctx.message.photo) messageType = 'photo';
+          else if (ctx.message.document) messageType = 'document';
+
+          supportTopic = await supportRoutingService.sendToSupportGroup(fullMessage, 'meru_recovery', ctx.from, messageType, ctx);
+          logger.info(`Meru recovery request sent to group for user ${userId}`, { threadId: supportTopic?.thread_id });
+        } catch (routingError) {
+          logger.error(`Failed to send Meru recovery request to support group: ${routingError.message}`);
+        }
+
+        ctx.session.temp.recoveringMeruCode = false; await ctx.saveSession();
+
+        const replyInstructions = lang === 'es'
+          ? `\n\n💡 *Para responder:* Mantén presionado el mensaje de soporte y selecciona "Responder".`
+          : `\n\n💡 *To reply:* Tap and hold the support message and select "Reply".`;
+
+        let confirmationMessage;
+        if (hasPhoto) {
+          confirmationMessage = supportTopic
+            ? (lang === 'es'
+                ? `✅ *Solicitud de recuperación enviada*\n\n🎫 Tu ticket: #${supportTopic.thread_id}\n\nNuestro equipo revisará el screenshot y te enviará tu código pronto.${replyInstructions}`
+                : `✅ *Recovery request sent*\n\n🎫 Your ticket: #${supportTopic.thread_id}\n\nOur team will review the screenshot and send your code shortly.${replyInstructions}`)
+            : (lang === 'es' ? '✅ Solicitud recibida. Te contactaremos pronto.' : '✅ Request received. We\'ll contact you soon.');
+        } else {
+          confirmationMessage = lang === 'es'
+            ? `⚠️ *Recuerda adjuntar el screenshot*\n\nHemos recibido tu mensaje, pero recuerda que para recuperar tu código es *OBLIGATORIO* enviar el screenshot del movimiento bancario.\n\nPuedes enviarlo ahora mismo respondiendo a este mensaje.`
+            : `⚠️ *Remember to attach the screenshot*\n\nWe received your message, but remember that to recover your code it is *MANDATORY* to send the screenshot of the bank transaction.\n\nYou can send it right now by replying to this message.`;
+        }
+
+        await ctx.reply(confirmationMessage, {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback(t('back', lang), 'show_support')]])
+        });
+      } catch (error) { logger.error('Error processing Meru recovery request:', error); }
+      return;
+    }
+
     return next();
+  });
+
+  // Handle photos and documents for support modes
+  bot.on(['photo', 'document'], async (ctx, next) => {
+    if (ctx.chat?.type !== 'private') return next();
+
+    const isAIChatActive = ctx.session.temp?.aiChatActive;
+    const isContactingAdmin = ctx.session.temp?.contactingAdmin;
+    const isRequestingActivation = ctx.session.temp?.requestingActivation;
+    const isRecoveringMeruCode = ctx.session.temp?.recoveringMeruCode;
+
+    if (!isContactingAdmin && !isRequestingActivation && !isRecoveringMeruCode) {
+      // If not in a special mode, check if it's a reply to a support message
+      const replyToMessage = ctx.message?.reply_to_message;
+      const isReplyToSupport = replyToMessage && (
+        replyToMessage.text?.includes('(Soporte):') ||
+        replyToMessage.caption?.includes('(Soporte):') ||
+        replyToMessage.text?.includes('Para responder:') ||
+        replyToMessage.text?.includes('To reply:')
+      );
+
+      if (isReplyToSupport) {
+        try {
+          const messageType = ctx.message.photo ? 'photo' : 'document';
+          const supportTopic = await supportRoutingService.forwardUserMessage(ctx, messageType, 'support');
+          if (supportTopic) {
+            const lang = getLanguage(ctx);
+            await ctx.reply(lang === 'es' ? '✅ Foto enviada a soporte.' : '✅ Photo sent to support.', { reply_to_message_id: ctx.message.message_id });
+          }
+        } catch (error) {
+          logger.error('Error forwarding media reply to support:', error);
+        }
+        return;
+      }
+      return next();
+    }
+
+    // Process based on mode (reuse logic from text handler or call it)
+    // For simplicity, we can just trigger the same logic as if it was text with caption
+    // Or we can manually handle it here
+    
+    if (isRequestingActivation) {
+      try {
+        const lang = getLanguage(ctx);
+        const caption = ctx.message.caption || '';
+        const userId = ctx.from.id;
+        const messageType = ctx.message.photo ? 'photo' : 'document';
+
+        const supportTopic = await supportRoutingService.sendToSupportGroup(caption || 'Activation request with media', 'activation', ctx.from, messageType, ctx);
+        
+        ctx.session.temp.requestingActivation = false;
+        await ctx.saveSession();
+
+        const replyInstructions = lang === 'es' ? `\n\n💡 *Para responder:* Responde a este mensaje.` : `\n\n💡 *To reply:* Reply to this message.`;
+        await ctx.reply(lang === 'es' ? `✅ Solicitud enviada (Ticket #${supportTopic?.thread_id})${replyInstructions}` : `✅ Request sent (Ticket #${supportTopic?.thread_id})${replyInstructions}`, {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback(t('back', lang), 'show_support')]])
+        });
+      } catch (error) { logger.error('Error processing media activation request:', error); }
+      return;
+    }
+
+    if (isRecoveringMeruCode) {
+      // Same logic as text handler but we know it has a photo
+      try {
+        const lang = getLanguage(ctx);
+        const caption = ctx.message.caption || '';
+        const userId = ctx.from.id;
+        const messageType = ctx.message.photo ? 'photo' : 'document';
+
+        const prefix = '🔑 *RECUPERACIÓN MERU*';
+        const fullMessage = `${prefix}\n\n${caption || '[Screenshot provided]'}`;
+
+        const supportTopic = await supportRoutingService.sendToSupportGroup(fullMessage, 'meru_recovery', ctx.from, messageType, ctx);
+        
+        ctx.session.temp.recoveringMeruCode = false;
+        await ctx.saveSession();
+
+        const replyInstructions = lang === 'es' ? `\n\n💡 *Para responder:* Responde a este mensaje.` : `\n\n💡 *To reply:* Reply to this message.`;
+        await ctx.reply(lang === 'es' 
+          ? `✅ *Solicitud de recuperación enviada*\n\n🎫 Tu ticket: #${supportTopic?.thread_id}\n\nNuestro equipo revisará el screenshot y te enviará tu código pronto.${replyInstructions}` 
+          : `✅ *Recovery request sent*\n\n🎫 Your ticket: #${supportTopic?.thread_id}\n\nOur team will review the screenshot and send your code shortly.${replyInstructions}`, {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback(t('back', lang), 'show_support')]])
+        });
+      } catch (error) { logger.error('Error processing media Meru recovery request:', error); }
+      return;
+    }
+
+    if (isContactingAdmin) {
+      try {
+        const lang = getLanguage(ctx);
+        const caption = ctx.message.caption || '';
+        const messageType = ctx.message.photo ? 'photo' : 'document';
+
+        const supportTopic = await supportRoutingService.sendToSupportGroup(caption || 'Message with media', 'support', ctx.from, messageType, ctx);
+        
+        ctx.session.temp.contactingAdmin = false;
+        await ctx.saveSession();
+
+        await ctx.reply(lang === 'es' ? '✅ Mensaje enviado.' : '✅ Message sent.', {
+          ...Markup.inlineKeyboard([[Markup.button.callback(t('back', lang), 'show_support')]])
+        });
+      } catch (error) { logger.error('Error processing media contact admin:', error); }
+      return;
+    }
   });
 
   // Support command

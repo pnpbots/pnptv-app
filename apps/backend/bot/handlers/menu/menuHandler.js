@@ -857,7 +857,8 @@ async function handleDeepLinkSupport(ctx, lang) {
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback(lang === 'es' ? '🤖 Hablar con Cristina' : '🤖 Chat with Cristina', 'support_ai_chat')],
     [Markup.button.callback(lang === 'es' ? '📞 Contactar Soporte al Cliente' : '📞 Contact Customer Support', 'support_contact_admin')],
-    [Markup.button.callback(lang === 'es' ? '🎁 Solicitar Activación' : '🎁 Request Activation', 'support_request_activation')],
+    [Markup.button.callback(lang === 'es' ? '🎁 Activar Código Meru' : '🎁 Redeem Meru Code', 'support_request_activation')],
+    [Markup.button.callback(lang === 'es' ? '🔑 Recuperar mi Código' : '🔑 Recover my Code', 'support_recover_meru_code')],
     [Markup.button.callback(lang === 'es' ? '❓ FAQ' : '❓ FAQ', 'support_faq')],
     [Markup.button.callback(lang === 'es' ? '🏠 Menú Principal' : '🏠 Main Menu', 'menu:back')],
   ]);
@@ -1384,7 +1385,8 @@ async function handleSupport(ctx, lang) {
     ...Markup.inlineKeyboard([
       [Markup.button.callback('🤖 Chat with Cristina', 'support_ai_chat')],
       [Markup.button.callback('📞 Contact Customer Support', 'support_contact_admin')],
-      [Markup.button.callback('🎁 Request Activation', 'support_request_activation')],
+      [Markup.button.callback('🎁 Redeem Meru Code', 'support_request_activation')],
+      [Markup.button.callback('🔑 Recover my Code', 'support_recover_meru_code')],
       [Markup.button.callback('❓ FAQ', 'support_faq')],
       [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'menu:back')],
     ]),
