@@ -1,10 +1,6 @@
 const { Markup } = require('telegraf');
-const VideoCallModel = require('../../../models/videoCallModel');
 const logger = require('../../../utils/logger');
-const { hasFullAccess, safeReplyOrEdit } = require('../../utils/helpers');
-const { consumeRateLimit, getRateLimitInfo } = require('../../core/middleware/rateLimitGranular');
-const { buildHangoutsWebAppUrl } = require('../../utils/hangoutsWebApp');
-// Video calls use Agora (bot menu) or Telegram native (webapp hangouts)
+const { safeReplyOrEdit } = require('../../utils/helpers');
 const FeatureUrlService = require('../../../services/featureUrlService');
 
 /**
@@ -12,8 +8,6 @@ const FeatureUrlService = require('../../../services/featureUrlService');
  * @param {Telegraf} bot - Bot instance
  */
 const registerHangoutsHandlers = (bot) => {
-  const HANGOUTS_WEB_APP_URL = process.env.HANGOUTS_WEB_APP_URL || 'https://pnptv.app/hangouts';
-
   /**
    * Web-first /hangout command
    * Calls backend API to get the Hangouts web app URL
@@ -89,32 +83,23 @@ const registerHangoutsHandlers = (bot) => {
     try {
       await ctx.answerCbQuery();
       const lang = ctx.session?.language || 'en';
-      const user = ctx.session?.user || {};
       const userId = ctx.from?.id;
 
-      // Get public calls
-      let publicCalls = [];
-      try {
-        publicCalls = await VideoCallModel.getAllPublic();
-      } catch (e) {
-        logger.warn(`Error fetching public calls: ${e.message}`);
-      }
+      // Get the hangout URL
+      const webAppUrl = await FeatureUrlService.getHangoutUrl(userId);
 
       const message = lang === 'es'
         ? `🎥 *PNP Hangouts*\n\n` +
-          `Videollamadas y salas comunitarias.\n\n` +
-          `📞 *Llamadas Activas:* ${publicCalls.length}\n\n` +
-          `Elige una opción:`
+          `Las videollamadas y salas comunitarias se han movido a nuestra plataforma web.\n\n` +
+          `Únete a conversaciones en vivo, comparte medios y conoce a la comunidad en tiempo real.`
         : `🎥 *PNP Hangouts*\n\n` +
-          `Video calls and community rooms.\n\n` +
-          `📞 *Active Calls:* ${publicCalls.length}\n\n` +
-          `Choose an option:`;
+          `Video calls and community rooms have moved to our web platform.\n\n` +
+          `Join live conversations, share media, and meet the community in real time.`;
 
       await safeReplyOrEdit(ctx, message, {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.callback(lang === 'es' ? '🎥 Crear Videollamada' : '🎥 Create Video Call', 'create_video_call')],
-          [Markup.button.callback(lang === 'es' ? '📋 Mis Llamadas' : '📋 My Calls', 'my_active_calls')],
+          [Markup.button.webApp(lang === 'es' ? '🚀 Abrir Hangouts' : '🚀 Open Hangouts', webAppUrl)],
           [Markup.button.callback(lang === 'es' ? '⬅️ Menú Principal' : '⬅️ Main Menu', 'back_to_main')],
         ]),
       });
@@ -128,290 +113,13 @@ const registerHangoutsHandlers = (bot) => {
     }
   }
 
-  // ==========================================
-  // VIDEO CALLS (PRIME ONLY)
-  // ==========================================
-
-  /**
-   * Create a new video call
-   */
-  bot.action('create_video_call', async (ctx) => {
-    try {
-      await ctx.answerCbQuery();
-      const lang = ctx.session?.language || 'en';
-      const user = ctx.session?.user || {};
-      const userId = ctx.from?.id;
-
-      // Check access (PRIME or Admin for pre-launch testing)
-      if (!hasFullAccess(user, userId)) {
-        const message = lang === 'es'
-          ? '🔒 *Función PRIME*\n\nLas videollamadas requieren membresía PRIME.'
-          : '🔒 *PRIME Feature*\n\nVideo calls require PRIME membership.';
-
-        await safeReplyOrEdit(ctx, message, {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback(lang === 'es' ? '💎 Ver Planes' : '💎 View Plans', 'show_subscription_plans')],
-            [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'hangouts_menu')],
-          ]),
-        });
-        return;
-      }
-
-      // Rate limit check (max 5 calls per hour)
-      const allowed = await consumeRateLimit(userId.toString(), 'videocall');
-      if (!allowed) {
-        const rateLimitInfo = await getRateLimitInfo(userId.toString(), 'videocall');
-        const waitTime = rateLimitInfo?.resetIn || 1800;
-        const waitMinutes = Math.ceil(waitTime / 60);
-
-        const message = lang === 'es'
-          ? `⏱ *Límite Alcanzado*\n\nHas creado demasiadas llamadas. Por favor espera ${waitMinutes} minutos antes de crear otra.`
-          : `⏱ *Limit Reached*\n\nYou've created too many calls. Please wait ${waitMinutes} minutes before creating another.`;
-
-        await safeReplyOrEdit(ctx, message, {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback(lang === 'es' ? '📋 Mis Llamadas' : '📋 My Calls', 'my_active_calls')],
-            [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'hangouts_menu')],
-          ]),
-        });
-        return;
-      }
-
-      // Create the call
-      const call = await VideoCallModel.create({
-        creatorId: ctx.from.id,
-        creatorName: ctx.from.first_name || ctx.from.username || 'User',
-        isPublic: false,
-        maxParticipants: 10,
-      });
-
-      const displayName = ctx.from.first_name || ctx.from.username || 'User';
-
-      // Generate WebApp URL for the hangout
-      const webAppUrl = buildHangoutsWebAppUrl({
-        baseUrl: HANGOUTS_WEB_APP_URL,
-        room: call.channelName,
-        token: call.rtcToken,
-        uid: ctx.from.id,
-        username: displayName,
-        type: call.isPublic ? 'public' : 'private',
-        appId: call.appId,
-        callId: call.id,
-      });
-
-      const joinLink = `https://t.me/${ctx.botInfo.username}?start=call_${call.id}`;
-
-      const message = lang === 'es'
-        ? `✅ *¡Videollamada Creada!*\n\n` +
-          `👥 Capacidad: 0/10 personas\n` +
-          `🔗 Comparte: \`${joinLink}\`\n\n` +
-          `Usa el botón para entrar:`
-        : `✅ *Video Call Created!*\n\n` +
-          `👥 Capacity: 0/10 people\n` +
-          `🔗 Share: \`${joinLink}\`\n\n` +
-          `Use the button below to join:`;
-
-      await safeReplyOrEdit(ctx, message, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.webApp(lang === 'es' ? '📱 Entrar' : '📱 Join Call', webAppUrl)],
-          [Markup.button.callback(lang === 'es' ? '❌ Terminar Llamada' : '❌ End Call', `end_call_${call.id}`)],
-          [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'hangouts_menu')],
-        ]),
-      });
-
-      logger.info('Video call created', { callId: call.id, creatorId: ctx.from.id });
-    } catch (error) {
-      logger.error('Error creating video call:', error);
-      const lang = ctx.session?.language || 'en';
-      await ctx.answerCbQuery(
-        lang === 'es' ? '❌ Error creando llamada' : '❌ Error creating call',
-        { show_alert: true }
-      );
-    }
-  });
-
-  /**
-   * End a video call (creator only)
-   */
+  // Legacy actions now redirected or disabled
+  bot.action('create_video_call', showHangoutsMenu);
+  bot.action('my_active_calls', showHangoutsMenu);
+  bot.action(/^view_call_(.+)$/, showHangoutsMenu);
   bot.action(/^end_call_(.+)$/, async (ctx) => {
-    try {
-      const callId = ctx.match[1];
-      const lang = ctx.session?.language || 'en';
-
-      await VideoCallModel.endCall(callId, ctx.from.id);
-
-      await ctx.answerCbQuery(
-        lang === 'es' ? '✅ Llamada terminada' : '✅ Call ended',
-        { show_alert: true }
-      );
-
-      // Return to hangouts menu
-      await ctx.editMessageText(
-        lang === 'es' ? '📞 Llamada terminada. Volviendo al menú...' : '📞 Call ended. Returning to menu...',
-        {
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback(lang === 'es' ? '📞 Hangouts' : '📞 Hangouts', 'hangouts_menu')],
-          ]),
-        }
-      );
-    } catch (error) {
-      logger.error('Error ending call:', error);
-      const lang = ctx.session?.language || 'en';
-      await ctx.answerCbQuery(
-        lang === 'es' ? '❌ Error terminando llamada' : '❌ Error ending call',
-        { show_alert: true }
-      );
-    }
-  });
-
-  /**
-   * Delete a video call (creator only, when empty)
-   */
-  bot.action(/^delete_call_(.+)$/, async (ctx) => {
-    try {
-      const callId = ctx.match[1];
-      const lang = ctx.session?.language || 'en';
-
-      await VideoCallModel.deleteCall(callId, ctx.from.id);
-
-      await ctx.answerCbQuery(
-        lang === 'es' ? '✅ Llamada eliminada' : '✅ Call deleted',
-        { show_alert: true }
-      );
-
-      // Return to active calls
-      await showActiveCalls(ctx);
-    } catch (error) {
-      logger.error('Error deleting call:', error);
-      const lang = ctx.session?.language || 'en';
-      await ctx.answerCbQuery(
-        error.message.includes('active participants')
-          ? (lang === 'es' ? '❌ No se puede eliminar con participantes activos' : '❌ Cannot delete with active participants')
-          : (lang === 'es' ? '❌ Error eliminando llamada' : '❌ Error deleting call'),
-        { show_alert: true }
-      );
-    }
-  });
-
-  /**
-   * Show user's active calls
-   */
-  bot.action('my_active_calls', async (ctx) => {
-    await showActiveCalls(ctx);
-  });
-
-  async function showActiveCalls(ctx) {
-    try {
-      await ctx.answerCbQuery();
-      const lang = ctx.session?.language || 'en';
-
-      const calls = await VideoCallModel.getActiveByCreator(ctx.from.id);
-
-      if (calls.length === 0) {
-        const message = lang === 'es'
-          ? '📋 *Mis Llamadas Activas*\n\nNo tienes llamadas activas.'
-          : '📋 *My Active Calls*\n\nYou have no active calls.';
-
-        await safeReplyOrEdit(ctx, message, {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback(lang === 'es' ? '🎥 Crear Llamada' : '🎥 Create Call', 'create_video_call')],
-            [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'hangouts_menu')],
-          ]),
-        });
-        return;
-      }
-
-      const callButtons = calls.map(call => {
-        const label = `📞 ${call.title || 'Call'} (${call.currentParticipants}/${call.maxParticipants})`;
-        return [Markup.button.callback(label, `view_call_${call.id}`)];
-      });
-
-      const message = lang === 'es'
-        ? `📋 *Mis Llamadas Activas*\n\nTienes ${calls.length} llamada(s) activa(s):`
-        : `📋 *My Active Calls*\n\nYou have ${calls.length} active call(s):`;
-
-      await safeReplyOrEdit(ctx, message, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          ...callButtons,
-          [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'hangouts_menu')],
-        ]),
-      });
-    } catch (error) {
-      logger.error('Error showing active calls:', error);
-    }
-  }
-
-  /**
-   * View call details
-   */
-  bot.action(/^view_call_(.+)$/, async (ctx) => {
-    try {
-      const callId = ctx.match[1];
-      const lang = ctx.session?.language || 'en';
-      await ctx.answerCbQuery();
-      const displayName = ctx.from.first_name || ctx.from.username || 'User';
-
-      const joinResult = await VideoCallModel.joinCall(
-        callId,
-        ctx.from.id,
-        displayName,
-        false
-      );
-
-      const call = joinResult.call;
-      const participantCount = call.currentParticipants + (joinResult.alreadyJoined ? 0 : 1);
-
-      // Check if user is creator (moderator)
-      const isModerator = call.creatorId === ctx.from.id;
-
-      const webAppUrl = buildHangoutsWebAppUrl({
-        baseUrl: HANGOUTS_WEB_APP_URL,
-        room: call.channelName,
-        token: joinResult.rtcToken,
-        uid: ctx.from.id,
-        username: displayName,
-        type: call.isPublic ? 'public' : 'private',
-        appId: joinResult.appId,
-        callId: call.id,
-      });
-      const joinLink = `https://t.me/${ctx.botInfo.username}?start=call_${call.id}`;
-
-      const message = lang === 'es'
-        ? `📞 *Detalles de Llamada*\n\n` +
-          `👥 Participantes: ${participantCount}/${call.maxParticipants}\n` +
-          `📅 Creada: ${new Date(call.createdAt).toLocaleString()}\n` +
-          `🔗 Compartir: \`${joinLink}\`\n\n` +
-          `Usa el botón para entrar:`
-        : `📞 *Call Details*\n\n` +
-          `👥 Participants: ${participantCount}/${call.maxParticipants}\n` +
-          `📅 Created: ${new Date(call.createdAt).toLocaleString()}\n` +
-          `🔗 Share: \`${joinLink}\`\n\n` +
-          `Use the button below to join:`;
-
-      await safeReplyOrEdit(ctx, message, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.webApp(lang === 'es' ? '📱 Entrar' : '📱 Join Call', webAppUrl)],
-          [Markup.button.callback(lang === 'es' ? '❌ Terminar' : '❌ End', `end_call_${call.id}`)],
-          [Markup.button.callback(lang === 'es' ? '🗑️ Eliminar' : '🗑️ Delete', `delete_call_${call.id}`)],
-          [Markup.button.callback(lang === 'es' ? '⬅️ Volver' : '⬅️ Back', 'my_active_calls')],
-        ]),
-      });
-    } catch (error) {
-      logger.error('Error viewing call:', error);
-      const lang = ctx.session?.language || 'en';
-      await ctx.answerCbQuery(
-        error.message.includes('full')
-          ? (lang === 'es' ? '❌ La llamada está llena' : '❌ Call is full')
-          : (lang === 'es' ? '❌ Error cargando llamada' : '❌ Error loading call'),
-        { show_alert: true }
-      );
-    }
+    const lang = ctx.session?.language || 'en';
+    await ctx.answerCbQuery(lang === 'es' ? 'Llamada terminada en la WebApp' : 'Call ended in WebApp', { show_alert: true });
   });
 
 };

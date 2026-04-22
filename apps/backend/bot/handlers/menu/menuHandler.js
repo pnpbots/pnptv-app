@@ -17,7 +17,6 @@ const {
 const { detectLanguage } = require('../../../utils/languageDetector');
 const { showProfile, showEditProfileMenu } = require('../user/profile');
 const UserModel = require('../../../models/userModel');
-const VideoCallModel = require('../../../models/videoCallModel');
 const { isPrimeUser, hasFullAccess } = require('../../utils/helpers');
 const UserService = require('../../../services/userService');
 const { buildHangoutsWebAppUrl } = require('../../utils/hangoutsWebApp');
@@ -731,52 +730,19 @@ async function handleDeepLinkHangouts(ctx, lang) {
 /**
  * Handle deep link to join a video call via /start call_<id>
  */
-async function handleDeepLinkCallJoin(ctx, lang, callId) {
-  const displayName = ctx.from.first_name || ctx.from.username || 'User';
+async function handleDeepLinkCallJoin(ctx, lang, _callId) {
+  const message = lang === 'es'
+    ? '🎥 *PNP Hangouts*\n\nLas videollamadas se movieron a la aplicación web.'
+    : '🎥 *PNP Hangouts*\n\nVideo calls have moved to the web app.';
 
-  try {
-    const joinResult = await VideoCallModel.joinCall(
-      callId,
-      ctx.from.id,
-      displayName,
-      false
-    );
+  const webAppUrl = buildHangoutsWebAppUrl({ baseUrl: HANGOUTS_WEB_APP_URL });
 
-    const call = joinResult.call;
-    const participantCount = call.currentParticipants + (joinResult.alreadyJoined ? 0 : 1);
-    const webAppUrl = buildHangoutsWebAppUrl({
-      baseUrl: HANGOUTS_WEB_APP_URL,
-      room: call.channelName,
-      token: joinResult.rtcToken,
-      uid: ctx.from.id,
-      username: displayName,
-      type: call.isPublic ? 'public' : 'private',
-      appId: joinResult.appId,
-      callId: call.id,
-    });
-
-    const message = lang === 'es'
-      ? `📞 *Unirse a Videollamada*\n\n` +
-        `Creada por: ${call.creatorName}\n` +
-        `👥 ${participantCount}/${call.maxParticipants} participantes\n\n` +
-        `Presiona el botón para entrar:`
-      : `📞 *Join Video Call*\n\n` +
-        `Created by: ${call.creatorName}\n` +
-        `👥 ${participantCount}/${call.maxParticipants} participants\n\n` +
-        `Tap the button to join:`;
-
-    await ctx.reply(message, {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.webApp(lang === 'es' ? '🚀 Entrar a Llamada' : '🚀 Join Call', webAppUrl)],
-      ]),
-    });
-  } catch (error) {
-    logger.error('Error joining call via deeplink:', error);
-    await ctx.reply(
-      lang === 'es' ? '❌ Error al unirse a la llamada.' : '❌ Error joining the call.'
-    );
-  }
+  await ctx.reply(message, {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([
+      [Markup.button.webApp(lang === 'es' ? '🚀 Abrir Hangouts' : '🚀 Open Hangouts', webAppUrl)],
+    ]),
+  });
 }
 
 /**

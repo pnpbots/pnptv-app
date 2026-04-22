@@ -2,7 +2,6 @@ const logger = require('../../../utils/logger');
 const { query, getClient } = require('../../../config/postgres');
 const { cache } = require('../../../config/redis');
 const AdminDashboardService = require('../../../services/adminDashboardService');
-const VideoCallModel = require('../../../models/videoCallModel');
 const SocialPostService = require('../../../services/socialPostService');
 
 // Escape LIKE/ILIKE metacharacters so user input cannot widen search patterns
