@@ -2278,8 +2278,8 @@ const muteGroupForUser = async (req, res) => {
 
   const { rowCount } = await query(
     `UPDATE hangout_group_members
-        SET is_user_muted = $3,
-            muted_until  = $4
+        SET is_user_muted  = $3,
+            user_mute_until = $4
       WHERE group_id = $1 AND user_id = $2`,
     [groupId, user.id, isMuted, mutedUntil]
   );
