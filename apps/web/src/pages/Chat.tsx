@@ -21,6 +21,11 @@ import {
   leaveHangoutGroup,
   deleteHangoutGroup,
   markGroupAsRead,
+  pinHangoutGroup,
+  muteHangoutGroupForUser,
+  archiveHangoutGroup,
+  forwardHangoutMessage,
+  getArchivedHangouts,
   joinHangoutGroup,
   discoverHangoutGroups,
   requestJoinGroup,
@@ -65,6 +70,7 @@ import {
   type JoinRequest,
   type SocialPostItem,
   type MessageReaction,
+  type ForwardTarget,
 } from "@/lib/api";
 import SocialPostCard from "@/components/social/SocialPostCard";
 import { PostComposer } from "@/components/PostComposer";
@@ -77,8 +83,10 @@ import { CreateEventModal } from "@/components/events/CreateEventModal";
 import { EventDetailModal } from "@/components/events";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
+import { MediaUploadButton } from "@/components/hangouts/MediaUploadButton";
 import { VideoCallButton } from "@/components/hangouts/VideoCallButton";
 import LiveKitCallDock from "@/components/hangouts/LiveKitCallDock";
+import { ForwardTargetPicker } from "@/components/forwarding/ForwardTargetPicker";
 
 type View = "list" | "chat";
 
@@ -132,6 +140,16 @@ function HangoutChatPanel({
   const [contextMenu, setContextMenu] = useState<{ msg: GroupMessage; x: number; y: number } | null>(null);
   const [showScrollFab, setShowScrollFab] = useState(false);
   const [unreadBelow, setUnreadBelow] = useState(0);
+  const [forwardingMsg, setForwardingMsg] = useState<GroupMessage | null>(null);
+
+  const handleForwardMessage = useCallback(
+    async (targets: ForwardTarget[], note?: string) => {
+      if (!forwardingMsg) return;
+      await forwardHangoutMessage(forwardingMsg.id, targets, note);
+      setForwardingMsg(null);
+    },
+    [forwardingMsg]
+  );
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
@@ -718,6 +736,15 @@ function HangoutChatPanel({
               </svg>
               Reply
             </button>
+            <button
+              onClick={() => { const msg = contextMenu.msg; setContextMenu(null); setForwardingMsg(msg); }}
+              className="w-full px-4 py-2.5 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+            >
+              <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 14l5.293-5.293a1 1 0 011.414 0L12 11m0 0l5-5m-5 5v9" transform="rotate(90 12 12)" />
+              </svg>
+              Forward
+            </button>
             {String(contextMenu.msg.user_id) === String(myId) && (
               <>
                 <button
@@ -926,6 +953,15 @@ function HangoutChatPanel({
           <img src={lightboxUrl} alt="" className="max-w-full max-h-full object-contain rounded-lg" />
         </div>
       )}
+
+      {/* Forward target picker — reusable picker for DM + hangout destinations */}
+      <ForwardTargetPicker
+        isOpen={!!forwardingMsg}
+        onClose={() => setForwardingMsg(null)}
+        onForward={handleForwardMessage}
+        title="Forward message"
+        subtitle={forwardingMsg?.content ? forwardingMsg.content.slice(0, 60) : undefined}
+      />
     </div>
   );
 }
@@ -944,6 +980,11 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [groups, setGroups] = useState<HangoutGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Archived list state + Active/Archived view toggle
+  const [listMode, setListMode] = useState<"active" | "archived">("active");
+  const [archivedGroups, setArchivedGroups] = useState<HangoutGroup[]>([]);
+  const [archivedLoading, setArchivedLoading] = useState(false);
 
   // Create group
   const [showCreate, setShowCreate] = useState(false);
@@ -1102,6 +1143,74 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setError(null);
     } catch {
       setError("Failed to load groups");
+    }
+  }, []);
+
+  const loadArchivedGroups = useCallback(async () => {
+    setArchivedLoading(true);
+    try {
+      const data = await getArchivedHangouts();
+      setArchivedGroups(data.groups || []);
+    } catch { /* silent */ }
+    setArchivedLoading(false);
+  }, []);
+
+  // Auto-load archived list when the tab is first opened
+  useEffect(() => {
+    if (listMode === "archived" && archivedGroups.length === 0) loadArchivedGroups();
+  }, [listMode, archivedGroups.length, loadArchivedGroups]);
+
+  // ─── Per-row actions: pin / mute / archive ──────────────────────────
+
+  const handleTogglePin = useCallback(async (group: HangoutGroup) => {
+    const next = !group.isPinned;
+    setGroups((prev) =>
+      prev
+        .map((g) => (g.id === group.id ? { ...g, isPinned: next } : g))
+        .sort((a, b) => Number(!!b.isPinned) - Number(!!a.isPinned))
+    );
+    setGroupCardMenuId(null);
+    try {
+      await pinHangoutGroup(group.id, next);
+    } catch {
+      setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, isPinned: !next } : g)));
+    }
+  }, []);
+
+  const handleToggleMute = useCallback(async (group: HangoutGroup) => {
+    const currentlyMuted = !!group.isUserMuted;
+    const until = currentlyMuted ? null : "forever";
+    setGroups((prev) =>
+      prev.map((g) => (g.id === group.id ? { ...g, isUserMuted: !currentlyMuted } : g))
+    );
+    setGroupCardMenuId(null);
+    try {
+      await muteHangoutGroupForUser(group.id, until);
+    } catch {
+      setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, isUserMuted: currentlyMuted } : g)));
+    }
+  }, []);
+
+  const handleToggleArchive = useCallback(async (group: HangoutGroup) => {
+    const next = !group.isArchived;
+    if (next) {
+      setGroups((prev) => prev.filter((g) => g.id !== group.id));
+      setArchivedGroups((prev) => [{ ...group, isArchived: true }, ...prev]);
+    } else {
+      setArchivedGroups((prev) => prev.filter((g) => g.id !== group.id));
+      setGroups((prev) => [{ ...group, isArchived: false }, ...prev]);
+    }
+    setGroupCardMenuId(null);
+    try {
+      await archiveHangoutGroup(group.id, next);
+    } catch {
+      if (next) {
+        setArchivedGroups((prev) => prev.filter((g) => g.id !== group.id));
+        setGroups((prev) => [{ ...group, isArchived: false }, ...prev]);
+      } else {
+        setGroups((prev) => prev.filter((g) => g.id !== group.id));
+        setArchivedGroups((prev) => [{ ...group, isArchived: true }, ...prev]);
+      }
     }
   }, []);
 
@@ -3260,8 +3369,36 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         </div>
       )}
 
+      {/* Active / Archived toggle */}
+      <div className="flex gap-1 p-1 rounded-lg mb-3" style={{ background: "rgba(255,255,255,0.04)" }}>
+        <button
+          type="button"
+          onClick={() => setListMode("active")}
+          className="flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          style={
+            listMode === "active"
+              ? { background: "#D4007A", color: "#fff" }
+              : { background: "transparent", color: "#8E8E93" }
+          }
+        >
+          Active
+        </button>
+        <button
+          type="button"
+          onClick={() => setListMode("archived")}
+          className="flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          style={
+            listMode === "archived"
+              ? { background: "#D4007A", color: "#fff" }
+              : { background: "transparent", color: "#8E8E93" }
+          }
+        >
+          Archived {archivedGroups.length > 0 && <span className="opacity-60">({archivedGroups.length})</span>}
+        </button>
+      </div>
+
       {/* Loading skeletons */}
-      {isLoading ? (
+      {(listMode === "active" ? isLoading : archivedLoading) ? (
         <div className="space-y-3" aria-label="Loading groups" aria-busy="true">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="glass-card-sm p-4 animate-pulse">
@@ -3275,7 +3412,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             </div>
           ))}
         </div>
-      ) : groups.length === 0 ? (
+      ) : (listMode === "active" ? groups : archivedGroups).length === 0 ? (
         /* Empty state */
         <div className="glass-card-sm p-8 text-center space-y-4">
           <div className="w-20 h-20 mx-auto rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(123,97,255,0.12))" }}>
@@ -3317,7 +3454,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       ) : (
         /* Group list */
         <div className="space-y-2">
-          {groups.map((group) => (
+          {(listMode === "active" ? groups : archivedGroups).map((group) => (
             <div
               key={group.id}
               onClick={() => openChat(group)}

@@ -12,7 +12,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { getXLoginUrl, getXStatus, sharePostToX, type XStatus } from "@/lib/api";
+import { getXLoginUrl, getXStatus, sharePostToX, getHangoutGroups, sharePostToHangouts, type XStatus, type HangoutGroup } from "@/lib/api";
 
 const APP_BASE = "https://pnptv.app";
 
@@ -51,6 +51,8 @@ export interface SharePostModalProps {
 
 type CopyState = "idle" | "copied" | "error";
 type XShareState = "idle" | "loading" | "success" | "error";
+type HangoutsLoadState = "idle" | "loading" | "loaded" | "error";
+type HangoutsShareState = "idle" | "sending" | "success" | "error";
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -77,6 +79,19 @@ export function SharePostModal({
   const [xShareError, setXShareError] = useState<string | null>(null);
   const [tweetUrl, setTweetUrl] = useState<string | null>(null);
 
+  // Hangouts section state
+  const [hangoutsExpanded, setHangoutsExpanded] = useState(false);
+  const [hangoutsLoadState, setHangoutsLoadState] = useState<HangoutsLoadState>("idle");
+  const [hangoutsLoadError, setHangoutsLoadError] = useState<string | null>(null);
+  const [hangoutGroups, setHangoutGroups] = useState<HangoutGroup[]>([]);
+  const [selectedHangoutIds, setSelectedHangoutIds] = useState<number[]>([]);
+  const [hangoutNote, setHangoutNote] = useState("");
+  const [hangoutsShareState, setHangoutsShareState] = useState<HangoutsShareState>("idle");
+  const [hangoutsShareError, setHangoutsShareError] = useState<string | null>(null);
+  const [hangoutsSharedCount, setHangoutsSharedCount] = useState(0);
+  // Tracks whether groups were fetched at least once this modal-open lifecycle
+  const hangoutsFetchedRef = useRef(false);
+
   // Focus management
   const firstButtonRef = useRef<HTMLButtonElement>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,6 +106,18 @@ export function SharePostModal({
     setXShareError(null);
     setTweetUrl(null);
     setCopyState("idle");
+
+    // Reset hangouts section for this modal-open lifecycle
+    setHangoutsExpanded(false);
+    setHangoutsLoadState("idle");
+    setHangoutsLoadError(null);
+    setHangoutGroups([]);
+    setSelectedHangoutIds([]);
+    setHangoutNote("");
+    setHangoutsShareState("idle");
+    setHangoutsShareError(null);
+    setHangoutsSharedCount(0);
+    hangoutsFetchedRef.current = false;
 
     getXStatus()
       .then((res) => {
@@ -165,6 +192,58 @@ export function SharePostModal({
       setXShareState("error");
     }
   }, [postId, xShareState]);
+
+  // ── Hangout helpers ───────────────────────────────────────────────────────
+
+  const loadHangoutGroups = useCallback(async () => {
+    if (hangoutsFetchedRef.current) return;
+    hangoutsFetchedRef.current = true;
+    setHangoutsLoadState("loading");
+    setHangoutsLoadError(null);
+    try {
+      const res = await getHangoutGroups();
+      const active = (res.groups || []).filter((g) => !g.isArchived);
+      setHangoutGroups(active);
+      setHangoutsLoadState("loaded");
+    } catch (err: unknown) {
+      setHangoutsLoadError(err instanceof Error ? err.message : "Failed to load hangouts");
+      setHangoutsLoadState("error");
+      hangoutsFetchedRef.current = false; // allow retry
+    }
+  }, []);
+
+  const handleToggleHangoutsSection = useCallback(() => {
+    setHangoutsExpanded((prev) => {
+      const next = !prev;
+      if (next) loadHangoutGroups();
+      return next;
+    });
+  }, [loadHangoutGroups]);
+
+  const handleToggleHangout = useCallback((id: number) => {
+    setSelectedHangoutIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 10) return prev;
+      return [...prev, id];
+    });
+  }, []);
+
+  const handleShareToHangouts = useCallback(async () => {
+    if (selectedHangoutIds.length === 0 || hangoutsShareState === "sending") return;
+    setHangoutsShareState("sending");
+    setHangoutsShareError(null);
+    try {
+      const res = await sharePostToHangouts(postId, selectedHangoutIds, hangoutNote || undefined);
+      const sent = res.results.filter((r) => r.status === "sent").length;
+      setHangoutsSharedCount(sent);
+      setHangoutsShareState("success");
+      setHangoutsExpanded(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to share to hangouts";
+      setHangoutsShareError(msg);
+      setHangoutsShareState("error");
+    }
+  }, [postId, selectedHangoutIds, hangoutNote, hangoutsShareState]);
 
   const handleNativeShare = useCallback(async () => {
     const displayName = authorName || "Someone";
@@ -425,6 +504,275 @@ export function SharePostModal({
     );
   };
 
+  // ── Hangouts section renderer ─────────────────────────────────────────────
+
+  const renderHangoutsSection = () => {
+    const isSuccess = hangoutsShareState === "success";
+
+    // Post-share success pill (collapsed)
+    if (isSuccess) {
+      return (
+        <div
+          className="flex items-center gap-3 p-3 rounded-xl"
+          style={{ background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.2)" }}
+        >
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "rgba(52,199,89,0.15)" }}
+          >
+            <svg className="w-4 h-4" style={{ color: "#34C759" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold" style={{ color: "#34C759" }}>
+              Shared to {hangoutsSharedCount} hangout{hangoutsSharedCount !== 1 ? "s" : ""}!
+            </p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>
+              Your post was forwarded to the selected hangouts
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        {/* Expand / collapse header button */}
+        <button
+          type="button"
+          onClick={handleToggleHangoutsSection}
+          className="w-full flex items-center gap-3 p-3 rounded-xl transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+          aria-expanded={hangoutsExpanded}
+          aria-label="Share to hangouts — expand section"
+        >
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "rgba(123,97,255,0.12)" }}
+          >
+            {/* Hangout / users icon */}
+            <svg className="w-4 h-4" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0 text-left">
+            <p className="text-sm font-semibold text-white">Share to Hangouts</p>
+            <p className="text-xs" style={{ color: "#8E8E93" }}>
+              Forward this post to your hangout groups
+            </p>
+          </div>
+          {/* Chevron */}
+          <svg
+            className="w-4 h-4 flex-shrink-0 transition-transform duration-200"
+            style={{ color: "#555", transform: hangoutsExpanded ? "rotate(180deg)" : "rotate(0deg)" }}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {/* Expanded panel */}
+        {hangoutsExpanded && (
+          <div className="mt-2 space-y-2">
+            {/* List area */}
+            <div
+              className="rounded-xl overflow-hidden"
+              style={{ border: "1px solid rgba(255,255,255,0.08)" }}
+            >
+              {hangoutsLoadState === "loading" ? (
+                <div className="space-y-0" aria-label="Loading hangouts" aria-busy="true">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2.5 p-2.5 animate-pulse"
+                      style={{ borderBottom: i < 2 ? "1px solid rgba(255,255,255,0.05)" : undefined }}
+                    >
+                      <div className="w-9 h-9 rounded-lg flex-shrink-0" style={{ background: "rgba(255,255,255,0.07)" }} />
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-3 rounded" style={{ background: "rgba(255,255,255,0.07)", width: "55%" }} />
+                        <div className="h-2.5 rounded" style={{ background: "rgba(255,255,255,0.04)", width: "35%" }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : hangoutsLoadState === "error" ? (
+                <div className="flex items-center justify-between gap-2 px-3 py-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#FF453A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                    </svg>
+                    <p className="text-xs truncate" style={{ color: "#FF453A" }}>
+                      {hangoutsLoadError}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { hangoutsFetchedRef.current = false; loadHangoutGroups(); }}
+                    className="text-xs font-medium flex-shrink-0 hover:opacity-80 transition-opacity"
+                    style={{ color: "#FF453A" }}
+                    aria-label="Retry loading hangouts"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : hangoutGroups.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-6 px-3 text-center">
+                  <svg className="w-6 h-6 mb-2" style={{ color: "#555" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                  </svg>
+                  <p className="text-sm" style={{ color: "#8E8E93" }}>
+                    You're not a member of any hangouts yet
+                  </p>
+                </div>
+              ) : (
+                <div
+                  className="max-h-[36vh] overflow-y-auto"
+                  role="listbox"
+                  aria-multiselectable="true"
+                  aria-label="Select hangouts to share to"
+                >
+                  {hangoutGroups.map((g, idx) => {
+                    const isChecked = selectedHangoutIds.includes(g.id);
+                    const isDisabled = !isChecked && selectedHangoutIds.length >= 10;
+                    const initial = g.name.charAt(0).toUpperCase();
+                    return (
+                      <button
+                        key={g.id}
+                        type="button"
+                        role="option"
+                        aria-selected={isChecked}
+                        aria-disabled={isDisabled}
+                        aria-label={`${isChecked ? "Deselect" : "Select"} hangout: ${g.name}`}
+                        onClick={() => handleToggleHangout(g.id)}
+                        disabled={isDisabled}
+                        className="w-full flex items-center gap-2.5 px-2.5 py-2 transition-all active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed"
+                        style={{
+                          borderBottom: idx < hangoutGroups.length - 1 ? "1px solid rgba(255,255,255,0.05)" : undefined,
+                          background: isChecked ? "rgba(123,97,255,0.10)" : "transparent",
+                        }}
+                      >
+                        {g.avatarUrl ? (
+                          <img
+                            src={g.avatarUrl}
+                            alt=""
+                            className="w-9 h-9 rounded-lg object-cover flex-shrink-0"
+                          />
+                        ) : (
+                          <div
+                            className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
+                            style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)", color: "#fff" }}
+                          >
+                            {initial}
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0 text-left">
+                          <p className="text-sm font-medium text-white truncate">{g.name}</p>
+                          {g.memberCount > 0 && (
+                            <p className="text-xs" style={{ color: "#8E8E93" }}>
+                              {g.memberCount} member{g.memberCount !== 1 ? "s" : ""}
+                            </p>
+                          )}
+                        </div>
+                        <div
+                          className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors"
+                          style={
+                            isChecked
+                              ? { background: "#7B61FF" }
+                              : { background: "transparent", border: "1.5px solid rgba(255,255,255,0.25)" }
+                          }
+                          aria-hidden="true"
+                        >
+                          {isChecked && (
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} aria-hidden="true">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Note textarea — only shown when there are groups to share to */}
+            {hangoutsLoadState === "loaded" && hangoutGroups.length > 0 && (
+              <>
+                <textarea
+                  value={hangoutNote}
+                  onChange={(e) => setHangoutNote(e.target.value.slice(0, 500))}
+                  rows={2}
+                  placeholder="Add a message (optional)"
+                  aria-label="Optional note to send with the post"
+                  className="w-full text-sm text-white rounded-lg px-3 py-2 outline-none resize-none"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                />
+                <div className="flex justify-between text-[10px] px-1" style={{ color: "#555" }}>
+                  <span>{selectedHangoutIds.length}/10 selected</span>
+                  <span>{hangoutNote.length}/500</span>
+                </div>
+
+                {/* Share error inline */}
+                {hangoutsShareState === "error" && hangoutsShareError && (
+                  <div className="flex items-center gap-2 px-1">
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#FF453A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                    </svg>
+                    <p className="text-xs flex-1 min-w-0" style={{ color: "#FF453A" }}>
+                      {hangoutsShareError}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => { setHangoutsShareState("idle"); setHangoutsShareError(null); }}
+                      className="text-xs font-medium flex-shrink-0 hover:opacity-80 transition-opacity"
+                      style={{ color: "#FF453A" }}
+                      aria-label="Dismiss error and retry"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {/* Submit button */}
+                <button
+                  type="button"
+                  onClick={handleShareToHangouts}
+                  disabled={selectedHangoutIds.length === 0 || hangoutsShareState === "sending"}
+                  className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+                  style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)" }}
+                  aria-label={
+                    selectedHangoutIds.length === 0
+                      ? "Select at least one hangout"
+                      : `Share to ${selectedHangoutIds.length} hangout${selectedHangoutIds.length !== 1 ? "s" : ""}`
+                  }
+                >
+                  {hangoutsShareState === "sending" ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Sending…
+                    </span>
+                  ) : selectedHangoutIds.length === 0 ? (
+                    "Select a hangout"
+                  ) : (
+                    `Share to ${selectedHangoutIds.length} hangout${selectedHangoutIds.length !== 1 ? "s" : ""}`
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -517,6 +865,9 @@ export function SharePostModal({
 
         {/* Share to X */}
         {renderXRow()}
+
+        {/* Share to Hangouts */}
+        {renderHangoutsSection()}
 
         {/* Native Share API — only shown when available */}
         {typeof navigator !== "undefined" && "share" in navigator && (
