@@ -710,7 +710,7 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange }: Her
         display: "flex",
         flexDirection: "column",
         overflowX: "hidden",
-        paddingBottom: 100,
+        paddingBottom: 200, // clearance for stacked pills + legal + CTA footer
       }}
     >
       {/* Ambient glow */}
@@ -951,20 +951,80 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange }: Her
         </p>
       </div>
 
-      {/* Sticky footer CTA */}
+      {/* Sticky footer: nav pills + legal + CTA button, stacked */}
       <div
         style={{
           position: "fixed",
           bottom: 0,
           left: 0,
           width: "100%",
-          padding: "16px 20px 20px",
           background:
-            "linear-gradient(to top, rgba(18,13,20,0.98) 70%, transparent)",
+            "linear-gradient(to top, rgba(18,13,20,0.98) 50%, rgba(18,13,20,0.9) 85%, transparent)",
           zIndex: 50,
           boxSizing: "border-box",
+          paddingBottom: "max(16px, env(safe-area-inset-bottom))",
         }}
       >
+        {/* Pill nav — horizontal scroll */}
+        <nav style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }} aria-label="Explore PNPtv">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", width: "max-content" }}>
+            {NAV_ITEMS.map((item) => (
+              <a
+                key={item.id}
+                href={`/landing?sheet=${item.id}`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "6px 12px",
+                  borderRadius: 9999,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  color: "#cfcfd4",
+                  textDecoration: "none",
+                  flexShrink: 0,
+                  background: "rgba(18,13,20,0.6)",
+                }}
+              >
+                <span>{item.emoji}</span>
+                <span>{item.label}</span>
+              </a>
+            ))}
+          </div>
+        </nav>
+
+        {/* Legal links */}
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "center",
+            columnGap: 12,
+            rowGap: 2,
+            padding: "4px 16px 8px",
+          }}
+        >
+          {LEGAL_LINKS.map((l) => (
+            <a
+              key={l.href}
+              href={l.href}
+              style={{
+                fontSize: 10,
+                color: "rgba(207,207,212,0.5)",
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {l.label}
+            </a>
+          ))}
+        </div>
+
+        {/* CTA button container */}
+        <div style={{ padding: "4px 20px 0" }}>
         <button
           onClick={handleCtaClick}
           disabled={availabilityLoading || isClosed}
@@ -1015,6 +1075,7 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange }: Her
             ? s.ctaSoldOut
             : s.ctaGetAccess}
         </button>
+        </div>
       </div>
 
       {/* Modals */}
@@ -1253,15 +1314,12 @@ export default function Lifetime100() {
   }
 
   return (
-    <>
-      <HeroView
-        s={s}
-        available={available}
-        availabilityLoading={availabilityLoading}
-        lang={lang}
-        onLangChange={handleLangChange}
-      />
-      <NavFooter />
-    </>
+    <HeroView
+      s={s}
+      available={available}
+      availabilityLoading={availabilityLoading}
+      lang={lang}
+      onLangChange={handleLangChange}
+    />
   );
 }
