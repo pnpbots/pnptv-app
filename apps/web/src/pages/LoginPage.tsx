@@ -5,6 +5,8 @@ import { getI18n, getLang } from "@/lib/i18n";
 import { useAuth } from "@/hooks/useAuth";
 
 const AUTHENTIK_URL = import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app";
+const ENROLLMENT_FLOW_URL = `${AUTHENTIK_URL}/if/flow/pnptv-enrollment/`;
+const RECOVERY_FLOW_URL = `${AUTHENTIK_URL}/if/flow/pnptv-recovery/`;
 
 // Strip leading '@' if present (BotFather usernames may be stored with it)
 function getBotUsername(): string {
@@ -163,6 +165,34 @@ export function LoginPage() {
     return map[method] ?? null;
   };
 
+  // Email capture for signup
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupEmailError, setSignupEmailError] = useState<string | null>(null);
+  const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
+
+  const handleCreateAccount = (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = signupEmail.trim();
+    if (!email) {
+      setSignupEmailError(t.emailRequiredForSignup);
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setSignupEmailError(t.emailInvalid);
+      return;
+    }
+    setSignupEmailError(null);
+    // Persist so Settings / downstream can pick it up, and pre-fill Authentik
+    try { localStorage.setItem("pnptv_signup_email", email); } catch { /* ignore */ }
+    const url = `${ENROLLMENT_FLOW_URL}?email=${encodeURIComponent(email)}`;
+    window.location.href = url;
+  };
+
+  const handleCreateAccountNoEmail = () => {
+    // Fallback: user clicks CTA without filling email
+    window.location.href = ENROLLMENT_FLOW_URL;
+  };
+
   const [oidcLoading, setOidcLoading] = useState(false);
 
   type WidgetStatus = "idle" | "verifying" | "error";
@@ -212,10 +242,11 @@ export function LoginPage() {
   }, []);
 
   const label = methodLabel(lastMethod);
+  const returningUser = !!label;
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden"
+      className="min-h-screen flex items-center justify-center px-4 py-8 relative overflow-hidden"
       style={{ background: "#121212" }}
     >
       {/* Background glows */}
@@ -228,62 +259,116 @@ export function LoginPage() {
         style={{ background: "radial-gradient(circle, #E69138, transparent 70%)" }}
       />
 
-      <div className="glass-card neon-glow animate-subtle-glow w-full max-w-md p-8 sm:p-10 relative z-10 animate-fade-in-up">
+      <div className="glass-card neon-glow animate-subtle-glow w-full max-w-md p-6 sm:p-8 relative z-10 animate-fade-in-up">
         {/* Logo + tagline */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-5">
           <img
             src="/logo-login.png"
             alt="PNPtv!"
-            className="w-64 sm:w-72 h-auto mx-auto"
+            className="w-48 sm:w-56 h-auto mx-auto"
           />
           <p
-            className="text-sm mt-4 font-medium"
+            className="text-xs mt-2 font-medium"
             style={{ color: "#E69138" }}
           >
             {t.tagline}
           </p>
         </div>
 
-        <div className="space-y-5">
-          {/* Last login method indicator */}
-          {label && (
-            <p className="text-center text-xs text-pnp-textSecondary">
-              {t.lastLoginedWith}{" "}
-              <span className="font-semibold text-white">{label}</span>
-              {lastUsername ? ` (@${lastUsername})` : ""}
-            </p>
-          )}
+        {/* Lifetime deal banner */}
+        <a
+          href="/subscribe?plan=lifetime"
+          className="block rounded-xl p-3 mb-4 text-center transition-all hover:brightness-110 active:scale-[0.98]"
+          style={{
+            background: "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))",
+            border: "1px solid rgba(230,145,56,0.35)",
+          }}
+        >
+          <div className="flex items-center justify-center gap-2">
+            <span
+              className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+              style={{ background: "#E69138", color: "#121212" }}
+            >
+              {t.lifetimeDealLabel}
+            </span>
+          </div>
+          <p className="text-sm font-bold text-white mt-1.5">
+            {t.lifetimeDealTitle}
+          </p>
+          <p className="text-[11px] mt-0.5" style={{ color: "#E69138" }}>
+            {t.lifetimeDealSub} <span className="font-semibold">{t.lifetimeDealCta}</span>
+          </p>
+        </a>
 
-          {/* Primary CTA — PNPtv ID */}
+        {/* Feature badges — 3-up */}
+        <div className="grid grid-cols-3 gap-2 mb-5">
+          {t.featureBadges.map((b) => (
+            <div
+              key={b.title}
+              className="rounded-lg px-2 py-2 text-center"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
+            >
+              <p className="text-[11px] font-bold text-white leading-tight">{b.title}</p>
+              <p className="text-[9px] mt-0.5" style={{ color: "#8E8E93" }}>{b.sub}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* ── PRIMARY: Join + email capture ─────────────────────────────── */}
+        <form onSubmit={handleCreateAccount} noValidate className="space-y-3">
+          <div>
+            <h2 className="text-base font-bold text-white mb-2 text-center">
+              {t.joinHeadline}
+            </h2>
+            <input
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              value={signupEmail}
+              onChange={(e) => { setSignupEmail(e.target.value); setSignupEmailError(null); }}
+              placeholder={t.emailPlaceholder}
+              aria-label={t.emailPlaceholder}
+              aria-invalid={!!signupEmailError}
+              aria-describedby={signupEmailError ? "signup-email-error" : undefined}
+              className="w-full py-3 px-4 rounded-xl text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 transition-all"
+              style={{
+                background: "rgba(255,255,255,0.06)",
+                border: signupEmailError ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.1)",
+              }}
+            />
+            {signupEmailError && (
+              <p id="signup-email-error" className="text-xs text-red-400 mt-1 px-1">
+                {signupEmailError}
+              </p>
+            )}
+          </div>
           <button
-            onClick={handleOidcLogin}
-            disabled={oidcLoading}
-            className="w-full py-3.5 px-6 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+            type="submit"
+            className="w-full py-3.5 px-6 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white transition-all hover:brightness-110 active:scale-[0.98]"
             style={{
-              background: oidcLoading
-                ? "linear-gradient(135deg, #a0005e, #b87020)"
-                : "linear-gradient(135deg, #D4007A, #E69138)",
+              background: "linear-gradient(135deg, #D4007A, #E69138)",
               boxShadow: "0 0 24px rgba(212, 0, 122, 0.4)",
             }}
           >
-            {oidcLoading ? (
-              <Spinner className="h-5 w-5" />
-            ) : (
-              <ShieldIcon />
-            )}
-            <span>{t.signInWithPnptvId}</span>
+            <span>{t.createMyAccount}</span>
+            <span aria-hidden="true">→</span>
           </button>
+          <p className="text-center text-[11px]" style={{ color: "#8E8E93" }}>
+            {t.freeTakes30s}
+          </p>
+        </form>
 
-          {/* Divider */}
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-white/10" />
-            <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">
-              {t.orContinueWith}
-            </span>
-            <div className="flex-1 h-px bg-white/10" />
-          </div>
+        {/* Divider */}
+        <div className="flex items-center gap-3 my-5">
+          <div className="flex-1 h-px bg-white/10" />
+          <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">
+            {t.orContinueWith}
+          </span>
+          <div className="flex-1 h-px bg-white/10" />
+        </div>
 
-          {/* Secondary — Telegram widget */}
+        {/* Telegram widget — great for returning Telegram users */}
+        <div>
           {widgetStatus === "verifying" && (
             <div className="flex items-center justify-center gap-3 py-4 text-white text-sm font-medium">
               <Spinner />
@@ -296,29 +381,66 @@ export function LoginPage() {
               onLoadError={handleWidgetLoadError}
             />
           </div>
+          <p className="text-center text-[11px] mt-2" style={{ color: "#8E8E93" }}>
+            {t.recommendedForBot}
+          </p>
           {widgetStatus === "error" && widgetError && (
-            <p className="text-center text-xs text-red-400">{widgetError}</p>
+            <p className="text-center text-xs text-red-400 mt-2">{widgetError}</p>
           )}
           {widgetBlocked && (
-            <p className="text-center text-xs" style={{ color: "#8E8E93" }}>
+            <p className="text-center text-xs mt-2" style={{ color: "#8E8E93" }}>
               {t.telegramWidgetBlocked}
             </p>
           )}
+        </div>
 
-          {/* Create account link */}
-          <p className="text-center text-xs text-pnp-textSecondary pt-1">
-            {t.noAccountPrompt}{" "}
+        {/* ── SECONDARY: already a member? ──────────────────────────────── */}
+        <div className="mt-6 pt-5 border-t border-white/10">
+          <p className="text-center text-xs text-pnp-textSecondary mb-3">
+            {t.alreadyMember}
+          </p>
+          {returningUser && (
+            <p className="text-center text-[11px] mb-2" style={{ color: "#8E8E93" }}>
+              {t.lastLoginedWith}{" "}
+              <span className="font-semibold text-white">{label}</span>
+              {lastUsername ? ` (@${lastUsername})` : ""}
+            </p>
+          )}
+          <button
+            onClick={handleOidcLogin}
+            disabled={oidcLoading}
+            className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all hover:bg-white/10 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              color: "#FFFFFF",
+            }}
+          >
+            {oidcLoading ? <Spinner className="h-4 w-4" /> : <ShieldIcon />}
+            <span>{t.signInWithEmail}</span>
+          </button>
+          <p className="text-center text-[10px] mt-1.5" style={{ color: "#636366" }}>
+            {t.signInSubLabel}
+          </p>
+          <p className="text-center text-xs mt-3">
             <a
-              href={`${AUTHENTIK_URL}/if/flow/default-enrollment-flow/`}
-              className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all"
+              href={RECOVERY_FLOW_URL}
+              className="underline text-pnp-accent hover:brightness-125 transition-all"
             >
-              {t.createAccount}
+              {t.forgotPassword}
             </a>
           </p>
         </div>
 
+        {/* Signup fallback if they click without typing email — edge case kept accessible */}
+        <p className="sr-only">
+          <button type="button" onClick={handleCreateAccountNoEmail}>
+            {t.createAccount}
+          </button>
+        </p>
+
         {/* Legal footer */}
-        <div className="mt-8 pt-6 border-t border-white/5">
+        <div className="mt-6 pt-5 border-t border-white/5">
           <p className="text-center text-[10px] text-pnp-textSecondary mb-3">
             {t.legalPrefix}{" "}
             <a href="/terms" className="underline text-pnp-accent">

@@ -22,6 +22,18 @@ const strings = {
     noAccountPrompt: "Don't have an account?",
     createAccount: "Create one",
     lastLoginedWith: "Last logged in with",
+
+    // Signup-first layout
+    joinHeadline: "Join PNPtv today",
+    createMyAccount: "Create my account",
+    freeTakes30s: "Free. Takes 30 seconds.",
+    emailRequiredForSignup: "Please enter your email to continue",
+    emailInvalid: "That doesn't look like a valid email",
+    recommendedForBot: "Recommended if you joined via our Telegram bot",
+    alreadyMember: "Already a member?",
+    signInWithEmail: "Sign in with email & password",
+    signInSubLabel: "(for users with a PNPtv ID — not Telegram)",
+    forgotPassword: "Forgot password?",
     loginWithTelegram: "Login with Telegram",
     waitingForTelegram: "Waiting for Telegram...",
     telegramInstructions: "Open Telegram and press Start to log in",
@@ -109,6 +121,25 @@ const strings = {
     lifetimeDealSub: "Un solo pago. Sin renovaciones. Nunca vence.",
     lifetimeDealCta: "Obtenerlo →",
 
+    // Auth buttons
+    signInWithPnptvId: "Entrar con PNPtv ID",
+    orContinueWith: "o continuar con",
+    noAccountPrompt: "¿No tienes cuenta?",
+    createAccount: "Crear una",
+    lastLoginedWith: "Último acceso con",
+
+    // Signup-first layout
+    joinHeadline: "Únete a PNPtv hoy",
+    createMyAccount: "Crear mi cuenta",
+    freeTakes30s: "Gratis. En 30 segundos.",
+    emailRequiredForSignup: "Ingresa tu correo para continuar",
+    emailInvalid: "El correo no parece válido",
+    recommendedForBot: "Recomendado si te uniste por nuestro bot de Telegram",
+    alreadyMember: "¿Ya eres miembro?",
+    signInWithEmail: "Entrar con correo y contraseña",
+    signInSubLabel: "(para usuarios con PNPtv ID — no Telegram)",
+    forgotPassword: "¿Olvidaste tu contraseña?",
+
     loginWithTelegram: "Entrar con Telegram",
     waitingForTelegram: "Esperando Telegram...",
     telegramInstructions: "Abre Telegram y presiona Iniciar para entrar",
@@ -171,6 +202,25 @@ const strings = {
     lifetimeDealSub: "Um pagamento. Sem renovações. Nunca expira.",
     lifetimeDealCta: "Quero isso →",
 
+    // Auth buttons
+    signInWithPnptvId: "Entrar com PNPtv ID",
+    orContinueWith: "ou continuar com",
+    noAccountPrompt: "Não tem uma conta?",
+    createAccount: "Criar agora",
+    lastLoginedWith: "Último acesso com",
+
+    // Signup-first layout
+    joinHeadline: "Entre na PNPtv hoje",
+    createMyAccount: "Criar minha conta",
+    freeTakes30s: "Grátis. Em 30 segundos.",
+    emailRequiredForSignup: "Digite seu e-mail para continuar",
+    emailInvalid: "Esse e-mail não parece válido",
+    recommendedForBot: "Recomendado se você entrou pelo bot do Telegram",
+    alreadyMember: "Já é membro?",
+    signInWithEmail: "Entrar com e-mail e senha",
+    signInSubLabel: "(para usuários com PNPtv ID — não Telegram)",
+    forgotPassword: "Esqueceu a senha?",
+
     loginWithTelegram: "Entrar com Telegram",
     waitingForTelegram: "Aguardando Telegram...",
     telegramInstructions: "Abra o Telegram e pressione Iniciar para entrar",
@@ -231,6 +281,25 @@ const strings = {
     lifetimeDealTitle: "$100 — PRIME 永久访问权",
     lifetimeDealSub: "一次付款。无需续费。永不过期。",
     lifetimeDealCta: "立即获取 →",
+
+    // Auth buttons
+    signInWithPnptvId: "使用 PNPtv ID 登录",
+    orContinueWith: "或继续使用",
+    noAccountPrompt: "没有账号？",
+    createAccount: "立即创建",
+    lastLoginedWith: "上次登录方式",
+
+    // Signup-first layout
+    joinHeadline: "今天加入 PNPtv",
+    createMyAccount: "创建我的账号",
+    freeTakes30s: "免费，30 秒完成",
+    emailRequiredForSignup: "请输入邮箱以继续",
+    emailInvalid: "该邮箱格式无效",
+    recommendedForBot: "如果你通过 Telegram 机器人加入，推荐使用此方式",
+    alreadyMember: "已有账号？",
+    signInWithEmail: "使用邮箱和密码登录",
+    signInSubLabel: "（适用于拥有 PNPtv ID 的用户——非 Telegram 用户）",
+    forgotPassword: "忘记密码？",
 
     loginWithTelegram: "使用 Telegram 登录",
     waitingForTelegram: "等待 Telegram...",
@@ -293,6 +362,25 @@ const strings = {
     lifetimeDealSub: "一次付款。無需續約。永不過期。",
     lifetimeDealCta: "立即取得 →",
 
+    // Auth buttons
+    signInWithPnptvId: "使用 PNPtv ID 登入",
+    orContinueWith: "或繼續使用",
+    noAccountPrompt: "沒有帳號？",
+    createAccount: "立即建立",
+    lastLoginedWith: "上次登入方式",
+
+    // Signup-first layout
+    joinHeadline: "立即加入 PNPtv",
+    createMyAccount: "建立我的帳號",
+    freeTakes30s: "免費，30 秒完成",
+    emailRequiredForSignup: "請輸入電子郵件以繼續",
+    emailInvalid: "該電子郵件格式無效",
+    recommendedForBot: "如果您透過 Telegram 機器人加入，建議使用此方式",
+    alreadyMember: "已是會員？",
+    signInWithEmail: "使用電子郵件與密碼登入",
+    signInSubLabel: "（適用於擁有 PNPtv ID 的使用者——非 Telegram 使用者）",
+    forgotPassword: "忘記密碼？",
+
     loginWithTelegram: "使用 Telegram 登入",
     waitingForTelegram: "等待 Telegram...",
     telegramInstructions: "開啟 Telegram 並按開始以登入",
@@ -353,6 +441,25 @@ const strings = {
     lifetimeDealTitle: "$100 — accès PRIME à vie",
     lifetimeDealSub: "Un seul paiement. Sans renouvellement. Pour toujours.",
     lifetimeDealCta: "Je veux ça →",
+
+    // Auth buttons
+    signInWithPnptvId: "Se connecter avec PNPtv ID",
+    orContinueWith: "ou continuer avec",
+    noAccountPrompt: "Pas de compte ?",
+    createAccount: "Créer un compte",
+    lastLoginedWith: "Dernière connexion avec",
+
+    // Signup-first layout
+    joinHeadline: "Rejoignez PNPtv aujourd'hui",
+    createMyAccount: "Créer mon compte",
+    freeTakes30s: "Gratuit. En 30 secondes.",
+    emailRequiredForSignup: "Veuillez saisir votre e-mail",
+    emailInvalid: "L'e-mail ne semble pas valide",
+    recommendedForBot: "Recommandé si vous avez rejoint via notre bot Telegram",
+    alreadyMember: "Déjà membre ?",
+    signInWithEmail: "Se connecter avec e-mail et mot de passe",
+    signInSubLabel: "(pour les utilisateurs avec un PNPtv ID — pas Telegram)",
+    forgotPassword: "Mot de passe oublié ?",
 
     loginWithTelegram: "Se connecter avec Telegram",
     waitingForTelegram: "En attente de Telegram...",
@@ -415,6 +522,25 @@ const strings = {
     lifetimeDealSub: "Einmalige Zahlung. Keine Verlängerungen. Läuft nie ab.",
     lifetimeDealCta: "Jetzt sichern →",
 
+    // Auth buttons
+    signInWithPnptvId: "Mit PNPtv ID einloggen",
+    orContinueWith: "oder weiter mit",
+    noAccountPrompt: "Noch kein Konto?",
+    createAccount: "Konto erstellen",
+    lastLoginedWith: "Zuletzt eingeloggt mit",
+
+    // Signup-first layout
+    joinHeadline: "Tritt PNPtv heute bei",
+    createMyAccount: "Konto erstellen",
+    freeTakes30s: "Kostenlos. In 30 Sekunden.",
+    emailRequiredForSignup: "Bitte gib deine E-Mail ein",
+    emailInvalid: "Die E-Mail scheint ungültig zu sein",
+    recommendedForBot: "Empfohlen, wenn du über unseren Telegram-Bot beigetreten bist",
+    alreadyMember: "Bereits Mitglied?",
+    signInWithEmail: "Mit E-Mail und Passwort einloggen",
+    signInSubLabel: "(für Nutzer mit PNPtv ID — nicht Telegram)",
+    forgotPassword: "Passwort vergessen?",
+
     loginWithTelegram: "Mit Telegram einloggen",
     waitingForTelegram: "Warte auf Telegram...",
     telegramInstructions: "Öffne Telegram und drücke Start zum Einloggen",
@@ -475,6 +601,25 @@ const strings = {
     lifetimeDealTitle: "$100 — สิทธิ์ PRIME ตลอดชีพ",
     lifetimeDealSub: "จ่ายครั้งเดียว ไม่ต้องต่ออายุ ไม่มีวันหมดอายุ",
     lifetimeDealCta: "รับเลย →",
+
+    // Auth buttons
+    signInWithPnptvId: "เข้าสู่ระบบด้วย PNPtv ID",
+    orContinueWith: "หรือดำเนินการต่อด้วย",
+    noAccountPrompt: "ยังไม่มีบัญชี?",
+    createAccount: "สร้างบัญชี",
+    lastLoginedWith: "เข้าสู่ระบบครั้งล่าสุดด้วย",
+
+    // Signup-first layout
+    joinHeadline: "เข้าร่วม PNPtv วันนี้",
+    createMyAccount: "สร้างบัญชีของฉัน",
+    freeTakes30s: "ฟรี ใช้เวลา 30 วินาที",
+    emailRequiredForSignup: "กรุณากรอกอีเมลเพื่อดำเนินการต่อ",
+    emailInvalid: "รูปแบบอีเมลไม่ถูกต้อง",
+    recommendedForBot: "แนะนำถ้าคุณเข้าร่วมผ่านบอท Telegram ของเรา",
+    alreadyMember: "เป็นสมาชิกอยู่แล้ว?",
+    signInWithEmail: "เข้าสู่ระบบด้วยอีเมลและรหัสผ่าน",
+    signInSubLabel: "(สำหรับผู้ใช้ที่มี PNPtv ID — ไม่ใช่ Telegram)",
+    forgotPassword: "ลืมรหัสผ่าน?",
 
     loginWithTelegram: "เข้าสู่ระบบด้วย Telegram",
     waitingForTelegram: "รอ Telegram...",
@@ -537,6 +682,25 @@ const strings = {
     lifetimeDealSub: "Un solo pagamento. Nessun rinnovo. Non scade mai.",
     lifetimeDealCta: "Prendilo →",
 
+    // Auth buttons
+    signInWithPnptvId: "Accedi con PNPtv ID",
+    orContinueWith: "o continua con",
+    noAccountPrompt: "Non hai un account?",
+    createAccount: "Creane uno",
+    lastLoginedWith: "Ultimo accesso con",
+
+    // Signup-first layout
+    joinHeadline: "Unisciti a PNPtv oggi",
+    createMyAccount: "Crea il mio account",
+    freeTakes30s: "Gratis. In 30 secondi.",
+    emailRequiredForSignup: "Inserisci la tua e-mail per continuare",
+    emailInvalid: "L'e-mail non sembra valida",
+    recommendedForBot: "Consigliato se ti sei iscritto tramite il nostro bot Telegram",
+    alreadyMember: "Sei già membro?",
+    signInWithEmail: "Accedi con e-mail e password",
+    signInSubLabel: "(per utenti con PNPtv ID — non Telegram)",
+    forgotPassword: "Password dimenticata?",
+
     loginWithTelegram: "Accedi con Telegram",
     waitingForTelegram: "In attesa di Telegram...",
     telegramInstructions: "Apri Telegram e premi Avvia per accedere",
@@ -597,6 +761,25 @@ const strings = {
     lifetimeDealTitle: "$100 — ömür boyu PRIME erişimi",
     lifetimeDealSub: "Tek ödeme. Yenileme yok. Asla sona ermez.",
     lifetimeDealCta: "Hemen al →",
+
+    // Auth buttons
+    signInWithPnptvId: "PNPtv ID ile giriş yap",
+    orContinueWith: "veya şununla devam et",
+    noAccountPrompt: "Hesabın yok mu?",
+    createAccount: "Oluştur",
+    lastLoginedWith: "Son giriş yöntemi",
+
+    // Signup-first layout
+    joinHeadline: "Bugün PNPtv'ye katıl",
+    createMyAccount: "Hesabımı oluştur",
+    freeTakes30s: "Ücretsiz. 30 saniye sürer.",
+    emailRequiredForSignup: "Devam etmek için e-posta gir",
+    emailInvalid: "E-posta geçerli görünmüyor",
+    recommendedForBot: "Telegram botumuz üzerinden katıldıysan önerilir",
+    alreadyMember: "Zaten üye misin?",
+    signInWithEmail: "E-posta ve şifre ile giriş yap",
+    signInSubLabel: "(PNPtv ID'si olan kullanıcılar için — Telegram değil)",
+    forgotPassword: "Şifreni mi unuttun?",
 
     loginWithTelegram: "Telegram ile giriş yap",
     waitingForTelegram: "Telegram bekleniyor...",
@@ -659,6 +842,25 @@ const strings = {
     lifetimeDealSub: "Один платёж. Без продлений. Никогда не истекает.",
     lifetimeDealCta: "Получить →",
 
+    // Auth buttons
+    signInWithPnptvId: "Войти через PNPtv ID",
+    orContinueWith: "или продолжить через",
+    noAccountPrompt: "Нет аккаунта?",
+    createAccount: "Создать",
+    lastLoginedWith: "Последний вход",
+
+    // Signup-first layout
+    joinHeadline: "Присоединяйтесь к PNPtv",
+    createMyAccount: "Создать аккаунт",
+    freeTakes30s: "Бесплатно. За 30 секунд.",
+    emailRequiredForSignup: "Введите email для продолжения",
+    emailInvalid: "Неверный формат email",
+    recommendedForBot: "Рекомендуется, если вы вошли через наш Telegram-бот",
+    alreadyMember: "Уже участник?",
+    signInWithEmail: "Войти через email и пароль",
+    signInSubLabel: "(для пользователей с PNPtv ID — не Telegram)",
+    forgotPassword: "Забыли пароль?",
+
     loginWithTelegram: "Войти через Telegram",
     waitingForTelegram: "Ожидание Telegram...",
     telegramInstructions: "Откройте Telegram и нажмите Старт для входа",
@@ -719,6 +921,25 @@ const strings = {
     lifetimeDealTitle: "$100 — PRIME-toegang, voor altijd",
     lifetimeDealSub: "Eén betaling. Geen verlengingen. Verloopt nooit.",
     lifetimeDealCta: "Pak het →",
+
+    // Auth buttons
+    signInWithPnptvId: "Inloggen met PNPtv ID",
+    orContinueWith: "of ga door met",
+    noAccountPrompt: "Nog geen account?",
+    createAccount: "Aanmaken",
+    lastLoginedWith: "Laatst ingelogd met",
+
+    // Signup-first layout
+    joinHeadline: "Word vandaag lid van PNPtv",
+    createMyAccount: "Account aanmaken",
+    freeTakes30s: "Gratis. Duurt 30 seconden.",
+    emailRequiredForSignup: "Voer je e-mail in om door te gaan",
+    emailInvalid: "Dat lijkt geen geldig e-mailadres",
+    recommendedForBot: "Aanbevolen als je via onze Telegram-bot kwam",
+    alreadyMember: "Al lid?",
+    signInWithEmail: "Inloggen met e-mail en wachtwoord",
+    signInSubLabel: "(voor gebruikers met een PNPtv ID — niet Telegram)",
+    forgotPassword: "Wachtwoord vergeten?",
 
     loginWithTelegram: "Inloggen met Telegram",
     waitingForTelegram: "Wachten op Telegram...",
@@ -781,6 +1002,25 @@ const strings = {
     lifetimeDealSub: "Một lần thanh toán. Không gia hạn. Không bao giờ hết hạn.",
     lifetimeDealCta: "Lấy ngay →",
 
+    // Auth buttons
+    signInWithPnptvId: "Đăng nhập với PNPtv ID",
+    orContinueWith: "hoặc tiếp tục với",
+    noAccountPrompt: "Chưa có tài khoản?",
+    createAccount: "Tạo ngay",
+    lastLoginedWith: "Đăng nhập lần cuối với",
+
+    // Signup-first layout
+    joinHeadline: "Tham gia PNPtv hôm nay",
+    createMyAccount: "Tạo tài khoản của tôi",
+    freeTakes30s: "Miễn phí. Chỉ mất 30 giây.",
+    emailRequiredForSignup: "Vui lòng nhập email để tiếp tục",
+    emailInvalid: "Email không hợp lệ",
+    recommendedForBot: "Nên chọn nếu bạn đăng ký qua bot Telegram",
+    alreadyMember: "Đã là thành viên?",
+    signInWithEmail: "Đăng nhập bằng email và mật khẩu",
+    signInSubLabel: "(dành cho người dùng có PNPtv ID — không phải Telegram)",
+    forgotPassword: "Quên mật khẩu?",
+
     loginWithTelegram: "Đăng nhập bằng Telegram",
     waitingForTelegram: "Đang chờ Telegram...",
     telegramInstructions: "Mở Telegram và nhấn Bắt đầu để đăng nhập",
@@ -841,6 +1081,25 @@ const strings = {
     lifetimeDealTitle: "$100 — PRIME 永久アクセス",
     lifetimeDealSub: "一回払い。更新不要。永久に有効。",
     lifetimeDealCta: "今すぐ手に入れる →",
+
+    // Auth buttons
+    signInWithPnptvId: "PNPtv ID でログイン",
+    orContinueWith: "または次の方法で続行",
+    noAccountPrompt: "アカウントをお持ちでない？",
+    createAccount: "作成する",
+    lastLoginedWith: "前回のログイン方法",
+
+    // Signup-first layout
+    joinHeadline: "今すぐ PNPtv に参加",
+    createMyAccount: "アカウントを作成",
+    freeTakes30s: "無料。30秒で完了。",
+    emailRequiredForSignup: "メールアドレスを入力してください",
+    emailInvalid: "メールアドレスの形式が正しくありません",
+    recommendedForBot: "Telegram ボットから参加した方におすすめ",
+    alreadyMember: "すでにメンバーですか？",
+    signInWithEmail: "メールとパスワードでログイン",
+    signInSubLabel: "（PNPtv ID をお持ちの方 — Telegram は不可）",
+    forgotPassword: "パスワードをお忘れですか？",
 
     loginWithTelegram: "Telegram でログイン",
     waitingForTelegram: "Telegram を待っています...",
@@ -903,6 +1162,25 @@ const strings = {
     lifetimeDealSub: "Satu kali bayar. Tanpa perpanjangan. Tidak pernah kedaluwarsa.",
     lifetimeDealCta: "Dapatkan →",
 
+    // Auth buttons
+    signInWithPnptvId: "Masuk dengan PNPtv ID",
+    orContinueWith: "atau lanjutkan dengan",
+    noAccountPrompt: "Belum punya akun?",
+    createAccount: "Buat akun",
+    lastLoginedWith: "Terakhir masuk dengan",
+
+    // Signup-first layout
+    joinHeadline: "Bergabung dengan PNPtv hari ini",
+    createMyAccount: "Buat akun saya",
+    freeTakes30s: "Gratis. Hanya 30 detik.",
+    emailRequiredForSignup: "Masukkan email Anda untuk melanjutkan",
+    emailInvalid: "Format email tidak valid",
+    recommendedForBot: "Disarankan jika Anda bergabung lewat bot Telegram kami",
+    alreadyMember: "Sudah menjadi anggota?",
+    signInWithEmail: "Masuk dengan email dan kata sandi",
+    signInSubLabel: "(untuk pengguna dengan PNPtv ID — bukan Telegram)",
+    forgotPassword: "Lupa kata sandi?",
+
     loginWithTelegram: "Masuk dengan Telegram",
     waitingForTelegram: "Menunggu Telegram...",
     telegramInstructions: "Buka Telegram dan tekan Mulai untuk masuk",
@@ -963,6 +1241,25 @@ const strings = {
     lifetimeDealTitle: "$100 — وصول PRIME للأبد",
     lifetimeDealSub: "دفعة واحدة. بلا تجديد. لا تنتهي أبداً.",
     lifetimeDealCta: "احصل عليه ←",
+
+    // Auth buttons
+    signInWithPnptvId: "الدخول عبر PNPtv ID",
+    orContinueWith: "أو تابع عبر",
+    noAccountPrompt: "ليس لديك حساب؟",
+    createAccount: "أنشئ حساباً",
+    lastLoginedWith: "آخر دخول عبر",
+
+    // Signup-first layout
+    joinHeadline: "انضم إلى PNPtv اليوم",
+    createMyAccount: "إنشاء حسابي",
+    freeTakes30s: "مجاني. يستغرق 30 ثانية.",
+    emailRequiredForSignup: "يرجى إدخال بريدك الإلكتروني للمتابعة",
+    emailInvalid: "البريد الإلكتروني غير صالح",
+    recommendedForBot: "موصى به إذا انضممت عبر بوت Telegram الخاص بنا",
+    alreadyMember: "عضو بالفعل؟",
+    signInWithEmail: "الدخول بالبريد الإلكتروني وكلمة المرور",
+    signInSubLabel: "(للمستخدمين أصحاب PNPtv ID — ليس Telegram)",
+    forgotPassword: "نسيت كلمة المرور؟",
 
     loginWithTelegram: "الدخول عبر Telegram",
     waitingForTelegram: "في انتظار Telegram...",
