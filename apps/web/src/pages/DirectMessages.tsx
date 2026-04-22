@@ -1313,13 +1313,33 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                   )}
                 <div
                   ref={(el) => { if (el) messageRefs.current.set(msg.id, el); else messageRefs.current.delete(msg.id); }}
-                  className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${isGrouped ? "!mt-0.5" : ""} transition-all`}
+                  className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} items-end ${isGrouped ? "!mt-0.5" : ""} transition-all`}
                   onContextMenu={(e) => handleContextMenu(msg, e)}
                   onTouchStart={(e) => { handleTouchStart(msg, e); handleBubbleTouchStart(msg, e); }}
                   onTouchEnd={(e) => { handleTouchEnd(); handleBubbleTouchEnd(msg, e); }}
                   onTouchMove={(e) => { handleTouchEnd(); handleBubbleTouchMove(msg, e); }}
                   style={{ transition: "transform 200ms ease-out", background: isHighlighted ? "rgba(212,0,122,0.12)" : undefined, borderRadius: isHighlighted ? "12px" : undefined }}
                 >
+                  {/* Partner avatar — only on incoming messages, only at bottom of group to avoid repetition */}
+                  {!isMe && (
+                    isGrouped ? (
+                      <div className="w-7 flex-shrink-0" aria-hidden />
+                    ) : partnerPhoto ? (
+                      <img
+                        src={partnerPhoto}
+                        alt=""
+                        className="w-7 h-7 rounded-full object-cover flex-shrink-0 self-end"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                      />
+                    ) : (
+                      <div
+                        className="w-7 h-7 rounded-full flex-shrink-0 self-end flex items-center justify-center text-[11px] font-bold text-white"
+                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                      >
+                        {(partnerName || "?")[0].toUpperCase()}
+                      </div>
+                    )
+                  )}
                   <div className={`max-w-[78%] flex flex-col ${isMe ? "items-end" : "items-start"}`}>
                     {msg.is_deleted ? (
                       <div className="rounded-2xl px-3 py-1.5 text-xs italic text-pnp-textSecondary/50 bg-white/5">

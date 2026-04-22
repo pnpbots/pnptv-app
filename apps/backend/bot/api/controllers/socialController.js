@@ -482,11 +482,14 @@ const createPostWithMedia = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const { content, isExclusive, isShareable, videoTitle, videoDescription } = req.body;
 
-  if (!content || !content.toString().trim()) return res.status(400).json({ error: 'Content required' });
+  // Media-attached post: content may be empty (caption-less photo/video is valid).
+  const hasContent = content && content.toString().trim().length > 0;
+  const hasMedia = !!req.file;
+  if (!hasContent && !hasMedia) return res.status(400).json({ error: 'Content or media required' });
 
   try {
     const { assertCleanText } = require('../../../services/contentModerationFilter');
-    assertCleanText(content, 'content');
+    if (hasContent) assertCleanText(content, 'content');
     if (videoTitle) assertCleanText(videoTitle, 'video title');
     if (videoDescription) assertCleanText(videoDescription, 'video description');
   } catch (err) {
@@ -779,11 +782,14 @@ const createPostWithMultiMedia = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const { content, isExclusive, isShareable } = req.body;
 
-  if (!content || !content.toString().trim()) return res.status(400).json({ error: 'Content required' });
+  // Media-attached post: content may be empty (caption-less multi-photo post is valid).
+  const hasContent = content && content.toString().trim().length > 0;
+  const hasMedia = Array.isArray(req.files) && req.files.length > 0;
+  if (!hasContent && !hasMedia) return res.status(400).json({ error: 'Content or media required' });
 
   try {
     const { assertCleanText } = require('../../../services/contentModerationFilter');
-    assertCleanText(content, 'content');
+    if (hasContent) assertCleanText(content, 'content');
   } catch (err) {
     if (err.code === 'FORBIDDEN_CONTENT') {
       return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });

@@ -495,7 +495,7 @@ export function PostComposer({
   // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || isPosting) return;
+    if ((!trimmed && files.length === 0) || isPosting) return;
 
     setIsPosting(true);
     setError(null);
@@ -650,7 +650,7 @@ export function PostComposer({
   const canAddMoreImages = !hasVideo && imageCount < MAX_IMAGES;
   const canAddVideo = files.length === 0;
   const isOverCharLimit = text.length > MAX_CHARS;
-  const canPost = text.trim().length > 0 && !isPosting && !isOverCharLimit;
+  const canPost = (text.trim().length > 0 || files.length > 0) && !isPosting && !isOverCharLimit;
   const resolvedPlaceholder = placeholder ?? tFeed.whatOnYourMind;
   const displayName = user?.displayName || user?.username || "U";
 
