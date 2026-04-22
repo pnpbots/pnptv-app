@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useSearchParams, useLocation, useNavigate } from "react-router-dom";
+import { useSearchParams, useLocation, useNavigate, Link } from "react-router-dom";
 import { useLifetime100Strings, type Lifetime100Strings } from "@/lib/i18n/lifetime100";
+import { sheets } from "@/pages/LandingPage";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -680,9 +681,10 @@ interface HeroViewProps {
   availabilityLoading: boolean;
   lang: string;
   onLangChange: (lang: string) => void;
+  onOpenSheet: (id: string) => void;
 }
 
-function HeroView({ s, available, availabilityLoading, lang, onLangChange }: HeroViewProps) {
+function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpenSheet }: HeroViewProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
 
@@ -965,13 +967,14 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange }: Her
           paddingBottom: "max(16px, env(safe-area-inset-bottom))",
         }}
       >
-        {/* Pill nav — horizontal scroll */}
+        {/* Pill nav — opens bottom sheets in-place (stays on /lifetime100) */}
         <nav style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }} aria-label="Explore PNPtv">
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", width: "max-content" }}>
             {NAV_ITEMS.map((item) => (
-              <a
+              <button
                 key={item.id}
-                href={`/landing?sheet=${item.id}`}
+                type="button"
+                onClick={() => onOpenSheet(item.id)}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -983,14 +986,14 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange }: Her
                   whiteSpace: "nowrap",
                   border: "1px solid rgba(255,255,255,0.12)",
                   color: "#cfcfd4",
-                  textDecoration: "none",
+                  cursor: "pointer",
                   flexShrink: 0,
                   background: "rgba(18,13,20,0.6)",
                 }}
               >
                 <span>{item.emoji}</span>
                 <span>{item.label}</span>
-              </a>
+              </button>
             ))}
           </div>
         </nav>
@@ -1123,7 +1126,7 @@ const LEGAL_LINKS = [
   { label: "Contact", href: "/contact" },
 ];
 
-function NavFooter() {
+function NavFooter({ onOpenSheet }: { onOpenSheet: (id: string) => void }) {
   return (
     <div
       style={{
@@ -1141,9 +1144,10 @@ function NavFooter() {
       <nav style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }} aria-label="Explore PNPtv">
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px", height: 48, width: "max-content" }}>
           {NAV_ITEMS.map((item) => (
-            <a
+            <button
               key={item.id}
-              href={`/landing?sheet=${item.id}`}
+              type="button"
+              onClick={() => onOpenSheet(item.id)}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1155,8 +1159,9 @@ function NavFooter() {
                 whiteSpace: "nowrap",
                 border: "1px solid rgba(255,255,255,0.12)",
                 color: "#cfcfd4",
-                textDecoration: "none",
+                cursor: "pointer",
                 flexShrink: 0,
+                background: "transparent",
                 transition: "color 0.15s, border-color 0.15s",
               }}
               onMouseEnter={(e) => {
@@ -1170,7 +1175,7 @@ function NavFooter() {
             >
               <span>{item.emoji}</span>
               <span>{item.label}</span>
-            </a>
+            </button>
           ))}
         </div>
       </nav>
@@ -1209,6 +1214,61 @@ function NavFooter() {
   );
 }
 
+// ── Bottom-sheet modal (mirrors LandingPage's sheet) ──────────────────────────
+// Lets pills open sheet content IN-PLACE so the user stays on /lifetime100.
+
+interface SheetModalProps {
+  sheet: { title: string; emoji: string; body: React.ReactNode };
+  onClose: () => void;
+}
+
+function SheetModal({ sheet, onClose }: SheetModalProps) {
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        className="fixed bottom-0 left-0 right-0 z-[60] glass-nav border-t border-pnp-border rounded-t-2xl overflow-y-auto animate-fade-in-up"
+        style={{ maxHeight: "70dvh", animationDuration: "0.2s" }}
+        role="dialog"
+        aria-label={sheet.title}
+      >
+        <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+          <div className="w-10 h-1 rounded-full bg-pnp-border" />
+        </div>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-pnp-border sticky top-0 glass-nav">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">{sheet.emoji}</span>
+            <h2 className="text-sm font-bold text-white">{sheet.title}</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-pnp-textSecondary hover:text-white hover:bg-pnp-surface transition-colors"
+            aria-label="Close"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="px-4 py-4">{sheet.body}</div>
+        <div className="px-4 pb-6">
+          <Link
+            to="/join"
+            onClick={onClose}
+            className="btn-gradient block w-full text-center py-3 rounded-xl text-sm font-bold text-white"
+          >
+            Join free →
+          </Link>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ── Root page ──────────────────────────────────────────────────────────────────
 
 export default function Lifetime100() {
@@ -1220,6 +1280,14 @@ export default function Lifetime100() {
   const modeParam = searchParams.get("mode");
   const codeParam = searchParams.get("code") || "";
   const isActivateMode = isActivatePath || modeParam === "activate" || !!codeParam;
+
+  // Bottom-sheet state — pills open an in-place sheet instead of navigating
+  const [activeSheet, setActiveSheet] = useState<string | null>(null);
+  useEffect(() => {
+    document.body.style.overflow = activeSheet ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [activeSheet]);
+  const sheetData = activeSheet ? sheets[activeSheet] : null;
 
   // Language
   const [lang, setLang] = useState(getInitialLang);
@@ -1308,18 +1376,27 @@ export default function Lifetime100() {
         </header>
 
         <ActivateView s={s} initialCode={codeParam} />
-        <NavFooter />
+        <NavFooter onOpenSheet={setActiveSheet} />
+        {sheetData && (
+          <SheetModal sheet={sheetData} onClose={() => setActiveSheet(null)} />
+        )}
       </div>
     );
   }
 
   return (
+    <>
     <HeroView
       s={s}
       available={available}
       availabilityLoading={availabilityLoading}
       lang={lang}
       onLangChange={handleLangChange}
+      onOpenSheet={setActiveSheet}
     />
+    {sheetData && (
+      <SheetModal sheet={sheetData} onClose={() => setActiveSheet(null)} />
+    )}
+    </>
   );
 }

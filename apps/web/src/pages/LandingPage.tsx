@@ -58,7 +58,7 @@ function TelegramLoginWidget({ onAuth, onLoadError }: { onAuth: (u: TelegramWidg
 
 // ── Sheet content ─────────────────────────────────────────────────────────────
 
-const sheets: Record<string, { title: string; emoji: string; body: React.ReactNode }> = {
+export const sheets: Record<string, { title: string; emoji: string; body: React.ReactNode }> = {
   about: {
     title: "What is PNPtv?",
     emoji: "👋",
