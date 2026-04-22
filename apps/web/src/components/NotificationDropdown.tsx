@@ -66,7 +66,7 @@ export function NotificationDropdown({ onClose }: Props) {
     <div
       role="dialog"
       aria-label={t.notifications.notifications}
-      className="absolute right-0 top-12 w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] flex flex-col rounded-xl glass-nav border border-pnp-border shadow-xl z-50 overflow-hidden"
+      className="absolute right-0 top-12 w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] flex flex-col rounded-xl bg-pnp-background border border-pnp-border shadow-xl z-50 overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-pnp-border shrink-0">
