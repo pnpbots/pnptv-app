@@ -1963,6 +1963,154 @@ const updateProfile = async (req, res) => {
 };
 
 /**
+ * POST /api/webapp/profile/telegram/link
+ * Link an existing PNPtv account to a Telegram account using the official
+ * Telegram Login Widget payload. Proof of ownership = signed widget hash.
+ *
+ * Body: { id, first_name, last_name?, username?, photo_url?, auth_date, hash }
+ *
+ * If the logged-in user has no username yet (or the placeholder 'ANONYMOUS'),
+ * the Telegram @username is auto-adopted — matches the existing error message
+ * in updateProfile ("Link your Telegram account to use your Telegram username.").
+ */
+const linkTelegram = async (req, res) => {
+  const sessionUser = req.session?.user;
+  if (!sessionUser) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  const { id, first_name, last_name, username, photo_url, auth_date, hash } = req.body || {};
+  if (!id || !hash || !auth_date) {
+    return res.status(400).json({ success: false, error: 'Missing required Telegram auth fields' });
+  }
+
+  const isValid = verifyTelegramAuth(req.body);
+  const skipVerification = process.env.SKIP_TELEGRAM_HASH_VERIFICATION === 'true'
+    && process.env.NODE_ENV !== 'production';
+  if (!isValid && !skipVerification) {
+    logger.warn('[TelegramLink] Hash verification failed', { userId: sessionUser.id, tgId: id });
+    return res.status(401).json({ success: false, error: 'Invalid Telegram authentication data' });
+  }
+
+  const telegramId = String(id);
+
+  try {
+    const existing = await query(
+      'SELECT id FROM users WHERE telegram = $1 AND id != $2 AND is_active = true LIMIT 1',
+      [telegramId, sessionUser.id]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        error: 'This Telegram account is already linked to another PNPtv account.',
+      });
+    }
+
+    const currentRow = await query(
+      'SELECT username, telegram FROM users WHERE id = $1',
+      [sessionUser.id]
+    );
+    const current = currentRow.rows[0];
+    if (!current) return res.status(404).json({ success: false, error: 'User not found' });
+
+    const currentUsername = (current.username || '').trim();
+    const hasRealUsername = currentUsername !== '' && currentUsername.toUpperCase() !== 'ANONYMOUS';
+
+    let adoptedUsername = null;
+    const tgUsername = username ? String(username).replace(/^@+/, '').trim() : '';
+    if (!hasRealUsername && tgUsername && /^[a-zA-Z0-9_]{3,30}$/.test(tgUsername)) {
+      // Only adopt if the tg username isn't already taken by another account.
+      const taken = await query(
+        `SELECT id FROM users WHERE UPPER(username) = UPPER($1) AND id != $2
+           AND is_deleted IS NOT TRUE AND username != '' AND UPPER(username) != 'ANONYMOUS'
+         LIMIT 1`,
+        [tgUsername, sessionUser.id]
+      );
+      if (taken.rows.length === 0) {
+        adoptedUsername = tgUsername;
+      }
+    }
+
+    if (adoptedUsername) {
+      await query(
+        'UPDATE users SET telegram = $1, username = $2, updated_at = NOW() WHERE id = $3',
+        [telegramId, adoptedUsername, sessionUser.id]
+      );
+    } else {
+      await query(
+        'UPDATE users SET telegram = $1, updated_at = NOW() WHERE id = $2',
+        [telegramId, sessionUser.id]
+      );
+    }
+
+    try {
+      const { cache } = require('../../../config/redis');
+      await cache.del(`user:${sessionUser.id}`);
+    } catch (cacheErr) {
+      logger.warn(`[TelegramLink] Cache invalidation failed for user ${sessionUser.id}: ${cacheErr.message}`);
+    }
+
+    if (adoptedUsername) req.session.user.username = adoptedUsername;
+    await new Promise((resolve, reject) =>
+      req.session.save(err => (err ? reject(err) : resolve()))
+    );
+
+    logger.info(`[TelegramLink] User ${sessionUser.id} linked Telegram ${telegramId}${adoptedUsername ? ` (adopted @${adoptedUsername})` : ''}`);
+    return res.json({
+      success: true,
+      telegram: telegramId,
+      username: adoptedUsername || current.username,
+      adoptedUsername: !!adoptedUsername,
+    });
+  } catch (error) {
+    logger.error('[TelegramLink] Link error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to link Telegram account' });
+  }
+};
+
+/**
+ * POST /api/webapp/profile/telegram/unlink
+ * Remove the Telegram linkage from the current user.
+ */
+const unlinkTelegram = async (req, res) => {
+  const sessionUser = req.session?.user;
+  if (!sessionUser) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  try {
+    // Do not allow unlinking if Telegram is the only login method (no email set + no password_hash).
+    const row = await query(
+      'SELECT email, password_hash, pnptv_id FROM users WHERE id = $1',
+      [sessionUser.id]
+    );
+    const r = row.rows[0];
+    const placeholderEmail = r?.email && /@telegram\.pnptv\.app$/i.test(r.email);
+    const hasRealEmail = r?.email && !placeholderEmail;
+    if (!hasRealEmail && !r?.password_hash) {
+      return res.status(409).json({
+        success: false,
+        error: 'Set an email + password before unlinking Telegram, otherwise you will lose access to this account.',
+      });
+    }
+
+    await query(
+      'UPDATE users SET telegram = NULL, updated_at = NOW() WHERE id = $1',
+      [sessionUser.id]
+    );
+
+    try {
+      const { cache } = require('../../../config/redis');
+      await cache.del(`user:${sessionUser.id}`);
+    } catch (cacheErr) {
+      logger.warn(`[TelegramLink] Cache invalidation failed for user ${sessionUser.id}: ${cacheErr.message}`);
+    }
+
+    logger.info(`[TelegramLink] User ${sessionUser.id} unlinked Telegram`);
+    return res.json({ success: true });
+  } catch (error) {
+    logger.error('[TelegramLink] Unlink error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to unlink Telegram account' });
+  }
+};
+
+/**
  * GET /api/webapp/mastodon/feed
  */
 const getMastodonFeed = async (req, res) => {
@@ -2266,6 +2414,8 @@ module.exports = {
   logout,
   getProfile,
   updateProfile,
+  linkTelegram,
+  unlinkTelegram,
   forgotPassword,
   resetPassword,
   getMastodonFeed,

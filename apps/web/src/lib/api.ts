@@ -202,6 +202,27 @@ export function telegramWidgetAuth(
   });
 }
 
+export interface TelegramLinkResponse {
+  success: boolean;
+  telegram?: string;
+  username?: string | null;
+  adoptedUsername?: boolean;
+  error?: string;
+}
+
+export function linkTelegramAccount(
+  data: TelegramWidgetUser,
+): Promise<TelegramLinkResponse> {
+  return request("/api/webapp/profile/telegram/link", {
+    method: "POST",
+    body: data,
+  });
+}
+
+export function unlinkTelegramAccount(): Promise<{ success: boolean; error?: string }> {
+  return request("/api/webapp/profile/telegram/unlink", { method: "POST" });
+}
+
 export function checkAuthStatus(): Promise<AuthStatusResponse> {
   return request("/api/auth-status");
 }
@@ -4327,6 +4348,8 @@ export interface AdminUserFilters {
   status?: string;
   plan?: string;
   role?: string;
+  /** 'linked' | 'unlinked' */
+  telegram?: string;
 }
 
 export function getAdminUsers(
@@ -4340,6 +4363,7 @@ export function getAdminUsers(
   if (filters?.status) params.set("status", filters.status);
   if (filters?.plan) params.set("plan", filters.plan);
   if (filters?.role) params.set("role", filters.role);
+  if (filters?.telegram) params.set("telegram", filters.telegram);
   return request(`/api/webapp/admin/users?${params}`);
 }
 

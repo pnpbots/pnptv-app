@@ -26,6 +26,8 @@ export interface AdminUser {
   created_at: string;
   last_payment_date?: string;
   phone_number?: string;
+  /** Telegram numeric user ID if the account is linked to Telegram, else null/undefined. */
+  telegram?: string | null;
   // Creator / Live Performer fields
   creator_status?: string;
   creator_type?: string;
@@ -119,6 +121,8 @@ export interface AdminUserFilters {
   status?: string;
   plan?: string;
   role?: string;
+  /** 'linked' | 'unlinked' — filter users by Telegram link status. */
+  telegram?: string;
 }
 
 export interface AddOn {

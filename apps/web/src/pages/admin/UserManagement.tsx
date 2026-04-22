@@ -234,6 +234,26 @@ export default function UserManagement() {
       ),
     },
     {
+      key: "telegram",
+      header: "Telegram",
+      render: (row: AdminUser) => {
+        if (row.telegram) {
+          return (
+            <span
+              className="text-xs font-semibold px-2 py-0.5 rounded-full"
+              style={{ background: "rgba(42, 171, 238, 0.15)", color: "#2AABEE" }}
+              title={`Telegram ID: ${row.telegram}`}
+            >
+              Linked
+            </span>
+          );
+        }
+        return (
+          <span className="text-xs text-pnp-textSecondary opacity-60">—</span>
+        );
+      },
+    },
+    {
       key: "last_login_at",
       header: t.users.lastLogin,
       render: (row: AdminUser) => (
@@ -354,6 +374,18 @@ export default function UserManagement() {
             <option value="superadmin">{t.users.superadmin}</option>
             <option value="admin">{t.users.admin}</option>
             <option value="user">{t.users.userRole}</option>
+          </select>
+        </div>
+        <div className="flex-1 min-w-[120px]">
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Telegram</label>
+          <select
+            value={filters.telegram || ""}
+            onChange={(e) => handleFilterChange("telegram", e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
+          >
+            <option value="">Any</option>
+            <option value="linked">Linked</option>
+            <option value="unlinked">Not linked</option>
           </select>
         </div>
         {hasActiveFilters && (

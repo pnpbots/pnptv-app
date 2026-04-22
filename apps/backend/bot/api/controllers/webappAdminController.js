@@ -90,13 +90,14 @@ const listUsers = async (req, res) => {
     const statusFilter = (req.query.status || '').trim();
     const planFilter = (req.query.plan || '').trim();
     const roleFilter = (req.query.role || '').trim();
+    const telegramFilter = (req.query.telegram || '').trim();
     const limit = 20;
     const offset = (page - 1) * limit;
 
     let countQuery = 'SELECT COUNT(*) as count FROM users WHERE is_active = true';
     let dataQuery = `SELECT id, username, email, first_name, last_name, role, tier,
                             subscription_status, plan_id AS subscription_plan, plan_expiry, created_at,
-                            last_login_at, last_login_method, last_active
+                            last_login_at, last_login_method, last_active, telegram
                      FROM users WHERE is_active = true`;
     const params = [];
     const countParams = [];
@@ -151,6 +152,16 @@ const listUsers = async (req, res) => {
       dataQuery += clause;
       params.push(roleFilter);
       countParams.push(roleFilter);
+    }
+
+    if (telegramFilter === 'linked') {
+      const clause = ` AND telegram IS NOT NULL AND telegram != ''`;
+      countQuery += clause;
+      dataQuery += clause;
+    } else if (telegramFilter === 'unlinked') {
+      const clause = ` AND (telegram IS NULL OR telegram = '')`;
+      countQuery += clause;
+      dataQuery += clause;
     }
 
     dataQuery += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);

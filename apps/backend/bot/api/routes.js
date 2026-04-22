@@ -2793,6 +2793,8 @@ app.post('/api/webapp/auth/enable-pnptv-id', requireSessionAuth, enablePnptvIdLi
 app.get('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.getProfile));
 app.put('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.updateProfile));
 app.post('/api/webapp/profile/avatar', requireSessionAuth, uploadLimiter, avatarUpload.single('avatar'), verifyMagicBytes(IMAGE_MIMES), asyncHandler(webAppController.uploadAvatar));
+app.post('/api/webapp/profile/telegram/link', telegramWidgetLimiter, requireSessionAuth, asyncHandler(webAppController.linkTelegram));
+app.post('/api/webapp/profile/telegram/unlink', requireSessionAuth, asyncHandler(webAppController.unlinkTelegram));
 app.post('/api/webapp/upload/event-cover', requireSessionAuth, uploadLimiter, eventCoverUpload.single('media'), verifyMagicBytes(IMAGE_MIMES), asyncHandler(webAppController.uploadEventCover));
 
 // Web App Privacy Settings
