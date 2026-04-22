@@ -600,6 +600,43 @@ export default function SocialPostCard({
                 </button>
               )}
 
+              {/* Link preview — only when the post has no media */}
+              {!post.is_promoted && !post.media_url && (() => {
+                const contentStr = translatedContent ?? localContent ?? post.content ?? "";
+                const urlMatch = contentStr.match(/https?:\/\/[^\s<>"]+/);
+                if (!urlMatch) return null;
+                const rawUrl = urlMatch[0].replace(/[.,;:!?)\]]+$/, "");
+                let host = rawUrl;
+                try { host = new URL(rawUrl).host.replace(/^www\./, ""); } catch { /* noop */ }
+                return (
+                  <a
+                    href={rawUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="mt-3 block rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/[0.08] transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <svg
+                        className="w-4 h-4 flex-shrink-0"
+                        style={{ color: "#5ED1C4" }}
+                        fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                      </svg>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] uppercase tracking-wide font-semibold text-pnp-textSecondary">
+                          {host}
+                        </div>
+                        <div className="text-xs text-white/80 truncate">
+                          {rawUrl}
+                        </div>
+                      </div>
+                    </div>
+                  </a>
+                );
+              })()}
+
               {/* Media */}
               {!post.is_promoted && post.media_url && (
                 <div className="mt-3">
@@ -864,6 +901,26 @@ export default function SocialPostCard({
                           text={reply.content}
                           className="text-xs text-white/80 mt-0.5 whitespace-pre-wrap block"
                         />
+                        {/* Reply-to-reply: prefills composer with the reply author's @handle */}
+                        {currentUserId && String(reply.author_id) !== currentUserId && (reply.author_username || reply.author_first_name) && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const handle = reply.author_username || reply.author_first_name || "";
+                              const mention = `@${handle} `;
+                              setReplyText((prev) => {
+                                if (prev.startsWith(mention)) return prev;
+                                const cleaned = prev.replace(/^@\S+\s+/, "");
+                                return mention + cleaned;
+                              });
+                            }}
+                            className="mt-1 text-[11px] font-medium hover:underline"
+                            style={{ color: "#5ED1C4" }}
+                          >
+                            {t.reply || "Reply"}
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}

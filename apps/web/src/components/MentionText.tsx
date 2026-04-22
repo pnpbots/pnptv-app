@@ -15,9 +15,10 @@ function truncateAtWord(text: string, max: number): string {
 }
 
 /**
- * Renders a string with @username and #hashtag tokens converted to tappable links.
+ * Renders a string with @username / #hashtag / URL tokens converted to tappable links.
  * @username navigates to /profile/:username.
  * #hashtag navigates to /?tag=hashtagname for filtered feed.
+ * Plain http(s) URLs open in a new tab.
  * Optionally collapses long text behind a "View more" toggle.
  */
 export function MentionText({ text, className, maxLength }: MentionTextProps) {
@@ -31,12 +32,33 @@ export function MentionText({ text, className, maxLength }: MentionTextProps) {
     ? truncateAtWord(text, maxLength)
     : text;
 
-  // Split on both @mention and #hashtag tokens
-  const parts = displayText.split(/(@[a-zA-Z0-9_]{2,32}|#[a-zA-Z0-9_\u00C0-\u024F]{1,64})/g);
+  // Split on @mention, #hashtag, and URL tokens
+  const parts = displayText.split(/(@[a-zA-Z0-9_]{2,32}|#[a-zA-Z0-9_À-ɏ]{1,64}|https?:\/\/[^\s<>"]+)/g);
 
   return (
     <span className={className}>
       {parts.map((part, i) => {
+        if (/^https?:\/\/[^\s<>"]+$/.test(part)) {
+          // Strip trailing punctuation that isn't part of the URL
+          const trimmed = part.replace(/[.,;:!?)\]]+$/, "");
+          const trailing = part.slice(trimmed.length);
+          return (
+            <React.Fragment key={i}>
+              <a
+                href={trimmed}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="hover:underline break-all"
+                style={{ color: "#5ED1C4" }}
+              >
+                {trimmed}
+              </a>
+              {trailing}
+            </React.Fragment>
+          );
+        }
+
         if (/^@[a-zA-Z0-9_]{2,32}$/.test(part)) {
           const username = part.slice(1);
           return (
@@ -54,7 +76,7 @@ export function MentionText({ text, className, maxLength }: MentionTextProps) {
           );
         }
 
-        if (/^#[a-zA-Z0-9_\u00C0-\u024F]{1,64}$/.test(part)) {
+        if (/^#[a-zA-Z0-9_À-ɏ]{1,64}$/.test(part)) {
           const tag = part.slice(1);
           return (
             <span
