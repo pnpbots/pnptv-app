@@ -111,10 +111,14 @@ function HangoutChatPanel({
   activeGroup,
   isOwnerOrMod,
   groupMembers,
+  readReceipts,
+  emitReadMessage,
 }: {
   activeGroup: HangoutGroup;
   isOwnerOrMod: boolean;
   groupMembers: any[];
+  readReceipts: Record<string, number>;
+  emitReadMessage: (messageId: number) => void;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -252,6 +256,18 @@ function HangoutChatPanel({
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 50);
     }
   }, [isLoading]);
+
+  // Mark the latest visible message as read whenever messages change and the
+  // user is at the bottom of the chat (i.e., actually viewing new content).
+  useEffect(() => {
+    if (messages.length === 0) return;
+    if (!isNearBottom.current && !isLoading) return;
+    const last = messages[messages.length - 1];
+    if (!last?.id) return;
+    // Only emit when the last message isn't our own (no point telling ourselves).
+    if (String(last.user_id) === String(myId)) return;
+    emitReadMessage(Number(last.id));
+  }, [messages, isLoading, myId, emitReadMessage]);
 
   // Socket.IO real-time messages
   useEffect(() => {
@@ -582,6 +598,23 @@ function HangoutChatPanel({
                           <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
                             <span className={`text-[10px] ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>{timeStr}</span>
                             {msg.edited_at && <span className={`text-[10px] ${isMe ? "text-white/40" : "text-pnp-textSecondary/60"}`}>(edited)</span>}
+                            {isMe && !msg.is_deleted && (() => {
+                              let readByOther = false;
+                              for (const uid in readReceipts) {
+                                if (String(uid) === String(myId)) continue;
+                                if (readReceipts[uid] >= Number(msg.id)) { readByOther = true; break; }
+                              }
+                              return (
+                                <span
+                                  className="text-[11px] leading-none ml-0.5"
+                                  style={{ color: readByOther ? "#4FC3F7" : "rgba(255,255,255,0.5)" }}
+                                  title={readByOther ? "Read" : "Sent"}
+                                  aria-label={readByOther ? "Read" : "Sent"}
+                                >
+                                  {readByOther ? "✓✓" : "✓"}
+                                </span>
+                              );
+                            })()}
                           </div>
                         </div>
 
@@ -1036,10 +1069,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Group members (loaded on chat open for member management panels)
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
 
-  // Socket hook — presence + socket connection state
+  // Socket hook — presence + socket connection state + read receipts
   const {
     isConnected,
     onlineMembers,
+    readReceipts,
+    emitReadMessage,
   } = useHangoutSocket(activeGroup?.id ?? null, user?.dbId);
 
   // Video call / general chat error
@@ -2819,6 +2854,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             activeGroup={activeGroup}
             isOwnerOrMod={isOwnerOrMod}
             groupMembers={groupMembers}
+            readReceipts={readReceipts}
+            emitReadMessage={emitReadMessage}
           />
         )}
 
