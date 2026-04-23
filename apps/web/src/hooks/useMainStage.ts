@@ -41,9 +41,6 @@ interface UseMainStageReturn {
   };
 }
 
-const LIVEKIT_URL =
-  (typeof import.meta !== "undefined" && (import.meta as { env?: Record<string, string> }).env?.VITE_LIVEKIT_URL) ||
-  "wss://livekit.pnptv.app";
 const ROOM_NAME = "main-stage-prime";
 
 export function useMainStage(): UseMainStageReturn {
@@ -51,6 +48,11 @@ export function useMainStage(): UseMainStageReturn {
 
   const [state, setState] = useState<MainStageState | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [livekitUrl, setLivekitUrl] = useState(
+    (typeof import.meta !== "undefined" && (import.meta as { env?: Record<string, string> }).env?.VITE_LIVEKIT_URL) ||
+    "wss://livekit.pnptv.app"
+  );
+  const [roomName, setRoomName] = useState(ROOM_NAME);
   const [role, setRole] = useState<MainStageTokenResponse["role"] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +79,8 @@ export function useMainStage(): UseMainStageReturn {
         const res = await getMainStageToken({ asCammer: tokenAsCammerRef.current });
         if (!mountedRef.current) return;
         setToken(res.token);
+        setLivekitUrl(res.livekitUrl);
+        setRoomName(res.roomName);
         setRole(res.role);
         scheduleTokenRefresh();
       } catch {
@@ -110,6 +114,8 @@ export function useMainStage(): UseMainStageReturn {
         if (cancelled) return;
         setState(stateRes);
         setToken(tokenRes.token);
+        setLivekitUrl(tokenRes.livekitUrl);
+        setRoomName(tokenRes.roomName);
         setRole(tokenRes.role);
         tokenAsCammerRef.current = false;
         scheduleTokenRefresh();
@@ -145,9 +151,12 @@ export function useMainStage(): UseMainStageReturn {
 
   const joinAsCammer = useCallback(async () => {
     try {
+      setError(null);
       const res = await getMainStageToken({ asCammer: true });
       if (mountedRef.current) {
         setToken(res.token);
+        setLivekitUrl(res.livekitUrl);
+        setRoomName(res.roomName);
         setRole(res.role);
         tokenAsCammerRef.current = true;
         scheduleTokenRefresh();
@@ -162,9 +171,12 @@ export function useMainStage(): UseMainStageReturn {
   const leaveCammer = useCallback(async () => {
     // Re-mint as viewer to demote from cammer role
     try {
+      setError(null);
       const res = await getMainStageToken({ asCammer: false });
       if (mountedRef.current) {
         setToken(res.token);
+        setLivekitUrl(res.livekitUrl);
+        setRoomName(res.roomName);
         setRole(res.role);
         tokenAsCammerRef.current = false;
         scheduleTokenRefresh();
@@ -197,16 +209,17 @@ export function useMainStage(): UseMainStageReturn {
     await moderateMainStage(action, identity);
   }, []);
 
-  // Admins can always be cammers; regular users can only be viewers unless role permits
-  const canBeCammer = authIsAdmin || role === "cammer";
+  // Any authenticated user can request a cammer token; the backend enforces caps
+  // and returns the effective role in the minted token.
+  const canBeCammer = isAuthenticated;
 
   return {
     state,
     isAdmin: authIsAdmin,
     canBeCammer,
     token,
-    livekitUrl: LIVEKIT_URL,
-    roomName: ROOM_NAME,
+    livekitUrl,
+    roomName,
     role,
     loading,
     error,

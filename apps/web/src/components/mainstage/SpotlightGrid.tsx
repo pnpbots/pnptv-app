@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import {
   ParticipantTile,
   useTracks,
@@ -12,75 +12,18 @@ interface SpotlightGridProps {
   onTileClick?: (identity: string) => void;
 }
 
-function useCountdown(targetMs: number | null): string | null {
-  const ref = useRef<ReturnType<typeof setInterval> | null>(null);
-  const forceUpdate = useForceUpdate();
-
-  useEffect(() => {
-    if (targetMs == null) return;
-    ref.current = setInterval(forceUpdate, 1000);
-    return () => { if (ref.current) clearInterval(ref.current); };
-  }, [targetMs, forceUpdate]);
-
-  if (targetMs == null) return null;
-  const diff = Math.max(0, Math.floor((targetMs - Date.now()) / 1000));
-  if (diff <= 0) return "now";
-  const m = Math.floor(diff / 60);
-  const s = diff % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function useForceUpdate() {
-  const updateRef = useRef(0);
-  const setter = useRef<(() => void) | null>(null);
-  useEffect(() => {
-    // Tiny trick: capture a stable updater. We do this by reading from a set
-    // of state inside the component, but since this is a utility hook, we
-    // use a ref-based counter pattern instead.
-  }, []);
-  return () => { updateRef.current += 1; if (setter.current) setter.current(); };
-}
-
-// Simpler countdown: use a state-based approach
-function Countdown({ targetMs }: { targetMs: number | null }) {
-  const forceRef = useRef(0);
-  const [, setTick] = [forceRef.current, (n: number) => { forceRef.current = n; }];
-
-  useEffect(() => {
-    if (targetMs == null) return;
-    const iv = setInterval(() => {
-      setTick(Date.now());
-    }, 1000);
-    return () => clearInterval(iv);
-  }, [targetMs, setTick]);
-
-  if (targetMs == null) return null;
-  const diff = Math.max(0, Math.floor((targetMs - Date.now()) / 1000));
-  if (diff <= 0) return <span>now</span>;
-  const m = Math.floor(diff / 60);
-  const s = diff % 60;
-  return <span>Next: {m}:{String(s).padStart(2, "0")}</span>;
-}
-
-// A self-contained countdown that actually re-renders
 function CountdownChip({ nextAt }: { nextAt: number | null }) {
-  const [tick, setTick] = [0, (_: number) => {}];
-  void tick; void setTick;
+  const [now, setNow] = useState(() => Date.now());
 
-  // We need actual re-rendering state
-  return <CountdownChipInner nextAt={nextAt} />;
-}
-
-function CountdownChipInner({ nextAt }: { nextAt: number | null }) {
-  const [, forceUpdate] = [0, () => {}];
   useEffect(() => {
     if (nextAt == null) return;
-    const iv = setInterval(() => forceUpdate(), 1000);
+    setNow(Date.now());
+    const iv = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(iv);
-  }, [nextAt, forceUpdate]);
+  }, [nextAt]);
 
   if (nextAt == null) return null;
-  const diff = Math.max(0, Math.floor((nextAt - Date.now()) / 1000));
+  const diff = Math.max(0, Math.floor((nextAt - now) / 1000));
   const label = diff <= 0 ? "Rotating..." : (() => {
     const m = Math.floor(diff / 60);
     const s = diff % 60;
@@ -141,18 +84,15 @@ export function SpotlightGrid({ focusIdentity, nextAt, onTileClick }: SpotlightG
       {/* Hero */}
       <div className="relative flex-1 min-h-0">
         {heroTrack && (
-          <div className="absolute inset-0">
-            <div
-              className="w-full h-full cursor-pointer"
-              style={{ aspectRatio: "16/9", maxHeight: "100%" }}
-              onClick={() => onTileClick?.(heroTrack.participant.identity)}
-            >
-              <ParticipantTile
-                trackRef={heroTrack}
-                style={{ width: "100%", height: "100%" }}
-              />
-            </div>
-            <CountdownChipInner nextAt={nextAt} />
+          <div
+            className={`absolute inset-0${onTileClick ? " cursor-pointer" : ""}`}
+            onClick={onTileClick ? () => onTileClick(heroTrack.participant.identity) : undefined}
+          >
+            <ParticipantTile
+              trackRef={heroTrack}
+              style={{ width: "100%", height: "100%" }}
+            />
+            <CountdownChip nextAt={nextAt} />
           </div>
         )}
       </div>
@@ -175,7 +115,7 @@ export function SpotlightGrid({ focusIdentity, nextAt, onTileClick }: SpotlightG
               onClick={() => onTileClick?.(t.participant.identity)}
               className="flex-shrink-0 rounded-xl overflow-hidden relative transition-all hover:scale-[1.04] active:scale-[0.97]"
               style={{
-                width: "calc(9/16 * 76px)",
+                width: "calc(16/9 * 76px)",
                 height: "76px",
                 border: "1.5px solid rgba(255,255,255,0.12)",
               }}

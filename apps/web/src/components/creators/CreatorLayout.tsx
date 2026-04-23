@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
+import CreatorEnrollmentWizard, { type TierId } from "@/components/profile/CreatorEnrollmentWizard";
 import { useAuth } from "@/hooks/useAuth";
 import { Toast } from "@/components/Toast";
 import {
@@ -390,6 +391,10 @@ type ConsentRow = {
   status: ConsentRowStatus;
   detail?: string | null;
   date?: string | null;
+  href?: string;
+  expandContent?: React.ReactNode;
+  actionLabel?: string;
+  onAction?: () => void;
 };
 
 function statusPillClass(s: ConsentRowStatus): string {
@@ -419,34 +424,91 @@ function statusLabel(s: ConsentRowStatus): string {
 }
 
 function ConsentRowList({ rows }: { rows: ConsentRow[] }) {
+  const [expandedIdx, setExpandedIdx] = React.useState<number | null>(null);
   return (
-    <div className="space-y-3">
-      {rows.map((item, i) => (
-        <div key={i} className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }}>
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-white">{item.label}</p>
-            {item.detail && (
-              <p className="text-xs text-pnp-textSecondary mt-0.5 truncate">{item.detail}</p>
+    <div className="space-y-2">
+      {rows.map((item, i) => {
+        const isExpanded = expandedIdx === i;
+        const isExpandable = !!item.expandContent;
+        const isLink = !!item.href;
+        const hasAction = !!item.onAction;
+
+        const header = (
+          <div className="flex items-center justify-between gap-3 px-4 py-3 w-full">
+            <div className="min-w-0 flex-1 text-left">
+              <p className="text-sm font-medium text-white">{item.label}</p>
+              {item.detail && (
+                <p className="text-xs text-pnp-textSecondary mt-0.5 truncate">{item.detail}</p>
+              )}
+              {item.date && (
+                <p className="text-[10px] text-pnp-textSecondary/70 mt-0.5">
+                  {new Date(item.date).toLocaleDateString()}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold ${statusPillClass(item.status)}`}>
+                {statusLabel(item.status)}
+              </span>
+              {isLink && (
+                <svg className="w-4 h-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                </svg>
+              )}
+              {isExpandable && (
+                <svg className={`w-4 h-4 opacity-50 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              )}
+            </div>
+          </div>
+        );
+
+        return (
+          <div key={i} className="rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.04)" }}>
+            {isLink ? (
+              <a href={item.href} target="_blank" rel="noopener noreferrer" className="block hover:bg-white/5 transition-colors" style={{ textDecoration: "none" }}>
+                {header}
+              </a>
+            ) : isExpandable ? (
+              <button className="block w-full hover:bg-white/5 transition-colors text-left" onClick={() => setExpandedIdx(isExpanded ? null : i)}>
+                {header}
+              </button>
+            ) : (
+              <div>{header}</div>
             )}
-            {item.date && (
-              <p className="text-[10px] text-pnp-textSecondary/70 mt-0.5">
-                {new Date(item.date).toLocaleDateString()}
-              </p>
+
+            {isExpanded && item.expandContent && (
+              <div className="px-4 pb-4 text-xs leading-relaxed space-y-2" style={{ color: "#8E8E93", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                {item.expandContent}
+              </div>
+            )}
+
+            {hasAction && (
+              <div className="px-4 pb-3">
+                <button
+                  onClick={item.onAction}
+                  className="w-full py-2 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {item.actionLabel ?? "Complete"}
+                </button>
+              </div>
             )}
           </div>
-          <span className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold ${statusPillClass(item.status)}`}>
-            {statusLabel(item.status)}
-          </span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
 export function CreatorConsents() {
+  const navigate = useNavigate();
   const [consents, setConsents] = React.useState<any>(null);
   const [userId, setUserId] = React.useState<string | number | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [showWizard, setShowWizard] = React.useState(false);
+  const [wizardTier] = React.useState<TierId>("ice");
 
   React.useEffect(() => {
     getCreatorConsents().then(res => {
@@ -459,11 +521,38 @@ export function CreatorConsents() {
   }, []);
 
   const genericRows: ConsentRow[] = consents ? [
-    { label: "Terms of Service", status: consents.terms_accepted ? "accepted" : "pending", date: consents.created_at },
-    { label: "Privacy Policy", status: consents.privacy_accepted ? "accepted" : "pending", date: consents.created_at },
-    { label: "Age Verification", status: consents.age_verified ? "accepted" : "pending", date: consents.age_verified_at },
-    { label: "Wall of Fame Photo Consent", status: consents.wof_photo_consent ? "accepted" : "pending" },
-    { label: "Content Disclaimer", status: consents.content_disclaimer ? "accepted" : "pending", date: consents.content_disclaimer_accepted_at },
+    {
+      label: "Terms of Service",
+      status: consents.terms_accepted ? "accepted" : "pending",
+      date: consents.created_at,
+      href: "/terms",
+    },
+    {
+      label: "Privacy Policy",
+      status: consents.privacy_accepted ? "accepted" : "pending",
+      date: consents.created_at,
+      href: "/privacy",
+    },
+    {
+      label: "Age Verification",
+      status: consents.age_verified ? "accepted" : "pending",
+      date: consents.age_verified_at,
+    },
+    {
+      label: "Wall of Fame Photo Consent",
+      status: consents.wof_photo_consent ? "accepted" : "pending",
+      expandContent: (
+        <p className="pt-2">Allow your Wall of Fame photos to appear in the Social Feed on the web app. You can toggle this in Settings → App Preferences at any time.</p>
+      ),
+    },
+    {
+      label: "Content Disclaimer",
+      status: consents.content_disclaimer ? "accepted" : "pending",
+      date: consents.content_disclaimer_accepted_at,
+      expandContent: (
+        <p className="pt-2">I confirm that all objects, substances, or materials appearing in my videos are props, simulated, or used solely for entertainment purposes. All content must comply with PNPtv! community standards. No illegal content. Explicit content requires age verification to be active on your account.</p>
+      ),
+    },
   ] : [];
 
   const hasApplication = !!consents?.application_id;
@@ -488,6 +577,7 @@ export function CreatorConsents() {
         ? `${applicationTypeLabel ?? "Application"} — ${consents.application_status ?? "pending"}`
         : "Not submitted",
       date: consents.application_created_at,
+      ...(!hasApplication ? { actionLabel: "Start Application", onAction: () => navigate("/creators/apply") } : {}),
     },
     {
       label: "Stage Name",
@@ -523,6 +613,17 @@ export function CreatorConsents() {
       status: consents.creator_terms_agreed ? "accepted" : "pending",
       detail: consents.creator_terms_version ? `Version ${consents.creator_terms_version}` : null,
       date: consents.creator_terms_agreed_at,
+      ...(consents.creator_terms_agreed
+        ? {
+            expandContent: (
+              <>
+                <p className="pt-2">By enrolling as a creator, you agree to PNPtv!'s Creator Program Terms. Subscription revenue is split 70% to you / 30% to PNPtv!. Payouts are processed every Tuesday before 2:00 PM UTC via your selected payment method.</p>
+                <p>You retain ownership of all content you upload. PNPtv! reserves the right to deactivate creator profiles for violations of community standards or the strike policy (3 strikes = suspension).</p>
+                <p>You may voluntarily deactivate at any time. Active subscribers retain access until their billing period ends. PNPtv! may amend these terms with 30 days written notice.</p>
+              </>
+            ),
+          }
+        : { actionLabel: "Start Enrollment", onAction: () => setShowWizard(true) }),
     },
     {
       label: "Onboarding Call",
@@ -536,6 +637,7 @@ export function CreatorConsents() {
       detail: consents.fiat_payout_method
         ? `Configured (${String(consents.fiat_payout_method).toUpperCase()})`
         : "Not configured",
+      ...(!consents.fiat_payout_method ? { actionLabel: "Configure Payouts", onAction: () => navigate("/creators/settings") } : {}),
     },
     {
       label: "Crypto Payout Wallet",
@@ -545,6 +647,7 @@ export function CreatorConsents() {
       detail: consents.wallet_address_set
         ? (consents.creator_wallet_verified ? "Connected & verified" : "Connected — pending verification")
         : "Not connected",
+      ...(!consents.wallet_address_set ? { actionLabel: "Configure Payouts", onAction: () => navigate("/creators/settings") } : {}),
     },
   ] : [];
 
@@ -553,7 +656,7 @@ export function CreatorConsents() {
       <Helmet><title>Consents — Creator Studio — PNPtv!</title></Helmet>
       <div className="p-4 lg:p-6">
         <h1 className="text-xl font-bold text-pnp-textPrimary mb-2">Consents &amp; Agreements</h1>
-        <p className="text-sm text-pnp-textSecondary mb-6">A record of every consent, form, and document you've submitted as a creator/performer on PNPtv.</p>
+        <p className="text-sm text-pnp-textSecondary mb-6">A record of every consent, form, and document you've submitted as a creator/performer on PNPtv. Tap any row to read the document or take action.</p>
 
         {loading ? (
           <div className="animate-pulse space-y-3">
@@ -563,7 +666,7 @@ export function CreatorConsents() {
           <p className="text-sm text-pnp-textSecondary">Could not load your consents.</p>
         ) : (
           <div className="space-y-8">
-            {/* Identifiers — always at top so admin support can reference them */}
+            {/* Identifiers */}
             <section>
               <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider mb-3">Identifiers</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -593,7 +696,6 @@ export function CreatorConsents() {
               </p>
             </section>
 
-            {/* Content disclaimer timestamp note */}
             {consents.content_disclaimer && consents.content_disclaimer_accepted_at && (
               <p className="text-[10px] text-pnp-textSecondary/50 px-1">
                 Content disclaimer accepted on {new Date(consents.content_disclaimer_accepted_at).toLocaleDateString()}
@@ -602,6 +704,17 @@ export function CreatorConsents() {
           </div>
         )}
       </div>
+
+      {showWizard && (
+        <CreatorEnrollmentWizard
+          tier={wizardTier}
+          onClose={() => setShowWizard(false)}
+          onSubmitted={() => {
+            setShowWizard(false);
+            setConsents((c: any) => c ? { ...c, creator_terms_agreed: true } : c);
+          }}
+        />
+      )}
     </>
   );
 }

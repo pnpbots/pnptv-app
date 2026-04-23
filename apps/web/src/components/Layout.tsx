@@ -16,6 +16,7 @@ import { useI18n } from "@/lib/i18n";
 import { LandingPage } from "@/pages/LandingPage";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
+import { MainStageFAB } from "@/components/mainstage/MainStageFAB";
 
 const SIDEBAR_DM_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -751,6 +752,7 @@ export function Layout() {
       links: [
         { to: "/?view=feed", label: "PNP Feed" },
         { to: "/channels", label: "PNP Channels" },
+        { to: "/main-stage", label: "Main Stage" },
       ],
     },
     {
@@ -1198,6 +1200,37 @@ export function Layout() {
             <nav className="flex-1 overflow-y-auto" aria-label="Mobile navigation">
               <div className="px-3 py-3 space-y-4">
 
+                {/* ── Navigation ──────────────────────────────────────────── */}
+                <div>
+                  <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Navigation</p>
+                  {[
+                    { to: "/?view=feed", label: "PNP Feed" },
+                    { to: "/main-stage", label: "Main Stage", isLive: true },
+                    { to: "/channels", label: "PNP Channels" },
+                    { to: "/?view=hangouts", label: "PNP Hangouts" },
+                    { to: "/nearby", label: "Nearby" },
+                  ].map((link) => (
+                    <NavLink
+                      key={link.to}
+                      to={link.to}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={({ isActive }: { isActive: boolean }) =>
+                        `flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                        }`
+                      }
+                    >
+                      <span>{link.label}</span>
+                      {link.isLive && (
+                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
+                          <span className="w-1 h-1 rounded-full bg-white animate-pulse" />
+                          LIVE
+                        </span>
+                      )}
+                    </NavLink>
+                  ))}
+                </div>
+
                 {/* ── Account ──────────────────────────────────────────── */}
                 <div>
                   <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Account</p>
@@ -1341,9 +1374,12 @@ export function Layout() {
         const inVideoCall = location.pathname.startsWith("/chat/");
         const showCompact = isLandscape && isMobile && inVideoCall;
         return (
-          <Suspense fallback={null}>
-            <CristinaWidget compact={showCompact} />
-          </Suspense>
+          <>
+            <MainStageFAB />
+            <Suspense fallback={null}>
+              <CristinaWidget compact={showCompact} />
+            </Suspense>
+          </>
         );
       })()}
 

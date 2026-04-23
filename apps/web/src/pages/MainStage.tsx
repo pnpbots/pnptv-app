@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   LiveKitRoom,
-  RoomAudioRenderer,
   useLocalParticipant,
+  useRoomContext,
   useTracks,
 } from "@livekit/components-react";
-import type { TrackReferenceOrPlaceholder } from "@livekit/components-react";
-import { ConnectionState, Track } from "livekit-client";
+import { ConnectionState, RoomEvent, Track } from "livekit-client";
 import { useMainStage } from "@/hooks/useMainStage";
 import { SpotlightGrid } from "@/components/mainstage/SpotlightGrid";
 import { CinemaGrid } from "@/components/mainstage/CinemaGrid";
@@ -15,36 +14,23 @@ import { EqualGrid } from "@/components/mainstage/EqualGrid";
 
 const MEDIA_IDENTITY = "mainstage-media";
 
-// ── Volume mixer inner (needs LiveKit context) ────────────────────────────────
+// ── Cammer identity collection (needs LiveKit context) ────────────────────────
 
-interface VolumeMixerInnerProps {
-  camsVol: number;
-  mediaVol: number;
+interface CammerInfo {
+  identity: string;
+  name: string;
 }
 
-function VolumeMixerInner({ camsVol, mediaVol }: VolumeMixerInnerProps) {
+function ParticipantCollector({ onCammersChange }: { onCammersChange: (cammers: CammerInfo[]) => void }) {
   const tracks = useTracks(
-    [{ source: Track.Source.Microphone, withPlaceholder: false }],
-    { onlySubscribed: true }
-  ) as TrackReferenceOrPlaceholder[];
-
+    [{ source: Track.Source.Camera, withPlaceholder: true }],
+    { onlySubscribed: false }
+  );
   useEffect(() => {
-    for (const trackRef of tracks) {
-      const pub = trackRef.publication;
-      if (!pub || pub.kind !== Track.Kind.Audio) continue;
-      const track = pub.audioTrack;
-      if (!track) continue;
-      const elements = track.attachedElements;
-      const isMedia = trackRef.participant.identity === MEDIA_IDENTITY;
-      const vol = isMedia ? mediaVol / 100 : camsVol / 100;
-      for (const el of elements) {
-        if (el instanceof HTMLMediaElement) {
-          el.volume = Math.max(0, Math.min(1, vol));
-        }
-      }
-    }
-  }, [tracks, camsVol, mediaVol]);
-
+    onCammersChange(
+      tracks.map((t) => ({ identity: t.participant.identity, name: t.participant.name || t.participant.identity }))
+    );
+  }, [tracks, onCammersChange]);
   return null;
 }
 
@@ -233,15 +219,7 @@ function BottomBarInner({
 
 // ── Connection state overlay ──────────────────────────────────────────────────
 
-function ConnectionOverlay() {
-  const [connState, setConnState] = useState<ConnectionState>(ConnectionState.Connecting);
-
-  useEffect(() => {
-    // We don't have room context here — this component is rendered inside <LiveKitRoom>
-    // but we need to listen at the room level. Use the room event hook.
-  }, []);
-
-  // We listen for the connection banner via the RoomEvent on the outer wrapper
+function ConnectionOverlay({ connState }: { connState: ConnectionState }) {
   if (connState === ConnectionState.Connected) return null;
 
   return (
@@ -265,14 +243,25 @@ function ConnectionOverlay() {
 // ── Room event listener ───────────────────────────────────────────────────────
 
 interface RoomListenerProps {
-  onConnected: () => void;
-  onReconnecting: () => void;
-  onReconnected: () => void;
+  onConnectionStateChange: (state: ConnectionState) => void;
 }
 
-function RoomListener({ onConnected, onReconnecting, onReconnected }: RoomListenerProps) {
-  // This relies on useRoomContext but we handle it at the outer Room level via callbacks
-  void onConnected; void onReconnecting; void onReconnected;
+function RoomListener({ onConnectionStateChange }: RoomListenerProps) {
+  const room = useRoomContext();
+
+  useEffect(() => {
+    const handleState = (nextState: ConnectionState) => {
+      onConnectionStateChange(nextState);
+    };
+
+    room.on(RoomEvent.ConnectionStateChanged, handleState);
+    handleState(room.state);
+
+    return () => {
+      room.off(RoomEvent.ConnectionStateChanged, handleState);
+    };
+  }, [onConnectionStateChange, room]);
+
   return null;
 }
 
@@ -284,8 +273,6 @@ interface MainStageInnerProps {
   spotlightNextAt: number | null;
   mediaKind: "video" | "music" | "off";
   mediaSrc: string | null;
-  camsVol: number;
-  mediaVol: number;
   canBeCammer: boolean;
   isAdmin: boolean;
   counts: { cammers: number; viewers: number };
@@ -294,6 +281,8 @@ interface MainStageInnerProps {
   onLeaveCam: () => void;
   onOpenAdmin: () => void;
   onSpotlightPick: (identity: string) => void;
+  onConnectionStateChange: (state: ConnectionState) => void;
+  onCammersChange: (cammers: CammerInfo[]) => void;
 }
 
 function MainStageInner({
@@ -302,8 +291,6 @@ function MainStageInner({
   spotlightNextAt,
   mediaKind,
   mediaSrc,
-  camsVol,
-  mediaVol,
   canBeCammer,
   isAdmin,
   counts,
@@ -312,13 +299,13 @@ function MainStageInner({
   onLeaveCam,
   onOpenAdmin,
   onSpotlightPick,
+  onConnectionStateChange,
+  onCammersChange,
 }: MainStageInnerProps) {
   return (
     <>
-      {/* Audio rendering is done by RoomAudioRenderer only for visual reference;
-          volume mixing is applied per-element in VolumeMixerInner */}
-      <RoomAudioRenderer />
-      <VolumeMixerInner camsVol={camsVol} mediaVol={mediaVol} />
+      <ParticipantCollector onCammersChange={onCammersChange} />
+      <RoomListener onConnectionStateChange={onConnectionStateChange} />
 
       <div className="flex-1 min-h-0 relative overflow-hidden" style={{ transition: "background 0.3s" }}>
         {mode === "spotlight" && (
@@ -371,25 +358,23 @@ export default function MainStage() {
 
   const [adminOpen, setAdminOpen] = useState(false);
   const [connState, setConnState] = useState<ConnectionState>(ConnectionState.Connecting);
-  const [isCammer, setIsCammer] = useState(false);
+  const [cammerInfos, setCammerInfos] = useState<CammerInfo[]>([]);
+  const isCammer = role === "cammer" || role === "admin";
 
-  // Track if user is currently on cam
   useEffect(() => {
-    setIsCammer(role === "cammer" || role === "admin");
-  }, [role]);
+    setConnState(ConnectionState.Connecting);
+  }, [token]);
 
   const handleJoinCam = useCallback(async () => {
     await joinAsCammer();
-    setIsCammer(true);
   }, [joinAsCammer]);
 
   const handleLeaveCam = useCallback(async () => {
     await leaveCammer();
-    setIsCammer(false);
   }, [leaveCammer]);
 
-  const handleRoomConnected = useCallback(() => {
-    setConnState(ConnectionState.Connected);
+  const handleCammersChange = useCallback((infos: CammerInfo[]) => {
+    setCammerInfos(infos);
   }, []);
 
   // Loading skeleton
@@ -476,6 +461,7 @@ export default function MainStage() {
   if (!token || !state) return null;
 
   const mode = state.mode;
+  const liveCammers = state?.counts?.cammers ?? 0;
 
   return (
     <div
@@ -515,6 +501,13 @@ export default function MainStage() {
           <span>Main Stage</span>
           <span className="text-white/30 mx-0.5">·</span>
           <span style={{ color: "rgba(255,255,255,0.55)" }}>{MODE_LABELS[mode]}</span>
+          {liveCammers > 0 && (
+            <>
+              <span className="text-white/20 mx-0.5">·</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+              <span className="tabular-nums" style={{ color: "rgba(255,255,255,0.70)" }}>{liveCammers}</span>
+            </>
+          )}
         </div>
 
         {/* Close */}
@@ -544,6 +537,7 @@ export default function MainStage() {
 
       {/* LiveKit room */}
       <LiveKitRoom
+        key={token}
         token={token}
         serverUrl={livekitUrl}
         connect={true}
@@ -554,33 +548,35 @@ export default function MainStage() {
           dynacast: true,
           publishDefaults: { simulcast: true },
         }}
-        onConnected={handleRoomConnected}
         style={{ display: "contents" }}
       >
         <MainStageInner
           mode={mode}
-          spotlightCammer={state.spotlight.cammer}
-          spotlightNextAt={state.spotlight.nextAt}
-          mediaKind={state.media.kind}
-          mediaSrc={state.media.src}
-          camsVol={state.cams.volume}
-          mediaVol={state.media.volume}
+          spotlightCammer={state?.spotlight?.cammer}
+          spotlightNextAt={state?.spotlight?.nextAt}
+          mediaKind={state?.media?.kind || "off"}
+          mediaSrc={state?.media?.src}
           canBeCammer={canBeCammer}
           isAdmin={isAdmin}
-          counts={state.counts}
+          counts={state?.counts || { cammers: 0, viewers: 0 }}
           isCammer={isCammer}
           onJoinCam={handleJoinCam}
           onLeaveCam={handleLeaveCam}
           onOpenAdmin={() => setAdminOpen(true)}
           onSpotlightPick={(identity) => admin.setSpotlight(identity)}
+          onConnectionStateChange={setConnState}
+          onCammersChange={handleCammersChange}
         />
       </LiveKitRoom>
+
+      <ConnectionOverlay connState={connState} />
 
       {/* Admin drawer */}
       {adminOpen && (
         <AdminDrawer
           state={state}
           admin={admin}
+          cammerInfos={cammerInfos}
           onClose={() => setAdminOpen(false)}
         />
       )}
@@ -593,10 +589,11 @@ export default function MainStage() {
 interface AdminDrawerProps {
   state: import("@/hooks/useMainStage").MainStageState;
   admin: ReturnType<typeof useMainStage>["admin"];
+  cammerInfos: CammerInfo[];
   onClose: () => void;
 }
 
-function AdminDrawer({ state, admin, onClose }: AdminDrawerProps) {
+function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
   return (
     <>
       {/* Backdrop */}
@@ -621,7 +618,7 @@ function AdminDrawer({ state, admin, onClose }: AdminDrawerProps) {
         }}
       >
         {/* Inline admin content — imports MainStageAdmin logic */}
-        <AdminPanelContent state={state} admin={admin} onClose={onClose} />
+        <AdminPanelContent state={state} admin={admin} cammerInfos={cammerInfos} onClose={onClose} />
       </aside>
     </>
   );
@@ -634,6 +631,7 @@ type AdminType = ReturnType<typeof useMainStage>["admin"];
 interface AdminPanelContentProps {
   state: import("@/hooks/useMainStage").MainStageState;
   admin: AdminType;
+  cammerInfos: CammerInfo[];
   onClose?: () => void;
 }
 
@@ -675,41 +673,22 @@ const MODES: Array<{ id: "spotlight" | "cinema" | "equal"; label: string; sub: s
   },
 ];
 
-export function AdminPanelContent({ state, admin, onClose }: AdminPanelContentProps) {
+export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminPanelContentProps) {
   const [mediaUrl, setMediaUrl] = useState(state.media.src ?? "");
-  const [camsVol, setCamsVol] = useState(state.cams.volume);
-  const [mediaVol, setMediaVol] = useState(state.media.volume);
-
-  const volDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleVolChange = useCallback(
-    (type: "cams" | "media", val: number) => {
-      if (type === "cams") setCamsVol(val);
-      else setMediaVol(val);
-      if (volDebounceRef.current) clearTimeout(volDebounceRef.current);
-      volDebounceRef.current = setTimeout(() => {
-        admin.setVolume(type === "cams" ? { cams: val } : { media: val });
-      }, 200);
-    },
-    [admin]
-  );
-
-  useEffect(() => {
-    return () => { if (volDebounceRef.current) clearTimeout(volDebounceRef.current); };
-  }, []);
 
   const handlePlayMedia = useCallback(() => {
     if (!mediaUrl.trim()) return;
-    admin.setMedia({ kind: "video", src: mediaUrl.trim(), playing: true, volume: mediaVol });
-  }, [admin, mediaUrl, mediaVol]);
+    admin.setMedia({ kind: "video", src: mediaUrl.trim(), playing: true });
+  }, [admin, mediaUrl]);
 
   const handleStopMedia = useCallback(() => {
     admin.setMedia({ kind: "off", src: null, playing: false });
   }, [admin]);
 
   const handleTogglePlay = useCallback(() => {
+    if (!state?.media) return;
     admin.setMedia({ ...state.media, playing: !state.media.playing });
-  }, [admin, state.media]);
+  }, [admin, state?.media]);
 
   return (
     <div className="flex flex-col h-full">
@@ -721,7 +700,7 @@ export function AdminPanelContent({ state, admin, onClose }: AdminPanelContentPr
         <div>
           <h2 className="text-white font-bold text-sm">Admin Controls</h2>
           <p className="text-white/40 text-xs mt-0.5">
-            {state.counts.cammers} cammers · {state.counts.viewers} watching
+            {state?.counts?.cammers || 0} cammers · {state?.counts?.viewers || 0} watching
           </p>
         </div>
         {onClose && (
@@ -745,7 +724,7 @@ export function AdminPanelContent({ state, admin, onClose }: AdminPanelContentPr
           <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">Layout Mode</h3>
           <div className="grid grid-cols-3 gap-2">
             {MODES.map((m) => {
-              const active = state.mode === m.id;
+              const active = state?.mode === m.id;
               return (
                 <button
                   key={m.id}
@@ -797,7 +776,7 @@ export function AdminPanelContent({ state, admin, onClose }: AdminPanelContentPr
               </button>
             </div>
 
-            {state.media.kind !== "off" && (
+            {state?.media?.kind && state.media.kind !== "off" && (
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -837,60 +816,50 @@ export function AdminPanelContent({ state, admin, onClose }: AdminPanelContentPr
           </div>
         </section>
 
-        {/* Volume controls */}
+        {/* Participants */}
         <section>
-          <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-3">Volume Mix</h3>
-          <div className="space-y-4">
-            {/* Cams volume */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs text-white/60 font-medium flex items-center gap-1.5">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
-                  </svg>
-                  Cammers
-                </label>
-                <span className="text-xs text-white/80 font-bold tabular-nums">{Math.round(camsVol)}%</span>
-              </div>
-              <input
-                type="range"
-                min={0} max={100} step={1}
-                value={camsVol}
-                onChange={(e) => handleVolChange("cams", Number(e.target.value))}
-                className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-                style={{
-                  background: `linear-gradient(to right, #D4007A ${camsVol}%, rgba(255,255,255,0.12) ${camsVol}%)`,
-                  outline: "none",
-                }}
-                aria-label={`Cammers volume ${Math.round(camsVol)}%`}
-              />
+          <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">
+            Participants{cammerInfos.length > 0 ? ` (${cammerInfos.length})` : ""}
+          </h3>
+          {cammerInfos.length === 0 ? (
+            <p className="text-white/30 text-xs">No cammers on stage</p>
+          ) : (
+            <div className="space-y-1.5">
+              {cammerInfos.map((c) => (
+                <div
+                  key={c.identity}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
+                >
+                  <span className="flex-1 min-w-0 text-xs text-white/70 truncate">{c.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => admin.moderate("mute", c.identity)}
+                    className="flex-shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-[0.96]"
+                    style={{
+                      background: "rgba(230,145,56,0.12)",
+                      border: "1px solid rgba(230,145,56,0.25)",
+                      color: "#E69138",
+                    }}
+                  >
+                    Mute
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => admin.moderate("kick", c.identity)}
+                    className="flex-shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-[0.96]"
+                    style={{
+                      background: "rgba(255,69,58,0.12)",
+                      border: "1px solid rgba(255,69,58,0.25)",
+                      color: "#FF453A",
+                    }}
+                  >
+                    Kick
+                  </button>
+                </div>
+              ))}
             </div>
-
-            {/* Media volume */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs text-white/60 font-medium flex items-center gap-1.5">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
-                  </svg>
-                  Media
-                </label>
-                <span className="text-xs text-white/80 font-bold tabular-nums">{Math.round(mediaVol)}%</span>
-              </div>
-              <input
-                type="range"
-                min={0} max={100} step={1}
-                value={mediaVol}
-                onChange={(e) => handleVolChange("media", Number(e.target.value))}
-                className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-                style={{
-                  background: `linear-gradient(to right, #7B61FF ${mediaVol}%, rgba(255,255,255,0.12) ${mediaVol}%)`,
-                  outline: "none",
-                }}
-                aria-label={`Media volume ${Math.round(mediaVol)}%`}
-              />
-            </div>
-          </div>
+          )}
         </section>
       </div>
     </div>

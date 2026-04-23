@@ -38,7 +38,7 @@ export default function CreatorEnrollmentWizard({
   const pr = i18n.profile;
   const t = TIER_CONFIG[tier];
   const [step, setStep] = useState(1);
-  const TOTAL_STEPS = 4;
+  const TOTAL_STEPS = 5;
 
   // Step 1 state
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -92,7 +92,8 @@ export default function CreatorEnrollmentWizard({
 
   const canProceedStep1 = termsAccepted && commitmentAccepted;
   const canProceedStep2 = paymentAddress.trim().length >= 3;
-  const canProceedStep3 = !!idFile && !!signatureData;
+  const canProceedStep3 = !!idFile;
+  const canProceedStep4 = !!signatureData;
 
   return (
     <div
@@ -324,21 +325,37 @@ export default function CreatorEnrollmentWizard({
                 )}
               </div>
 
+            </>
+          )}
+
+          {/* Step 4: Digital Signature */}
+          {step === 4 && (
+            <>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">
+                {pr.digitalSignature}
+              </p>
+
+              <div className="rounded-xl p-3 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <p style={{ color: "#8E8E93" }}>
+                  {pr.idVerificationExplanation}
+                </p>
+              </div>
+
               <div>
-                <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>
+                <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>
                   {pr.digitalSignature} <span className="text-red-400">*</span>
                 </p>
                 <SignaturePad
                   onSave={setSignatureData}
-                  width={300}
-                  height={100}
+                  width={320}
+                  height={180}
                 />
               </div>
             </>
           )}
 
-          {/* Step 4: Review & Submit */}
-          {step === 4 && (
+          {/* Step 5: Review & Submit */}
+          {step === 5 && (
             <>
               <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">{pr.reviewAndSubmit}</p>
 
@@ -411,7 +428,8 @@ export default function CreatorEnrollmentWizard({
               disabled={
                 (step === 1 && !canProceedStep1) ||
                 (step === 2 && !canProceedStep2) ||
-                (step === 3 && !canProceedStep3)
+                (step === 3 && !canProceedStep3) ||
+                (step === 4 && !canProceedStep4)
               }
               className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-40"
               style={{ background: t.gradient }}

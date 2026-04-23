@@ -15,9 +15,7 @@ export function TutorialOverlay({ section, onDismiss, onDismissForever }: Tutori
   const lang = user?.language === "es" ? "es" : "en";
 
   const content = tutorialContent[section];
-  if (!content) return null;
-
-  const slides = content.slides;
+  const slides = content?.slides ?? [];
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState<"left" | "right">("right");
   const [exiting, setExiting] = useState(false);
@@ -61,6 +59,8 @@ export function TutorialOverlay({ section, onDismiss, onDismissForever }: Tutori
     if (dx > 0) next();
     else back();
   }, [next, back]);
+
+  if (!content) return null;
 
   return (
     <div

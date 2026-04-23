@@ -123,6 +123,9 @@ export default function Settings() {
   const [contentDisclaimer, setContentDisclaimer] = useState(false);
   const [contentDisclaimerSaving, setContentDisclaimerSaving] = useState(false);
 
+  const [creatorStatus, setCreatorStatus] = useState<string>("");
+  const [expandedAgreement, setExpandedAgreement] = useState<string | null>(null);
+
   const [autoShareToX, setAutoShareToX] = useState(false);
   const [autoShareToXSaving, setAutoShareToXSaving] = useState(false);
   const [xHandle, setXHandle] = useState<string | null>(null);
@@ -262,6 +265,7 @@ export default function Settings() {
         setWofConsent(profile.wofPhotoConsent ?? false);
         setContentDisclaimer(profile.contentDisclaimer ?? false);
         setAutoShareToX(profile.autoShareToX ?? false);
+        setCreatorStatus(profile.creatorStatus ?? "");
         setXHandle(profile.xHandle ?? null);
         setSelectedLang((profile.language as Lang) ?? (user?.language as Lang) ?? "en");
 
@@ -1021,6 +1025,145 @@ export default function Settings() {
             accentColor="#000000"
           />
         </div>
+      </Section>
+
+      {/* ── Consents & Agreements ─────────────────────────────────────────── */}
+      <Section title={p.consentsSection}>
+        {/* Platform TOS */}
+        <a
+          href="/terms"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-between rounded-lg px-3 py-3 mb-3 group"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", textDecoration: "none" }}
+        >
+          <p className="text-sm font-medium text-white">{p.platformTOS}</p>
+          <svg className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+          </svg>
+        </a>
+
+        {/* Privacy Policy */}
+        <a
+          href="/privacy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-between rounded-lg px-3 py-3 mb-3 group"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", textDecoration: "none" }}
+        >
+          <p className="text-sm font-medium text-white">{p.privacyPolicy}</p>
+          <svg className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+          </svg>
+        </a>
+
+        {/* Creator Program Terms */}
+        {(() => {
+          const isEnrolled = creatorStatus === "active" || creatorStatus === "pending_review";
+          const isExpanded = expandedAgreement === "creator-program";
+          return (
+            <div className="rounded-lg mb-3 overflow-hidden" style={{ border: "1px solid rgba(212,0,122,0.2)", background: "rgba(212,0,122,0.04)" }}>
+              <button
+                onClick={() => isEnrolled ? setExpandedAgreement(isExpanded ? null : "creator-program") : undefined}
+                className={`w-full flex items-center justify-between px-3 py-3 ${isEnrolled ? "cursor-pointer" : "cursor-default"}`}
+              >
+                <p className="text-sm font-medium text-white text-left">{p.creatorProgramAgreement}</p>
+                <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                  {creatorStatus === "active" && (
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "rgba(74,222,128,0.15)", color: "#4ADE80" }}>{p.agreementAccepted}</span>
+                  )}
+                  {creatorStatus === "pending_review" && (
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "rgba(251,191,36,0.15)", color: "#FBBF24" }}>{p.agreementUnderReview}</span>
+                  )}
+                  {!isEnrolled && (
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}>{p.agreementNotEnrolled}</span>
+                  )}
+                  {isEnrolled && (
+                    <svg className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  )}
+                </div>
+              </button>
+              {isEnrolled && isExpanded && (
+                <div className="px-3 pb-3 text-xs space-y-2" style={{ color: "#8E8E93", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <p className="pt-2">{p.programTermsBody}</p>
+                  <p>{p.programTermsBody2}</p>
+                  <p>{p.programTermsBody3}</p>
+                </div>
+              )}
+              {!isEnrolled && (
+                <div className="px-3 pb-3">
+                  <button
+                    onClick={() => {
+                      try { localStorage.setItem("pnp:creator-interest", "1"); } catch { /* ignore */ }
+                      navigate("/profile");
+                    }}
+                    className="w-full py-2 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  >
+                    {p.startEnrollmentCTA}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Payout Terms */}
+        {(() => {
+          const isExpanded = expandedAgreement === "payout-terms";
+          return (
+            <div className="rounded-lg mb-3 overflow-hidden" style={{ border: "1px solid rgba(94,209,196,0.2)", background: "rgba(94,209,196,0.04)" }}>
+              <button
+                onClick={() => setExpandedAgreement(isExpanded ? null : "payout-terms")}
+                className="w-full flex items-center justify-between px-3 py-3 cursor-pointer"
+              >
+                <p className="text-sm font-medium text-white text-left">{p.payoutTermsAgreement}</p>
+                <svg className={`w-4 h-4 transition-transform duration-200 flex-shrink-0 ml-2 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {isExpanded && (
+                <div className="px-3 pb-3 text-xs space-y-1.5" style={{ color: "#8E8E93", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <p className="pt-2">{p.youReceive70}</p>
+                  <p>{p.payoutsEveryTuesday}</p>
+                  <p>{p.minimumPayout}</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Content Requirements */}
+        {(() => {
+          const isExpanded = expandedAgreement === "content-req";
+          return (
+            <div className="rounded-lg overflow-hidden" style={{ border: "1px solid rgba(255,180,84,0.2)", background: "rgba(255,180,84,0.04)" }}>
+              <button
+                onClick={() => setExpandedAgreement(isExpanded ? null : "content-req")}
+                className="w-full flex items-center justify-between px-3 py-3 cursor-pointer"
+              >
+                <p className="text-sm font-medium text-white text-left">{p.contentRequirementsAgreement}</p>
+                <svg className={`w-4 h-4 transition-transform duration-200 flex-shrink-0 ml-2 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {isExpanded && (
+                <div className="px-3 pb-3 text-xs space-y-1.5" style={{ color: "#8E8E93", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <p className="pt-2">{p.contentReqBody}</p>
+                  <ul className="list-disc list-inside space-y-0.5 mt-1">
+                    <li>{p.contentReqItem1}</li>
+                    <li>{p.contentReqItem2}</li>
+                    <li>{p.contentReqItem3}</li>
+                    <li>{p.contentReqItem4}</li>
+                  </ul>
+                  <p className="mt-1">{p.contentReqDisclaimer}</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Section>
 
       {/* ── Upcoming Private Calls ────────────────────────────────────────── */}

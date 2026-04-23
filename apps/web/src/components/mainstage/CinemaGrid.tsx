@@ -87,7 +87,7 @@ export function CinemaGrid({ mediaIdentity, mediaKind, mediaSrc }: CinemaGridPro
               key={t.participant.identity}
               className="flex-shrink-0 rounded-xl overflow-hidden"
               style={{
-                width: "calc(9/16 * 76px)",
+                width: "calc(16/9 * 76px)",
                 height: "76px",
                 border: "1.5px solid rgba(255,255,255,0.10)",
               }}

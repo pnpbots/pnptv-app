@@ -203,12 +203,12 @@ export default function MainStageAdmin({ standalone = true }: MainStageAdminProp
         </header>
 
         <div className="flex-1 overflow-y-auto">
-          <AdminPanelContent state={state} admin={admin} />
+          <AdminPanelContent state={state} admin={admin} cammerInfos={[]} />
         </div>
       </div>
     );
   }
 
   // When used as a drawer (non-standalone), render just the panel content
-  return <AdminPanelContent state={state} admin={admin} />;
+  return <AdminPanelContent state={state} admin={admin} cammerInfos={[]} />;
 }

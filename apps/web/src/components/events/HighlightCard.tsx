@@ -26,6 +26,8 @@ interface HighlightCardProps {
 }
 
 export function HighlightCard({ item, onRsvp, onCancel, canCancel, onViewDetails }: HighlightCardProps) {
+  const navigate = useNavigate();
+
   if (item.kind === "event") {
     return (
       <EventCard
@@ -39,7 +41,6 @@ export function HighlightCard({ item, onRsvp, onCancel, canCancel, onViewDetails
   }
 
   const ann = item.data;
-  const navigate = useNavigate();
   const hasImage = !!ann.image && (ann.image.startsWith("/") || ann.image.startsWith("http"));
   const isInternal = ann.link && ann.link.startsWith("/") && !ann.link.startsWith("//");
 

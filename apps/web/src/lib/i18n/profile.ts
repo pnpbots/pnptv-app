@@ -401,6 +401,19 @@ const strings = {
     appealErrorRateLimitedDay: "You've reached the daily appeal limit. Please try again tomorrow.",
     appealErrorDuplicate: "We already have a pending appeal for this account. Our team will respond by email.",
     appealErrorGeneric: "Could not submit appeal. Please try again.",
+
+    // ── Consents & Agreements section ─────────────────────────────────────────
+    consentsSection: "Consents & Agreements",
+    platformTOS: "Platform Terms of Service",
+    privacyPolicy: "Privacy Policy",
+    creatorProgramAgreement: "Creator Program Terms & Conditions",
+    payoutTermsAgreement: "Payout Terms",
+    contentRequirementsAgreement: "Content Requirements",
+    agreementAccepted: "Accepted",
+    agreementUnderReview: "Under Review",
+    agreementNotEnrolled: "Not enrolled",
+    startEnrollmentCTA: "Start Enrollment",
+    viewDocument: "View",
   },
 
   es: {
@@ -805,6 +818,19 @@ const strings = {
     appealErrorRateLimitedDay: "Has alcanzado el límite diario de apelaciones. Inténtalo mañana.",
     appealErrorDuplicate: "Ya tenemos una apelación pendiente para esta cuenta. Nuestro equipo responderá por correo.",
     appealErrorGeneric: "No se pudo enviar la apelación. Inténtalo de nuevo.",
+
+    // ── Consents & Agreements section ─────────────────────────────────────────
+    consentsSection: "Consentimientos y acuerdos",
+    platformTOS: "Términos del servicio",
+    privacyPolicy: "Política de privacidad",
+    creatorProgramAgreement: "Términos del Programa de Creadores",
+    payoutTermsAgreement: "Términos de pago",
+    contentRequirementsAgreement: "Requisitos de contenido",
+    agreementAccepted: "Aceptado",
+    agreementUnderReview: "En revisión",
+    agreementNotEnrolled: "No inscrito",
+    startEnrollmentCTA: "Iniciar inscripción",
+    viewDocument: "Ver",
   },
 } as const;
 

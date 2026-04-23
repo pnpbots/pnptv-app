@@ -307,6 +307,16 @@ export function importSoundCloud(metadata: any, label?: string): Promise<{
   });
 }
 
+export function requestSoundCloud(url: string): Promise<{
+  success: boolean;
+  requestId: number;
+}> {
+  return request("/api/webapp/radio/request-soundcloud", {
+    method: "POST",
+    body: { url },
+  });
+}
+
 
 export function getSoundCloudArtistTracks(artistUrl: string): Promise<{
   success: boolean;
@@ -717,6 +727,13 @@ export function getRtmpKey(): Promise<{
   return request("/api/webapp/live/rtmp-key");
 }
 
+export function getMyChannel(): Promise<{
+  success: boolean;
+  channel: { ref: string; streamKey: string; rtmpUrl: string } | null;
+}> {
+  return request("/api/webapp/live/my-channel");
+}
+
 
 export function provisionChannel(): Promise<{
   success: boolean;
@@ -873,6 +890,20 @@ export function sharePostToX(postId: number): Promise<{
   return request(`/api/webapp/social/posts/${postId}/share-x`, { method: "POST" });
 }
 
+export function reactToPost(
+  postId: number,
+  emoji: string
+): Promise<{
+  success: boolean;
+  added: boolean;
+  reactions: Array<{ emoji: string; count: number; reacted_by_me?: boolean; users?: Array<{ id: string; username: string }> }>;
+}> {
+  return request(`/api/webapp/social/posts/${postId}/react`, {
+    method: "POST",
+    body: { emoji },
+  });
+}
+
 
 export function sharePostToHangouts(
   postId: number,
@@ -954,6 +985,12 @@ export interface EmailRegisterResponse {
     email: string;
   };
   error?: string;
+}
+
+export function emailRegister(
+  payload: EmailRegisterPayload
+): Promise<EmailRegisterResponse> {
+  return request("/api/webapp/auth/email/register", { method: "POST", body: payload });
 }
 
 
@@ -1130,6 +1167,53 @@ export type BulkUploadProgress = {
   total: number;
   percent: number;
 };
+
+export function bulkUploadVideos(
+  entries: BulkVideoEntry[],
+  onProgress?: (p: BulkUploadProgress) => void
+): Promise<{ success: boolean; posts: SocialPostItem[]; errors: { index: number; error: string }[] }> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    entries.forEach((entry) => {
+      formData.append("videos", entry.file);
+      formData.append("captions", entry.caption || "🎬");
+      formData.append("isExclusive", entry.isExclusive ? "true" : "false");
+      formData.append("isShareable", entry.isShareable ? "true" : "false");
+    });
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE}/api/webapp/social/posts/bulk-videos`);
+    xhr.withCredentials = true;
+
+    if (onProgress) {
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          onProgress({ loaded: e.loaded, total: e.total, percent: Math.round((e.loaded / e.total) * 100) });
+        }
+      });
+    }
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error("Invalid server response"));
+        }
+      } else {
+        try {
+          const err = JSON.parse(xhr.responseText);
+          reject(new Error(err.error || `Upload failed (${xhr.status})`));
+        } catch {
+          reject(new Error(`Upload failed (${xhr.status})`));
+        }
+      }
+    });
+    xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
+    xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
+    xhr.send(formData);
+  });
+}
 
 
 export function togglePostLike(postId: number): Promise<{ liked: boolean; likes_count?: number }> {
@@ -5788,7 +5872,20 @@ export function reviewCastingApplication(applicationId: string, decision: "appro
 
 // ── Telegram Group Linking & Video Chat ───────────────────────────────────────
 
+export function linkTelegramGroup(
+  groupId: number,
+  telegramChatId: string,
+  telegramInviteLink?: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/link-telegram`, {
+    method: "POST",
+    body: { telegramChatId, telegramInviteLink },
+  });
+}
 
+export function getVideoChatStatus(groupId: number): Promise<{ active: boolean; inviteLink: string | null }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/video-chat-status`);
+}
 
 export function startHangoutCall(groupId: number): Promise<{ token: string; livekitUrl: string; roomName: string }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/call/start`, { method: "POST" });
@@ -5798,6 +5895,14 @@ export function joinHangoutCall(groupId: number): Promise<{ token: string; livek
   return request(`/api/webapp/hangouts/groups/${groupId}/call/join`, { method: "POST" });
 }
 
+export function endHangoutCall(groupId: number): Promise<void> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/call/end`, { method: "POST" });
+}
+
+export function leaveHangoutCall(groupId: number | string): Promise<{ ok: boolean; participantCount: number }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/call/leave`, { method: "POST" });
+}
+
 
 
 // ── Radio / Now Playing ──────────────────────────────────────────────────────
@@ -5805,6 +5910,10 @@ export function joinHangoutCall(groupId: number): Promise<{ token: string; livek
 export interface NowPlaying {
   track: { title: string; artist: string; thumbnailUrl?: string; duration?: number; startedAt?: string } | null;
   listenerCount: number;
+}
+
+export function getRadioNowPlaying(): Promise<NowPlaying> {
+  return request("/api/radio/now-playing");
 }
 
 
@@ -6067,6 +6176,7 @@ export interface MainStageState {
   spotlight: {
     cammer: string | null;
     nextAt: number | null;
+    queue: string[];
   };
   media: {
     kind: "video" | "music" | "off";
@@ -6092,7 +6202,9 @@ export interface MainStageTokenResponse {
 }
 
 export function getMainStageState(): Promise<MainStageState> {
-  return request("/api/main-stage/state");
+  return request<{ success: boolean; state: MainStageState }>("/api/main-stage/state").then(
+    (res) => res.state
+  );
 }
 
 export function getMainStageToken(body: { asCammer?: boolean }): Promise<MainStageTokenResponse> {
