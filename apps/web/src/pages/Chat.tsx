@@ -175,7 +175,6 @@ function HangoutChatPanel({
   const [shareFeedNote, setShareFeedNote] = useState("");
   const [shareFeedSending, setShareFeedSending] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<GroupMessage | null>(null);
-  const [deleteForAll, setDeleteForAll] = useState(true);
   const [deleting, setDeleting] = useState(false);
 
   // Inject UX polish styles
@@ -222,14 +221,11 @@ function HangoutChatPanel({
   const [recentlyReacted, setRecentlyReacted] = useState<Set<string>>(new Set());
   // Floating-emoji overlays — one per tap, removed after animation ends
   const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; msgId: number; emoji: string; x?: number; y?: number }>>([]);
-  // Reaction strip (long-press) — Telegram-style floating emoji strip
-  const [reactionStrip, setReactionStrip] = useState<{ msgId: number; anchor: { x: number; y: number } } | null>(null);
   // Reactors bottom sheet
   const [reactorsSheet, setReactorsSheet] = useState<{ emoji: string; users: string[] } | null>(null);
   // Chat toast (inline, replaces alert)
   const [chatToast, setChatToast] = useState<string | null>(null);
   // Double-tap tracking ref
-  const lastTapRef = useRef<{ msgId: number; time: number } | null>(null);
   // Swipe-to-reply tracking ref
   const swipeRef = useRef<{ startX: number; startY: number; startTime: number; msgId: number; el: HTMLDivElement | null; cancelled: boolean } | null>(null);
 
@@ -246,7 +242,6 @@ function HangoutChatPanel({
 
   const openEmojiPicker = (msgId: number, x: number, y: number) => {
     setContextMenu(null);
-    setReactionStrip(null);
     setEmojiPickerMsgId(msgId);
     // Use visualViewport to account for on-screen keyboard offset
     const vw = window.visualViewport?.width ?? window.innerWidth;
@@ -509,21 +504,14 @@ function HangoutChatPanel({
     if (msg.is_deleted) return;
     const touch = e.touches[0];
     const now = Date.now();
-    // Double-tap detection — add first allowed reaction
-    if (lastTapRef.current && lastTapRef.current.msgId === msg.id && now - lastTapRef.current.time < 300) {
-      lastTapRef.current = null;
-      handleReactionWithAnimation(msg.id, ALLOWED_REACTIONS[0], { x: touch.clientX, y: touch.clientY });
-      return;
-    }
-    lastTapRef.current = { msgId: msg.id, time: now };
     // Swipe-to-reply tracking
     swipeRef.current = { startX: touch.clientX, startY: touch.clientY, startTime: now, msgId: msg.id, el: e.currentTarget as HTMLDivElement, cancelled: false };
-    // Long-press: 300ms → floating reaction strip
+    // Long-press: 380ms → unified action sheet (reactions + menu)
     longPressTimer.current = setTimeout(() => {
       swipeRef.current = null;
-      setReactionStrip({ msgId: msg.id, anchor: { x: touch.clientX, y: touch.clientY } });
+      setContextMenu({ msg, x: touch.clientX, y: touch.clientY });
       try { (window as any).Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("medium"); } catch {}
-    }, 300);
+    }, 380);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
@@ -586,17 +574,13 @@ function HangoutChatPanel({
   const handleDeleteMsg = (msg: GroupMessage) => {
     setContextMenu(null);
     setConfirmDelete(msg);
-    setDeleteForAll(true);
   };
 
-  const handleDeleteConfirm = async () => {
+  const handleDeleteConfirm = async (forAll: boolean) => {
     if (!confirmDelete || deleting) return;
     setDeleting(true);
     try {
-      await deleteGroupMessage(groupId, confirmDelete.id, deleteForAll);
-      // Backend broadcast will trigger UI update via socket, but we can also
-      // update optimistically or rely on the socket event "hangout:message:deleted".
-      // The current socket handler already marks it as deleted.
+      await deleteGroupMessage(groupId, confirmDelete.id, forAll);
       setConfirmDelete(null);
     } catch (err) {
       setChatError(err instanceof Error ? err.message : "Failed to delete");
@@ -730,11 +714,13 @@ function HangoutChatPanel({
                   )}
 
                   {msg.is_deleted ? (
-                    <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${grouped ? "" : "mt-2"}`}>
-                      {!isMe && <div className="w-6 flex-shrink-0" />}
-                      <div className="max-w-[75%] rounded-2xl px-3 py-1.5 text-xs italic text-pnp-textSecondary/50 bg-white/5">
+                    <div className={`flex ${isMe ? "flex-row-reverse" : "flex-row"} ${grouped ? "" : "mt-2"} px-2`}>
+                      <span className="text-[11px] italic text-pnp-textSecondary/40 flex items-center gap-1">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636m12.728 12.728L18.364 18.364" />
+                        </svg>
                         Message deleted
-                      </div>
+                      </span>
                     </div>
                   ) : (
                     <div
@@ -872,7 +858,14 @@ function HangoutChatPanel({
                           })() : msg.content && <p><MentionText text={msg.content} /></p>}
                           <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
                             <span className={`text-[10px] ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>{timeStr}</span>
-                            {msg.edited_at && <span className={`text-[10px] ${isMe ? "text-white/40" : "text-pnp-textSecondary/60"}`}>(edited)</span>}
+                            {msg.edited_at && (
+                              <span
+                                className={`text-[10px] ${isMe ? "text-white/40" : "text-pnp-textSecondary/60"}`}
+                                title={msg.edit_count && msg.edit_count > 1 ? `Edited ${msg.edit_count} times · ${new Date(msg.edited_at).toLocaleString()}` : `Edited · ${new Date(msg.edited_at).toLocaleString()}`}
+                              >
+                                edited{msg.edit_count && msg.edit_count > 1 ? ` ·${msg.edit_count}×` : ""}
+                              </span>
+                            )}
                             {isMe && !msg.is_deleted && (() => {
                               let readByOther = false;
                               for (const uid in readReceipts) {
@@ -950,33 +943,15 @@ function HangoutChatPanel({
                           </div>
                         )}
 
-                        {/* Quick reaction row — visible on hover (desktop) */}
-                        <div className={`hidden group-hover/msg:flex items-center gap-0.5 mt-0.5 px-1 ${isMe ? "flex-row-reverse" : ""}`}>
-                          {QUICK_REACTIONS.map((emoji) => (
-                            <button
-                              key={emoji}
-                              onClick={() => handleReactionWithAnimation(msg.id, emoji)}
-                              className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-xs"
-                            >
-                              {emoji}
-                            </button>
-                          ))}
-                          <button
-                            onClick={(e) => { e.stopPropagation(); openEmojiPicker(msg.id, e.clientX, e.clientY); }}
-                            className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-xs text-pnp-textSecondary font-bold"
-                            title="More emojis"
-                          >+</button>
-                          <button
-                            onClick={() => startReply(msg)}
-                            className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all"
-                            title="Reply"
-                          >
-                            <svg className="w-3 h-3 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                            </svg>
-                          </button>
-                        </div>
                       </div>
+                      {/* Desktop hover kebab — opens unified action sheet */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setContextMenu({ msg, x: e.clientX, y: e.clientY }); }}
+                        aria-label="Message actions"
+                        className={`hidden group-hover/msg:flex self-center flex-shrink-0 w-7 h-7 items-center justify-center rounded-full bg-pnp-surface/80 hover:bg-white/10 ring-1 ring-white/10 text-pnp-textSecondary active:scale-90 transition-all backdrop-blur-md ${isMe ? "mr-1" : "ml-1"}`}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm0 5.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM10 14a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/></svg>
+                      </button>
                     </div>
                   )}
                 </React.Fragment>
@@ -1017,25 +992,26 @@ function HangoutChatPanel({
             style={{
               background: "#2C2C2E",
               border: "1px solid rgba(255,255,255,0.1)",
-              left: Math.min(contextMenu.x, window.innerWidth - 192),
-              top: Math.min(contextMenu.y, window.innerHeight - 320),
+              left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 280)),
+              top: Math.max(60, Math.min(contextMenu.y, window.innerHeight - 360)),
             }}
           >
             {/* Quick reactions in context menu */}
-            <div className="flex items-center justify-center gap-1 px-2 py-2 border-b border-white/5">
-              {QUICK_REACTIONS.slice(0, 6).map((emoji) => (
+            <div className="flex items-center gap-0.5 px-2 py-2 border-b border-white/5 overflow-x-auto scrollbar-hide">
+              {QUICK_REACTIONS.map((emoji) => (
                 <button
                   key={emoji}
-                  onClick={() => handleReactionWithAnimation(contextMenu.msg.id, emoji)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-base"
+                  onClick={() => { handleReactionWithAnimation(contextMenu.msg.id, emoji); setContextMenu(null); }}
+                  aria-label={`React with ${emoji}`}
+                  className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-base"
                 >
                   {emoji}
                 </button>
               ))}
               <button
                 onClick={(e) => { e.stopPropagation(); openEmojiPicker(contextMenu.msg.id, e.clientX, e.clientY); }}
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-sm text-pnp-textSecondary font-bold"
-                title="More emojis"
+                aria-label="More emojis"
+                className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-sm text-pnp-textSecondary font-bold"
               >+</button>
             </div>
             {contextMenu.msg.media_url && (
@@ -1158,46 +1134,6 @@ function HangoutChatPanel({
         </>
       )}
 
-      {/* Floating reaction strip — long-press on mobile (Telegram-style) */}
-      {reactionStrip && createPortal(
-        <>
-          <div className="fixed inset-0 z-[70]" onClick={() => setReactionStrip(null)} />
-          <div
-            className="fixed z-[71] flex items-center gap-1 px-3 py-2 rounded-2xl shadow-2xl animate-fade-in-up"
-            style={{
-              background: "#2C2C2E",
-              border: "1px solid rgba(255,255,255,0.15)",
-              left: Math.min(Math.max(8, reactionStrip.anchor.x - 160), window.innerWidth - 320),
-              top: Math.max(60, reactionStrip.anchor.y - 64),
-            }}
-          >
-            {ALLOWED_REACTIONS.map((emoji) => (
-              <button
-                key={emoji}
-                onClick={() => {
-                  handleReactionWithAnimation(reactionStrip.msgId, emoji, { x: reactionStrip.anchor.x, y: reactionStrip.anchor.y });
-                  setReactionStrip(null);
-                }}
-                aria-label={`React with ${emoji}`}
-                className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-2xl focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:outline-none"
-              >
-                {emoji}
-              </button>
-            ))}
-            <button
-              onClick={() => {
-                const { msgId, anchor } = reactionStrip;
-                setReactionStrip(null);
-                openEmojiPicker(msgId, anchor.x, anchor.y);
-              }}
-              aria-label="More emojis"
-              className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-base text-pnp-textSecondary font-bold focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:outline-none"
-            >···</button>
-          </div>
-        </>,
-        document.body
-      )}
-
       {/* Reactors bottom sheet */}
       {reactorsSheet && createPortal(
         <>
@@ -1271,18 +1207,35 @@ function HangoutChatPanel({
       )}
 
       {/* Edit bar */}
-      {editingMsg && (
-        <div className="px-3 py-2.5 border-t border-pnp-border flex items-center gap-3 flex-shrink-0 bg-blue-500/[0.04] backdrop-blur-xl animate-fade-in-up">
-          <div className="w-[3px] h-8 rounded-full bg-blue-500/80 flex-shrink-0 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
-          <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-bold text-blue-400 uppercase tracking-tight">Editing message</p>
-            <p className="text-xs text-white/50 truncate leading-relaxed">{editingMsg.content?.slice(0, 80)}</p>
+      {editingMsg && (() => {
+        const createdMs = new Date(editingMsg.created_at).getTime();
+        const remainingMs = Math.max(0, 48 * 3600 * 1000 - (Date.now() - createdMs));
+        const hoursLeft = Math.floor(remainingMs / 3600000);
+        const minutesLeft = Math.floor((remainingMs % 3600000) / 60000);
+        const timeLeftLabel = hoursLeft >= 1 ? `${hoursLeft}h ${minutesLeft}m left` : `${minutesLeft}m left`;
+        return (
+          <div className="px-3 py-2.5 border-t border-pnp-border flex items-center gap-3 flex-shrink-0 bg-blue-500/[0.04] backdrop-blur-xl animate-fade-in-up">
+            <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center bg-blue-500/15 text-blue-400">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <p className="text-[11px] font-bold text-blue-400 uppercase tracking-tight">Editing message</p>
+                <span className="text-[10px] text-white/30 tabular-nums" title="Edit window is 48 hours from send time">· {timeLeftLabel}</span>
+                {editingMsg.edit_count && editingMsg.edit_count > 0 && (
+                  <span className="text-[10px] text-white/30 tabular-nums">· {editingMsg.edit_count}×</span>
+                )}
+              </div>
+              <p className="text-xs text-white/50 truncate leading-relaxed">{editingMsg.content?.slice(0, 80)}</p>
+            </div>
+            <button onClick={cancelEdit} className="w-8 h-8 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-white hover:bg-white/10 transition-all active:scale-90 flex-shrink-0" aria-label="Cancel edit (Esc)" title="Cancel edit (Esc)">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </div>
-          <button onClick={cancelEdit} className="w-8 h-8 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-white hover:bg-white/10 transition-all active:scale-90 flex-shrink-0" aria-label="Cancel edit">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Media preview */}
       {mediaFile && !editingMsg && (
@@ -1467,63 +1420,53 @@ function HangoutChatPanel({
         </div>
       )}
 
-      {/* Delete confirmation modal */}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-md animate-fade-in" onClick={() => !deleting && setConfirmDelete(null)}>
-          <div className="w-full max-w-[320px] rounded-[24px] p-6 space-y-5 shadow-[0_20px_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl border border-white/10 animate-fade-in-up" style={{ background: "rgba(28,28,30,0.92)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="text-center space-y-2">
-              <h3 className="text-xl font-bold text-white tracking-tight">Delete Message?</h3>
-              <p className="text-[13px] text-white/40 leading-relaxed px-2">This action cannot be undone. Select your preference below.</p>
-            </div>
-            
-            {(String(confirmDelete.user_id) === String(myId) || isOwnerOrMod) && (
-              <div className="bg-white/[0.03] p-3.5 rounded-2xl border border-white/[0.05] transition-all hover:bg-white/[0.05]">
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <div className="relative flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={deleteForAll}
-                      onChange={(e) => setDeleteForAll(e.target.checked)}
-                      className="peer sr-only"
-                      disabled={deleting}
-                    />
-                    <div className="w-5 h-5 border-2 border-white/20 rounded-md flex items-center justify-center peer-checked:border-red-500/50 peer-checked:bg-red-500 transition-all duration-200">
-                      <svg className="w-3.5 h-3.5 text-white scale-0 peer-checked:scale-100 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                    </div>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[13px] font-bold text-white/90 group-hover:text-white transition-colors">Delete for everyone</span>
-                    <span className="text-[10px] text-white/30 uppercase tracking-widest font-bold">Recommended</span>
-                  </div>
-                </label>
+      {/* Delete confirmation — Telegram-style explicit choice */}
+      {confirmDelete && (() => {
+        const isSender = String(confirmDelete.user_id) === String(myId);
+        const canDeleteForEveryone = isSender || isOwnerOrMod;
+        const preview = confirmDelete.is_deleted
+          ? "(deleted)"
+          : confirmDelete.content?.slice(0, 80)
+            || (confirmDelete.media_type === "image" ? "📷 Photo" : confirmDelete.media_type === "video" ? "🎥 Video" : confirmDelete.media_type === "audio" ? "🎤 Voice message" : "Message");
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in" onClick={() => !deleting && setConfirmDelete(null)}>
+            <div className="w-full max-w-[320px] rounded-2xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10 animate-fade-in-up" style={{ background: "#1C1C1E" }} onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 pt-5 pb-4 space-y-2">
+                <h3 className="text-base font-bold text-white">Delete message?</h3>
+                <p className="text-[13px] text-white/60 line-clamp-2 leading-snug">{preview}</p>
               </div>
-            )}
-
-            <div className="flex flex-col gap-2.5">
-              <button
-                onClick={handleDeleteConfirm}
-                disabled={deleting}
-                className="w-full py-3 rounded-2xl text-[14px] font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50 shadow-[0_4px_12px_rgba(239,68,68,0.2)] hover:brightness-110"
-                style={{ background: "linear-gradient(135deg, #FF4B2B, #FF416C)" }}
-              >
-                {deleting ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                    Deleting...
-                  </span>
-                ) : "Delete"}
-              </button>
-              <button
-                onClick={() => setConfirmDelete(null)}
-                disabled={deleting}
-                className="w-full py-3 rounded-2xl text-[14px] font-bold text-white/40 hover:text-white hover:bg-white/[0.05] transition-all disabled:opacity-50"
-              >
-                Cancel
-              </button>
+              <div className="flex flex-col border-t border-white/5">
+                {canDeleteForEveryone && (
+                  <button
+                    onClick={() => handleDeleteConfirm(true)}
+                    disabled={deleting}
+                    className="w-full px-5 py-3.5 text-[15px] font-semibold text-left text-red-400 hover:bg-white/5 active:bg-white/10 disabled:opacity-50 transition-colors flex items-center justify-between"
+                  >
+                    <span>Delete for everyone</span>
+                    {deleting && (
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={() => handleDeleteConfirm(false)}
+                  disabled={deleting}
+                  className={`w-full px-5 py-3.5 text-[15px] font-semibold text-left hover:bg-white/5 active:bg-white/10 disabled:opacity-50 transition-colors ${canDeleteForEveryone ? "border-t border-white/5 text-red-400" : "text-red-400"}`}
+                >
+                  Delete for me only
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  disabled={deleting}
+                  className="w-full px-5 py-3.5 text-[15px] font-semibold text-white/80 hover:bg-white/5 active:bg-white/10 disabled:opacity-50 transition-colors border-t border-white/5"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
