@@ -22,7 +22,6 @@
     "invariant": "^2.2.4",
     "leaflet": "^1.9.0",
     "livekit-client": "^2.18.1",
-    "matrix-js-sdk": "^41.1.0",
     "oidc-client-ts": "^3.1.0",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.0",
