@@ -48,6 +48,7 @@ const PaymentSecurityService = require('./paymentSecurityService');
 const { isSubscriptionPlan, getEpaycoSubscriptionUrl, normalizePlanId } = require('../config/epaycoSubscriptionPlans');
 const PaymentHistoryService = require('./paymentHistoryService');
 const axios = require('axios');
+const PaymentWebhookEventModel = require('../models/paymentWebhookEventModel');
 
 class PaymentService {
   static EPAYCO_ERROR_MESSAGES = {
@@ -352,14 +353,23 @@ class PaymentService {
         if (Number.isFinite(received) && closest > 0) {
           const deltaPct = ((received - closest) / closest) * 100;
           if (Math.abs(deltaPct) >= 10) {
+            const envRate = process.env.EPAYCO_USD_TO_COP || '4000';
+            const deltaPercent = Number(deltaPct.toFixed(2));
             logger.warn('[ePayco] FX rate drift — webhook COP amount differs from stored expected by >10%', {
               paymentId: payment.id,
               received,
               expectedClosest: closest,
-              deltaPercent: Number(deltaPct.toFixed(2)),
-              envRate: process.env.EPAYCO_USD_TO_COP || '4000',
+              deltaPercent,
+              envRate,
               hint: 'Update EPAYCO_USD_TO_COP env var if the market rate has shifted permanently.',
             });
+            PaymentService.notifyFxDrift({
+              paymentId: payment.id,
+              received,
+              expectedClosest: closest,
+              deltaPercent,
+              envRate,
+            }).catch((err) => logger.error('[ePayco] FX drift notify failed', { error: err?.message }));
           }
         }
       } catch (e) {
@@ -377,6 +387,60 @@ class PaymentService {
       receivedCurrency: webhookData.x_currency_code,
       normalizedReceivedCurrency: webhookCurrency,
     };
+  }
+
+  // Deduped per |deltaPercent| bucket for 24h; Redis miss fails open so
+  // monitoring stays visible. Notifier + audit errors are logged and swallowed.
+  static async notifyFxDrift({ paymentId, received, expectedClosest, deltaPercent, envRate }) {
+    const bucket = Math.floor(Math.abs(Number(deltaPercent) || 0));
+    const dedupeKey = `pnpapp:fx_drift_warning:${bucket}`;
+    let firstInWindow = true;
+    try {
+      firstInWindow = await cache.setNX(dedupeKey, { paymentId, deltaPercent, ts: Date.now() }, 24 * 60 * 60);
+    } catch (err) {
+      logger.warn('[ePayco] FX drift dedupe check failed — proceeding without dedupe', { error: err?.message });
+      firstInWindow = true;
+    }
+    if (!firstInWindow) {
+      logger.info('[ePayco] FX drift suppressed by 24h dedupe', { bucket, dedupeKey });
+      return;
+    }
+    const payload = {
+      current_env_rate: envRate,
+      reference_rate: expectedClosest,
+      drift_percent: deltaPercent,
+      received_amount: received,
+      timestamp: new Date().toISOString(),
+    };
+    try {
+      const msg = [
+        '⚠️ <b>FX RATE DRIFT — ePayco</b>',
+        '',
+        `📉 Drift: ${deltaPercent}% (>=10% threshold)`,
+        `💱 Env rate (USD→COP): ${envRate}`,
+        `🎯 Reference (closest expected): ${expectedClosest}`,
+        `📨 Webhook amount received: ${received}`,
+        `🧾 Payment: <code>${paymentId || 'N/A'}</code>`,
+        '',
+        'Review <code>EPAYCO_USD_TO_COP</code> env var.',
+      ].join('\n');
+      await BusinessNotificationService.send(msg);
+    } catch (err) {
+      logger.error('[ePayco] FX drift admin notify failed', { error: err?.message });
+    }
+    try {
+      await PaymentWebhookEventModel.logEvent({
+        provider: 'epayco',
+        eventId: `fx_drift_${bucket}_${Date.now()}`,
+        paymentId,
+        status: 'fx_drift_warning',
+        stateCode: null,
+        isValidSignature: true,
+        payload,
+      });
+    } catch (err) {
+      logger.error('[ePayco] FX drift audit insert failed', { error: err?.message });
+    }
   }
 
     /**
