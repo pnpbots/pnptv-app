@@ -654,6 +654,29 @@ export function SharePostModal({
         {/* Expanded panel */}
         {hangoutsExpanded && (
           <div className="mt-2 space-y-2">
+            {/* Post preview card — what they're about to share */}
+            <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+              {(videoThumbnailUrl || mediaUrl) && mediaType && mediaType !== "audio" && (
+                <div className="relative w-full bg-black/40" style={{ aspectRatio: "16/9" }}>
+                  <img src={videoThumbnailUrl || mediaUrl!} alt="" className="w-full h-full object-cover" />
+                  {mediaType === "video" && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
+                        <svg className="w-4 h-4 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="px-3 py-2">
+                {authorName && <p className="text-[11px] font-semibold" style={{ color: "#5ED1C4" }}>{authorName}</p>}
+                {postContent ? (
+                  <p className="text-xs text-white/80 line-clamp-2 mt-0.5">{postContent}</p>
+                ) : mediaType === "audio" ? (
+                  <p className="text-xs text-white/50 italic mt-0.5">🎤 Audio post</p>
+                ) : null}
+              </div>
+            </div>
             {/* List area */}
             <div
               className="rounded-xl overflow-hidden"
@@ -782,8 +805,8 @@ export function SharePostModal({
                   value={hangoutNote}
                   onChange={(e) => setHangoutNote(e.target.value.slice(0, 500))}
                   rows={2}
-                  placeholder="Add a message (optional)"
-                  aria-label="Optional note to send with the post"
+                  placeholder="Add your comment…"
+                  aria-label="Your comment to send with the post"
                   className="w-full text-sm text-white rounded-lg px-3 py-2 outline-none resize-none"
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
                 />
@@ -904,6 +927,29 @@ export function SharePostModal({
 
         {dmsExpanded && (
           <div className="mt-2 space-y-2">
+            {/* Post preview card */}
+            <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+              {(videoThumbnailUrl || mediaUrl) && mediaType && mediaType !== "audio" && (
+                <div className="relative w-full bg-black/40" style={{ aspectRatio: "16/9" }}>
+                  <img src={videoThumbnailUrl || mediaUrl!} alt="" className="w-full h-full object-cover" />
+                  {mediaType === "video" && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
+                        <svg className="w-4 h-4 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="px-3 py-2">
+                {authorName && <p className="text-[11px] font-semibold" style={{ color: "#7B61FF" }}>{authorName}</p>}
+                {postContent ? (
+                  <p className="text-xs text-white/80 line-clamp-2 mt-0.5">{postContent}</p>
+                ) : mediaType === "audio" ? (
+                  <p className="text-xs text-white/50 italic mt-0.5">🎤 Audio post</p>
+                ) : null}
+              </div>
+            </div>
             <div className="rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
               {dmsLoadState === "loading" ? (
                 <div className="p-3 space-y-2">
@@ -992,7 +1038,7 @@ export function SharePostModal({
                   <textarea
                     value={dmNote}
                     onChange={(e) => setDmNote(e.target.value.slice(0, 500))}
-                    placeholder="Add a note (optional)"
+                    placeholder="Add your comment…"
                     rows={2}
                     className="w-full text-sm bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder:text-pnp-textSecondary/50 outline-none focus:border-white/30 resize-none"
                   />

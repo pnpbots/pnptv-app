@@ -20,6 +20,109 @@ const authGuard = (req, res) => {
   return user;
 };
 
+function buildDmReplyPreview(row) {
+  if (!row || row.is_deleted) return { content: '', mediaType: row?.media_type || null, isDeleted: !!row?.is_deleted };
+  if (row.message_type === 'post_card') {
+    const snap = row.meta?.snapshot || null;
+    const note = typeof snap?.note === 'string' ? snap.note.trim() : '';
+    const preview = typeof snap?.content === 'string' ? snap.content.trim() : '';
+    if (note) return { content: note.slice(0, 80), mediaType: snap?.mediaType || row.media_type || null, isDeleted: false };
+    if (preview) return { content: preview.slice(0, 80), mediaType: snap?.mediaType || row.media_type || null, isDeleted: false };
+    return { content: 'Shared post', mediaType: snap?.mediaType || row.media_type || null, isDeleted: false };
+  }
+  if (typeof row.content === 'string' && row.content.trim()) {
+    return { content: row.content.trim().slice(0, 80), mediaType: row.media_type || null, isDeleted: false };
+  }
+  if (row.media_type === 'image') return { content: 'Photo', mediaType: 'image', isDeleted: false };
+  if (row.media_type === 'video') return { content: 'Video', mediaType: 'video', isDeleted: false };
+  if (row.media_type === 'audio') return { content: 'Voice message', mediaType: 'audio', isDeleted: false };
+  return { content: '', mediaType: row.media_type || null, isDeleted: false };
+}
+
+function normalizeDmMessageRow(row) {
+  const replyPreview = row.reply_preview
+    ? {
+        id: row.reply_preview.id,
+        senderId: row.reply_preview.senderId,
+        content: row.reply_preview.content || '',
+        mediaType: row.reply_preview.mediaType || null,
+        isDeleted: row.reply_preview.isDeleted === true,
+      }
+    : null;
+  return {
+    ...row,
+    content: row.is_deleted ? null : row.content,
+    reactions: Array.isArray(row.reactions) ? row.reactions : [],
+    replyPreview,
+  };
+}
+
+async function getHydratedDmMessage(messageId) {
+  const { rows } = await query(
+    `SELECT dm.id, dm.sender_id, dm.recipient_id,
+            dm.content, dm.is_deleted, dm.edited_at,
+            dm.media_url, dm.media_type, dm.media_mime, dm.media_thumb_url,
+            dm.message_type, dm.meta, dm.reply_to_id,
+            dm.is_read, dm.read_at, dm.created_at,
+            rxn.reactions, rpv.reply_preview
+       FROM direct_messages dm
+       LEFT JOIN LATERAL (
+         SELECT json_agg(json_build_object(
+           'emoji', sub.emoji,
+           'count', sub.cnt,
+           'users', sub.users
+         )) AS reactions
+         FROM (
+           SELECT dr.emoji,
+                  COUNT(*)::int AS cnt,
+                  json_agg(json_build_object('id', u.id, 'username', u.username)) AS users
+           FROM dm_reactions dr
+           JOIN users u ON u.id = dr.user_id
+           WHERE dr.message_id = dm.id
+           GROUP BY dr.emoji
+         ) sub
+       ) rxn ON true
+       LEFT JOIN LATERAL (
+         SELECT json_build_object(
+           'id', rdm.id,
+           'senderId', rdm.sender_id,
+           'content', '',
+           'mediaType', COALESCE((rdm.meta -> 'snapshot' ->> 'mediaType'), rdm.media_type),
+           'isDeleted', rdm.is_deleted
+         ) AS reply_preview
+         FROM direct_messages rdm
+         WHERE rdm.id = dm.reply_to_id
+       ) rpv ON dm.reply_to_id IS NOT NULL
+      WHERE dm.id = $1
+      LIMIT 1`,
+    [messageId]
+  );
+  if (!rows.length) return null;
+
+  const row = rows[0];
+  if (row.reply_to_id) {
+    const { rows: replyRows } = await query(
+      `SELECT id, sender_id, content, media_type, message_type, meta, is_deleted
+         FROM direct_messages
+        WHERE id = $1
+        LIMIT 1`,
+      [row.reply_to_id]
+    );
+    if (replyRows.length) {
+      const preview = buildDmReplyPreview(replyRows[0]);
+      row.reply_preview = {
+        id: replyRows[0].id,
+        senderId: replyRows[0].sender_id,
+        content: preview.content,
+        mediaType: preview.mediaType,
+        isDeleted: preview.isDeleted,
+      };
+    }
+  }
+
+  return normalizeDmMessageRow(row);
+}
+
 function buildDmCallLink(roomName, callerId, calleeId) {
   const params = new URLSearchParams({
     call: roomName,
@@ -138,16 +241,27 @@ const getConversation = async (req, res) => {
            GROUP BY dr.emoji
          ) sub
        ) rxn ON true
-       LEFT JOIN LATERAL (
-         SELECT json_build_object(
-           'id', rdm.id,
-           'senderId', rdm.sender_id,
-           'content', LEFT(COALESCE(rdm.content, ''), 80),
-           'mediaType', rdm.media_type,
-           'isDeleted', rdm.is_deleted
-         ) AS reply_preview
-         FROM direct_messages rdm
-         WHERE rdm.id = dm.reply_to_id
+      LEFT JOIN LATERAL (
+        SELECT json_build_object(
+          'id', rdm.id,
+          'senderId', rdm.sender_id,
+          'content', COALESCE(
+            NULLIF(LEFT(BTRIM(COALESCE(rdm.meta -> 'snapshot' ->> 'note', '')), 80), ''),
+            NULLIF(LEFT(BTRIM(COALESCE(rdm.meta -> 'snapshot' ->> 'content', '')), 80), ''),
+            NULLIF(LEFT(BTRIM(COALESCE(rdm.content, '')), 80), ''),
+            CASE
+              WHEN COALESCE((rdm.meta -> 'snapshot' ->> 'mediaType'), rdm.media_type) = 'image' THEN 'Photo'
+              WHEN COALESCE((rdm.meta -> 'snapshot' ->> 'mediaType'), rdm.media_type) = 'video' THEN 'Video'
+              WHEN COALESCE((rdm.meta -> 'snapshot' ->> 'mediaType'), rdm.media_type) = 'audio' THEN 'Voice message'
+              WHEN rdm.message_type = 'post_card' THEN 'Shared post'
+              ELSE ''
+            END
+          ),
+          'mediaType', COALESCE((rdm.meta -> 'snapshot' ->> 'mediaType'), rdm.media_type),
+          'isDeleted', rdm.is_deleted
+        ) AS reply_preview
+        FROM direct_messages rdm
+        WHERE rdm.id = dm.reply_to_id
        ) rpv ON dm.reply_to_id IS NOT NULL
        WHERE ((dm.sender_id=$1 AND dm.recipient_id=$2) OR (dm.sender_id=$2 AND dm.recipient_id=$1))
          ${cursor ? 'AND dm.created_at < $3' : ''}
@@ -156,12 +270,7 @@ const getConversation = async (req, res) => {
     );
 
     // Normalize: deleted messages show placeholder, reactions always array
-    const messages = rows.reverse().map((m) => ({
-      ...m,
-      content: m.is_deleted ? null : m.content,
-      reactions: Array.isArray(m.reactions) ? m.reactions : [],
-      replyPreview: m.reply_preview || null,
-    }));
+    const messages = rows.reverse().map(normalizeDmMessageRow);
 
     // Mark messages as read (and emit dm:message:read so sender's checkmarks flip)
     await DmService.markAsRead(user.id, partnerId, req.app.get('io') || null);
@@ -319,7 +428,7 @@ const joinDmVideoCall = async (req, res) => {
 const sendMessage = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const requestedRecipientId = req.params.recipientId;
-  const { content } = req.body;
+  const { content, replyToId } = req.body;
 
   // Pre-validation: fail fast before touching DmService.
   if (typeof content !== 'string' || !content.trim()) {
@@ -339,9 +448,11 @@ const sendMessage = async (req, res) => {
     const message = await DmService.sendMessage(
       user.id,
       requestedRecipientId,
-      { content },
+      { content, replyToId },
       { isAdmin: isAdminSender }
     );
+
+    const hydratedMessage = await getHydratedDmMessage(message.id) || message;
 
     // Cristina AI ticket intercept — skip socket/push, return ticket notice
     if (message._ticket) {
@@ -353,7 +464,7 @@ const sendMessage = async (req, res) => {
     const senderName = user.firstName || user.first_name || user.username || 'User';
     if (io) {
       io.to(`user:${message.recipient_id}`).emit('dm:message', {
-        ...message,
+        ...hydratedMessage,
         senderName,
         senderPhoto: user.photoUrl || user.photo_url || null,
       });
@@ -361,7 +472,7 @@ const sendMessage = async (req, res) => {
 
     // Fire push notification to recipient (non-blocking)
     const PushNotificationService = require('../../../services/pushNotificationService');
-    const messageText = String(message.content || '');
+    const messageText = String(hydratedMessage.content || message.content || '');
     PushNotificationService.sendToUser(String(message.recipient_id), {
       title: senderName,
       body: messageText.slice(0, 120),
@@ -370,9 +481,9 @@ const sendMessage = async (req, res) => {
     }).catch(() => {});
 
     // ── Webapp → Telegram DM bridge: forward to recipient's Telegram ──
-    DmService.bridgeToTelegram(user.id, message.recipient_id, message).catch(() => {});
+    DmService.bridgeToTelegram(user.id, message.recipient_id, hydratedMessage).catch(() => {});
 
-    return res.json({ success: true, message, remaining: req.dmLimit?.remaining ?? null });
+    return res.json({ success: true, message: hydratedMessage, remaining: req.dmLimit?.remaining ?? null });
   } catch (err) {
     if (err.statusCode) {
       return res.status(err.statusCode).json({ error: err.message, code: err.code });
@@ -617,10 +728,11 @@ const shareDmPost = async (req, res) => {
     );
     // Socket fanout to recipient
     const io = req.app.get('io');
+    const hydratedMessage = await getHydratedDmMessage(msg.id) || msg;
     if (io) {
-      try { io.to(`user:${partnerId}`).emit('dm:message', { id: msg.id }); } catch (_) { /* ignore */ }
+      try { io.to(`user:${partnerId}`).emit('dm:message', hydratedMessage); } catch (_) { /* ignore */ }
     }
-    return res.json({ success: true, messageId: msg.id });
+    return res.json({ success: true, messageId: msg.id, message: hydratedMessage });
   } catch (err) {
     if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     logger.error('shareDmPost error', err);
@@ -717,7 +829,10 @@ const forwardMessage = async (req, res) => {
     const io = req.app.get('io');
     if (io && Array.isArray(result.sent)) {
       for (const item of result.sent) {
-        try { io.to(`user:${item.recipientId}`).emit('dm:message', { id: item.messageId }); } catch (_) {}
+        try {
+          const hydratedMessage = await getHydratedDmMessage(item.messageId);
+          if (hydratedMessage) io.to(`user:${item.recipientId}`).emit('dm:message', hydratedMessage);
+        } catch (_) {}
       }
     }
     return res.json(result);

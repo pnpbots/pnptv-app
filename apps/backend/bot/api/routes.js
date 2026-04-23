@@ -4713,19 +4713,20 @@ app.post('/api/webapp/hangouts/groups/:id/requests/:requestId/:action', requireS
 // ── Hangout Group Chat — open to all authenticated users ─────────────────────
 app.get('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.getMessages));
 // search MUST be registered before /:msgId routes so "search" is not parsed as a msgId
-app.get('/api/webapp/hangouts/groups/:id/messages/search', requireSessionAuth, asyncHandler(hangoutGroupController.searchMessages));
-app.patch('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, asyncHandler(hangoutGroupController.editMessage));
-app.delete('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, asyncHandler(hangoutGroupController.deleteMessage));
-app.post('/api/webapp/hangouts/groups/:id/messages/:msgId/react', requireSessionAuth, asyncHandler(hangoutGroupController.toggleReaction));
+app.get('/api/webapp/hangouts/groups/:id/messages/search', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.searchMessages));
+app.patch('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.editMessage));
+app.delete('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.deleteMessage));
+app.post('/api/webapp/hangouts/groups/:id/messages/:msgId/react', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.toggleReaction));
 app.post('/api/webapp/hangouts/groups/:id/link-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.linkTelegramGroup));
 app.post('/api/webapp/hangouts/groups/:id/unlink-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.unlinkTelegramGroup));
 app.get('/api/webapp/hangouts/groups/:id/video-chat-status', requireSessionAuth, asyncHandler(hangoutGroupController.getVideoChatStatus));
-app.get('/api/webapp/hangouts/groups/:id/messages/:msgId/reactions', requireSessionAuth, asyncHandler(hangoutGroupController.getReactions));
+app.get('/api/webapp/hangouts/groups/:id/messages/:msgId/reactions', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.getReactions));
 app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.sendMessage));
 // Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
 app.post(
   '/api/webapp/hangouts/groups/:id/media',
   requireSessionAuth,
+  requireHangoutAccess,
   uploadLimiter,
   uploadHangoutMedia,
   asyncHandler(hangoutMediaController.uploadHangoutMedia)

@@ -94,7 +94,7 @@ const listUsers = async (req, res) => {
     const offset = (page - 1) * limit;
 
     let countQuery = 'SELECT COUNT(*) as count FROM users WHERE is_active = true';
-    let dataQuery = `SELECT id, username, email, first_name, last_name, role, tier,
+    let dataQuery = `SELECT id, username, email, first_name, last_name, photo_file_id, role, tier,
                             subscription_status, plan_id AS subscription_plan, plan_expiry, created_at,
                             last_login_at, last_login_method, last_active, telegram
                      FROM users WHERE is_active = true`;

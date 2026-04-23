@@ -94,7 +94,10 @@ type View = "list" | "chat";
 function getTelegramDeepLink(inviteLink: string): string {
   // https://t.me/+HASH → tg://join?invite=HASH
   const match = inviteLink.match(/t\.me\/\+(.+)/);
-  return match ? `tg://join?invite=${match[1]}` : inviteLink;
+  if (match) return `tg://join?invite=${match[1]}`;
+  // Fallback: only allow safe https://t.me/ links — block javascript: and other schemes
+  if (/^https:\/\/t\.me\/.+/.test(inviteLink)) return inviteLink;
+  return "#";
 }
 
 // ─── HangoutChatPanel (PostgreSQL + Socket.IO) ──────────────────────────────
@@ -112,12 +115,14 @@ function HangoutChatPanel({
   groupMembers,
   readReceipts,
   emitReadMessage,
+  isConnected,
 }: {
   activeGroup: HangoutGroup;
   isOwnerOrMod: boolean;
   groupMembers: any[];
   readReceipts: Record<string, number>;
   emitReadMessage: (messageId: number) => void;
+  isConnected: boolean;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -144,6 +149,9 @@ function HangoutChatPanel({
   const [showScrollFab, setShowScrollFab] = useState(false);
   const [unreadBelow, setUnreadBelow] = useState(0);
   const [forwardingMsg, setForwardingMsg] = useState<GroupMessage | null>(null);
+  const [shareFeedMsg, setShareFeedMsg] = useState<GroupMessage | null>(null);
+  const [shareFeedNote, setShareFeedNote] = useState("");
+  const [shareFeedSending, setShareFeedSending] = useState(false);
 
   const handleForwardMessage = useCallback(
     async (targets: ForwardTarget[], note?: string) => {
@@ -176,7 +184,17 @@ function HangoutChatPanel({
   // Animated reaction state — key is "${msgId}-${emoji}"
   const [recentlyReacted, setRecentlyReacted] = useState<Set<string>>(new Set());
   // Floating-emoji overlays — one per tap, removed after animation ends
-  const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; msgId: number; emoji: string }>>([]);
+  const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; msgId: number; emoji: string; x?: number; y?: number }>>([]);
+  // Reaction strip (long-press) — Telegram-style floating emoji strip
+  const [reactionStrip, setReactionStrip] = useState<{ msgId: number; anchor: { x: number; y: number } } | null>(null);
+  // Reactors bottom sheet
+  const [reactorsSheet, setReactorsSheet] = useState<{ emoji: string; users: string[] } | null>(null);
+  // Chat toast (inline, replaces alert)
+  const [chatToast, setChatToast] = useState<string | null>(null);
+  // Double-tap tracking ref
+  const lastTapRef = useRef<{ msgId: number; time: number } | null>(null);
+  // Swipe-to-reply tracking ref
+  const swipeRef = useRef<{ startX: number; startY: number; startTime: number; msgId: number; el: HTMLDivElement | null; cancelled: boolean } | null>(null);
 
   // Build memberMap: userId → displayName
   const memberMap = React.useMemo<Record<string, string>>(() => {
@@ -191,31 +209,34 @@ function HangoutChatPanel({
 
   const openEmojiPicker = (msgId: number, x: number, y: number) => {
     setContextMenu(null);
+    setReactionStrip(null);
     setEmojiPickerMsgId(msgId);
-    // Keep panel inside viewport
+    // Use visualViewport to account for on-screen keyboard offset
+    const vw = window.visualViewport?.width ?? window.innerWidth;
+    const vh = window.visualViewport?.height ?? window.innerHeight;
     const PANEL_W = 280;
     const PANEL_H = 260;
     setEmojiPickerPos({
-      x: Math.min(x, window.innerWidth - PANEL_W - 8),
-      y: Math.max(8, Math.min(y, window.innerHeight - PANEL_H - 8)),
+      x: Math.min(x, vw - PANEL_W - 8),
+      y: Math.max(8, Math.min(y, vh - PANEL_H - 8)),
     });
   };
 
-  const handleReactionWithAnimation = async (msgId: number, emoji: string) => {
-    const key = `${msgId}-${emoji}`;
-    const floatId = `${key}-${Date.now()}`;
-    setRecentlyReacted((prev) => new Set(prev).add(key));
-    setFloatingReactions((prev) => [...prev, { id: floatId, msgId, emoji }]);
-    setTimeout(() => {
-      setRecentlyReacted((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }, 380);
-    setTimeout(() => {
-      setFloatingReactions((prev) => prev.filter((f) => f.id !== floatId));
-    }, 1000);
+  const handleReactionWithAnimation = async (msgId: number, emoji: string, anchor?: { x: number; y: number }) => {
+    // Determine if this is an add (not already reacted) before mutating state
+    const existingMsg = messages.find(m => m.id === msgId);
+    const existingReaction = (existingMsg?.reactions as MessageReaction[] | undefined)?.find(r => r.emoji === emoji);
+    const alreadyReacted = existingReaction ? (existingReaction.users || []).map(String).includes(String(myId)) : false;
+    const isAdd = !alreadyReacted;
+    if (isAdd) {
+      const key = `${msgId}-${emoji}`;
+      const floatId = `${key}-${Date.now()}`;
+      setRecentlyReacted((prev) => new Set(prev).add(key));
+      setFloatingReactions((prev) => [...prev, { id: floatId, msgId, emoji, x: anchor?.x, y: anchor?.y }]);
+      setTimeout(() => setRecentlyReacted((prev) => { const n = new Set(prev); n.delete(key); return n; }), 600);
+      setTimeout(() => setFloatingReactions((prev) => prev.filter((f) => f.id !== floatId)), 700);
+      try { (window as any).Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {}
+    }
     await handleReaction(msgId, emoji);
   };
 
@@ -334,6 +355,13 @@ function HangoutChatPanel({
     };
   }, [groupId, myId]);
 
+  // Auto-dismiss chatToast after 2.5s
+  useEffect(() => {
+    if (!chatToast) return;
+    const t = setTimeout(() => setChatToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [chatToast]);
+
   const emitTyping = () => {
     const now = Date.now();
     if (now - lastTypingEmit.current < 2000) return;
@@ -443,16 +471,58 @@ function HangoutChatPanel({
   const handleTouchStart = (msg: GroupMessage, e: React.TouchEvent) => {
     if (msg.is_deleted) return;
     const touch = e.touches[0];
+    const now = Date.now();
+    // Double-tap detection — add first allowed reaction
+    if (lastTapRef.current && lastTapRef.current.msgId === msg.id && now - lastTapRef.current.time < 300) {
+      lastTapRef.current = null;
+      handleReactionWithAnimation(msg.id, ALLOWED_REACTIONS[0], { x: touch.clientX, y: touch.clientY });
+      return;
+    }
+    lastTapRef.current = { msgId: msg.id, time: now };
+    // Swipe-to-reply tracking
+    swipeRef.current = { startX: touch.clientX, startY: touch.clientY, startTime: now, msgId: msg.id, el: e.currentTarget as HTMLDivElement, cancelled: false };
+    // Long-press: 300ms → floating reaction strip
     longPressTimer.current = setTimeout(() => {
-      setContextMenu({ msg, x: touch.clientX, y: touch.clientY });
-    }, 500);
+      swipeRef.current = null;
+      setReactionStrip({ msgId: msg.id, anchor: { x: touch.clientX, y: touch.clientY } });
+      try { (window as any).Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("medium"); } catch {}
+    }, 300);
   };
 
-  const handleTouchEnd = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!swipeRef.current || swipeRef.current.cancelled) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - swipeRef.current.startX;
+    const dy = touch.clientY - swipeRef.current.startY;
+    // Cancel long-press if clearly moving
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+      if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
     }
+    // Swipe-right-to-reply: horizontal drag dominant + rightward
+    if (dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.5 && swipeRef.current.el) {
+      const clampedX = Math.min(dx, 48);
+      swipeRef.current.el.style.transform = `translateX(${clampedX}px)`;
+      swipeRef.current.el.style.transition = "none";
+    }
+  };
+
+  const handleTouchEnd = (msg?: GroupMessage) => {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+    if (swipeRef.current && swipeRef.current.el) {
+      const el = swipeRef.current.el;
+      const startX = swipeRef.current.startX;
+      const elapsed = Date.now() - swipeRef.current.startTime;
+      const currentX = parseFloat(el.style.transform?.replace("translateX(", "") || "0");
+      el.style.transform = "";
+      el.style.transition = "transform 0.2s ease";
+      setTimeout(() => { if (el) el.style.transition = ""; }, 250);
+      // Trigger reply on sufficient swipe
+      if (currentX > 44 && elapsed < 500 && msg && !msg.is_deleted) {
+        startReply(msg);
+        try { (window as any).Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light"); } catch {}
+      }
+    }
+    swipeRef.current = null;
   };
 
   // Message actions
@@ -487,19 +557,57 @@ function HangoutChatPanel({
 
   const handleReaction = async (msgId: number, emoji: string) => {
     setContextMenu(null);
+    const myDbId = String(myId ?? "");
+    if (!myDbId) return;
+    // Optimistic update — apply immediately, revert on error
+    const snapshot = messages;
+    setMessages(prev => prev.map(m => {
+      if (m.id !== msgId) return m;
+      const reactions: MessageReaction[] = Array.isArray(m.reactions) ? (m.reactions as MessageReaction[]).map(r => ({ ...r })) : [];
+      const idx = reactions.findIndex(r => r.emoji === emoji);
+      if (idx >= 0) {
+        const users = (reactions[idx].users || []).map(String);
+        if (users.includes(myDbId)) {
+          const newUsers = users.filter(u => u !== myDbId);
+          if (newUsers.length === 0) reactions.splice(idx, 1);
+          else reactions[idx] = { ...reactions[idx], count: newUsers.length, users: newUsers };
+        } else {
+          reactions[idx] = { ...reactions[idx], count: (reactions[idx].count || 0) + 1, users: [...users, myDbId] };
+        }
+      } else {
+        reactions.push({ emoji, count: 1, users: [myDbId], reacted_by_me: true });
+      }
+      return { ...m, reactions };
+    }));
     try {
       await toggleMessageReaction(groupId, msgId, emoji);
-    } catch { /* silent */ }
+    } catch (err: any) {
+      setMessages(snapshot);
+      const code = err?.body?.code || err?.code;
+      if (code === "REACTION_LIMIT") setChatToast("Maximum emoji reactions reached for this message");
+      else if (code === "EMOJI_NOT_ALLOWED") setChatToast("This emoji is not allowed");
+      else setChatToast("Could not update reaction — please try again");
+    }
   };
 
-  const handleShareToFeed = async (msg: GroupMessage) => {
+  const handleShareToFeed = (msg: GroupMessage) => {
     setContextMenu(null);
+    setShareFeedMsg(msg);
+    setShareFeedNote("");
+  };
+
+  const handleShareFeedConfirm = async () => {
+    if (!shareFeedMsg || shareFeedSending) return;
+    setShareFeedSending(true);
     try {
-      await dropToFeed(groupId, msg.id);
-      setChatError('Shared to group feed!');
-      setTimeout(() => setChatError(null), 2500);
+      await dropToFeed(groupId, shareFeedMsg.id, shareFeedNote.trim() || undefined);
+      setShareFeedMsg(null);
+      setChatToast("Shared to feed!");
     } catch {
-      setChatError('Could not share to feed. Try again.');
+      setChatToast("Could not share to feed. Try again.");
+      setShareFeedMsg(null);
+    } finally {
+      setShareFeedSending(false);
     }
   };
 
@@ -507,12 +615,25 @@ function HangoutChatPanel({
 
   return (
     <div className="flex flex-col h-full relative">
+      {/* Offline banner */}
+      {!isConnected && (
+        <div className="flex items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 py-1.5 px-3 text-xs text-amber-300 flex-shrink-0">
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+          <span>Reconnecting to chat…</span>
+        </div>
+      )}
       {chatError && (
         <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 flex-shrink-0 flex items-center justify-between gap-2">
           <p className="text-xs text-red-400 flex-1">{chatError}</p>
           <button onClick={() => setChatError(null)} className="text-red-400/60 hover:text-red-400 flex-shrink-0 p-1">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
+        </div>
+      )}
+      {/* Inline toast for reaction errors */}
+      {chatToast && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[100] px-4 py-2 rounded-xl text-xs text-white shadow-xl pointer-events-none" style={{ background: "rgba(30,30,32,0.95)", border: "1px solid rgba(255,255,255,0.12)" }}>
+          {chatToast}
         </div>
       )}
 
@@ -567,11 +688,12 @@ function HangoutChatPanel({
                     </div>
                   ) : (
                     <div
+                      id={`msg-${msg.id}`}
                       className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${grouped ? "" : "mt-2"} group/msg`}
                       onContextMenu={(e) => handleContextMenu(msg, e)}
                       onTouchStart={(e) => handleTouchStart(msg, e)}
-                      onTouchEnd={handleTouchEnd}
-                      onTouchMove={handleTouchEnd}
+                      onTouchEnd={() => handleTouchEnd(msg)}
+                      onTouchMove={handleTouchMove}
                     >
                       {/* Avatar — only for first message in group, linked to profile */}
                       {!isMe && (
@@ -608,7 +730,17 @@ function HangoutChatPanel({
                             </div>
                           )}
                           {msg.reply_to && (
-                            <div className="mb-1 pl-2 border-l-2 border-white/30 text-[10px] text-white/60">
+                            <div
+                              className="mb-1 pl-2 border-l-2 border-white/30 text-[10px] text-white/60 cursor-pointer hover:border-pnp-accent/60 hover:text-white/80 transition-colors"
+                              onClick={() => {
+                                const target = document.getElementById(`msg-${msg.reply_to_id}`);
+                                if (target) {
+                                  target.scrollIntoView({ behavior: "smooth", block: "center" });
+                                  target.classList.add("ring-2", "ring-pnp-accent", "rounded-xl");
+                                  setTimeout(() => target.classList.remove("ring-2", "ring-pnp-accent", "rounded-xl"), 1500);
+                                }
+                              }}
+                            >
                               <span className="font-semibold">{msg.reply_to.name}</span>: {msg.reply_to.content?.slice(0, 80)}
                             </div>
                           )}
@@ -712,8 +844,7 @@ function HangoutChatPanel({
                         {msg.reactions && (msg.reactions as MessageReaction[]).length > 0 && (
                           <div className="relative flex flex-wrap gap-1 mt-1 px-1">
                             {(msg.reactions as MessageReaction[]).map((r) => {
-                              const myId = String(user?.id ?? "");
-                              const isReacted = myId && Array.isArray(r.users) && r.users.map(String).includes(myId);
+                              const isReacted = myId && Array.isArray(r.users) && r.users.map(String).includes(String(myId));
                               const reactorNames = (r.users || [])
                                 .map((uid: string) => memberMap[String(uid)] || "User")
                                 .filter(Boolean);
@@ -724,9 +855,14 @@ function HangoutChatPanel({
                               return (
                                 <div key={r.emoji} className="relative group/rxn">
                                   <button
-                                    onClick={() => handleReactionWithAnimation(msg.id, r.emoji)}
+                                    onClick={(e) => {
+                                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                      handleReactionWithAnimation(msg.id, r.emoji, { x: rect.left + rect.width / 2, y: rect.top });
+                                    }}
+                                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setReactorsSheet({ emoji: r.emoji, users: r.users || [] }); }}
                                     aria-pressed={isReacted ? "true" : "false"}
-                                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all active:scale-95 ${
+                                    aria-label={`${r.emoji} ${r.count} reaction${r.count !== 1 ? "s" : ""}`}
+                                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all active:scale-95 focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:outline-none ${
                                       recentlyReacted.has(animKey) ? "chat-reaction-pop" : ""
                                     } ${
                                       isReacted
@@ -752,16 +888,12 @@ function HangoutChatPanel({
                                 </div>
                               );
                             })}
-                            {/* Floating-emoji overlays for this message */}
-                            {floatingReactions.filter((f) => f.msgId === msg.id).map((f) => (
-                              <span
-                                key={f.id}
-                                className="chat-reaction-float pointer-events-none absolute left-4 bottom-0 text-xl"
-                                aria-hidden="true"
-                              >
-                                {f.emoji}
-                              </span>
-                            ))}
+                            {/* "+" add-reaction chip */}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openEmojiPicker(msg.id, e.clientX, e.clientY); }}
+                              aria-label="Add reaction"
+                              className="flex items-center justify-center w-7 h-[22px] rounded-full bg-white/[0.06] hover:bg-white/10 ring-1 ring-white/5 text-pnp-textSecondary text-sm transition-all active:scale-90 focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:outline-none"
+                            >+</button>
                           </div>
                         )}
 
@@ -973,12 +1105,101 @@ function HangoutChatPanel({
         </>
       )}
 
+      {/* Floating reaction strip — long-press on mobile (Telegram-style) */}
+      {reactionStrip && createPortal(
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setReactionStrip(null)} />
+          <div
+            className="fixed z-[71] flex items-center gap-1 px-3 py-2 rounded-2xl shadow-2xl animate-fade-in-up"
+            style={{
+              background: "#2C2C2E",
+              border: "1px solid rgba(255,255,255,0.15)",
+              left: Math.min(Math.max(8, reactionStrip.anchor.x - 160), window.innerWidth - 320),
+              top: Math.max(60, reactionStrip.anchor.y - 64),
+            }}
+          >
+            {ALLOWED_REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                onClick={() => {
+                  handleReactionWithAnimation(reactionStrip.msgId, emoji, { x: reactionStrip.anchor.x, y: reactionStrip.anchor.y });
+                  setReactionStrip(null);
+                }}
+                aria-label={`React with ${emoji}`}
+                className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-2xl focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:outline-none"
+              >
+                {emoji}
+              </button>
+            ))}
+            <button
+              onClick={() => {
+                const { msgId, anchor } = reactionStrip;
+                setReactionStrip(null);
+                openEmojiPicker(msgId, anchor.x, anchor.y);
+              }}
+              aria-label="More emojis"
+              className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-base text-pnp-textSecondary font-bold focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:outline-none"
+            >···</button>
+          </div>
+        </>,
+        document.body
+      )}
+
+      {/* Reactors bottom sheet */}
+      {reactorsSheet && createPortal(
+        <>
+          <div className="fixed inset-0 z-[80] bg-black/50" onClick={() => setReactorsSheet(null)} />
+          <div className="fixed bottom-0 left-0 right-0 z-[81] rounded-t-2xl shadow-2xl max-h-[60vh] flex flex-col overflow-hidden" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+              <p className="text-sm font-semibold text-white">{reactorsSheet.emoji} {reactorsSheet.users.length} reaction{reactorsSheet.users.length !== 1 ? "s" : ""}</p>
+              <button onClick={() => setReactorsSheet(null)} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 text-pnp-textSecondary" aria-label="Close">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto py-2 px-4 space-y-1">
+              {reactorsSheet.users.map((uid) => {
+                const name = memberMap[String(uid)] || messages.find(m => String(m.user_id) === String(uid))?.first_name || "Member";
+                return (
+                  <div key={uid} className="flex items-center gap-3 py-2">
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>
+                      {name[0]?.toUpperCase() || "?"}
+                    </div>
+                    <span className="text-sm text-white">{name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+
+      {/* Portal-based floating emoji overlays */}
+      {floatingReactions.length > 0 && createPortal(
+        <>
+          {floatingReactions.map((f) => (
+            <span
+              key={f.id}
+              className="chat-reaction-float pointer-events-none text-2xl"
+              aria-hidden="true"
+              style={f.x != null ? { position: "fixed", left: f.x, top: f.y ?? 0, transform: "translateX(-50%)", zIndex: 9999 } : { position: "fixed", left: "50%", top: "50%", transform: "translateX(-50%)", zIndex: 9999 }}
+            >
+              {f.emoji}
+            </span>
+          ))}
+        </>,
+        document.body
+      )}
+
       {/* Typing indicator */}
       {typingNames.length > 0 && (
-        <div className="px-4 py-1 flex-shrink-0">
-          <p className="text-xs text-pnp-textSecondary italic">
-            {typingNames.join(", ")} {typingNames.length === 1 ? "is" : "are"} typing...
-          </p>
+        <div className="px-4 py-1 flex-shrink-0 flex items-center gap-1">
+          <span className="text-xs text-pnp-textSecondary italic">{typingNames.join(", ")} {typingNames.length === 1 ? "is" : "are"} typing</span>
+          <span className="inline-flex items-end gap-px ml-0.5 mb-0.5">
+            <span className="w-1 h-1 rounded-full bg-pnp-textSecondary" style={{ animation: "typingDot 1.2s infinite 0ms" }} />
+            <span className="w-1 h-1 rounded-full bg-pnp-textSecondary" style={{ animation: "typingDot 1.2s infinite 200ms" }} />
+            <span className="w-1 h-1 rounded-full bg-pnp-textSecondary" style={{ animation: "typingDot 1.2s infinite 400ms" }} />
+          </span>
         </div>
       )}
 
@@ -1099,6 +1320,99 @@ function HangoutChatPanel({
         title="Forward message"
         subtitle={forwardingMsg?.content ? forwardingMsg.content.slice(0, 60) : undefined}
       />
+
+      {/* Share to Feed sheet — preview + comment before posting */}
+      {shareFeedMsg && (
+        <div
+          className="fixed inset-0 z-[70] flex items-end justify-center"
+          style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}
+          onClick={() => !shareFeedSending && setShareFeedMsg(null)}
+        >
+          <div
+            className="w-full max-w-lg rounded-t-2xl p-5 pb-8 space-y-3"
+            style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-center mb-1" aria-hidden="true">
+              <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} />
+            </div>
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-white">Share to Feed</h2>
+              <button
+                type="button"
+                onClick={() => setShareFeedMsg(null)}
+                disabled={shareFeedSending}
+                className="w-7 h-7 rounded-full flex items-center justify-center hover:opacity-80 disabled:opacity-40"
+                style={{ background: "rgba(255,255,255,0.08)" }}
+                aria-label="Cancel"
+              >
+                <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* Message preview */}
+            <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+              {shareFeedMsg.media_url && shareFeedMsg.media_type && (
+                <div className="relative w-full bg-black/40" style={{ aspectRatio: "16/9" }}>
+                  {shareFeedMsg.media_type === "video" ? (
+                    <video src={shareFeedMsg.media_url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                  ) : shareFeedMsg.media_type === "image" ? (
+                    <img src={shareFeedMsg.media_thumb_url || shareFeedMsg.media_url} alt="" className="w-full h-full object-cover" />
+                  ) : null}
+                  {shareFeedMsg.media_type === "video" && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
+                        <svg className="w-4 h-4 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="px-3 py-2.5">
+                <p className="text-[11px] font-semibold text-pnp-accent">{shareFeedMsg.first_name || shareFeedMsg.username || "User"}</p>
+                {shareFeedMsg.content && (
+                  <p className="text-sm text-white/80 line-clamp-3 mt-0.5">{shareFeedMsg.content}</p>
+                )}
+                {!shareFeedMsg.content && shareFeedMsg.media_type && (
+                  <p className="text-sm text-white/50 mt-0.5 italic">
+                    {shareFeedMsg.media_type === "image" ? "📷 Photo" : shareFeedMsg.media_type === "video" ? "🎥 Video" : "🎤 Audio"}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Comment input */}
+            <div>
+              <textarea
+                value={shareFeedNote}
+                onChange={(e) => setShareFeedNote(e.target.value.slice(0, 500))}
+                rows={3}
+                placeholder="Add your comment… (optional)"
+                className="w-full text-sm text-white rounded-xl px-3 py-2.5 outline-none resize-none focus:border-pnp-accent/50 transition-colors"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
+                autoFocus
+                disabled={shareFeedSending}
+              />
+              <p className="text-[10px] text-right mt-0.5" style={{ color: "#555" }}>{shareFeedNote.length}/500</p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleShareFeedConfirm}
+              disabled={shareFeedSending}
+              className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+              style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)" }}
+            >
+              {shareFeedSending ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  Sharing…
+                </>
+              ) : "Share to Feed"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2061,6 +2375,20 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
           {/* Right: call + menu — 44px min touch targets */}
           <div className="flex items-center flex-shrink-0">
+            {/* Create event button */}
+            {isOwnerOrMod && (
+              <button
+                onClick={() => setShowCreateEvent(true)}
+                className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all"
+                aria-label="Create event"
+                title="Create event"
+              >
+                <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z" />
+                </svg>
+              </button>
+            )}
+
             {/* Video call button — opens LiveKit call panel */}
             <VideoCallButton
               hasActiveCall={showTelegramDock || !!activeGroup?.hasActiveCall}
@@ -2955,6 +3283,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             groupMembers={groupMembers}
             readReceipts={readReceipts}
             emitReadMessage={emitReadMessage}
+            isConnected={isConnected}
           />
         )}
 
@@ -2998,6 +3327,20 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           </div>
         )}
       </div>
+
+      {/* Create event modal — available from within the active group view */}
+      {showCreateEvent && (
+        <CreateEventModal
+          canCreateLive={false}
+          userGroups={groups}
+          onClose={() => setShowCreateEvent(false)}
+          onCreated={() => {
+            setShowCreateEvent(false);
+            setEventKey((k) => k + 1);
+            loadHangoutEvents();
+          }}
+        />
+      )}
       </>
     );
   }
@@ -3036,7 +3379,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         showAction={isPrime}
         onAction={() => setShowCreate(true)}
         actionLabel="New group"
-        emptyAction={isPrime ? () => setShowCreate(true) : undefined}
+        emptyAction={isPrime ? () => setShowCreateEvent(true) : undefined}
       />
 
       {/* Create hangout — success state with Telegram linking instructions */}

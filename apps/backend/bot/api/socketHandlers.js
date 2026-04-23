@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const { spawn } = require('child_process');
-const { query } = require('../../config/postgres');
+const { query, getPool } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 const { getRedis } = require('../../config/redis');
 const { processChatMedia } = require('../../services/chatMediaService');
@@ -572,7 +572,29 @@ function initSocketIO(io) {
           await redis.del(`hangout:unread:${gid}:${user.id}`);
         } catch (_) { /* non-fatal */ }
 
-        // Messages now stored in PG chat_messages, no Matrix sync needed.
+        // Emit active call if one exists so the joining client can show the call UI
+        try {
+          const { rows: activeCallRows } = await query(
+            `SELECT id, group_id, room_name, creator_id, status, created_at
+               FROM hangout_video_calls WHERE group_id=$1 AND status='active' LIMIT 1`,
+            [gid]
+          );
+          if (activeCallRows.length > 0) {
+            const ac = activeCallRows[0];
+            const { rows: pRows } = await query(
+              `SELECT COUNT(*)::int AS count FROM hangout_call_participants WHERE call_id=$1 AND left_at IS NULL`,
+              [ac.id]
+            );
+            socket.emit('hangout:call:active', {
+              callId: String(ac.id),
+              roomName: ac.room_name,
+              participantCount: pRows[0]?.count || 0,
+              createdAt: ac.created_at,
+            });
+          }
+        } catch (callCheckErr) {
+          logger.warn('hangout:join active-call check failed', { gid, error: callCheckErr.message });
+        }
       } catch (err) {
         logger.error('hangout:join error', err);
       }
@@ -856,10 +878,20 @@ function initSocketIO(io) {
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
 
+      // Rate limit: 1 typing event per 2s per user per group — silently drop if over-limit
+      const redisTyping = getRedis();
+      if (redisTyping) {
+        try {
+          const rlTypingKey = `ratelimit:hangout:typing:${user.id}:${gid}`;
+          const exists = await redisTyping.set(rlTypingKey, '1', 'PX', 2000, 'NX');
+          if (!exists) return; // already typed recently — drop
+        } catch (_) { /* non-fatal */ }
+      }
+
       // Verify membership before broadcasting typing indicator
       try {
         const { rows: typingMemberRows } = await query(
-          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned=false OR is_banned IS NULL)',
           [gid, user.id]
         );
         if (typingMemberRows.length === 0) return;
@@ -935,9 +967,9 @@ function initSocketIO(io) {
 
 
       try {
-        // Verify membership
+        // Verify membership + ban status
         const { rows: memberRows } = await query(
-          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned=false OR is_banned IS NULL)',
           [gid, user.id]
         );
         if (memberRows.length === 0) return;
@@ -1145,63 +1177,82 @@ function initSocketIO(io) {
         return;
       }
 
+      // Rate limit: 10 reactions per 5s per user per message
+      const redis = getRedis();
+      if (redis) {
+        try {
+          const rlKey = `ratelimit:hangout:reaction:${user.id}:${msgId}`;
+          const now = Date.now();
+          const windowMs = 5000;
+          const [, , count] = await redis.multi()
+            .zadd(rlKey, now, `${now}`)
+            .zremrangebyscore(rlKey, '-inf', now - windowMs)
+            .zcard(rlKey)
+            .expire(rlKey, 10)
+            .exec();
+          if (Array.isArray(count) ? count[1] > 10 : count > 10) {
+            socket.emit('hangout:error', { message: 'You are reacting too fast', code: 'RATE_LIMITED' });
+            return;
+          }
+        } catch (_) { /* non-fatal — proceed if Redis fails */ }
+      }
 
+      const pool = getPool ? getPool() : null;
+      const client = pool ? await pool.connect() : null;
       try {
-        const { rows: memberRows } = await query(
+        if (!client) throw new Error('DB pool unavailable');
+
+        // Membership + ban check
+        const { rows: memberRows } = await client.query(
           'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned=false OR is_banned IS NULL)',
           [gid, user.id]
         );
         if (memberRows.length === 0) return;
 
-        const { rows: msgRows } = await query(
+        const { rows: msgRows } = await client.query(
           `SELECT id FROM chat_messages WHERE id=$1 AND room='hangout:'||$2 AND is_deleted=false`,
           [msgId, gid]
         );
         if (msgRows.length === 0) return;
 
-        const { rows: existing } = await query(
-          `SELECT id FROM chat_message_reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3`,
-          [msgId, String(user.id), emojiStr]
+        // Atomic toggle inside a transaction with row-level lock
+        await client.query('BEGIN');
+        const { rows: existingRows } = await client.query(
+          `SELECT id, user_id, emoji FROM chat_message_reactions WHERE message_id=$1 FOR UPDATE`,
+          [msgId]
         );
-
-        if (existing.length > 0) {
-          await query(
-            `DELETE FROM chat_message_reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3`,
-            [msgId, String(user.id), emojiStr]
-          );
+        const myRow = existingRows.find(r => String(r.user_id) === String(user.id) && r.emoji === emojiStr);
+        if (myRow) {
+          await client.query(`DELETE FROM chat_message_reactions WHERE id=$1`, [myRow.id]);
         } else {
-          const { rows: uniqueEmojiRows } = await query(
-            `SELECT COUNT(DISTINCT emoji)::int AS cnt FROM chat_message_reactions WHERE message_id=$1`,
-            [msgId]
-          );
-          if (uniqueEmojiRows[0].cnt >= 20) {
+          const uniqueEmojis = new Set(existingRows.map(r => r.emoji));
+          if (!uniqueEmojis.has(emojiStr) && uniqueEmojis.size >= 20) {
+            await client.query('ROLLBACK');
             socket.emit('hangout:error', { message: 'Maximum emoji reactions reached for this message', code: 'REACTION_LIMIT' });
             return;
           }
-          await query(
+          await client.query(
             `INSERT INTO chat_message_reactions (message_id, user_id, emoji) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
             [msgId, String(user.id), emojiStr]
           );
         }
-
-        const { rows: aggRows } = await query(
-          `SELECT emoji, COUNT(*)::int AS count, array_agg(user_id) AS users
-           FROM chat_message_reactions WHERE message_id=$1 GROUP BY emoji`,
+        const { rows: aggRows } = await client.query(
+          `SELECT emoji, COUNT(*)::int AS count, array_agg(user_id ORDER BY user_id) AS users
+           FROM chat_message_reactions WHERE message_id=$1 GROUP BY emoji ORDER BY count DESC, emoji`,
           [msgId]
         );
+        await client.query('COMMIT');
+
         const reactions = aggRows.map((r) => ({
-          emoji:  r.emoji,
-          count:  r.count,
-          users:  Array.isArray(r.users) ? r.users.map(String) : [],
+          emoji: r.emoji,
+          count: r.count,
+          users: Array.isArray(r.users) ? r.users.map(String) : [],
         }));
 
         io.to(`hangout:${gid}`).emit('hangout:reaction:updated', { messageId: msgId, reactions });
 
-        // ── Webapp → Telegram reaction bridge: set bot reaction to the top emoji ──
-        // Limitation: Telegram's setMessageReaction attributes the reaction to the
-        // bot, not the user. We show the current top emoji as the bot's reaction
-        // so TG users can see activity. Empty reactions clear the bot's reaction.
-        (async () => {
+        // ── Webapp → Telegram reaction bridge (fire-and-forget, up to top 3 emojis) ──
+        setImmediate(async () => {
           try {
             const { rows: metaRows } = await query(
               `SELECT media_metadata FROM chat_messages WHERE id = $1`,
@@ -1209,15 +1260,10 @@ function initSocketIO(io) {
             );
             const meta = metaRows[0]?.media_metadata;
             if (!meta?.telegramMsgId || !meta?.telegramChatId) return;
-
             const { getBotInstance } = require('../core/bot');
             const bot = getBotInstance();
             if (!bot) return;
-
-            // Pick the emoji with the highest count (ties broken by emoji string)
-            const top = reactions.slice().sort((a, b) => b.count - a.count || a.emoji.localeCompare(b.emoji))[0];
-            const tgReaction = top ? [{ type: 'emoji', emoji: top.emoji }] : [];
-
+            const tgReaction = reactions.slice(0, 3).map(r => ({ type: 'emoji', emoji: r.emoji }));
             await bot.telegram.callApi('setMessageReaction', {
               chat_id: meta.telegramChatId,
               message_id: meta.telegramMsgId,
@@ -1225,12 +1271,14 @@ function initSocketIO(io) {
               is_big: false,
             });
           } catch (rxnBridgeErr) {
-            // TG rejects unsupported/custom emoji — ignore silently
             logger.warn('[App→TG Bridge] reaction sync failed', { error: rxnBridgeErr.message, messageId: msgId });
           }
-        })();
+        });
       } catch (err) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         logger.error('hangout:reaction:toggle error', { userId: user.id, groupId: gid, messageId: msgId, error: err.message });
+      } finally {
+        if (client) client.release();
       }
     });
 
@@ -1242,19 +1290,28 @@ function initSocketIO(io) {
       const msgId = parseInt(messageId, 10);
       if (!Number.isFinite(gid) || !Number.isFinite(msgId)) return;
 
-
       try {
-        await query(
+        // Membership + ban check before any update or broadcast
+        const { rows: memberRows } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned=false OR is_banned IS NULL)',
+          [gid, user.id]
+        );
+        if (memberRows.length === 0) return;
+
+        const { rowCount } = await query(
           `UPDATE hangout_group_members
            SET last_read_message_id = GREATEST(COALESCE(last_read_message_id, 0), $1)
            WHERE group_id=$2 AND user_id=$3`,
           [msgId, gid, user.id]
         );
 
-        socket.to(`hangout:${gid}`).emit('hangout:read:update', {
-          userId:            user.id,
-          lastReadMessageId: msgId,
-        });
+        // Only broadcast if the UPDATE actually matched a row
+        if (rowCount > 0) {
+          socket.to(`hangout:${gid}`).emit('hangout:read:update', {
+            userId:            user.id,
+            lastReadMessageId: msgId,
+          });
+        }
       } catch (err) {
         logger.error('hangout:read:message error', { userId: user.id, groupId: gid, messageId: msgId, error: err.message });
       }
@@ -1282,13 +1339,19 @@ function initSocketIO(io) {
       if (!groupId || !trackId || !trackUrl) return;
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
+      // Validate trackUrl: must be https:// only (blocks SSRF and javascript: injection)
+      const urlStr = String(trackUrl);
+      if (!urlStr.startsWith('https://')) {
+        socket.emit('hangout:error', { message: 'Invalid track URL', code: 'INVALID_TRACK_URL' });
+        return;
+      }
       try {
         const isMod = await isHangoutMod(user.id, gid);
         if (!isMod) { socket.emit('hangout:error', { message: 'Not a moderator', code: 'NOT_MOD' }); return; }
         const existingShuffle = hangoutMusicState.get(gid)?.shuffle || false;
         const state = {
           trackId: String(trackId),
-          trackUrl: String(trackUrl).slice(0, 500),
+          trackUrl: urlStr.slice(0, 500),
           trackTitle: String(trackTitle || '').slice(0, 200),
           trackArtist: String(trackArtist || '').slice(0, 200),
           trackArt: trackArt ? String(trackArt).slice(0, 500) : null,

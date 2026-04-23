@@ -1810,11 +1810,10 @@ export function getHangoutFeed(groupId: number, cursor?: string, limit = 20): Pr
   return request(`/api/webapp/hangouts/groups/${groupId}/feed?${params}`);
 }
 
-export function dropToFeed(groupId: number, messageId: number): Promise<{ success: boolean; post: SocialPostItem }> {
+export function dropToFeed(groupId: number, messageId: number, note?: string): Promise<{ success: boolean; post: SocialPostItem }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/drop-to-feed`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messageId }),
+    body: { messageId, ...(note?.trim() ? { note: note.trim() } : {}) },
   });
 }
 
@@ -4191,6 +4190,7 @@ export interface AdminUser {
   email: string;
   first_name?: string;
   last_name?: string;
+  photo_file_id?: string | null;
   bio?: string;
   role: string;
   tier: string;

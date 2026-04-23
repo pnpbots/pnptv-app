@@ -10,11 +10,29 @@ const { resolveUserId } = require('../bot/utils/helpers');
  * Centralizes direct messaging logic for REST and Socket.IO
  */
 class DmService {
+  static _buildThreadPreview({ content, mediaType, messageType, meta }) {
+    const text = typeof content === 'string' ? content.trim() : '';
+    if (messageType === 'post_card') {
+      const snap = meta?.snapshot || null;
+      const note = typeof snap?.note === 'string' ? snap.note.trim() : '';
+      const preview = typeof snap?.content === 'string' ? snap.content.trim() : '';
+      if (note) return note.slice(0, 100);
+      if (preview) return `Shared post: ${preview}`.slice(0, 100);
+      if (snap?.mediaType === 'image') return 'Shared post: [image]';
+      if (snap?.mediaType === 'video') return 'Shared post: [video]';
+      if (snap?.mediaType === 'audio') return 'Shared post: [audio]';
+      return text.slice(0, 100) || 'Shared post';
+    }
+    if (text) return text.slice(0, 100);
+    if (mediaType) return `[${mediaType}]`;
+    return 'Media';
+  }
+
   /**
    * Send a direct message (text or media)
    */
   static async sendMessage(senderId, recipientId, data, options = {}) {
-    const { content, mediaUrl, mediaType, mediaMime, mediaThumbUrl, messageType, meta } = data;
+    const { content, mediaUrl, mediaType, mediaMime, mediaThumbUrl, messageType, meta, replyToId } = data;
     const { isAdmin = false } = options;
 
     const resolvedRecipientId = await resolveUserId(recipientId);
@@ -111,20 +129,46 @@ class DmService {
       }
     }
 
+    let resolvedReplyToId = null;
+    if (replyToId != null) {
+      const replyId = Number(replyToId);
+      if (!Number.isFinite(replyId) || replyId <= 0) {
+        throw { statusCode: 400, message: 'Invalid reply target' };
+      }
+      const replyCheck = await query(
+        `SELECT id
+           FROM direct_messages
+          WHERE id = $1
+            AND ((sender_id = $2 AND recipient_id = $3) OR (sender_id = $3 AND recipient_id = $2))
+            AND is_deleted = false
+          LIMIT 1`,
+        [replyId, senderId, resolvedRecipientId]
+      );
+      if (!replyCheck.rows.length) {
+        throw { statusCode: 404, message: 'Reply target not found' };
+      }
+      resolvedReplyToId = replyId;
+    }
+
     const text = content ? String(content).trim().slice(0, 4000) : null;
     const mType = (messageType === 'post_card' ? 'post_card' : 'text');
     const metaJson = meta ? JSON.stringify(meta) : null;
     const { rows } = await query(
       `INSERT INTO direct_messages
-         (sender_id, recipient_id, content, media_url, media_type, media_mime, media_thumb_url, message_type, meta)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+         (sender_id, recipient_id, content, media_url, media_type, media_mime, media_thumb_url, message_type, meta, reply_to_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
        RETURNING *`,
-      [senderId, resolvedRecipientId, text, mediaUrl || null, mediaType || null, mediaMime || null, mediaThumbUrl || null, mType, metaJson]
+      [senderId, resolvedRecipientId, text, mediaUrl || null, mediaType || null, mediaMime || null, mediaThumbUrl || null, mType, metaJson, resolvedReplyToId]
     );
 
     const message = rows[0];
     const [a, b] = [senderId, resolvedRecipientId].sort();
-    const threadPreview = text ? text.slice(0, 100) : (mediaType ? `[${mediaType}]` : 'Media');
+    const threadPreview = DmService._buildThreadPreview({
+      content: text,
+      mediaType,
+      messageType: mType,
+      meta,
+    });
 
     await query(
       `INSERT INTO dm_threads (user_a, user_b, last_message_at, last_message, unread_for_a, unread_for_b)
@@ -332,7 +376,17 @@ class DmService {
     for (const rid of ids) {
       const resolvedRid = (await resolveUserId(rid)) || rid;
       const baseContent = src.content || '';
-      const content = note && note.trim() ? `${note.trim()}\n\n${baseContent}`.trim() : baseContent;
+      const noteText = typeof note === 'string' ? note.trim().slice(0, 500) : '';
+      const content = noteText ? `${noteText}\n\n${baseContent}`.trim() : baseContent;
+      const mergedMeta = src.message_type === 'post_card'
+        ? {
+            ...(src.meta || {}),
+            snapshot: {
+              ...((src.meta && src.meta.snapshot) || {}),
+              note: noteText || src.meta?.snapshot?.note || null,
+            },
+          }
+        : (src.meta || null);
       try {
         const msg = await DmService.sendMessage(
           userId,
@@ -345,7 +399,7 @@ class DmService {
             mediaThumbUrl: src.media_thumb_url || null,
             // Preserve post_card type + meta so forwarded shares keep rich rendering
             messageType: src.message_type || 'text',
-            meta: src.meta || null,
+            meta: mergedMeta,
           },
           {}
         );

@@ -1548,9 +1548,10 @@ const getHangoutFeed = async (req, res) => {
 const dropToFeed = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id, 10);
-  const { messageId } = req.body;
+  const { messageId, note } = req.body;
   if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
   if (!messageId) return res.status(400).json({ error: 'messageId required' });
+  const safeNote = (typeof note === 'string' ? note.trim().slice(0, 500) : '') || '';
 
   const msgId = parseInt(messageId, 10);
   if (!Number.isFinite(msgId) || msgId <= 0) return res.status(400).json({ error: 'Invalid messageId' });
@@ -1588,8 +1589,8 @@ const dropToFeed = async (req, res) => {
     const existingCheck = await dbQuery('SELECT id FROM social_posts WHERE source_message_id=$1', [msgId]);
     if (existingCheck.rows.length) return res.status(409).json({ error: 'This message has already been dropped to the feed' });
 
-    // Create the post
-    const postContent = msg.content || '';
+    // Create the post — note (user comment) takes priority over raw message content
+    const postContent = safeNote || msg.content || '';
     const post = await SocialPostService.createPost(
       msg.user_id, postContent, msg.media_url, msg.media_type,
       null, null, false, false, true, null, null, null,

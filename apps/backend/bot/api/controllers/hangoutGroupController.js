@@ -75,6 +75,26 @@ const normalizeMessage = (m) => ({
   photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null,
 });
 
+const buildReplyPreviewText = (row) => {
+  if (!row || row.is_deleted) return '[deleted]';
+  if (row.message_type === 'post_card') {
+    const snap = row.meta?.snapshot || null;
+    const note = typeof snap?.note === 'string' ? snap.note.trim() : '';
+    const preview = typeof snap?.content === 'string' ? snap.content.trim() : '';
+    if (note) return note.slice(0, 100);
+    if (preview) return preview.slice(0, 100);
+    if (snap?.mediaType === 'image') return '[shared photo]';
+    if (snap?.mediaType === 'video') return '[shared video]';
+    if (snap?.mediaType === 'audio') return '[shared audio]';
+    return '[shared post]';
+  }
+  if (typeof row.content === 'string' && row.content.trim()) return row.content.trim().slice(0, 100);
+  if (row.media_type === 'image') return '[photo]';
+  if (row.media_type === 'video') return '[video]';
+  if (row.media_type === 'audio') return '[voice]';
+  return '[media]';
+};
+
 /**
  * Send a Cristina welcome message into the hangout chat and optionally DM the user via Telegram.
  * Fire-and-forget — never throws, never blocks the caller.
@@ -986,6 +1006,7 @@ const getMessages = async (req, res) => {
               cm.media_thumb_url, cm.media_width, cm.media_height,
               cm.media_metadata, cm.reply_to_id,
               r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content,
+              r.media_type AS reply_media_type, r.message_type AS reply_message_type, r.meta AS reply_meta,
               cm.created_at, cm.edited_at, cm.edit_count, cm.is_pinned,
               rxn.reactions
        FROM chat_messages cm
@@ -1015,9 +1036,18 @@ const getMessages = async (req, res) => {
     // Attach reply_to object, reacted_by_me flag, and clean up helper columns
     for (const msg of rows) {
       if (msg.reply_to_id && (msg.reply_name || msg.reply_username)) {
-        msg.reply_to = { name: msg.reply_name || msg.reply_username || 'User', content: (msg.reply_content || '[media]').slice(0, 100) };
+        msg.reply_to = {
+          name: msg.reply_name || msg.reply_username || 'User',
+          content: buildReplyPreviewText({
+            content: msg.reply_content,
+            media_type: msg.reply_media_type,
+            message_type: msg.reply_message_type,
+            meta: msg.reply_meta,
+          }),
+        };
       }
       delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
+      delete msg.reply_media_type; delete msg.reply_message_type; delete msg.reply_meta;
 
       if (Array.isArray(msg.reactions)) {
         msg.reactions = msg.reactions.map((r) => ({
@@ -1139,11 +1169,14 @@ const sendMessage = async (req, res) => {
     // Attach reply_to preview if replying
     if (parsedReplyToId) {
       const { rows: replyRows } = await query(
-        'SELECT first_name, username, content FROM chat_messages WHERE id = $1 AND room = $2',
+        'SELECT first_name, username, content, media_type, message_type, meta FROM chat_messages WHERE id = $1 AND room = $2',
         [parsedReplyToId, room]
       );
       if (replyRows[0]) {
-        msg.reply_to = { name: replyRows[0].first_name || replyRows[0].username || 'User', content: (replyRows[0].content || '[media]').slice(0, 100) };
+        msg.reply_to = {
+          name: replyRows[0].first_name || replyRows[0].username || 'User',
+          content: buildReplyPreviewText(replyRows[0]),
+        };
       }
     }
 
@@ -2105,6 +2138,7 @@ const searchMessages = async (req, res) => {
               cm.media_thumb_url, cm.media_width, cm.media_height,
               cm.media_metadata, cm.reply_to_id,
               r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content,
+              r.media_type AS reply_media_type, r.message_type AS reply_message_type, r.meta AS reply_meta,
               cm.created_at, cm.edited_at, cm.edit_count, cm.is_pinned
        FROM chat_messages cm
        LEFT JOIN users u ON u.id = cm.user_id
@@ -2119,9 +2153,18 @@ const searchMessages = async (req, res) => {
 
     for (const msg of rows) {
       if (msg.reply_to_id && (msg.reply_name || msg.reply_username)) {
-        msg.reply_to = { name: msg.reply_name || msg.reply_username || 'User', content: (msg.reply_content || '[media]').slice(0, 100) };
+        msg.reply_to = {
+          name: msg.reply_name || msg.reply_username || 'User',
+          content: buildReplyPreviewText({
+            content: msg.reply_content,
+            media_type: msg.reply_media_type,
+            message_type: msg.reply_message_type,
+            meta: msg.reply_meta,
+          }),
+        };
       }
       delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
+      delete msg.reply_media_type; delete msg.reply_message_type; delete msg.reply_meta;
       msg.reactions = [];
     }
 
@@ -2384,7 +2427,15 @@ const forwardMessage = async (req, res) => {
   const content = note ? (baseContent ? `${note}\n\n${baseContent}` : note) : baseContent;
   // Preserve post_card meta + text fallback so shared-post forwards keep working
   const messageType = src.message_type === 'post_card' ? 'post_card' : 'text';
-  const meta = src.meta || null;
+  const meta = src.message_type === 'post_card'
+    ? {
+        ...(src.meta || {}),
+        snapshot: {
+          ...((src.meta && src.meta.snapshot) || {}),
+          note: note || src.meta?.snapshot?.note || null,
+        },
+      }
+    : (src.meta || null);
 
   const io = req.app.get('io');
   const DmService = require('../../../services/dmService');
@@ -2560,6 +2611,67 @@ function effectiveCallLimits(userRole, userTier) {
   return CALL_LIMITS_OVERRIDE[tier] || CALL_LIMITS_DEFAULTS[tier] || CALL_LIMITS_DEFAULTS.free;
 }
 
+// ── Video-call shared helpers ─────────────────────────────────────────────────
+
+function emitToHangoutGroup(groupId, event, data) {
+  const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+  if (io) io.to(`hangout:${groupId}`).emit(event, data);
+}
+
+async function getActiveParticipantCount(callId) {
+  const { rows: [{ count }] } = await query(
+    'SELECT COUNT(*)::int AS count FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL',
+    [callId]
+  );
+  return count;
+}
+
+async function validateUserGroupAccess(userId, groupId, language, res) {
+  await ensureMainGroupMembership(userId);
+  await ensureLanguageGroupMembership(userId, language);
+  const member = await isMember(groupId, userId);
+  if (!member) { res.status(403).json({ error: 'Not a member of this group' }); return false; }
+  return true;
+}
+
+async function checkPaidHangoutAccess(groupId, user, res) {
+  const { rows: [grp] } = await query(
+    `SELECT id, is_paid, price_usd FROM hangout_groups WHERE id = $1`,
+    [groupId]
+  );
+  if (!grp) { res.status(404).json({ error: 'Group not found' }); return false; }
+  if (grp.is_paid && parseFloat(grp.price_usd || 0) > 0) {
+    const ownerMod = await isOwnerOrMod(groupId, user.id);
+    if (!ownerMod) {
+      const EntitlementAccessService = require('../../../services/entitlementAccessService');
+      const result = await EntitlementAccessService.hasResourceAccess(String(user.id), 'hangout', String(groupId));
+      if (!result.allowed) {
+        res.status(402).json({ error: 'Paid hangout — access required to join call', code: 'PAID_ACCESS_REQUIRED' });
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// Generates a LiveKit token, upserts the participant row, and returns the call response payload.
+// Does NOT handle capacity checks — callers must do that before invoking.
+async function generateCallAccess(groupId, callId, roomName, user) {
+  const displayName = user.firstName || user.first_name || user.username || 'User';
+  const isOwnerMod = await isOwnerOrMod(groupId, user.id);
+  const ttl = isOwnerMod ? 4 * 3600 : 2 * 3600;
+  const token = await livekitService.generateToken(roomName, String(user.id), displayName, isOwnerMod, { ttlSeconds: ttl });
+  await query(
+    `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (call_id, user_id) DO UPDATE SET left_at = NULL, joined_at = EXCLUDED.joined_at`,
+    [callId, user.id, displayName]
+  );
+  return { token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName };
+}
+
+// ── Video-call controllers ────────────────────────────────────────────────────
+
 // POST /api/webapp/hangouts/groups/:id/call/start
 async function startCall(req, res) {
   const user = authGuard(req, res); if (!user) return;
@@ -2567,33 +2679,14 @@ async function startCall(req, res) {
   if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
-    await ensureMainGroupMembership(user.id);
-    await ensureLanguageGroupMembership(user.id, user.language);
-    const member = await isMember(groupId, user.id);
-    if (!member) return res.status(403).json({ error: 'Not a member of this group' });
+    if (!(await validateUserGroupAccess(user.id, groupId, user.language, res))) return;
 
     const starterLimits = effectiveCallLimits(user.role, user.tier);
     if (starterLimits.maxRoomsPerDay === 0) {
       return res.status(403).json({ error: 'Your tier cannot start video calls', code: 'TIER_NOT_ELIGIBLE_FOR_CALLS' });
     }
 
-    {
-      const { rows: [grp] } = await query(
-        `SELECT id, is_paid, price_usd FROM hangout_groups WHERE id = $1`,
-        [groupId]
-      );
-      if (!grp) return res.status(404).json({ error: 'Group not found' });
-      if (grp.is_paid && parseFloat(grp.price_usd || 0) > 0) {
-        const ownerMod = await isOwnerOrMod(groupId, user.id);
-        if (!ownerMod) {
-          const EntitlementAccessService = require('../../../services/entitlementAccessService');
-          const result = await EntitlementAccessService.hasResourceAccess(String(user.id), 'hangout', String(groupId));
-          if (!result.allowed) {
-            return res.status(402).json({ error: 'Paid hangout — access required to join call', code: 'PAID_ACCESS_REQUIRED' });
-          }
-        }
-      }
-    }
+    if (!(await checkPaidHangoutAccess(groupId, user, res))) return;
 
     // Rooms-per-day cap — owner/mods of THIS group bypass so hosts aren't
     // blocked; admins bypass via their limit being 999.
@@ -2630,46 +2723,23 @@ async function startCall(req, res) {
     );
 
     if (existing.length > 0) {
-      const activeRoomName = existing[0].room_name;
-      const existingCallId = existing[0].id;
-      const displayName = user.firstName || user.first_name || user.username || 'User';
-
-      // Capacity check — based on call creator's tier. Skip if user is already
-      // an active participant (they're just re-fetching a token).
-      const creatorLimits = effectiveCallLimits(existing[0].creator_role, existing[0].creator_tier);
+      const { id: existingCallId, room_name: activeRoomName } = existing[0];
+      // Capacity check — skip if user is already an active participant (re-fetching token)
       const { rows: [already] } = await query(
         `SELECT 1 FROM hangout_call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL`,
         [existingCallId, user.id]
       );
       if (!already) {
-        const { rows: [cap] } = await query(
-          `SELECT COUNT(*)::int AS count FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL`,
-          [existingCallId]
-        );
-        if ((cap?.count || 0) >= creatorLimits.maxParticipants) {
+        const creatorLimits = effectiveCallLimits(existing[0].creator_role, existing[0].creator_tier);
+        const count = await getActiveParticipantCount(existingCallId);
+        if (count >= creatorLimits.maxParticipants) {
           return res.status(409).json({
             error: `Call is full (${creatorLimits.maxParticipants} participants max)`,
             code: 'CALL_PARTICIPANT_LIMIT_REACHED',
           });
         }
       }
-
-      const ownerModJoin = await isOwnerOrMod(groupId, user.id);
-      const joinTtl = ownerModJoin ? 4 * 3600 : 2 * 3600;
-      const token = await livekitService.generateToken(
-        activeRoomName,
-        String(user.id),
-        displayName,
-        ownerModJoin,
-        { ttlSeconds: joinTtl }
-      );
-      await query(
-        `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
-         VALUES ($1, $2, $3, NOW())
-         ON CONFLICT (call_id, user_id) DO UPDATE SET joined_at = NOW(), left_at = NULL`,
-        [existingCallId, user.id, displayName]
-      );
-      return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName: activeRoomName });
+      return res.json(await generateCallAccess(groupId, existingCallId, activeRoomName, user));
     }
 
     let callId;
@@ -2690,23 +2760,7 @@ async function startCall(req, res) {
           [groupId]
         );
         if (race.length > 0) {
-          const displayName = user.firstName || user.first_name || user.username || 'User';
-          const ownerModRace = await isOwnerOrMod(groupId, user.id);
-          const raceTtl = ownerModRace ? 4 * 3600 : 2 * 3600;
-          const token = await livekitService.generateToken(
-            race[0].room_name,
-            String(user.id),
-            displayName,
-            ownerModRace,
-            { ttlSeconds: raceTtl }
-          );
-          await query(
-            `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
-             VALUES ($1, $2, $3, NOW())
-             ON CONFLICT (call_id, user_id) DO UPDATE SET joined_at = NOW(), left_at = NULL`,
-            [race[0].id, user.id, displayName]
-          );
-          return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName: race[0].room_name });
+          return res.json(await generateCallAccess(groupId, race[0].id, race[0].room_name, user));
         }
       }
       throw insertErr;
@@ -2723,19 +2777,14 @@ async function startCall(req, res) {
     // Creator of a new call is always owner/mod — use 4h TTL
     const token = await livekitService.generateToken(roomName, String(user.id), displayName, true, { ttlSeconds: 4 * 3600 });
 
-    // Notify everyone in the hangout room
-    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
-    if (io) {
-      io.to(`hangout:${groupId}`).emit('hangout:call:started', {
-        groupId,
-        callId,
-        startedBy: { firstName: user.firstName || user.first_name, username: user.username },
-      });
-    }
+    emitToHangoutGroup(groupId, 'hangout:call:started', {
+      groupId,
+      callId,
+      startedBy: { firstName: user.firstName || user.first_name, username: user.username },
+    });
 
     // Cache active call for 60s so listGroups can skip the DB sub-query
-    const activeCallCacheKey = `hangout:active_call:${groupId}`;
-    getRedis().set(activeCallCacheKey, JSON.stringify({ id: callId, roomName, participantCount: 1 }), 'EX', 60).catch(() => {});
+    getRedis().set(`hangout:active_call:${groupId}`, JSON.stringify({ id: callId, roomName, participantCount: 1 }), 'EX', 60).catch(() => {});
 
     logger.info(`startCall: group=${groupId} call=${callId} user=${user.id}`);
     return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName });
@@ -2752,33 +2801,14 @@ async function joinCall(req, res) {
   if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
 
   try {
-    await ensureMainGroupMembership(user.id);
-    await ensureLanguageGroupMembership(user.id, user.language);
-    const member = await isMember(groupId, user.id);
-    if (!member) return res.status(403).json({ error: 'Not a member of this group' });
+    if (!(await validateUserGroupAccess(user.id, groupId, user.language, res))) return;
 
     const joinerLimits = effectiveCallLimits(user.role, user.tier);
     if (joinerLimits.maxParticipants === 0) {
       return res.status(403).json({ error: 'Your tier cannot join video calls', code: 'TIER_NOT_ELIGIBLE_FOR_CALLS' });
     }
 
-    {
-      const { rows: [grp] } = await query(
-        `SELECT id, is_paid, price_usd FROM hangout_groups WHERE id = $1`,
-        [groupId]
-      );
-      if (!grp) return res.status(404).json({ error: 'Group not found' });
-      if (grp.is_paid && parseFloat(grp.price_usd || 0) > 0) {
-        const ownerMod = await isOwnerOrMod(groupId, user.id);
-        if (!ownerMod) {
-          const EntitlementAccessService = require('../../../services/entitlementAccessService');
-          const result = await EntitlementAccessService.hasResourceAccess(String(user.id), 'hangout', String(groupId));
-          if (!result.allowed) {
-            return res.status(402).json({ error: 'Paid hangout — access required to join call', code: 'PAID_ACCESS_REQUIRED' });
-          }
-        }
-      }
-    }
+    if (!(await checkPaidHangoutAccess(groupId, user, res))) return;
 
     const { rows } = await query(
       `SELECT hvc.id, hvc.room_name, u.role AS creator_role, u.tier AS creator_tier
@@ -2797,11 +2827,8 @@ async function joinCall(req, res) {
       [callId, user.id]
     );
     if (!already) {
-      const { rows: [cap] } = await query(
-        `SELECT COUNT(*)::int AS count FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL`,
-        [callId]
-      );
-      if ((cap?.count || 0) >= creatorLimits.maxParticipants) {
+      const count = await getActiveParticipantCount(callId);
+      if (count >= creatorLimits.maxParticipants) {
         return res.status(409).json({
           error: `Call is full (${creatorLimits.maxParticipants} participants max)`,
           code: 'CALL_PARTICIPANT_LIMIT_REACHED',
@@ -2809,28 +2836,15 @@ async function joinCall(req, res) {
       }
     }
 
-    const displayName = user.firstName || user.first_name || user.username || 'User';
-    const isOwnerModJoin = await isOwnerOrMod(groupId, user.id);
-    const joinCallTtl = isOwnerModJoin ? 4 * 3600 : 2 * 3600;
-    const token = await livekitService.generateToken(roomName, String(user.id), displayName, isOwnerModJoin, { ttlSeconds: joinCallTtl });
+    const result = await generateCallAccess(groupId, callId, roomName, user);
 
-    await query(
-      `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (call_id, user_id) DO UPDATE SET left_at = NULL, joined_at = EXCLUDED.joined_at`,
-      [callId, user.id, displayName]
-    );
+    emitToHangoutGroup(groupId, 'hangout:call:participant-joined', {
+      groupId,
+      callId,
+      user: { id: user.id, firstName: user.firstName || user.first_name, username: user.username },
+    });
 
-    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
-    if (io) {
-      io.to(`hangout:${groupId}`).emit('hangout:call:participant-joined', {
-        groupId,
-        callId,
-        user: { id: user.id, firstName: user.firstName || user.first_name, username: user.username },
-      });
-    }
-
-    return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName });
+    return res.json(result);
   } catch (err) {
     logger.error('joinCall error', err);
     return res.status(500).json({ error: 'Failed to join call' });
@@ -2846,7 +2860,6 @@ async function endCall(req, res) {
   try {
     const isAdminRole = (user.role || '').toLowerCase() === 'admin' || (user.role || '').toLowerCase() === 'superadmin';
 
-    // Fetch the active call to verify ownership
     const { rows } = await query(
       `SELECT id, creator_id FROM hangout_video_calls WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
       [groupId]
@@ -2865,13 +2878,8 @@ async function endCall(req, res) {
       [user.id, callId]
     );
 
-    // Invalidate active call cache
     getRedis().del(`hangout:active_call:${groupId}`).catch(() => {});
-
-    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
-    if (io) {
-      io.to(`hangout:${groupId}`).emit('hangout:call:ended', { groupId, callId });
-    }
+    emitToHangoutGroup(groupId, 'hangout:call:ended', { groupId, callId });
 
     logger.info(`endCall: group=${groupId} call=${callId} endedBy=${user.id}`);
     return res.json({ success: true });
@@ -2903,22 +2911,13 @@ async function leaveCall(req, res) {
       [callId, user.id]
     );
 
-    const { rows: [{ count }] } = await query(
-      'SELECT COUNT(*)::int AS count FROM hangout_call_participants WHERE call_id = $1 AND left_at IS NULL',
-      [callId]
-    );
-
-    // Invalidate active call cache (participant count changed; TTL refresh happens on next startCall)
+    const count = await getActiveParticipantCount(callId);
     getRedis().del(`hangout:active_call:${groupId}`).catch(() => {});
-
-    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
-    if (io) {
-      io.to(`hangout:${groupId}`).emit('hangout:call:participant-left', {
-        callId,
-        userId: user.id,
-        participantCount: count,
-      });
-    }
+    emitToHangoutGroup(groupId, 'hangout:call:participant-left', {
+      callId,
+      userId: user.id,
+      participantCount: count,
+    });
 
     return res.json({ ok: true, participantCount: count });
   } catch (err) {

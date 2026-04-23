@@ -196,7 +196,7 @@ export function useHangoutSocket(
     socket.on("hangout:typing", onTyping);
     socket.on("hangout:presence", onPresence);
     socket.on("hangout:call:active", onCallActive);
-    socket.on("hangout:call:participant:left", onParticipantLeft);
+    socket.on("hangout:call:participant-left", onParticipantLeft);
     socket.on("hangout:call:participants", onCallParticipants);
     socket.on("hangout:call:screenshare", onScreenShare);
     socket.on("hangout:read:update", onReadUpdate);
@@ -217,7 +217,7 @@ export function useHangoutSocket(
       socket.off("hangout:typing", onTyping);
       socket.off("hangout:presence", onPresence);
       socket.off("hangout:call:active", onCallActive);
-      socket.off("hangout:call:participant:left", onParticipantLeft);
+      socket.off("hangout:call:participant-left", onParticipantLeft);
       socket.off("hangout:call:participants", onCallParticipants);
       socket.off("hangout:call:screenshare", onScreenShare);
       socket.off("hangout:read:update", onReadUpdate);

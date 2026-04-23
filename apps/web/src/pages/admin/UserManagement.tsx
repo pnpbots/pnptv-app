@@ -178,15 +178,41 @@ export default function UserManagement() {
     delete: "danger",
   };
 
+  function resolvePhotoUrl(photo: string | null | undefined): string | null {
+    if (!photo || typeof photo !== "string") return null;
+    if (photo.startsWith("/") || photo.startsWith("http")) return photo;
+    return null;
+  }
+
   const columns = [
     {
       key: "username",
       header: t.users.username,
-      render: (row: AdminUser) => (
-        <span className="font-medium text-pnp-textPrimary">
-          {row.username || "—"}
-        </span>
-      ),
+      render: (row: AdminUser) => {
+        const photoSrc = resolvePhotoUrl(row.photo_file_id);
+        const initials = (row.first_name?.[0] || row.username?.[0] || "?").toUpperCase();
+        return (
+          <button
+            className="flex items-center gap-2 text-left group"
+            onClick={(e) => { e.stopPropagation(); navigate(`/admin/users/${row.id}`); }}
+          >
+            {photoSrc ? (
+              <img
+                src={photoSrc}
+                alt={row.username || ""}
+                className="w-8 h-8 rounded-full object-cover flex-shrink-0 ring-1 ring-pnp-border group-hover:ring-pnp-accent transition-all"
+              />
+            ) : (
+              <span className="w-8 h-8 rounded-full bg-pnp-surface border border-pnp-border flex items-center justify-center text-xs font-bold text-pnp-textSecondary flex-shrink-0 group-hover:border-pnp-accent transition-all">
+                {initials}
+              </span>
+            )}
+            <span className="font-medium text-pnp-textPrimary group-hover:text-pnp-accent transition-colors">
+              {row.username || "—"}
+            </span>
+          </button>
+        );
+      },
     },
     {
       key: "email",
