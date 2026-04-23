@@ -307,15 +307,6 @@ export function importSoundCloud(metadata: any, label?: string): Promise<{
   });
 }
 
-export function requestSoundCloud(url: string): Promise<{
-  success: boolean;
-  requestId: number;
-}> {
-  return request("/api/webapp/radio/request-soundcloud", {
-    method: "POST",
-    body: { url },
-  });
-}
 
 export function getSoundCloudArtistTracks(artistUrl: string): Promise<{
   success: boolean;
@@ -327,20 +318,7 @@ export function getSoundCloudArtistTracks(artistUrl: string): Promise<{
   });
 }
 
-export function searchMedia(
-  q: string,
-  limit = 20
-): Promise<{ success: boolean; tracks: MediaTrack[] }> {
-  return request(
-    `/api/proxy/media/search?q=${encodeURIComponent(q)}&limit=${limit}`
-  );
-}
 
-export function getMediaStreamUrl(
-  songId: string
-): Promise<{ success: boolean; url: string }> {
-  return request(`/api/proxy/media/stream/${songId}`);
-}
 
 // Live proxy (Restreamer)
 export interface LiveStream {
@@ -739,12 +717,6 @@ export function getRtmpKey(): Promise<{
   return request("/api/webapp/live/rtmp-key");
 }
 
-export function getMyChannel(): Promise<{
-  success: boolean;
-  channel: { ref: string; streamKey: string; rtmpUrl: string } | null;
-}> {
-  return request("/api/webapp/live/my-channel");
-}
 
 export function provisionChannel(): Promise<{
   success: boolean;
@@ -901,19 +873,6 @@ export function sharePostToX(postId: number): Promise<{
   return request(`/api/webapp/social/posts/${postId}/share-x`, { method: "POST" });
 }
 
-export function reactToPost(
-  postId: number,
-  emoji: string
-): Promise<{
-  success: boolean;
-  added: boolean;
-  reactions: Array<{ emoji: string; count: number; reacted_by_me?: boolean; users?: Array<{ id: string; username: string }> }>;
-}> {
-  return request(`/api/webapp/social/posts/${postId}/react`, {
-    method: "POST",
-    body: { emoji },
-  });
-}
 
 export function sharePostToHangouts(
   postId: number,
@@ -997,11 +956,6 @@ export interface EmailRegisterResponse {
   error?: string;
 }
 
-export function emailRegister(
-  payload: EmailRegisterPayload
-): Promise<EmailRegisterResponse> {
-  return request("/api/webapp/auth/register", { method: "POST", body: payload });
-}
 
 export function resendVerificationEmail(email: string): Promise<{ success: boolean; message: string }> {
   return request("/api/webapp/auth/resend-verification", { method: "POST", body: { email } });
@@ -1177,47 +1131,6 @@ export type BulkUploadProgress = {
   percent: number;
 };
 
-export function bulkUploadVideos(
-  entries: BulkVideoEntry[],
-  onProgress?: (p: BulkUploadProgress) => void
-): Promise<{ success: boolean; posts: SocialPostItem[]; errors: { index: number; error: string }[] }> {
-  return new Promise((resolve, reject) => {
-    const formData = new FormData();
-    entries.forEach((entry) => {
-      formData.append("videos", entry.file);
-      formData.append("captions", entry.caption || "🎬");
-      formData.append("isExclusive", entry.isExclusive ? "true" : "false");
-      formData.append("isShareable", entry.isShareable ? "true" : "false");
-    });
-
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${API_BASE}/api/webapp/social/posts/bulk-videos`);
-    xhr.withCredentials = true;
-
-    if (onProgress) {
-      xhr.upload.addEventListener("progress", (e) => {
-        if (e.lengthComputable) {
-          onProgress({ loaded: e.loaded, total: e.total, percent: Math.round((e.loaded / e.total) * 100) });
-        }
-      });
-    }
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try { resolve(JSON.parse(xhr.responseText)); }
-        catch { reject(new Error("Invalid server response")); }
-      } else {
-        try {
-          const err = JSON.parse(xhr.responseText);
-          reject(new Error(err.error || `Upload failed (${xhr.status})`));
-        } catch { reject(new Error(`Upload failed (${xhr.status})`)); }
-      }
-    });
-    xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
-    xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
-    xhr.send(formData);
-  });
-}
 
 export function togglePostLike(postId: number): Promise<{ liked: boolean; likes_count?: number }> {
   return request(`/api/webapp/social/posts/${postId}/like`, { method: "POST" });
@@ -1276,33 +1189,9 @@ export function adminUnflagWofPost(postId: number): Promise<{ success: boolean }
 
 // ── Matrix bridge endpoints ───────────────────────────────────────────────────
 
-export function getMatrixToken(): Promise<{
-  success: boolean;
-  matrixUserId: string;
-  accessToken: string;
-  deviceId?: string;
-  homeserverUrl: string;
-}> {
-  return request("/api/webapp/matrix/token");
-}
 
-export function getOrCreateDmRoom(userId: string): Promise<{
-  success: boolean;
-  roomId: string;
-}> {
-  return request(`/api/webapp/matrix/dm/${userId}`, { method: "POST" });
-}
 
-export function getOrCreateHangoutRoom(groupId: number): Promise<{
-  success: boolean;
-  roomId: string;
-}> {
-  return request(`/api/webapp/matrix/hangout-room/${groupId}`, { method: "POST" });
-}
 
-export function getWofStats(): Promise<{ total_posts: number; total_likes: number; unique_contributors: number }> {
-  return request("/api/webapp/social/wof/stats");
-}
 
 export function getReplies(
   postId: number,
@@ -1344,12 +1233,6 @@ export function searchMentions(
  * liked_by_me is always false; use getSocialFeedPosts on the Social page for
  * accurate per-viewer like state.
  */
-export function getHomeFeedPosts(
-  limit = 10
-): Promise<{ success: boolean; posts: SocialPostItem[] }> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  return request(`/api/webapp/social/home-feed?${params}`);
-}
 
 // Hangout Groups
 export interface HangoutGroup {
@@ -1596,12 +1479,6 @@ export function deleteGroupMessage(
   });
 }
 
-export function searchGroupMessages(
-  groupId: number,
-  q: string
-): Promise<{ success: boolean; messages: GroupMessage[] }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/messages/search?q=${encodeURIComponent(q)}`);
-}
 
 export function toggleMessageReaction(
   groupId: number,
@@ -1666,15 +1543,6 @@ export function muteHangoutGroupForUser(
   });
 }
 
-export function markHangoutMessageRead(
-  groupId: number,
-  messageId: number
-): Promise<{ success: boolean; lastReadMessageId: number }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/read-message`, {
-    method: "PUT",
-    body: { messageId },
-  });
-}
 
 export function forwardHangoutMessage(
   messageId: number,
@@ -1764,12 +1632,6 @@ export function updateHangoutSettings(groupId: number, settings: {
   });
 }
 
-export function transferHangoutOwnership(groupId: number, userId: string): Promise<{ success: boolean }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/transfer`, {
-    method: "POST",
-    body: { userId },
-  });
-}
 
 export function getHangoutInviteLink(groupId: number): Promise<{ success: boolean; inviteCode: string; inviteUrl: string }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/invite-link`);
@@ -1788,12 +1650,6 @@ export function updateHangoutNotification(groupId: number, mode: "all" | "mentio
   });
 }
 
-export function deleteHangoutMessage(groupId: number, eventId: string): Promise<{ success: boolean }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/delete-message`, {
-    method: "POST",
-    body: { eventId },
-  });
-}
 
 // GetActiveCallResponse, getActiveGroupCall, leaveGroupCall removed — calls use Telegram native
 
@@ -1852,44 +1708,9 @@ export interface NearbyUserBasic {
   lastSeen: string;
 }
 
-export function getUserLocation(): Promise<{
-  success: boolean;
-  location: UserLocation | null;
-  message?: string;
-}> {
-  return request("/api/webapp/profile/location");
-}
 
-export function updateUserLocation(location: {
-  latitude: number;
-  longitude: number;
-  accuracy?: number;
-  isOnline?: boolean;
-}): Promise<{ success: boolean; location: UserLocation }> {
-  return request("/api/webapp/profile/location", {
-    method: "PUT",
-    body: location,
-  });
-}
 
-export function deleteUserLocation(): Promise<{ success: boolean; message: string }> {
-  return request("/api/webapp/profile/location", { method: "DELETE" });
-}
 
-export function getNearbyUsers(
-  radius?: number,
-  limit?: number
-): Promise<{
-  success: boolean;
-  users: NearbyUserBasic[];
-  radius: number;
-  count: number;
-}> {
-  const params = new URLSearchParams();
-  if (radius) params.append("radius", radius.toString());
-  if (limit) params.append("limit", limit.toString());
-  return request(`/api/webapp/users/nearby?${params.toString()}`);
-}
 
 // ============================================================================
 // Follow System API
@@ -1955,11 +1776,6 @@ export interface GlobalSearchResult {
   }>;
 }
 
-export function searchAll(q: string, limit = 8): Promise<GlobalSearchResult> {
-  return request(
-    `/api/webapp/search?q=${encodeURIComponent(q)}&limit=${limit}`
-  );
-}
 
 export function followUser(userId: string): Promise<{
   success: boolean;
@@ -2415,12 +2231,6 @@ export interface SendDmOptions {
   replyToId?: number | null;
 }
 
-export function sendDm(
-  recipientId: string,
-  opts: SendDmOptions
-): Promise<{ success: boolean; message?: any }> {
-  return request(`/api/webapp/dm/send/${encodeURIComponent(recipientId)}`, { method: 'POST', body: opts });
-}
 
 // ── DM Telegram-style features ───────────────────────────────────────────────
 
@@ -2434,21 +2244,7 @@ export function editDmMessage(
   });
 }
 
-export function deleteDmMessage(
-  messageId: number,
-  forAll: boolean = false
-): Promise<{ success: boolean }> {
-  return request(`/api/webapp/dm/messages/${messageId}?forAll=${forAll}`, {
-    method: "DELETE",
-  });
-}
 
-export function searchDmMessages(
-  partnerId: string,
-  q: string
-): Promise<{ success: boolean; messages: any[] }> {
-  return request(`/api/webapp/dm/conversation/${partnerId}/search?q=${encodeURIComponent(q)}`);
-}
 
 export interface DmVideoCallInvite {
   roomName: string;
@@ -2495,27 +2291,7 @@ export function toggleDmMessageReaction(
 
 // ── Chat Message Reactions ────────────────────────────────────────────────────
 
-export function reactToChatMessage(
-  messageId: number,
-  emoji: string
-): Promise<{
-  success: boolean;
-  added: boolean;
-  reactions: Array<{ emoji: string; count: number; users: Array<{ id: string; username: string }> }>;
-}> {
-  return request(`/api/webapp/chat/messages/${messageId}/react`, {
-    method: "POST",
-    body: { emoji },
-  });
-}
 
-export function getChatReactions(
-  messageId: number
-): Promise<{
-  reactions: Array<{ emoji: string; count: number; users: Array<{ id: string; username: string }> }>;
-}> {
-  return request(`/api/webapp/chat/messages/${messageId}/reactions`);
-}
 
 
 // ============================================================================
@@ -2724,15 +2500,6 @@ export function validatePromoCode(
   return request(`/api/webapp/promos/${encodeURIComponent(code)}${qs}`);
 }
 
-export function updatePaymentEmail(
-  paymentId: string,
-  email: string
-): Promise<{ success: boolean; error?: string }> {
-  return request(`/api/payment/${encodeURIComponent(paymentId)}/email`, {
-    method: "POST",
-    body: { email },
-  });
-}
 
 export function initiateCreatorSubscriptionPayment(
   creatorId: string,
@@ -3446,16 +3213,6 @@ export function saveCreatorWallet(payload: {
   return request("/api/webapp/creator/wallet", { method: "POST", body: payload });
 }
 
-export function changeCreatorTier(
-  tier: "ice" | "crystal" | "diamond"
-): Promise<{
-  success: boolean;
-  tier: string;
-  price: number;
-  error?: string;
-}> {
-  return request("/api/webapp/creator/change-tier", { method: "POST", body: { tier } });
-}
 
 export function getCreatorSubscriptionStatus(
   creatorId: string
@@ -3797,12 +3554,6 @@ export interface ModelWithdrawal {
   processedAt: string | null;
 }
 
-export function getModelDashboard(): Promise<{
-  success: boolean;
-  data: { stats: ModelDashboardStats };
-}> {
-  return request("/api/model/dashboard");
-}
 
 export function getModelEarnings(): Promise<{
   success: boolean;
@@ -3877,9 +3628,6 @@ export function getXLoginUrl(): string {
   return `${base}/api/webapp/auth/x/start?redirect=true`;
 }
 
-export function unlinkX(): Promise<{ success: boolean }> {
-  return request("/api/webapp/auth/x/unlink", { method: "POST" });
-}
 
 export function getCanvaLoginUrl(): string {
   const base = import.meta.env.VITE_API_URL || "https://pnptv.app";
@@ -3909,15 +3657,7 @@ export function startCanvaExport(
   });
 }
 
-export function listCanvaExports(): Promise<{ success: boolean; jobs: CanvaExportJob[] }> {
-  return request("/api/canva/exports");
-}
 
-export function getCanvaExportStatus(
-  jobId: string
-): Promise<{ success: boolean; job: CanvaExportJob }> {
-  return request(`/api/canva/exports/${jobId}`);
-}
 
 // ---------------------------------------------------------------------------
 // Admin Canva API
@@ -4474,16 +4214,7 @@ export function getAddOns(): Promise<{ success: boolean; addOns: AddOn[] }> {
   return request("/api/webapp/admin/add-ons");
 }
 
-export function getPlanAddOns(planId: string): Promise<{ success: boolean; addOns: AdminPlanAddOn[] }> {
-  return request(`/api/webapp/admin/plans/${planId}/add-ons`);
-}
 
-export function setPlanAddOns(
-  planId: string,
-  addOns: { add_on_id: string; duration_days: number | null; is_lifetime: boolean }[]
-): Promise<{ success: boolean }> {
-  return request(`/api/webapp/admin/plans/${planId}/add-ons`, { method: "PUT", body: { addOns } });
-}
 
 /** Convenience alias — same as getAdminPlans */
 export const listAdminPlans = getAdminPlans;
@@ -4882,14 +4613,7 @@ export function getGamificationCategories(): Promise<{ success: boolean; categor
   return request("/api/webapp/gamification/categories");
 }
 
-export function getGamificationBadges(category?: string): Promise<{ success: boolean; badges: GamificationBadge[] }> {
-  const qs = category ? `?category=${encodeURIComponent(category)}` : "";
-  return request(`/api/webapp/gamification/badges${qs}`);
-}
 
-export function getUserGamificationBadges(userId: string | number): Promise<{ success: boolean; badges: UserBadgeEntry[] }> {
-  return request(`/api/webapp/gamification/user/${userId}/badges`);
-}
 
 export function getGamificationBadgeHolders(badgeSlug: string): Promise<{ success: boolean; holders: GamificationHolder[] }> {
   return request(`/api/webapp/gamification/badge/${encodeURIComponent(badgeSlug)}/holders`);
@@ -4946,9 +4670,6 @@ export function getStreamOverlays(): Promise<{ success: boolean; overlays: Strea
   return request("/api/webapp/admin/stream-overlays");
 }
 
-export function getStreamOverlay(channelRef: string): Promise<{ success: boolean; overlay: StreamOverlay }> {
-  return request(`/api/webapp/admin/stream-overlays/${encodeURIComponent(channelRef)}`);
-}
 
 export function updateStreamOverlay(
   channelRef: string,
@@ -5326,33 +5047,8 @@ export interface MediaLibraryVideo {
   updated_at: string;
 }
 
-export function getMediaLibraryVideos(): Promise<{
-  success: boolean;
-  videos: MediaLibraryVideo[];
-}> {
-  return request("/api/webapp/admin/media-library/videos");
-}
 
-export function syncVideoToMediaLibrary(data: {
-  filename: string;
-  title: string;
-  category?: string;
-}): Promise<{ success: boolean; video: MediaLibraryVideo; isNew: boolean }> {
-  return request("/api/webapp/admin/media-library/sync-video", {
-    method: "POST",
-    body: data,
-  });
-}
 
-export function toggleVideoPrime(
-  id: string,
-  isPrime: boolean
-): Promise<{ success: boolean; video: MediaLibraryVideo }> {
-  return request(`/api/webapp/admin/media-library/${encodeURIComponent(id)}/prime`, {
-    method: "PUT",
-    body: { is_prime: isPrime },
-  });
-}
 
 /**
  * Allowed hostnames for payment redirect URLs.  Any checkout link returned by
@@ -5429,13 +5125,7 @@ export function getUpcomingEvents(params?: {
   return request(`/api/proxy/events/upcoming${q ? `?${q}` : ""}`);
 }
 
-export function getFeaturedEvents(): Promise<{ success: boolean; events: EventItem[] }> {
-  return request("/api/proxy/events/featured");
-}
 
-export function getEvent(id: string): Promise<{ success: boolean; event: EventItem }> {
-  return request(`/api/proxy/events/${encodeURIComponent(id)}`);
-}
 
 export function createEvent(data: {
   type: "live_stream" | "hangout_event";
@@ -5474,17 +5164,7 @@ export function cancelEvent(id: string): Promise<{ success: boolean }> {
 
 // ── Playlists ────────────────────────────────────────────────────────────────
 
-export function updatePlaylist(playlistId: string | number, data: { title?: string; description?: string; category?: string; icon?: string; isPublic?: boolean }): Promise<Record<string, unknown>> {
-  return request(`/api/playlists/${playlistId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-}
 
-export function deletePlaylist(playlistId: string | number): Promise<{ success: boolean }> {
-  return request(`/api/playlists/${playlistId}`, { method: "DELETE" });
-}
 
 export function rsvpEvent(id: string): Promise<{ success: boolean; rsvpCount: number; userRsvpd: boolean }> {
   return request(`/api/webapp/events/${encodeURIComponent(id)}/rsvp`, { method: "POST" });
@@ -5494,9 +5174,6 @@ export function unrsvpEvent(id: string): Promise<{ success: boolean; rsvpCount: 
   return request(`/api/webapp/events/${encodeURIComponent(id)}/rsvp`, { method: "DELETE" });
 }
 
-export function getMyRsvps(): Promise<{ success: boolean; events: EventItem[] }> {
-  return request("/api/webapp/events/my-rsvps");
-}
 
 export function getMyEvents(): Promise<{ success: boolean; events: EventItem[] }> {
   return request("/api/webapp/events/mine");
@@ -5530,36 +5207,10 @@ export interface CourtesyInviteCheckResult {
   error?: string;
 }
 
-export function checkCourtesyInvite(code: string): Promise<CourtesyInviteCheckResult> {
-  return request(`/api/courtesy-invites/check/${encodeURIComponent(code)}`);
-}
 
-export function redeemCourtesyInvite(code: string): Promise<{
-  success: boolean;
-  grant_days?: number;
-  expires_at?: string;
-  message?: string;
-  error?: string;
-}> {
-  return request(`/api/courtesy-invites/${encodeURIComponent(code)}/redeem`, { method: "POST" });
-}
 
-export function createCourtesyInvite(data: {
-  label?: string;
-  max_uses?: number;
-  grant_days?: number;
-  expires_at?: string;
-}): Promise<{ success: boolean; invite: CourtesyInvite }> {
-  return request("/api/courtesy-invites", { method: "POST", body: data });
-}
 
-export function listCourtesyInvites(): Promise<{ success: boolean; invites: CourtesyInvite[] }> {
-  return request("/api/courtesy-invites");
-}
 
-export function deactivateCourtesyInvite(id: number): Promise<{ success: boolean }> {
-  return request(`/api/courtesy-invites/${id}`, { method: "DELETE" });
-}
 
 // ---------------------------------------------------------------------------
 // Admin: Creator / Live Performer management
@@ -5667,24 +5318,7 @@ export function getBookingOptions(
   return request(`/api/webapp/book-call/${creatorId}/options?${params}`);
 }
 
-export function bookCall(data: {
-  creatorId: string;
-  startAt: string;
-  creditId: number;
-  durationMinutes: 30 | 60;
-}): Promise<{ success: boolean; booking: Record<string, unknown> }> {
-  return request("/api/webapp/book-call", {
-    method: "POST",
-    body: data,
-  });
-}
 
-export function getMyCallCredits(
-  creatorId?: string
-): Promise<{ success: boolean; credits: CallCredit[] }> {
-  const qs = creatorId ? `?creatorId=${encodeURIComponent(creatorId)}` : "";
-  return request(`/api/webapp/my-call-credits${qs}`);
-}
 
 // ─── Creator: manage own call packages ───────────────────────────────────────
 
@@ -5755,19 +5389,7 @@ export interface CreatorCallEarnings {
   totalReviews: number;
 }
 
-export function getCreatorCallBookings(
-  status?: "upcoming" | "completed" | "cancelled"
-): Promise<{ success: boolean; bookings: CreatorCallBooking[] }> {
-  const qs = status ? `?status=${status}` : "";
-  return request(`/api/webapp/creator/call-bookings${qs}`);
-}
 
-export function getCreatorCallEarnings(): Promise<{
-  success: boolean;
-  earnings: CreatorCallEarnings;
-}> {
-  return request("/api/webapp/creator/call-earnings");
-}
 
 export interface CallCheckoutPayload {
   packageId: number;
@@ -5950,24 +5572,7 @@ export function setNextShowDate(
   });
 }
 
-export function completeCallBooking(
-  bookingId: number
-): Promise<{ success: boolean }> {
-  return request(`/api/webapp/bookings/${bookingId}/complete`, {
-    method: "POST",
-    body: {},
-  });
-}
 
-export function cancelCallBooking(
-  bookingId: number,
-  reason?: string
-): Promise<{ success: boolean }> {
-  return request(`/api/webapp/bookings/${bookingId}/cancel`, {
-    method: "POST",
-    body: { reason },
-  });
-}
 
 // ─── Media Packs (Admin) ──────────────────────────────────────────────────────
 
@@ -6071,33 +5676,10 @@ export function getSlotNotifyStatus(slotId: string | number): Promise<{ subscrib
 // Stage TV API
 // ============================================================================
 
-export function getStageTvStatus(): Promise<{ success: boolean; running: boolean; hlsUrl: string | null }> {
-  return request("/api/webapp/stage-tv/status");
-}
 
-export function getAdminStageTvStatus(): Promise<{
-  success: boolean;
-  running: boolean;
-  videos: string[];
-  pid: number | null;
-  startedAt: string | null;
-  startedBy: string | null;
-  hlsUrl: string | null;
-}> {
-  return request("/api/webapp/admin/stage-tv/status");
-}
 
-export function getStageTvVideos(): Promise<{ success: boolean; videos: string[] }> {
-  return request("/api/webapp/admin/stage-tv/videos");
-}
 
-export function startStageTv(videos: string[]): Promise<{ success: boolean; hlsUrl?: string; videoCount?: number; error?: string }> {
-  return request("/api/webapp/admin/stage-tv/start", { method: "POST", body: { videos } });
-}
 
-export function stopStageTv(): Promise<{ success: boolean }> {
-  return request("/api/webapp/admin/stage-tv/stop", { method: "POST" });
-}
 
 // ============================================================================
 // Radio Requests API (Admin)
@@ -6206,20 +5788,7 @@ export function reviewCastingApplication(applicationId: string, decision: "appro
 
 // ── Telegram Group Linking & Video Chat ───────────────────────────────────────
 
-export function linkTelegramGroup(
-  groupId: number,
-  telegramChatId: string,
-  telegramInviteLink?: string
-): Promise<{ success: boolean }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/link-telegram`, {
-    method: "POST",
-    body: { telegramChatId, telegramInviteLink },
-  });
-}
 
-export function getVideoChatStatus(groupId: number): Promise<{ active: boolean; inviteLink: string | null }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/video-chat-status`);
-}
 
 export function startHangoutCall(groupId: number): Promise<{ token: string; livekitUrl: string; roomName: string }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/call/start`, { method: "POST" });
@@ -6229,13 +5798,7 @@ export function joinHangoutCall(groupId: number): Promise<{ token: string; livek
   return request(`/api/webapp/hangouts/groups/${groupId}/call/join`, { method: "POST" });
 }
 
-export function endHangoutCall(groupId: number): Promise<void> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/call/end`, { method: "POST" });
-}
 
-export function leaveHangoutCall(groupId: number | string): Promise<{ ok: boolean; participantCount: number }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/call/leave`, { method: "POST" });
-}
 
 // ── Radio / Now Playing ──────────────────────────────────────────────────────
 
@@ -6244,9 +5807,6 @@ export interface NowPlaying {
   listenerCount: number;
 }
 
-export function getRadioNowPlaying(): Promise<NowPlaying> {
-  return request("/api/radio/now-playing");
-}
 
 // ── Online Users ──────────────────────────────────────────────────────────────
 
@@ -6336,13 +5896,7 @@ export function getVideoramaTrending(): Promise<{ success: boolean; results: Inv
   return request("/api/webapp/videorama/trending");
 }
 
-export function getVideoramaPopular(): Promise<{ success: boolean; results: InvidiousVideo[] }> {
-  return request("/api/webapp/videorama/popular");
-}
 
-export function getVideoramaVideo(videoId: string): Promise<{ success: boolean; video: InvidiousVideo & { formatStreams?: { url: string; qualityLabel: string }[] } }> {
-  return request(`/api/webapp/videorama/video/${videoId}`);
-}
 
 // ── Stream Analytics ──────────────────────────────────────────────────────────
 

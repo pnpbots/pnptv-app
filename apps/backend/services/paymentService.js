@@ -44,7 +44,6 @@ const sanitize = require('../utils/sanitizer');
 const BusinessNotificationService = require('./businessNotificationService');
 const PaymentNotificationService = require('./paymentNotificationService');
 const NotificationEmitter = require('./notificationEmitter');
-const BookingAvailabilityIntegration = require('./bookingAvailabilityIntegration');
 const PaymentSecurityService = require('./paymentSecurityService');
 const { isSubscriptionPlan, getEpaycoSubscriptionUrl, normalizePlanId } = require('../config/epaycoSubscriptionPlans');
 const PaymentHistoryService = require('./paymentHistoryService');

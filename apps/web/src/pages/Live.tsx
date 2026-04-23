@@ -40,12 +40,6 @@ import {
 } from "@/lib/api";
 import { PerformerDrawer } from "@/components/live/PerformerDrawer";
 
-
-if (false) {
-  // Cal.com booking removed — kept as dead code guard to avoid import errors
-  console.warn("unused");
-}
-
 const ALLOWED_IMAGE_HOSTS = ["cms.pnptv.app", "app.pnptv.app", "pnptv.app"];
 function isValidPhotoUrl(photo: string | null | undefined): photo is string {
   if (!photo) return false;
