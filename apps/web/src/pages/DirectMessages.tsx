@@ -1395,13 +1395,16 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); scrollToMessage(msg.replyPreview!.id); }}
-                            className="w-full text-left mb-1.5 pl-2 border-l-2 rounded-r"
-                            style={{ borderColor: isMe ? "rgba(255,255,255,0.6)" : "#D4007A", background: isMe ? "rgba(255,255,255,0.1)" : "rgba(212,0,122,0.08)" }}
+                            className="block text-left -mx-3 -mt-2 mb-1.5 px-3 py-2 border-l-[3px] rounded-t-2xl hover:brightness-110 transition-all"
+                            style={{ borderColor: isMe ? "rgba(255,255,255,0.85)" : "#D4007A", background: isMe ? "rgba(0,0,0,0.25)" : "rgba(212,0,122,0.15)" }}
                           >
-                            <p className={`text-[11px] font-semibold ${isMe ? "text-white/90" : "text-pnp-accent"}`}>
-                              {String(msg.replyPreview.senderId) === String(myDbId) ? "You" : (partnerName || "Them")}
+                            <p className={`text-[11px] font-semibold flex items-center gap-1 mb-0.5 ${isMe ? "text-white" : "text-pnp-accent"}`}>
+                              <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v4M3 10l4-4m-4 4l4 4" />
+                              </svg>
+                              <span className="truncate">{String(msg.replyPreview.senderId) === String(myDbId) ? "You" : (partnerName || "Them")}</span>
                             </p>
-                            <p className={`text-[11px] truncate ${isMe ? "text-white/70" : "text-pnp-textSecondary"}`}>
+                            <p className={`text-[11px] line-clamp-2 leading-snug ${isMe ? "text-white/90" : "text-pnp-textSecondary"}`}>
                               {msg.replyPreview.isDeleted ? "(deleted)" : msg.replyPreview.mediaType === "image" ? "📷 Photo" : msg.replyPreview.mediaType === "video" ? "🎥 Video" : msg.replyPreview.mediaType === "audio" ? "🎤 Voice" : (msg.replyPreview.content || "")}
                             </p>
                           </button>
@@ -1571,15 +1574,28 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
 
       {/* Reply preview bar */}
       {replyTo && !editingMsg && (
-        <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-3 flex-shrink-0 bg-pnp-background">
-          <div className="w-1 self-stretch rounded-full" style={{ background: "linear-gradient(180deg, #D4007A, #E69138)" }} />
+        <div className="px-3 py-2 border-t border-white/10 flex items-center gap-2.5 flex-shrink-0 bg-pnp-surface/80 backdrop-blur">
+          <svg className="w-4 h-4 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v4M3 10l4-4m-4 4l4 4" />
+          </svg>
+          <div className="w-[3px] self-stretch rounded-full" style={{ background: "linear-gradient(180deg, #D4007A, #E69138)" }} />
+          {(replyTo.media_type === "image" || replyTo.media_type === "video") && (replyTo.media_thumb_url || replyTo.media_url) && (
+            <div className="relative w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-white/5">
+              <img src={replyTo.media_thumb_url || replyTo.media_url || ""} alt="" className="w-full h-full object-cover" />
+              {replyTo.media_type === "video" && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                  <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold text-pnp-accent uppercase tracking-wider">Replying to {String(replyTo.sender_id) === String(myDbId) ? "yourself" : (partnerName || "Them")}</p>
+            <p className="text-[10px] font-bold text-pnp-accent uppercase tracking-wider truncate">Replying to {String(replyTo.sender_id) === String(myDbId) ? "yourself" : (partnerName || "Them")}</p>
             <p className="text-xs text-pnp-textPrimary truncate">
-              {replyTo.is_deleted ? "(deleted)" : replyTo.media_type === "image" ? "📷 Photo" : replyTo.media_type === "video" ? "🎥 Video" : replyTo.media_type === "audio" ? "🎤 Voice message" : (replyTo.content || "")}
+              {replyTo.is_deleted ? "(deleted)" : replyTo.media_type === "image" ? "Photo" : replyTo.media_type === "video" ? "Video" : replyTo.media_type === "audio" ? "🎤 Voice message" : (replyTo.content || "")}
             </p>
           </div>
-          <button onClick={() => setReplyTo(null)} className="w-7 h-7 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10" aria-label="Cancel reply">
+          <button onClick={() => setReplyTo(null)} className="w-9 h-9 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10 active:scale-95 transition-all flex-shrink-0" aria-label="Cancel reply">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
