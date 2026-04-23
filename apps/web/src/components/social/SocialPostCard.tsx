@@ -16,6 +16,7 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { translateText } from "@/lib/feedI18n";
+import { useAuth } from "@/hooks/useAuth";
 
 export interface SocialPostCardProps {
   post: SocialPostItem;
@@ -89,6 +90,10 @@ export default function SocialPostCard({
 
   const isOwn = String(post.author_id) === currentUserId;
   const canDelete = isOwn || isAdmin;
+  const { user } = useAuth();
+  // For own posts/replies, always use the live auth-context photo so avatar
+  // updates cascade instantly without a full feed refetch.
+  const effectiveAuthorPhoto = isOwn && user?.photoUrl ? user.photoUrl : post.author_photo;
 
   const handleWofToggle = useCallback(async () => {
     if (wofToggling) return;
@@ -215,6 +220,14 @@ export default function SocialPostCard({
       ? "/profile"
       : `/profile/${post.author_id}`;
 
+  // Promoted posts fall back to the PNPtv logo ONLY when the author has no
+  // real avatar (platform-only announcements). When a real author is attached
+  // (e.g. a founder blog crosspost), show their photo and allow profile nav.
+  const showPlatformLogo =
+    post.is_promoted &&
+    !isValidPhotoUrl(effectiveAuthorPhoto) &&
+    post.author_id !== "cristina-ai";
+
   return (
     <div
       className="glass-card-sm pt-4 pb-4 pr-4 pl-14 cursor-pointer relative"
@@ -231,10 +244,10 @@ export default function SocialPostCard({
     >
       {/* Avatar — pinned to upper-left corner */}
       <button
-        onClick={(e) => { e.stopPropagation(); if (!post.is_promoted) onNavigate(authorPath); }}
+        onClick={(e) => { e.stopPropagation(); if (!showPlatformLogo) onNavigate(authorPath); }}
         className="absolute -top-2 -left-2 z-10 flex-shrink-0"
       >
-        {post.is_promoted ? (
+        {showPlatformLogo ? (
           <img
             src="/Logo2-50.png"
             alt="PNPtv!"
@@ -243,9 +256,9 @@ export default function SocialPostCard({
           />
         ) : post.author_id === "cristina-ai" ? (
           <span className="w-10 h-10 rounded-full flex items-center justify-center text-2xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
-        ) : isValidPhotoUrl(post.author_photo) ? (
+        ) : isValidPhotoUrl(effectiveAuthorPhoto) ? (
           <img
-            src={post.author_photo}
+            src={effectiveAuthorPhoto}
             alt={`${post.author_first_name || post.author_username || "User"}'s avatar`}
             className="w-10 h-10 rounded-full object-cover ring-2 ring-[#1C1C1E]"
             onError={(e) => {
@@ -255,13 +268,13 @@ export default function SocialPostCard({
             }}
           />
         ) : null}
-        {!post.is_promoted && post.author_id !== "cristina-ai" && (
+        {!showPlatformLogo && post.author_id !== "cristina-ai" && (
           <div
             className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ring-2 ring-[#1C1C1E]"
             style={{
               background: "linear-gradient(135deg, #D4007A, #E69138)",
               color: "#fff",
-              display: isValidPhotoUrl(post.author_photo) ? "none" : undefined,
+              display: isValidPhotoUrl(effectiveAuthorPhoto) ? "none" : undefined,
             }}
           >
             {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
@@ -846,21 +859,24 @@ export default function SocialPostCard({
                 </p>
               ) : (
                 <div className="space-y-3 mb-3">
-                  {replies.map((reply) => (
+                  {replies.map((reply) => {
+                    const replyIsOwn = String(reply.author_id) === currentUserId;
+                    const replyPhoto = replyIsOwn && user?.photoUrl ? user.photoUrl : reply.author_photo;
+                    return (
                     <div key={reply.id} className="flex gap-2">
                       <button
                         onClick={() =>
                           onNavigate(
-                            String(reply.author_id) === currentUserId
+                            replyIsOwn
                               ? "/profile"
                               : `/profile/${reply.author_id}`
                           )
                         }
                         className="flex-shrink-0"
                       >
-                        {isValidPhotoUrl(reply.author_photo) ? (
+                        {isValidPhotoUrl(replyPhoto) ? (
                           <img
-                            src={reply.author_photo}
+                            src={replyPhoto}
                             alt={`${reply.author_first_name || reply.author_username || "User"}'s avatar`}
                             className="w-7 h-7 rounded-full object-cover"
                             onError={(e) => {
@@ -876,7 +892,7 @@ export default function SocialPostCard({
                             background:
                               "linear-gradient(135deg, #D4007A, #E69138)",
                             color: "#fff",
-                            display: isValidPhotoUrl(reply.author_photo)
+                            display: isValidPhotoUrl(replyPhoto)
                               ? "none"
                               : undefined,
                           }}
@@ -923,7 +939,8 @@ export default function SocialPostCard({
                         )}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
