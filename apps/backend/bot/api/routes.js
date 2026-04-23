@@ -3512,6 +3512,8 @@ app.post('/api/public/lifetime100/reserve', lifetime100ReserveLimiter, asyncHand
     success: true,
     message: 'Founder code sent to your email. It is valid for 60 minutes.',
     expiresAt: reservation.reserved_until,
+    meruUrl: reservation.meru_link,
+    code: reservation.code,
   });
 }));
 

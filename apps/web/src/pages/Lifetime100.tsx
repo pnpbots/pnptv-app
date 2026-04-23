@@ -187,7 +187,7 @@ interface EmailModalProps {
   s: Lifetime100Strings;
   lang: string;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (meruUrl: string | null) => void;
 }
 
 function EmailModal({ s, lang, onClose, onSuccess }: EmailModalProps) {
@@ -226,7 +226,7 @@ function EmailModal({ s, lang, onClose, onSuccess }: EmailModalProps) {
         setError(data.error || data.message || s.errorGeneric);
         return;
       }
-      onSuccess();
+      onSuccess(typeof data.meruUrl === "string" ? data.meruUrl : null);
     } catch {
       setError(s.errorGeneric);
     } finally {
@@ -354,10 +354,11 @@ function EmailModal({ s, lang, onClose, onSuccess }: EmailModalProps) {
 interface ConfirmationModalProps {
   s: Lifetime100Strings;
   onClose: () => void;
+  onDismiss: () => void;
   activateHref: string;
 }
 
-function ConfirmationModal({ s, onClose, activateHref }: ConfirmationModalProps) {
+function ConfirmationModal({ s, onClose, onDismiss, activateHref }: ConfirmationModalProps) {
   return (
     <ModalOverlay onClose={onClose}>
       {/* Checkmark icon */}
@@ -418,7 +419,7 @@ function ConfirmationModal({ s, onClose, activateHref }: ConfirmationModalProps)
       </a>
 
       <button
-        onClick={onClose}
+        onClick={onDismiss}
         style={{
           display: "block",
           width: "100%",
@@ -687,6 +688,7 @@ interface HeroViewProps {
 function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpenSheet }: HeroViewProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [meruUrl, setMeruUrl] = useState<string | null>(null);
 
   const isSoldOut = available === 0;
   const isClosed = !availabilityLoading && isSoldOut;
@@ -696,7 +698,8 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
     setModalOpen(true);
   };
 
-  const handleReserveSuccess = () => {
+  const handleReserveSuccess = (url: string | null) => {
+    setMeruUrl(url);
     setModalOpen(false);
     setShowConfirmation(true);
   };
@@ -1094,6 +1097,14 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
         <ConfirmationModal
           s={s}
           onClose={() => setShowConfirmation(false)}
+          onDismiss={() => {
+            setShowConfirmation(false);
+            if (meruUrl) {
+              window.location.assign(meruUrl);
+            } else {
+              window.location.assign("/landing");
+            }
+          }}
           activateHref={activateHref}
         />
       )}
