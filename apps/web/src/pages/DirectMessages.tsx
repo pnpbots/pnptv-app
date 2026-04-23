@@ -169,9 +169,6 @@ const ALLOWED_REACTIONS = ["😈", "❤️", "😆", "🔝", "🐷", "🍆", "�
 const QUICK_REACTIONS = ALLOWED_REACTIONS;
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
-const EMOJI_CATEGORIES = [
-  { label: "Reactions", emojis: ALLOWED_REACTIONS },
-] as const;
 
 function parseDmCallInvite(content: string | null): ParsedDmCallInvite | null {
   if (!content) return null;
@@ -281,10 +278,9 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
   const [incomingCall, setIncomingCall] = useState<{ roomName: string; callerId: string; calleeId: string; callerName: string } | null>(null);
   const incomingCallDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Context menu / emoji picker
+  // Context menu / delete confirm
   const [contextMenu, setContextMenu] = useState<{ msg: DmMessage; x: number; y: number } | null>(null);
-  const [emojiPickerMsgId, setEmojiPickerMsgId] = useState<number | null>(null);
-  const [emojiPickerPos, setEmojiPickerPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [confirmDelete, setConfirmDelete] = useState<DmMessage | null>(null);
   const [recentlyReacted, setRecentlyReacted] = useState<Set<string>>(new Set());
 
   // Telegram-style: presence, reply, edit, forward, pin, scroll-to-bottom, in-chat search, more-menu
@@ -820,16 +816,6 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     } catch { /* silent */ }
   }, []);
 
-  const openEmojiPicker = (msgId: number, x: number, y: number) => {
-    setContextMenu(null);
-    const PANEL_W = 280, PANEL_H = 280;
-    setEmojiPickerPos({
-      x: Math.min(x, window.innerWidth - PANEL_W - 8),
-      y: Math.max(8, Math.min(y, window.innerHeight - PANEL_H - 8)),
-    });
-    setEmojiPickerMsgId(msgId);
-  };
-
   const handleContextMenu = (msg: DmMessage, e: React.MouseEvent) => {
     if (msg.is_deleted) return;
     e.preventDefault();
@@ -841,7 +827,8 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     const touch = e.touches[0];
     longPressTimer.current = setTimeout(() => {
       setContextMenu({ msg, x: touch.clientX, y: touch.clientY });
-    }, 500);
+      try { (window as any).Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("medium"); } catch { /* ignore */ }
+    }, 380);
   };
 
   const handleTouchEnd = () => {
@@ -850,12 +837,17 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
 
   const handleDeleteMsg = (msg: DmMessage) => {
     setContextMenu(null);
-    // Optimistic update — mark message deleted immediately so the UI responds instantly
-    setMessages((prev) =>
-      prev.map((m) => m.id === msg.id ? { ...m, is_deleted: true, content: null } : m)
-    );
-    // Server-side delete + broadcast to both participants via Socket.IO
-    connectSocket().emit("dm:message:delete", { messageId: msg.id });
+    setConfirmDelete(msg);
+  };
+
+  const handleDeleteConfirm = (forAll: boolean) => {
+    if (!confirmDelete) return;
+    const msg = confirmDelete;
+    setConfirmDelete(null);
+    if (forAll) {
+      setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, is_deleted: true, content: null } : m));
+    }
+    connectSocket().emit("dm:message:delete", { messageId: msg.id, forAll });
   };
 
   const handleReply = (msg: DmMessage) => {
@@ -1354,7 +1346,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                   )}
                 <div
                   ref={(el) => { if (el) messageRefs.current.set(msg.id, el); else messageRefs.current.delete(msg.id); }}
-                  className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} items-end ${isGrouped ? "!mt-0.5" : ""} transition-all`}
+                  className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} items-end ${isGrouped ? "!mt-0.5" : ""} transition-all group/msg`}
                   onContextMenu={(e) => handleContextMenu(msg, e)}
                   onTouchStart={(e) => { handleTouchStart(msg, e); handleBubbleTouchStart(msg, e); }}
                   onTouchEnd={(e) => { handleTouchEnd(); handleBubbleTouchEnd(msg, e); }}
@@ -1531,6 +1523,16 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                       </div>
                     )}
                   </div>
+                  {/* Hover kebab — desktop only */}
+                  {!msg.is_deleted && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setContextMenu({ msg, x: e.clientX, y: e.clientY }); }}
+                      className={`hidden md:flex items-center justify-center w-7 h-7 rounded-full text-pnp-textSecondary/40 hover:text-pnp-textSecondary hover:bg-white/8 opacity-0 group-hover/msg:opacity-100 transition-all active:scale-90 self-center flex-shrink-0 ${isMe ? "mr-1" : "ml-1"}`}
+                      title="Message options"
+                    >
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="4" r="1.5" /><circle cx="10" cy="10" r="1.5" /><circle cx="10" cy="16" r="1.5" /></svg>
+                    </button>
+                  )}
                 </div>
                 </React.Fragment>
               );
@@ -1601,19 +1603,33 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
         </div>
       )}
 
-      {/* Edit preview bar */}
-      {editingMsg && (
-        <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-3 flex-shrink-0 bg-pnp-background">
-          <svg className="w-4 h-4 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold text-pnp-accent uppercase tracking-wider">Editing message</p>
-            <p className="text-xs text-pnp-textSecondary truncate">{editingMsg.content || ""}</p>
+      {/* Edit bar with countdown */}
+      {editingMsg && (() => {
+        const createdMs = new Date(editingMsg.created_at).getTime();
+        const remainingMs = Math.max(0, 24 * 3600 * 1000 - (Date.now() - createdMs));
+        const hoursLeft = Math.floor(remainingMs / 3600000);
+        const minutesLeft = Math.floor((remainingMs % 3600000) / 60000);
+        const timeLeftLabel = hoursLeft >= 1 ? `${hoursLeft}h ${minutesLeft}m left` : `${minutesLeft}m left`;
+        return (
+          <div className="px-3 py-2.5 border-t border-pnp-border flex items-center gap-3 flex-shrink-0 bg-pnp-background">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500/15">
+              <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="text-[11px] font-bold text-blue-400 uppercase tracking-wider">Editing message</p>
+                <span className="text-[10px] text-pnp-textSecondary/60">· {timeLeftLabel}</span>
+              </div>
+              <p className="text-xs text-pnp-textSecondary truncate">{editingMsg.content?.slice(0, 80) || ""}</p>
+            </div>
+            <button onClick={() => { setEditingMsg(null); setMessageInput(""); }} className="w-7 h-7 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10 active:scale-95 transition-all" aria-label="Cancel edit (Esc)">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </div>
-          <button onClick={() => { setEditingMsg(null); setMessageInput(""); }} className="w-7 h-7 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10" aria-label="Cancel edit">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Media preview + upload progress */}
       {mediaFile && (
@@ -1749,8 +1765,8 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
               border: "1px solid rgba(255,255,255,0.1)",
             }}
           >
-            {/* Quick reaction bar */}
-            <div className="flex items-center gap-1 px-2 py-2 border-b border-white/5">
+            {/* Quick reaction bar — all 9 reactions inline */}
+            <div className="flex items-center justify-around px-2 py-2 border-b border-white/5">
               {QUICK_REACTIONS.map((emoji) => (
                 <button
                   key={emoji}
@@ -1760,14 +1776,6 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                   {emoji}
                 </button>
               ))}
-              <button
-                onClick={() => openEmojiPicker(contextMenu.msg.id, contextMenu.x, contextMenu.y)}
-                className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-white/10 active:scale-90 transition-all text-pnp-textSecondary"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-              </button>
             </div>
             <button onClick={() => handleReply(contextMenu.msg)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
@@ -1819,47 +1827,37 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
         />
       )}
 
-      {/* Full emoji picker */}
-      {emojiPickerMsgId !== null && (
-        <>
-          <div className="fixed inset-0 z-[60]" onClick={() => setEmojiPickerMsgId(null)} />
-          <div
-            className="fixed z-[61] rounded-2xl shadow-2xl overflow-hidden"
-            style={{
-              left: Math.max(8, Math.min(emojiPickerPos.x, window.innerWidth - Math.min(280, window.innerWidth - 16) - 8)),
-              top: emojiPickerPos.y,
-              width: Math.min(280, window.innerWidth - 16),
-              background: "#1C1C1E",
-              border: "1px solid rgba(255,255,255,0.12)",
-            }}
-          >
-            <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
-              <p className="text-[11px] font-semibold text-pnp-textSecondary uppercase tracking-wider">Reactions</p>
-              <button onClick={() => setEmojiPickerMsgId(null)} className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 text-pnp-textSecondary">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="overflow-y-auto" style={{ maxHeight: 240 }}>
-              {EMOJI_CATEGORIES.map((cat) => (
-                <div key={cat.label} className="px-2 pb-2">
-                  <p className="text-[10px] font-semibold text-pnp-textSecondary/60 px-1 pt-1.5 pb-1 uppercase tracking-wider">{cat.label}</p>
-                  <div className="flex flex-wrap gap-0.5">
-                    {cat.emojis.map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => { handleReaction(emojiPickerMsgId!, emoji); setEmojiPickerMsgId(null); }}
-                        className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-white/10 active:scale-90 transition-all text-xl"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
+      {/* Delete confirmation modal — Telegram iOS style */}
+      {confirmDelete && (() => {
+        const isSender = String(confirmDelete.sender_id) === String(myDbId);
+        const preview = confirmDelete.media_type === "image" ? "📷 Photo"
+          : confirmDelete.media_type === "video" ? "🎥 Video"
+          : confirmDelete.media_type === "audio" ? "🎤 Voice message"
+          : (confirmDelete.content || "").slice(0, 80);
+        return (
+          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4 pb-safe" onClick={() => setConfirmDelete(null)}>
+            <div className="w-full max-w-[320px] rounded-2xl overflow-hidden mb-2 sm:mb-0" style={{ background: "#1C1C1E" }} onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 pt-5 pb-4 space-y-1.5">
+                <h3 className="text-base font-semibold text-white text-center">Delete message?</h3>
+                {preview && <p className="text-sm text-pnp-textSecondary text-center line-clamp-3">{preview}</p>}
+              </div>
+              <div className="flex flex-col border-t border-white/5">
+                {isSender && (
+                  <button onClick={() => handleDeleteConfirm(true)} className="w-full px-5 py-3.5 text-sm font-medium text-red-400 hover:bg-white/5 transition-colors border-b border-white/5">
+                    Delete for everyone
+                  </button>
+                )}
+                <button onClick={() => handleDeleteConfirm(false)} className="w-full px-5 py-3.5 text-sm font-medium text-red-400 hover:bg-white/5 transition-colors border-b border-white/5">
+                  Delete for me only
+                </button>
+                <button onClick={() => setConfirmDelete(null)} className="w-full px-5 py-3.5 text-sm font-medium text-pnp-textSecondary hover:bg-white/5 transition-colors">
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
-        </>
-      )}
+        );
+      })()}
 
       {showPermGate && (
         <PermissionGate
