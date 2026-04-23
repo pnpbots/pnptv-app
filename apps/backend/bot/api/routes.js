@@ -27,8 +27,6 @@ const playlistController = require('./controllers/playlistController');
 const podcastController = require('./controllers/podcastController');
 const ageVerificationController = require('./controllers/ageVerificationController');
 const healthController = require('./controllers/healthController');
-// hangoutsController removed — legacy Agora routes disabled. Use /api/webapp/hangouts routes instead.
-// const hangoutsController = require('./controllers/hangoutsController');
 const eventsController = require('./controllers/eventsController');
 const { adminGuard, superadminGuard } = require('../../middleware/guards');
 const xOAuthRoutes = require('./xOAuthRoutes');
@@ -76,9 +74,6 @@ const courtesyInviteRoutes = require('./routes/courtesyInviteRoutes');
 
 // Main Stage — 24/7 LiveKit room
 const mainStageController = require('./controllers/mainStageController');
-
-
-// JaaS token generation (viewer, moderator, live streaming) — handled by jaasStreamController
 
 const SoundCloudService = require('../../services/soundCloudService');
 const AuthentikService = require('../../services/authentikService');
@@ -1828,13 +1823,6 @@ app.get('/api/subscription/stats', verifyAdminJWT, asyncHandler(subscriptionCont
 // imported by audioManagement.js for the bot flow.
 
 // ==========================================
-// Hangouts API (PROTECTED: create/join require authentication)
-// Legacy Agora-based hangouts routes (DEPRECATED)
-app.get('/api/hangouts/public', requireSessionAuth, (req, res) => res.json({ success: true, rooms: [], count: 0, note: 'Moved to /api/webapp/hangouts/groups' }));
-app.post('/api/hangouts/create', authenticateUser, (req, res) => res.status(410).json({ success: false, error: 'Legacy video calls are disabled. Use WebApp hangouts.' }));
-app.post('/api/hangouts/join/:callId', authenticateUser, (req, res) => res.status(410).json({ success: false, error: 'Legacy video calls are disabled. Use WebApp hangouts.' }));
-
-// ==========================================
 // Media Library API (for Videorama)
 // ==========================================
 const MediaPlayerModel = require('../../models/mediaPlayerModel');
@@ -3091,8 +3079,6 @@ app.post('/api/webapp/live/mixer-presets', requireSessionAuth, asyncHandler(weba
 // Stream Bridge: browser → RTMP via WebSocket+FFmpeg (legacy — kept for backward compat)
 const streamBridgeController = require('./controllers/streamBridgeController');
 app.get('/api/webapp/live/my-channel', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamBridgeController.getMyChannel));
-
-// JaaS WebRTC Streaming removed — live streaming uses Restreamer HLS exclusively
 
 // Stream Auto-Chat (Grok-generated messages that post to live chat at intervals)
 const streamAutoController = require('./controllers/streamAutoController');
@@ -8045,10 +8031,6 @@ app.use('/api/webapp/gamification', gamificationRoutes);
 
 // Canva Connect API routes
 app.use('/api/canva', canvaRoutes);
-
-
-// JaaS Token Endpoints — removed (dead code, jaasController deleted)
-
 
 // ── Book a Call ──────────────────────────────────────────────────────────────
 const callPackageController = require('./controllers/callPackageController');

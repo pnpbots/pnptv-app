@@ -788,27 +788,6 @@ services:
       traefik.http.routers.livekit.tls.certresolver: "letsencrypt"
       traefik.http.services.livekit.loadbalancer.server.port: "7880"
 
-  element-call:
-    image: ghcr.io/element-hq/element-call:latest
-    container_name: element-call-pnptv
-    restart: unless-stopped
-    volumes:
-      - ./infrastructure/configs/element-call/config.json:/app/config.json:ro
-    networks:
-      - pnptvapp_net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256m
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: "pnptvapp_pnptvapp_net"
-      traefik.http.routers.element-call.rule: "Host(`call.pnptv.app`)"
-      traefik.http.routers.element-call.entrypoints: "websecure"
-      traefik.http.routers.element-call.tls.certresolver: "letsencrypt"
-      traefik.http.services.element-call.loadbalancer.server.port: "8080"
-
   # ===========================================
   # BLOCK H - Live Streaming (Restreamer)
   # Port 1935 exposed for RTMP ingestion

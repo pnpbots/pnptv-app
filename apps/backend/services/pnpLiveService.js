@@ -3,7 +3,6 @@ const { cache } = require('../config/redis');
 const ModelService = require('./modelService');
 const AvailabilityService = require('./availabilityService');
 const PNPLiveTimeSlotService = require('./pnpLiveTimeSlotService');
-const JaaSService = { isConfigured: () => false }; // JaaS removed — replaced by LiveKit
 const logger = require('../utils/logger');
 
 // Cache TTL for model pricing (1 hour)
@@ -161,13 +160,15 @@ class PNPLiveService {
   }
 
   /**
-   * Create a new PNP Live booking with JaaS video room integration
+   * Create a new PNP Live booking. The LiveKit room/token is minted at
+   * call-join time by callBookingController, not here — this just records
+   * the booking and reserves a room name.
    * @param {string} userId - User ID
    * @param {number} modelId - Model ID
    * @param {number} durationMinutes - Duration in minutes (30, 60, or 90)
    * @param {Date} bookingTime - Booking time
    * @param {string} paymentMethod - Payment method
-   * @returns {Promise<Object>} Created booking with video room details
+   * @returns {Promise<Object>} Created booking with reserved room name
    */
   static async createBooking(userId, modelId, durationMinutes, bookingTime, paymentMethod) {
     let client;
@@ -261,27 +262,16 @@ class PNPLiveService {
       );
 
       const newBooking = booking.rows && booking.rows[0];
-      
-      // Generate JaaS video room only when JaaS is fully configured.
-      // If env vars are missing the service throws — guard prevents a misconfigured
-      // environment from failing every booking creation.
-      const roomName = `pnp-live-${newBooking.id}-${Date.now()}`;
-      let jaasClientUrl = null;
-      let jaasClientToken = null;
-      if (JaaSService.isConfigured()) {
-        const jaasRoom = JaaSService.generatePNPLiveRoom(roomName, newBooking.id, model.name);
-        jaasClientUrl = jaasRoom.clientUrl;
-        jaasClientToken = jaasRoom.tokens.client;
-      } else {
-        logger.warn('JaaS not configured — booking created without video room tokens', { bookingId: newBooking.id });
-      }
 
-      // Update booking with video room details
+      // Reserve a deterministic LiveKit room name. The actual room/token is
+      // minted on demand at call-join time by callBookingController.
+      const roomName = `pnp-live-${newBooking.id}-${Date.now()}`;
+
       await client.query(
         `UPDATE pnp_bookings
-         SET video_room_name = $1, video_room_url = $2, video_room_token = $3
-         WHERE id = $4`,
-        [roomName, jaasClientUrl, jaasClientToken, newBooking.id]
+         SET video_room_name = $1, video_room_url = NULL, video_room_token = NULL
+         WHERE id = $2`,
+        [roomName, newBooking.id]
       );
 
       await client.query('COMMIT');
@@ -309,8 +299,7 @@ class PNPLiveService {
         ...publicBooking,
         videoRoom: {
           roomName,
-          clientUrl: jaasClientUrl,
-          // modelUrl intentionally omitted from client response
+          clientUrl: null, // LiveKit URL is minted at call-join time
         }
       };
     } catch (error) {

@@ -5062,8 +5062,6 @@ export function updateAdminTicket(
   });
 }
 
-// getJaasLiveToken, refreshJaasToken removed — JaaS live streaming removed
-
 // Live Rules Acknowledgment Gate
 
 export function getLiveRulesStatus(channelRef?: string | null): Promise<{

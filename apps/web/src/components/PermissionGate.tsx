@@ -29,7 +29,7 @@ function hasMediaDevices(): boolean {
  * Shows a modal asking the user to grant camera + microphone permissions.
  * Must be triggered by a user gesture (button tap) so the browser allows the prompt.
  * On mobile WebViews where getUserMedia isn't available, offers a "Continue anyway"
- * option since the Jitsi iframe handles its own permissions.
+ * option since LiveKit will request permissions itself when the call starts.
  */
 export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
   const [camStatus, setCamStatus] = useState<PermStatus>("checking");
@@ -134,7 +134,7 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
           if (granted.includes("video")) setCamStatus("granted");
           if (granted.includes("audio")) setMicStatus("granted");
 
-          // At least one succeeded — let them proceed (Jitsi handles the rest)
+          // At least one succeeded — let them proceed (LiveKit handles the rest)
           if (granted.length > 0) {
             onGranted();
             return;
@@ -277,7 +277,7 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
             </button>
           )}
           {/* Continue anyway — lets user proceed when permissions are denied/unavailable.
-              The Jitsi iframe will handle its own permission prompts inside the call. */}
+              LiveKit will request permissions itself when the call starts. */}
           {(denied || unavailable) && (
             <button
               onClick={onGranted}

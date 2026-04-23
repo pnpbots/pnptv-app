@@ -207,12 +207,12 @@ function creatorConfirmationHtml({ memberUsername, startAt, durationMinutes, joi
  *
  * @param {string} memberId  - users.id of the member
  * @param {{ creator_name?: string, start_at: string, duration_minutes: number }} booking
- * @param {{ token?: string, roomName?: string, meetingUrl?: string }|null} jaasInfo
+ * @param {{ token?: string, roomName?: string, meetingUrl?: string }|null} callInfo
  */
-async function sendBookingConfirmationToMember(memberId, booking, jaasInfo) {
+async function sendBookingConfirmationToMember(memberId, booking, callInfo) {
   const memberInfo = await fetchUserInfo(memberId);
   const creatorName = booking.creator_name || 'your creator';
-  const joinUrl = jaasInfo?.meetingUrl || null;
+  const joinUrl = callInfo?.meetingUrl || null;
 
   // Email
   if (memberInfo.email) {
@@ -245,12 +245,12 @@ async function sendBookingConfirmationToMember(memberId, booking, jaasInfo) {
  * @param {string} creatorId  - users.id of the creator
  * @param {{ start_at: string, duration_minutes: number }} booking
  * @param {{ username?: string, display_name?: string }} memberInfo
- * @param {{ token?: string, roomName?: string, meetingUrl?: string }|null} jaasInfo
+ * @param {{ token?: string, roomName?: string, meetingUrl?: string }|null} callInfo
  */
-async function sendBookingConfirmationToCreator(creatorId, booking, memberInfo, jaasInfo) {
+async function sendBookingConfirmationToCreator(creatorId, booking, memberInfo, callInfo) {
   const creatorUserInfo = await fetchUserInfo(creatorId);
   const memberUsername = memberInfo?.display_name || memberInfo?.username || 'a member';
-  const joinUrl = jaasInfo?.meetingUrl || null;
+  const joinUrl = callInfo?.meetingUrl || null;
 
   // Email
   if (creatorUserInfo.email) {
@@ -285,20 +285,20 @@ async function sendBookingConfirmationToCreator(creatorId, booking, memberInfo, 
  * @param {string}  creatorId
  * @param {string}  memberId
  * @param {string}  startAt     - ISO timestamp of call start
- * @param {{ token?: string, roomName?: string, meetingUrl?: string }|null} jaasInfo
+ * @param {{ token?: string, roomName?: string, meetingUrl?: string }|null} callInfo
  */
-function scheduleCallReminders(bookingId, creatorId, memberId, startAt, jaasInfo) {
+function scheduleCallReminders(bookingId, creatorId, memberId, startAt, callInfo) {
   const startMs = new Date(startAt).getTime();
   const nowMs = Date.now();
 
   const ONE_HOUR_MS = 60 * 60 * 1000;
   const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 
-  const joinUrl = jaasInfo?.meetingUrl || APP_URL;
+  const joinUrl = callInfo?.meetingUrl || APP_URL;
 
   async function sendReminder(label, includeEmail) {
     const formattedTime = formatDateTime(startAt);
-    const tgMsg = `${label} Your call starts at ${formattedTime}. ${jaasInfo ? `Join: ${joinUrl}` : ''}`;
+    const tgMsg = `${label} Your call starts at ${formattedTime}. ${callInfo ? `Join: ${joinUrl}` : ''}`;
 
     await Promise.allSettled([
       sendNotificationViaTelegram(memberId, { type: 'hangout_call', message: tgMsg, entityType: 'call', entityId: null }),

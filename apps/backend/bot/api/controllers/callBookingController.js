@@ -105,7 +105,7 @@ async function createCheckout(req, res) {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns credit details plus a fresh JaaS token for the caller.
+ * Returns credit details plus a fresh LiveKit token for the caller.
  * :bookingId is call_credits.id.
  */
 async function getBooking(req, res) {
@@ -155,10 +155,10 @@ async function getBooking(req, res) {
     const displayName = (isModerator ? credit.creator_display_name : credit.member_display_name) || userId;
     const photoUrl = (isModerator ? credit.creator_photo : credit.member_photo) || '';
 
-    let jaasInfo = null;
+    let livekitInfo = null;
     try {
       const token = await generateToken(roomName, userId, displayName, isModerator);
-      jaasInfo = { token, roomName, livekitUrl: LIVEKIT_WS_URL, meetingUrl: null };
+      livekitInfo = { token, roomName, livekitUrl: LIVEKIT_WS_URL };
     } catch (livekitErr) {
       logger.warn('[callBookingController] LiveKit token generation failed', {
         creditId,
@@ -186,7 +186,7 @@ async function getBooking(req, res) {
       member_photo: credit.member_photo,
     };
 
-    return res.json({ success: true, booking, jaas: jaasInfo });
+    return res.json({ success: true, booking, livekit: livekitInfo });
   } catch (err) {
     logger.error('[callBookingController] getBooking error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to retrieve booking' });

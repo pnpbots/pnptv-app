@@ -1,7 +1,7 @@
 const logger = require('./logger');
 
 /**
- * Generate a unique room code for Jitsi/Zoom meetings
+ * Generate a unique room code for video call rooms.
  * Format: ABC-1234 (3 letters + hyphen + 4 numbers)
  * @returns {string} Room code
  */

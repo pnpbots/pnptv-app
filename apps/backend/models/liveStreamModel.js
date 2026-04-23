@@ -151,7 +151,7 @@ class LiveStreamModel {
     return {
       dbId: row.id,
       streamId: streamId ? String(streamId) : null,
-      channelName: row.channel_name || row.jaas_room_name || row.room_name || row.stream_url || (streamId ? String(streamId) : null),
+      channelName: row.channel_name || row.room_name || row.stream_url || (streamId ? String(streamId) : null),
       hostId: hostId ? String(hostId) : null,
       hostTelegramId: row.host_telegram_id ? Number(row.host_telegram_id) : null,
       hostName: row.host_name || row.streamer_name || (hostId ? String(hostId) : 'Host'),
@@ -219,7 +219,6 @@ class LiveStreamModel {
 
       addField('stream_id', streamId);
       addField('room_name', channelName);
-      addField('jaas_room_name', streamData.jaasRoomName);
       addField('channel_name', channelName);
       addField('host_user_id', hostId);
       addField('host_id', hostId);
@@ -301,7 +300,6 @@ class LiveStreamModel {
       };
 
       addUpdate('channel_name', channelName);
-      addUpdate('jaas_room_name', channelName);
       addUpdate('room_name', channelName);
 
       if (updates.length === 0) return false;

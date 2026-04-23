@@ -549,13 +549,6 @@ describe('PNPLiveService.createBooking — response does not leak internal field
       commission: 60,
     });
 
-    // (JaaSService mock removed — services/jaasService.js was deleted when
-    //  the Matrix/Element/JaaS stack was purged in favor of LiveKit. The
-    //  try/catch below already asserts the field-stripping invariant via
-    //  fall-through when createBooking can't satisfy all its real deps in
-    //  isolation, so deleting this jest.mock keeps the same coverage
-    //  without exploding at module-resolution time.)
-
     let booking;
     try {
       booking = await PNPLiveService.createBooking(
