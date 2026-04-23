@@ -132,11 +132,6 @@ module.exports = {
   REMINDER_3DAY_CRON: process.env.REMINDER_3DAY_CRON || '0 10 * * *',
   REMINDER_1DAY_CRON: process.env.REMINDER_1DAY_CRON || '0 10 * * *',
 
-  // ==================== JITSI (JAAS) ====================
-  JAAS_APP_ID: process.env.JAAS_APP_ID,
-  JAAS_API_KEY_ID: process.env.JAAS_API_KEY_ID,
-  JAAS_PRIVATE_KEY: process.env.JAAS_PRIVATE_KEY,
-
   // ==================== HANGOUTS/VIDEO CALLS ====================
   HANGOUTS_WEB_APP_URL: process.env.HANGOUTS_WEB_APP_URL,
   MAIN_ROOM_COUNT: parseInt(process.env.MAIN_ROOM_COUNT) || 10,

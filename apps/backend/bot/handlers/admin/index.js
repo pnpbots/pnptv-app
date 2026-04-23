@@ -6399,8 +6399,6 @@ async function sendBroadcastWithButtons(ctx, bot) {
   }
 }
 
-// Import and register audio management handlers
-const registerAudioManagementHandlers = require('./audioManagement');
 const registerDateTimePickerHandlers = require('./dateTimePickerHandlers');
 const registerNearbyPlacesAdminHandlers = require('./nearbyPlacesAdmin');
 const registerEnhancedBusinessAdminHandlers = require('./enhancedBusinessAdmin');
@@ -6817,11 +6815,9 @@ const registerRadioAdminHandlers = (bot) => {
   logger.info('Radio admin handlers registered');
 };
 
-// Create wrapper function that also registers audio management and group cleanup
 const finalRegisterAdminHandlers = (bot) => {
   wrappedRegisterAdminHandlers(bot);
   registerBroadcastHandlers(bot);
-  registerAudioManagementHandlers(bot);
   registerDateTimePickerHandlers(bot);
   registerNearbyPlacesAdminHandlers(bot);
   registerEnhancedBusinessAdminHandlers(bot);

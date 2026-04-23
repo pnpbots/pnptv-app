@@ -1816,12 +1816,6 @@ app.post('/api/subscription/create-plan', verifyAdminJWT, asyncHandler(subscript
 app.get('/api/subscription/subscriber/:identifier', verifyAdminJWT, asyncHandler(subscriptionController.getSubscriber));
 app.get('/api/subscription/stats', verifyAdminJWT, asyncHandler(subscriptionController.getStatistics));
 
-// /api/audio/* HTTP routes removed — they were a parallel duplicate of the
-// admin audio management bot handler at bot/handlers/admin/audioManagement.js
-// (which IS wired and remains the canonical surface). Zero frontend or bot
-// callers ever invoked these HTTP routes. The audioStreamer service is still
-// imported by audioManagement.js for the bot flow.
-
 // ==========================================
 // Media Library API (for Videorama)
 // ==========================================

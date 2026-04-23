@@ -1640,8 +1640,6 @@ export async function sendGroupMediaMessage(
   return res.json();
 }
 
-// JaasCallInfo, ActiveCallInfo, StartCallResponse, startGroupCall removed — calls use Telegram native
-
 export function markGroupAsRead(groupId: number): Promise<{ success: boolean }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/read`, { method: "POST" });
 }
