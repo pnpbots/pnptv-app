@@ -2390,11 +2390,16 @@ const forwardMessage = async (req, res) => {
   }
   if (targets.length === 0) return res.status(400).json({ error: 'No valid targets' });
 
-  // Fetch source message — must be in a hangout room and sender must belong there
+  // Fetch source message — must be in a hangout room and sender must belong there.
+  // JOIN users for author photo so forward cards can render the original avatar.
   const { rows: srcRows } = await query(
-    `SELECT id, room, user_id, username, first_name, content, media_url, media_type,
-            media_mime, media_thumb_url, message_type, meta, is_deleted
-       FROM chat_messages WHERE id = $1 LIMIT 1`,
+    `SELECT cm.id, cm.room, cm.user_id, cm.username, cm.first_name, cm.content,
+            cm.media_url, cm.media_type, cm.media_mime, cm.media_thumb_url,
+            cm.message_type, cm.meta, cm.is_deleted, cm.created_at,
+            u.photo_file_id AS author_photo
+       FROM chat_messages cm
+       LEFT JOIN users u ON u.id = cm.user_id
+      WHERE cm.id = $1 LIMIT 1`,
     [messageId]
   );
   const src = srcRows[0];
@@ -2425,17 +2430,42 @@ const forwardMessage = async (req, res) => {
   // Build forwarded content (prepend note if provided)
   const baseContent = src.content || '';
   const content = note ? (baseContent ? `${note}\n\n${baseContent}` : note) : baseContent;
-  // Preserve post_card meta + text fallback so shared-post forwards keep working
-  const messageType = src.message_type === 'post_card' ? 'post_card' : 'text';
-  const meta = src.message_type === 'post_card'
-    ? {
-        ...(src.meta || {}),
-        snapshot: {
-          ...((src.meta && src.meta.snapshot) || {}),
-          note: note || src.meta?.snapshot?.note || null,
-        },
-      }
-    : (src.meta || null);
+  // Shared-post forwards keep their existing post_card shape (snapshot.note
+  // carries the new caption). Every other forward becomes a post_card with
+  // meta.kind='forward' so recipients see author + media preview, not a bare
+  // text/media row. Legacy columns stay populated for clients that ignore meta.
+  let messageType;
+  let meta;
+  if (src.message_type === 'post_card') {
+    messageType = 'post_card';
+    meta = {
+      ...(src.meta || {}),
+      snapshot: {
+        ...((src.meta && src.meta.snapshot) || {}),
+        note: note || src.meta?.snapshot?.note || null,
+      },
+    };
+  } else {
+    messageType = 'post_card';
+    meta = {
+      kind: 'forward',
+      source: {
+        type: 'hangout',
+        messageId: src.id,
+        groupId: srcGroupId,
+        authorId: String(src.user_id),
+        authorUsername: src.username || null,
+        authorFirstName: src.first_name || null,
+        authorPhoto: src.author_photo || null,
+        createdAt: src.created_at ? new Date(src.created_at).toISOString() : null,
+        text: src.content || null,
+        mediaUrl: src.media_url || null,
+        mediaType: src.media_type || null,
+        mediaThumbUrl: src.media_thumb_url || null,
+      },
+      note: note || null,
+    };
+  }
 
   const io = req.app.get('io');
   const DmService = require('../../../services/dmService');
@@ -2452,10 +2482,17 @@ const forwardMessage = async (req, res) => {
         }
         // For post_card sources, promote the snapshot's media into DM columns
         // so the media preview renders via the existing DM renderer even if the
-        // recipient's client doesn't yet understand post_card meta.
+        // recipient's client doesn't yet understand post_card meta. For
+        // forward cards we zero the media columns — meta.source carries media
+        // and duplicating via legacy columns would render the thumbnail twice.
+        const isForwardCard = meta && meta.kind === 'forward';
         const srcSnap = (src.meta && src.meta.snapshot) || null;
-        const dmMediaUrl = src.media_url || (src.message_type === 'post_card' ? (srcSnap?.mediaUrl || null) : null);
-        const dmMediaType = src.media_type || (src.message_type === 'post_card' ? (srcSnap?.mediaType || null) : null);
+        const dmMediaUrl = isForwardCard
+          ? null
+          : src.media_url || (src.message_type === 'post_card' ? (srcSnap?.mediaUrl || null) : null);
+        const dmMediaType = isForwardCard
+          ? null
+          : src.media_type || (src.message_type === 'post_card' ? (srcSnap?.mediaType || null) : null);
         const msg = await DmService.sendMessage(
           user.id,
           resolvedRid,
@@ -2463,10 +2500,10 @@ const forwardMessage = async (req, res) => {
             content: content || null,
             mediaUrl: dmMediaUrl,
             mediaType: dmMediaType,
-            mediaMime: src.media_mime || null,
-            mediaThumbUrl: src.media_thumb_url || null,
-            messageType: src.message_type === 'post_card' ? 'post_card' : 'text',
-            meta: src.message_type === 'post_card' ? src.meta : null,
+            mediaMime: isForwardCard ? null : (src.media_mime || null),
+            mediaThumbUrl: isForwardCard ? null : (src.media_thumb_url || null),
+            messageType,
+            meta,
           },
           {}
         );
@@ -2500,6 +2537,9 @@ const forwardMessage = async (req, res) => {
         }
 
         const room = `hangout:${gid}`;
+        // Forward cards carry media via meta.source — zero legacy columns to
+        // avoid the recipient rendering the thumbnail twice.
+        const isForwardCard = meta && meta.kind === 'forward';
         const { rows: insRows } = await query(
           `INSERT INTO chat_messages
              (room, user_id, username, first_name, photo_url, content,
@@ -2511,8 +2551,10 @@ const forwardMessage = async (req, res) => {
           [
             room, user.id, senderUsername, senderFirstName, senderPhoto,
             content || null,
-            src.media_url || null, src.media_type || null,
-            src.media_mime || null, src.media_thumb_url || null,
+            isForwardCard ? null : (src.media_url || null),
+            isForwardCard ? null : (src.media_type || null),
+            isForwardCard ? null : (src.media_mime || null),
+            isForwardCard ? null : (src.media_thumb_url || null),
             messageType, meta ? JSON.stringify(meta) : null,
           ]
         );

@@ -1391,8 +1391,28 @@ export interface GroupMessage {
   is_pinned?: boolean;
   reactions?: MessageReaction[];
   message_type?: "text" | "post_card" | string;
-  meta?: { postId?: number; snapshot?: PostCardSnapshot } | null;
+  meta?: MessageMeta | null;
 }
+
+export interface ForwardSource {
+  type: "dm" | "hangout" | "post";
+  messageId?: number;
+  groupId?: number;
+  authorId?: string | null;
+  authorUsername?: string | null;
+  authorFirstName?: string | null;
+  authorPhoto?: string | null;
+  createdAt?: string | null;
+  text?: string | null;
+  mediaUrl?: string | null;
+  mediaType?: "image" | "video" | "audio" | null;
+  mediaThumbUrl?: string | null;
+}
+
+export type MessageMeta =
+  | { postId: number; snapshot?: PostCardSnapshot; kind?: undefined; source?: undefined; note?: string | null }
+  | { kind: "forward"; source: ForwardSource; note?: string | null; postId?: undefined; snapshot?: undefined }
+  | { postId?: number; snapshot?: PostCardSnapshot; kind?: string; source?: ForwardSource; note?: string | null };
 
 export interface GroupMember {
   user_id: string;

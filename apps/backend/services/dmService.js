@@ -12,6 +12,20 @@ const { resolveUserId } = require('../bot/utils/helpers');
 class DmService {
   static _buildThreadPreview({ content, mediaType, messageType, meta }) {
     const text = typeof content === 'string' ? content.trim() : '';
+    if (messageType === 'post_card' && meta?.kind === 'forward') {
+      const src = meta.source || {};
+      const noteText = typeof meta.note === 'string' ? meta.note.trim() : '';
+      const srcText = typeof src.text === 'string' ? src.text.trim() : '';
+      const author = src.authorUsername
+        ? `@${src.authorUsername}`
+        : (src.authorFirstName || 'User');
+      if (noteText) return noteText.slice(0, 100);
+      if (srcText) return `↪ ${author}: ${srcText}`.slice(0, 100);
+      if (src.mediaType === 'image') return `↪ ${author}: [image]`;
+      if (src.mediaType === 'video') return `↪ ${author}: [video]`;
+      if (src.mediaType === 'audio') return `↪ ${author}: [audio]`;
+      return `↪ Forwarded from ${author}`.slice(0, 100);
+    }
     if (messageType === 'post_card') {
       const snap = meta?.snapshot || null;
       const note = typeof snap?.note === 'string' ? snap.note.trim() : '';
@@ -360,10 +374,17 @@ class DmService {
     const ids = (Array.isArray(recipientIds) ? recipientIds : []).slice(0, 5);
     if (!ids.length) return { success: true, sent: [] };
 
-    // Validate sender is a party to the source message
+    // JOIN users so we can snapshot the original author onto a forward card.
     const { rows: srcRows } = await query(
-      `SELECT id, sender_id, recipient_id, content, media_url, media_type, media_mime, media_thumb_url, message_type, meta
-         FROM direct_messages WHERE id = $1 LIMIT 1`,
+      `SELECT dm.id, dm.sender_id, dm.recipient_id, dm.content, dm.media_url,
+              dm.media_type, dm.media_mime, dm.media_thumb_url, dm.message_type,
+              dm.meta, dm.created_at,
+              u.username   AS sender_username,
+              u.first_name AS sender_first_name,
+              u.photo_file_id AS sender_photo
+         FROM direct_messages dm
+         LEFT JOIN users u ON u.id = dm.sender_id
+        WHERE dm.id = $1 LIMIT 1`,
       [sourceMessageId]
     );
     const src = srcRows[0];
@@ -372,34 +393,64 @@ class DmService {
       throw { statusCode: 403, message: 'Cannot forward this message' };
     }
 
+    const noteText = typeof note === 'string' ? note.trim().slice(0, 500) : '';
+    const baseContent = src.content || '';
+    const forwardedContent = noteText ? `${noteText}\n\n${baseContent}`.trim() : baseContent;
+
+    let messageType;
+    let meta;
+    if (src.message_type === 'post_card') {
+      messageType = 'post_card';
+      meta = {
+        ...(src.meta || {}),
+        snapshot: {
+          ...((src.meta && src.meta.snapshot) || {}),
+          note: noteText || src.meta?.snapshot?.note || null,
+        },
+      };
+    } else {
+      // Wrap every non-post_card forward as a card so recipients see author
+      // context + media preview instead of a bare text/media row.
+      messageType = 'post_card';
+      meta = {
+        kind: 'forward',
+        source: {
+          type: 'dm',
+          messageId: src.id,
+          authorId: String(src.sender_id),
+          authorUsername: src.sender_username || null,
+          authorFirstName: src.sender_first_name || null,
+          authorPhoto: src.sender_photo || null,
+          createdAt: src.created_at ? new Date(src.created_at).toISOString() : null,
+          text: src.content || null,
+          mediaUrl: src.media_url || null,
+          mediaType: src.media_type || null,
+          mediaThumbUrl: src.media_thumb_url || null,
+        },
+        note: noteText || null,
+      };
+    }
+
+    // For forward cards we intentionally zero the legacy media columns so the
+    // recipient doesn't render the media twice (once from the column, once from
+    // the card). meta.source carries the media for the card renderer; legacy
+    // clients that ignore meta fall back to the text-only content.
+    const isForwardCard = meta && meta.kind === 'forward';
     const sent = [];
     for (const rid of ids) {
       const resolvedRid = (await resolveUserId(rid)) || rid;
-      const baseContent = src.content || '';
-      const noteText = typeof note === 'string' ? note.trim().slice(0, 500) : '';
-      const content = noteText ? `${noteText}\n\n${baseContent}`.trim() : baseContent;
-      const mergedMeta = src.message_type === 'post_card'
-        ? {
-            ...(src.meta || {}),
-            snapshot: {
-              ...((src.meta && src.meta.snapshot) || {}),
-              note: noteText || src.meta?.snapshot?.note || null,
-            },
-          }
-        : (src.meta || null);
       try {
         const msg = await DmService.sendMessage(
           userId,
           resolvedRid,
           {
-            content: content || null,
-            mediaUrl: src.media_url || null,
-            mediaType: src.media_type || null,
-            mediaMime: src.media_mime || null,
-            mediaThumbUrl: src.media_thumb_url || null,
-            // Preserve post_card type + meta so forwarded shares keep rich rendering
-            messageType: src.message_type || 'text',
-            meta: mergedMeta,
+            content: forwardedContent || null,
+            mediaUrl: isForwardCard ? null : (src.media_url || null),
+            mediaType: isForwardCard ? null : (src.media_type || null),
+            mediaMime: isForwardCard ? null : (src.media_mime || null),
+            mediaThumbUrl: isForwardCard ? null : (src.media_thumb_url || null),
+            messageType,
+            meta,
           },
           {}
         );

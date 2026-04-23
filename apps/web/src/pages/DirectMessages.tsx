@@ -1408,7 +1408,79 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                             <MediaMessage mediaUrl={msg.media_url} mediaType={msg.media_type} thumbUrl={msg.media_thumb_url} onExpandImage={(url) => setLightboxUrl(url)} isMe={isMe} />
                           </div>
                         ) : null}
-                        {msg.message_type === "post_card" && msg.meta?.postId ? (() => {
+                        {msg.message_type === "post_card" && (msg.meta as any)?.kind === "forward" ? (() => {
+                          const meta = msg.meta as any;
+                          const src = (meta?.source || {}) as {
+                            authorUsername?: string | null;
+                            authorFirstName?: string | null;
+                            text?: string | null;
+                            mediaUrl?: string | null;
+                            mediaType?: string | null;
+                            mediaThumbUrl?: string | null;
+                          };
+                          const author = src.authorUsername
+                            ? `@${src.authorUsername}`
+                            : (src.authorFirstName || "User");
+                          const authorPath = src.authorUsername ? `/profile/${src.authorUsername}` : null;
+                          const srcText = typeof src.text === "string" ? src.text : "";
+                          const noteText = typeof meta?.note === "string" ? meta.note : "";
+                          const thumb = src.mediaThumbUrl
+                            || (src.mediaType === "image" || src.mediaType === "video" ? src.mediaUrl : null);
+                          const isVideo = src.mediaType === "video";
+                          const hasThumb = !!thumb;
+                          return (
+                            <>
+                              {noteText && <p className="mb-1.5 text-sm">{noteText}</p>}
+                              <div className="w-full rounded-lg overflow-hidden border border-white/15 bg-black/20">
+                                {hasThumb && (
+                                  <div className="relative w-full bg-black/40" style={{ aspectRatio: "16/9" }}>
+                                    {isVideo ? (
+                                      <video src={thumb!} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                                    ) : (
+                                      <img src={thumb!} alt="" className="w-full h-full object-cover" />
+                                    )}
+                                    {isVideo && (
+                                      <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                        <span className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
+                                          <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                                        </span>
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="px-2.5 py-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: isMe ? "rgba(255,255,255,0.85)" : "#5ED1C4" }} aria-hidden="true">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17l5-5-5-5M4 18v-2a4 4 0 014-4h12" />
+                                    </svg>
+                                    {authorPath ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); navigate(authorPath); }}
+                                        className="text-[11px] font-semibold hover:underline truncate"
+                                        style={{ color: isMe ? "rgba(255,255,255,0.95)" : "#5ED1C4" }}
+                                      >
+                                        Forwarded from {author}
+                                      </button>
+                                    ) : (
+                                      <span className="text-[11px] font-semibold truncate" style={{ color: isMe ? "rgba(255,255,255,0.95)" : "#5ED1C4" }}>
+                                        Forwarded from {author}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {srcText && (
+                                    <div className={`text-xs mt-0.5 line-clamp-4 ${isMe ? "text-white/85" : "text-white/80"}`}>
+                                      {srcText}
+                                    </div>
+                                  )}
+                                  {!srcText && !hasThumb && src.mediaType === "audio" && (
+                                    <p className={`text-xs mt-0.5 ${isMe ? "text-white/70" : "text-white/60"}`}>🎤 Voice message</p>
+                                  )}
+                                </div>
+                              </div>
+                            </>
+                          );
+                        })() : msg.message_type === "post_card" && msg.meta?.postId ? (() => {
                           const snap = msg.meta.snapshot || {};
                           const handleName = snap.authorUsername
                             ? `@${snap.authorUsername}`
@@ -2010,7 +2082,10 @@ function ForwardModal({ msg, onClose, onSubmit, myDbId }: { msg: DmMessage; onCl
     setSubmitting(false);
   };
 
-  const preview = msg.media_type === "image" ? "📷 Photo" : msg.media_type === "video" ? "🎥 Video" : msg.media_type === "audio" ? "🎤 Voice message" : (msg.content || "");
+  const previewText = msg.media_type === "image" ? "Photo" : msg.media_type === "video" ? "Video" : msg.media_type === "audio" ? "Voice message" : (msg.content || "");
+  const previewThumb = msg.media_thumb_url
+    || (msg.media_type === "image" || msg.media_type === "video" ? msg.media_url : null);
+  const previewIsVideo = msg.media_type === "video";
 
   return (
     <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
@@ -2018,11 +2093,34 @@ function ForwardModal({ msg, onClose, onSubmit, myDbId }: { msg: DmMessage; onCl
         <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
           <div>
             <h3 className="text-base font-bold text-pnp-textPrimary">Forward to…</h3>
-            <p className="text-[11px] text-pnp-textSecondary truncate max-w-[260px]">{preview}</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10" aria-label="Close">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
+        </div>
+        <div className="px-4 py-2 border-b border-white/5">
+          <div className="flex items-center gap-2 rounded-lg p-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            {previewThumb && (
+              <div className="relative w-12 h-12 rounded-md overflow-hidden flex-shrink-0" style={{ background: "rgba(0,0,0,0.4)" }}>
+                {previewIsVideo ? (
+                  <video src={previewThumb} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                ) : (
+                  <img src={previewThumb} alt="" className="w-full h-full object-cover" />
+                )}
+                {previewIsVideo && (
+                  <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <span className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
+                      <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold" style={{ color: "#5ED1C4" }}>📎 Message</p>
+              <p className="text-xs text-white/80 line-clamp-2 mt-0.5">{previewText || "Media"}</p>
+            </div>
+          </div>
         </div>
         <div className="px-3 py-2 border-b border-white/5">
           <input

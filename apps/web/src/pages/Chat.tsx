@@ -783,7 +783,75 @@ function HangoutChatPanel({
                               <p className="text-[10px] leading-snug text-white/50 line-clamp-1 group-hover/reply:text-white/70">{msg.reply_to.content?.slice(0, 80)}</p>
                             </div>
                           )}
-                          {msg.message_type === "post_card" && msg.meta?.postId ? (() => {
+                          {msg.message_type === "post_card" && msg.meta?.kind === "forward" ? (() => {
+                            const src = msg.meta.source || {};
+                            const author = src.authorUsername
+                              ? `@${src.authorUsername}`
+                              : (src.authorFirstName || "User");
+                            const authorPath = src.authorUsername ? `/profile/${src.authorUsername}` : null;
+                            const srcText = typeof src.text === "string" ? src.text : "";
+                            const noteText = typeof msg.meta.note === "string" ? msg.meta.note : "";
+                            const thumb = src.mediaThumbUrl
+                              || (src.mediaType === "image" || src.mediaType === "video" ? src.mediaUrl : null);
+                            const isVideo = src.mediaType === "video";
+                            const hasThumb = !!thumb;
+                            return (
+                              <>
+                                {noteText && (
+                                  <p className="mb-1.5">
+                                    <MentionText text={noteText} />
+                                  </p>
+                                )}
+                                <div className="w-full rounded-lg overflow-hidden border border-white/15 bg-black/20">
+                                  {hasThumb && (
+                                    <div className="relative w-full bg-black/40" style={{ aspectRatio: "16/9" }}>
+                                      {isVideo ? (
+                                        <video src={thumb!} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                                      ) : (
+                                        <img src={thumb!} alt="" className="w-full h-full object-cover" />
+                                      )}
+                                      {isVideo && (
+                                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                          <span className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
+                                            <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                                          </span>
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  <div className="px-2.5 py-2">
+                                    <div className="flex items-center gap-1.5">
+                                      <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: isMe ? "rgba(255,255,255,0.85)" : "#5ED1C4" }} aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 17l5-5-5-5M4 18v-2a4 4 0 014-4h12" />
+                                      </svg>
+                                      {authorPath ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); navigate(authorPath); }}
+                                          className="text-[11px] font-semibold hover:underline truncate"
+                                          style={{ color: isMe ? "rgba(255,255,255,0.95)" : "#5ED1C4" }}
+                                        >
+                                          Forwarded from {author}
+                                        </button>
+                                      ) : (
+                                        <span className="text-[11px] font-semibold truncate" style={{ color: isMe ? "rgba(255,255,255,0.95)" : "#5ED1C4" }}>
+                                          Forwarded from {author}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {srcText && (
+                                      <div className={`text-xs mt-0.5 line-clamp-4 ${isMe ? "text-white/85" : "text-white/80"}`}>
+                                        <MentionText text={srcText} />
+                                      </div>
+                                    )}
+                                    {!srcText && !hasThumb && src.mediaType === "audio" && (
+                                      <p className={`text-xs mt-0.5 ${isMe ? "text-white/70" : "text-white/60"}`}>🎤 Voice message</p>
+                                    )}
+                                  </div>
+                                </div>
+                              </>
+                            );
+                          })() : msg.message_type === "post_card" && msg.meta?.postId ? (() => {
                             const snap = msg.meta.snapshot || {};
                             const handleName = snap.authorUsername
                               ? `@${snap.authorUsername}`
@@ -1324,7 +1392,14 @@ function HangoutChatPanel({
         onClose={() => setForwardingMsg(null)}
         onForward={handleForwardMessage}
         title="Forward message"
-        subtitle={forwardingMsg?.content ? forwardingMsg.content.slice(0, 60) : undefined}
+        sourcePreview={forwardingMsg ? {
+          authorName: forwardingMsg.first_name || forwardingMsg.username || "User",
+          authorPhoto: forwardingMsg.photo_url || null,
+          text: forwardingMsg.content || null,
+          mediaUrl: forwardingMsg.media_url || null,
+          mediaType: forwardingMsg.media_type || null,
+          mediaThumbUrl: forwardingMsg.media_thumb_url || null,
+        } : undefined}
       />
 
       {/* Share to Feed sheet — preview + comment before posting */}

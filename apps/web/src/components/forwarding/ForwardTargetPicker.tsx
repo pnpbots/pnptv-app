@@ -15,12 +15,22 @@ import {
 const MAX_TARGETS = 10;
 const MAX_NOTE = 500;
 
+export interface ForwardSourcePreview {
+  authorName?: string | null;
+  authorPhoto?: string | null;
+  text?: string | null;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
+  mediaThumbUrl?: string | null;
+}
+
 export interface ForwardTargetPickerProps {
   isOpen: boolean;
   onClose: () => void;
   onForward: (targets: ForwardTarget[], note?: string) => Promise<void>;
   title?: string;
   subtitle?: string;
+  sourcePreview?: ForwardSourcePreview;
 }
 
 type Tab = "recents" | "dms" | "hangouts";
@@ -39,6 +49,7 @@ export function ForwardTargetPicker({
   onForward,
   title = "Forward to",
   subtitle,
+  sourcePreview,
 }: ForwardTargetPickerProps) {
   const [tab, setTab] = useState<Tab>("recents");
   const [loading, setLoading] = useState(false);
@@ -197,6 +208,60 @@ export function ForwardTargetPicker({
             </svg>
           </button>
         </div>
+
+        {sourcePreview && (() => {
+          const thumb =
+            sourcePreview.mediaThumbUrl ||
+            (sourcePreview.mediaType === "image" || sourcePreview.mediaType === "video"
+              ? sourcePreview.mediaUrl
+              : null);
+          const isVideo = sourcePreview.mediaType === "video";
+          const hasThumb = !!thumb;
+          const snippet = (sourcePreview.text || "").slice(0, 120);
+          const author = sourcePreview.authorName || "User";
+          return (
+            <div
+              className="flex items-center gap-2 rounded-lg p-2"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+            >
+              {hasThumb && (
+                <div
+                  className="relative w-12 h-12 rounded-md overflow-hidden flex-shrink-0"
+                  style={{ background: "rgba(0,0,0,0.4)" }}
+                >
+                  {isVideo ? (
+                    <video src={thumb!} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                  ) : (
+                    <img src={thumb!} alt="" className="w-full h-full object-cover" />
+                  )}
+                  {isVideo && (
+                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <span className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
+                        <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                      </span>
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold" style={{ color: "#5ED1C4" }}>📎 {author}</p>
+                {snippet ? (
+                  <p className="text-xs text-white/80 line-clamp-2 mt-0.5">{snippet}</p>
+                ) : (
+                  <p className="text-xs text-white/60 mt-0.5">
+                    {sourcePreview.mediaType === "image"
+                      ? "Photo"
+                      : sourcePreview.mediaType === "video"
+                      ? "Video"
+                      : sourcePreview.mediaType === "audio"
+                      ? "Voice message"
+                      : "Message"}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="flex gap-1 p-1 rounded-lg" style={{ background: "rgba(255,255,255,0.04)" }}>
           <button
