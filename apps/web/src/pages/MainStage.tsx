@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   LiveKitRoom,
@@ -11,10 +11,10 @@ import { useMainStage } from "@/hooks/useMainStage";
 import { SpotlightGrid } from "@/components/mainstage/SpotlightGrid";
 import { CinemaGrid } from "@/components/mainstage/CinemaGrid";
 import { EqualGrid } from "@/components/mainstage/EqualGrid";
+import { communityResources } from "@/lib/i18n/communityResources";
+import { getFeaturedPrimeVideos, getAssetUrl, type PrimeVideo } from "@/lib/directus";
 
 const MEDIA_IDENTITY = "mainstage-media";
-
-// ── Cammer identity collection (needs LiveKit context) ────────────────────────
 
 interface CammerInfo {
   identity: string;
@@ -33,8 +33,6 @@ function ParticipantCollector({ onCammersChange }: { onCammersChange: (cammers: 
   }, [tracks, onCammersChange]);
   return null;
 }
-
-// ── Mode label ────────────────────────────────────────────────────────────────
 
 const MODE_LABELS: Record<string, string> = {
   spotlight: "Spotlight",
@@ -65,16 +63,23 @@ const MODE_ICONS: Record<string, JSX.Element> = {
   ),
 };
 
-// ── Bottom bar inner (needs LiveKit context) ──────────────────────────────────
+const NEXT_MODE: Record<"spotlight" | "cinema" | "equal", "spotlight" | "cinema" | "equal"> = {
+  spotlight: "cinema",
+  cinema: "equal",
+  equal: "spotlight",
+};
 
 interface BottomBarProps {
   canBeCammer: boolean;
   isCammer: boolean;
   isAdmin: boolean;
   counts: { cammers: number; viewers: number };
+  mode: "spotlight" | "cinema" | "equal";
   onJoinCam: () => void;
   onLeaveCam: () => void;
   onOpenAdmin: () => void;
+  onLeave: () => void;
+  onCycleMode: () => void;
 }
 
 function BottomBarInner({
@@ -82,9 +87,12 @@ function BottomBarInner({
   isCammer,
   isAdmin,
   counts,
+  mode,
   onJoinCam,
   onLeaveCam,
   onOpenAdmin,
+  onLeave,
+  onCycleMode,
 }: BottomBarProps) {
   const { localParticipant, isCameraEnabled, isMicrophoneEnabled } = useLocalParticipant();
 
@@ -106,8 +114,23 @@ function BottomBarInner({
         paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
       }}
     >
-      {/* Live counter */}
       <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
+        <button
+          type="button"
+          onClick={onLeave}
+          aria-label="Leave Main Stage"
+          className="min-h-[44px] flex items-center gap-1.5 px-3 rounded-full text-xs font-bold transition-all active:scale-[0.96]"
+          style={{
+            background: "rgba(255,69,58,0.14)",
+            border: "1px solid rgba(255,69,58,0.30)",
+            color: "#FF453A",
+          }}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+          </svg>
+          <span className="hidden sm:inline">Leave</span>
+        </button>
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)" }}>
           <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" aria-hidden />
           <span className="text-white text-xs font-semibold tabular-nums">{counts.cammers}</span>
@@ -118,7 +141,26 @@ function BottomBarInner({
         </div>
       </div>
 
-      {/* Cammer controls */}
+      {isAdmin && (
+        <button
+          type="button"
+          onClick={onCycleMode}
+          aria-label={`Switch view mode — current: ${MODE_LABELS[mode]}. Next: ${MODE_LABELS[NEXT_MODE[mode]]}`}
+          title={`Switch to ${MODE_LABELS[NEXT_MODE[mode]]}`}
+          className="min-h-[44px] flex items-center gap-1.5 px-3 rounded-full text-xs font-semibold text-white transition-all active:scale-[0.96]"
+          style={{
+            background: "linear-gradient(135deg, rgba(212,0,122,0.20), rgba(123,97,255,0.18))",
+            border: "1px solid rgba(212,0,122,0.35)",
+          }}
+        >
+          <span style={{ color: "#FF4FB0" }}>{MODE_ICONS[mode]}</span>
+          <span className="hidden sm:inline">{MODE_LABELS[mode]}</span>
+          <svg className="w-3 h-3 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+        </button>
+      )}
+
       <div className="flex items-center gap-2 flex-shrink-0">
         {isCammer && (
           <>
@@ -217,8 +259,6 @@ function BottomBarInner({
   );
 }
 
-// ── Connection state overlay ──────────────────────────────────────────────────
-
 function ConnectionOverlay({ connState }: { connState: ConnectionState }) {
   if (connState === ConnectionState.Connected) return null;
 
@@ -239,8 +279,6 @@ function ConnectionOverlay({ connState }: { connState: ConnectionState }) {
     </div>
   );
 }
-
-// ── Room event listener ───────────────────────────────────────────────────────
 
 interface RoomListenerProps {
   onConnectionStateChange: (state: ConnectionState) => void;
@@ -265,14 +303,14 @@ function RoomListener({ onConnectionStateChange }: RoomListenerProps) {
   return null;
 }
 
-// ── MainStage inner (inside LiveKitRoom) ─────────────────────────────────────
-
 interface MainStageInnerProps {
   mode: "spotlight" | "cinema" | "equal";
   spotlightCammer: string | null;
   spotlightNextAt: number | null;
   mediaKind: "video" | "music" | "off";
   mediaSrc: string | null;
+  mediaPlaying: boolean;
+  mediaVolume: number;
   canBeCammer: boolean;
   isAdmin: boolean;
   counts: { cammers: number; viewers: number };
@@ -283,6 +321,8 @@ interface MainStageInnerProps {
   onSpotlightPick: (identity: string) => void;
   onConnectionStateChange: (state: ConnectionState) => void;
   onCammersChange: (cammers: CammerInfo[]) => void;
+  onLeave: () => void;
+  onCycleMode: () => void;
 }
 
 function MainStageInner({
@@ -291,6 +331,8 @@ function MainStageInner({
   spotlightNextAt,
   mediaKind,
   mediaSrc,
+  mediaPlaying,
+  mediaVolume,
   canBeCammer,
   isAdmin,
   counts,
@@ -301,6 +343,8 @@ function MainStageInner({
   onSpotlightPick,
   onConnectionStateChange,
   onCammersChange,
+  onLeave,
+  onCycleMode,
 }: MainStageInnerProps) {
   return (
     <>
@@ -320,6 +364,8 @@ function MainStageInner({
             mediaIdentity={MEDIA_IDENTITY}
             mediaKind={mediaKind}
             mediaSrc={mediaSrc}
+            mediaPlaying={mediaPlaying}
+            mediaVolume={mediaVolume}
           />
         )}
         {mode === "equal" && <EqualGrid />}
@@ -330,15 +376,16 @@ function MainStageInner({
         isCammer={isCammer}
         isAdmin={isAdmin}
         counts={counts}
+        mode={mode}
         onJoinCam={onJoinCam}
         onLeaveCam={onLeaveCam}
         onOpenAdmin={onOpenAdmin}
+        onLeave={onLeave}
+        onCycleMode={onCycleMode}
       />
     </>
   );
 }
-
-// ── MainStage page ────────────────────────────────────────────────────────────
 
 export default function MainStage() {
   const navigate = useNavigate();
@@ -377,7 +424,17 @@ export default function MainStage() {
     setCammerInfos(infos);
   }, []);
 
-  // Loading skeleton
+  const handleLeave = useCallback(() => {
+    navigate(-1);
+  }, [navigate]);
+
+  const handleCycleMode = useCallback(() => {
+    if (!state) return;
+    const next: "spotlight" | "cinema" | "equal" =
+      state.mode === "spotlight" ? "cinema" : state.mode === "cinema" ? "equal" : "spotlight";
+    admin.setMode(next).catch(() => { /* broadcast recovers on next socket tick */ });
+  }, [admin, state]);
+
   if (loading) {
     return (
       <div
@@ -386,7 +443,6 @@ export default function MainStage() {
         role="status"
         aria-label="Loading Main Stage"
       >
-        {/* Header skeleton */}
         <div
           className="flex-shrink-0 flex items-center justify-between px-4 h-14"
           style={{
@@ -399,7 +455,6 @@ export default function MainStage() {
           <div className="w-24 h-5 rounded animate-pulse" style={{ background: "rgba(255,255,255,0.06)" }} />
           <div className="w-8 h-8 rounded-full animate-pulse" style={{ background: "rgba(255,255,255,0.08)" }} />
         </div>
-        {/* Video area skeleton */}
         <div className="flex-1 animate-pulse" style={{ background: "rgba(255,255,255,0.03)" }}>
           <div className="absolute inset-0 flex items-center justify-center">
             <div
@@ -408,7 +463,6 @@ export default function MainStage() {
             />
           </div>
         </div>
-        {/* Bottom bar skeleton */}
         <div
           className="flex-shrink-0 h-16 animate-pulse"
           style={{ background: "rgba(10,10,15,0.9)", borderTop: "1px solid rgba(255,255,255,0.06)" }}
@@ -417,7 +471,6 @@ export default function MainStage() {
     );
   }
 
-  // Error state
   if (error) {
     return (
       <div
@@ -468,7 +521,6 @@ export default function MainStage() {
       className="fixed inset-0 flex flex-col"
       style={{ background: "#0A0A0F" }}
     >
-      {/* Header */}
       <header
         className="flex-shrink-0 flex items-center justify-between px-4 gap-3"
         style={{
@@ -480,7 +532,6 @@ export default function MainStage() {
           zIndex: 20,
         }}
       >
-        {/* Logo */}
         <img
           src="/logo-login.png"
           alt="PNPtv!"
@@ -488,7 +539,6 @@ export default function MainStage() {
           style={{ filter: "brightness(1.1)" }}
         />
 
-        {/* Mode indicator */}
         <div
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
           style={{
@@ -510,7 +560,6 @@ export default function MainStage() {
           )}
         </div>
 
-        {/* Close */}
         <button
           type="button"
           aria-label="Leave Main Stage"
@@ -524,7 +573,6 @@ export default function MainStage() {
         </button>
       </header>
 
-      {/* Reconnecting banner */}
       {connState === ConnectionState.Reconnecting && (
         <div
           className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
@@ -535,7 +583,6 @@ export default function MainStage() {
         </div>
       )}
 
-      {/* LiveKit room */}
       <LiveKitRoom
         key={token}
         token={token}
@@ -556,6 +603,8 @@ export default function MainStage() {
           spotlightNextAt={state?.spotlight?.nextAt}
           mediaKind={state?.media?.kind || "off"}
           mediaSrc={state?.media?.src}
+          mediaPlaying={state?.media?.playing ?? true}
+          mediaVolume={state?.media?.volume ?? 0.8}
           canBeCammer={canBeCammer}
           isAdmin={isAdmin}
           counts={state?.counts || { cammers: 0, viewers: 0 }}
@@ -566,12 +615,15 @@ export default function MainStage() {
           onSpotlightPick={(identity) => admin.setSpotlight(identity)}
           onConnectionStateChange={setConnState}
           onCammersChange={handleCammersChange}
+          onLeave={handleLeave}
+          onCycleMode={handleCycleMode}
         />
       </LiveKitRoom>
 
       <ConnectionOverlay connState={connState} />
 
-      {/* Admin drawer */}
+      {!adminOpen && <WellnessTipsOverlay />}
+
       {adminOpen && (
         <AdminDrawer
           state={state}
@@ -584,8 +636,6 @@ export default function MainStage() {
   );
 }
 
-// ── Inline admin drawer (embedded, not standalone) ────────────────────────────
-
 interface AdminDrawerProps {
   state: import("@/hooks/useMainStage").MainStageState;
   admin: ReturnType<typeof useMainStage>["admin"];
@@ -596,14 +646,12 @@ interface AdminDrawerProps {
 function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
   return (
     <>
-      {/* Backdrop */}
       <div
         className="fixed inset-0 z-40"
         style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
         onClick={onClose}
         aria-hidden
       />
-      {/* Drawer */}
       <aside
         role="dialog"
         aria-modal="true"
@@ -617,14 +665,11 @@ function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
           paddingBottom: "env(safe-area-inset-bottom, 0px)",
         }}
       >
-        {/* Inline admin content — imports MainStageAdmin logic */}
         <AdminPanelContent state={state} admin={admin} cammerInfos={cammerInfos} onClose={onClose} />
       </aside>
     </>
   );
 }
-
-// ── Inline admin panel content ────────────────────────────────────────────────
 
 type AdminType = ReturnType<typeof useMainStage>["admin"];
 
@@ -675,6 +720,25 @@ const MODES: Array<{ id: "spotlight" | "cinema" | "equal"; label: string; sub: s
 
 export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminPanelContentProps) {
   const [mediaUrl, setMediaUrl] = useState(state.media.src ?? "");
+  const [primeVideos, setPrimeVideos] = useState<PrimeVideo[]>([]);
+  const [primeLoading, setPrimeLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPrimeLoading(true);
+    getFeaturedPrimeVideos(40)
+      .then((items) => {
+        if (cancelled) return;
+        setPrimeVideos(items.filter((v) => v.video_file));
+      })
+      .catch(() => {
+        if (!cancelled) setPrimeVideos([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPrimeLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const handlePlayMedia = useCallback(() => {
     if (!mediaUrl.trim()) return;
@@ -690,9 +754,21 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
     admin.setMedia({ ...state.media, playing: !state.media.playing });
   }, [admin, state?.media]);
 
+  const handlePickPrimeVideo = useCallback(
+    async (video: PrimeVideo) => {
+      const src = getAssetUrl(video.video_file);
+      if (!src) return;
+      setMediaUrl(src);
+      if (state.mode !== "cinema") {
+        await admin.setMode("cinema").catch(() => {});
+      }
+      await admin.setMedia({ kind: "video", src, playing: true }).catch(() => {});
+    },
+    [admin, state.mode]
+  );
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div
         className="flex-shrink-0 flex items-center justify-between px-4 py-4"
         style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}
@@ -719,7 +795,6 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-5 p-4">
-        {/* Mode picker */}
         <section>
           <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">Layout Mode</h3>
           <div className="grid grid-cols-3 gap-2">
@@ -748,9 +823,83 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
           </div>
         </section>
 
-        {/* Media controls */}
         <section>
-          <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">Media</h3>
+          <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">
+            Prime Videos{primeVideos.length > 0 ? ` (${primeVideos.length})` : ""}
+          </h3>
+          {primeLoading ? (
+            <div className="flex gap-2 overflow-hidden">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="flex-shrink-0 w-32 h-[88px] rounded-xl animate-pulse"
+                  style={{ background: "rgba(255,255,255,0.04)" }}
+                />
+              ))}
+            </div>
+          ) : primeVideos.length === 0 ? (
+            <p className="text-white/30 text-xs">No published Prime Videos in CMS</p>
+          ) : (
+            <div
+              className="flex gap-2 overflow-x-auto pb-1"
+              style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}
+            >
+              {primeVideos.map((v) => {
+                const thumb = getAssetUrl(v.thumbnail) || getAssetUrl(v.cover_url);
+                const src = getAssetUrl(v.video_file);
+                const active = state.mode === "cinema" && state.media.src === src;
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => handlePickPrimeVideo(v)}
+                    className="flex-shrink-0 relative w-32 h-[88px] rounded-xl overflow-hidden transition-all active:scale-[0.97] text-left"
+                    style={{
+                      border: active ? "1.5px solid #D4007A" : "1.5px solid rgba(255,255,255,0.08)",
+                      background: "rgba(255,255,255,0.04)",
+                      boxShadow: active ? "0 0 0 2px rgba(212,0,122,0.30)" : "none",
+                    }}
+                    aria-label={`Play ${v.title}`}
+                    title={v.title}
+                  >
+                    {thumb ? (
+                      <img
+                        src={thumb}
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div
+                        className="absolute inset-0"
+                        style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.25), rgba(123,97,255,0.20))" }}
+                      />
+                    )}
+                    <div
+                      className="absolute inset-0"
+                      style={{ background: "linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.15) 60%, rgba(0,0,0,0) 100%)" }}
+                    />
+                    <div className="absolute inset-x-0 bottom-0 px-2 pb-1.5">
+                      <p className="text-white text-[10px] font-semibold leading-tight line-clamp-2">
+                        {v.title}
+                      </p>
+                    </div>
+                    {active && (
+                      <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "#D4007A" }}>
+                        <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">Custom URL</h3>
           <div className="space-y-3">
             <div className="flex gap-2">
               <input
@@ -816,7 +965,6 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
           </div>
         </section>
 
-        {/* Participants */}
         <section>
           <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">
             Participants{cammerInfos.length > 0 ? ` (${cammerInfos.length})` : ""}
@@ -861,6 +1009,124 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
             </div>
           )}
         </section>
+      </div>
+    </div>
+  );
+}
+
+const TIP_INTERVAL_MS = 30 * 60 * 1000;
+const TIP_VISIBLE_MS = 15 * 1000;
+
+type TipItem = { title: string; body: string };
+
+function getWellnessTips(): TipItem[] {
+  const lang = typeof navigator !== "undefined" && navigator.language?.startsWith("es") ? "es" : "en";
+  const bundle = communityResources[lang];
+  const items = [...bundle.harmReductionItems, ...bundle.mentalHealthItems];
+  return items.map((it) => ({ title: it.title, body: it.body }));
+}
+
+function WellnessTipsOverlay() {
+  const [tip, setTip] = useState<TipItem | null>(null);
+  const [visible, setVisible] = useState(false);
+  const indexRef = useRef(0);
+  const tipsRef = useRef<TipItem[]>(getWellnessTips());
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const showNext = () => {
+      const tips = tipsRef.current;
+      if (!tips.length) return;
+      const next = tips[indexRef.current % tips.length];
+      indexRef.current += 1;
+      setTip(next);
+      setVisible(true);
+      if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
+      dismissTimerRef.current = setTimeout(() => setVisible(false), TIP_VISIBLE_MS);
+    };
+
+    const intervalId = setInterval(showNext, TIP_INTERVAL_MS);
+    return () => {
+      clearInterval(intervalId);
+      if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
+    };
+  }, []);
+
+  const handleClose = () => {
+    setVisible(false);
+    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
+  };
+
+  if (!tip) return null;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none fixed left-1/2 -translate-x-1/2 z-40 w-full max-w-[480px] px-4"
+      style={{
+        bottom: "calc(84px + env(safe-area-inset-bottom, 0px))",
+        transform: `translate(-50%, ${visible ? "0" : "24px"})`,
+        opacity: visible ? 1 : 0,
+        transition: "transform 0.35s cubic-bezier(0.2,0.9,0.3,1), opacity 0.35s",
+      }}
+    >
+      <div
+        className="pointer-events-auto relative rounded-2xl p-4 pr-10"
+        style={{
+          background: "linear-gradient(135deg, rgba(15,15,22,0.92), rgba(25,15,35,0.92))",
+          border: "1px solid rgba(212,0,122,0.35)",
+          backdropFilter: "blur(20px)",
+          boxShadow: "0 16px 48px rgba(0,0,0,0.45), 0 0 0 1px rgba(123,97,255,0.08) inset",
+        }}
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center mt-0.5"
+            style={{
+              background: "linear-gradient(135deg,rgba(212,0,122,0.25),rgba(123,97,255,0.25))",
+              border: "1px solid rgba(212,0,122,0.35)",
+            }}
+          >
+            <svg className="w-4 h-4" style={{ color: "#FF4FB0" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "#FF4FB0" }}>
+              Wellness tip
+            </p>
+            <p className="text-white text-[13px] font-semibold leading-snug mb-1">
+              {tip.title}
+            </p>
+            <p className="text-white/70 text-[12px] leading-snug line-clamp-3">
+              {tip.body}
+            </p>
+            <a
+              href="/community-resources"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 mt-2 text-[11px] font-bold"
+              style={{ color: "#7B61FF" }}
+            >
+              More resources
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </a>
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label="Dismiss wellness tip"
+          onClick={handleClose}
+          className="absolute top-2.5 right-2.5 w-7 h-7 flex items-center justify-center rounded-full transition-all active:scale-[0.92]"
+          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
+        >
+          <svg className="w-3 h-3 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
     </div>
   );

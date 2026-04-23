@@ -1,17 +1,198 @@
+import { useEffect, useRef, useState } from "react";
 import {
   ParticipantTile,
   useTracks,
 } from "@livekit/components-react";
 import type { TrackReferenceOrPlaceholder } from "@livekit/components-react";
 import { Track } from "livekit-client";
+import Hls from "hls.js";
 
 interface CinemaGridProps {
   mediaIdentity: string;
   mediaKind: "video" | "music" | "off";
   mediaSrc: string | null;
+  mediaPlaying?: boolean;
+  mediaVolume?: number;
 }
 
-export function CinemaGrid({ mediaIdentity, mediaKind, mediaSrc }: CinemaGridProps) {
+interface UrlMediaPlayerProps {
+  src: string;
+  kind: "video" | "music";
+  playing: boolean;
+  volume: number;
+}
+
+function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const [muted, setMuted] = useState(true);
+  const [canPlay, setCanPlay] = useState(false);
+
+  const isHls = /\.m3u8(\?|$)/i.test(src);
+
+  useEffect(() => {
+    const el: HTMLMediaElement | null = kind === "music" ? audioRef.current : videoRef.current;
+    if (!el || !src) return;
+
+    setCanPlay(false);
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
+
+    if (isHls && Hls.isSupported() && kind === "video") {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        manifestLoadingMaxRetry: 4,
+        manifestLoadingRetryDelay: 2000,
+        levelLoadingMaxRetry: 4,
+        levelLoadingRetryDelay: 2000,
+        fragLoadingMaxRetry: 4,
+        fragLoadingRetryDelay: 2000,
+      });
+      hlsRef.current = hls;
+      hls.loadSource(src);
+      hls.attachMedia(el as HTMLVideoElement);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => setCanPlay(true));
+      hls.on(Hls.Events.ERROR, (_evt, data) => {
+        if (!data.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+      });
+    } else {
+      el.src = src;
+      el.load();
+      const onReady = () => setCanPlay(true);
+      el.addEventListener("loadedmetadata", onReady, { once: true });
+      return () => {
+        el.removeEventListener("loadedmetadata", onReady);
+      };
+    }
+
+    return () => {
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
+    };
+  }, [src, isHls, kind]);
+
+  useEffect(() => {
+    const el: HTMLMediaElement | null = kind === "music" ? audioRef.current : videoRef.current;
+    if (!el) return;
+    el.volume = Math.max(0, Math.min(1, volume));
+    el.muted = muted;
+    if (!canPlay) return;
+    if (playing) {
+      el.play().catch(() => {
+        setMuted(true);
+        if (el) el.muted = true;
+        el.play().catch(() => {});
+      });
+    } else {
+      el.pause();
+    }
+  }, [playing, volume, muted, canPlay, kind]);
+
+  const handleUnmute = () => {
+    setMuted(false);
+    const el: HTMLMediaElement | null = kind === "music" ? audioRef.current : videoRef.current;
+    if (el) {
+      el.muted = false;
+      el.play().catch(() => {});
+    }
+  };
+
+  if (kind === "music") {
+    return (
+      <div className="flex flex-col items-center gap-5 px-6 text-center">
+        <div
+          className="relative w-28 h-28 rounded-full flex items-center justify-center"
+          style={{
+            background: "radial-gradient(circle at 30% 30%, rgba(212,0,122,0.45), rgba(123,97,255,0.25) 60%, rgba(0,0,0,0.6) 100%)",
+            boxShadow: "0 18px 60px rgba(212,0,122,0.30)",
+          }}
+        >
+          <div
+            className="absolute inset-0 rounded-full"
+            style={{
+              border: "1px solid rgba(255,255,255,0.12)",
+              animation: playing ? "spin 12s linear infinite" : "none",
+            }}
+          />
+          <svg className="w-10 h-10 text-white/90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+          </svg>
+        </div>
+        <div>
+          <p className="text-white/80 text-sm font-semibold tracking-wide">
+            {playing ? "Now Playing" : "Paused"}
+          </p>
+          <p className="text-white/30 text-[11px] mt-1 max-w-[240px] truncate mx-auto" title={src}>
+            {decodeURIComponent(src.split("/").pop() || src)}
+          </p>
+        </div>
+        {muted && canPlay && playing && (
+          <button
+            type="button"
+            onClick={handleUnmute}
+            className="min-h-[40px] px-4 rounded-full text-xs font-bold text-white transition-all active:scale-[0.96]"
+            style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)", boxShadow: "0 4px 16px rgba(212,0,122,0.35)" }}
+          >
+            Tap for sound
+          </button>
+        )}
+        <audio ref={audioRef} autoPlay playsInline preload="auto" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="absolute inset-0 bg-black">
+      <video
+        ref={videoRef}
+        className="w-full h-full object-contain"
+        autoPlay
+        playsInline
+        preload="auto"
+        muted={muted}
+        controls={false}
+      />
+      {!canPlay && (
+        <div className="absolute inset-0 flex items-center justify-center" style={{ background: "rgba(10,10,15,0.6)" }}>
+          <div
+            className="w-10 h-10 rounded-full border-2 animate-spin"
+            style={{ borderColor: "rgba(212,0,122,0.3)", borderTopColor: "#D4007A" }}
+          />
+        </div>
+      )}
+      {muted && canPlay && playing && (
+        <button
+          type="button"
+          onClick={handleUnmute}
+          aria-label="Unmute"
+          className="absolute bottom-4 right-4 z-10 flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold text-white transition-all active:scale-[0.96]"
+          style={{
+            background: "linear-gradient(135deg,#D4007A,#7B61FF)",
+            boxShadow: "0 4px 16px rgba(212,0,122,0.35)",
+            backdropFilter: "blur(8px)",
+          }}
+        >
+          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2a4.5 4.5 0 00-2.5-4v8a4.5 4.5 0 002.5-4z" />
+          </svg>
+          Tap for sound
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function CinemaGrid({
+  mediaIdentity,
+  mediaKind,
+  mediaSrc,
+  mediaPlaying = true,
+  mediaVolume = 0.8,
+}: CinemaGridProps) {
   const tracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: true }],
     { onlySubscribed: false }
@@ -27,7 +208,6 @@ export function CinemaGrid({ mediaIdentity, mediaKind, mediaSrc }: CinemaGridPro
 
   return (
     <div className="flex flex-col h-full" style={{ background: "#000" }}>
-      {/* Main area */}
       <div className="relative flex-1 min-h-0 flex items-center justify-center" style={{ background: "#000" }}>
         {showStandby ? (
           <div className="flex flex-col items-center gap-4 px-6 text-center">
@@ -51,28 +231,16 @@ export function CinemaGrid({ mediaIdentity, mediaKind, mediaSrc }: CinemaGridPro
               style={{ width: "100%", height: "100%" }}
             />
           </div>
-        ) : (
-          // Fallback: media source without LiveKit participant (e.g. music)
-          <div className="flex flex-col items-center gap-3 px-6 text-center">
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center"
-              style={{ background: "rgba(212,0,122,0.12)" }}
-            >
-              <svg className="w-8 h-8" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
-              </svg>
-            </div>
-            <p className="text-white/60 text-sm font-medium">Now Playing</p>
-            {mediaSrc && (
-              <p className="text-white/30 text-xs max-w-[200px] truncate" title={mediaSrc}>
-                {mediaSrc}
-              </p>
-            )}
-          </div>
-        )}
+        ) : mediaSrc ? (
+          <UrlMediaPlayer
+            src={mediaSrc}
+            kind={mediaKind === "music" ? "music" : "video"}
+            playing={mediaPlaying}
+            volume={mediaVolume}
+          />
+        ) : null}
       </div>
 
-      {/* Cammer strip */}
       {cammerTracks.length > 0 && (
         <div
           className="flex-shrink-0 flex gap-1.5 overflow-x-auto"
@@ -101,7 +269,6 @@ export function CinemaGrid({ mediaIdentity, mediaKind, mediaSrc }: CinemaGridPro
         </div>
       )}
 
-      {/* No cammers empty state */}
       {tracks.length === 0 && !showStandby && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
           <p className="text-white/30 text-sm">Waiting for performers</p>
