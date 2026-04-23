@@ -66,7 +66,7 @@ export function ForwardTargetPicker({
       .then(([dmRes, hRes]) => {
         if (cancelled) return;
         setDms(dmRes.threads || []);
-        setHangouts((hRes.groups || []).filter((g) => !g.isArchived));
+        setHangouts(hRes.groups || []);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load targets");

@@ -226,8 +226,7 @@ export function SharePostModal({
     setHangoutsLoadError(null);
     try {
       const res = await getHangoutGroups();
-      const active = (res.groups || []).filter((g) => !g.isArchived);
-      setHangoutGroups(active);
+      setHangoutGroups(res.groups || []);
       setHangoutsLoadState("loaded");
     } catch (err: unknown) {
       setHangoutsLoadError(err instanceof Error ? err.message : "Failed to load hangouts");
