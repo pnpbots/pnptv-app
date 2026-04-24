@@ -1,3 +1,4 @@
+const geoip = require('geoip-lite');
 const { getEpaycoClient } = require('../../../config/epayco');
 const SubscriberModel = require('../../../models/subscriberModel');
 const PlanModel = require('../../../models/planModel');
@@ -14,7 +15,20 @@ class SubscriptionController {
    */
   static async getPlans(req, res) {
     try {
-      const plans = await PlanModel.getPublicPlans();
+      const allPlans = await PlanModel.getPublicPlans();
+
+      // Country-aware filtering: Colombian IPs see ONLY pnp-col plans;
+      // everyone else sees the regular catalog minus any pnp-col plans.
+      const ip = req.headers['x-real-ip']
+        || req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+        || req.ip;
+      const geo = geoip.lookup(ip);
+      const country = geo?.country || req.session?.user?.country || null;
+      const isColombia = country === 'CO';
+
+      const plans = isColombia
+        ? allPlans.filter((p) => p.tier === 'pnp-col')
+        : allPlans.filter((p) => p.tier !== 'pnp-col');
 
       // Add currency conversion for each plan
       const plansWithPrices = await Promise.all(
@@ -32,6 +46,8 @@ class SubscriptionController {
       res.json({
         success: true,
         plans: plansWithPrices,
+        country,
+        isColombia,
       });
     } catch (error) {
       logger.error('Error getting subscription plans:', error);

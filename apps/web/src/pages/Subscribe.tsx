@@ -102,6 +102,9 @@ export default function Subscribe() {
   // Dash availability
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
 
+  // Country-based gating — Colombian users must subscribe to PNP Col
+  const [isColombia, setIsColombia] = useState(false);
+
   // Dash invoice state
   const [dashInvoice, setDashInvoice] = useState<{
     invoiceId: string;
@@ -124,18 +127,34 @@ export default function Subscribe() {
   const dashCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    getSubscriptionPlans()
-      .then((res) => {
-        if (res.success && res.plans.length > 0) {
-          setPlans(res.plans);
-          const rec = res.plans.find((p) => p.id === RECOMMENDED_PLAN || p.sku === RECOMMENDED_PLAN);
-          setSelectedPlan(rec?.id || res.plans[0].id);
-        } else {
-          setError(s.noPlansAvailable);
-        }
+    // Detect country first so we can prefer the pnp-col plan when applicable
+    fetch("/api/webapp/geo", { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null)
+      .catch(() => null)
+      .then((geo) => {
+        const co = !!geo?.isColombia;
+        setIsColombia(co);
+        return co;
       })
-      .catch((err) => setError(err.message || s.failedToLoadPlans))
-      .finally(() => setLoading(false));
+      .then((co) => {
+        getSubscriptionPlans()
+          .then((res) => {
+            if (res.success && res.plans.length > 0) {
+              setPlans(res.plans);
+              if (co) {
+                const monthly = res.plans.find((p) => p.id === "pnp_col_monthly");
+                setSelectedPlan(monthly?.id || res.plans[0].id);
+              } else {
+                const rec = res.plans.find((p) => p.id === RECOMMENDED_PLAN || p.sku === RECOMMENDED_PLAN);
+                setSelectedPlan(rec?.id || res.plans[0].id);
+              }
+            } else {
+              setError(s.noPlansAvailable);
+            }
+          })
+          .catch((err) => setError(err.message || s.failedToLoadPlans))
+          .finally(() => setLoading(false));
+      });
 
     getDashAvailable()
       .then((res) => setDashAvailable(res.available === true && res.configured === true))
@@ -611,6 +630,24 @@ export default function Subscribe() {
         <h1 className="text-2xl font-bold text-pnp-textPrimary mb-1">{s.chooseYourPlan}</h1>
         <p className="text-sm text-pnp-textSecondary">{s.subtitle}</p>
       </div>
+
+      {/* Colombia access notice — shown when backend geo flags isColombia */}
+      {isColombia && (
+        <div
+          className="mb-5 rounded-xl px-4 py-3 border flex items-start gap-3"
+          style={{ borderColor: "rgba(212,0,122,0.4)", background: "rgba(212,0,122,0.10)" }}
+        >
+          <span className="text-[#D4007A] text-lg leading-none mt-0.5">🇨🇴</span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-pnp-textPrimary">
+              PNP Col subscription required
+            </p>
+            <p className="text-xs text-pnp-textSecondary mt-0.5">
+              Platform access for users in Colombia requires the PNP Col plan ($49.99 USD — monthly or lifetime).
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Current tier status banner */}
       {renderTierBanner()}

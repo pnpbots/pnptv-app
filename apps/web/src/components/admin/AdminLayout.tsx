@@ -22,8 +22,12 @@ const CREATOR_RESTRICTED_PATHS = new Set([
   "/admin/duplicate-accounts",
 ]);
 
-// Nav item definitions — labelKey maps to admin.nav[key]
-const allNavItems = [
+// Nav item definitions — internal items use { to, labelKey }; external items use { externalUrl, label }
+type InternalNavItem = { to: string; labelKey: string; end?: boolean; icon: string; creatorAllowed: boolean };
+type ExternalNavItem = { externalUrl: string; label: string; icon: string; creatorAllowed: boolean };
+type NavItem = InternalNavItem | ExternalNavItem;
+
+const allNavItems: NavItem[] = [
   { to: "/admin", labelKey: "overview", end: true, icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4", creatorAllowed: true },
   { to: "/admin/users", labelKey: "users", icon: "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z", creatorAllowed: false },
   { to: "/admin/plans", labelKey: "plans", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z", creatorAllowed: false },
@@ -46,6 +50,9 @@ const allNavItems = [
   { to: "/admin/creator-subscriptions", labelKey: "creatorSubs", icon: "M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z", creatorAllowed: true },
   { to: "/admin/meru-links", labelKey: "meruLinks", icon: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1", creatorAllowed: false },
   { to: "/admin/duplicate-accounts", labelKey: "duplicateAccounts", icon: "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z", creatorAllowed: false },
+  // Direct CMS (Directus) shortcuts — open in a new tab
+  { externalUrl: "https://cms.pnptv.app/admin/content/social_posts", label: "CMS: X Posts", icon: "M6 18L18 6M6 6l12 12", creatorAllowed: false },
+  { externalUrl: "https://cms.pnptv.app/admin/content/prime_videos", label: "CMS: Prime Channel", icon: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z", creatorAllowed: false },
 ];
 
 export function AdminLayout() {
@@ -116,26 +123,48 @@ export function AdminLayout() {
         )}
       </div>
       <div className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            onClick={() => setSidebarOpen(false)}
-            className={({ isActive }: { isActive: boolean }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive
-                  ? "bg-pnp-accent/20 text-pnp-accent"
-                  : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-              }`
-            }
-          >
-            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
-            </svg>
-            {(t as any)[item.labelKey] || item.labelKey}
-          </NavLink>
-        ))}
+        {navItems.map((item) => {
+          if ("externalUrl" in item) {
+            return (
+              <a
+                key={item.externalUrl}
+                href={item.externalUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setSidebarOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
+              >
+                <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
+                </svg>
+                <span className="flex-1">{item.label}</span>
+                <svg className="w-3.5 h-3.5 opacity-60 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            );
+          }
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              onClick={() => setSidebarOpen(false)}
+              className={({ isActive }: { isActive: boolean }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-pnp-accent/20 text-pnp-accent"
+                    : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                }`
+              }
+            >
+              <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
+              </svg>
+              {(t as any)[item.labelKey] || item.labelKey}
+            </NavLink>
+          );
+        })}
       </div>
       <div className="p-3 border-t border-pnp-border">
         <button

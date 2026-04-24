@@ -319,6 +319,61 @@ function latamLandingResponse(req, res, next, countryCode) {
   return res.redirect(302, `/landing?country=${countryCode}&focus=performer`);
 }
 
+// ── Colombia access gate ────────────────────────────────────────────────────
+// Users whose detected country is 'CO' must hold an active 'pnp-col'
+// entitlement to reach any /api/* route. Gate exempts auth, geo, plan
+// listing, payment, webhook, health, and CMS endpoints so unsubscribed users
+// can still buy the required plan. Admins bypass. Unauthenticated requests
+// pass through; downstream auth middleware handles them.
+const COLOMBIA_EXEMPT_PREFIXES = [
+  '/api/webapp/auth/', '/api/auth-status', '/api/logout', '/api/accept-terms',
+  '/api/webapp/geo',
+  '/api/subscription/plans', '/api/webapp/plans',
+  '/api/payment/', '/api/webapp/payment/',
+  '/api/webhook/', '/pnp/webhook/',
+  '/api/health', '/health',
+  '/api/cms/', '/api/webapp/cms/',
+];
+
+async function colombiaAccessGate(req, res, next) {
+  const url = req.originalUrl || req.url || '';
+  // Scope to /api/* only
+  if (!url.startsWith('/api/')) return next();
+  // Exempt paths (auth/plans/payment/webhooks/etc.)
+  if (COLOMBIA_EXEMPT_PREFIXES.some((p) => url.startsWith(p))) return next();
+  // Preflight CORS — let CORS middleware handle it
+  if (req.method === 'OPTIONS') return next();
+
+  const user = req.session?.user;
+  if (!user?.id) return next(); // Downstream auth decides 401s
+
+  const role = (user.role || '').toLowerCase();
+  if (role === 'admin' || role === 'superadmin') return next();
+
+  const ip = req.headers['x-real-ip']
+    || req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || req.ip;
+  const geo = geoip.lookup(ip);
+  const country = geo?.country || user.country || null;
+  if (country !== 'CO') return next();
+
+  try {
+    const has = await EntitlementAccessService.hasEntitlement(user.id, 'pnp-col');
+    if (has) return next();
+  } catch (err) {
+    logger.error('[ColombiaGate] entitlement check failed', { userId: user.id, error: err.message });
+    // Fail closed for CO users when the check errors — safer than leaking access
+  }
+
+  return res.status(403).json({
+    success: false,
+    error: 'PNP Col subscription required for users in Colombia',
+    code: 'PNP_COL_REQUIRED',
+    country: 'CO',
+    upgradeUrl: '/subscribe?plan=pnp_col',
+  });
+}
+
 // ── Geo country detection endpoint ──────────────────────────────────────────
 // Used by the frontend to determine if the user is in a LATAM country so
 // specific features (Social, Hangouts, Channels, Live) can be gated unless
@@ -451,7 +506,24 @@ app.get('/api/webapp/geo', asyncHandler(async (req, res) => {
   const ip = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
   const geo = geoip.lookup(ip);
   const country = geo?.country || null;
-  return res.json({ country, isLatam: false, landingMode: false });
+  const isColombia = country === 'CO';
+  let hasPnpCol = false;
+  const userId = req.session?.user?.id;
+  if (isColombia && userId) {
+    try {
+      hasPnpCol = await EntitlementAccessService.hasEntitlement(userId, 'pnp-col');
+    } catch (err) {
+      logger.warn('[geo] pnp-col entitlement check failed', { userId, error: err.message });
+    }
+  }
+  return res.json({
+    country,
+    isLatam: false,
+    landingMode: false,
+    isColombia,
+    hasPnpCol,
+    requiresPnpCol: isColombia && !hasPnpCol,
+  });
 }));
 
 
@@ -1022,6 +1094,7 @@ const limiter = rateLimit({
   },
 });
 app.use('/api/', limiter);
+app.use(colombiaAccessGate);
 
 const ageVerificationUpload = multer({
   storage: multer.memoryStorage(),
