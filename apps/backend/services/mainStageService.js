@@ -16,6 +16,7 @@ const axios       = require('axios');
 const logger      = require('../utils/logger');
 const { getRedis } = require('../config/redis');
 const { getPool }  = require('../config/postgres');
+const livekit     = require('./livekitService');
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -27,7 +28,7 @@ const LOCK_KEY             = 'mainstage:rotator:lock';
 const LOCK_TTL_S           = 60;      // lock expires in 60s
 const LOCK_RENEW_MS        = 20_000;  // renew every 20s
 const MAX_CAMMERS          = 12;
-const VALID_MODES          = new Set(['spotlight', 'cinema', 'equal']);
+const VALID_MODES          = new Set(['spotlight', 'cinema', 'equal', 'theater', 'karaoke']);
 const VALID_MEDIA_KINDS    = new Set(['video', 'music', 'off']);
 
 // Directus endpoints for background Prime Video auto-rotation
@@ -57,25 +58,28 @@ function clampVolume(v) {
   return Math.min(100, Math.max(0, n));
 }
 
+// Debounced state broadcast. Admin burst clicks (e.g. rapid volume slider
+// tweaks) used to fire one broadcast per mutation. This coalesces anything
+// within 200ms into a single emit to the whole mainstage room.
+let _emitStateTimer = null;
 async function emitState() {
   if (!_io) return;
-  try {
-    const snapshot = await getState();
-    _io.to('mainstage').emit('mainstage:state', snapshot);
-  } catch (err) {
-    logger.warn('[MainStage] emitState failed', { error: err.message });
-  }
+  if (_emitStateTimer) return;
+  _emitStateTimer = setTimeout(async () => {
+    _emitStateTimer = null;
+    try {
+      const snapshot = await getState();
+      _io.to('mainstage').emit('mainstage:state', snapshot);
+    } catch (err) {
+      logger.warn('[MainStage] emitState failed', { error: err.message });
+    }
+  }, 200);
 }
 
-// Debounced viewer-count broadcast. Called when sockets join/leave the
-// mainstage room — bursty during app boot, so collapse to one emit per tick.
-let _viewerEmitTimer = null;
+// Viewer-count broadcast. Already-debounced via emitState above, but kept
+// as a named entry so socketHandlers can stay semantic.
 function notifyViewersChanged() {
-  if (_viewerEmitTimer) return;
-  _viewerEmitTimer = setTimeout(() => {
-    _viewerEmitTimer = null;
-    emitState().catch(() => {});
-  }, 500);
+  emitState().catch(() => {});
 }
 
 // ── State accessors ───────────────────────────────────────────────────────────
@@ -109,7 +113,16 @@ async function getState() {
     redis.get('mainstage:cams:volume'),
   ]);
 
-  let media = { kind: 'off', src: null, title: null, playing: false, volume: 70, startedAt: null };
+  let media = {
+    kind: 'off',
+    src: null,
+    title: null,
+    playing: false,
+    volume: 70,
+    startedAt: null,
+    playbackRate: 1.25,   // Anti-capture speed applied by the frontend player
+    adminLocked: false,   // If true, autoRotateMedia skips until admin unlocks
+  };
   if (mediaRaw) {
     try { media = { ...media, ...JSON.parse(mediaRaw) }; } catch (_) {}
   }
@@ -162,12 +175,23 @@ async function setMode(mode) {
 // ── Media ─────────────────────────────────────────────────────────────────────
 
 /**
- * @param {{ kind?: string, src?: string, title?: string, playing?: boolean, volume?: number }} opts
+ * @param {{
+ *   kind?: string,
+ *   src?: string,
+ *   title?: string,
+ *   playing?: boolean,
+ *   volume?: number,
+ *   adminLocked?: boolean,   // explicit admin lock/unlock of auto-rotation
+ *   _fromAutoRotate?: boolean // internal: true when called by autoRotateMedia
+ * }} opts
  */
-async function setMedia({ kind, src, title, playing, volume } = {}) {
+async function setMedia({ kind, src, title, playing, volume, adminLocked, _fromAutoRotate } = {}) {
   const redis  = getRedis();
   const rawNow = await redis.get('mainstage:media');
-  let current  = { kind: 'off', src: null, title: null, playing: false, volume: 70, startedAt: null };
+  let current  = {
+    kind: 'off', src: null, title: null, playing: false, volume: 70,
+    startedAt: null, playbackRate: 1.25, adminLocked: false,
+  };
   if (rawNow) { try { current = { ...current, ...JSON.parse(rawNow) }; } catch (_) {} }
 
   if (kind !== undefined) {
@@ -180,6 +204,16 @@ async function setMedia({ kind, src, title, playing, volume } = {}) {
   if (src    !== undefined) current.src    = src || null;
   if (title  !== undefined) current.title  = title || null;
   if (volume !== undefined) current.volume = clampVolume(volume);
+
+  // Admin-lock semantics: any human call to setMedia (kind/src change) locks
+  // auto-rotation so admin intent (including "silence") is respected. Only
+  // autoRotateMedia itself bypasses the lock via _fromAutoRotate. An admin
+  // can explicitly unlock by passing { adminLocked: false }.
+  if (adminLocked !== undefined) {
+    current.adminLocked = Boolean(adminLocked);
+  } else if (!_fromAutoRotate && (kind !== undefined || src !== undefined)) {
+    current.adminLocked = true;
+  }
 
   if (playing !== undefined) {
     const wasPlaying = current.playing;
@@ -272,39 +306,60 @@ async function addCammer(identity) {
   return 'added';
 }
 
+// Atomic shuffle-and-rotate-spotlight. Closes the race where a concurrent
+// addCammer's Lua could slip in between a JS-side LRANGE and the DEL+RPUSH
+// pipeline, wiping the new cammer. Everything now runs in a single EVAL.
+//   KEYS[1]  = mainstage:spotlight:queue
+//   KEYS[2]  = mainstage:spotlight:cammer
+//   KEYS[3]  = mainstage:spotlight:nextAt
+//   ARGV[1]  = nextAt (ms since epoch)
+//   ARGV[2]  = STATE_CACHE_TTL_S
+// Returns:    the new queue order (ARRAY) — client uses [1] as new spotlight
+const SHUFFLE_LUA = `
+local queueKey = KEYS[1]
+local spotKey  = KEYS[2]
+local nextKey  = KEYS[3]
+local nextAt   = ARGV[1]
+local ttl      = tonumber(ARGV[2])
+local list = redis.call('LRANGE', queueKey, 0, -1)
+if #list == 0 then return {} end
+if #list > 1 then
+  -- Seed from Redis TIME (sec+usec) so successive shuffles differ.
+  local t = redis.call('TIME')
+  math.randomseed(tonumber(t[1]) * 1000000 + tonumber(t[2]))
+  for i = #list, 2, -1 do
+    local j = math.random(i)
+    list[i], list[j] = list[j], list[i]
+  end
+  redis.call('DEL', queueKey)
+  redis.call('RPUSH', queueKey, unpack(list))
+  redis.call('EXPIRE', queueKey, ttl)
+end
+redis.call('SET', spotKey, list[1], 'EX', ttl)
+redis.call('SET', nextKey, nextAt, 'EX', ttl)
+return list
+`;
+
 /**
  * Randomize the cammer queue order in-place and advance the spotlight to the
  * new head of the queue. Used by the client "shuffle" button to let any user
- * shake up the layout when the room gets stale. Idempotent on empty queues.
+ * shake up the layout when the room gets stale. Atomic via Lua so concurrent
+ * addCammer calls can't get their identity silently dropped.
  */
 async function shuffleCammers() {
-  const redis    = getRedis();
-  const queueKey = 'mainstage:spotlight:queue';
-  const items = await redis.lrange(queueKey, 0, -1);
-  if (items.length < 2) {
-    // Nothing meaningful to shuffle — still advance spotlight for visual effect
-    if (items.length === 1) await advanceSpotlight();
-    return;
-  }
-
-  // Fisher-Yates in JS; then atomic replace via pipeline
-  for (let i = items.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [items[i], items[j]] = [items[j], items[i]];
-  }
-  const pipe = redis.pipeline();
-  pipe.del(queueKey);
-  pipe.rpush(queueKey, ...items);
-  pipe.expire(queueKey, STATE_CACHE_TTL_S);
-  await pipe.exec();
-
-  // Promote the new head to spotlight so the visual change is immediate even
-  // in modes that don't re-sort tracks by queue.
-  await redis.set('mainstage:spotlight:cammer', String(items[0]), 'EX', STATE_CACHE_TTL_S);
-  const nextAt = Date.now() + ROTATE_INTERVAL_MS;
-  await redis.set('mainstage:spotlight:nextAt', String(nextAt), 'EX', STATE_CACHE_TTL_S);
-
-  logger.info('[MainStage] cammers shuffled', { count: items.length, spotlight: items[0] });
+  const redis   = getRedis();
+  const nextAt  = Date.now() + ROTATE_INTERVAL_MS;
+  const result = await redis.eval(
+    SHUFFLE_LUA, 3,
+    'mainstage:spotlight:queue',
+    'mainstage:spotlight:cammer',
+    'mainstage:spotlight:nextAt',
+    String(nextAt),
+    String(STATE_CACHE_TTL_S),
+  );
+  const newQueue = Array.isArray(result) ? result : [];
+  if (newQueue.length === 0) return; // nothing to do, no emit needed
+  logger.info('[MainStage] cammers shuffled', { count: newQueue.length, spotlight: newQueue[0] });
   await emitState();
 }
 
@@ -425,42 +480,99 @@ async function fetchFeaturedPrimeVideos() {
   }
 }
 
+// Directus file IDs are UUIDs. Guard against malformed records leaking
+// arbitrary path segments into the URL we broadcast to every client.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
- * If no admin-picked media is currently playing and there is no active
- * cammer, pick a random featured Prime Video from Directus and broadcast it
- * as the background. Respects admin overrides: once state.media.kind is set
- * to 'video' or 'music' by an admin, this function is a no-op.
+ * If no admin-picked media is currently playing and auto-rotation isn't
+ * admin-locked, pick a random featured Prime Video from Directus and
+ * broadcast it as the background.
+ *
+ * Respects admin intent in two ways:
+ * 1. If state.media.kind !== 'off', we don't interrupt.
+ * 2. If state.media.adminLocked === true, we skip even when kind === 'off'
+ *    (admin explicitly chose silence).
  */
 async function autoRotateMedia() {
   try {
-    const redis   = getRedis();
+    const redis    = getRedis();
     const rawMedia = await redis.get('mainstage:media');
-    let current = { kind: 'off' };
+    let current = { kind: 'off', adminLocked: false };
     if (rawMedia) { try { current = { ...current, ...JSON.parse(rawMedia) }; } catch (_) {} }
 
     // Admin has media playing — don't interrupt
     if (current.kind !== 'off') return;
+    // Admin explicitly chose silence — respect it
+    if (current.adminLocked) return;
 
     const items = await fetchFeaturedPrimeVideos();
     if (!items.length) return;
 
     const pick = items[Math.floor(Math.random() * items.length)];
+    if (!pick || typeof pick.fileId !== 'string' || !UUID_RE.test(pick.fileId)) {
+      logger.warn('[MainStage] autoRotateMedia skipped: invalid Directus fileId', { fileId: pick?.fileId });
+      return;
+    }
     const src  = `${DIRECTUS_PUBLIC_URL}/assets/${pick.fileId}`;
 
-    // Only CinemaGrid renders URL-backed media. If the room is in equal/
-    // spotlight mode, the video would be set in state but invisible — so
-    // force the layout to cinema when we auto-fill. Admin can still pick a
-    // different mode and their choice persists until their media is cleared.
-    const redis2   = getRedis();
-    const currentMode = await redis2.get('mainstage:mode');
-    if (currentMode !== 'cinema') {
+    // Only CinemaGrid/Theater/Karaoke render URL-backed media. If the room is
+    // in equal/spotlight mode, the video would be set in state but invisible
+    // — force the layout to cinema when auto-filling.
+    const currentMode = await redis.get('mainstage:mode');
+    if (currentMode !== 'cinema' && currentMode !== 'theater' && currentMode !== 'karaoke') {
       await setMode('cinema');
     }
 
-    await setMedia({ kind: 'video', src, title: pick.title, playing: true });
+    // _fromAutoRotate bypasses the admin-lock auto-set; the lock stays false.
+    await setMedia({ kind: 'video', src, title: pick.title, playing: true, _fromAutoRotate: true });
     logger.info('[MainStage] auto-rotated Prime Video', { fileId: pick.fileId, title: pick.title });
   } catch (err) {
     logger.error('[MainStage] autoRotateMedia error', { error: err.message });
+  }
+}
+
+/**
+ * Prune queue entries whose identities are NOT connected to the LiveKit room.
+ * This catches ghost cammers — users who were granted a cammer token but
+ * whose socket died before the disconnect handler could run removeCammer
+ * (e.g. socket closed before auth-binding). Without this sweep they squat
+ * a MAX_CAMMERS slot until the 24h TTL expires.
+ *
+ * Runs on the same rotation tick as spotlight rotation (locked; one replica
+ * only). Admin identities with isAdminRole are preserved even if not yet
+ * published, in case they're slow to join.
+ */
+async function sweepGhostCammers() {
+  try {
+    const participants = await livekit.listParticipants(ROOM_NAME);
+    if (!participants) return;
+    // If LiveKit returned zero participants but our queue has entries, we do
+    // NOT nuke the queue — that's more likely a transient LiveKit hiccup than
+    // all users disconnecting at once. Require at least one live participant
+    // before we trust LiveKit's view of the world.
+    if (participants.length === 0) return;
+
+    const liveIdentities = new Set(participants.map(p => p.identity));
+    const redis = getRedis();
+    const queue = await redis.lrange('mainstage:spotlight:queue', 0, -1);
+    const ghosts = queue.filter(id => !liveIdentities.has(id) && id !== MEDIA_BOT_IDENTITY);
+    if (ghosts.length === 0) return;
+
+    for (const id of ghosts) {
+      await redis.lrem('mainstage:spotlight:queue', 0, id);
+      logger.info('[MainStage] swept ghost cammer', { identity: id });
+    }
+
+    // If the spotlighted cammer was a ghost, advance to a live one
+    const currentSpot = await redis.get('mainstage:spotlight:cammer');
+    if (currentSpot && ghosts.includes(currentSpot)) {
+      await advanceSpotlight();
+    } else {
+      await emitState();
+    }
+  } catch (err) {
+    logger.warn('[MainStage] sweepGhostCammers error', { error: err.message });
   }
 }
 
@@ -511,9 +623,11 @@ async function startRotation() {
       }
     }, LOCK_RENEW_MS);
 
-    // Rotation tick
+    // Rotation tick — also opportunistically sweeps ghost cammers every tick
     _rotationInterval = setInterval(async () => {
       try {
+        // Ghost-sweep first so the spotlight rotation operates on a clean queue
+        await sweepGhostCammers();
         const mode = await redis.get('mainstage:mode');
         if (mode !== 'spotlight') return;
         await advanceSpotlight();

@@ -1,6 +1,6 @@
 'use strict';
 
-const { AccessToken } = require('livekit-server-sdk');
+const { AccessToken, RoomServiceClient } = require('livekit-server-sdk');
 const logger = require('../utils/logger');
 
 const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
@@ -9,6 +9,30 @@ const LIVEKIT_WS_URL = process.env.LIVEKIT_WS_URL || 'wss://livekit.pnptv.app';
 
 if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
   throw new Error('LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set in environment');
+}
+
+// Lazy-init RoomServiceClient — first call only, reused for all room ops.
+let _roomClient = null;
+function getRoomClient() {
+  if (_roomClient) return _roomClient;
+  const host = LIVEKIT_WS_URL.replace(/^wss?:\/\//, 'https://');
+  _roomClient = new RoomServiceClient(host, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
+  return _roomClient;
+}
+
+/**
+ * List participants currently connected to a LiveKit room.
+ * Returns [] on error so callers can fail open (e.g. queue-cleanup sweeps
+ * that shouldn't nuke the queue if LiveKit is briefly unreachable).
+ */
+async function listParticipants(roomName) {
+  try {
+    const client = getRoomClient();
+    return await client.listParticipants(roomName);
+  } catch (err) {
+    logger.warn('[livekit] listParticipants failed', { roomName, error: err.message });
+    return [];
+  }
 }
 
 /**
@@ -87,4 +111,4 @@ async function generateToken(roomName, participantIdentity, participantName, isM
   return token;
 }
 
-module.exports = { generateToken, LIVEKIT_WS_URL };
+module.exports = { generateToken, LIVEKIT_WS_URL, getRoomClient, listParticipants };

@@ -252,6 +252,36 @@ export const router = createBrowserRouter([
             </VerificationGate>
           </ModuleLoader>
         ),
+        // Per-route boundary: if a grid or overlay throws, keep the app shell
+        // (header, nav) alive and render a small recoverable error state
+        // instead of crashing the entire SPA.
+        errorElement: (
+          <div className="fixed inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center"
+               style={{ background: "#0A0A0F" }}>
+            <p className="text-white/80 text-sm font-semibold">Main Stage hit a snag</p>
+            <p className="text-white/40 text-xs max-w-sm">
+              Something went wrong rendering the stage. The rest of PNPtv is fine.
+            </p>
+            <div className="flex gap-3 mt-2">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white"
+                style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+              >
+                Reload
+              </button>
+              <button
+                type="button"
+                onClick={() => window.history.back()}
+                className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white/60"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
+              >
+                Go back
+              </button>
+            </div>
+          </div>
+        ),
       },
       {
         path: "main-stage/admin",

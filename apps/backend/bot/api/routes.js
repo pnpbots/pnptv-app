@@ -8582,6 +8582,20 @@ const mainStageAdminLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Per-user limiter for layout mutators (/mode, /shuffle) — these are open
+// to ALL authenticated users, so IP-keying is wrong (shared NAT blocks
+// everyone; Tor bypasses entirely). 5 changes/min per account keeps the
+// room from getting griefed while leaving enough headroom for normal use.
+const mainStageMutatorLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many layout changes. Take a breath.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const mainStageTokenLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,   // 30 token mints per user per minute — covers reconnects but blocks floods
@@ -8614,21 +8628,21 @@ app.post(
 );
 
 // Layout mode — open to all authenticated users. Mode is a communal view
-// preference (spotlight/cinema/equal) with no content-mutation risk; rate
-// limit prevents spam. Other /api/main-stage/* writes stay admin-only.
+// preference with no content-mutation risk; the user-keyed rate limiter
+// prevents one account from griefing the whole room. Other /api/main-stage/*
+// writes stay admin-only.
 app.post(
   '/api/main-stage/mode',
   authenticateUser,
-  mainStageAdminLimiter,
+  mainStageMutatorLimiter,
   mainStageController.setMode
 );
 
-// Shuffle cammers — same communal ethic as layout mode: any auth user can
-// reshuffle the queue to change who's spotlighted + reorder grid tiles.
+// Shuffle cammers — same communal ethic as layout mode.
 app.post(
   '/api/main-stage/shuffle',
   authenticateUser,
-  mainStageAdminLimiter,
+  mainStageMutatorLimiter,
   mainStageController.shuffle
 );
 

@@ -4,8 +4,7 @@ import {
   useTracks,
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
-
-const MEDIA_IDENTITY = "mainstage-media";
+import { MEDIA_IDENTITY } from "./CinemaGrid";
 
 export function EqualGrid() {
   const allTracks = useTracks(

@@ -6121,6 +6121,8 @@ export interface MainStageState {
     playing: boolean;
     volume: number;
     startedAt: number | null;
+    playbackRate?: number;
+    adminLocked?: boolean;
   };
   cams: {
     volume: number;

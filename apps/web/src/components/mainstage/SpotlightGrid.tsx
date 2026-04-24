@@ -5,8 +5,7 @@ import {
 } from "@livekit/components-react";
 import type { TrackReferenceOrPlaceholder } from "@livekit/components-react";
 import { Track } from "livekit-client";
-
-const MEDIA_IDENTITY = "mainstage-media";
+import { MEDIA_IDENTITY } from "./CinemaGrid";
 
 interface SpotlightGridProps {
   focusIdentity: string | null;

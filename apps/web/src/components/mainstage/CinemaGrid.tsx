@@ -7,6 +7,14 @@ import type { TrackReferenceOrPlaceholder } from "@livekit/components-react";
 import { Track } from "livekit-client";
 import Hls from "hls.js";
 
+/**
+ * Identity of the media-bot participant that publishes URL-backed media
+ * (e.g. auto-rotated Prime Videos). Must match MEDIA_BOT_IDENTITY in
+ * apps/backend/services/mainStageService.js. Single source of truth for the
+ * frontend — import from here in grids and pages.
+ */
+export const MEDIA_IDENTITY = "mainstage-media";
+
 interface CinemaGridProps {
   mediaIdentity: string;
   mediaKind: "video" | "music" | "off";
@@ -67,8 +75,13 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
       el.load();
       const onReady = () => setCanPlay(true);
       el.addEventListener("loadedmetadata", onReady, { once: true });
+      // Safety net: on autoplay-blocked Safari with cross-origin audio,
+      // `loadedmetadata` can be suppressed until user gesture. After 5s of
+      // silence we force canPlay=true so the "Tap for sound" CTA appears.
+      const fallbackTimer = setTimeout(() => setCanPlay(true), 5000);
       return () => {
         el.removeEventListener("loadedmetadata", onReady);
+        clearTimeout(fallbackTimer);
       };
     }
 
@@ -158,7 +171,8 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
     <div className="absolute inset-0 bg-black">
       <video
         ref={videoRef}
-        className="w-full h-full object-contain"
+        className="w-full h-full object-cover"
+        style={{ objectPosition: "center top" }}
         autoPlay
         playsInline
         preload="auto"
@@ -253,21 +267,24 @@ export function CinemaGrid({
 
       {!hideCammerStrip && cammerTracks.length > 0 && (
         <div
-          className="flex-shrink-0 flex gap-1.5 overflow-x-auto"
+          className="flex-shrink-0 flex gap-2 overflow-x-auto"
           style={{
-            height: "88px",
-            padding: "6px 8px",
-            background: "rgba(0,0,0,0.8)",
+            height: "200px",
+            padding: "12px 14px",
+            background: "rgba(0,0,0,0.85)",
+            scrollbarWidth: "none",
+            msOverflowStyle: "none",
           }}
         >
           {cammerTracks.map((t) => (
             <div
               key={t.participant.identity}
-              className="flex-shrink-0 rounded-xl overflow-hidden"
+              className="flex-shrink-0 rounded-2xl overflow-hidden"
               style={{
-                width: "calc(16/9 * 76px)",
-                height: "76px",
-                border: "1.5px solid rgba(255,255,255,0.10)",
+                width: "calc(16/9 * 176px)",
+                height: "176px",
+                border: "2px solid rgba(212,0,122,0.28)",
+                boxShadow: "0 6px 18px rgba(0,0,0,0.45), 0 0 20px rgba(212,0,122,0.15)",
               }}
             >
               <ParticipantTile
