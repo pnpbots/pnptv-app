@@ -10,7 +10,7 @@ const CristinaWidget = lazy(() => import("@/components/CristinaWidget").then((m)
 import { NotificationBell } from "@/components/NotificationBell";
 import { Toast } from "@/components/Toast";
 import { useNearbyToggle } from "@/components/NearbyBadge";
-import { getMessageThreads, getHangoutGroups, markThreadAsRead, getProfile, type MessageThread, type HangoutGroup } from "@/lib/api";
+import { getMessageThreads, getHangoutGroups, markThreadAsRead, getProfile, getMainStageState, type MessageThread, type HangoutGroup, type MainStageState } from "@/lib/api";
 import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 import { LandingPage } from "@/pages/LandingPage";
@@ -1376,6 +1376,7 @@ export function Layout() {
         return (
           <>
             <MainStageFAB />
+            <FloatingMainStagePlayer />
             <Suspense fallback={null}>
               <CristinaWidget compact={showCompact} />
             </Suspense>
@@ -1555,6 +1556,136 @@ export function Layout() {
           (e.g. failed hangout-invite redirect). Shown regardless of auth so the
           message survives the redirect to /login. */}
       <FlashBanner />
+    </div>
+  );
+}
+
+/**
+ * Picture-in-picture-style floating Main Stage player.
+ *
+ * Shows a small muted <video> of the current auto-rotated Prime Video in the
+ * bottom-right whenever the user is OFF /main-stage. Click to jump back;
+ * × to dismiss until they next visit Main Stage.
+ *
+ * Scope: URL-backed media only (the always-on Prime Video background). Live
+ * cammer feeds aren't ported here — that would require hoisting LiveKitRoom
+ * to the app root and reworking token mint on every page.
+ */
+function FloatingMainStagePlayer() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [state, setState] = useState<MainStageState | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const onMainStage = location.pathname === "/main-stage";
+
+  // Subscribe to live state via socket, plus an initial fetch.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      getMainStageState()
+        .then((s) => { if (!cancelled) setState(s); })
+        .catch(() => {});
+    };
+    refresh();
+
+    const socket = connectSocket();
+    const onState = (payload: MainStageState) => {
+      if (!cancelled) setState(payload);
+    };
+    socket.on("mainstage:state", onState);
+
+    return () => {
+      cancelled = true;
+      socket.off("mainstage:state", onState);
+    };
+  }, []);
+
+  // Reset dismissal whenever the user re-enters /main-stage so the widget
+  // comes back next time they leave.
+  useEffect(() => {
+    if (onMainStage) setDismissed(false);
+  }, [onMainStage]);
+
+  const mediaKind = state?.media?.kind;
+  const mediaSrc  = state?.media?.src || null;
+  const mediaTitle = state?.media?.title || null;
+
+  if (onMainStage) return null;
+  if (dismissed) return null;
+  if (mediaKind !== "video" || !mediaSrc) return null;
+
+  return (
+    <div
+      className="fixed z-40 rounded-xl overflow-hidden"
+      style={{
+        width: 220,
+        height: 130,
+        right: "calc(1rem + env(safe-area-inset-right, 0px))",
+        bottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
+        background: "#0A0A0F",
+        border: "1px solid rgba(212,0,122,0.40)",
+        boxShadow: "0 12px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04) inset",
+      }}
+      role="complementary"
+      aria-label="Main Stage mini player"
+    >
+      {/* Click the video area to open Main Stage */}
+      <button
+        type="button"
+        onClick={() => navigate("/main-stage")}
+        aria-label="Open Main Stage"
+        className="block w-full h-full relative"
+      >
+        <video
+          key={mediaSrc}
+          src={mediaSrc}
+          autoPlay
+          muted
+          playsInline
+          loop
+          preload="metadata"
+          className="w-full h-full object-cover"
+          ref={(el) => {
+            // Anti-capture: slight speed-up so screen recordings desync.
+            if (el) el.playbackRate = 1.25;
+          }}
+        />
+        {/* LIVE pill top-left */}
+        <span
+          className="absolute top-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full"
+          style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)" }}
+        >
+          <span
+            className="w-1.5 h-1.5 rounded-full animate-pulse"
+            style={{ background: "#FF2D55", boxShadow: "0 0 6px rgba(255,45,85,0.8)" }}
+            aria-hidden
+          />
+          <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-white">Main Stage</span>
+        </span>
+        {/* Title ribbon bottom */}
+        {mediaTitle && (
+          <div
+            className="absolute inset-x-0 bottom-0 px-2 py-1.5 text-[10px] text-white/90 truncate text-left"
+            style={{ background: "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 100%)" }}
+            title={mediaTitle}
+          >
+            {mediaTitle}
+          </div>
+        )}
+      </button>
+
+      {/* Dismiss button — stop propagation so it doesn't navigate */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setDismissed(true); }}
+        aria-label="Dismiss Main Stage mini player"
+        className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center transition-opacity hover:opacity-100 opacity-80"
+        style={{ background: "rgba(0,0,0,0.60)", backdropFilter: "blur(6px)" }}
+      >
+        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
     </div>
   );
 }

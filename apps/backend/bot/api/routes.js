@@ -8613,11 +8613,12 @@ app.post(
   mainStageController.token
 );
 
-// Admin writes — auth + role guard + rate limit
+// Layout mode — open to all authenticated users. Mode is a communal view
+// preference (spotlight/cinema/equal) with no content-mutation risk; rate
+// limit prevents spam. Other /api/main-stage/* writes stay admin-only.
 app.post(
   '/api/main-stage/mode',
   authenticateUser,
-  roleGuard('admin', 'superadmin'),
   mainStageAdminLimiter,
   mainStageController.setMode
 );

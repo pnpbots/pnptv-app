@@ -411,6 +411,16 @@ async function autoRotateMedia() {
     const pick = items[Math.floor(Math.random() * items.length)];
     const src  = `${DIRECTUS_PUBLIC_URL}/assets/${pick.fileId}`;
 
+    // Only CinemaGrid renders URL-backed media. If the room is in equal/
+    // spotlight mode, the video would be set in state but invisible — so
+    // force the layout to cinema when we auto-fill. Admin can still pick a
+    // different mode and their choice persists until their media is cleared.
+    const redis2   = getRedis();
+    const currentMode = await redis2.get('mainstage:mode');
+    if (currentMode !== 'cinema') {
+      await setMode('cinema');
+    }
+
     await setMedia({ kind: 'video', src, title: pick.title, playing: true });
     logger.info('[MainStage] auto-rotated Prime Video', { fileId: pick.fileId, title: pick.title });
   } catch (err) {

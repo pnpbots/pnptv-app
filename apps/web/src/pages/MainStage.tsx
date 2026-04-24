@@ -131,6 +131,7 @@ function BottomBarInner({
           </svg>
           <span className="hidden sm:inline">Leave</span>
         </button>
+        <FullscreenToggle />
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)" }}>
           <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" aria-hidden />
           <span className="text-white text-xs font-semibold tabular-nums">{counts.cammers}</span>
@@ -141,25 +142,23 @@ function BottomBarInner({
         </div>
       </div>
 
-      {isAdmin && (
-        <button
-          type="button"
-          onClick={onCycleMode}
-          aria-label={`Switch view mode — current: ${MODE_LABELS[mode]}. Next: ${MODE_LABELS[NEXT_MODE[mode]]}`}
-          title={`Switch to ${MODE_LABELS[NEXT_MODE[mode]]}`}
-          className="min-h-[44px] flex items-center gap-1.5 px-3 rounded-full text-xs font-semibold text-white transition-all active:scale-[0.96]"
-          style={{
-            background: "linear-gradient(135deg, rgba(212,0,122,0.20), rgba(123,97,255,0.18))",
-            border: "1px solid rgba(212,0,122,0.35)",
-          }}
-        >
-          <span style={{ color: "#FF4FB0" }}>{MODE_ICONS[mode]}</span>
-          <span className="hidden sm:inline">{MODE_LABELS[mode]}</span>
-          <svg className="w-3 h-3 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-          </svg>
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onCycleMode}
+        aria-label={`Switch view mode — current: ${MODE_LABELS[mode]}. Next: ${MODE_LABELS[NEXT_MODE[mode]]}`}
+        title={`Switch to ${MODE_LABELS[NEXT_MODE[mode]]}`}
+        className="min-h-[44px] flex items-center gap-1.5 px-3 rounded-full text-xs font-semibold text-white transition-all active:scale-[0.96]"
+        style={{
+          background: "linear-gradient(135deg, rgba(212,0,122,0.20), rgba(123,97,255,0.18))",
+          border: "1px solid rgba(212,0,122,0.35)",
+        }}
+      >
+        <span style={{ color: "#FF4FB0" }}>{MODE_ICONS[mode]}</span>
+        <span className="hidden sm:inline">{MODE_LABELS[mode]}</span>
+        <svg className="w-3 h-3 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+        </svg>
+      </button>
 
       <div className="flex items-center gap-2 flex-shrink-0">
         {isCammer && (
@@ -1053,6 +1052,56 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
         </section>
       </div>
     </div>
+  );
+}
+
+function FullscreenToggle() {
+  const [isFs, setIsFs] = useState(
+    typeof document !== "undefined" && !!document.fullscreenElement
+  );
+
+  useEffect(() => {
+    const onChange = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const handleClick = useCallback(async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        // Fullscreen the page root so all stage UI stays visible
+        const target = document.documentElement;
+        await target.requestFullscreen();
+      }
+    } catch {
+      // Some browsers reject if not triggered by user gesture chain — silent
+    }
+  }, []);
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      aria-label={isFs ? "Exit fullscreen" : "Enter fullscreen"}
+      title={isFs ? "Exit fullscreen" : "Fullscreen"}
+      className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.94]"
+      style={{
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.10)",
+      }}
+    >
+      {isFs ? (
+        <svg className="w-4 h-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9V4.5M15 9h4.5M15 9l5.25-5.25M15 15v4.5M15 15h4.5M15 15l5.25 5.25" />
+        </svg>
+      ) : (
+        <svg className="w-4 h-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+        </svg>
+      )}
+    </button>
   );
 }
 

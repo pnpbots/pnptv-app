@@ -75,7 +75,7 @@ import { PostComposer } from "@/components/PostComposer";
 import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
 import { NearbyBadge } from "@/components/NearbyBadge";
 import { SpotlightStrip } from "@/components/SpotlightStrip";
-import { getUpcomingEvents } from "@/lib/api";
+import { getUpcomingEvents, getMainStageState, type MainStageState } from "@/lib/api";
 import type { EventItem } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
 import { EventDetailModal } from "@/components/events";
@@ -3487,7 +3487,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       {!embeddedMode && showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.chat.hangoutsTitle}</h1>
           <p className="text-sm mt-1 text-pnp-textSecondary">
@@ -3496,6 +3496,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         </div>
         {/* Actions handled by SpotlightStrip + icon */}
       </div>
+
+      {/* Main Stage entry — horizontal stage-themed strip */}
+      <MainStageStrip />
 
       {/* SpotlightStrip — hangout events */}
       <SpotlightStrip
@@ -4734,5 +4737,158 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       )}
 
     </div>
+  );
+}
+
+/**
+ * Horizontal stage-themed entry strip for Main Stage.
+ * Red velvet curtains on the sides, marquee bulbs along the top, warm
+ * spotlight glow on a dark "stage floor" in the middle. Polls state every
+ * 30s so the cammer/viewer counts and now-playing title stay reasonably
+ * fresh without hammering the API.
+ */
+function MainStageStrip() {
+  const navigate = useNavigate();
+  const [state, setState] = useState<MainStageState | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      getMainStageState()
+        .then((s) => { if (!cancelled) setState(s); })
+        .catch(() => {});
+    };
+    refresh();
+    const id = setInterval(refresh, 30_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  const cammers = state?.counts?.cammers ?? 0;
+  const viewers = state?.counts?.viewers ?? 0;
+  const title = state?.media?.title ?? null;
+
+  // 22 bulbs renders nicely across the strip width at mobile → desktop
+  const bulbs = Array.from({ length: 22 });
+
+  return (
+    <button
+      type="button"
+      onClick={() => navigate("/main-stage")}
+      aria-label="Enter Main Stage"
+      className="relative w-full h-28 sm:h-32 mb-6 rounded-2xl overflow-hidden transition-transform active:scale-[0.99]"
+      style={{
+        background:
+          "radial-gradient(ellipse at 50% 85%, rgba(255,180,80,0.35) 0%, rgba(180,30,50,0.55) 35%, rgba(60,10,20,0.95) 75%)",
+        border: "1px solid rgba(212,0,122,0.35)",
+        boxShadow:
+          "0 8px 28px rgba(0,0,0,0.45), inset 0 0 80px rgba(0,0,0,0.35)",
+      }}
+    >
+      {/* Marquee bulbs along the top edge */}
+      <div
+        className="absolute inset-x-3 top-1.5 flex justify-between pointer-events-none"
+        aria-hidden
+      >
+        {bulbs.map((_, i) => (
+          <span
+            key={i}
+            className="block rounded-full"
+            style={{
+              width: 4,
+              height: 4,
+              background: i % 2 === 0 ? "#FFE27A" : "rgba(255,226,122,0.35)",
+              boxShadow:
+                i % 2 === 0
+                  ? "0 0 6px rgba(255,226,122,0.9), 0 0 2px rgba(255,255,255,0.9)"
+                  : "none",
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Left velvet curtain — vertical pleats + dark outer edge */}
+      <div
+        className="absolute left-0 top-0 bottom-0 pointer-events-none"
+        aria-hidden
+        style={{
+          width: "14%",
+          background:
+            "linear-gradient(90deg, rgba(40,5,10,0.95) 0%, rgba(150,15,35,0.55) 70%, rgba(180,30,55,0.0) 100%), " +
+            "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 2px, transparent 2px 10px)",
+        }}
+      />
+      {/* Right velvet curtain — mirror */}
+      <div
+        className="absolute right-0 top-0 bottom-0 pointer-events-none"
+        aria-hidden
+        style={{
+          width: "14%",
+          background:
+            "linear-gradient(270deg, rgba(40,5,10,0.95) 0%, rgba(150,15,35,0.55) 70%, rgba(180,30,55,0.0) 100%), " +
+            "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 2px, transparent 2px 10px)",
+        }}
+      />
+
+      {/* Stage floor — a subtle warm band at the bottom */}
+      <div
+        className="absolute inset-x-0 bottom-0 h-3 pointer-events-none"
+        aria-hidden
+        style={{
+          background:
+            "linear-gradient(180deg, transparent 0%, rgba(90,30,10,0.9) 100%)",
+          borderTop: "1px solid rgba(255,180,80,0.25)",
+        }}
+      />
+
+      {/* Center stage content */}
+      <div className="relative h-full flex flex-col items-center justify-center gap-1.5 px-6 text-center">
+        <div className="flex items-center gap-2">
+          <span
+            className="relative inline-flex w-2 h-2 rounded-full"
+            aria-hidden
+            style={{ background: "#FF2D55", boxShadow: "0 0 10px rgba(255,45,85,0.9)" }}
+          >
+            <span
+              className="absolute inset-0 rounded-full animate-ping"
+              style={{ background: "#FF2D55", opacity: 0.6 }}
+            />
+          </span>
+          <span
+            className="text-[10px] font-bold uppercase tracking-[0.2em]"
+            style={{ color: "#FF2D55" }}
+          >
+            Live
+          </span>
+        </div>
+
+        <h2
+          className="font-extrabold text-xl sm:text-2xl tracking-widest"
+          style={{
+            color: "#FFF6D5",
+            textShadow: "0 2px 10px rgba(255,180,80,0.55), 0 0 2px rgba(0,0,0,0.6)",
+            letterSpacing: "0.12em",
+          }}
+        >
+          MAIN STAGE
+        </h2>
+
+        <div className="flex items-center gap-2 text-[11px] sm:text-xs text-white/80">
+          <span className="font-semibold tabular-nums">{cammers}</span>
+          <span className="text-white/50">cammers</span>
+          <span className="text-white/30">·</span>
+          <span className="font-semibold tabular-nums">{viewers}</span>
+          <span className="text-white/50">watching</span>
+        </div>
+
+        {title && (
+          <p
+            className="text-[10px] sm:text-[11px] text-white/55 max-w-full truncate px-4"
+            title={title}
+          >
+            Now playing · {title}
+          </p>
+        )}
+      </div>
+    </button>
   );
 }

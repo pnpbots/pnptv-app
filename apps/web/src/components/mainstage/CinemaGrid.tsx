@@ -82,6 +82,10 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
     const normalized = volume > 1 ? volume / 100 : volume;
     el.volume = Math.max(0, Math.min(1, normalized));
     el.muted = muted;
+    // Anti-capture: play Prime Videos slightly fast so screen recordings
+    // desync and don't match the original master. Main Stage is silent by
+    // design so there's no pitch artifact.
+    if (kind === "video") el.playbackRate = 1.25;
     if (!canPlay) return;
     if (playing) {
       el.play().catch(() => {
