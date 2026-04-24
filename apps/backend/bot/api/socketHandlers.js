@@ -377,54 +377,40 @@ function initSocketIO(io) {
     // ── Main Stage — everyone auto-joins for state broadcasts ────────────────
     socket.join('mainstage');
 
-    // Send the current state to the joining socket
+    // Send the current state to the joining socket and tell everyone the
+    // viewer count moved. Debounced inside the service so a connection burst
+    // doesn't spam the room.
     const _ms = getMainStageService();
     if (_ms) {
       _ms.getState().then(state => {
         socket.emit('mainstage:state', state);
       }).catch(() => {});
+      if (typeof _ms.notifyViewersChanged === 'function') _ms.notifyViewersChanged();
     }
+    socket.once('disconnect', () => {
+      const ms3 = getMainStageService();
+      if (ms3 && typeof ms3.notifyViewersChanged === 'function') ms3.notifyViewersChanged();
+    });
 
-    // mainstage:join-cammer — called by cammers who want to publish video
+    // mainstage:join-cammer — called by cammers who want to publish video.
+    // The slot is normally already reserved by POST /api/main-stage/token
+    // (addCammer is atomic + idempotent), so this path either confirms the
+    // existing reservation or serves as a fallback for clients that skipped
+    // the REST mint. No pre-check — trust the Lua script's return value so
+    // we never false-reject on a stale read of the queue.
     socket.on('mainstage:join-cammer', async () => {
       const ms2 = getMainStageService();
       if (!ms2) return;
 
-      const userRole = (user.role || '').toLowerCase();
-      const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
-
-      // Non-admin cammers must hold pnp-member entitlement
-      if (!isAdminUser) {
-        try {
-          const hasMember = await getCachedEntitlement(socket, user.id, 'pnp-member');
-          if (!hasMember) {
-            socket.emit('mainstage:error', {
-              code: 'MEMBER_REQUIRED',
-              message: 'Active membership required to go live on Main Stage',
-            });
-            return;
-          }
-        } catch (err) {
-          logger.error('mainstage:join-cammer entitlement check failed', { userId: user.id, error: err.message });
-          socket.emit('mainstage:error', {
-            code: 'ENTITLEMENT_CHECK_FAILED',
-            message: 'Access check failed. Please try again.',
-          });
-          return;
-        }
-      }
-
       try {
-        const state = await ms2.getState();
-        const queue  = state.spotlight.queue;
-        if (!queue.includes(String(user.id)) && queue.length >= ms2.MAX_CAMMERS) {
+        const result = await ms2.addCammer(String(user.id));
+        if (result === 'full') {
           socket.emit('mainstage:error', {
             code: 'CAMMER_CAP_REACHED',
             message: `Cammer slots full (max ${ms2.MAX_CAMMERS})`,
           });
           return;
         }
-        await ms2.addCammer(String(user.id));
         socket.emit('mainstage:cammer-joined', { identity: String(user.id) });
       } catch (err) {
         logger.error('mainstage:join-cammer error', { userId: user.id, error: err.message });
@@ -2611,6 +2597,14 @@ function initSocketIO(io) {
           onlineUsersMap.delete(user.id);
           for (const gid of groupIds) {
             setImmediate(() => emitGroupPresence(io, gid));
+          }
+
+          // Main Stage: self-heal the spotlight queue when a cammer's last
+          // socket closes. Without this, closed tabs leave stale IDs that
+          // eat slots against MAX_CAMMERS until an admin or rotation runs.
+          const _ms = getMainStageService();
+          if (_ms && typeof _ms.removeCammer === 'function') {
+            _ms.removeCammer(String(user.id)).catch(() => {});
           }
 
           // ── Redis presence: mark offline + notify DM partners ───────────────

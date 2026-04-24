@@ -6,6 +6,8 @@ import {
 import type { TrackReferenceOrPlaceholder } from "@livekit/components-react";
 import { Track } from "livekit-client";
 
+const MEDIA_IDENTITY = "mainstage-media";
+
 interface SpotlightGridProps {
   focusIdentity: string | null;
   nextAt: number | null;
@@ -46,10 +48,13 @@ function CountdownChip({ nextAt }: { nextAt: number | null }) {
 }
 
 export function SpotlightGrid({ focusIdentity, nextAt, onTileClick }: SpotlightGridProps) {
-  const tracks = useTracks(
+  const allTracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: true }],
     { onlySubscribed: false }
   );
+  // The URL-ingress media bot publishes a Camera track too; never let it
+  // appear as a spotlight or strip tile.
+  const tracks = allTracks.filter((t) => t.participant.identity !== MEDIA_IDENTITY);
 
   const heroTrack: TrackReferenceOrPlaceholder | undefined = focusIdentity
     ? tracks.find((t) => t.participant.identity === focusIdentity) ?? tracks[0]

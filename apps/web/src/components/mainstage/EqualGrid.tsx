@@ -5,11 +5,15 @@ import {
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
 
+const MEDIA_IDENTITY = "mainstage-media";
+
 export function EqualGrid() {
-  const tracks = useTracks(
+  const allTracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: true }],
     { onlySubscribed: false }
   );
+  // Drop the URL-ingress media bot so it doesn't get a tile alongside cammers.
+  const tracks = allTracks.filter((t) => t.participant.identity !== MEDIA_IDENTITY);
 
   if (tracks.length === 0) {
     return (

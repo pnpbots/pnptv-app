@@ -12,7 +12,8 @@
  * socketHandlers.js) to avoid a circular require with bot.js.
  */
 
-const logger = require('../utils/logger');
+const axios       = require('axios');
+const logger      = require('../utils/logger');
 const { getRedis } = require('../config/redis');
 const { getPool }  = require('../config/postgres');
 
@@ -20,6 +21,7 @@ const { getPool }  = require('../config/postgres');
 
 const ROOM_NAME            = 'main-stage-prime';
 const ROTATE_INTERVAL_MS   = 120_000; // 2 min between spotlight rotations
+const AUTO_MEDIA_INTERVAL_MS = 10 * 60_000; // 10 min between auto-picked Prime Videos
 const MEDIA_BOT_IDENTITY   = 'mainstage-media';
 const LOCK_KEY             = 'mainstage:rotator:lock';
 const LOCK_TTL_S           = 60;      // lock expires in 60s
@@ -27,6 +29,10 @@ const LOCK_RENEW_MS        = 20_000;  // renew every 20s
 const MAX_CAMMERS          = 12;
 const VALID_MODES          = new Set(['spotlight', 'cinema', 'equal']);
 const VALID_MEDIA_KINDS    = new Set(['video', 'music', 'off']);
+
+// Directus endpoints for background Prime Video auto-rotation
+const DIRECTUS_INTERNAL_URL = (process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055').replace(/\/$/, '');
+const DIRECTUS_PUBLIC_URL   = (process.env.DIRECTUS_PUBLIC_URL   || 'https://cms.pnptv.app').replace(/\/$/, '');
 // 24h TTL so an idle room doesn't silently reset to `mode: 'equal'` after 5 min.
 // Every write refreshes the TTL; the rotation tick effectively heartbeats it too.
 const STATE_CACHE_TTL_S    = 86_400;
@@ -61,6 +67,17 @@ async function emitState() {
   }
 }
 
+// Debounced viewer-count broadcast. Called when sockets join/leave the
+// mainstage room — bursty during app boot, so collapse to one emit per tick.
+let _viewerEmitTimer = null;
+function notifyViewersChanged() {
+  if (_viewerEmitTimer) return;
+  _viewerEmitTimer = setTimeout(() => {
+    _viewerEmitTimer = null;
+    emitState().catch(() => {});
+  }, 500);
+}
+
 // ── State accessors ───────────────────────────────────────────────────────────
 
 /**
@@ -92,7 +109,7 @@ async function getState() {
     redis.get('mainstage:cams:volume'),
   ]);
 
-  let media = { kind: 'off', src: null, playing: false, volume: 70, startedAt: null };
+  let media = { kind: 'off', src: null, title: null, playing: false, volume: 70, startedAt: null };
   if (mediaRaw) {
     try { media = { ...media, ...JSON.parse(mediaRaw) }; } catch (_) {}
   }
@@ -110,9 +127,26 @@ async function getState() {
     },
     counts: {
       cammers: queue.length,
-      viewers: 0, // viewer count tracked per-room by LiveKit; not kept in Redis here
+      viewers: countViewers(queue.length),
     },
   };
+}
+
+/**
+ * Best-effort viewer count: every authenticated socket auto-joins the
+ * 'mainstage' Socket.IO room (see socketHandlers.js). Subtract the cammer
+ * queue size so cammers aren't double-counted as both performer and viewer.
+ * Returns 0 if io isn't wired yet (boot ordering) or the room is empty.
+ */
+function countViewers(cammerCount) {
+  if (!_io) return 0;
+  try {
+    const room = _io.sockets?.adapter?.rooms?.get('mainstage');
+    const total = room ? room.size : 0;
+    return Math.max(0, total - (cammerCount || 0));
+  } catch {
+    return 0;
+  }
 }
 
 // ── Mode ──────────────────────────────────────────────────────────────────────
@@ -128,19 +162,23 @@ async function setMode(mode) {
 // ── Media ─────────────────────────────────────────────────────────────────────
 
 /**
- * @param {{ kind?: string, src?: string, playing?: boolean, volume?: number }} opts
+ * @param {{ kind?: string, src?: string, title?: string, playing?: boolean, volume?: number }} opts
  */
-async function setMedia({ kind, src, playing, volume } = {}) {
+async function setMedia({ kind, src, title, playing, volume } = {}) {
   const redis  = getRedis();
   const rawNow = await redis.get('mainstage:media');
-  let current  = { kind: 'off', src: null, playing: false, volume: 70, startedAt: null };
+  let current  = { kind: 'off', src: null, title: null, playing: false, volume: 70, startedAt: null };
   if (rawNow) { try { current = { ...current, ...JSON.parse(rawNow) }; } catch (_) {} }
 
   if (kind !== undefined) {
     if (!VALID_MEDIA_KINDS.has(kind)) throw new Error(`Invalid media kind: ${kind}`);
     current.kind = kind;
+    // When the kind changes (or admin clears with kind='off'), reset the
+    // title so stale metadata doesn't linger from the previous pick.
+    if (title === undefined) current.title = null;
   }
   if (src    !== undefined) current.src    = src || null;
+  if (title  !== undefined) current.title  = title || null;
   if (volume !== undefined) current.volume = clampVolume(volume);
 
   if (playing !== undefined) {
@@ -318,9 +356,72 @@ async function advanceSpotlight() {
   await emitState();
 }
 
+// ── Prime Video auto-rotation ─────────────────────────────────────────────────
+
+let _primeVideoCache = { items: [], fetchedAt: 0 };
+const PRIME_CACHE_TTL_MS = 60 * 60 * 1000; // refetch Directus list hourly
+
+async function fetchFeaturedPrimeVideos() {
+  const now = Date.now();
+  if (_primeVideoCache.items.length && now - _primeVideoCache.fetchedAt < PRIME_CACHE_TTL_MS) {
+    return _primeVideoCache.items;
+  }
+  try {
+    const resp = await axios.get(`${DIRECTUS_INTERNAL_URL}/items/prime_videos`, {
+      params: {
+        filter: JSON.stringify({
+          status: { _eq: 'published' },
+          video_file: { _nnull: true },
+        }),
+        fields: 'video_file,title',
+        limit: 100,
+      },
+      timeout: 8_000,
+    });
+    const items = (resp.data?.data || [])
+      .filter(v => v?.video_file)
+      .map(v => ({ fileId: v.video_file, title: v.title || null }));
+    _primeVideoCache = { items, fetchedAt: now };
+    return items;
+  } catch (err) {
+    logger.warn('[MainStage] fetchFeaturedPrimeVideos failed', { error: err.message });
+    return _primeVideoCache.items; // stale-ok
+  }
+}
+
+/**
+ * If no admin-picked media is currently playing and there is no active
+ * cammer, pick a random featured Prime Video from Directus and broadcast it
+ * as the background. Respects admin overrides: once state.media.kind is set
+ * to 'video' or 'music' by an admin, this function is a no-op.
+ */
+async function autoRotateMedia() {
+  try {
+    const redis   = getRedis();
+    const rawMedia = await redis.get('mainstage:media');
+    let current = { kind: 'off' };
+    if (rawMedia) { try { current = { ...current, ...JSON.parse(rawMedia) }; } catch (_) {} }
+
+    // Admin has media playing — don't interrupt
+    if (current.kind !== 'off') return;
+
+    const items = await fetchFeaturedPrimeVideos();
+    if (!items.length) return;
+
+    const pick = items[Math.floor(Math.random() * items.length)];
+    const src  = `${DIRECTUS_PUBLIC_URL}/assets/${pick.fileId}`;
+
+    await setMedia({ kind: 'video', src, title: pick.title, playing: true });
+    logger.info('[MainStage] auto-rotated Prime Video', { fileId: pick.fileId, title: pick.title });
+  } catch (err) {
+    logger.error('[MainStage] autoRotateMedia error', { error: err.message });
+  }
+}
+
 // ── Distributed rotation lock ─────────────────────────────────────────────────
 
 let _rotationInterval = null;
+let _autoMediaInterval = null;
 let _lockRenewInterval = null;
 let _lockToken        = null;
 
@@ -351,8 +452,10 @@ async function startRotation() {
           // Lock was taken from us (e.g. crash + recovery); stop renewing
           clearInterval(_lockRenewInterval);
           clearInterval(_rotationInterval);
+          if (_autoMediaInterval) clearInterval(_autoMediaInterval);
           _lockRenewInterval = null;
           _rotationInterval  = null;
+          _autoMediaInterval = null;
           logger.warn('[MainStage] rotation lock lost — stopping local rotation');
           return;
         }
@@ -372,6 +475,13 @@ async function startRotation() {
         logger.error('[MainStage] rotation tick error', { error: err.message });
       }
     }, ROTATE_INTERVAL_MS);
+
+    // Prime Video auto-rotation: fire once shortly after boot so the room
+    // isn't silent on first load, then every AUTO_MEDIA_INTERVAL_MS.
+    setTimeout(() => { autoRotateMedia().catch(() => {}); }, 15_000);
+    _autoMediaInterval = setInterval(() => {
+      autoRotateMedia().catch(() => {});
+    }, AUTO_MEDIA_INTERVAL_MS);
   }
 
   await tryAcquire().catch(err =>
@@ -382,6 +492,7 @@ async function startRotation() {
 async function stopRotation() {
   if (_lockRenewInterval) { clearInterval(_lockRenewInterval); _lockRenewInterval = null; }
   if (_rotationInterval)  { clearInterval(_rotationInterval);  _rotationInterval  = null; }
+  if (_autoMediaInterval) { clearInterval(_autoMediaInterval); _autoMediaInterval = null; }
 
   if (_lockToken) {
     try {
@@ -471,4 +582,6 @@ module.exports = {
   startRotation,
   stopRotation,
   logAdminAction,
+  notifyViewersChanged,
+  autoRotateMedia,
 };

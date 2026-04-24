@@ -131,7 +131,7 @@ export function useMainStage(): UseMainStageReturn {
     return () => { cancelled = true; };
   }, [isAuthenticated]);
 
-  // Subscribe to socket state updates
+  // Subscribe to socket state updates + surface server errors.
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -142,24 +142,51 @@ export function useMainStage(): UseMainStageReturn {
       if (mountedRef.current) setState(payload);
     }
 
+    function onError(payload: { code?: string; message?: string }) {
+      if (!mountedRef.current) return;
+      const msg =
+        payload?.message ||
+        (payload?.code === "CAMMER_CAP_REACHED"
+          ? "Cammer slots are full right now. Try again in a moment."
+          : "Main Stage error");
+      setError(msg);
+    }
+
     socket.on("mainstage:state", onState);
+    socket.on("mainstage:error", onError);
 
     return () => {
       socket.off("mainstage:state", onState);
+      socket.off("mainstage:error", onError);
     };
   }, [isAuthenticated]);
 
   const joinAsCammer = useCallback(async () => {
     try {
       setError(null);
+      // REST mint is the source of truth: the controller atomically reserves
+      // a slot via addCammer's Lua script and returns 429 if the cap is full.
+      // Commit to the cammer role immediately so the UI flips and LiveKit
+      // auto-publishes cam+mic on the next render.
       const res = await getMainStageToken({ asCammer: true });
-      if (mountedRef.current) {
-        setToken(res.token);
-        setLivekitUrl(res.livekitUrl);
-        setRoomName(res.roomName);
-        setRole(res.role);
-        tokenAsCammerRef.current = true;
-        scheduleTokenRefresh();
+      if (!mountedRef.current) return;
+
+      setToken(res.token);
+      setLivekitUrl(res.livekitUrl);
+      setRoomName(res.roomName);
+      setRole(res.role);
+      tokenAsCammerRef.current = true;
+      scheduleTokenRefresh();
+
+      // Best-effort socket notification so the server can broadcast updated
+      // queue state to everyone else. Fire-and-forget: the REST call already
+      // reserved the slot, so we don't need the ack.
+      try {
+        const socket = getSocket();
+        if (!socket.connected) socket.connect();
+        socket.emit("mainstage:join-cammer");
+      } catch {
+        // non-fatal — state still converges on the next state broadcast
       }
     } catch (err) {
       if (mountedRef.current) {
@@ -169,6 +196,15 @@ export function useMainStage(): UseMainStageReturn {
   }, [scheduleTokenRefresh]);
 
   const leaveCammer = useCallback(async () => {
+    // Tell the server to remove us from the spotlight queue BEFORE re-minting
+    // the viewer token, otherwise our identity lingers in state.spotlight.queue.
+    try {
+      const socket = getSocket();
+      if (socket.connected) socket.emit("mainstage:leave-cammer");
+    } catch {
+      // non-fatal — server prunes stale queue entries on disconnect
+    }
+
     // Re-mint as viewer to demote from cammer role
     try {
       setError(null);

@@ -82,6 +82,15 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
                 ? error.message
                 : friendlyHttpError(res.status, `API error ${res.status}`);
         const errorCode = typeof error.code === "string" ? error.code : undefined;
+        // Colombia gate: redirect to /subscribe so the user can purchase PNP Col.
+        // Skip when already on /subscribe to avoid a redirect loop.
+        if (
+          errorCode === "PNP_COL_REQUIRED" &&
+          typeof window !== "undefined" &&
+          !window.location.pathname.startsWith("/subscribe")
+        ) {
+          window.location.replace("/subscribe?plan=pnp_col");
+        }
         // Extract structured access details for scoped-resource 403 responses so
         // callers can render the right in-context purchase modal instead of
         // bouncing to /subscribe.
@@ -306,17 +315,6 @@ export function importSoundCloud(metadata: any, label?: string): Promise<{
     body: { ...metadata, label },
   });
 }
-
-export function requestSoundCloud(url: string): Promise<{
-  success: boolean;
-  requestId: number;
-}> {
-  return request("/api/webapp/radio/request-soundcloud", {
-    method: "POST",
-    body: { url },
-  });
-}
-
 
 export function getSoundCloudArtistTracks(artistUrl: string): Promise<{
   success: boolean;
@@ -727,14 +725,6 @@ export function getRtmpKey(): Promise<{
   return request("/api/webapp/live/rtmp-key");
 }
 
-export function getMyChannel(): Promise<{
-  success: boolean;
-  channel: { ref: string; streamKey: string; rtmpUrl: string } | null;
-}> {
-  return request("/api/webapp/live/my-channel");
-}
-
-
 export function provisionChannel(): Promise<{
   success: boolean;
   alreadyProvisioned?: boolean;
@@ -890,21 +880,6 @@ export function sharePostToX(postId: number): Promise<{
   return request(`/api/webapp/social/posts/${postId}/share-x`, { method: "POST" });
 }
 
-export function reactToPost(
-  postId: number,
-  emoji: string
-): Promise<{
-  success: boolean;
-  added: boolean;
-  reactions: Array<{ emoji: string; count: number; reacted_by_me?: boolean; users?: Array<{ id: string; username: string }> }>;
-}> {
-  return request(`/api/webapp/social/posts/${postId}/react`, {
-    method: "POST",
-    body: { emoji },
-  });
-}
-
-
 export function sharePostToHangouts(
   postId: number,
   groupIds: number[],
@@ -967,32 +942,6 @@ export function updatePrivacy(settings: {
 export function updateLanguage(lang: string): Promise<{ success: boolean }> {
   return updateProfile({ language: lang });
 }
-
-// Email Authentication
-export interface EmailRegisterPayload {
-  email: string;
-  password: string;
-  firstName: string;
-  lastName?: string;
-}
-
-export interface EmailRegisterResponse {
-  authenticated: boolean;
-  requiresVerification?: boolean;
-  message?: string;
-  user?: {
-    id: string;
-    email: string;
-  };
-  error?: string;
-}
-
-export function emailRegister(
-  payload: EmailRegisterPayload
-): Promise<EmailRegisterResponse> {
-  return request("/api/webapp/auth/email/register", { method: "POST", body: payload });
-}
-
 
 export function resendVerificationEmail(email: string): Promise<{ success: boolean; message: string }> {
   return request("/api/webapp/auth/resend-verification", { method: "POST", body: { email } });
@@ -5890,23 +5839,6 @@ export function reviewCastingApplication(applicationId: string, decision: "appro
   return request("/api/casting/review", { method: "POST", body: { applicationId, decision, notes } });
 }
 
-// ── Telegram Group Linking & Video Chat ───────────────────────────────────────
-
-export function linkTelegramGroup(
-  groupId: number,
-  telegramChatId: string,
-  telegramInviteLink?: string
-): Promise<{ success: boolean }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/link-telegram`, {
-    method: "POST",
-    body: { telegramChatId, telegramInviteLink },
-  });
-}
-
-export function getVideoChatStatus(groupId: number): Promise<{ active: boolean; inviteLink: string | null }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/video-chat-status`);
-}
-
 export function startHangoutCall(groupId: number): Promise<{ token: string; livekitUrl: string; roomName: string }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/call/start`, { method: "POST" });
 }
@@ -5915,26 +5847,10 @@ export function joinHangoutCall(groupId: number): Promise<{ token: string; livek
   return request(`/api/webapp/hangouts/groups/${groupId}/call/join`, { method: "POST" });
 }
 
-export function endHangoutCall(groupId: number): Promise<void> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/call/end`, { method: "POST" });
-}
-
 export function leaveHangoutCall(groupId: number | string): Promise<{ ok: boolean; participantCount: number }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/call/leave`, { method: "POST" });
 }
 
-
-
-// ── Radio / Now Playing ──────────────────────────────────────────────────────
-
-export interface NowPlaying {
-  track: { title: string; artist: string; thumbnailUrl?: string; duration?: number; startedAt?: string } | null;
-  listenerCount: number;
-}
-
-export function getRadioNowPlaying(): Promise<NowPlaying> {
-  return request("/api/radio/now-playing");
-}
 
 
 // ── Online Users ──────────────────────────────────────────────────────────────
@@ -6201,6 +6117,7 @@ export interface MainStageState {
   media: {
     kind: "video" | "music" | "off";
     src: string | null;
+    title: string | null;
     playing: boolean;
     volume: number;
     startedAt: number | null;

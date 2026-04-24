@@ -135,15 +135,12 @@ const token = asyncHandler(async (req, res) => {
 
   const displayName = userRow.first_name || userRow.username || `user_${userId}`;
 
-  // Determine role
+  // Determine role. Any authenticated user may request a cammer grant; the
+  // MAX_CAMMERS cap is still enforced atomically by addCammer's Lua script.
   let role = 'viewer';
   if (isAdminRole(userRow.role)) {
     role = 'admin';
   } else if (asCammer) {
-    // Reserve a slot atomically BEFORE issuing the token.
-    // Prevents a TOCTOU race where N concurrent requests all pass a stale cap
-    // check and each get a cammer token. addCammer's Lua script enforces the
-    // cap in a single Redis round-trip.
     const addResult = await mainStageService.addCammer(String(userId));
     if (addResult === 'full') {
       return res.status(429).json({

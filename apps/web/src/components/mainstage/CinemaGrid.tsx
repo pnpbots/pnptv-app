@@ -78,7 +78,9 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
   useEffect(() => {
     const el: HTMLMediaElement | null = kind === "music" ? audioRef.current : videoRef.current;
     if (!el) return;
-    el.volume = Math.max(0, Math.min(1, volume));
+    // Backend stores volume on a 0-100 scale; HTMLMediaElement expects 0-1.
+    const normalized = volume > 1 ? volume / 100 : volume;
+    el.volume = Math.max(0, Math.min(1, normalized));
     el.muted = muted;
     if (!canPlay) return;
     if (playing) {
@@ -266,12 +268,6 @@ export function CinemaGrid({
               />
             </div>
           ))}
-        </div>
-      )}
-
-      {tracks.length === 0 && !showStandby && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-          <p className="text-white/30 text-sm">Waiting for performers</p>
         </div>
       )}
     </div>

@@ -511,7 +511,45 @@ export default function MainStage() {
     );
   }
 
-  if (!token || !state) return null;
+  if (!token || !state) {
+    return (
+      <div
+        className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center"
+        style={{ background: "#0A0A0F" }}
+      >
+        <div
+          className="w-16 h-16 rounded-2xl flex items-center justify-center"
+          style={{ background: "rgba(123,97,255,0.12)", border: "1px solid rgba(123,97,255,0.25)" }}
+        >
+          <svg className="w-8 h-8" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          </svg>
+        </div>
+        <div>
+          <p className="text-white font-semibold text-sm mb-1">Main Stage unavailable</p>
+          <p className="text-white/50 text-xs">No state received from the server. Try reloading.</p>
+        </div>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white transition-all active:scale-[0.97]"
+            style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+          >
+            Reload
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white/60 transition-all active:scale-[0.97]"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
+          >
+            Go back
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const mode = state.mode;
   const liveCammers = state?.counts?.cammers ?? 0;
@@ -604,7 +642,7 @@ export default function MainStage() {
           mediaKind={state?.media?.kind || "off"}
           mediaSrc={state?.media?.src}
           mediaPlaying={state?.media?.playing ?? true}
-          mediaVolume={state?.media?.volume ?? 0.8}
+          mediaVolume={state?.media?.volume ?? 70}
           canBeCammer={canBeCammer}
           isAdmin={isAdmin}
           counts={state?.counts || { cammers: 0, viewers: 0 }}
@@ -621,6 +659,10 @@ export default function MainStage() {
       </LiveKitRoom>
 
       <ConnectionOverlay connState={connState} />
+
+      {state?.media?.kind === "video" && state.media.title && !adminOpen && (
+        <NowPlayingChip title={state.media.title} />
+      )}
 
       {!adminOpen && <WellnessTipsOverlay />}
 
@@ -1014,7 +1056,37 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
   );
 }
 
-const TIP_INTERVAL_MS = 30 * 60 * 1000;
+function NowPlayingChip({ title }: { title: string }) {
+  return (
+    <div
+      className="pointer-events-none fixed z-30 flex items-center gap-2 px-3 py-1.5 rounded-full"
+      style={{
+        top: "calc(64px + env(safe-area-inset-top, 0px))",
+        right: "1rem",
+        maxWidth: "calc(100vw - 2rem)",
+        background: "rgba(10,10,15,0.72)",
+        border: "1px solid rgba(212,0,122,0.28)",
+        backdropFilter: "blur(12px)",
+      }}
+      role="status"
+      aria-live="polite"
+      aria-label={`Now playing: ${title}`}
+    >
+      <span
+        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+        style={{ background: "#D4007A", boxShadow: "0 0 8px rgba(212,0,122,0.7)" }}
+        aria-hidden
+      />
+      <span className="text-white/45 text-[10px] font-bold uppercase tracking-wider flex-shrink-0">
+        Now playing
+      </span>
+      <span className="text-white text-xs font-medium truncate">{title}</span>
+    </div>
+  );
+}
+
+const TIP_FIRST_DELAY_MS = 10 * 1000;
+const TIP_INTERVAL_MS = 5 * 60 * 1000;
 const TIP_VISIBLE_MS = 15 * 1000;
 
 type TipItem = { title: string; body: string };
@@ -1045,8 +1117,12 @@ function WellnessTipsOverlay() {
       dismissTimerRef.current = setTimeout(() => setVisible(false), TIP_VISIBLE_MS);
     };
 
+    // Show the first tip shortly after entry so users actually see one in a
+    // typical session, then settle into the longer recurring cadence.
+    const firstTimer = setTimeout(showNext, TIP_FIRST_DELAY_MS);
     const intervalId = setInterval(showNext, TIP_INTERVAL_MS);
     return () => {
+      clearTimeout(firstTimer);
       clearInterval(intervalId);
       if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
     };
