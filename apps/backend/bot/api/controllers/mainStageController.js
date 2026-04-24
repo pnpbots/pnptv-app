@@ -328,6 +328,17 @@ const moderate = asyncHandler(async (req, res) => {
   return res.json({ success: true, action, identity });
 });
 
+/**
+ * POST /api/main-stage/shuffle
+ * Auth required. Open to all authenticated users — same ethic as mode cycle.
+ * Reshuffles the cammer queue and advances spotlight. Rate-limited.
+ */
+const shuffle = asyncHandler(async (req, res) => {
+  await mainStageService.shuffleCammers();
+  await mainStageService.logAdminAction(req.user.id, 'shuffle_cammers');
+  return res.json({ success: true });
+});
+
 module.exports = {
   token,
   getState,
@@ -336,4 +347,5 @@ module.exports = {
   setVolume,
   setSpotlight,
   moderate,
+  shuffle,
 };

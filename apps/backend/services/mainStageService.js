@@ -272,6 +272,42 @@ async function addCammer(identity) {
   return 'added';
 }
 
+/**
+ * Randomize the cammer queue order in-place and advance the spotlight to the
+ * new head of the queue. Used by the client "shuffle" button to let any user
+ * shake up the layout when the room gets stale. Idempotent on empty queues.
+ */
+async function shuffleCammers() {
+  const redis    = getRedis();
+  const queueKey = 'mainstage:spotlight:queue';
+  const items = await redis.lrange(queueKey, 0, -1);
+  if (items.length < 2) {
+    // Nothing meaningful to shuffle — still advance spotlight for visual effect
+    if (items.length === 1) await advanceSpotlight();
+    return;
+  }
+
+  // Fisher-Yates in JS; then atomic replace via pipeline
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  const pipe = redis.pipeline();
+  pipe.del(queueKey);
+  pipe.rpush(queueKey, ...items);
+  pipe.expire(queueKey, STATE_CACHE_TTL_S);
+  await pipe.exec();
+
+  // Promote the new head to spotlight so the visual change is immediate even
+  // in modes that don't re-sort tracks by queue.
+  await redis.set('mainstage:spotlight:cammer', String(items[0]), 'EX', STATE_CACHE_TTL_S);
+  const nextAt = Date.now() + ROTATE_INTERVAL_MS;
+  await redis.set('mainstage:spotlight:nextAt', String(nextAt), 'EX', STATE_CACHE_TTL_S);
+
+  logger.info('[MainStage] cammers shuffled', { count: items.length, spotlight: items[0] });
+  await emitState();
+}
+
 async function removeCammer(identity) {
   if (!identity) return;
   const redis    = getRedis();
@@ -587,6 +623,7 @@ module.exports = {
   setCamsVolume,
   addCammer,
   removeCammer,
+  shuffleCammers,
   setSpotlight,
   advanceSpotlight,
   startRotation,

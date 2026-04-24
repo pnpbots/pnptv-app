@@ -6108,7 +6108,7 @@ export function updateRecording(
 // ============================================================================
 
 export interface MainStageState {
-  mode: "spotlight" | "cinema" | "equal";
+  mode: "spotlight" | "cinema" | "equal" | "theater" | "karaoke";
   spotlight: {
     cammer: string | null;
     nextAt: number | null;
@@ -6177,6 +6177,10 @@ export function moderateMainStage(
   identity: string
 ): Promise<{ success: boolean }> {
   return request("/api/main-stage/moderate", { method: "POST", body: { action, identity } });
+}
+
+export function shuffleMainStageCammers(): Promise<{ success: boolean }> {
+  return request("/api/main-stage/shuffle", { method: "POST" });
 }
 
 // ── Cash-out / USDT off-ramp ──────────────────────────────────────────────────

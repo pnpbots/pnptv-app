@@ -13,6 +13,9 @@ interface CinemaGridProps {
   mediaSrc: string | null;
   mediaPlaying?: boolean;
   mediaVolume?: number;
+  /** Karaoke mode hides the bottom cammer strip — the spotlighted cammer
+   *  is rendered as a floating corner tile by the caller instead. */
+  hideCammerStrip?: boolean;
 }
 
 interface UrlMediaPlayerProps {
@@ -198,6 +201,7 @@ export function CinemaGrid({
   mediaSrc,
   mediaPlaying = true,
   mediaVolume = 0.8,
+  hideCammerStrip = false,
 }: CinemaGridProps) {
   const tracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: true }],
@@ -247,7 +251,7 @@ export function CinemaGrid({
         ) : null}
       </div>
 
-      {cammerTracks.length > 0 && (
+      {!hideCammerStrip && cammerTracks.length > 0 && (
         <div
           className="flex-shrink-0 flex gap-1.5 overflow-x-auto"
           style={{

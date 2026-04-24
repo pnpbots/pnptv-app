@@ -7,6 +7,7 @@ import {
   setMainStageVolume,
   setMainStageSpotlight,
   moderateMainStage,
+  shuffleMainStageCammers,
   type MainStageState,
   type MainStageTokenResponse,
 } from "@/lib/api";
@@ -27,6 +28,7 @@ interface UseMainStageReturn {
   error: string | null;
   joinAsCammer: () => Promise<void>;
   leaveCammer: () => void;
+  shuffle: () => Promise<void>;
   admin: {
     setMode: (mode: MainStageState["mode"]) => Promise<void>;
     setMedia: (payload: {
@@ -245,6 +247,14 @@ export function useMainStage(): UseMainStageReturn {
     await moderateMainStage(action, identity);
   }, []);
 
+  const shuffle = useCallback(async () => {
+    try {
+      await shuffleMainStageCammers();
+    } catch {
+      // state will recover on next socket tick
+    }
+  }, []);
+
   // Any authenticated user can request a cammer token; the backend enforces caps
   // and returns the effective role in the minted token.
   const canBeCammer = isAuthenticated;
@@ -261,6 +271,7 @@ export function useMainStage(): UseMainStageReturn {
     error,
     joinAsCammer,
     leaveCammer,
+    shuffle,
     admin: {
       setMode: adminSetMode,
       setMedia: adminSetMedia,

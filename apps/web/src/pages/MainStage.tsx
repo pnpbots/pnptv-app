@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   LiveKitRoom,
+  ParticipantTile,
   useLocalParticipant,
   useRoomContext,
   useTracks,
 } from "@livekit/components-react";
 import { ConnectionState, RoomEvent, Track } from "livekit-client";
 import { useMainStage } from "@/hooks/useMainStage";
+import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { SpotlightGrid } from "@/components/mainstage/SpotlightGrid";
 import { CinemaGrid } from "@/components/mainstage/CinemaGrid";
 import { EqualGrid } from "@/components/mainstage/EqualGrid";
@@ -34,23 +36,38 @@ function ParticipantCollector({ onCammersChange }: { onCammersChange: (cammers: 
   return null;
 }
 
-const MODE_LABELS: Record<string, string> = {
+type ModeId = "spotlight" | "theater" | "cinema" | "karaoke" | "equal";
+
+const MODE_LABELS: Record<ModeId, string> = {
   spotlight: "Spotlight",
+  theater: "Theater",
   cinema: "Cinema",
+  karaoke: "Karaoke",
   equal: "Everyone",
 };
 
-const MODE_ICONS: Record<string, JSX.Element> = {
+const MODE_ICONS: Record<ModeId, JSX.Element> = {
   spotlight: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <circle cx="12" cy="10" r="4" />
       <path strokeLinecap="round" d="M12 14v5M8 19h8" />
     </svg>
   ),
+  theater: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 5v14M20 5v14M4 7c2 0 4 2 4 4s-2 4-4 4M20 7c-2 0-4 2-4 4s2 4 4 4M9 12h6" />
+    </svg>
+  ),
   cinema: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <path strokeLinecap="round" d="M8 10l4 2.5L8 15z" fill="currentColor" />
+    </svg>
+  ),
+  karaoke: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <rect x="3" y="5" width="18" height="12" rx="1.5" />
+      <circle cx="17" cy="15" r="3" fill="currentColor" />
     </svg>
   ),
   equal: (
@@ -63,9 +80,11 @@ const MODE_ICONS: Record<string, JSX.Element> = {
   ),
 };
 
-const NEXT_MODE: Record<"spotlight" | "cinema" | "equal", "spotlight" | "cinema" | "equal"> = {
-  spotlight: "cinema",
-  cinema: "equal",
+const NEXT_MODE: Record<ModeId, ModeId> = {
+  spotlight: "theater",
+  theater: "cinema",
+  cinema: "karaoke",
+  karaoke: "equal",
   equal: "spotlight",
 };
 
@@ -74,12 +93,14 @@ interface BottomBarProps {
   isCammer: boolean;
   isAdmin: boolean;
   counts: { cammers: number; viewers: number };
-  mode: "spotlight" | "cinema" | "equal";
+  mode: ModeId;
   onJoinCam: () => void;
   onLeaveCam: () => void;
   onOpenAdmin: () => void;
   onLeave: () => void;
   onCycleMode: () => void;
+  onShuffle: () => void;
+  fullscreenTargetRef: React.RefObject<HTMLElement>;
 }
 
 function BottomBarInner({
@@ -93,6 +114,8 @@ function BottomBarInner({
   onOpenAdmin,
   onLeave,
   onCycleMode,
+  onShuffle,
+  fullscreenTargetRef,
 }: BottomBarProps) {
   const { localParticipant, isCameraEnabled, isMicrophoneEnabled } = useLocalParticipant();
 
@@ -106,7 +129,7 @@ function BottomBarInner({
 
   return (
     <div
-      className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-3"
+      className="flex-shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-3"
       style={{
         background: "rgba(10,10,15,0.9)",
         backdropFilter: "blur(16px)",
@@ -131,34 +154,51 @@ function BottomBarInner({
           </svg>
           <span className="hidden sm:inline">Leave</span>
         </button>
-        <FullscreenToggle />
+        <FullscreenToggle targetRef={fullscreenTargetRef} />
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)" }}>
           <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" aria-hidden />
           <span className="text-white text-xs font-semibold tabular-nums">{counts.cammers}</span>
-          <span className="text-white/40 text-xs">cam</span>
+          <span className="hidden sm:inline text-white/40 text-xs">cam</span>
           <span className="text-white/20 text-xs mx-0.5">·</span>
           <span className="text-white text-xs font-semibold tabular-nums">{counts.viewers}</span>
-          <span className="text-white/40 text-xs">watching</span>
+          <span className="hidden sm:inline text-white/40 text-xs">watching</span>
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={onCycleMode}
-        aria-label={`Switch view mode — current: ${MODE_LABELS[mode]}. Next: ${MODE_LABELS[NEXT_MODE[mode]]}`}
-        title={`Switch to ${MODE_LABELS[NEXT_MODE[mode]]}`}
-        className="min-h-[44px] flex items-center gap-1.5 px-3 rounded-full text-xs font-semibold text-white transition-all active:scale-[0.96]"
-        style={{
-          background: "linear-gradient(135deg, rgba(212,0,122,0.20), rgba(123,97,255,0.18))",
-          border: "1px solid rgba(212,0,122,0.35)",
-        }}
-      >
-        <span style={{ color: "#FF4FB0" }}>{MODE_ICONS[mode]}</span>
-        <span className="hidden sm:inline">{MODE_LABELS[mode]}</span>
-        <svg className="w-3 h-3 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-        </svg>
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onCycleMode}
+          aria-label={`Switch view mode — current: ${MODE_LABELS[mode]}. Next: ${MODE_LABELS[NEXT_MODE[mode]]}`}
+          title={`Switch to ${MODE_LABELS[NEXT_MODE[mode]]}`}
+          className="min-h-[44px] flex items-center gap-1.5 px-3 rounded-full text-xs font-semibold text-white transition-all active:scale-[0.96]"
+          style={{
+            background: "linear-gradient(135deg, rgba(212,0,122,0.20), rgba(123,97,255,0.18))",
+            border: "1px solid rgba(212,0,122,0.35)",
+          }}
+        >
+          <span style={{ color: "#FF4FB0" }}>{MODE_ICONS[mode]}</span>
+          <span className="hidden sm:inline">{MODE_LABELS[mode]}</span>
+          <svg className="w-3 h-3 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={onShuffle}
+          aria-label="Shuffle cammers"
+          title="Shuffle cammers"
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.94]"
+          style={{
+            background: "rgba(229,255,0,0.08)",
+            border: "1px solid rgba(229,255,0,0.25)",
+          }}
+        >
+          <svg className="w-4 h-4" style={{ color: "#E5FF00" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 4.5l3 3m0 0l-3 3m3-3H12M7.5 19.5l-3-3m0 0l3-3m-3 3H12M4.5 5.25L12 12.75M19.5 18.75L15 14.25" />
+          </svg>
+        </button>
+      </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
         {isCammer && (
@@ -303,7 +343,7 @@ function RoomListener({ onConnectionStateChange }: RoomListenerProps) {
 }
 
 interface MainStageInnerProps {
-  mode: "spotlight" | "cinema" | "equal";
+  mode: ModeId;
   spotlightCammer: string | null;
   spotlightNextAt: number | null;
   mediaKind: "video" | "music" | "off";
@@ -322,6 +362,8 @@ interface MainStageInnerProps {
   onCammersChange: (cammers: CammerInfo[]) => void;
   onLeave: () => void;
   onCycleMode: () => void;
+  onShuffle: () => void;
+  fullscreenTargetRef: React.RefObject<HTMLElement>;
 }
 
 function MainStageInner({
@@ -344,6 +386,8 @@ function MainStageInner({
   onCammersChange,
   onLeave,
   onCycleMode,
+  onShuffle,
+  fullscreenTargetRef,
 }: MainStageInnerProps) {
   return (
     <>
@@ -367,6 +411,31 @@ function MainStageInner({
             mediaVolume={mediaVolume}
           />
         )}
+        {mode === "theater" && (
+          <div className="relative h-full w-full">
+            <CinemaGrid
+              mediaIdentity={MEDIA_IDENTITY}
+              mediaKind={mediaKind}
+              mediaSrc={mediaSrc}
+              mediaPlaying={mediaPlaying}
+              mediaVolume={mediaVolume}
+            />
+            <TheaterCurtains />
+          </div>
+        )}
+        {mode === "karaoke" && (
+          <>
+            <CinemaGrid
+              mediaIdentity={MEDIA_IDENTITY}
+              mediaKind={mediaKind}
+              mediaSrc={mediaSrc}
+              mediaPlaying={mediaPlaying}
+              mediaVolume={mediaVolume}
+              hideCammerStrip
+            />
+            <KaraokeCammerOverlay spotlightIdentity={spotlightCammer} />
+          </>
+        )}
         {mode === "equal" && <EqualGrid />}
       </div>
 
@@ -381,6 +450,8 @@ function MainStageInner({
         onOpenAdmin={onOpenAdmin}
         onLeave={onLeave}
         onCycleMode={onCycleMode}
+        onShuffle={onShuffle}
+        fullscreenTargetRef={fullscreenTargetRef}
       />
     </>
   );
@@ -399,6 +470,7 @@ export default function MainStage() {
     error,
     joinAsCammer,
     leaveCammer,
+    shuffle,
     admin,
   } = useMainStage();
 
@@ -406,10 +478,27 @@ export default function MainStage() {
   const [connState, setConnState] = useState<ConnectionState>(ConnectionState.Connecting);
   const [cammerInfos, setCammerInfos] = useState<CammerInfo[]>([]);
   const isCammer = role === "cammer" || role === "admin";
+  // Ref to the MainStage root container, used by FullscreenToggle so we
+  // fullscreen just the stage (not the whole document, which fails on iOS).
+  const stageRootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setConnState(ConnectionState.Connecting);
   }, [token]);
+
+  // Auto-start Cristina's radio when entering Main Stage so the room has
+  // music over the silent video. Skips if the user already has something
+  // playing. The music lives in a top-level MusicPlayerProvider so it keeps
+  // going when the user navigates away; user can pause from the widget.
+  const { play: playMusic, isPlaying: musicIsPlaying, tracks: musicTracks } = useMusicPlayer();
+  useEffect(() => {
+    if (musicIsPlaying) return;
+    if (!musicTracks || musicTracks.length === 0) return; // provider still loading
+    playMusic();
+    // Intentionally only run on mount + when tracks first arrive — don't
+    // restart music every time isPlaying flips false (e.g. user paused).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [musicTracks.length > 0]);
 
   const handleJoinCam = useCallback(async () => {
     await joinAsCammer();
@@ -429,10 +518,14 @@ export default function MainStage() {
 
   const handleCycleMode = useCallback(() => {
     if (!state) return;
-    const next: "spotlight" | "cinema" | "equal" =
-      state.mode === "spotlight" ? "cinema" : state.mode === "cinema" ? "equal" : "spotlight";
+    const current: ModeId = (state.mode as ModeId) ?? "spotlight";
+    const next: ModeId = NEXT_MODE[current] ?? "spotlight";
     admin.setMode(next).catch(() => { /* broadcast recovers on next socket tick */ });
   }, [admin, state]);
+
+  const handleShuffle = useCallback(() => {
+    shuffle();
+  }, [shuffle]);
 
   if (loading) {
     return (
@@ -555,6 +648,7 @@ export default function MainStage() {
 
   return (
     <div
+      ref={stageRootRef}
       className="fixed inset-0 flex flex-col"
       style={{ background: "#0A0A0F" }}
     >
@@ -635,7 +729,7 @@ export default function MainStage() {
         style={{ display: "contents" }}
       >
         <MainStageInner
-          mode={mode}
+          mode={mode as ModeId}
           spotlightCammer={state?.spotlight?.cammer}
           spotlightNextAt={state?.spotlight?.nextAt}
           mediaKind={state?.media?.kind || "off"}
@@ -654,6 +748,8 @@ export default function MainStage() {
           onCammersChange={handleCammersChange}
           onLeave={handleLeave}
           onCycleMode={handleCycleMode}
+          onShuffle={handleShuffle}
+          fullscreenTargetRef={stageRootRef}
         />
       </LiveKitRoom>
 
@@ -1055,30 +1151,54 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
   );
 }
 
-function FullscreenToggle() {
+interface FullscreenToggleProps {
+  targetRef: React.RefObject<HTMLElement>;
+}
+
+function FullscreenToggle({ targetRef }: FullscreenToggleProps) {
   const [isFs, setIsFs] = useState(
-    typeof document !== "undefined" && !!document.fullscreenElement
+    typeof document !== "undefined" &&
+      !!(document.fullscreenElement ||
+        // iOS Safari webkit variant
+        (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement)
   );
 
   useEffect(() => {
-    const onChange = () => setIsFs(!!document.fullscreenElement);
+    const onChange = () =>
+      setIsFs(
+        !!document.fullscreenElement ||
+          !!(document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement
+      );
     document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
+    document.addEventListener("webkitfullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("webkitfullscreenchange", onChange);
+    };
   }, []);
 
   const handleClick = useCallback(async () => {
+    const doc = document as Document & {
+      webkitExitFullscreen?: () => Promise<void> | void;
+      webkitFullscreenElement?: Element;
+    };
     try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
+      if (doc.fullscreenElement || doc.webkitFullscreenElement) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen();
       } else {
-        // Fullscreen the page root so all stage UI stays visible
-        const target = document.documentElement;
-        await target.requestFullscreen();
+        // Target the Main Stage container specifically so the rest of the
+        // document (and any route listeners) aren't involved.
+        const el = (targetRef.current || document.documentElement) as HTMLElement & {
+          webkitRequestFullscreen?: () => Promise<void> | void;
+        };
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
       }
     } catch {
-      // Some browsers reject if not triggered by user gesture chain — silent
+      // Some browsers (iOS Safari on non-video elements) reject — silent
     }
-  }, []);
+  }, [targetRef]);
 
   return (
     <button
@@ -1102,6 +1222,81 @@ function FullscreenToggle() {
         </svg>
       )}
     </button>
+  );
+}
+
+/** Red velvet curtains flanking the Prime Video for Theater mode. */
+function TheaterCurtains() {
+  return (
+    <>
+      {/* Left curtain */}
+      <div
+        className="absolute left-0 top-0 bottom-0 pointer-events-none z-10"
+        aria-hidden
+        style={{
+          width: "9%",
+          background:
+            "linear-gradient(90deg, rgba(30,5,10,0.98) 0%, rgba(150,15,35,0.65) 65%, rgba(180,30,55,0) 100%), " +
+            "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 2px, transparent 2px 14px)",
+        }}
+      />
+      {/* Right curtain */}
+      <div
+        className="absolute right-0 top-0 bottom-0 pointer-events-none z-10"
+        aria-hidden
+        style={{
+          width: "9%",
+          background:
+            "linear-gradient(270deg, rgba(30,5,10,0.98) 0%, rgba(150,15,35,0.65) 65%, rgba(180,30,55,0) 100%), " +
+            "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 2px, transparent 2px 14px)",
+        }}
+      />
+      {/* Top valance — a short burgundy band hanging from the top edge */}
+      <div
+        className="absolute inset-x-0 top-0 h-4 pointer-events-none z-10"
+        aria-hidden
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(90,10,20,0.95) 0%, rgba(180,30,55,0.25) 100%)",
+          borderBottom: "1px solid rgba(255,180,80,0.25)",
+        }}
+      />
+    </>
+  );
+}
+
+/** Small circular cammer tile in the bottom-right for Karaoke mode. */
+function KaraokeCammerOverlay({ spotlightIdentity }: { spotlightIdentity: string | null | undefined }) {
+  const tracks = useTracks(
+    [{ source: Track.Source.Camera, withPlaceholder: true }],
+    { onlySubscribed: false }
+  );
+  const pick = tracks.find(
+    (t) =>
+      t.participant.identity !== MEDIA_IDENTITY &&
+      (spotlightIdentity ? t.participant.identity === spotlightIdentity : true)
+  );
+
+  if (!pick) return null;
+
+  return (
+    <div
+      className="absolute z-20 rounded-full overflow-hidden shadow-2xl"
+      style={{
+        width: 140,
+        height: 140,
+        bottom: "calc(96px + env(safe-area-inset-bottom, 0px))",
+        right: "1rem",
+        border: "3px solid rgba(212,0,122,0.55)",
+        boxShadow: "0 12px 32px rgba(0,0,0,0.55), 0 0 24px rgba(212,0,122,0.35)",
+      }}
+    >
+      <ParticipantTile
+        trackRef={pick}
+        disableSpeakingIndicator
+        style={{ width: "100%", height: "100%" }}
+      />
+    </div>
   );
 }
 
