@@ -530,9 +530,15 @@ function AuditLogEntry({ entry }: AuditEntryProps) {
 
 interface UserEntitlementsSectionProps {
   userId: string;
+  /**
+   * Notify the parent that the user's entitlements changed (grant/revoke/extend).
+   * Parent uses this to refetch the user record so the header tier badge stays
+   * in sync with what was just granted.
+   */
+  onChanged?: () => void;
 }
 
-export function UserEntitlementsSection({ userId }: UserEntitlementsSectionProps) {
+export function UserEntitlementsSection({ userId, onChanged }: UserEntitlementsSectionProps) {
   const [entitlements, setEntitlements] = useState<AdminEntitlement[]>([]);
   const [auditLog, setAuditLog] = useState<EntitlementAuditEntry[]>([]);
   const [availableAddOns, setAvailableAddOns] = useState<AddOn[]>([]);
@@ -576,6 +582,7 @@ export function UserEntitlementsSection({ userId }: UserEntitlementsSectionProps
       await revokeAdminUserEntitlement(userId, revokeTarget.add_on_id);
       setRevokeTarget(null);
       await loadData();
+      onChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to revoke entitlement.");
       setRevokeTarget(null);
@@ -587,10 +594,12 @@ export function UserEntitlementsSection({ userId }: UserEntitlementsSectionProps
   const handleExtendDone = async () => {
     setExtendingAddOnId(null);
     await loadData();
+    onChanged?.();
   };
 
   const handleGranted = () => {
     loadData();
+    onChanged?.();
   };
 
   // --- Loading skeleton ---

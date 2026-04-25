@@ -189,6 +189,78 @@ class EntitlementAccessService {
   }
 
   /**
+   * Recompute users.tier from active entitlements and persist it.
+   * Single source of truth for the badge that appears next to a user's name
+   * (PRIME / BASIC / FREE). Call this after every grant, revoke, or expiry.
+   *
+   * Rules:
+   *   active 'prime' entitlement      → tier = 'PRIME'
+   *   active 'pnp-member' only        → tier = 'member'
+   *   neither                          → tier = 'free'
+   *
+   * Banned users (tier='banned') are left untouched. Tier downgrades on
+   * 'free' are skipped if the user already has a stronger explicit tier
+   * (e.g. 'creator') that we don't manage here.
+   *
+   * Idempotent. Invalidates the user_label Redis cache so the change is
+   * visible on the next profile load.
+   *
+   * @param {string|number} userId
+   * @returns {Promise<'PRIME'|'member'|'free'|null>} the tier written, or null on failure
+   */
+  static async recomputeUserTier(userId) {
+    if (!userId) return null;
+    try {
+      const { rows: addOnRows } = await query(
+        `SELECT add_on_id FROM user_entitlements
+           WHERE user_id = $1
+             AND is_consumed = false
+             AND (is_lifetime = true OR (expires_at IS NOT NULL AND expires_at > NOW()))`,
+        [String(userId)]
+      );
+      const active = new Set(addOnRows.map((r) => r.add_on_id));
+      const tier = active.has('prime') ? 'PRIME'
+        : active.has('pnp-member') ? 'member'
+        : 'free';
+
+      // Don't touch banned users — bans are a separate axis.
+      // Don't downgrade 'creator' tier (managed by creatorService).
+      // tier+subscription_status are coupled by chk_tier_status_consistency:
+      //   PRIME/member ⇔ subscription_status='active'
+      //   free         ⇔ subscription_status IN ('free','churned')
+      // We update both atomically so the constraint is always satisfied.
+      await query(
+        `UPDATE users
+           SET tier = $2,
+               subscription_status = CASE
+                 WHEN $2 = 'free' AND subscription_status IN ('free','churned') THEN subscription_status
+                 WHEN $2 = 'free' THEN 'churned'
+                 ELSE 'active'
+               END,
+               updated_at = NOW()
+           WHERE id = $1
+             AND tier IS DISTINCT FROM 'banned'
+             AND ($2 <> 'free' OR tier IS DISTINCT FROM 'creator')`,
+        [String(userId), tier]
+      );
+
+      // Invalidate label cache so the badge updates on next read
+      try {
+        const redis = getRedis();
+        await redis.del(`user_label:${userId}`);
+      } catch (cacheErr) {
+        // Non-fatal — TTL will eventually clear the stale value
+        logger.debug('recomputeUserTier: cache invalidate failed', { userId, error: cacheErr.message });
+      }
+
+      return tier;
+    } catch (err) {
+      logger.error('EntitlementAccessService.recomputeUserTier failed', { userId, error: err.message });
+      return null;
+    }
+  }
+
+  /**
    * Express middleware factory: require a specific active entitlement to access a route.
    * This is the canonical replacement for the old requireTier() middleware.
    *
@@ -245,16 +317,27 @@ class EntitlementAccessService {
   //
   // hasResourceAccess(userId, kind, resourceId) is the single entry point for
   // deciding whether a user can use a specific channel, hangout, or creator.
-  // Scoped access is standalone: a user with channel-access:X keeps access to
-  // channel X for the full paid period regardless of pnp-member state.
   //
-  // Resolution ladder (fail-open on first match):
+  // Tier model:
+  //   FREE   = no membership entitlement.
+  //   BASIC  = has 'pnp-member' entitlement.
+  //   PRIME  = has 'prime' entitlement (also unlocks the single PRIME channel).
+  //
+  // Rules:
+  //   - The PRIME channel (access_type='prime') requires the 'prime' entitlement.
+  //   - Paid channels and paid hangouts are monthly subscriptions — only BASIC
+  //     and PRIME members can subscribe; FREE users must upgrade first.
+  //   - Free channels are open to everyone; free hangouts require pnp-member.
+  //   - PRIME alone does NOT unlock paid channels/hangouts — the user must still
+  //     purchase the per-resource scoped subscription (channel-access /
+  //     hangout-access).
+  //
+  // Resolution ladder (first match wins):
   //   1. banned → deny
-  //   2. admin → allow
+  //   2. resource not found → deny
   //   3. direct scope match (channel-access:id, hangout-access:id, creator-subscription:id)
-  //   4. global prime → allow (prime unlocks everything)
-  //   5. kind/access_type specific rules (free / prime / subscription / paid)
-  //   6. otherwise require pnp-member (free-community fallback)
+  //   4. kind/access_type specific rules (free / prime / paid / subscription)
+  //   5. free-community fallback (require pnp-member)
   // ───────────────────────────────────────────────────────────────────────
 
   /**
@@ -380,18 +463,17 @@ class EntitlementAccessService {
       }
     }
 
-    // 4. global PRIME override — prime unlocks everything except banned state
-    if (await EntitlementAccessService.hasEntitlement(userId, 'prime')) {
-      return { allowed: true, reason: 'prime_override' };
-    }
-
-    // 5. kind-specific resolution
+    // 4. kind-specific resolution
     if (kind === 'channel') {
       const accessType = resource.access_type || 'free';
       if (accessType === 'free') {
         return { allowed: true, reason: 'free' };
       }
       if (accessType === 'prime') {
+        // PRIME channel — only the 'prime' entitlement unlocks it.
+        if (await EntitlementAccessService.hasEntitlement(userId, 'prime')) {
+          return { allowed: true, reason: 'prime_entitlement' };
+        }
         return {
           allowed: false,
           reason: 'requires_prime',
@@ -399,20 +481,31 @@ class EntitlementAccessService {
           code: 'PRIME_REQUIRED',
         };
       }
-      if (accessType === 'subscription') {
-        const creatorId = String(resource.creator_id);
-        if (await EntitlementAccessService.hasEntitlement(userId, 'creator-subscription', { creatorId })) {
-          return { allowed: true, reason: 'creator_subscriber', scoped: true };
+      if (accessType === 'paid' || accessType === 'subscription') {
+        // Paid/subscription channels = monthly subscription, BASIC or PRIME
+        // members only. FREE users must upgrade first.
+        const hasMember = await EntitlementAccessService.hasEntitlement(userId, 'pnp-member');
+        const hasPrime = hasMember ? false : await EntitlementAccessService.hasEntitlement(userId, 'prime');
+        if (!hasMember && !hasPrime) {
+          return {
+            allowed: false,
+            reason: 'requires_member',
+            accessType,
+            creatorId: resource.creator_id ? String(resource.creator_id) : undefined,
+            priceUsd: resource.price_usd ? Number(resource.price_usd) : undefined,
+            code: 'MEMBER_REQUIRED',
+          };
         }
-        return {
-          allowed: false,
-          reason: 'requires_subscription',
-          accessType: 'subscription',
-          creatorId,
-          code: 'CREATOR_SUBSCRIPTION_REQUIRED',
-        };
-      }
-      if (accessType === 'paid') {
+        // Member/Prime but no scoped entitlement → must subscribe to this channel.
+        if (accessType === 'subscription') {
+          return {
+            allowed: false,
+            reason: 'requires_subscription',
+            accessType: 'subscription',
+            creatorId: String(resource.creator_id),
+            code: 'CREATOR_SUBSCRIPTION_REQUIRED',
+          };
+        }
         return {
           allowed: false,
           reason: 'requires_payment',
@@ -429,8 +522,20 @@ class EntitlementAccessService {
       if (resource.channel_id) {
         return EntitlementAccessService.hasResourceAccess(userId, 'channel', resource.channel_id);
       }
-      // Standalone paid hangout without a direct scope entitlement
       if (resource.is_paid) {
+        // Paid hangout = monthly subscription. BASIC/PRIME only; FREE must upgrade.
+        const hasMember = await EntitlementAccessService.hasEntitlement(userId, 'pnp-member');
+        const hasPrime = hasMember ? false : await EntitlementAccessService.hasEntitlement(userId, 'prime');
+        if (!hasMember && !hasPrime) {
+          return {
+            allowed: false,
+            reason: 'requires_member',
+            accessType: 'paid',
+            creatorId: resource.creator_id ? String(resource.creator_id) : undefined,
+            priceUsd: resource.price_usd ? Number(resource.price_usd) : undefined,
+            code: 'MEMBER_REQUIRED',
+          };
+        }
         return {
           allowed: false,
           reason: 'requires_payment',
@@ -440,7 +545,7 @@ class EntitlementAccessService {
           code: 'PAYMENT_REQUIRED',
         };
       }
-      // Free community hangout → require pnp-member
+      // Free community hangout → require pnp-member (handled by fallback below)
     }
 
     if (kind === 'creator') {

@@ -4422,6 +4422,8 @@ app.put('/api/webapp/admin/plans/:planId/add-ons', adminGuard, asyncHandler(weba
 // User entitlement management
 app.get('/api/webapp/admin/users/:userId/entitlements', adminGuard, asyncHandler(webappAdminController.getUserEntitlements));
 app.post('/api/webapp/admin/users/:userId/entitlements', adminGuard, asyncHandler(webappAdminController.grantUserEntitlement));
+// One-shot plan assignment — grants all entitlements + syncs plan_id/plan_expiry/tier in one call.
+app.post('/api/webapp/admin/users/:userId/assign-plan', adminGuard, asyncHandler(webappAdminController.assignUserPlan));
 // Resource picker for the admin scoped grant form. Returns channels, hangouts, or creators.
 app.get('/api/webapp/admin/resources', adminGuard, asyncHandler(webappAdminController.searchResources));
 app.delete('/api/webapp/admin/users/:userId/entitlements/:addOnId', adminGuard, asyncHandler(webappAdminController.revokeUserEntitlement));

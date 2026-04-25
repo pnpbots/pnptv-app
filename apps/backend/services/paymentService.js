@@ -3879,36 +3879,36 @@ class PaymentService {
           const EntitlementAccessService = require('./entitlementAccessService');
           await EntitlementAccessService.invalidateCache(userId);
 
-          // Force tier based on what was granted
-          let forcedTier;
-          if (grantedAddOnIds.includes('prime')) {
-            forcedTier = 'PRIME';
-          } else if (grantedAddOnIds.includes('pnp-member')) {
-            forcedTier = 'member';
-          } else {
-            // Fallback: derive from entitlements
-            const label = await EntitlementAccessService.getUserLabel(userId);
-            forcedTier = EntitlementAccessService.labelToDisplayTier(label);
-          }
-
-          try {
-            await query(
-              `UPDATE users SET tier = $1, updated_at = NOW() WHERE id = $2`,
-              [forcedTier, userId]
-            );
-            logger.info('Display tier synced after entitlement grant', { userId, displayTier: forcedTier });
-          } catch (tierUpdateErr) {
-            if (tierUpdateErr.message && tierUpdateErr.message.includes('Lifetime entitlements')) {
-              logger.debug('Display tier sync skipped for lifetime user', { userId });
-            } else {
-              logger.warn('Failed to sync display tier after entitlement grant (non-critical)', {
-                userId, planId, error: tierUpdateErr.message,
-              });
-            }
+          // Recompute users.tier + subscription_status from active entitlements.
+          // recomputeUserTier handles chk_tier_status_consistency atomically; the
+          // previous direct UPDATE-tier-only path failed silently on free users.
+          const newTier = await EntitlementAccessService.recomputeUserTier(userId);
+          if (newTier) {
+            logger.info('Display tier synced after entitlement grant', { userId, displayTier: newTier });
           }
         } catch (postGrantErr) {
           logger.warn('Post-grant cache/tier sync failed (non-critical)', {
             userId, planId, error: postGrantErr.message,
+          });
+        }
+
+        // Referral reward — grant PNP Live tokens to the referrer ONCE, when
+        // the referee makes their first paid plan purchase. Failure must not
+        // block the payment, so swallow all errors.
+        try {
+          const referralService = require('./referralService');
+          const reward = await referralService.grantReferralReward(userId, planId);
+          if (reward.credited) {
+            logger.info('Referral reward granted on plan purchase', {
+              referrerId: reward.referrerId,
+              refereeId: userId,
+              planId: reward.planId,
+              tokens: reward.tokens,
+            });
+          }
+        } catch (referralErr) {
+          logger.warn('Referral reward grant failed (non-critical)', {
+            userId, planId, error: referralErr.message,
           });
         }
       }

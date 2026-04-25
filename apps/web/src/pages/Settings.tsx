@@ -1688,9 +1688,9 @@ export default function Settings() {
               </div>
               <div className="text-center">
                 <div className="text-xl font-bold" style={{ color: "#5ED1C4" }}>
-                  {referralStats.completed * 3}
+                  {referralStats.tokensEarned ?? 0}
                 </div>
-                <div className="text-[10px]" style={{ color: "var(--pnp-text-secondary)" }}>{p.daysEarned}</div>
+                <div className="text-[10px]" style={{ color: "var(--pnp-text-secondary)" }}>{p.tokensEarned ?? p.daysEarned}</div>
               </div>
             </div>
           </>

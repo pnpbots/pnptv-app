@@ -182,6 +182,10 @@ const planBuilderController = {
    */
   async listPlans(req, res) {
     try {
+      // Default to active plans only — admins assigning a plan should not
+      // see deprecated/disabled SKUs. Pass ?includeInactive=true to bypass
+      // (used by the plan-builder admin to manage retired plans).
+      const includeInactive = String(req.query.includeInactive || '') === 'true';
       const { rows } = await query(`
         SELECT p.*,
           COALESCE(
@@ -199,6 +203,7 @@ const planBuilderController = {
         FROM plans p
         LEFT JOIN plan_add_ons pa ON pa.plan_id = p.id
         LEFT JOIN add_ons ao ON ao.id = pa.add_on_id
+        ${includeInactive ? '' : 'WHERE p.active = true'}
         GROUP BY p.id
         ORDER BY p.price ASC
       `);

@@ -10,6 +10,7 @@ import {
   getAdminUser,
   getAdminPlans,
   updateAdminUser,
+  assignAdminUserPlan,
   banAdminUser,
   deleteAdminUser,
   getAdminUserPayments,
@@ -71,10 +72,6 @@ function CopyField({ label, value }: { label: string; value?: string | null }) {
 interface EditForm {
   username: string;
   email: string;
-  subscriptionStatus: string;
-  subscriptionPlan: string;
-  planExpiry: string;
-  tier: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,11 +93,12 @@ export default function UserDetail() {
   const [editForm, setEditForm] = useState<EditForm>({
     username: "",
     email: "",
-    subscriptionStatus: "free",
-    subscriptionPlan: "",
-    planExpiry: "",
-    tier: "free",
   });
+
+  // Assign-plan one-shot: pick a plan and the backend grants entitlements,
+  // syncs tier + subscription_status + plan_expiry.
+  const [assignPlanId, setAssignPlanId] = useState("");
+  const [assignLoading, setAssignLoading] = useState(false);
 
   const [banReason, setBanReason] = useState("");
   const [banConfirmOpen, setBanConfirmOpen] = useState(false);
@@ -130,15 +128,8 @@ export default function UserDetail() {
       setEditForm({
         username: userRes.user.username || "",
         email: userRes.user.email || "",
-        subscriptionStatus: userRes.user.subscription_status || "free",
-        subscriptionPlan: userRes.user.subscription_plan || "",
-        planExpiry: (() => {
-          if (!userRes.user.plan_expiry) return "";
-          const d = new Date(userRes.user.plan_expiry);
-          return isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0];
-        })(),
-        tier: userRes.user.tier || "free",
       });
+      setAssignPlanId(userRes.user.subscription_plan || "");
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : t.shared.failedToLoad);
@@ -181,10 +172,6 @@ export default function UserDetail() {
       const res = await updateAdminUser(userId, {
         username: editForm.username || undefined,
         email: editForm.email || undefined,
-        subscriptionStatus: editForm.subscriptionStatus || undefined,
-        subscriptionPlan: editForm.subscriptionPlan || undefined,
-        tier: editForm.tier || undefined,
-        planExpiry: editForm.planExpiry || undefined,
       });
       setUser((prev) => (prev ? { ...prev, ...res.user } : res.user));
       setSaveSuccess(true);
@@ -195,6 +182,32 @@ export default function UserDetail() {
       setSaveLoading(false);
     }
   };
+
+  const handleAssignPlan = async () => {
+    if (!userId || !assignPlanId) return;
+    setAssignLoading(true);
+    setSaveSuccess(false);
+    try {
+      const res = await assignAdminUserPlan(userId, assignPlanId);
+      setUser(res.user);
+      setSaveSuccess(true);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t.userDetail.failedToSave);
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  // Force a full refetch of the user record. Used after granting/revoking an
+  // entitlement so the header badge reflects the new tier immediately.
+  const refreshUser = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const res = await getAdminUser(userId);
+      setUser(res.user);
+    } catch { /* silent — entitlements section already shows the change */ }
+  }, [userId]);
 
   const openBanModal = (action: "ban" | "unban") => {
     setBanAction(action);
@@ -356,7 +369,7 @@ export default function UserDetail() {
         </div>
       </div>
 
-      {/* Edit Form */}
+      {/* Edit identity (username + email only) */}
       <div className="rounded-xl bg-pnp-surface border border-pnp-border p-5 space-y-4">
         <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">
           {t.userDetail.editUser}
@@ -387,67 +400,6 @@ export default function UserDetail() {
               className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
             />
           </div>
-          <div>
-            <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="edit-sub-status">
-              {t.userDetail.subscriptionStatus}
-            </label>
-            <select
-              id="edit-sub-status"
-              value={editForm.subscriptionStatus}
-              onChange={(e) => handleFormChange("subscriptionStatus", e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
-            >
-              <option value="active">active</option>
-              <option value="churned">churned</option>
-              <option value="free">free</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="edit-sub-plan">
-              {t.userDetail.subscriptionPlan}
-            </label>
-            <select
-              id="edit-sub-plan"
-              value={editForm.subscriptionPlan}
-              onChange={(e) => handleFormChange("subscriptionPlan", e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
-            >
-              <option value="">{t.userDetail.noOption}</option>
-              {plans.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.display_name} ({p.tier})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="edit-expiry">
-              {t.userDetail.planExpiry}
-            </label>
-            <input
-              id="edit-expiry"
-              type="date"
-              value={editForm.planExpiry}
-              onChange={(e) => handleFormChange("planExpiry", e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="edit-tier">
-              {t.userDetail.tier}
-            </label>
-            <select
-              id="edit-tier"
-              value={editForm.tier}
-              onChange={(e) => handleFormChange("tier", e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
-            >
-              <option value="free">free</option>
-              <option value="member">member</option>
-              <option value="PRIME">PRIME</option>
-              <option value="banned">banned</option>
-            </select>
-          </div>
         </div>
 
         <div className="flex justify-end">
@@ -461,8 +413,52 @@ export default function UserDetail() {
         </div>
       </div>
 
+      {/* Assign plan — one-shot. Picks an active plan and the backend grants
+          all entitlements + computes plan_expiry + syncs tier/status. */}
+      <div className="rounded-xl bg-pnp-surface border border-pnp-border p-5 space-y-3">
+        <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">
+          {t.userDetail.subscriptionPlan}
+        </h2>
+        <p className="text-xs text-pnp-textSecondary">
+          Pick an active plan. Tier, status, expiry, and entitlements are set automatically.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="assign-plan">
+              {t.userDetail.subscriptionPlan}
+            </label>
+            <select
+              id="assign-plan"
+              value={assignPlanId}
+              onChange={(e) => { setAssignPlanId(e.target.value); setSaveSuccess(false); }}
+              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
+            >
+              <option value="">{t.userDetail.noOption}</option>
+              {plans.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.display_name} ({p.tier})
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={handleAssignPlan}
+            disabled={assignLoading || !assignPlanId || assignPlanId === (user.subscription_plan || "")}
+            className="px-5 py-2 rounded-lg bg-pnp-accent text-white text-sm font-medium hover:bg-pnp-accent/80 disabled:opacity-50 transition-colors min-h-[44px] sm:flex-shrink-0"
+          >
+            {assignLoading ? t.shared.saving : "Assign Plan"}
+          </button>
+        </div>
+        {user.subscription_plan && (
+          <p className="text-xs text-pnp-textSecondary">
+            Current: <span className="font-mono text-pnp-textPrimary">{user.subscription_plan}</span>
+            {user.plan_expiry && <> · expires {formatDateShort(user.plan_expiry)}</>}
+          </p>
+        )}
+      </div>
+
       {/* Entitlements section */}
-      {userId && <UserEntitlementsSection userId={userId} />}
+      {userId && <UserEntitlementsSection userId={userId} onChanged={refreshUser} />}
 
       {/* Creator & Live Performer section */}
       {user && (

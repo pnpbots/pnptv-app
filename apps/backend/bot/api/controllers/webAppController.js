@@ -1653,6 +1653,11 @@ const getProfile = async (req, res) => {
       availabilityMessage: p.perf_availability_message || null,
     } : null;
 
+    // Compute the PRIME/BASIC/FREE label from active entitlements so the
+    // badge next to the username is always accurate.
+    const EntitlementAccessService = require('../../../services/entitlementAccessService');
+    const label = await EntitlementAccessService.getUserLabel(p.id);
+
     return res.json({
       success: true,
       profile: {
@@ -1665,6 +1670,7 @@ const getProfile = async (req, res) => {
         photoUrl: p.photo_file_id,
         subscriptionStatus: p.subscription_status,
         tier: p.tier || 'free',
+        label,
         subscriptionPlan: p.plan_id,
         subscriptionExpires: p.plan_expiry,
         language: p.language,

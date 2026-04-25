@@ -44,7 +44,10 @@ export default function AuthCallback() {
         const refCode = localStorage.getItem("pnptv:pendingRef");
         if (refCode) {
           localStorage.removeItem("pnptv:pendingRef");
-          redeemReferralCode(refCode).catch(() => {});
+          redeemReferralCode(refCode).then(
+            (result) => console.info("[referral] redeemed on auth callback", { code: refCode, result }),
+            (err) => console.error("[referral] redemption failed on auth callback", { code: refCode, error: err?.message || err })
+          );
         }
 
         // Prefer an explicit returnTo (e.g. user came from studio.pnptv.app)

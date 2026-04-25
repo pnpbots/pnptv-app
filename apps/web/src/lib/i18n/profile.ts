@@ -134,14 +134,15 @@ const strings = {
 
     // ── Referral card ─────────────────────────────────────────────────────────
     referralProgram: "Referral Program",
-    referralInviteDesc: "Invite friends and both of you get",
-    referralFreePrime: "3 days FREE PRIME",
-    referralWhenTheyJoin: "when they join.",
+    referralInviteDesc: "Invite friends — when they buy a paid plan you earn",
+    referralFreePrime: "PNP Live tokens",
+    referralWhenTheyJoin: "(1 for week/monthly, 3 for any other plan).",
     copy: "Copy",
     copied: "Copied!",
     invited: "Invited",
     joined_noun: "Joined",
     daysEarned: "Days earned",
+    tokensEarned: "Tokens earned",
 
     // ── App preferences ───────────────────────────────────────────────────────
     appPreferences: "App Preferences",
@@ -551,14 +552,15 @@ const strings = {
 
     // ── Referral card ─────────────────────────────────────────────────────────
     referralProgram: "Programa de referidos",
-    referralInviteDesc: "Invita amigos y ambos reciben",
-    referralFreePrime: "3 días PRIME GRATIS",
-    referralWhenTheyJoin: "cuando se unan.",
+    referralInviteDesc: "Invita amigos: cuando compren un plan, ganas",
+    referralFreePrime: "tokens de PNP Live",
+    referralWhenTheyJoin: "(1 por plan semanal/mensual, 3 por cualquier otro).",
     copy: "Copiar",
     copied: "¡Copiado!",
     invited: "Invitados",
     joined_noun: "Se unieron",
     daysEarned: "Días ganados",
+    tokensEarned: "Tokens ganados",
 
     // ── App preferences ───────────────────────────────────────────────────────
     appPreferences: "Preferencias de la app",

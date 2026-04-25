@@ -299,11 +299,13 @@ class EntitlementModel {
 
     logger.info('Entitlement granted', { userId, addOnId, isLifetime, durationDays, actorId });
 
-    // ── Auto-cascade: granting 'prime' also grants 'pnp-member' and forces tier ──
+    // ── Auto-cascade: granting 'prime' also grants 'pnp-member' ──
+    // Match prime's lifetime/duration so pnp-member never outlives or
+    // pre-expires the prime grant. The previous version inserted with
+    // expires_at=NULL on time-limited grants, leaving pnp-member dead.
     if (addOnId === 'prime') {
-      // 1. Auto-grant 'pnp-member' (BASIC) if not already active
       try {
-        const hasMember = await query(
+        const hasActiveMember = await query(
           `SELECT 1 FROM user_entitlements
            WHERE user_id = $1 AND add_on_id = 'pnp-member'
              AND creator_id IS NULL AND is_consumed = false
@@ -311,44 +313,59 @@ class EntitlementModel {
            LIMIT 1`,
           [userId]
         );
-        if (hasMember.rows.length === 0) {
-          await query(
-            `INSERT INTO user_entitlements
-               (user_id, add_on_id, is_lifetime, source_plan_id, granted_at)
-             VALUES ($1, 'pnp-member', $2, $3, NOW())
-             ON CONFLICT (user_id, add_on_id, creator_id)
-             DO UPDATE SET
-               is_lifetime = CASE WHEN EXCLUDED.is_lifetime THEN true ELSE user_entitlements.is_lifetime END,
-               is_consumed = false, updated_at = NOW()`,
-            [userId, isLifetime, sourcePlanId]
-          );
-          logger.info('Auto-granted pnp-member alongside prime', { userId });
+        if (hasActiveMember.rows.length === 0) {
+          if (isLifetime) {
+            await query(
+              `INSERT INTO user_entitlements
+                 (user_id, add_on_id, is_lifetime, source_plan_id, granted_at)
+               VALUES ($1, 'pnp-member', true, $2, NOW())
+               ON CONFLICT (user_id, add_on_id, creator_id)
+               DO UPDATE SET
+                 is_lifetime = true,
+                 expires_at = NULL,
+                 is_consumed = false,
+                 updated_at = NOW()`,
+              [userId, sourcePlanId]
+            );
+          } else {
+            await query(
+              `INSERT INTO user_entitlements
+                 (user_id, add_on_id, is_lifetime, expires_at, source_plan_id, granted_at)
+               VALUES ($1, 'pnp-member', false,
+                       NOW() + ($2::integer * INTERVAL '1 day'),
+                       $3, NOW())
+               ON CONFLICT (user_id, add_on_id, creator_id)
+               DO UPDATE SET
+                 expires_at = CASE
+                   WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+                   WHEN user_entitlements.expires_at IS NOT NULL
+                        AND user_entitlements.expires_at > NOW() + ($2::integer * INTERVAL '1 day')
+                     THEN user_entitlements.expires_at
+                   ELSE NOW() + ($2::integer * INTERVAL '1 day')
+                 END,
+                 is_consumed = false,
+                 updated_at = NOW()
+               WHERE NOT user_entitlements.is_lifetime`,
+              [userId, durationDays, sourcePlanId]
+            );
+          }
+          logger.info('Auto-granted pnp-member alongside prime', {
+            userId, isLifetime, durationDays: isLifetime ? null : durationDays,
+          });
         }
       } catch (memberErr) {
         logger.warn('Auto-grant pnp-member failed (non-fatal)', { userId, error: memberErr.message });
       }
-
-      // 2. Force users.tier = 'PRIME'
-      try {
-        await query(`UPDATE users SET tier = 'PRIME', updated_at = NOW() WHERE id = $1`, [userId]);
-        logger.info('Tier forced to PRIME after prime entitlement grant', { userId });
-      } catch (tierErr) {
-        logger.warn('Tier update to PRIME failed (non-fatal)', { userId, error: tierErr.message });
-      }
     }
 
-    // ── Auto-cascade: granting 'pnp-member' forces tier to at least 'member' ──
-    if (addOnId === 'pnp-member') {
-      try {
-        // Only upgrade tier if currently 'free' — don't downgrade PRIME users
-        await query(
-          `UPDATE users SET tier = 'member', updated_at = NOW()
-           WHERE id = $1 AND (tier IS NULL OR tier = 'free')`,
-          [userId]
-        );
-      } catch (tierErr) {
-        logger.warn('Tier update to member failed (non-fatal)', { userId, error: tierErr.message });
-      }
+    // Recompute users.tier from active entitlements (single source of truth
+    // for the PRIME/BASIC/FREE badge next to the username). Lazy-required to
+    // avoid a circular import at module load.
+    try {
+      const EntitlementAccessService = require('../services/entitlementAccessService');
+      await EntitlementAccessService.recomputeUserTier(userId);
+    } catch (tierErr) {
+      logger.warn('recomputeUserTier after grant failed (non-fatal)', { userId, addOnId, error: tierErr.message });
     }
 
     return entitlementRow;
@@ -446,6 +463,15 @@ class EntitlementModel {
     }
 
     logger.info('Entitlement revoked', { userId, addOnId, revokedBy, wasLifetime: row.is_lifetime });
+
+    // Recompute users.tier so the PRIME/BASIC badge downgrades immediately.
+    try {
+      const EntitlementAccessService = require('../services/entitlementAccessService');
+      await EntitlementAccessService.recomputeUserTier(userId);
+    } catch (tierErr) {
+      logger.warn('recomputeUserTier after revoke failed (non-fatal)', { userId, addOnId, error: tierErr.message });
+    }
+
     return row;
   }
 

@@ -1111,6 +1111,13 @@ const getPublicProfile = async (req, res) => {
 
     const profile = result.profile;
     const pd = result.performerData;
+
+    // Compute the PRIME/BASIC/FREE label from the target user's active
+    // entitlements so the badge next to the username is always accurate,
+    // even if users.tier has drifted.
+    const EntitlementAccessService = require('../../../services/entitlementAccessService');
+    const label = await EntitlementAccessService.getUserLabel(profile.id);
+
     return res.json({
       success: true,
       profile: {
@@ -1125,6 +1132,8 @@ const getPublicProfile = async (req, res) => {
         country: profile.country,
         memberSince: profile.created_at,
         postCount: result.postCount,
+        tier: profile.tier || EntitlementAccessService.labelToDisplayTier(label),
+        label,
         creatorStatus: profile.creator_status,
         creatorType: profile.creator_type,
         creatorPriceUsd: profile.creator_price_usd ? parseFloat(profile.creator_price_usd) : null,

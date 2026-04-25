@@ -1475,6 +1475,107 @@ const grantUserEntitlement = async (req, res) => {
 };
 
 /**
+ * POST /api/webapp/admin/users/:userId/assign-plan
+ * One-shot plan assignment. Replaces the manual juggling of tier /
+ * subscription_status / plan_id / plan_expiry / per-add-on entitlements.
+ *
+ * Behavior:
+ *   1. Validate plan exists and is active.
+ *   2. Call PaymentService.grantEntitlementsForPlan with source='admin' —
+ *      this grants every entitlement defined in plan_add_ons (with the
+ *      correct lifetime/duration), runs the prime→pnp-member cascade, and
+ *      syncs users.tier + subscription_status via recomputeUserTier.
+ *   3. Update the legacy users.plan_id / plan_expiry columns so existing
+ *      admin views that still read them stay consistent. plan_expiry is
+ *      computed from the plan's duration_days (NULL for lifetime plans).
+ *
+ * Body: { planId: string }
+ */
+const assignUserPlan = async (req, res) => {
+  try {
+    const userId = String(req.params.userId);
+    const planId = String((req.body || {}).planId || '').trim();
+    if (!planId) {
+      return res.status(400).json({ success: false, error: 'planId is required' });
+    }
+
+    const planRes = await query(
+      `SELECT id, display_name, tier, duration_days, is_lifetime, active
+         FROM plans WHERE id = $1`,
+      [planId]
+    );
+    if (planRes.rows.length === 0) {
+      return res.status(404).json({ success: false, error: `Plan '${planId}' not found` });
+    }
+    const plan = planRes.rows[0];
+    if (plan.active === false) {
+      return res.status(400).json({ success: false, error: `Plan '${planId}' is inactive` });
+    }
+
+    const userExists = await query(`SELECT 1 FROM users WHERE id = $1`, [userId]);
+    if (userExists.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    // Grant entitlements via the canonical payment-side path so duration,
+    // cascade, and tier sync are all handled in one place.
+    const PaymentService = require('../../../services/paymentService');
+    const grantResult = await PaymentService.grantEntitlementsForPlan(
+      userId,
+      planId,
+      'admin',
+      { actorId: String(req.user?.id ?? 'admin') }
+    );
+
+    // Sync legacy columns. plan_expiry = NOW() + duration_days for time-limited
+    // plans, NULL for lifetime. We don't touch tier/subscription_status here —
+    // recomputeUserTier inside grantEntitlementsForPlan already wrote them.
+    if (plan.is_lifetime) {
+      await query(
+        `UPDATE users SET plan_id = $1, plan_expiry = NULL, updated_at = NOW()
+           WHERE id = $2`,
+        [planId, userId]
+      );
+    } else {
+      const days = Number(plan.duration_days) > 0 ? Number(plan.duration_days) : 30;
+      await query(
+        `UPDATE users
+            SET plan_id = $1,
+                plan_expiry = NOW() + ($2::integer * INTERVAL '1 day'),
+                updated_at = NOW()
+          WHERE id = $3`,
+        [planId, days, userId]
+      );
+    }
+
+    const userRes = await query(
+      `SELECT id, username, email, first_name, last_name, bio, role, tier,
+              subscription_status, plan_id AS subscription_plan, plan_expiry, created_at,
+              last_payment_date, last_payment_method, last_payment_amount,
+              last_login_at, last_login_method, last_active,
+              telegram, twitter, x_username, pnptv_id, language, location_name,
+              creator_status, creator_type, creator_price_usd, creator_locked, live_channel
+         FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    logger.info('Admin assigned plan', {
+      adminId: req.user?.id, userId, planId,
+      granted: grantResult?.granted, errors: grantResult?.errors,
+    });
+    return res.json({
+      success: true,
+      user: userRes.rows[0],
+      plan: { id: plan.id, displayName: plan.display_name, tier: plan.tier },
+      grantResult,
+    });
+  } catch (error) {
+    logger.error('assignUserPlan error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
  * GET /api/webapp/admin/resources?kind=channel|hangout|creator&q=<search>
  * Async-searchable resource picker for the admin scoped grant form.
  * Returns a flat array of {id, name, thumbnailUrl, meta} for the selected kind.
@@ -2163,6 +2264,7 @@ module.exports = {
   getUserEntitlements,
   getMyAccess,
   grantUserEntitlement,
+  assignUserPlan,
   searchResources,
   revokeUserEntitlement,
   extendUserEntitlement,

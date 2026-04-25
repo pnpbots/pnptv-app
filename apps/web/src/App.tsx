@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { RouterProvider } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
 import { AuthProvider } from "@/hooks/useAuth";
@@ -11,6 +11,56 @@ import { NotificationPermissionPrompt } from "@/components/NotificationPermissio
 import { PermissionOnboarding } from "@/components/PermissionOnboarding";
 import { useAuth } from "@/hooks/useAuth";
 import { getSocket, connectSocket, disconnectSocket } from "@/lib/socket";
+import { redeemReferralCode } from "@/lib/api";
+
+const REFERRAL_STORAGE_KEY = "pnptv:pendingRef";
+
+// Capture a ?ref=<code> from the landing URL on any path (not only /join),
+// store it in localStorage, and redeem it as soon as the user is
+// authenticated. Idempotent — only fires once per page load.
+function useReferralCapture() {
+  const { isAuthenticated } = useAuth();
+  const redeemedRef = useRef(false);
+
+  // 1. On first mount, read the URL once and persist any ?ref= for later.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const ref = params.get("ref");
+      if (ref && ref.trim()) {
+        localStorage.setItem(REFERRAL_STORAGE_KEY, ref.trim().toUpperCase());
+      }
+    } catch (_) {
+      /* localStorage / URL parse failure — non-critical */
+    }
+  }, []);
+
+  // 2. When the user is authenticated, redeem any stored code exactly once.
+  useEffect(() => {
+    if (!isAuthenticated || redeemedRef.current) return;
+    let code: string | null = null;
+    try {
+      code = localStorage.getItem(REFERRAL_STORAGE_KEY);
+    } catch (_) {
+      return;
+    }
+    if (!code) return;
+    redeemedRef.current = true;
+    try {
+      localStorage.removeItem(REFERRAL_STORAGE_KEY);
+    } catch (_) { /* ignore */ }
+    redeemReferralCode(code).then(
+      (result) => {
+        // eslint-disable-next-line no-console
+        console.info("[referral] redeemed", { code, result });
+      },
+      (err) => {
+        // eslint-disable-next-line no-console
+        console.error("[referral] redemption failed", { code, error: err?.message || err });
+      }
+    );
+  }, [isAuthenticated]);
+}
 
 function useScreenCaptureGuard() {
   useEffect(() => {
@@ -159,6 +209,7 @@ function AppOverlays() {
   const { isAuthenticated } = useAuth();
   const { suspendedMsg } = useGlobalSocketEvents();
   useDocumentDir();
+  useReferralCapture();
   return (
     <>
       <UpdateBanner />

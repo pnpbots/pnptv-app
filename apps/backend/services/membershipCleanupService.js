@@ -645,6 +645,19 @@ Type /subscribe to view membership plans and reactivate your access!`;
               `, [row.user_id, JSON.stringify({ add_on_id: row.add_on_id, entitlement_id: row.id })]);
             } catch (_) { /* non-critical */ }
           }
+
+          // Recompute users.tier for each affected user so the PRIME/BASIC badge
+          // downgrades immediately when their entitlement expires.
+          try {
+            const EntitlementAccessService = require('./entitlementAccessService');
+            const affectedUserIds = [...new Set(consumeResult.rows.map((r) => String(r.user_id)))];
+            for (const uid of affectedUserIds) {
+              await EntitlementAccessService.recomputeUserTier(uid);
+            }
+            logger.info(`Recomputed tier for ${affectedUserIds.length} users after entitlement expiry`);
+          } catch (tierErr) {
+            logger.warn('Tier recompute after expiry failed (non-fatal)', { error: tierErr.message });
+          }
         }
       } catch (e) {
         logger.warn('Could not consume expired entitlements (table may not exist)', { error: e.message });

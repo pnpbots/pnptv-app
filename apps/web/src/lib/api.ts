@@ -602,13 +602,17 @@ export interface ReferralStats {
   link: string;
   total: number;
   completed: number;
+  /** PNP Live tokens earned from completed referrals (since 2026-04-25). */
+  tokensEarned?: number;
 }
 
 export function getMyReferral(): Promise<ReferralStats> {
   return request("/api/webapp/me/referral");
 }
 
-export function redeemReferralCode(code: string): Promise<{ success?: boolean; alreadyRedeemed?: boolean }> {
+export function redeemReferralCode(
+  code: string
+): Promise<{ success?: boolean; alreadyRedeemed?: boolean; pending?: boolean }> {
   return request("/api/webapp/referral/redeem", { method: "POST", body: { code } });
 }
 
@@ -4222,8 +4226,30 @@ export function endAdminHangout(id: string): Promise<{ success: boolean; message
 }
 
 // Admin Plans
-export function getAdminPlans(): Promise<{ success: boolean; plans: AdminPlan[] }> {
-  return request("/api/webapp/admin/plans");
+export function getAdminPlans(opts?: { includeInactive?: boolean }): Promise<{ success: boolean; plans: AdminPlan[] }> {
+  const qs = opts?.includeInactive ? "?includeInactive=true" : "";
+  return request(`/api/webapp/admin/plans${qs}`);
+}
+
+/**
+ * Assign a plan to a user in one shot. Grants every entitlement defined by
+ * the plan (with the right duration), runs the prime → pnp-member cascade,
+ * syncs users.tier + subscription_status + plan_id + plan_expiry. Returns
+ * the fresh user row.
+ */
+export function assignAdminUserPlan(
+  userId: string,
+  planId: string
+): Promise<{
+  success: boolean;
+  user: AdminUser;
+  plan: { id: string; displayName: string; tier: string };
+  grantResult: { granted: number; errors: number; warning?: string };
+}> {
+  return request(`/api/webapp/admin/users/${userId}/assign-plan`, {
+    method: "POST",
+    body: { planId },
+  });
 }
 
 export function createAdminPlan(
@@ -5924,32 +5950,6 @@ export function addMeruLinks(
 export function deleteMeruLink(id: string): Promise<{ success: boolean; message: string }> {
   return request(`/api/webapp/admin/meru-links/${id}`, { method: "DELETE" });
 }
-
-// ── Videorama (Invidious video discovery) ────────────────────────────────────
-
-export interface InvidiousVideo {
-  type: string;
-  title: string;
-  videoId: string;
-  author: string;
-  authorId: string;
-  description: string;
-  viewCount: number;
-  lengthSeconds: number;
-  videoThumbnails: { quality: string; url: string; width: number; height: number }[];
-  published: number;
-  publishedText: string;
-}
-
-export function searchVideorama(q: string, page = 1): Promise<{ success: boolean; results: InvidiousVideo[] }> {
-  return request(`/api/webapp/videorama/search?q=${encodeURIComponent(q)}&page=${page}`);
-}
-
-export function getVideoramaTrending(): Promise<{ success: boolean; results: InvidiousVideo[] }> {
-  return request("/api/webapp/videorama/trending");
-}
-
-
 
 // ── Stream Analytics ──────────────────────────────────────────────────────────
 
