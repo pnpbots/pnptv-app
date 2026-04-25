@@ -965,6 +965,7 @@ services:
       - /var/www/pnptvbot-sandbox/public/media:/media
       - ./logs:/app/logs
       - ./config/jaas-private-key.pem:/app/config/jaas-private-key.pem:ro
+      - ./infrastructure/data/directus/uploads:/directus-uploads
     env_file:
       - .env
       - .env.production
@@ -973,6 +974,7 @@ services:
       PORT: 3001
       POSTGRES_HOST: pg-pnptv
       REDIS_HOST: redis-pnptv
+      DIRECTUS_UPLOADS_DIR: /directus-uploads
       BOT_LOCK_ENABLED: "false"
       BTCPAY_URL: http://btcpay-server:23000
       RESTREAMER_URL: http://restreamer:8080

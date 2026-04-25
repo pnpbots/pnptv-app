@@ -798,6 +798,7 @@ export interface SocialPostItem {
   likes_count: number;
   reposts_count: number;
   replies_count: number;
+  view_count?: number;
   created_at: string;
   author_id: string;
   author_username: string;
@@ -833,6 +834,8 @@ export interface SocialPostItem {
   media_urls?: Array<{ url: string; type: string; thumbnail_url?: string }> | null;
   // Video thumbnail (poster frame generated server-side)
   video_thumbnail_url?: string | null;
+  // Multi-frame thumbnails for hover/cycling preview
+  video_thumbnails?: string[] | null;
   // Promoted post fields (CMS-managed featured content)
   is_promoted?: boolean;
   promoted_link?: string | null;
@@ -1167,6 +1170,10 @@ export function bulkUploadVideos(
 
 export function togglePostLike(postId: number): Promise<{ liked: boolean; likes_count?: number }> {
   return request(`/api/webapp/social/posts/${postId}/like`, { method: "POST" });
+}
+
+export function recordPostView(postId: number): Promise<{ success: boolean; view_count?: number; deduped?: boolean }> {
+  return request(`/api/webapp/social/posts/${postId}/view`, { method: "POST" });
 }
 
 // ── Content (video) reactions ─────────────────────────────────────────────────
@@ -3076,6 +3083,7 @@ export interface CreatorChannel {
   coverImageUrl: string | null;
   tags: string[];
   isPremium?: boolean;
+  featured?: boolean;
   accessType: 'free' | 'prime' | 'subscription' | 'paid';
   priceUsd: number;
   hangoutGroupId: number | null;

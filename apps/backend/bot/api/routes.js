@@ -4929,6 +4929,277 @@ app.post('/api/webapp/social/posts/with-media', requireSessionAuth, socialPostLi
 app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, socialPostLimiter, uploadLimiter, attachCreatorStatus, postMultiMediaUploadMiddleware, asyncHandler(socialController.createPostWithMultiMedia));
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));
 app.post('/api/webapp/social/posts/:postId/like', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.toggleLike));
+
+// ── Helper: extract N evenly-spaced still frames + duration from a video file. ──
+// Runs ffmpeg/ffprobe on the local /directus-uploads volume mount; uploads each
+// frame back into the same dir + registers it as a directus_files row via the
+// Directus admin API. Returns { duration, frames: [uuid] } or null on failure.
+async function generateVideoThumbnails(videoFileUuid, count = 6) {
+  const path = require('path');
+  const fs = require('fs');
+  const { execFile } = require('child_process');
+  const { promisify } = require('util');
+  const { randomUUID } = require('crypto');
+  const execFileAsync = promisify(execFile);
+
+  const uploadsDir = process.env.DIRECTUS_UPLOADS_DIR || '/directus-uploads';
+  if (!fs.existsSync(uploadsDir)) {
+    logger.warn('directus uploads dir not mounted', { uploadsDir });
+    return null;
+  }
+
+  const PRIME_FOLDER = '96931d91-bd2f-4342-818f-3116cc9ff23c';
+  const ADMIN_UUID = 'eac5f7e8-f13d-4d3b-a267-1949073e5547';
+
+  // Find the source file by filename_disk in directus_files
+  const directusUrl = process.env.DIRECTUS_URL || process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
+  const adminToken = process.env.DIRECTUS_ADMIN_TOKEN;
+  let srcMeta;
+  try {
+    const r = await axios.get(`${directusUrl}/files/${videoFileUuid}`, {
+      headers: { Authorization: `Bearer ${adminToken}` }, timeout: 5000,
+    });
+    srcMeta = r.data && r.data.data;
+  } catch (err) {
+    logger.warn('thumbgen: failed to fetch source file meta', { videoFileUuid, error: err.message });
+    return null;
+  }
+  const srcPath = path.join(uploadsDir, srcMeta.filename_disk);
+  if (!fs.existsSync(srcPath)) {
+    logger.warn('thumbgen: source file missing on disk', { srcPath });
+    return null;
+  }
+
+  // Probe duration
+  let duration = 0;
+  try {
+    const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', srcPath]);
+    duration = Math.max(1, Math.round(parseFloat(stdout.trim()) || 0));
+  } catch (err) {
+    logger.warn('thumbgen: ffprobe failed', { srcPath, error: err.message });
+    return null;
+  }
+
+  // Extract `count` frames at evenly-spaced positions (skip extreme edges)
+  const positions = [];
+  for (let i = 0; i < count; i++) {
+    positions.push(Math.floor(duration * (0.08 + (0.84 * i / Math.max(1, count - 1)))));
+  }
+
+  const frames = [];
+  const FormData = require('form-data');
+  const tmpDir = '/tmp';
+  for (let i = 0; i < positions.length; i++) {
+    const ts = positions[i];
+    const tmpName = `prime-thumb-${randomUUID()}.jpg`;
+    const tmpPath = path.join(tmpDir, tmpName);
+    try {
+      await execFileAsync('ffmpeg', ['-y', '-ss', String(ts), '-i', srcPath, '-frames:v', '1', '-vf', 'scale=1280:-2', '-q:v', '4', tmpPath]);
+    } catch (err) {
+      logger.warn('thumbgen: ffmpeg failed for frame', { ts, srcPath, error: (err.stderr || err.message || '').toString().slice(0, 300) });
+      continue;
+    }
+    if (!fs.existsSync(tmpPath)) continue;
+    // Upload to Directus via multipart API — Directus handles disk placement + ownership
+    try {
+      const form = new FormData();
+      form.append('folder', PRIME_FOLDER);
+      form.append('title', `Auto-thumbnail frame ${i + 1}/${count}`);
+      form.append('file', fs.createReadStream(tmpPath), {
+        filename: `frame-${i + 1}-of-${count}.jpg`,
+        contentType: 'image/jpeg',
+      });
+      const upload = await axios.post(`${directusUrl}/files`, form, {
+        headers: { ...form.getHeaders(), Authorization: `Bearer ${adminToken}` },
+        timeout: 30000,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+      });
+      const uploadedId = upload.data && upload.data.data && upload.data.data.id;
+      if (uploadedId) frames.push(uploadedId);
+    } catch (err) {
+      logger.warn('thumbgen: failed to upload frame to directus', { error: err.response?.data?.errors?.[0]?.message || err.message });
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch (_) {}
+    }
+  }
+
+  if (!frames.length) return null;
+  return { duration, frames };
+}
+
+// ── Directus → bot prime_videos sync webhook ──
+// Triggered by a Directus Flow on items.create / update / delete of prime_videos.
+// Upserts a matching social_post in the PNPtv! PRIME channel (id=5) keyed by directus_id.
+app.post('/api/webapp/internal/prime-videos/sync', asyncHandler(async (req, res) => {
+  const expected = process.env.PRIME_SYNC_SECRET;
+  if (!expected) return res.status(503).json({ error: 'sync not configured' });
+  const provided = req.headers['x-prime-sync-secret'];
+  if (!provided || provided !== expected) return res.status(401).json({ error: 'unauthorized' });
+
+  const PRIME_CHANNEL_ID = 5;
+  const SANTINO_ID = '8599671840';
+  const CMS = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
+
+  // Directus may send the trigger payload either as a structured body or
+  // (when the operation template is `{{$trigger}}`) as the whole trigger
+  // object. Normalize both shapes here.
+  const body = req.body || {};
+  const rawEvent = String(body.event || 'items.update');
+  // Directus event format is "<collection>.items.<verb>" — strip the collection prefix
+  const event = rawEvent.includes('.items.') ? `items.${rawEvent.split('.items.')[1]}` : rawEvent;
+  const keys = Array.isArray(body.keys)
+    ? body.keys
+    : (body.key != null ? [body.key] : (body.payload && body.payload.id ? [body.payload.id] : []));
+  if (!keys.length) {
+    logger.warn('prime-videos sync: missing keys', { event: rawEvent, bodyKeys: Object.keys(body) });
+    return res.status(400).json({ error: 'missing keys' });
+  }
+
+  const directusUrl = process.env.DIRECTUS_URL || process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
+  const adminToken = process.env.DIRECTUS_ADMIN_TOKEN;
+  const results = [];
+
+  for (const key of keys) {
+    const directusId = parseInt(key, 10);
+    if (!Number.isFinite(directusId)) { results.push({ key, status: 'invalid' }); continue; }
+
+    if (event === 'items.delete') {
+      await getPool().query(
+        `UPDATE social_posts SET is_deleted = true, updated_at = NOW() WHERE directus_id = $1 AND channel_id = $2`,
+        [directusId, PRIME_CHANNEL_ID]
+      );
+      results.push({ key: directusId, status: 'soft_deleted' });
+      continue;
+    }
+
+    let row = null;
+    try {
+      const fetched = await axios.get(`${directusUrl}/items/prime_videos/${directusId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` }, timeout: 5000,
+      });
+      row = fetched.data && fetched.data.data;
+    } catch (err) {
+      if (err.response?.status === 404) {
+        await getPool().query(
+          `UPDATE social_posts SET is_deleted = true, updated_at = NOW() WHERE directus_id = $1 AND channel_id = $2`,
+          [directusId, PRIME_CHANNEL_ID]
+        );
+        results.push({ key: directusId, status: 'fetched_404_deleted' });
+        continue;
+      }
+      results.push({ key: directusId, status: 'fetch_failed', error: err.message });
+      continue;
+    }
+    if (!row) { results.push({ key: directusId, status: 'no_data' }); continue; }
+
+    if (row.status !== 'published' || !row.video_file) {
+      await getPool().query(
+        `UPDATE social_posts SET is_deleted = true, updated_at = NOW() WHERE directus_id = $1 AND channel_id = $2`,
+        [directusId, PRIME_CHANNEL_ID]
+      );
+      results.push({ key: directusId, status: 'unpublished_hidden' });
+      continue;
+    }
+
+    // Auto-generate multi-frame thumbnails on first sync OR when video_file changed
+    let storedThumbs = row.thumbnails;
+    if (typeof storedThumbs === 'string') { try { storedThumbs = JSON.parse(storedThumbs); } catch (_) { storedThumbs = {}; } }
+    storedThumbs = storedThumbs || {};
+    const needsThumbs = storedThumbs.video_file !== row.video_file
+      || !Array.isArray(storedThumbs.frames)
+      || storedThumbs.frames.length < 3;
+    let frameUuids = Array.isArray(storedThumbs.frames) ? storedThumbs.frames : [];
+    let primaryThumbUuid = row.thumbnail;
+    let durationSecs = row.duration;
+    if (needsThumbs) {
+      const gen = await generateVideoThumbnails(row.video_file, 6);
+      if (gen) {
+        frameUuids = gen.frames;
+        primaryThumbUuid = gen.frames[0];
+        durationSecs = gen.duration;
+        // Patch back into prime_videos
+        try {
+          await axios.patch(`${directusUrl}/items/prime_videos/${directusId}`, {
+            duration: durationSecs,
+            thumbnail: primaryThumbUuid,
+            cover_url: `/assets/${primaryThumbUuid}`,
+            thumbnails: { video_file: row.video_file, frames: frameUuids },
+          }, { headers: { Authorization: `Bearer ${adminToken}` }, timeout: 8000 });
+        } catch (err) {
+          logger.warn('thumbgen: failed to patch prime_videos', { directusId, error: err.message });
+        }
+      }
+    }
+
+    const mediaUrl = `${CMS}/assets/${row.video_file}`;
+    const thumbUrl = primaryThumbUuid ? `${CMS}/assets/${primaryThumbUuid}` : null;
+    const frameUrls = frameUuids.map((u) => `${CMS}/assets/${u}`);
+    const title = row.title || 'Untitled';
+    const description = row.description || '';
+    const content = `${title}: ${description}`.slice(0, 2000);
+
+    await getPool().query(
+      `INSERT INTO social_posts (
+         user_id, content, media_url, media_type, channel_id, content_tier,
+         video_thumbnail_url, video_title, video_description, video_thumbnails,
+         directus_id, is_exclusive, is_shareable, is_deleted
+       ) VALUES ($1, $2, $3, 'video', $4, 'PRIME', $5, $6, $7, $8::jsonb, $9, true, true, false)
+       ON CONFLICT (directus_id) WHERE directus_id IS NOT NULL
+       DO UPDATE SET
+         content = EXCLUDED.content,
+         media_url = EXCLUDED.media_url,
+         video_thumbnail_url = EXCLUDED.video_thumbnail_url,
+         video_title = EXCLUDED.video_title,
+         video_description = EXCLUDED.video_description,
+         video_thumbnails = EXCLUDED.video_thumbnails,
+         is_deleted = false,
+         updated_at = NOW()`,
+      [SANTINO_ID, content, mediaUrl, PRIME_CHANNEL_ID, thumbUrl, title, description, JSON.stringify(frameUrls), directusId]
+    );
+    results.push({ key: directusId, status: needsThumbs ? 'upserted_with_new_thumbs' : 'upserted', frames: frameUuids.length });
+  }
+
+  // Recompute post_count for the channel
+  await getPool().query(
+    `UPDATE creator_channels SET post_count = (
+       SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false
+     ), updated_at = NOW() WHERE id = $1`,
+    [PRIME_CHANNEL_ID]
+  );
+
+  res.json({ success: true, event, results });
+}));
+app.post('/api/webapp/social/posts/:postId/view', softAuth, asyncHandler(async (req, res) => {
+  const postId = parseInt(req.params.postId, 10);
+  if (!postId || Number.isNaN(postId)) return res.status(400).json({ error: 'Invalid post id' });
+  const dedupeKey = `view:post:${postId}:${(req.session?.userId) || (req.ip || 'anon').replace(/[^a-zA-Z0-9.:_-]/g, '_')}`;
+  try {
+    const seen = await redisClient.set(dedupeKey, '1', 'EX', 3600, 'NX');
+    if (seen !== 'OK') return res.json({ success: true, deduped: true });
+  } catch (_) { /* if Redis is down, count anyway */ }
+  try {
+    const { rows } = await getPool().query(
+      `UPDATE social_posts SET view_count = view_count + 1 WHERE id = $1 AND is_deleted = false RETURNING view_count, directus_id`,
+      [postId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Post not found' });
+    const { view_count, directus_id } = rows[0];
+    if (directus_id) {
+      const directusUrl = process.env.DIRECTUS_URL || process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
+      const token = process.env.DIRECTUS_ADMIN_TOKEN;
+      if (token) {
+        axios.patch(`${directusUrl}/items/prime_videos/${directus_id}`, { plays: view_count }, {
+          headers: { Authorization: `Bearer ${token}` }, timeout: 5000,
+        }).catch((err) => logger.warn('prime_videos.plays sync failed', { directus_id, error: err.message }));
+      }
+    }
+    return res.json({ success: true, view_count });
+  } catch (err) {
+    logger.error('post view increment failed', { postId, error: err.message });
+    return res.status(500).json({ error: 'Failed to record view' });
+  }
+}));
 app.delete('/api/webapp/social/posts/:postId', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.deletePost));
 app.patch('/api/webapp/social/posts/:postId', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.editPost));
 app.post('/api/webapp/social/posts/:postId/assign-channel', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.assignPostToChannel));
@@ -5558,7 +5829,7 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
          FROM creator_channels cc
          JOIN users u ON u.id = cc.creator_id
          WHERE ${conditions.join(' AND ')}
-         ORDER BY cc.post_count DESC, cc.created_at DESC
+         ORDER BY cc.is_featured DESC, cc.post_count DESC, cc.created_at DESC
          LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
         [...params, limit, offset]
       );
@@ -5576,7 +5847,10 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
           coverImageUrl: ch.cover_image_url,
           tags: ch.tags || [],
           isPremium: ch.is_premium,
+          accessType: ch.access_type,
+          featured: ch.is_featured === true,
           postCount: ch.post_count,
+          subscriberCount: ch.subscriber_count,
           createdAt: ch.created_at,
           creatorName: [ch.first_name, ch.last_name].filter(Boolean).join(' ') || ch.username || 'Creator',
           creatorUsername: ch.username,
@@ -6005,18 +6279,20 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       isCollaborator,
     };
 
-    // Check premium access
+    // Check access — owner/collaborator always allowed; otherwise delegate to
+    // entitlement resolver (handles free/prime/subscription/paid + global prime override).
     let locked = false;
-    if (ch.is_premium) {
-      if (!viewerId || !isOwner) {
-        if (viewerId) {
-          const subRes = await getPool().query(
-            `SELECT id FROM creator_subscriptions WHERE creator_id = $1 AND subscriber_id = $2 AND expires_at > NOW()`,
-            [ch.creator_id, viewerId]
-          );
-          if (!subRes.rows.length) locked = true;
-        } else {
+    let lockReason = null;
+    if (!isOwner && !isCollaborator) {
+      if (!viewerId) {
+        locked = true;
+        lockReason = ch.access_type === 'free' ? null : 'AUTH_REQUIRED';
+        if (ch.access_type === 'free') locked = false;
+      } else {
+        const decision = await EntitlementAccessService.hasResourceAccess(viewerId, 'channel', channelId);
+        if (!decision.allowed) {
           locked = true;
+          lockReason = decision.code || 'ACCESS_DENIED';
         }
       }
     }
@@ -6026,7 +6302,8 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
     if (!locked) {
       const postsRes = await getPool().query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls,
-                sp.video_thumbnail_url, sp.likes_count, sp.replies_count, sp.created_at,
+                sp.video_thumbnail_url, sp.video_thumbnails, sp.video_title, sp.video_description,
+                sp.likes_count, sp.replies_count, sp.view_count, sp.created_at,
                 sp.user_id AS author_id,
                 u.username AS author_username, u.first_name AS author_first_name, u.photo_file_id AS author_photo
          FROM social_posts sp
@@ -6039,7 +6316,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       posts = postsRes.rows;
     }
 
-    res.json({ success: true, channel, posts, locked });
+    res.json({ success: true, channel, posts, locked, lockReason });
   } catch (err) {
     logger.error('Channel detail error:', err);
     res.status(500).json({ error: 'Failed to load channel' });

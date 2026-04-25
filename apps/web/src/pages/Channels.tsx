@@ -825,6 +825,7 @@ function ChannelDetailView({
                               videoUrl={isValidPhotoUrl(p.media_url) ? p.media_url : null}
                               posterUrl={thumbSrc}
                               alt={p.video_title || p.content?.slice(0, 60) || "Video"}
+                              frames={Array.isArray(p.video_thumbnails) ? p.video_thumbnails : null}
                             />
                           ) : thumbSrc ? (
                             <img

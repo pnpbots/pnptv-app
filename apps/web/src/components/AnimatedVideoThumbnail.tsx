@@ -4,68 +4,100 @@ interface Props {
   videoUrl: string | null;
   posterUrl: string | null;
   alt: string;
+  /**
+   * Pre-extracted still frames (cheap, fast). When provided, these are cycled
+   * via opacity crossfade — no video bytes are pulled. Falls back to live
+   * video seeking only when this is empty/undefined.
+   */
+  frames?: string[] | null;
+  /** Crossfade interval between frames in ms. */
+  frameIntervalMs?: number;
 }
 
 /**
- * Displays a video thumbnail that cycles through random frames.
- * Only loads the video when the element is visible (IntersectionObserver).
- * Falls back to the static poster image if video can't load.
+ * Channel-feed thumbnail. Prefers cycling pre-extracted still frames (fast,
+ * cheap, no large video download). Falls back to seeking the actual video on
+ * the fly when no frames are available.
  */
-export function AnimatedVideoThumbnail({ videoUrl, posterUrl, alt }: Props) {
+export function AnimatedVideoThumbnail({ videoUrl, posterUrl, alt, frames, frameIntervalMs = 1500 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
+  const [frameIdx, setFrameIdx] = useState(0);
 
-  // Only activate when scrolled into view
+  const usableFrames = Array.isArray(frames) ? frames.filter((u) => typeof u === "string" && u.length > 0) : [];
+  const useFrames = usableFrames.length >= 2;
+
+  // Visibility — only animate / load when on screen
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !videoUrl) return;
-
+    if (!el) return;
     const observer = new IntersectionObserver(
       ([entry]) => setIsVisible(entry.isIntersecting),
       { threshold: 0.2 },
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [videoUrl]);
+  }, []);
 
-  // Seek to random frames periodically
+  // Frame cycling (cheap path)
   useEffect(() => {
-    if (!isVisible || !videoReady) return;
+    if (!useFrames || !isVisible) return;
+    const id = setInterval(() => {
+      setFrameIdx((i) => (i + 1) % usableFrames.length);
+    }, frameIntervalMs);
+    return () => clearInterval(id);
+  }, [useFrames, isVisible, usableFrames.length, frameIntervalMs]);
+
+  // Live-video seek path (expensive — only when no frames provided)
+  useEffect(() => {
+    if (useFrames || !isVisible || !videoReady) return;
     const video = videoRef.current;
     if (!video || !video.duration || video.duration < 2) return;
-
     const seekRandom = () => {
-      // Avoid the very start and end (often black frames)
       const safeStart = Math.min(1, video.duration * 0.05);
       const safeEnd = video.duration * 0.95;
       video.currentTime = safeStart + Math.random() * (safeEnd - safeStart);
     };
-
-    // Initial random seek already happened in onLoadedMetadata,
-    // so start the interval for subsequent seeks
     const id = setInterval(seekRandom, 3500);
     return () => clearInterval(id);
-  }, [isVisible, videoReady]);
+  }, [useFrames, isVisible, videoReady]);
 
   const handleMetadataLoaded = () => {
     const video = videoRef.current;
     if (!video || !video.duration || video.duration < 1) return;
-    // Seek to a random initial frame
     const safeStart = Math.min(1, video.duration * 0.05);
     const safeEnd = video.duration * 0.95;
     video.currentTime = safeStart + Math.random() * (safeEnd - safeStart);
   };
 
   const handleSeeked = () => {
-    // Video has seeked to the new frame — it's ready to show
     if (!videoReady) setVideoReady(true);
   };
 
+  // ── Render: pre-extracted frames path ──
+  if (useFrames) {
+    return (
+      <div ref={containerRef} className="w-full h-full relative">
+        {usableFrames.map((url, i) => (
+          <img
+            key={url}
+            src={url}
+            alt={i === 0 ? alt : ""}
+            loading={i === 0 ? "eager" : "lazy"}
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
+              i === frameIdx ? "opacity-100" : "opacity-0"
+            }`}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // ── Render: live-video fallback ──
   return (
     <div ref={containerRef} className="w-full h-full relative">
-      {/* Static poster — always rendered as fallback */}
       {posterUrl && (
         <img
           src={posterUrl}
@@ -76,7 +108,6 @@ export function AnimatedVideoThumbnail({ videoUrl, posterUrl, alt }: Props) {
         />
       )}
 
-      {/* Video frame cycler — only mounted when visible */}
       {isVisible && videoUrl && (
         <video
           ref={videoRef}
@@ -93,27 +124,11 @@ export function AnimatedVideoThumbnail({ videoUrl, posterUrl, alt }: Props) {
         />
       )}
 
-      {/* Fallback when no poster and no video */}
       {!posterUrl && !videoUrl && (
         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-pnp-surface to-pnp-bg">
-          <svg
-            className="w-8 h-8 text-pnp-textSecondary"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
+          <svg className="w-8 h-8 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
       )}
