@@ -187,7 +187,7 @@ class SocialPostService {
           thumbnail_url: v.thumbnail
             ? `/cms/assets/${v.thumbnail}`
             : (v.video_file ? `/video-thumb/${v.video_file}.jpg` : null),
-          link: `/channels?channel=prime&video=${v.id}`,
+          link: `/media?play=${v.id}`,
         }));
 
       if (items.length === 0) return null;
@@ -203,7 +203,7 @@ class SocialPostService {
         content: newCount > 0
           ? `${newCount} new video${newCount === 1 ? '' : 's'} dropped on PRIME this week`
           : 'Latest on PNPtv PRIME',
-        promoted_link: '/channels?channel=prime',
+        promoted_link: '/media',
         promoted_link_label: 'Browse all videos',
         author_id: 'pnptv-official',
         author_username: 'pnptv',
