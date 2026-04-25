@@ -250,13 +250,13 @@ function EmailModal({ s, lang, onClose, onSuccess }: EmailModalProps) {
       >
         {s.modalTitle}
       </h2>
-      <p style={{ margin: "0 0 20px", fontSize: 14, color: "#8E8E93", lineHeight: 1.5 }}>
+      <p style={{ margin: "0 0 20px", fontSize: 14, color: "var(--pnp-text-secondary)", lineHeight: 1.5 }}>
         {s.modalSubtitle}
       </p>
 
       <label
         htmlFor="lt100-email"
-        style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#8E8E93", marginBottom: 6 }}
+        style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--pnp-text-secondary)", marginBottom: 6 }}
       >
         {s.emailLabel}
       </label>
@@ -337,7 +337,7 @@ function EmailModal({ s, lang, onClose, onSuccess }: EmailModalProps) {
           padding: "10px",
           background: "none",
           border: "none",
-          color: "#8E8E93",
+          color: "var(--pnp-text-secondary)",
           fontSize: 13,
           cursor: submitting ? "not-allowed" : "pointer",
           minHeight: 44,
@@ -391,10 +391,10 @@ function ConfirmationModal({ s, onClose, onDismiss, activateHref }: Confirmation
       >
         {s.confirmationTitle}
       </h2>
-      <p style={{ margin: "0 0 12px", fontSize: 14, color: "#8E8E93", lineHeight: 1.5, textAlign: "center" }}>
+      <p style={{ margin: "0 0 12px", fontSize: 14, color: "var(--pnp-text-secondary)", lineHeight: 1.5, textAlign: "center" }}>
         {s.confirmationBody}
       </p>
-      <p style={{ margin: "0 0 24px", fontSize: 12, color: "#8E8E93", textAlign: "center" }}>
+      <p style={{ margin: "0 0 24px", fontSize: 12, color: "var(--pnp-text-secondary)", textAlign: "center" }}>
         {s.confirmationCheckEmail}
       </p>
 
@@ -549,10 +549,10 @@ function ActivateView({ s, initialCode }: ActivateViewProps) {
         <h2 style={{ margin: "0 0 10px", fontSize: 22, fontWeight: 800, color: "#ffffff" }}>
           {s.activateSuccessTitle}
         </h2>
-        <p style={{ margin: "0 0 24px", fontSize: 15, color: "#8E8E93", maxWidth: 320, lineHeight: 1.5 }}>
+        <p style={{ margin: "0 0 24px", fontSize: 15, color: "var(--pnp-text-secondary)", maxWidth: 320, lineHeight: 1.5 }}>
           {s.activateSuccessBody}
         </p>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#8E8E93", fontSize: 13 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--pnp-text-secondary)", fontSize: 13 }}>
           <Spinner size={14} />
           <span>{s.activateSuccessBody}</span>
         </div>
@@ -589,13 +589,13 @@ function ActivateView({ s, initialCode }: ActivateViewProps) {
       >
         {s.activateTitle}
       </h1>
-      <p style={{ margin: "0 0 28px", fontSize: 15, color: "#8E8E93", lineHeight: 1.5 }}>
+      <p style={{ margin: "0 0 28px", fontSize: 15, color: "var(--pnp-text-secondary)", lineHeight: 1.5 }}>
         {s.activateSubtitle}
       </p>
 
       <label
         htmlFor="lt100-code"
-        style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#8E8E93", marginBottom: 6 }}
+        style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--pnp-text-secondary)", marginBottom: 6 }}
       >
         {s.codeLabel}
       </label>
@@ -718,7 +718,7 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
     <div
       style={{
         minHeight: "100vh",
-        background: "#120d14",
+        background: "var(--pnp-background)",
         color: "#ffffff",
         display: "flex",
         flexDirection: "column",
@@ -784,7 +784,7 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
           >
             {s.heroTitle}
           </h1>
-          <p style={{ color: "#8E8E93", fontSize: 16, margin: 0 }}>
+          <p style={{ color: "var(--pnp-text-secondary)", fontSize: 16, margin: 0 }}>
             {s.heroSubtitle}
           </p>
         </section>
@@ -943,12 +943,12 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
           }}
         >
           <span style={{ color: "#ff3377" }}>⬥</span>
-          <span style={{ color: "#8E8E93" }}>⬥</span>
+          <span style={{ color: "var(--pnp-text-secondary)" }}>⬥</span>
           <span style={{ color: "#ff9933" }}>⬥</span>
         </div>
 
         {/* Already paid link */}
-        <p style={{ textAlign: "center", fontSize: 13, color: "#8E8E93" }}>
+        <p style={{ textAlign: "center", fontSize: 13, color: "var(--pnp-text-secondary)" }}>
           {s.alreadyPaid}{" "}
           <a
             href={activateHref}
@@ -1372,7 +1372,7 @@ export default function Lifetime100() {
       <div
         style={{
           minHeight: "100vh",
-          background: "#120d14",
+          background: "var(--pnp-background)",
           color: "#ffffff",
           position: "relative",
           overflowX: "hidden",

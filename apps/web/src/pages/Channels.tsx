@@ -12,6 +12,7 @@ import {
   deleteCreatorChannel,
   uploadChannelCover,
   uploadChannelVideo,
+  recordPostView,
   type Channel,
   type CreatorChannel,
   type SocialPostItem,
@@ -772,7 +773,7 @@ function ChannelDetailView({
               </svg>
             </div>
             <p className="text-white font-semibold text-base">Premium Channel</p>
-            <p className="text-sm text-center" style={{ color: "#8E8E93" }}>
+            <p className="text-sm text-center" style={{ color: "var(--pnp-text-secondary)" }}>
               Subscribe to {channel.creatorName || "this creator"} to access this channel
             </p>
             <button
@@ -813,6 +814,7 @@ function ChannelDetailView({
                           onClick={() => {
                             if (isVideo && isValidPhotoUrl(p.media_url)) {
                               setPlayingVideo({ url: p.media_url!, title: p.video_title || p.content?.slice(0, 60) });
+                              recordPostView(p.id).catch(() => { /* non-blocking */ });
                             } else if (!isVideo && isValidPhotoUrl(p.media_url)) {
                               navigate(`/social/post/${p.id}`);
                             }
@@ -839,6 +841,20 @@ function ChannelDetailView({
                                   <path d="M8 5v14l11-7z" />
                                 </svg>
                               </div>
+                            </div>
+                          )}
+                          {isVideo && (
+                            <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1 pointer-events-none">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[10px] font-medium text-white">
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17a5 5 0 110-10 5 5 0 010 10zm0-8a3 3 0 100 6 3 3 0 000-6z" /></svg>
+                                {p.view_count ?? 0}
+                              </span>
+                              {(p.likes_count ?? 0) > 0 && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[10px] font-medium text-white">
+                                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg>
+                                  {p.likes_count}
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -869,6 +885,7 @@ function ChannelDetailView({
                     </div>
                     <p className="text-sm text-pnp-textPrimary leading-relaxed line-clamp-4">{p.content}</p>
                     <div className="flex items-center gap-4 mt-2 text-[11px] text-pnp-textSecondary">
+                      <span>{p.view_count ?? 0} views</span>
                       <span>{p.likes_count} likes</span>
                       <span>{p.replies_count} replies</span>
                     </div>
@@ -1401,15 +1418,74 @@ export default function Channels() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {creatorChannels.map((ch) => (
-                    <CreatorChannelCard
-                      key={ch.id}
-                      channel={ch}
-                      onClick={() => setSelectedChannelId(ch.id)}
-                    />
-                  ))}
-                </div>
+                {(() => {
+                  const featuredChannel = creatorChannels.find((c) => c.featured);
+                  const gridChannels = creatorChannels.filter((c) => !c.featured);
+                  return (
+                    <>
+                      {featuredChannel && (
+                        <button
+                          onClick={() => setSelectedChannelId(featuredChannel.id)}
+                          className="w-full mb-4 group relative rounded-2xl overflow-hidden border border-pnp-accent/40 bg-pnp-surface text-left transition-transform hover:-translate-y-0.5"
+                          style={{
+                            background: featuredChannel.coverImageUrl
+                              ? `linear-gradient(135deg, rgba(167,139,250,0.85) 0%, rgba(212,0,122,0.65) 50%, rgba(0,0,0,0.6) 100%), url(${featuredChannel.coverImageUrl}) center/cover`
+                              : "linear-gradient(135deg, rgba(167,139,250,0.9) 0%, rgba(212,0,122,0.85) 100%)",
+                          }}
+                        >
+                          <div className="px-5 py-6 sm:px-7 sm:py-8 flex flex-col sm:flex-row sm:items-center gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-white/20 text-white backdrop-blur">
+                                  Featured · PRIME
+                                </span>
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-white/85">
+                                  Available to all PRIME members
+                                </span>
+                              </div>
+                              <h2 className="text-2xl sm:text-3xl font-bold text-white drop-shadow-sm">
+                                {featuredChannel.name}
+                              </h2>
+                              {featuredChannel.description && (
+                                <p className="mt-1.5 text-sm text-white/90 line-clamp-2 max-w-2xl">
+                                  {featuredChannel.description}
+                                </p>
+                              )}
+                              <div className="mt-3 flex items-center gap-3 text-xs text-white/80">
+                                <span>{featuredChannel.postCount} posts</span>
+                                {(featuredChannel.subscriberCount ?? 0) > 0 && (
+                                  <>
+                                    <span className="w-0.5 h-0.5 rounded-full bg-white/60" />
+                                    <span>{featuredChannel.subscriberCount} subs</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex-shrink-0">
+                              <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white text-pnp-accent font-semibold text-sm shadow-lg group-hover:scale-105 transition-transform">
+                                Enter PRIME
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                </svg>
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      )}
+                      {gridChannels.length > 0 && (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                          {gridChannels.map((ch) => (
+                            <CreatorChannelCard
+                              key={ch.id}
+                              channel={ch}
+                              onClick={() => setSelectedChannelId(ch.id)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 {channelsLoadingMore && (
                   <div className="flex justify-center py-4">
                     <div className="w-6 h-6 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />

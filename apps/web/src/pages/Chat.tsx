@@ -1058,7 +1058,7 @@ function HangoutChatPanel({
           <div
             className="fixed z-50 rounded-xl overflow-hidden shadow-xl py-1 min-w-[160px] animate-fade-in-up"
             style={{
-              background: "#2C2C2E",
+              background: "var(--pnp-surface-hover)",
               border: "1px solid rgba(255,255,255,0.1)",
               left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 280)),
               top: Math.max(60, Math.min(contextMenu.y, window.innerHeight - 360)),
@@ -1162,7 +1162,7 @@ function HangoutChatPanel({
               left: emojiPickerPos.x,
               top: emojiPickerPos.y,
               width: 320,
-              background: "#1C1C1E",
+              background: "var(--pnp-surface)",
               border: "1px solid rgba(255,255,255,0.12)",
             }}
           >
@@ -1206,7 +1206,7 @@ function HangoutChatPanel({
       {reactorsSheet && createPortal(
         <>
           <div className="fixed inset-0 z-[80] bg-black/50" onClick={() => setReactorsSheet(null)} />
-          <div className="fixed bottom-0 left-0 right-0 z-[81] rounded-t-2xl shadow-2xl max-h-[60vh] flex flex-col overflow-hidden" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
+          <div className="fixed bottom-0 left-0 right-0 z-[81] rounded-t-2xl shadow-2xl max-h-[60vh] flex flex-col overflow-hidden" style={{ background: "var(--pnp-surface)", border: "1px solid rgba(255,255,255,0.1)" }}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
               <p className="text-sm font-semibold text-white">{reactorsSheet.emoji} {reactorsSheet.users.length} reaction{reactorsSheet.users.length !== 1 ? "s" : ""}</p>
               <button onClick={() => setReactorsSheet(null)} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 text-pnp-textSecondary" aria-label="Close">
@@ -1411,7 +1411,7 @@ function HangoutChatPanel({
         >
           <div
             className="w-full max-w-lg rounded-t-2xl p-5 pb-8 space-y-3"
-            style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}
+            style={{ background: "var(--pnp-surface)", border: "1px solid rgba(255,255,255,0.08)" }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-center mb-1" aria-hidden="true">
@@ -1505,7 +1505,7 @@ function HangoutChatPanel({
             || (confirmDelete.media_type === "image" ? "📷 Photo" : confirmDelete.media_type === "video" ? "🎥 Video" : confirmDelete.media_type === "audio" ? "🎤 Voice message" : "Message");
         return (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in" onClick={() => !deleting && setConfirmDelete(null)}>
-            <div className="w-full max-w-[320px] rounded-2xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10 animate-fade-in-up" style={{ background: "#1C1C1E" }} onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-[320px] rounded-2xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10 animate-fade-in-up" style={{ background: "var(--pnp-surface)" }} onClick={(e) => e.stopPropagation()}>
               <div className="px-5 pt-5 pb-4 space-y-2">
                 <h3 className="text-base font-bold text-white">Delete message?</h3>
                 <p className="text-[13px] text-white/60 line-clamp-2 leading-snug">{preview}</p>
@@ -2564,7 +2564,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               {showGroupMenu && (
                 <>
                   <div className="fixed inset-0 z-[70]" onClick={() => setShowGroupMenu(false)} />
-                  <div className="fixed z-[71] rounded-xl overflow-hidden shadow-xl min-w-[200px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", top: groupMenuPos.top, right: groupMenuPos.right }}>
+                  <div className="fixed z-[71] rounded-xl overflow-hidden shadow-xl min-w-[200px]" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)", top: groupMenuPos.top, right: groupMenuPos.right }}>
                     <button
                       onClick={() => { setShowGroupMenu(false); setShowOnline(true); }}
                       className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
@@ -2740,7 +2740,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           >
             <div
               className="rounded-t-2xl w-full flex flex-col"
-              style={{ maxHeight: "60dvh", background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
+              style={{ maxHeight: "60dvh", background: "var(--pnp-surface)", borderTop: "1px solid rgba(255,255,255,0.1)" }}
             >
               {/* Drag handle */}
               <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
@@ -2750,12 +2750,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               <div className="flex items-center justify-between px-5 pt-4 pb-3 flex-shrink-0">
                 <div>
                   <p className="text-sm font-semibold text-white">{t.chat.onlineNow}</p>
-                  <p className="text-xs" style={{ color: "#8E8E93" }}>{t.chat.onlineOfTotal(onlineMembers.length, activeGroup.memberCount)}</p>
+                  <p className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>{t.chat.onlineOfTotal(onlineMembers.length, activeGroup.memberCount)}</p>
                 </div>
                 <button
                   onClick={() => setShowOnline(false)}
                   className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
-                  style={{ color: "#8E8E93" }}
+                  style={{ color: "var(--pnp-text-secondary)" }}
                   aria-label={t.chat.closeOnlinePanel}
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2766,7 +2766,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               {/* Member grid / list */}
               <div className="overflow-y-auto flex-1 px-4 pb-6">
                 {onlineMembers.length === 0 ? (
-                  <p className="text-center text-sm py-6" style={{ color: "#8E8E93" }}>{t.chat.noOtherMembersOnline}</p>
+                  <p className="text-center text-sm py-6" style={{ color: "var(--pnp-text-secondary)" }}>{t.chat.noOtherMembersOnline}</p>
                 ) : (
                   <div className="space-y-1">
                     {onlineMembers.map((member) => {
@@ -2835,14 +2835,14 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           >
             <div
               className="rounded-t-2xl w-full flex flex-col"
-              style={{ maxHeight: "80dvh", background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
+              style={{ maxHeight: "80dvh", background: "var(--pnp-surface)", borderTop: "1px solid rgba(255,255,255,0.1)" }}
             >
               <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
                 <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }} />
               </div>
               <div className="flex items-center justify-between px-5 pt-2 pb-3 flex-shrink-0">
                 <p className="text-sm font-semibold text-white">Group Settings</p>
-                <button onClick={() => setShowSettings(false)} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10" style={{ color: "#8E8E93" }} aria-label="Close settings">
+                <button onClick={() => setShowSettings(false)} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10" style={{ color: "var(--pnp-text-secondary)" }} aria-label="Close settings">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
@@ -3281,7 +3281,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                       {memberActionMenu === m.user_id && (
                                         <>
                                           <div className="fixed inset-0 z-30" onClick={() => setMemberActionMenu(null)} />
-                                          <div className="absolute right-0 top-8 z-40 rounded-xl overflow-hidden shadow-xl min-w-[140px] py-1" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+                                          <div className="absolute right-0 top-8 z-40 rounded-xl overflow-hidden shadow-xl min-w-[140px] py-1" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)" }}>
                                             {!isMod && !m.is_banned && (
                                               <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await promoteHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-blue-400 hover:bg-white/10">Promote to Mod</button>
                                             )}
@@ -3425,7 +3425,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
             onClick={(e) => { if (e.target === e.currentTarget && !confirmLoading) setConfirmAction(null); }}
           >
-            <div className="w-full max-w-lg rounded-t-2xl p-6 space-y-4" style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+            <div className="w-full max-w-lg rounded-t-2xl p-6 space-y-4" style={{ background: "var(--pnp-surface)", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
               {/* Drag handle */}
               <div className="flex justify-center -mt-2 mb-2"><div className="w-10 h-1 rounded-full bg-white/20" /></div>
               <h3 className="text-base font-bold text-white">{confirmAction.title}</h3>
@@ -4212,7 +4212,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       {groupCardMenuId === group.id && createPortal(
                         <>
                           <div className="fixed inset-0 z-[150]" onClick={() => setGroupCardMenuId(null)} />
-                          <div className="fixed z-[151] rounded-xl overflow-hidden shadow-xl min-w-[150px]" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", top: groupCardMenuPos.top, right: groupCardMenuPos.right }}>
+                          <div className="fixed z-[151] rounded-xl overflow-hidden shadow-xl min-w-[150px]" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)", top: groupCardMenuPos.top, right: groupCardMenuPos.right }}>
                             <button
                               onClick={() => {
                                 setGroupCardMenuId(null);
@@ -4281,12 +4281,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 {[0, 1, 2].map(i => (
                   <div key={i} className="glass-card-sm p-4 animate-pulse">
                     <div className="flex gap-3 items-center">
-                      <div className="w-10 h-10 rounded-full flex-shrink-0" style={{ background: "#2C2C2E" }} />
+                      <div className="w-10 h-10 rounded-full flex-shrink-0" style={{ background: "var(--pnp-surface-hover)" }} />
                       <div className="flex-1 space-y-2">
-                        <div className="h-4 rounded w-32" style={{ background: "#2C2C2E" }} />
-                        <div className="h-3 rounded w-24" style={{ background: "#2C2C2E" }} />
+                        <div className="h-4 rounded w-32" style={{ background: "var(--pnp-surface-hover)" }} />
+                        <div className="h-3 rounded w-24" style={{ background: "var(--pnp-surface-hover)" }} />
                       </div>
-                      <div className="h-8 w-16 rounded-lg flex-shrink-0" style={{ background: "#2C2C2E" }} />
+                      <div className="h-8 w-16 rounded-lg flex-shrink-0" style={{ background: "var(--pnp-surface-hover)" }} />
                     </div>
                   </div>
                 ))}
@@ -4523,7 +4523,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
           onClick={(e) => { if (e.target === e.currentTarget) setEditingGroup(null); }}
         >
-          <div className="w-full max-w-lg rounded-t-2xl p-6 space-y-4" style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+          <div className="w-full max-w-lg rounded-t-2xl p-6 space-y-4" style={{ background: "var(--pnp-surface)", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
             <div className="flex justify-center -mt-2 mb-2"><div className="w-10 h-1 rounded-full bg-white/20" /></div>
             <h3 className="text-base font-bold text-white">Edit Group</h3>
             <div className="space-y-3">
@@ -4574,7 +4574,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
           onClick={(e) => { if (e.target === e.currentTarget && !confirmLoading) setConfirmAction(null); }}
         >
-          <div className="w-full max-w-lg rounded-t-2xl p-6 space-y-4" style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+          <div className="w-full max-w-lg rounded-t-2xl p-6 space-y-4" style={{ background: "var(--pnp-surface)", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
             <div className="flex justify-center -mt-2 mb-2"><div className="w-10 h-1 rounded-full bg-white/20" /></div>
             <h3 className="text-base font-bold text-white">{confirmAction.title}</h3>
             <p className="text-sm text-pnp-textSecondary">{confirmAction.message}</p>
@@ -4644,7 +4644,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         >
           <div
             className="w-full max-w-md rounded-t-2xl p-5 pb-safe space-y-4"
-            style={{ background: "#1C1C1E", borderTop: "1px solid rgba(255,255,255,0.1)" }}
+            style={{ background: "var(--pnp-surface)", borderTop: "1px solid rgba(255,255,255,0.1)" }}
           >
             <div className="flex justify-center">
               <div className="w-10 h-1 rounded-full bg-white/20" />

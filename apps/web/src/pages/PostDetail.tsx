@@ -129,7 +129,7 @@ export default function PostDetail() {
       <button
         onClick={() => navigate(-1)}
         className="flex items-center gap-2 text-sm mb-4 transition-colors hover:text-pnp-accent"
-        style={{ color: "#8E8E93" }}
+        style={{ color: "var(--pnp-text-secondary)" }}
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -141,11 +141,11 @@ export default function PostDetail() {
 
       {!loading && error && (
         <div className="glass-card-sm p-8 text-center">
-          <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--pnp-text-secondary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
           </svg>
           <p className="text-white font-medium mb-1">Post Not Found</p>
-          <p className="text-sm mb-5" style={{ color: "#8E8E93" }}>
+          <p className="text-sm mb-5" style={{ color: "var(--pnp-text-secondary)" }}>
             {error}
           </p>
           <Link
@@ -194,11 +194,11 @@ export default function PostDetail() {
                 </button>
                 <div className="flex items-center gap-2 mt-0.5">
                   {post.author_username && (
-                    <span className="text-xs" style={{ color: "#8E8E93" }}>
+                    <span className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>
                       @{post.author_username}
                     </span>
                   )}
-                  <span className="text-xs" style={{ color: "#8E8E93" }}>
+                  <span className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>
                     &middot; {timeAgo(post.created_at)}
                   </span>
                   {post.author_creator_verified && (
@@ -222,7 +222,7 @@ export default function PostDetail() {
                     ? "PRIME Content"
                     : "Member Content"}
                 </p>
-                <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+                <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary)" }}>
                   {post.content_tier === "prime" || post.content_tier === "PRIME"
                     ? "PRIME content — Subscribe to view"
                     : "This post is for members only. Upgrade to view."}
@@ -244,7 +244,7 @@ export default function PostDetail() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                 </svg>
                 <p className="text-sm font-semibold text-white mb-1">Exclusive Content</p>
-                <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+                <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary)" }}>
                   Subscribe to {post.author_first_name || post.author_username} to unlock this post.
                 </p>
                 <button
@@ -329,7 +329,7 @@ export default function PostDetail() {
             )}
 
             {/* Stats + share row */}
-            <div className="flex items-center gap-5 mt-4 pt-4 border-t border-white/5" style={{ color: "#8E8E93" }}>
+            <div className="flex items-center gap-5 mt-4 pt-4 border-t border-white/5" style={{ color: "var(--pnp-text-secondary)" }}>
               {/* Likes */}
               <span className="flex items-center gap-1.5 text-xs">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -351,7 +351,7 @@ export default function PostDetail() {
                 <button
                   onClick={handleShare}
                   className="ml-auto flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-all border border-white/10 hover:border-white/20 hover:text-white"
-                  style={{ color: "#8E8E93" }}
+                  style={{ color: "var(--pnp-text-secondary)" }}
                   aria-label="Share this post"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -372,7 +372,7 @@ export default function PostDetail() {
             >
               <div
                 className="w-full max-w-sm rounded-2xl p-5 space-y-4"
-                style={{ background: "#1C1C1E", border: "1px solid rgba(212,0,122,0.25)" }}
+                style={{ background: "var(--pnp-surface)", border: "1px solid rgba(212,0,122,0.25)" }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center gap-3">
@@ -429,7 +429,7 @@ export default function PostDetail() {
               <img src="/Logo2-50.png" alt="PNPtv!" className="w-8 h-8 object-contain" />
             </div>
             <p className="text-white font-semibold mb-1">PNPtv!</p>
-            <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary)" }}>
               The queer PNP community. Connect, stream, and vibe.
             </p>
             <Link

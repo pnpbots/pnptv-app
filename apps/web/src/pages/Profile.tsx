@@ -632,7 +632,7 @@ export default function Profile() {
           </svg>
         </div>
         <h1 className="text-xl font-bold text-white mb-2">{p.signInRequired}</h1>
-        <p className="text-sm mb-6" style={{ color: "#8E8E93" }}>
+        <p className="text-sm mb-6" style={{ color: "var(--pnp-text-secondary)" }}>
           {p.signInPrompt}
         </p>
         <Button onClick={login}>{p.signIn}</Button>
@@ -680,11 +680,11 @@ export default function Profile() {
   if (error || !profile) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
-        <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--pnp-text-secondary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
         </svg>
         <p className="text-white font-medium mb-1">{p.profileNotFound}</p>
-        <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>{error || p.userDoesntExist}</p>
+        <p className="text-sm mb-4" style={{ color: "var(--pnp-text-secondary)" }}>{error || p.userDoesntExist}</p>
         <Button onClick={() => navigate("/")}>{p.goHome}</Button>
       </div>
     );
@@ -698,7 +698,7 @@ export default function Profile() {
           <button
             onClick={() => navigate(-1)}
             className="flex items-center gap-2 text-sm mb-4 hover:text-white transition-colors"
-            style={{ color: "#8E8E93" }}
+            style={{ color: "var(--pnp-text-secondary)" }}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -716,7 +716,7 @@ export default function Profile() {
             </svg>
           </div>
           <p className="text-white font-semibold mb-1">User Blocked</p>
-          <p className="text-sm mb-6" style={{ color: "#8E8E93" }}>
+          <p className="text-sm mb-6" style={{ color: "var(--pnp-text-secondary)" }}>
             You have blocked {profile.firstName || profile.username || "this user"}. Their content is hidden.
           </p>
           <button
@@ -794,7 +794,7 @@ export default function Profile() {
         <button
           onClick={() => navigate(-1)}
           className="flex items-center gap-2 text-sm mb-4 hover:text-pnp-accent transition-colors"
-          style={{ color: "#8E8E93" }}
+          style={{ color: "var(--pnp-text-secondary)" }}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -965,7 +965,7 @@ export default function Profile() {
               )}
             </div>
             {profile.username && (
-              <p className="text-sm" style={{ color: "#8E8E93" }}>@{profile.username}</p>
+              <p className="text-sm" style={{ color: "var(--pnp-text-secondary)" }}>@{profile.username}</p>
             )}
             {isOwnProfile && dpnsHandle && (
               <span
@@ -992,7 +992,7 @@ export default function Profile() {
                 style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
               >
                 <strong className="text-base font-bold text-white tabular-nums leading-none">{profile.postCount ?? posts.length}</strong>
-                <span className="text-[10px] uppercase tracking-wider mt-1" style={{ color: "#8E8E93" }}>{p.posts}</span>
+                <span className="text-[10px] uppercase tracking-wider mt-1" style={{ color: "var(--pnp-text-secondary)" }}>{p.posts}</span>
               </div>
               <button
                 onClick={() => setShowFollowModal("followers")}
@@ -1000,7 +1000,7 @@ export default function Profile() {
                 style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
               >
                 <strong className="text-base font-bold text-white tabular-nums leading-none">{followersCount}</strong>
-                <span className="text-[10px] uppercase tracking-wider mt-1" style={{ color: "#8E8E93" }}>{p.followers}</span>
+                <span className="text-[10px] uppercase tracking-wider mt-1" style={{ color: "var(--pnp-text-secondary)" }}>{p.followers}</span>
               </button>
               <button
                 onClick={() => setShowFollowModal("following")}
@@ -1008,12 +1008,12 @@ export default function Profile() {
                 style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
               >
                 <strong className="text-base font-bold text-white tabular-nums leading-none">{followingCount}</strong>
-                <span className="text-[10px] uppercase tracking-wider mt-1" style={{ color: "#8E8E93" }}>{p.following}</span>
+                <span className="text-[10px] uppercase tracking-wider mt-1" style={{ color: "var(--pnp-text-secondary)" }}>{p.following}</span>
               </button>
             </div>
 
             {/* Secondary stats + meta row */}
-            <div className="flex items-center gap-x-3 gap-y-1 mt-3 flex-wrap text-xs" style={{ color: "#8E8E93" }}>
+            <div className="flex items-center gap-x-3 gap-y-1 mt-3 flex-wrap text-xs" style={{ color: "var(--pnp-text-secondary)" }}>
               {profile.creatorStatus === "active" && (profile.creatorSubscriberCount || 0) > 0 && (
                 <span className="inline-flex items-center gap-1">
                   <strong className="text-white tabular-nums">{profile.creatorSubscriberCount}</strong>
@@ -1413,7 +1413,7 @@ export default function Profile() {
                     className="text-xs px-3 py-1 rounded-full disabled:opacity-50 transition-colors"
                     style={isBlocked
                       ? { background: "rgba(255,59,48,0.12)", color: "#FF453A", border: "1px solid rgba(255,59,48,0.3)" }
-                      : { background: "rgba(255,255,255,0.05)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
+                      : { background: "rgba(255,255,255,0.05)", color: "var(--pnp-text-secondary)", border: "1px solid rgba(255,255,255,0.1)" }
                     }
                   >
                     {blockLoading ? "..." : isBlocked ? "Unblock" : "Block"}
@@ -1437,7 +1437,7 @@ export default function Profile() {
         const gradientBg    = modalTc.gradient;
         return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
-          <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>
+          <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4" style={{ background: "var(--pnp-surface)", border: "1px solid rgba(255,255,255,0.08)" }}>
             {/* Header */}
             <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold text-white">
@@ -1463,7 +1463,7 @@ export default function Profile() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-white">${profile.creatorPriceUsd || 15}{p.perMonth}</p>
-                <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>{p.exclusiveCreatorAccess}</p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>{p.exclusiveCreatorAccess}</p>
               </div>
             </div>
 
@@ -1471,7 +1471,7 @@ export default function Profile() {
               <>
                 {/* Provider selector — Card (ePayco) or Dash (BTCPay) */}
                 <div>
-                  <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>{p.paymentMethod}</p>
+                  <p className="text-xs font-medium mb-2" style={{ color: "var(--pnp-text-secondary)" }}>{p.paymentMethod}</p>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -1479,7 +1479,7 @@ export default function Profile() {
                       className="py-2.5 rounded-lg text-sm font-medium transition-colors border"
                       style={subscribeProvider === "epayco"
                         ? { background: `rgba(${accentRgb},0.15)`, color: accentColor, borderColor: `rgba(${accentRgb},0.4)` }
-                        : { background: "rgba(255,255,255,0.04)", color: "#8E8E93", borderColor: "rgba(255,255,255,0.08)" }
+                        : { background: "rgba(255,255,255,0.04)", color: "var(--pnp-text-secondary)", borderColor: "rgba(255,255,255,0.08)" }
                       }
                     >
                       💳 {p.epaycoCard}
@@ -1494,7 +1494,7 @@ export default function Profile() {
                           ? { background: "rgba(255,255,255,0.02)", color: "#555", borderColor: "rgba(255,255,255,0.05)", cursor: "not-allowed" }
                           : subscribeProvider === "dash"
                           ? { background: "rgba(0,141,228,0.15)", color: "#008DE4", borderColor: "rgba(0,141,228,0.4)" }
-                          : { background: "rgba(255,255,255,0.04)", color: "#8E8E93", borderColor: "rgba(255,255,255,0.08)" }
+                          : { background: "rgba(255,255,255,0.04)", color: "var(--pnp-text-secondary)", borderColor: "rgba(255,255,255,0.08)" }
                       }
                     >
                       🥷 Dash
@@ -1504,7 +1504,7 @@ export default function Profile() {
 
                 {/* Email input */}
                 <div>
-                  <label className="text-xs font-medium block mb-1.5" style={{ color: "#8E8E93" }}>{p.emailForReceipt}</label>
+                  <label className="text-xs font-medium block mb-1.5" style={{ color: "var(--pnp-text-secondary)" }}>{p.emailForReceipt}</label>
                   <input
                     type="email"
                     value={subscribeEmail}
@@ -1547,7 +1547,7 @@ export default function Profile() {
                     </svg>
                   </div>
                   <p className="text-sm font-medium text-white text-center">{p.waitingForPaymentConfirmation}</p>
-                  <p className="text-xs text-center" style={{ color: "#8E8E93" }}>
+                  <p className="text-xs text-center" style={{ color: "var(--pnp-text-secondary)" }}>
                     {p.completePaymentInTab}
                   </p>
                 </div>
@@ -1567,7 +1567,7 @@ export default function Profile() {
                 <button
                   onClick={() => { setSubscribeAwaitingPayment(false); setSubscribePaymentId(null); setSubscribeError(null); }}
                   className="text-xs text-center"
-                  style={{ color: "#8E8E93" }}
+                  style={{ color: "var(--pnp-text-secondary)" }}
                 >
                   {p.goBack}
                 </button>
@@ -1640,11 +1640,11 @@ export default function Profile() {
         <>
           {posts.length === 0 ? (
             <div className="glass-card-sm p-8 text-center">
-              <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--pnp-text-secondary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
               </svg>
               <p className="text-white font-medium mb-1">{p.noPostsYet}</p>
-              <p className="text-sm" style={{ color: "#8E8E93" }}>
+              <p className="text-sm" style={{ color: "var(--pnp-text-secondary)" }}>
                 {isOwnProfile
                   ? p.shareFirstPost
                   : p.userHasntPosted}
@@ -1688,7 +1688,7 @@ export default function Profile() {
                     onClick={() => loadProfile(nextCursor)}
                     disabled={loadingMore}
                     className="text-sm font-medium hover:text-pnp-accent transition-colors"
-                    style={{ color: "#8E8E93" }}
+                    style={{ color: "var(--pnp-text-secondary)" }}
                   >
                     {loadingMore ? p.loading : p.loadMorePosts}
                   </button>
@@ -1717,7 +1717,7 @@ export default function Profile() {
                 </svg>
               </div>
               <p className="text-white font-bold mb-1">{p.exclusiveContentTitle}</p>
-              <p className="text-sm mb-4 leading-relaxed" style={{ color: "#8E8E93" }}>
+              <p className="text-sm mb-4 leading-relaxed" style={{ color: "var(--pnp-text-secondary)" }}>
                 {profile.creatorPriceUsd != null
                   ? p.subscribeForPriceToUnlock.replace('${price}', String(profile.creatorPriceUsd))
                   : p.subscribeToUnlockAll}
@@ -1738,7 +1738,7 @@ export default function Profile() {
                   {subscribeLoading ? p.processing : `${p.subscribe} $${profile.creatorPriceUsd || 15}/mo`}
                 </button>
               ) : (
-                <p className="text-xs" style={{ color: "#8E8E93" }}>{p.signInToSubscribe}</p>
+                <p className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>{p.signInToSubscribe}</p>
               )}
             </div>
           )}
@@ -1749,11 +1749,11 @@ export default function Profile() {
             if (exclusivePosts.length === 0) {
               return (
                 <div className="glass-card-sm p-8 text-center">
-                  <svg className="w-12 h-12 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#8E8E93" }}>
+                  <svg className="w-12 h-12 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--pnp-text-secondary)" }}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                   </svg>
                   <p className="text-white font-medium mb-1">{p.noExclusivePostsYet}</p>
-                  <p className="text-sm" style={{ color: "#8E8E93" }}>
+                  <p className="text-sm" style={{ color: "var(--pnp-text-secondary)" }}>
                     {isOwnProfile
                       ? p.createFirstExclusivePost
                       : p.creatorNoExclusiveYet}
@@ -1823,7 +1823,7 @@ export default function Profile() {
                 )}
                 <div className="text-left min-w-0">
                   <p className="text-xs font-semibold text-white truncate max-w-[100px]">{h.name}</p>
-                  <p className="text-[10px]" style={{ color: "#8E8E93" }}>
+                  <p className="text-[10px]" style={{ color: "var(--pnp-text-secondary)" }}>
                     {h.messageCount > 0 ? `${h.messageCount} msgs` : "Member"}
                     {h.memberCount > 0 && <> &middot; {h.memberCount} members</>}
                   </p>
@@ -1870,7 +1870,7 @@ export default function Profile() {
             </div>
           ) : myEvents.length === 0 ? (
             <div className="glass-card-sm p-6 text-center">
-              <p className="text-sm" style={{ color: "#8E8E93" }}>No events yet.</p>
+              <p className="text-sm" style={{ color: "var(--pnp-text-secondary)" }}>No events yet.</p>
               {isAuthenticated && (
                 <button onClick={() => setShowCreateEvent(true)} className="mt-2.5 text-xs font-semibold" style={{ color: "#FFB454" }}>
                   Create one

@@ -1173,7 +1173,7 @@ export default function Nearby() {
 
   // ─── Main render ───────────────────────────────────────────────────────────
   return (
-    <div className="page-container !p-0 flex flex-col min-h-full" style={{ background: "#121212" }}>
+    <div className="page-container !p-0 flex flex-col min-h-full" style={{ background: "var(--pnp-background)" }}>
       <Helmet>
         <title>{t.booking.pageTitle}</title>
         <meta name="description" content={t.booking.pageDescription} />

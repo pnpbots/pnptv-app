@@ -1120,7 +1120,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
           {showHeaderMenu && (
             <>
               <div className="fixed inset-0 z-[40]" onClick={() => setShowHeaderMenu(false)} />
-              <div className="absolute right-0 mt-1 w-52 z-[41] rounded-2xl shadow-2xl overflow-hidden" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+              <div className="absolute right-0 mt-1 w-52 z-[41] rounded-2xl shadow-2xl overflow-hidden" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)" }}>
                 <button onClick={() => { setShowHeaderMenu(false); setInChatSearch({ open: true, q: "", results: [], idx: 0 }); }} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
                   Search in chat
@@ -1833,7 +1833,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
               top: Math.min(contextMenu.y, window.innerHeight - 260 - 8),
               minWidth: Math.min(180, window.innerWidth - 24),
               maxWidth: "calc(100vw - 24px)",
-              background: "#2C2C2E",
+              background: "var(--pnp-surface-hover)",
               border: "1px solid rgba(255,255,255,0.1)",
             }}
           >
@@ -1908,7 +1908,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
           : (confirmDelete.content || "").slice(0, 80);
         return (
           <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4 pb-safe" onClick={() => setConfirmDelete(null)}>
-            <div className="w-full max-w-[320px] rounded-2xl overflow-hidden mb-2 sm:mb-0" style={{ background: "#1C1C1E" }} onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-[320px] rounded-2xl overflow-hidden mb-2 sm:mb-0" style={{ background: "var(--pnp-surface)" }} onClick={(e) => e.stopPropagation()}>
               <div className="px-5 pt-5 pb-4 space-y-1.5">
                 <h3 className="text-base font-semibold text-white text-center">Delete message?</h3>
                 {preview && <p className="text-sm text-pnp-textSecondary text-center line-clamp-3">{preview}</p>}
@@ -2089,7 +2089,7 @@ function ForwardModal({ msg, onClose, onSubmit, myDbId }: { msg: DmMessage; onCl
 
   return (
     <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md max-h-[80vh] flex flex-col rounded-t-3xl sm:rounded-2xl overflow-hidden" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md max-h-[80vh] flex flex-col rounded-t-3xl sm:rounded-2xl overflow-hidden" style={{ background: "var(--pnp-surface)", border: "1px solid rgba(255,255,255,0.1)" }}>
         <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
           <div>
             <h3 className="text-base font-bold text-pnp-textPrimary">Forward to…</h3>
@@ -2206,7 +2206,7 @@ function NewChatModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md max-h-[80vh] flex flex-col rounded-t-3xl sm:rounded-2xl overflow-hidden" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md max-h-[80vh] flex flex-col rounded-t-3xl sm:rounded-2xl overflow-hidden" style={{ background: "var(--pnp-surface)", border: "1px solid rgba(255,255,255,0.1)" }}>
         <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
           <h3 className="text-base font-bold text-pnp-textPrimary">New message</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10" aria-label="Close">
@@ -2605,7 +2605,7 @@ function ThreadListView({ myDbId }: { myDbId: string }) {
             left: Math.min(rowMenu.x, Math.max(8, window.innerWidth - 220 - 8)),
             top: Math.min(rowMenu.y, window.innerHeight - 280 - 8),
             minWidth: 200,
-            background: "#2C2C2E",
+            background: "var(--pnp-surface-hover)",
             border: "1px solid rgba(255,255,255,0.1)",
           }}>
             <button onClick={() => togglePin(rowMenu.thread)} className="w-full px-4 py-2.5 text-sm text-left text-pnp-textPrimary hover:bg-white/10 transition-colors flex items-center gap-3">
@@ -2635,7 +2635,7 @@ function ThreadListView({ myDbId }: { myDbId: string }) {
         return (
           <>
             <div className="fixed inset-0 z-[60]" onClick={() => setMuteSubmenu(null)} />
-            <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] rounded-2xl shadow-2xl overflow-hidden w-72" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] rounded-2xl shadow-2xl overflow-hidden w-72" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)" }}>
               <p className="px-4 pt-3 pb-2 text-[11px] font-bold text-pnp-textSecondary uppercase tracking-wider">Mute notifications</p>
               {isCurrentlyMuted && (
                 <button onClick={() => muteFor(muteSubmenu, null)} className="w-full px-4 py-2.5 text-sm text-left text-green-400 hover:bg-white/10 transition-colors">Unmute</button>

@@ -480,7 +480,7 @@ export default function Media() {
                     ? { background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }
                     : isMember
                     ? { background: "rgba(94,209,196,0.2)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }
-                    : { background: "rgba(255,255,255,0.08)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }
+                    : { background: "rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary)", border: "1px solid rgba(255,255,255,0.1)" }
                 }
               >
                 {isPrime ? "PRIME Member" : isMember ? "Member" : "Free"}
@@ -615,7 +615,7 @@ export default function Media() {
                 </div>
                 <div className="px-2 py-1.5 bg-pnp-surface">
                   <p className="text-[11px] font-semibold text-pnp-textPrimary truncate">{ch.name}</p>
-                  <p className="text-[9px]" style={{ color: "#8E8E93" }}>{ch.postCount} posts</p>
+                  <p className="text-[9px]" style={{ color: "var(--pnp-text-secondary)" }}>{ch.postCount} posts</p>
                 </div>
               </button>
             ))}
@@ -710,7 +710,7 @@ export default function Media() {
           ) : channelPosts.length === 0 ? (
             <div className="glass-card-sm p-8 text-center">
               <p className="text-white font-medium mb-1">No posts in this channel yet</p>
-              <p className="text-sm" style={{ color: "#8E8E93" }}>Content coming soon</p>
+              <p className="text-sm" style={{ color: "var(--pnp-text-secondary)" }}>Content coming soon</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -763,7 +763,7 @@ export default function Media() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white">Previous content on Telegram</p>
-              <p className="text-[11px]" style={{ color: "#8E8E93" }}>
+              <p className="text-[11px]" style={{ color: "var(--pnp-text-secondary)" }}>
                 Access our full archive while we migrate to the app
               </p>
             </div>
@@ -1028,19 +1028,19 @@ export default function Media() {
             </div>
           ) : feedError ? (
             <div className="glass-card-sm p-8 text-center">
-              <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--pnp-text-secondary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
               <p className="text-white font-medium mb-1">Feed unavailable</p>
-              <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>{feedError}</p>
+              <p className="text-sm mb-4" style={{ color: "var(--pnp-text-secondary)" }}>{feedError}</p>
             </div>
           ) : displayPosts.length === 0 ? (
             <div className="glass-card-sm p-8 text-center">
-              <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--pnp-text-secondary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
               </svg>
               <p className="text-white font-medium mb-1">No posts from Santino yet</p>
-              <p className="text-sm" style={{ color: "#8E8E93" }}>Check back soon for new content</p>
+              <p className="text-sm" style={{ color: "var(--pnp-text-secondary)" }}>Check back soon for new content</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -1094,11 +1094,11 @@ export default function Media() {
               </div>
             ) : liveEvents.length === 0 ? (
               <div className="glass-card-sm p-6 text-center">
-                <svg className="w-10 h-10 mx-auto mb-2" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-10 h-10 mx-auto mb-2" style={{ color: "var(--pnp-text-secondary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
                 <p className="text-white font-medium text-sm mb-1">No upcoming streams scheduled</p>
-                <p className="text-xs" style={{ color: "#8E8E93" }}>Follow Santino to get notified when he goes live</p>
+                <p className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>Follow Santino to get notified when he goes live</p>
               </div>
             ) : (
               <div className="space-y-2.5">
@@ -1121,7 +1121,7 @@ export default function Media() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-pnp-textPrimary truncate">{ev.title}</p>
-                      <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                      <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
                         {new Date(ev.scheduledAt).toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" })}
                         {" · "}
                         {ev.durationMinutes}min
@@ -1168,9 +1168,9 @@ export default function Media() {
                 <div className="flex-1">
                   <p className="text-sm font-semibold text-white mb-1">1-on-1 with Santino</p>
                   <div className="flex gap-3 mb-3">
-                    <span className="text-xs" style={{ color: "#8E8E93" }}>30min · $60</span>
-                    <span className="text-xs" style={{ color: "#8E8E93" }}>60min · $100</span>
-                    <span className="text-xs" style={{ color: "#8E8E93" }}>90min · $250</span>
+                    <span className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>30min · $60</span>
+                    <span className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>60min · $100</span>
+                    <span className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>90min · $250</span>
                   </div>
                   <button
                     onClick={() => isAuthenticated ? navigate("/live") : login()}
@@ -1201,9 +1201,9 @@ export default function Media() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-pnp-textPrimary">PNPtv! Merch</p>
-                <p className="text-xs" style={{ color: "#8E8E93" }}>Exclusive gear & accessories</p>
+                <p className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>Exclusive gear & accessories</p>
               </div>
-              <svg className="w-4 h-4 ml-auto flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: "#8E8E93" }}>
+              <svg className="w-4 h-4 ml-auto flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: "var(--pnp-text-secondary)" }}>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
             </button>

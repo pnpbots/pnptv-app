@@ -634,7 +634,7 @@ export default function Settings() {
       <button
         onClick={() => navigate("/profile")}
         className="flex items-center gap-2 text-sm mb-4 hover:text-white transition-colors"
-        style={{ color: "#8E8E93" }}
+        style={{ color: "var(--pnp-text-secondary)" }}
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -660,7 +660,7 @@ export default function Settings() {
                   {user?.displayName || user?.firstName || "—"}
                 </p>
                 {user?.username && (
-                  <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
                     @{user.username}
                   </p>
                 )}
@@ -668,7 +668,7 @@ export default function Settings() {
               <Badge variant={isPrime ? "accent" : "default"}>{tierLabel}</Badge>
             </div>
             {memberSince && (
-              <p className="text-xs flex items-center gap-1.5" style={{ color: "#8E8E93" }}>
+              <p className="text-xs flex items-center gap-1.5" style={{ color: "var(--pnp-text-secondary)" }}>
                 <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
                 </svg>
@@ -683,7 +683,7 @@ export default function Settings() {
       {!profileLoading &&
         (!profileEmail || profileEmail.endsWith("@telegram.pnptv.app")) && (
           <Section title="Enable PNPtv ID login">
-            <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary)" }}>
               Right now you sign in with Telegram. Add an email and password so
               you can also log in with a <strong>PNPtv ID</strong>—useful if
               you lose access to Telegram.
@@ -781,7 +781,7 @@ export default function Settings() {
                 </button>
                 <p
                   className="text-center text-[11px]"
-                  style={{ color: "#8E8E93" }}
+                  style={{ color: "var(--pnp-text-secondary)" }}
                 >
                   We'll update your email and send a one-time link to create
                   your password.
@@ -866,7 +866,7 @@ export default function Settings() {
                       <p className="text-sm font-semibold text-white truncate">
                         @{booking.performer_name}
                       </p>
-                      <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
+                      <p className="text-xs truncate" style={{ color: "var(--pnp-text-secondary)" }}>
                         {localTime}
                       </p>
                       <span
@@ -874,7 +874,7 @@ export default function Settings() {
                         style={
                           inWindow
                             ? { background: "rgba(52,199,89,0.15)", color: "#34C759" }
-                            : { background: "rgba(255,255,255,0.08)", color: "#8E8E93" }
+                            : { background: "rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary)" }
                         }
                       >
                         {startsInLabel}
@@ -920,7 +920,7 @@ export default function Settings() {
         >
           <div className="flex-1 min-w-0 mr-3">
             <p className="text-sm font-medium text-white">{p.languageIdioma}</p>
-            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
               {p.choosePreferredLanguage}
             </p>
           </div>
@@ -970,7 +970,7 @@ export default function Settings() {
         >
           <div className="flex-1 min-w-0 mr-3">
             <p className="text-sm font-medium text-white">{p.wallOfFameConsent}</p>
-            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
               {p.wallOfFameConsentDesc}
             </p>
           </div>
@@ -989,7 +989,7 @@ export default function Settings() {
         >
           <div className="flex-1 min-w-0 mr-3">
             <p className="text-sm font-medium text-white">{p.contentDisclaimer}</p>
-            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
               {contentDisclaimer
                 ? p.contentDisclaimerAccepted
                 : p.contentDisclaimerDesc}
@@ -1012,12 +1012,12 @@ export default function Settings() {
             <div className="flex items-center gap-1.5 flex-wrap">
               <p className="text-sm font-medium text-white">Share posts to X by default</p>
               {xHandle && (
-                <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: "rgba(255,255,255,0.08)", color: "#8E8E93" }}>
+                <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: "rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary)" }}>
                   @{xHandle}
                 </span>
               )}
             </div>
-            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
               {xHandle
                 ? "Automatically cross-post new posts to your X account when published."
                 : "Add your X account in Edit Profile first to enable cross-posting."}
@@ -1043,7 +1043,7 @@ export default function Settings() {
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", textDecoration: "none" }}
         >
           <p className="text-sm font-medium text-white">{p.platformTOS}</p>
-          <svg className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+          <svg className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary)" }}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
           </svg>
         </a>
@@ -1057,7 +1057,7 @@ export default function Settings() {
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", textDecoration: "none" }}
         >
           <p className="text-sm font-medium text-white">{p.privacyPolicy}</p>
-          <svg className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+          <svg className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary)" }}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
           </svg>
         </a>
@@ -1081,17 +1081,17 @@ export default function Settings() {
                     <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "rgba(251,191,36,0.15)", color: "#FBBF24" }}>{p.agreementUnderReview}</span>
                   )}
                   {!isEnrolled && (
-                    <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}>{p.agreementNotEnrolled}</span>
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary)" }}>{p.agreementNotEnrolled}</span>
                   )}
                   {isEnrolled && (
-                    <svg className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                    <svg className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary)" }}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                     </svg>
                   )}
                 </div>
               </button>
               {isEnrolled && isExpanded && (
-                <div className="px-3 pb-3 text-xs space-y-2" style={{ color: "#8E8E93", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="px-3 pb-3 text-xs space-y-2" style={{ color: "var(--pnp-text-secondary)", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                   <p className="pt-2">{p.programTermsBody}</p>
                   <p>{p.programTermsBody2}</p>
                   <p>{p.programTermsBody3}</p>
@@ -1125,12 +1125,12 @@ export default function Settings() {
                 className="w-full flex items-center justify-between px-3 py-3 cursor-pointer"
               >
                 <p className="text-sm font-medium text-white text-left">{p.payoutTermsAgreement}</p>
-                <svg className={`w-4 h-4 transition-transform duration-200 flex-shrink-0 ml-2 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                <svg className={`w-4 h-4 transition-transform duration-200 flex-shrink-0 ml-2 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary)" }}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
               {isExpanded && (
-                <div className="px-3 pb-3 text-xs space-y-1.5" style={{ color: "#8E8E93", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="px-3 pb-3 text-xs space-y-1.5" style={{ color: "var(--pnp-text-secondary)", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                   <p className="pt-2">{p.youReceive70}</p>
                   <p>{p.payoutsEveryTuesday}</p>
                   <p>{p.minimumPayout}</p>
@@ -1150,12 +1150,12 @@ export default function Settings() {
                 className="w-full flex items-center justify-between px-3 py-3 cursor-pointer"
               >
                 <p className="text-sm font-medium text-white text-left">{p.contentRequirementsAgreement}</p>
-                <svg className={`w-4 h-4 transition-transform duration-200 flex-shrink-0 ml-2 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                <svg className={`w-4 h-4 transition-transform duration-200 flex-shrink-0 ml-2 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary)" }}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
               {isExpanded && (
-                <div className="px-3 pb-3 text-xs space-y-1.5" style={{ color: "#8E8E93", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="px-3 pb-3 text-xs space-y-1.5" style={{ color: "var(--pnp-text-secondary)", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                   <p className="pt-2">{p.contentReqBody}</p>
                   <ul className="list-disc list-inside space-y-0.5 mt-1">
                     <li>{p.contentReqItem1}</li>
@@ -1249,7 +1249,7 @@ export default function Settings() {
                     <p className="text-sm font-semibold truncate" style={{ color: "#EBEBF5" }}>
                       @{booking.performer_name}
                     </p>
-                    <p className="text-xs" style={{ color: "#8E8E93" }}>{formattedStart}</p>
+                    <p className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>{formattedStart}</p>
                   </div>
 
                   {/* Time pill + join button */}
@@ -1267,7 +1267,7 @@ export default function Settings() {
                   ) : (
                     <span
                       className="flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-medium"
-                      style={{ background: "rgba(255,255,255,0.07)", color: "#8E8E93" }}
+                      style={{ background: "rgba(255,255,255,0.07)", color: "var(--pnp-text-secondary)" }}
                     >
                       {timePill}
                     </span>
@@ -1281,7 +1281,7 @@ export default function Settings() {
 
       {/* ── Wallet & Dash Identity ────────────────────────────────────────── */}
       <Section title={p.walletDashSection}>
-        <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+        <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary)" }}>
           {p.walletDashDesc}
         </p>
 
@@ -1404,7 +1404,7 @@ export default function Settings() {
               ) : txHistory.length === 0 ? (
                 <div
                   className="rounded-lg px-3 py-4 text-center text-sm"
-                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", color: "#8E8E93" }}
+                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", color: "var(--pnp-text-secondary)" }}
                 >
                   {p.txHistoryEmpty}
                 </div>
@@ -1444,11 +1444,11 @@ export default function Settings() {
                       style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
                     >
                       <div className="flex flex-col min-w-0">
-                        <span className="text-xs" style={{ color: "#8E8E93" }}>{dateStr}</span>
+                        <span className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>{dateStr}</span>
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <span className="text-xs font-semibold" style={{ color: "#008DE4" }}>+{tx.tokens_credited} tokens</span>
                           <span className="text-xs" style={{ color: "#6E6E73" }}>·</span>
-                          <span className="text-xs" style={{ color: "#8E8E93" }}>${Number(tx.usd_amount).toFixed(2)}</span>
+                          <span className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>${Number(tx.usd_amount).toFixed(2)}</span>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -1484,16 +1484,16 @@ export default function Settings() {
           </div>
         ) : notifPrefs ? (
           <>
-            <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary)" }}>
               {p.notifChooseHow}
             </p>
 
             {/* Column headers */}
             <div className="flex items-center gap-0.5 mb-2 px-1">
               <div className="flex-1 min-w-0" />
-              <div className="w-10 text-center text-[9px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelPush}</div>
-              <div className="w-10 text-center text-[9px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelBot}</div>
-              <div className="w-10 text-center text-[9px] font-medium" style={{ color: "#8E8E93" }}>{p.notifChannelEmail}</div>
+              <div className="w-10 text-center text-[9px] font-medium" style={{ color: "var(--pnp-text-secondary)" }}>{p.notifChannelPush}</div>
+              <div className="w-10 text-center text-[9px] font-medium" style={{ color: "var(--pnp-text-secondary)" }}>{p.notifChannelBot}</div>
+              <div className="w-10 text-center text-[9px] font-medium" style={{ color: "var(--pnp-text-secondary)" }}>{p.notifChannelEmail}</div>
             </div>
 
             {/* Notification type rows */}
@@ -1548,7 +1548,7 @@ export default function Settings() {
             >
               <div className="flex-1 min-w-0 mr-3">
                 <p className="text-sm font-medium text-white">{p.quietHours}</p>
-                <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
                   {p.quietHoursDesc}
                 </p>
               </div>
@@ -1566,7 +1566,7 @@ export default function Settings() {
             >
               <div className="flex-1 min-w-0 mr-3">
                 <p className="text-sm font-medium text-white">{p.notifSoundTitle || "Notification sound"}</p>
-                <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
                   {p.notifSoundDesc || "Play a short sound when a new notification arrives on this device."}
                 </p>
               </div>
@@ -1578,7 +1578,7 @@ export default function Settings() {
             </div>
           </>
         ) : (
-          <p className="text-xs" style={{ color: "#8E8E93" }}>
+          <p className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>
             {p.notifLoadError}
           </p>
         )}
@@ -1589,7 +1589,7 @@ export default function Settings() {
         <div className="flex items-center justify-between">
           <div className="flex-1 min-w-0 mr-4">
             <p className="text-sm text-white font-medium">PNPtv! Newsletter</p>
-            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
               Receive creator drops, platform news, and exclusive offers by email.
             </p>
           </div>
@@ -1605,7 +1605,7 @@ export default function Settings() {
         <div className="flex items-center justify-between mt-4">
           <div className="flex-1 min-w-0 mr-4">
             <p className="text-sm text-white font-medium">Browser Notifications</p>
-            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
               {pushState === "unsupported"
                 ? "Push notifications are not supported in this browser."
                 : pushState === "denied"
@@ -1620,7 +1620,7 @@ export default function Settings() {
               className="text-xs px-2.5 py-1 rounded-full flex-shrink-0"
               style={{
                 background: "rgba(255,255,255,0.07)",
-                color: "#8E8E93",
+                color: "var(--pnp-text-secondary)",
                 border: "1px solid rgba(255,255,255,0.12)",
               }}
             >
@@ -1639,7 +1639,7 @@ export default function Settings() {
 
       {/* ── Referral Program ─────────────────────────────────────────────── */}
       <Section title={p.referralProgram}>
-        <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+        <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary)" }}>
           {p.referralInviteDesc}{" "}
           <strong style={{ color: "#FFB454" }}>{p.referralFreePrime}</strong>{" "}
           {p.referralWhenTheyJoin}
@@ -1678,24 +1678,24 @@ export default function Settings() {
             <div className="flex gap-4">
               <div className="text-center">
                 <div className="text-xl font-bold text-white">{referralStats.total}</div>
-                <div className="text-[10px]" style={{ color: "#8E8E93" }}>{p.invited}</div>
+                <div className="text-[10px]" style={{ color: "var(--pnp-text-secondary)" }}>{p.invited}</div>
               </div>
               <div className="text-center">
                 <div className="text-xl font-bold" style={{ color: "#FFB454" }}>
                   {referralStats.completed}
                 </div>
-                <div className="text-[10px]" style={{ color: "#8E8E93" }}>{p.joined_noun}</div>
+                <div className="text-[10px]" style={{ color: "var(--pnp-text-secondary)" }}>{p.joined_noun}</div>
               </div>
               <div className="text-center">
                 <div className="text-xl font-bold" style={{ color: "#5ED1C4" }}>
                   {referralStats.completed * 3}
                 </div>
-                <div className="text-[10px]" style={{ color: "#8E8E93" }}>{p.daysEarned}</div>
+                <div className="text-[10px]" style={{ color: "var(--pnp-text-secondary)" }}>{p.daysEarned}</div>
               </div>
             </div>
           </>
         ) : (
-          <p className="text-xs" style={{ color: "#8E8E93" }}>
+          <p className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>
             {p.referralLoadError}
           </p>
         )}
@@ -1710,10 +1710,10 @@ export default function Settings() {
           </div>
         ) : blockedUsers.length === 0 ? (
           <div className="text-center py-4">
-            <svg className="w-8 h-8 mx-auto mb-2" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--pnp-text-secondary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
             </svg>
-            <p className="text-sm" style={{ color: "#8E8E93" }}>No blocked users</p>
+            <p className="text-sm" style={{ color: "var(--pnp-text-secondary)" }}>No blocked users</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -1741,7 +1741,7 @@ export default function Settings() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white truncate">{u.firstName || u.username}</p>
                     {u.username && (
-                      <p className="text-xs truncate" style={{ color: "#8E8E93" }}>@{u.username}</p>
+                      <p className="text-xs truncate" style={{ color: "var(--pnp-text-secondary)" }}>@{u.username}</p>
                     )}
                   </div>
                   <button
@@ -1806,7 +1806,7 @@ export default function Settings() {
           }}
         >
           <p className="text-sm font-medium text-white mb-1">{p.deleteAccount}</p>
-          <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+          <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary)" }}>
             {p.deleteAccountDesc}
           </p>
           <button
@@ -1894,7 +1894,7 @@ export default function Settings() {
         >
           <div
             className="w-full max-w-sm rounded-2xl p-6"
-            style={{ background: "#13131a", border: "1px solid rgba(255,59,48,0.25)" }}
+            style={{ background: "var(--pnp-background)", border: "1px solid rgba(255,59,48,0.25)" }}
           >
             <h2
               id="delete-modal-title"
@@ -1902,7 +1902,7 @@ export default function Settings() {
             >
               {p.deleteAccountConfirm}
             </h2>
-            <p id="delete-modal-desc" className="text-xs leading-relaxed mb-4" style={{ color: "#8E8E93" }}>
+            <p id="delete-modal-desc" className="text-xs leading-relaxed mb-4" style={{ color: "var(--pnp-text-secondary)" }}>
               {p.deleteAccountWarning}
             </p>
             <p className="text-xs mb-2" style={{ color: "rgba(255,255,255,0.5)" }}>
@@ -1977,7 +1977,7 @@ export default function Settings() {
         >
           <div
             className="w-full max-w-sm rounded-2xl p-6"
-            style={{ background: "#13131a", border: "1px solid rgba(255,59,48,0.4)" }}
+            style={{ background: "var(--pnp-background)", border: "1px solid rgba(255,59,48,0.4)" }}
           >
             {eraseReceipt ? (
               /* ── Receipt view ── */
@@ -2003,18 +2003,18 @@ export default function Settings() {
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
                 >
                   <div>
-                    <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "#8E8E93" }}>Erasure ID</p>
+                    <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "var(--pnp-text-secondary)" }}>Erasure ID</p>
                     <p className="text-xs font-mono text-white break-all">{eraseReceipt.erasure_id}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "#8E8E93" }}>Timestamp</p>
+                    <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "var(--pnp-text-secondary)" }}>Timestamp</p>
                     <p className="text-xs text-white">
                       {new Date(eraseReceipt.timestamp).toLocaleString()}
                     </p>
                   </div>
                   {eraseReceipt.scope && eraseReceipt.scope.length > 0 && (
                     <div>
-                      <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "#8E8E93" }}>Scope</p>
+                      <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "var(--pnp-text-secondary)" }}>Scope</p>
                       <p className="text-xs text-white">{eraseReceipt.scope.join(", ")}</p>
                     </div>
                   )}
@@ -2036,7 +2036,7 @@ export default function Settings() {
                     <h2 id="erase-modal-title" className="text-base font-bold text-white mb-1">
                       Erase All My Data (GDPR Article 17)
                     </h2>
-                    <p id="erase-modal-desc" className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+                    <p id="erase-modal-desc" className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary)" }}>
                       This permanently deletes ALL your data from our servers, including messages, payment history, and chat history. This action cannot be undone.
                     </p>
                   </div>
@@ -2161,7 +2161,7 @@ function ThemePicker() {
     >
       <div className="mb-2.5">
         <p className="text-sm font-medium text-white">Theme</p>
-        <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+        <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
           Choose how PNPtv looks. System follows your device.
         </p>
       </div>
