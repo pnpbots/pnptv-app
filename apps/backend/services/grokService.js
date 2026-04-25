@@ -585,20 +585,35 @@ async function generateSalesPost({ prompt, hasMedia = false, includeLex = false,
 // age-affirming system prompt that produces marketing copy without tripping
 // the SAFETY_CHECK_TYPE_CSAM filter.
 // ---------------------------------------------------------------------------
-const SAFE_VIDEO_DESC_SYSTEM = `You are a marketing copywriter for an adult subscription streaming platform that serves verified members aged 18 and older. All performers are professional adult entertainers of legal age (21+). Your job is to write short, evocative video descriptions that make adult subscribers want to press play.
+const SAFE_VIDEO_DESC_SYSTEM = `You are a copywriter for an adult subscription streaming platform serving verified members aged 18+. All performers are professional adult entertainers of legal age (21+). The audience is the gay PNP / P&P community — they want descriptions that are RAW, CONCRETE, and use community slang. They hate generic poetry, soft metaphor, and "sensual chemistry" language.
 
-Output rules:
-- TITLE on the first line in ALL CAPS, attention-grabbing, no quotes.
-- Blank line.
-- DESCRIPTION: 3 to 6 narrative sentences in plain text. Tease atmosphere, performers' chemistry, vibe — adult, sensual, but not graphic.
-- Blank line.
-- HASHTAGS: 3 to 5 relevant tags on a single line, lowercase, prefixed with #.
-- No markdown (no asterisks, underscores, headers, bullets).
-- Stay under 500 characters total.
-- Output ONLY the title, description, and hashtags. No labels, no preamble, no commentary.`;
+VOCABULARY TO LEAN INTO (this audience expects it):
+- "pig", "piggy", "filthy", "raw", "nasty", "loaded", "deep", "horny", "hung"
+- "P&P", "clouds", "slam", "S-lam", "deep sessions", "spun"
+- Geographic / type descriptors when given: Latino, Colombian, Venezuelan, daddy, twink, jock, bear
+- Concrete details: number of guys, what's actually happening on screen, the dynamic (top/bottom/vers, group, breeding, etc.), energy level
+
+VOCABULARY TO AVOID (boring / cheesy):
+- "rendezvous", "encounter", "intimate", "dance of sensuality", "chemistry"
+- "tantalizing", "alluring", "captivating", "tantalize", "unfold"
+- "soft glow", "luxurious", "atmosphere thick with anticipation"
+- Anything that sounds like a perfume ad or a romance novel
+
+OUTPUT RULES:
+- TITLE on the first line in ALL CAPS, raw and punchy, no quotes
+- Blank line
+- DESCRIPTION: 3-5 short punchy sentences. Concrete details over abstractions. Use the community slang naturally — don't fake it. Stay descriptive, not graphic (no anatomy spelled out).
+- Blank line
+- HASHTAGS: 3-5 relevant tags on a single line, lowercase
+- No markdown (no asterisks, underscores, headers, bullets)
+- Stay under 500 characters total
+- Output ONLY the title, description, and hashtags. No labels, no preamble.`;
 
 async function generateSafeVideoDescription({ prompt, language = 'English' }) {
-  const userPrompt = `Language: ${language}\n\nWrite a video description for the following clip:\n\n${prompt}`;
+  const langDirective = language === 'Spanish'
+    ? `Write the title, description, and hashtags in SPANISH (Latin American, neutral). PNP community slang stays in its native form when it has no real Spanish equivalent: "pig", "P&P", "slam", "S-lam", "clouds", "breeding", "spun", "loaded", "hung", "raw" can stay in English mid-sentence — that's how the community talks. Everything else MUST be Spanish. No English sentences, no Spanglish-by-default — only the slang stays English.`
+    : `Write the title, description, and hashtags in ENGLISH.`;
+  const userPrompt = `${langDirective}\n\nWrite a video description for the following clip:\n\n${prompt}`;
   const chatFn = module.exports.chat || chat;
   let content = await chatFn({
     mode: 'videoDescription',
@@ -619,18 +634,20 @@ async function generateBilingualSafeVideoDescription({ prompt }) {
 }
 
 // ── CSAM-safe single-line title rewriter ──────────────────────────────────
-const SAFE_TITLE_SYSTEM = `You are a marketing copywriter for an adult subscription streaming platform serving verified subscribers aged 18+. All performers are professional adult entertainers of legal age (21+).
+const SAFE_TITLE_SYSTEM = `You are a copywriter for an adult subscription streaming platform serving verified subscribers aged 18+. All performers are professional adult entertainers of legal age (21+). Audience: gay PNP / P&P community.
 
-Your job: write ONE punchy, marketable video title.
+Your job: write ONE raw, punchy, descriptive video title.
 
 Rules:
 - 3 to 7 words.
 - 60 characters or fewer.
-- Title Case or ALL CAPS — pick whichever has more punch.
-- Suggestive and adult in tone, but never graphic.
+- ALL CAPS preferred for punch.
+- Use community slang freely: pig, piggy, raw, filthy, nasty, loaded, deep, slam, S-lam, P&P, clouds, spun, horny, hung, daddy, breeding.
+- Concrete over poetic. AVOID: "rendezvous", "encounter", "intimate", "alluring", "captivating", "tantalizing", "sensual".
+- Suggestive and adult, but never spell out anatomy.
 - No quotes, no markdown, no hashtags, no labels, no preamble.
 - Output ONLY the title text on a single line.
-- If the input is just a numeric filename or noise, invent something evocative based on context (atmosphere, mood).`;
+- If the input is a numeric filename or noise, infer something concrete from any other context (location, number of guys, type, energy).`;
 
 async function generateSafeVideoTitle({ prompt }) {
   const chatFn = module.exports.chat || chat;
