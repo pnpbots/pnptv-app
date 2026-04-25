@@ -8730,18 +8730,51 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
       patch.title = patch.title.slice(0, 255);
     }
 
+    let updated;
     try {
       const { data } = await axios.patch(
         `${directusBaseUrl()}/items/prime_videos/${id}`,
         patch,
         { headers: directusHeaders(), timeout: 8000 }
       );
-      res.json({ success: true, item: data?.data });
+      updated = data?.data;
     } catch (err) {
       logger.error('admin prime-videos patch failed', { id, error: err.message });
       const status = err.response?.status === 404 ? 404 : 502;
-      res.status(status).json({ success: false, error: err.response?.data?.errors?.[0]?.message || err.message });
+      return res.status(status).json({ success: false, error: err.response?.data?.errors?.[0]?.message || err.message });
     }
+
+    // PRIME_SYNC_SECRET-bypass: mirror relevant fields to social_posts directly so
+    // the in-app editor doesn't depend on a Directus Flow webhook being configured.
+    try {
+      const syncFields = [];
+      const syncVals = [id];
+      let i = 2;
+      if (Object.prototype.hasOwnProperty.call(patch, 'title')) {
+        syncFields.push(`video_title = $${i++}`);
+        syncVals.push(updated.title);
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'description')) {
+        syncFields.push(`video_description = $${i++}`, `content = $${i++}`);
+        const content = updated.description && String(updated.description).trim() ? updated.description : updated.title;
+        syncVals.push(updated.description || null, content);
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'status')) {
+        syncFields.push(`is_deleted = $${i++}`);
+        syncVals.push(updated.status !== 'published');
+      }
+      if (syncFields.length) {
+        syncFields.push(`updated_at = NOW()`);
+        await getPool().query(
+          `UPDATE social_posts SET ${syncFields.join(', ')} WHERE directus_id = $1 AND channel_id = 5`,
+          syncVals
+        );
+      }
+    } catch (syncErr) {
+      logger.warn('admin prime-videos social_posts mirror failed (non-fatal)', { id, error: syncErr.message });
+    }
+
+    res.json({ success: true, item: updated });
   }));
 
   // POST /api/webapp/admin/prime-videos/:id/generate-description — Grok-powered description
@@ -8860,6 +8893,129 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
       res.json({ success: true, tags: fallback.slice(0, 5), taxonomy: PRIME_TAG_TAXONOMY, fallback: true });
     }
   }));
+
+  // POST /api/webapp/admin/prime-videos/upload — multipart video upload.
+  // Forwards file to Directus, creates prime_videos row, mirrors to social_posts.
+  const FormData = require('form-data');
+  const primeUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 4 * 1024 * 1024 * 1024 }, // 4 GB
+    fileFilter: (req, file, cb) => {
+      if (/^video\//i.test(file.mimetype || '')) return cb(null, true);
+      cb(new Error('Only video files are allowed'));
+    },
+  });
+
+  app.post('/api/webapp/admin/prime-videos/upload',
+    adminGuard,
+    primeUpload.single('file'),
+    asyncHandler(async (req, res) => {
+      if (!req.file) return res.status(400).json({ success: false, error: 'file required' });
+
+      const titleInput = (req.body?.title || req.file.originalname || 'Untitled').toString().trim();
+      const description = req.body?.description ? String(req.body.description).trim() : null;
+      const status = ['draft', 'published'].includes(req.body?.status) ? req.body.status : 'published';
+
+      // Step 1 — upload file to Directus
+      let fileId;
+      try {
+        const fd = new FormData();
+        fd.append('title', titleInput.slice(0, 255));
+        fd.append('file', req.file.buffer, {
+          filename: req.file.originalname,
+          contentType: req.file.mimetype,
+        });
+        const { data } = await axios.post(
+          `${directusBaseUrl()}/files`,
+          fd,
+          {
+            headers: { ...fd.getHeaders(), Authorization: `Bearer ${process.env.DIRECTUS_ADMIN_TOKEN}` },
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+            timeout: 600000,
+          }
+        );
+        fileId = data?.data?.id;
+      } catch (err) {
+        logger.error('prime-videos upload to Directus failed', { error: err.message });
+        return res.status(502).json({ success: false, error: 'Directus file upload failed: ' + err.message });
+      }
+      if (!fileId) return res.status(502).json({ success: false, error: 'Directus returned no file id' });
+
+      // Step 2 — pull file metadata (Directus extracts duration on upload)
+      let fileMeta = {};
+      try {
+        const { data } = await axios.get(
+          `${directusBaseUrl()}/files/${fileId}?fields=id,type,duration,filename_disk,filesize`,
+          { headers: directusHeaders(), timeout: 5000 }
+        );
+        fileMeta = data?.data || {};
+      } catch (_) { /* non-fatal */ }
+      const durationSec = fileMeta.duration ? Math.round(fileMeta.duration / 1000) : null;
+
+      // Step 3 — create prime_videos row
+      let primeRow;
+      try {
+        const { data } = await axios.post(
+          `${directusBaseUrl()}/items/prime_videos`,
+          {
+            title: titleInput.slice(0, 255),
+            description,
+            status,
+            type: 'video',
+            category: 'prime_videos',
+            video_file: fileId,
+            thumbnail: fileId,
+            url: `/assets/${fileId}`,
+            duration: durationSec,
+            is_explicit: false,
+            is_featured: false,
+            plays: 0,
+            likes: 0,
+          },
+          { headers: directusHeaders(), timeout: 8000 }
+        );
+        primeRow = data?.data;
+      } catch (err) {
+        logger.error('prime_videos insert failed', { fileId, error: err.message });
+        return res.status(502).json({
+          success: false,
+          error: 'Created file but failed to create prime_video: ' + err.message,
+          file_id: fileId,
+        });
+      }
+
+      // Step 4 — mirror to social_posts immediately
+      if (status === 'published') {
+        try {
+          const mediaUrl = `https://cms.pnptv.app/assets/${fileId}`;
+          const thumbUrl = `https://cms.pnptv.app/video-thumb/${fileId}.jpg`;
+          const content = description && description.trim() ? description : titleInput;
+          await getPool().query(
+            `INSERT INTO social_posts
+              (user_id, channel_id, directus_id, content, video_title, video_description,
+               media_url, media_type, content_tier, video_thumbnail_url, video_thumbnails,
+               is_shareable, source_channel, created_at, updated_at)
+             VALUES ($1, 5, $2, $3, $4, $5, $6, 'video', 'PRIME', $7, '[]'::jsonb, true, 'prime', NOW(), NOW())`,
+            ['8599671840', primeRow.id, content, titleInput, description, mediaUrl, thumbUrl]
+          );
+        } catch (syncErr) {
+          logger.warn('social_posts mirror after upload failed (non-fatal)', { id: primeRow.id, error: syncErr.message });
+        }
+      }
+
+      res.json({
+        success: true,
+        item: {
+          ...primeRow,
+          poster_url: `https://cms.pnptv.app/video-thumb/${fileId}.jpg`,
+          preview_url: `https://cms.pnptv.app/video-thumb/${fileId}_preview.mp4`,
+          video_url: `https://cms.pnptv.app/assets/${fileId}`,
+        },
+        note: 'Thumbnail will appear within 10 minutes (cron generates it).',
+      });
+    })
+  );
 }
 
 // ==========================================

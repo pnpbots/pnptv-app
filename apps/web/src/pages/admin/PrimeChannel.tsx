@@ -5,6 +5,7 @@ import {
   generatePrimeVideoDescription,
   generatePrimeVideoTitle,
   suggestPrimeVideoTags,
+  uploadAdminPrimeVideo,
   PRIME_TAG_TAXONOMY,
   type AdminPrimeVideo,
 } from "@/lib/api";
@@ -78,6 +79,58 @@ export default function PrimeChannel() {
   const [search, setSearch] = useState("");
   const [hoverId, setHoverId] = useState<number | null>(null);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
+
+  // Upload modal state
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadDescription, setUploadDescription] = useState("");
+  const [uploadStatus, setUploadStatus] = useState<"draft" | "published">("published");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploading, setUploading] = useState(false);
+
+  function resetUpload() {
+    setUploadFile(null);
+    setUploadTitle("");
+    setUploadDescription("");
+    setUploadStatus("published");
+    setUploadProgress(0);
+    setUploading(false);
+  }
+
+  function pickFile(f: File | null) {
+    setUploadFile(f);
+    if (f && !uploadTitle) {
+      // Default title to filename without extension
+      const base = f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+      setUploadTitle(base);
+    }
+  }
+
+  async function performUpload() {
+    if (!uploadFile) return;
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const res = await uploadAdminPrimeVideo(uploadFile, {
+        title: uploadTitle.trim() || undefined,
+        description: uploadDescription.trim() || undefined,
+        status: uploadStatus,
+        onProgress: setUploadProgress,
+      });
+      const newItem = res.item as AdminPrimeVideo;
+      setItems((prev) => [newItem, ...prev]);
+      setDrafts((prev) => ({ ...prev, [newItem.id]: buildDraft(newItem) }));
+      setToast({ kind: "ok", msg: `Uploaded "${newItem.title}". ${res.note || ""}`.trim() });
+      setUploadOpen(false);
+      resetUpload();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      setToast({ kind: "err", msg });
+    } finally {
+      setUploading(false);
+    }
+  }
 
   useEffect(() => {
     if (!toast) return;
@@ -212,12 +265,20 @@ export default function PrimeChannel() {
             Edit titles & descriptions, toggle featured, and generate copy with Grok.
           </p>
         </div>
-        <button
-          onClick={load}
-          className="px-3 py-2 text-sm rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:bg-pnp-surfaceHover"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setUploadOpen(true)}
+            className="px-3 py-2 text-sm rounded-lg bg-pnp-accent text-white font-medium hover:opacity-90"
+          >
+            + Upload Video
+          </button>
+          <button
+            onClick={load}
+            className="px-3 py-2 text-sm rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:bg-pnp-surfaceHover"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -474,6 +535,123 @@ export default function PrimeChannel() {
           );
         })}
       </div>
+
+      {/* Upload modal */}
+      {uploadOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => !uploading && setUploadOpen(false)}
+        >
+          <div
+            className="bg-pnp-surface border border-pnp-border rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-pnp-border flex items-center justify-between">
+              <h2 className="text-lg font-bold text-pnp-textPrimary">Upload Video to Prime</h2>
+              <button
+                onClick={() => !uploading && setUploadOpen(false)}
+                disabled={uploading}
+                className="text-pnp-textSecondary hover:text-pnp-textPrimary disabled:opacity-50"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <label className="block">
+                <span className="text-xs font-medium text-pnp-textSecondary">Video file (MP4, MOV, WebM — up to 4 GB)</span>
+                <input
+                  type="file"
+                  accept="video/*"
+                  disabled={uploading}
+                  onChange={(e) => pickFile(e.target.files?.[0] || null)}
+                  className="mt-1 w-full text-sm text-pnp-textPrimary file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-pnp-accent file:text-white file:cursor-pointer file:text-xs"
+                />
+                {uploadFile && (
+                  <p className="mt-1 text-[11px] text-pnp-textSecondary">
+                    {uploadFile.name} · {(uploadFile.size / 1024 / 1024).toFixed(1)} MB
+                  </p>
+                )}
+              </label>
+
+              <label className="block">
+                <span className="text-xs font-medium text-pnp-textSecondary">Title</span>
+                <input
+                  type="text"
+                  value={uploadTitle}
+                  maxLength={255}
+                  disabled={uploading}
+                  onChange={(e) => setUploadTitle(e.target.value)}
+                  placeholder="Defaults to filename if empty"
+                  className="mt-1 w-full px-2 py-1.5 text-sm rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary disabled:opacity-50"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-xs font-medium text-pnp-textSecondary">Description (optional — you can generate later with ✦ Grok)</span>
+                <textarea
+                  value={uploadDescription}
+                  rows={4}
+                  disabled={uploading}
+                  onChange={(e) => setUploadDescription(e.target.value)}
+                  placeholder="Leave blank and use Grok after upload, or write it now"
+                  className="mt-1 w-full px-2 py-1.5 text-sm rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary disabled:opacity-50"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-xs font-medium text-pnp-textSecondary">Status</span>
+                <select
+                  value={uploadStatus}
+                  disabled={uploading}
+                  onChange={(e) => setUploadStatus(e.target.value as "draft" | "published")}
+                  className="mt-1 w-full px-2 py-1.5 text-sm rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary disabled:opacity-50"
+                >
+                  <option value="published">Published — visible to users immediately</option>
+                  <option value="draft">Draft — hidden until you publish</option>
+                </select>
+              </label>
+
+              {uploading && (
+                <div>
+                  <div className="flex justify-between text-[11px] text-pnp-textSecondary mb-1">
+                    <span>Uploading…</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="h-2 bg-pnp-background rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-pnp-accent transition-all"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                  {uploadProgress === 100 && (
+                    <p className="mt-2 text-[11px] text-pnp-textSecondary">
+                      Upload finished. Directus is processing the file… (this can take a moment for large videos)
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-pnp-border flex justify-end gap-2">
+              <button
+                onClick={() => !uploading && setUploadOpen(false)}
+                disabled={uploading}
+                className="px-3 py-1.5 text-sm rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={performUpload}
+                disabled={!uploadFile || uploading}
+                className="px-4 py-1.5 text-sm rounded-md bg-pnp-accent text-white font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {uploading ? "Uploading…" : "Upload"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

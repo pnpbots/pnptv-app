@@ -6404,6 +6404,39 @@ export function suggestPrimeVideoTags(
   });
 }
 
+export function uploadAdminPrimeVideo(
+  file: File,
+  options: { title?: string; description?: string; status?: "draft" | "published"; onProgress?: (pct: number) => void } = {},
+): Promise<{ success: boolean; item: AdminPrimeVideo; note?: string }> {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (options.title) fd.append("title", options.title);
+    if (options.description) fd.append("description", options.description);
+    if (options.status) fd.append("status", options.status);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/webapp/admin/prime-videos/upload", true);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && options.onProgress) {
+        options.onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      try {
+        const body = JSON.parse(xhr.responseText || "{}");
+        if (xhr.status >= 200 && xhr.status < 300 && body.success) resolve(body);
+        else reject(new Error(body.error || `Upload failed (${xhr.status})`));
+      } catch (e) {
+        reject(new Error(`Upload failed (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.send(fd);
+  });
+}
+
 export const PRIME_TAG_TAXONOMY: { key: string; label: string }[] = [
   { key: "slam", label: "Slam" },
   { key: "clouds", label: "Clouds" },
