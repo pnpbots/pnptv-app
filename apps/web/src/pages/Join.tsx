@@ -56,7 +56,16 @@ export default function Join() {
         setPrimePlan(res.plans.find((p: SubscriptionPlan) => p.id === "monthly-pass") ?? null);
       }
     });
-    fetch("/api/stats").then((r) => r.json()).then((d) => setStats(d)).catch(() => null);
+    fetch("/api/stats")
+      .then((r) => r.json())
+      .then((d) => {
+        // /api/stats requires auth — unauthenticated visitors receive
+        // { error: "Not authenticated" }. Only persist the shape we expect.
+        if (typeof d?.totalUsers === "number" && typeof d?.newUsersLast30Days === "number") {
+          setStats(d);
+        }
+      })
+      .catch(() => null);
   }, []);
 
   const handleJoinFree = () => {
