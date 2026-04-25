@@ -158,22 +158,28 @@ const listGroups = async (req, res) => {
     await ensureMainGroupMembership(user.id);
     await ensureLanguageGroupMembership(user.id, user.language);
 
+    // Single LATERAL JOIN replaces two correlated subqueries that were
+    // running per group row (262k seq_scans observed pre-optimization).
+    // active_call resolves with one index scan per row instead of two.
     const { rows } = await query(
       `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
               g.is_main, g.is_wall_of_fame, g.is_public, g.max_members, g.created_at, g.feed_visibility,
               g.is_read_only, g.slow_mode_seconds, g.tags, g.rules,
               g.telegram_chat_id, g.telegram_invite_link, g.is_paid, g.price_usd, g.channel_id,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
-              (
-                (SELECT COUNT(*)::int FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active') > 0
-              ) as has_active_call,
-              (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1) as active_call_id,
+              (active_call.id IS NOT NULL) as has_active_call,
+              active_call.id::text as active_call_id,
               cc.access_type as channel_access_type,
               cc.price_usd as channel_price_usd,
               cc.name as channel_name
        FROM hangout_groups g
        JOIN hangout_group_members gm ON gm.group_id = g.id AND gm.user_id = $1
        LEFT JOIN creator_channels cc ON cc.id = g.channel_id
+       LEFT JOIN LATERAL (
+         SELECT id FROM hangout_video_calls
+         WHERE group_id = g.id AND status = 'active'
+         ORDER BY created_at DESC LIMIT 1
+       ) active_call ON TRUE
        ORDER BY g.is_main DESC, g.created_at DESC`,
       [user.id]
     );
@@ -380,25 +386,32 @@ const getGroup = async (req, res) => {
     // Auto-join main group if not already a member
     await ensureMainGroupMembership(user.id);
     await ensureLanguageGroupMembership(user.id, user.language);
+    // Single LATERAL JOINs each replace one correlated subquery for active
+    // call lookup. Two LATERALs (hvc + v) so we still cover both legacy
+    // video_calls and the newer hangout_video_calls tables without firing
+    // four nested subqueries per group.
     const { rows: groupRows } = await query(
       `SELECT g.*,
               g.slow_mode_seconds, g.is_read_only, g.allow_media, g.allow_member_invites,
               g.auto_delete_hours, g.tags, g.invite_code, g.channel_id,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
-              (
-                (SELECT COUNT(*)::int FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true) > 0
-                OR
-                (SELECT COUNT(*)::int FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active') > 0
-              ) as has_active_call,
-              COALESCE(
-                (SELECT hvc.id::text FROM hangout_video_calls hvc WHERE hvc.group_id = g.id AND hvc.status = 'active' ORDER BY hvc.created_at DESC LIMIT 1),
-                (SELECT v.id::text FROM video_calls v WHERE v.group_id = g.id AND v.is_active = true ORDER BY v.created_at DESC LIMIT 1)
-              ) as active_call_id,
+              (hvc.id IS NOT NULL OR vc.id IS NOT NULL) as has_active_call,
+              COALESCE(hvc.id::text, vc.id::text) as active_call_id,
               cc.access_type as channel_access_type,
               cc.price_usd as channel_price_usd,
               cc.name as channel_name
        FROM hangout_groups g
        LEFT JOIN creator_channels cc ON cc.id = g.channel_id
+       LEFT JOIN LATERAL (
+         SELECT id FROM hangout_video_calls
+         WHERE group_id = g.id AND status = 'active'
+         ORDER BY created_at DESC LIMIT 1
+       ) hvc ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT id FROM video_calls
+         WHERE group_id = g.id AND is_active = true
+         ORDER BY created_at DESC LIMIT 1
+       ) vc ON TRUE
        WHERE g.id = $1`,
       [groupId]
     );

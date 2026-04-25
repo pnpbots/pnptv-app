@@ -1728,10 +1728,14 @@ const forgotPassword = async (req, res) => {
     await query('UPDATE password_reset_tokens SET used = TRUE WHERE user_id = $1 AND used = FALSE', [user.id]);
 
     const token = crypto.randomBytes(32).toString('hex');
+    // Hash the token before persisting so a DB dump / backup leak doesn't
+    // expose usable reset links. Raw token only travels in the email URL;
+    // resetPassword compares the SHA256 of what the user submits.
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     await query(
       'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
-      [user.id, token, expiresAt.toISOString()]
+      [user.id, tokenHash, expiresAt.toISOString()]
     );
 
     const resetUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/reset-password?token=${token}`;
@@ -1764,11 +1768,16 @@ const resetPassword = async (req, res) => {
     if (!token || !password) return res.status(400).json({ error: 'Token and password are required' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
 
+    // Compare the SHA256 hash of the submitted token against the stored hash.
+    // Tokens issued before this change were stored plaintext — they will fail
+    // to match here, but those have a 1-hour expiry so the window closes
+    // automatically. No backfill needed.
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const result = await query(
       `SELECT t.id, t.user_id, t.expires_at, u.email, u.first_name
        FROM password_reset_tokens t JOIN users u ON u.id = t.user_id
        WHERE t.token = $1 AND t.used = FALSE`,
-      [token]
+      [tokenHash]
     );
     if (result.rows.length === 0) return res.status(400).json({ error: 'Invalid or expired reset link.' });
 

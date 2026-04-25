@@ -150,6 +150,12 @@ const token = asyncHandler(async (req, res) => {
       });
     }
     role = 'cammer';
+  } else {
+    // Explicit viewer-token request. If the user is currently in the cammer
+    // queue, remove them so the queue doesn't hold a ghost with a viewer
+    // LiveKit token. Covers the case where useMainStage init re-mints a
+    // viewer token after a navigate-away + back.
+    await mainStageService.removeCammer(String(userId));
   }
 
   const canPublish = role !== 'viewer';

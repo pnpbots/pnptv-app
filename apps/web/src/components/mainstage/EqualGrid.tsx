@@ -8,7 +8,7 @@ import { MEDIA_IDENTITY } from "./CinemaGrid";
 
 export function EqualGrid() {
   const allTracks = useTracks(
-    [{ source: Track.Source.Camera, withPlaceholder: true }],
+    [{ source: Track.Source.Camera, withPlaceholder: false }],
     { onlySubscribed: false }
   );
   // Drop the URL-ingress media bot so it doesn't get a tile alongside cammers.
@@ -26,8 +26,8 @@ export function EqualGrid() {
           </svg>
         </div>
         <div>
-          <p className="text-white font-semibold text-sm">Waiting for performers</p>
-          <p className="text-white/50 text-xs mt-1">The Main Stage is empty right now</p>
+          <p className="text-white font-semibold text-sm">Nobody on cam yet</p>
+          <p className="text-white/50 text-xs mt-1">Main Stage is open to everyone — tap <span className="text-white/80 font-semibold">Go live</span> to be first on</p>
         </div>
       </div>
     );

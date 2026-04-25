@@ -698,7 +698,7 @@ services:
     environment:
       POSTGRES_DB: mautrix_telegram
       POSTGRES_USER: mautrix_tg
-      POSTGRES_PASSWORD: mautrix_tg_secret_2026
+      POSTGRES_PASSWORD: ${PG_MAUTRIX_TG_PASSWORD}
     networks:
       - pnptvapp_net
     deploy:
@@ -1188,7 +1188,7 @@ services:
       NBXPLORER_BIND: 0.0.0.0:24444
       NBXPLORER_DASHNODEENDPOINT: dashd:9999
       NBXPLORER_DASHNODERPCURL: http://dashd:9998/
-      NBXPLORER_DASHNODERPCAUTH: dashuser:dashpassword
+      NBXPLORER_DASHNODERPCAUTH: ${NBXPLORER_DASH_RPC_AUTH}
       NBXPLORER_POSTGRES: "Host=pg-btcpay;Database=nbxplorer;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD}"
     networks:
       - pnptvapp_net
@@ -1394,7 +1394,7 @@ services:
       resources:
         limits:
           cpus: '1.0'
-          memory: 512m
+          memory: 768m
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/status || exit 1"]
       interval: 30s
@@ -1457,7 +1457,7 @@ services:
       MAILER_SMTP_PORT: 587
       MAILER_SMTP_SECURE: "false"
       MAILER_SMTP_USER: "support@pnptv.app"
-      MAILER_SMTP_PASSWORD: "Apelo801050)"
+      MAILER_SMTP_PASSWORD: ${HOPPSCOTCH_SMTP_PASSWORD}
       RATE_LIMIT_TTL: 60
       RATE_LIMIT_MAX: 100
       WHITELISTED_ORIGINS: "http://127.0.0.1:3100,http://localhost:3100"

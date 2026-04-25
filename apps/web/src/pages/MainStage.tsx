@@ -24,7 +24,7 @@ interface CammerInfo {
 
 function ParticipantCollector({ onCammersChange }: { onCammersChange: (cammers: CammerInfo[]) => void }) {
   const tracks = useTracks(
-    [{ source: Track.Source.Camera, withPlaceholder: true }],
+    [{ source: Track.Source.Camera, withPlaceholder: false }],
     { onlySubscribed: false }
   );
   useEffect(() => {
@@ -90,114 +90,52 @@ const NEXT_MODE: Record<ModeId, ModeId> = {
 interface BottomBarProps {
   canBeCammer: boolean;
   isCammer: boolean;
-  isAdmin: boolean;
-  mode: ModeId;
   onJoinCam: () => void;
   onLeaveCam: () => void;
-  onOpenAdmin: () => void;
   onLeave: () => void;
-  onCycleMode: () => void;
-  onShuffle: () => void;
-  fullscreenTargetRef: React.RefObject<HTMLElement>;
 }
 
 function BottomBarInner({
   canBeCammer,
   isCammer,
-  isAdmin,
-  mode,
   onJoinCam,
   onLeaveCam,
-  onOpenAdmin,
   onLeave,
-  onCycleMode,
-  onShuffle,
-  fullscreenTargetRef,
 }: BottomBarProps) {
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
 
-  const toggleMic = useCallback(() => {
-    localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
-  }, [localParticipant, isMicrophoneEnabled]);
+  // The cam button is now the single entry/exit point for being a cammer.
+  // Off+gray (not cammer) → tap → joinAsCammer() promotes + LiveKit auto-
+  // enables video via `video={isCammer}` on LiveKitRoom.
+  // On+pink (cammer)       → tap → leaveCammer() demotes back to viewer.
+  const handleCamToggle = useCallback(() => {
+    if (!canBeCammer) return;
+    if (isCammer) onLeaveCam();
+    else onJoinCam();
+  }, [canBeCammer, isCammer, onJoinCam, onLeaveCam]);
 
-  const toggleCam = useCallback(() => {
-    localParticipant.setCameraEnabled(!isCameraEnabled);
-  }, [localParticipant, isCameraEnabled]);
+  const handleMicToggle = useCallback(() => {
+    if (!isCammer) return; // grayed-out state — no-op
+    localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
+  }, [isCammer, localParticipant, isMicrophoneEnabled]);
 
   return (
     <div
-      className="relative flex-shrink-0 flex flex-col gap-2 px-3 sm:px-4 py-3"
+      className="relative flex-shrink-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2"
       style={{
         background: "rgba(10,10,15,0.95)",
         backdropFilter: "blur(16px)",
         borderTop: "1px solid rgba(255,255,255,0.07)",
-        paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+        paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))",
         zIndex: 45,
       }}
     >
-      {/* Row 1 — VIEW CONTROLS (top; always visible) */}
-      <div className="flex items-center justify-center gap-2 flex-wrap">
-        {/* CYCLE MODE — change view layout */}
-        <button
-          type="button"
-          onClick={onCycleMode}
-          aria-label={`Switch view mode — current: ${MODE_LABELS[mode]}. Next: ${MODE_LABELS[NEXT_MODE[mode]]}`}
-          title={`Switch to ${MODE_LABELS[NEXT_MODE[mode]]}`}
-          className="min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center gap-1.5 px-2 sm:px-3 rounded-full text-xs font-semibold text-white transition-all active:scale-[0.96]"
-          style={{
-            background: "linear-gradient(135deg, rgba(212,0,122,0.20), rgba(123,97,255,0.18))",
-            border: "1px solid rgba(212,0,122,0.35)",
-          }}
-        >
-          <span style={{ color: "#FF4FB0" }}>{MODE_ICONS[mode]}</span>
-          <span className="hidden sm:inline">{MODE_LABELS[mode]}</span>
-        </button>
-        {/* SHUFFLE cammers */}
-        <button
-          type="button"
-          onClick={onShuffle}
-          aria-label="Shuffle cammers"
-          title="Shuffle cammers"
-          className="min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center rounded-full transition-all active:scale-[0.94]"
-          style={{
-            background: "rgba(229,255,0,0.08)",
-            border: "1px solid rgba(229,255,0,0.25)",
-          }}
-        >
-          <svg className="w-4 h-4" style={{ color: "#E5FF00" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 4.5l3 3m0 0l-3 3m3-3H12M7.5 19.5l-3-3m0 0l3-3m-3 3H12M4.5 5.25L12 12.75M19.5 18.75L15 14.25" />
-          </svg>
-        </button>
-        {/* FULLSCREEN */}
-        <FullscreenToggle targetRef={fullscreenTargetRef} />
-        {/* ADMIN gear (admins only) */}
-        {isAdmin && (
-          <button
-            type="button"
-            aria-label="Open admin controls"
-            onClick={onOpenAdmin}
-            className="min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center rounded-full transition-all active:scale-[0.94] hover:opacity-80"
-            style={{
-              background: "rgba(123,97,255,0.15)",
-              border: "1px solid rgba(123,97,255,0.30)",
-            }}
-          >
-            <svg className="w-4 h-4" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
-        )}
-      </div>
-
-      {/* Row 2 — PARTICIPANT ACTIONS (bottom) */}
-      <div className="flex items-center justify-center gap-2 flex-wrap">
-      {/* 1. LEAVE — most important, always first */}
+      {/* LEAVE — always first (critical exit) */}
       <button
         type="button"
         onClick={onLeave}
         aria-label="Leave Main Stage"
-        className="min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center gap-1.5 px-3 rounded-full text-xs font-bold transition-all active:scale-[0.96]"
+        className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center gap-1 px-2.5 rounded-full text-xs font-bold transition-all active:scale-[0.96]"
         style={{
           background: "rgba(255,69,58,0.14)",
           border: "1px solid rgba(255,69,58,0.30)",
@@ -210,92 +148,82 @@ function BottomBarInner({
         <span className="hidden sm:inline">Leave</span>
       </button>
 
-      {/* 2. GO ON CAM / LEAVE CAM — primary action */}
+      {/* CAMERA / GO LIVE — prominent CTA. Always labeled so users
+          understand it's the control to start streaming. */}
       {canBeCammer && (
-        isCammer ? (
-          <button
-            type="button"
-            onClick={onLeaveCam}
-            aria-label="Leave cam"
-            className="min-h-[44px] flex-shrink-0 flex items-center gap-1.5 px-3 sm:px-4 rounded-full text-xs font-bold text-white transition-all active:scale-[0.96]"
-            style={{
-              background: "rgba(255,69,58,0.18)",
-              border: "1px solid rgba(255,69,58,0.35)",
-              color: "#FF453A",
-            }}
-          >
-            <svg className="w-3.5 h-3.5 sm:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <button
+          type="button"
+          onClick={handleCamToggle}
+          aria-label={isCammer ? "Stop streaming (leave cam)" : "Go live (start streaming)"}
+          title={isCammer ? "Tap to stop streaming" : "Tap to go live"}
+          aria-pressed={isCammer}
+          className="min-h-[40px] flex-shrink-0 flex items-center gap-1.5 px-3 rounded-full text-xs font-bold text-white transition-all active:scale-[0.94]"
+          style={{
+            background: isCammer
+              ? "rgba(255,69,58,0.18)"
+              : "linear-gradient(135deg,#D4007A,#7B61FF)",
+            border: isCammer
+              ? "1px solid rgba(255,69,58,0.45)"
+              : "1px solid rgba(212,0,122,0.60)",
+            boxShadow: isCammer
+              ? "0 2px 10px rgba(255,69,58,0.25)"
+              : "0 4px 16px rgba(212,0,122,0.45)",
+            color: isCammer ? "#FF453A" : "#FFFFFF",
+          }}
+        >
+          {isCammer ? (
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75zM3 3l18 18" />
             </svg>
-            <span className="hidden sm:inline">Leave cam</span>
-            <span className="sm:hidden">Off</span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onJoinCam}
-            aria-label="Go on cam"
-            className="min-h-[44px] flex-shrink-0 flex items-center gap-1.5 px-3 sm:px-4 rounded-full text-xs font-bold text-white transition-all active:scale-[0.96]"
-            style={{
-              background: "linear-gradient(135deg,#D4007A,#7B61FF)",
-              boxShadow: "0 4px 16px rgba(212,0,122,0.35)",
-            }}
-          >
-            <svg className="w-3.5 h-3.5 sm:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          ) : (
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
             </svg>
-            <span className="hidden sm:inline">Go on cam</span>
-            <span className="sm:hidden">Cam</span>
-          </button>
-        )
+          )}
+          <span>{isCammer ? "Stop" : "Go live"}</span>
+        </button>
       )}
 
-      {/* 3. MIC + CAM toggles when cammer */}
-      {isCammer && (
-        <>
-          <button
-            type="button"
-            aria-label={isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"}
-            onClick={toggleMic}
-            className="min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center rounded-full transition-all active:scale-[0.94]"
-            style={{
-              background: isMicrophoneEnabled ? "rgba(255,255,255,0.08)" : "rgba(255,69,58,0.20)",
-              border: isMicrophoneEnabled ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(255,69,58,0.40)",
-            }}
-          >
-            {isMicrophoneEnabled ? (
-              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3zM3 3l18 18" />
-              </svg>
-            )}
-          </button>
-          <button
-            type="button"
-            aria-label={isCameraEnabled ? "Turn off camera" : "Turn on camera"}
-            onClick={toggleCam}
-            className="min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center rounded-full transition-all active:scale-[0.94]"
-            style={{
-              background: isCameraEnabled ? "rgba(212,0,122,0.18)" : "rgba(255,69,58,0.20)",
-              border: isCameraEnabled ? "1px solid rgba(212,0,122,0.40)" : "1px solid rgba(255,69,58,0.40)",
-            }}
-          >
-            {isCameraEnabled ? (
-              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75zM3 3l18 18" />
-              </svg>
-            )}
-          </button>
-        </>
+      {/* MIC — grayed until user is a cammer; tap toggles mute. */}
+      {canBeCammer && (
+        <button
+          type="button"
+          onClick={handleMicToggle}
+          disabled={!isCammer}
+          aria-label={
+            !isCammer
+              ? "Microphone disabled (turn on camera first)"
+              : isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"
+          }
+          title={!isCammer ? "Turn on camera to enable mic" : isMicrophoneEnabled ? "Mute" : "Unmute"}
+          aria-pressed={isMicrophoneEnabled}
+          className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center rounded-full transition-all active:scale-[0.94] disabled:cursor-not-allowed"
+          style={{
+            background: !isCammer
+              ? "rgba(255,255,255,0.03)"
+              : isMicrophoneEnabled
+                ? "rgba(212,0,122,0.18)"
+                : "rgba(255,255,255,0.05)",
+            border: !isCammer
+              ? "1px solid rgba(255,255,255,0.08)"
+              : isMicrophoneEnabled
+                ? "1px solid rgba(212,0,122,0.40)"
+                : "1px solid rgba(255,255,255,0.12)",
+            opacity: !isCammer ? 0.4 : 1,
+          }}
+        >
+          {isMicrophoneEnabled && isCammer ? (
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4 text-white/55" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3zM3 3l18 18" />
+            </svg>
+          )}
+        </button>
       )}
-      </div>
+
     </div>
   );
 }
@@ -357,14 +285,10 @@ interface MainStageInnerProps {
   isCammer: boolean;
   onJoinCam: () => void;
   onLeaveCam: () => void;
-  onOpenAdmin: () => void;
   onSpotlightPick: (identity: string) => void;
   onConnectionStateChange: (state: ConnectionState) => void;
   onCammersChange: (cammers: CammerInfo[]) => void;
   onLeave: () => void;
-  onCycleMode: () => void;
-  onShuffle: () => void;
-  fullscreenTargetRef: React.RefObject<HTMLElement>;
 }
 
 function MainStageInner({
@@ -380,14 +304,10 @@ function MainStageInner({
   isCammer,
   onJoinCam,
   onLeaveCam,
-  onOpenAdmin,
   onSpotlightPick,
   onConnectionStateChange,
   onCammersChange,
   onLeave,
-  onCycleMode,
-  onShuffle,
-  fullscreenTargetRef,
 }: MainStageInnerProps) {
   return (
     <>
@@ -442,15 +362,9 @@ function MainStageInner({
       <BottomBarInner
         canBeCammer={canBeCammer}
         isCammer={isCammer}
-        isAdmin={isAdmin}
-        mode={mode}
         onJoinCam={onJoinCam}
         onLeaveCam={onLeaveCam}
-        onOpenAdmin={onOpenAdmin}
         onLeave={onLeave}
-        onCycleMode={onCycleMode}
-        onShuffle={onShuffle}
-        fullscreenTargetRef={fullscreenTargetRef}
       />
     </>
   );
@@ -476,10 +390,33 @@ export default function MainStage() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [connState, setConnState] = useState<ConnectionState>(ConnectionState.Connecting);
   const [cammerInfos, setCammerInfos] = useState<CammerInfo[]>([]);
+  const [camError, setCamError] = useState<string | null>(null);
   const isCammer = role === "cammer" || role === "admin";
+  // Clear stale camera-permission banners whenever user flips back to viewer.
+  useEffect(() => {
+    if (!isCammer) setCamError(null);
+  }, [isCammer]);
   // Ref to the MainStage root container, used by FullscreenToggle so we
   // fullscreen just the stage (not the whole document, which fails on iOS).
   const stageRootRef = useRef<HTMLDivElement>(null);
+
+  // Local view-mode override. Each user can pick their preferred layout
+  // without affecting anyone else. When null, we fall back to the server's
+  // mode (admin-controlled default). Persisted in localStorage so the
+  // choice survives reloads. Admin writes still go to the server via the
+  // AdminDrawer; those change the default for un-overridden users.
+  const LOCAL_MODE_KEY = "mainstage:localViewMode";
+  const [localViewMode, setLocalViewMode] = useState<ModeId | null>(() => {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(LOCAL_MODE_KEY);
+    const isValid = raw === "spotlight" || raw === "theater" || raw === "cinema" || raw === "karaoke" || raw === "equal";
+    return isValid ? (raw as ModeId) : null;
+  });
+  useEffect(() => {
+    if (typeof localStorage === "undefined") return;
+    if (localViewMode === null) localStorage.removeItem(LOCAL_MODE_KEY);
+    else localStorage.setItem(LOCAL_MODE_KEY, localViewMode);
+  }, [localViewMode]);
 
   useEffect(() => {
     setConnState(ConnectionState.Connecting);
@@ -515,12 +452,18 @@ export default function MainStage() {
     navigate(-1);
   }, [navigate]);
 
+  // Cycle the *local* view mode — each user's personal preference. The
+  // server's mode remains the default for anyone who hasn't overridden.
   const handleCycleMode = useCallback(() => {
-    if (!state) return;
-    const current: ModeId = (state.mode as ModeId) ?? "spotlight";
-    const next: ModeId = NEXT_MODE[current] ?? "spotlight";
-    admin.setMode(next).catch(() => { /* broadcast recovers on next socket tick */ });
-  }, [admin, state]);
+    const currentEffective: ModeId =
+      (localViewMode ?? (state?.mode as ModeId | undefined) ?? "spotlight");
+    const next = NEXT_MODE[currentEffective] ?? "spotlight";
+    setLocalViewMode(next);
+  }, [localViewMode, state?.mode]);
+
+  const handleResetViewMode = useCallback(() => {
+    setLocalViewMode(null);
+  }, []);
 
   const handleShuffle = useCallback(() => {
     shuffle();
@@ -642,7 +585,10 @@ export default function MainStage() {
     );
   }
 
-  const mode = state.mode;
+  // Effective mode: per-user local override wins over the server's
+  // shared mode. Everything downstream uses this.
+  const mode: ModeId =
+    (localViewMode ?? (state.mode as ModeId | undefined) ?? "spotlight");
   const liveCammers = state?.counts?.cammers ?? 0;
 
   return (
@@ -694,14 +640,106 @@ export default function MainStage() {
           type="button"
           aria-label="Leave Main Stage"
           onClick={() => navigate(-1)}
-          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:opacity-70 active:scale-[0.92]"
+          className="min-h-[36px] min-w-[36px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:opacity-70 active:scale-[0.92]"
           style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
         >
-          <svg className="w-4 h-4 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <svg className="w-3.5 h-3.5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </header>
+
+      {/* Floating vertical toolbar — fixed-positioned on the right edge,
+          always visible at any viewport size. Contains the per-user view
+          controls (cycle, reset) and shared utilities (shuffle, fullscreen,
+          admin). Stacked vertically so it scales down to the narrowest
+          phone without overflowing. */}
+      <div
+        className="absolute flex flex-col items-center gap-2 z-40"
+        style={{
+          top: "calc(64px + env(safe-area-inset-top, 0px))",
+          right: "calc(0.5rem + env(safe-area-inset-right, 0px))",
+        }}
+      >
+        <button
+          type="button"
+          onClick={handleCycleMode}
+          aria-label={`Switch your view — current: ${MODE_LABELS[mode]}. Next: ${MODE_LABELS[NEXT_MODE[mode]]}`}
+          title={`Your view · ${MODE_LABELS[mode]} → ${MODE_LABELS[NEXT_MODE[mode]]}`}
+          className="relative min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.94] shadow-lg"
+          style={{
+            background: "linear-gradient(135deg, rgba(212,0,122,0.85), rgba(123,97,255,0.80))",
+            border: "1px solid rgba(255,255,255,0.25)",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.45), 0 0 0 1px rgba(212,0,122,0.30)",
+          }}
+        >
+          <span style={{ color: "#FFF" }}>{MODE_ICONS[mode]}</span>
+          {localViewMode !== null && (
+            <span
+              className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border"
+              style={{ background: "#E5FF00", borderColor: "rgba(10,10,15,0.95)", boxShadow: "0 0 6px rgba(229,255,0,0.8)" }}
+              aria-hidden
+              title="You've picked your own view"
+            />
+          )}
+        </button>
+        {localViewMode !== null && (
+          <button
+            type="button"
+            onClick={handleResetViewMode}
+            aria-label={`Reset to room default (${MODE_LABELS[(state?.mode as ModeId) ?? "spotlight"]})`}
+            title="Reset to room default"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.94] shadow-lg"
+            style={{
+              background: "rgba(20,20,30,0.85)",
+              border: "1px solid rgba(255,255,255,0.18)",
+              backdropFilter: "blur(6px)",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+            }}
+          >
+            <svg className="w-4 h-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+            </svg>
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={handleShuffle}
+          aria-label="Shuffle cammers"
+          title="Shuffle cammers"
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.94] shadow-lg"
+          style={{
+            background: "rgba(20,20,30,0.85)",
+            border: "1px solid rgba(229,255,0,0.35)",
+            backdropFilter: "blur(6px)",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+          }}
+        >
+          <svg className="w-4 h-4" style={{ color: "#E5FF00" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 4.5l3 3m0 0l-3 3m3-3H12M7.5 19.5l-3-3m0 0l3-3m-3 3H12M4.5 5.25L12 12.75M19.5 18.75L15 14.25" />
+          </svg>
+        </button>
+        <FullscreenToggle targetRef={stageRootRef} />
+        {isAdmin && (
+          <button
+            type="button"
+            aria-label="Open admin controls"
+            onClick={() => setAdminOpen(true)}
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:opacity-80 active:scale-[0.94] shadow-lg"
+            style={{
+              background: "rgba(20,20,30,0.85)",
+              border: "1px solid rgba(123,97,255,0.40)",
+              backdropFilter: "blur(6px)",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+            }}
+          >
+            <svg className="w-4 h-4" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+        )}
+      </div>
 
       {connState === ConnectionState.Reconnecting && (
         <div
@@ -713,12 +751,43 @@ export default function MainStage() {
         </div>
       )}
 
+      {camError && (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 z-40 flex items-start gap-2 px-3 py-2 rounded-xl text-xs font-semibold max-w-[92vw] sm:max-w-[480px]"
+          style={{
+            top: "calc(60px + env(safe-area-inset-top, 0px))",
+            background: "rgba(255,69,58,0.95)",
+            color: "#fff",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+          }}
+          role="alert"
+          aria-live="assertive"
+        >
+          <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          </svg>
+          <span className="flex-1 text-left">{camError}</span>
+          <button
+            type="button"
+            onClick={() => setCamError(null)}
+            aria-label="Dismiss"
+            className="min-h-[20px] min-w-[20px] flex-shrink-0 flex items-center justify-center rounded-full opacity-80 hover:opacity-100"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       <LiveKitRoom
         key={token}
         token={token}
         serverUrl={livekitUrl}
         connect={true}
-        audio={isCammer}
+        // Mic starts off — cammers unmute via the bottom-bar mic toggle.
+        // Camera auto-publishes via video={isCammer} on mount.
+        audio={false}
         video={isCammer}
         options={{
           adaptiveStream: true,
@@ -726,6 +795,21 @@ export default function MainStage() {
           publishDefaults: { simulcast: true },
         }}
         style={{ display: "contents" }}
+        onMediaDeviceFailure={(failure) => {
+          // Surface the specific reason so users know why their cam didn't
+          // turn on. Most common is NotAllowedError (permission denied)
+          // or NotFoundError (no camera attached).
+          const msg = failure?.toString() || "Camera failed";
+          if (/NotAllowed|Permission/i.test(msg)) {
+            setCamError("Camera permission denied. Enable it in your browser settings and tap Go live again.");
+          } else if (/NotFound|Device/i.test(msg)) {
+            setCamError("No camera detected. Make sure a camera is connected.");
+          } else if (/NotReadable|Overconstrained/i.test(msg)) {
+            setCamError("Camera is in use by another app. Close it and retry.");
+          } else {
+            setCamError(`Camera error: ${msg}`);
+          }
+        }}
       >
         <MainStageInner
           mode={mode as ModeId}
@@ -740,14 +824,10 @@ export default function MainStage() {
           isCammer={isCammer}
           onJoinCam={handleJoinCam}
           onLeaveCam={handleLeaveCam}
-          onOpenAdmin={() => setAdminOpen(true)}
           onSpotlightPick={(identity) => admin.setSpotlight(identity)}
           onConnectionStateChange={setConnState}
           onCammersChange={handleCammersChange}
           onLeave={handleLeave}
-          onCycleMode={handleCycleMode}
-          onShuffle={handleShuffle}
-          fullscreenTargetRef={stageRootRef}
         />
       </LiveKitRoom>
 
@@ -779,6 +859,20 @@ interface AdminDrawerProps {
 }
 
 function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
+  // Lock body scroll while drawer is open so iOS doesn't capture pan gestures
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  // Close on Escape
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <>
       <div
@@ -791,15 +885,36 @@ function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
         role="dialog"
         aria-modal="true"
         aria-label="Admin controls"
-        className="fixed top-0 right-0 bottom-0 z-50 overflow-y-auto"
+        // No overflow on the wrapper — AdminPanelContent's body is the
+        // single scroll container so iOS doesn't get confused.
+        className="fixed top-0 right-0 bottom-0 z-50 flex flex-col"
         style={{
           width: "min(384px, 100vw)",
+          maxHeight: "100dvh",
           background: "#111117",
           borderLeft: "1px solid rgba(255,255,255,0.08)",
-          paddingTop: "env(safe-area-inset-top, 0px)",
-          paddingBottom: "env(safe-area-inset-bottom, 0px)",
         }}
       >
+        {/* Always-visible close button, fixed within the drawer regardless of
+            scroll. Big red circle, top-right corner, above the panel header. */}
+        <button
+          type="button"
+          aria-label="Close admin panel"
+          onClick={onClose}
+          className="absolute z-10 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.92] hover:opacity-90"
+          style={{
+            top: "calc(0.5rem + env(safe-area-inset-top, 0px))",
+            right: "0.5rem",
+            background: "rgba(255,69,58,0.95)",
+            border: "1px solid rgba(255,255,255,0.30)",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+            color: "#fff",
+          }}
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
         <AdminPanelContent state={state} admin={admin} cammerInfos={cammerInfos} onClose={onClose} />
       </aside>
     </>
@@ -924,33 +1039,28 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div
+      className="flex flex-col h-full min-h-0"
+      style={{
+        paddingTop: "env(safe-area-inset-top, 0px)",
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+      }}
+    >
       <div
         className="flex-shrink-0 flex items-center justify-between px-4 py-4"
         style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}
       >
-        <div>
+        <div className="pr-12">
           <h2 className="text-white font-bold text-sm">Admin Controls</h2>
           <p className="text-white/40 text-xs mt-0.5">
             {state?.counts?.cammers || 0} cammers · {state?.counts?.viewers || 0} watching
           </p>
         </div>
-        {onClose && (
-          <button
-            type="button"
-            aria-label="Close admin panel"
-            onClick={onClose}
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full hover:opacity-70 transition-opacity active:scale-[0.94]"
-            style={{ background: "rgba(255,255,255,0.06)" }}
-          >
-            <svg className="w-4 h-4 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
+        {/* Close button moved to a fixed-positioned overlay in AdminDrawer
+            so it's always reachable regardless of scroll position. */}
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-5 p-4">
+      <div className="flex-1 overflow-y-auto overscroll-contain space-y-5 p-4">
         <section>
           <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">Layout Mode</h3>
           <div className="grid grid-cols-3 gap-2">
@@ -1287,7 +1397,7 @@ function TheaterCurtains() {
 /** Small circular cammer tile in the bottom-right for Karaoke mode. */
 function KaraokeCammerOverlay({ spotlightIdentity }: { spotlightIdentity: string | null | undefined }) {
   const tracks = useTracks(
-    [{ source: Track.Source.Camera, withPlaceholder: true }],
+    [{ source: Track.Source.Camera, withPlaceholder: false }],
     { onlySubscribed: false }
   );
   const pick = tracks.find(

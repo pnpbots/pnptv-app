@@ -553,10 +553,24 @@ async function sweepGhostCammers() {
     // before we trust LiveKit's view of the world.
     if (participants.length === 0) return;
 
-    const liveIdentities = new Set(participants.map(p => p.identity));
+    // Build a lookup: identity -> canPublish permission. A queue entry is a
+    // "ghost" if (a) the identity isn't connected to LiveKit at all, or
+    // (b) the identity IS connected but with a viewer-only token (canPublish
+    // false) — happens when a former cammer navigated away and their
+    // useMainStage init re-minted a viewer token.
+    const canPublishByIdentity = new Map();
+    for (const p of participants) {
+      canPublishByIdentity.set(p.identity, Boolean(p.permission?.canPublish));
+    }
+
     const redis = getRedis();
     const queue = await redis.lrange('mainstage:spotlight:queue', 0, -1);
-    const ghosts = queue.filter(id => !liveIdentities.has(id) && id !== MEDIA_BOT_IDENTITY);
+    const ghosts = queue.filter(id => {
+      if (id === MEDIA_BOT_IDENTITY) return false;
+      if (!canPublishByIdentity.has(id)) return true; // not in LiveKit
+      if (canPublishByIdentity.get(id) === false) return true; // viewer-only
+      return false;
+    });
     if (ghosts.length === 0) return;
 
     for (const id of ghosts) {

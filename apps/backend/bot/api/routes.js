@@ -214,111 +214,6 @@ const pageLimiter = rateLimit({
   skip: (req) => req.path === '/pnp/webhook/telegram', // Skip webhook
 });
 
-// ── Geo-block middleware — blocks LATAM + Caribbean from the entire site ─────
-// Existing active users (last_login_at within 30 days) are grandfathered in.
-const LATAM_COUNTRIES = new Set([
-  // South America
-  'AR', 'BO', 'BR', 'CL', 'CO', 'EC', 'GY', 'PY', 'PE', 'SR', 'UY', 'VE', 'GF',
-  // Central America + Mexico
-  'BZ', 'CR', 'SV', 'GT', 'HN', 'MX', 'NI', 'PA',
-  // Caribbean
-  'AG', 'AW', 'BS', 'BB', 'BQ', 'CU', 'CW', 'DM', 'DO', 'GD', 'GP', 'HT',
-  'JM', 'KN', 'KY', 'LC', 'MF', 'MQ', 'MS', 'PR', 'BL', 'SX', 'TC', 'TT',
-  'VC', 'VG', 'AI',
-]);
-
-// Paths exempt from geo-blocking (webhooks, health checks, etc.)
-const GEO_EXEMPT_PATHS = ['/pnp/webhook/', '/health', '/api/health', '/api/webapp/auth/', '/auth/oidc/', '/auth/', '/api/auth-status'];
-
-// LATAM "landing mode": non-grandfathered visitors from LATAM are allowed to
-// reach the marketing landing page and the become-a-performer flow only.
-// Everything else redirects to /landing with a performer-focused CTA.
-const LATAM_ALLOWED_EXACT = new Set([
-  '/', '/landing', '/join', '/auth',
-  '/become-a-model', '/become-model', '/apply', '/creator',
-  '/about', '/blog', '/careers', '/resources', '/download',
-  '/terms', '/privacy', '/cookies', '/community-guidelines',
-  '/content-policy', '/refunds', '/subscriptions', '/creator-terms',
-  '/dmca', '/safety', '/contact',
-]);
-
-const LATAM_ALLOWED_PREFIXES = [
-  '/assets/', '/static/', '/locales/', '/flags/', '/public/',
-  '/page/', '/blog/',
-  '/auth/', '/api/webapp/auth/', '/api/webapp/geo',
-  '/api/auth-status', '/api/logout', '/api/accept-terms',
-  '/api/cms/', '/api/webapp/cms/',
-  '/api/webapp/creator/apply', '/api/creator/apply',
-];
-
-const LATAM_STATIC_ASSET_RE = /\.(js|mjs|css|map|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|eot|json|txt|xml|mp4|webm|mp3)$/i;
-
-async function latamGeoBlock(req, res, next) {
-  const ip = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
-  const geo = geoip.lookup(ip);
-  if (!geo || !LATAM_COUNTRIES.has(geo.country)) return next();
-
-  // Exempt critical paths (webhooks, health, etc.)
-  if (GEO_EXEMPT_PATHS.some(p => req.path.startsWith(p))) return next();
-
-  // Check if user is an authenticated, active (last 30 days) grandfathered user
-  const userId = req.session?.user?.id;
-  if (userId) {
-    try {
-      const redis = getRedis();
-      const cacheKey = `geo:exempt:${userId}`;
-      const cached = await redis.get(cacheKey);
-
-      if (cached === '1') return next();       // Cached as exempt
-      if (cached === '0') return latamLandingResponse(req, res, next, geo.country); // Cached as non-exempt
-
-      // Cache miss — check DB
-      const pool = getPool();
-      const { rows } = await pool.query(
-        `SELECT last_login_at FROM users WHERE id = $1`, [userId]
-      );
-      const lastLogin = rows[0]?.last_login_at;
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-      if (lastLogin && new Date(lastLogin) >= thirtyDaysAgo) {
-        await redis.set(cacheKey, '1', 'EX', 3600); // Cache 1 hour
-        return next();
-      }
-      await redis.set(cacheKey, '0', 'EX', 3600);
-    } catch (err) {
-      logger.error('[GeoBlock] Error checking exemption:', err.message);
-      // On error, fail open for authenticated users to avoid locking out legit users
-      return next();
-    }
-  }
-
-  return latamLandingResponse(req, res, next, geo.country);
-}
-
-function latamLandingResponse(req, res, next, countryCode) {
-  const p = req.path;
-
-  // Static assets — always allow (CSS, JS, images, fonts, etc.)
-  if (LATAM_STATIC_ASSET_RE.test(p)) return next();
-
-  // Exact or prefix-based allowlist for landing + performer flow
-  if (LATAM_ALLOWED_EXACT.has(p)) return next();
-  if (LATAM_ALLOWED_PREFIXES.some(prefix => p.startsWith(prefix))) return next();
-
-  // Not allowed — API gets 451 JSON, HTML gets redirected to landing
-  const isApi = p.startsWith('/api/') || req.headers.accept?.includes('application/json');
-  if (isApi) {
-    return res.status(451).json({
-      error: 'not_available_in_region',
-      message: 'PNPtv is not yet fully available in your country. You can still join as a performer.',
-      country: countryCode,
-      landingUrl: `/landing?country=${countryCode}&focus=performer`,
-    });
-  }
-
-  return res.redirect(302, `/landing?country=${countryCode}&focus=performer`);
-}
-
 // ── Colombia access gate ────────────────────────────────────────────────────
 // Users whose detected country is 'CO' must hold an active 'pnp-col'
 // entitlement to reach any /api/* route. Gate exempts auth, geo, plan
@@ -333,6 +228,9 @@ const COLOMBIA_EXEMPT_PREFIXES = [
   '/api/webhook/', '/pnp/webhook/',
   '/api/health', '/health',
   '/api/cms/', '/api/webapp/cms/',
+  // Main Stage is free-to-access for everyone, including Colombia users
+  // without pnp-col — viewing + going on cam have no tier gates by design.
+  '/api/main-stage/',
 ];
 
 async function colombiaAccessGate(req, res, next) {
@@ -496,7 +394,6 @@ const sessionMiddleware = session({
 
 app.use(sessionMiddleware);
 app.use(ipTracker); // Log every authenticated request IP for security
-// app.use(latamGeoBlock); // LATAM geo-block — DISABLED until further notice
 
 // express-session handles Set-Cookie automatically — no custom middleware needed
 
@@ -806,7 +703,7 @@ app.get('/lifetime100', (req, res) => {
   return res.redirect(302, 'https://app.pnptv.app/lifetime100' + qs);
 });
 
-// ── CMS asset proxy — LATAM geo-block handled globally via latamGeoBlock ─────
+// ── CMS asset proxy ──────────────────────────────────────────────────────────
 // Campaign videos reference cms.pnptv.app/assets/<id>.  This route allows
 // tweets to link to pnptv.app/cms/assets/<id>.
 app.get('/cms/assets/:assetId', async (req, res) => {
@@ -4758,8 +4655,8 @@ app.post('/api/webapp/hangouts/groups/:id/leave', requireSessionAuth, asyncHandl
 app.delete('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.deleteGroup));
 app.patch('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.updateGroup));
 app.post('/api/webapp/hangouts/groups/:id/avatar', requireSessionAuth, uploadLimiter, hangoutAvatarUpload.single('avatar'), verifyMagicBytes(IMAGE_MIMES), asyncHandler(hangoutGroupController.updateGroupAvatar));
-app.post('/api/webapp/hangouts/groups/:id/kick', requireSessionAuth, asyncHandler(hangoutGroupController.kickMember));
-app.post('/api/webapp/hangouts/groups/:id/members/:userId/role', requireSessionAuth, asyncHandler(hangoutGroupController.updateMemberRole));
+app.post('/api/webapp/hangouts/groups/:id/kick', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.kickMember));
+app.post('/api/webapp/hangouts/groups/:id/members/:userId/role', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.updateMemberRole));
 // Join requests for private groups
 app.post('/api/webapp/hangouts/groups/:id/request-join', requireSessionAuth, asyncHandler(hangoutGroupController.requestJoinGroup));
 app.get('/api/webapp/hangouts/groups/:id/requests', requireSessionAuth, asyncHandler(hangoutGroupController.getJoinRequests));
@@ -4794,21 +4691,21 @@ app.put('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, asyncHandler
 app.put('/api/webapp/hangouts/groups/:id/read-message', requireSessionAuth, asyncHandler(hangoutGroupController.markMessageRead));
 app.post('/api/webapp/hangouts/messages/:messageId/forward', requireSessionAuth, asyncHandler(hangoutGroupController.forwardMessage));
 // Hangout group management (kick is registered above at line 4268 — duplicate removed)
-app.post('/api/webapp/hangouts/groups/:id/ban', requireSessionAuth, asyncHandler(hangoutGroupController.banMember));
-app.post('/api/webapp/hangouts/groups/:id/unban', requireSessionAuth, asyncHandler(hangoutGroupController.unbanMember));
-app.post('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, asyncHandler(hangoutGroupController.muteMember));
-app.post('/api/webapp/hangouts/groups/:id/unmute', requireSessionAuth, asyncHandler(hangoutGroupController.unmuteMember));
-app.post('/api/webapp/hangouts/groups/:id/promote', requireSessionAuth, asyncHandler(hangoutGroupController.promoteMember));
-app.post('/api/webapp/hangouts/groups/:id/demote', requireSessionAuth, asyncHandler(hangoutGroupController.demoteMember));
+app.post('/api/webapp/hangouts/groups/:id/ban', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.banMember));
+app.post('/api/webapp/hangouts/groups/:id/unban', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.unbanMember));
+app.post('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.muteMember));
+app.post('/api/webapp/hangouts/groups/:id/unmute', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.unmuteMember));
+app.post('/api/webapp/hangouts/groups/:id/promote', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.promoteMember));
+app.post('/api/webapp/hangouts/groups/:id/demote', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.demoteMember));
 app.get('/api/webapp/hangouts/groups/:id/moderation/audit', requireSessionAuth, asyncHandler(hangoutGroupController.getModerationAudit));
 app.post('/api/webapp/hangouts/groups/:id/pin', requireSessionAuth, asyncHandler(hangoutGroupController.pinMessage));
 app.delete('/api/webapp/hangouts/groups/:id/pin/:eventId', requireSessionAuth, asyncHandler(hangoutGroupController.unpinMessage));
 app.get('/api/webapp/hangouts/groups/:id/pins', requireSessionAuth, asyncHandler(hangoutGroupController.getPinnedMessages));
-app.put('/api/webapp/hangouts/groups/:id/settings', requireSessionAuth, asyncHandler(hangoutGroupController.updateGroupSettings));
-app.post('/api/webapp/hangouts/groups/:id/transfer', requireSessionAuth, asyncHandler(hangoutGroupController.transferOwnership));
+app.put('/api/webapp/hangouts/groups/:id/settings', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.updateGroupSettings));
+app.post('/api/webapp/hangouts/groups/:id/transfer', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.transferOwnership));
 app.get('/api/webapp/hangouts/groups/:id/invite-link', requireSessionAuth, asyncHandler(hangoutGroupController.getInviteLink));
 app.put('/api/webapp/hangouts/groups/:id/notification', requireSessionAuth, asyncHandler(hangoutGroupController.updateNotificationMode));
-app.post('/api/webapp/hangouts/groups/:id/delete-message', requireSessionAuth, asyncHandler(hangoutGroupController.adminDeleteMessage));
+app.post('/api/webapp/hangouts/groups/:id/delete-message', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.adminDeleteMessage));
 // ── Hangout Feed Integration ────────────────────────────────────────────────
 app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, asyncHandler(socialController.getHangoutFeed));
 app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asyncHandler(socialController.dropToFeed));
@@ -4956,10 +4853,13 @@ app.post('/api/webapp/admin/cristina/neighbor-dm', adminGuard, asyncHandler(asyn
   const lockKey = 'admin:script:lock:cristina-neighbor-dm';
   const locked = await redisClient.set(lockKey, '1', 'EX', 300, 'NX');
   if (!locked) return res.status(409).json({ error: 'Script already running. Try again later.' });
-  const { exec } = require('child_process');
+  const { execFile } = require('child_process');
   const scriptPath = require('path').join(__dirname, '../../../scripts/cristinaNeighborDM.js');
-  exec(`node ${scriptPath}`, (err, stdout, stderr) => {
+  // execFile (vs exec) avoids shell interpretation. Bounded buffer so a
+  // runaway script can't OOM the bot via stdout buffering.
+  execFile('node', [scriptPath], { maxBuffer: 512 * 1024 }, (err, stdout, stderr) => {
     if (err) logger.error('cristinaNeighborDM script error', { err: err.message });
+    if (stderr) logger.warn('cristinaNeighborDM stderr', { stderr: String(stderr).slice(0, 500) });
   });
   return res.json({ success: true, message: 'Cristina neighbor DM campaign started in background' });
 }));
@@ -4970,14 +4870,20 @@ app.post('/api/webapp/admin/trials/revoke-unused', adminGuard, asyncHandler(asyn
   const locked = await redisClient.set(lockKey, '1', 'EX', 300, 'NX');
   if (!locked) return res.status(409).json({ error: 'Script already running. Try again later.' });
   const dryRun = req.query.dry_run === '1';
-  const { exec } = require('child_process');
+  const { execFile } = require('child_process');
   const scriptPath = require('path').join(__dirname, '../../../scripts/revokeUnusedTrials.js');
-  const args = dryRun ? '--dry-run' : '';
-  exec(`node ${scriptPath} ${args}`, (err, stdout, stderr) => {
+  const argv = dryRun ? [scriptPath, '--dry-run'] : [scriptPath];
+  // execFile (vs exec) avoids shell interpretation; maxBuffer caps output so
+  // a chatty script can't fill memory. Logs are truncated to keep entries
+  // shippable in the log pipeline.
+  execFile('node', argv, { maxBuffer: 512 * 1024 }, (err, stdout, stderr) => {
     if (err) logger.error('revokeUnusedTrials script error', { err: err.message });
-    logger.info('revokeUnusedTrials output', { stdout, stderr });
+    logger.info('revokeUnusedTrials output', {
+      stdout: String(stdout || '').slice(0, 2000),
+      stderr: String(stderr || '').slice(0, 500),
+    });
   });
-  return res.json({ success: true, message: `Trial revocation started${dryRun ? ' (dry run)' : ''}` });
+  return res.json({ success: true, queued: true, message: `Trial revocation started${dryRun ? ' (dry run)' : ''}` });
 }));
 
 // DM threads & conversations
@@ -5002,7 +4908,7 @@ app.get('/api/webapp/dm/conversation/:partnerId', requireSessionAuth, asyncHandl
 app.get('/api/webapp/dm/user/:partnerId', requireSessionAuth, asyncHandler(dmController.getPartnerInfo));
 app.post('/api/webapp/dm/call/join', requireSessionAuth, asyncHandler(dmController.joinDmVideoCall));
 app.post('/api/webapp/dm/call/start/:partnerId', requireSessionAuth, asyncHandler(dmController.createDmVideoCallInvite));
-app.post('/api/webapp/dm/send/:recipientId', requireSessionAuth, asyncHandler(dmController.sendMessage));
+app.post('/api/webapp/dm/send/:recipientId', requireSessionAuth, requireFreeTierDmLimit, asyncHandler(dmController.sendMessage));
 // DM message management (edit / delete)
 app.patch('/api/webapp/dm/messages/:msgId', requireSessionAuth, asyncHandler(dmController.editDmMessage));
 app.delete('/api/webapp/dm/messages/:msgId', requireSessionAuth, asyncHandler(dmController.deleteDmMessage));
@@ -5023,10 +4929,10 @@ app.post('/api/webapp/social/posts/with-media', requireSessionAuth, socialPostLi
 app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, socialPostLimiter, uploadLimiter, attachCreatorStatus, postMultiMediaUploadMiddleware, asyncHandler(socialController.createPostWithMultiMedia));
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));
 app.post('/api/webapp/social/posts/:postId/like', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.toggleLike));
-app.delete('/api/webapp/social/posts/:postId', requireSessionAuth, asyncHandler(socialController.deletePost));
-app.patch('/api/webapp/social/posts/:postId', requireSessionAuth, asyncHandler(socialController.editPost));
-app.post('/api/webapp/social/posts/:postId/assign-channel', requireSessionAuth, asyncHandler(socialController.assignPostToChannel));
-app.delete('/api/webapp/social/posts/:postId/assign-channel', requireSessionAuth, asyncHandler(socialController.unassignPostFromChannel));
+app.delete('/api/webapp/social/posts/:postId', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.deletePost));
+app.patch('/api/webapp/social/posts/:postId', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.editPost));
+app.post('/api/webapp/social/posts/:postId/assign-channel', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.assignPostToChannel));
+app.delete('/api/webapp/social/posts/:postId/assign-channel', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.unassignPostFromChannel));
 app.get('/api/webapp/social/posts/:postId', asyncHandler(socialController.getPost));
 app.get('/api/webapp/social/posts/:postId/replies', requireSessionAuth, asyncHandler(socialController.getReplies));
 app.get('/api/webapp/social/mentions/search', requireSessionAuth, asyncHandler(socialController.searchMentions));

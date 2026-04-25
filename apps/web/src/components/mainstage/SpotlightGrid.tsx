@@ -48,7 +48,7 @@ function CountdownChip({ nextAt }: { nextAt: number | null }) {
 
 export function SpotlightGrid({ focusIdentity, nextAt, onTileClick }: SpotlightGridProps) {
   const allTracks = useTracks(
-    [{ source: Track.Source.Camera, withPlaceholder: true }],
+    [{ source: Track.Source.Camera, withPlaceholder: false }],
     { onlySubscribed: false }
   );
   // The URL-ingress media bot publishes a Camera track too; never let it
@@ -76,8 +76,8 @@ export function SpotlightGrid({ focusIdentity, nextAt, onTileClick }: SpotlightG
           </svg>
         </div>
         <div>
-          <p className="text-white font-semibold text-sm">Waiting for performers</p>
-          <p className="text-white/50 text-xs mt-1">The Main Stage is getting ready</p>
+          <p className="text-white font-semibold text-sm">Stage is quiet</p>
+          <p className="text-white/50 text-xs mt-1">Tap <span className="text-white/80 font-semibold">Go live</span> to hop on cam — everyone's welcome</p>
         </div>
       </div>
     );

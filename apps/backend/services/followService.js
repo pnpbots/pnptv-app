@@ -15,34 +15,44 @@ function isEnforcedFollow(targetId) {
 
 /**
  * Ensure a user follows all enforced accounts.
- * Uses transactions to prevent counter drift from partial failures.
- * Idempotent — safe to call on every login.
+ *
+ * Single-transaction CTE: all 4 inserts + counter updates happen in one
+ * round-trip. Prior implementation issued ~24 round-trips per login (1
+ * existence check + BEGIN/INSERT/UPDATE/UPDATE/COMMIT × 4 targets).
+ * Idempotent via ON CONFLICT DO NOTHING; counters only bump for rows
+ * that actually inserted.
  */
 async function enforceDefaultFollows(userId) {
-  const pool = getPool();
-  const client = await pool.connect();
+  const targets = ENFORCED_FOLLOW_IDS.filter(id => String(id) !== String(userId));
+  if (targets.length === 0) return;
+
+  // Build VALUES list as ($2),($3),($4)... so we can pass userId as $1 and
+  // targets as the rest in a parameterized array — no string interpolation.
+  const targetPlaceholders = targets.map((_, i) => `($${i + 2})`).join(',');
+
   try {
-    for (const targetId of ENFORCED_FOLLOW_IDS) {
-      if (String(userId) === String(targetId)) continue;
-      // Skip if target user doesn't exist (prevents FK violation)
-      const { rowCount: exists } = await client.query('SELECT 1 FROM users WHERE id = $1', [targetId]);
-      if (!exists) continue;
-      await client.query('BEGIN');
-      const { rowCount } = await client.query(
-        'INSERT INTO user_follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT (follower_id, following_id) DO NOTHING',
-        [userId, targetId]
-      );
-      if (rowCount > 0) {
-        await client.query('UPDATE users SET following_count = following_count + 1 WHERE id = $1', [userId]);
-        await client.query('UPDATE users SET followers_count = followers_count + 1 WHERE id = $1', [targetId]);
-      }
-      await client.query('COMMIT');
-    }
+    await query(`
+      WITH targets(target_id) AS (VALUES ${targetPlaceholders}),
+      live_targets AS (
+        SELECT t.target_id FROM targets t
+        JOIN users u ON u.id = t.target_id
+      ),
+      inserted AS (
+        INSERT INTO user_follows (follower_id, following_id)
+        SELECT $1, target_id FROM live_targets
+        ON CONFLICT (follower_id, following_id) DO NOTHING
+        RETURNING following_id
+      ),
+      bump_followers AS (
+        UPDATE users SET followers_count = followers_count + 1
+        WHERE id IN (SELECT following_id FROM inserted)
+        RETURNING id
+      )
+      UPDATE users SET following_count = following_count + (SELECT COUNT(*)::int FROM inserted)
+      WHERE id = $1
+    `, [userId, ...targets]);
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
     logger.error('enforceDefaultFollows error', err);
-  } finally {
-    client.release();
   }
 }
 
