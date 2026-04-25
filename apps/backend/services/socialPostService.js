@@ -59,6 +59,7 @@ class SocialPostService {
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
               sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
+              sp.promoted_link2, sp.promoted_link2_label,
               COALESCE(sp.content_tier, 'free') as content_tier,
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
@@ -102,6 +103,7 @@ class SocialPostService {
                 sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
                 sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
+                sp.promoted_link2, sp.promoted_link2_label,
                 COALESCE(sp.content_tier, 'free') as content_tier,
                 u.id as author_id, u.username as author_username,
                 u.first_name as author_first_name, u.photo_file_id as author_photo,
@@ -118,6 +120,11 @@ class SocialPostService {
          LIMIT 1`,
         [userId, blockedParam]
       );
+
+      // Auto-generate "New on PRIME" carousel post (latest 10 published videos)
+      const carouselPost = await SocialPostService._buildPrimeCarouselPost();
+
+      let injected = page;
       if (promotedRows.length > 0) {
         let promoted = sanitizePostRows(promotedRows)[0];
         // Apply the same tier gate as the rest of the feed (CRIT-01)
@@ -126,11 +133,96 @@ class SocialPostService {
         const filtered = pinnedIds.has(promoted.id)
           ? page.filter(p => p.id !== promoted.id)
           : page;
-        return { posts: [promoted, ...filtered], nextCursor };
+        injected = [promoted, ...filtered];
       }
+      if (carouselPost) {
+        injected = [injected[0], carouselPost, ...injected.slice(1)].filter(Boolean);
+      }
+      return { posts: injected, nextCursor };
     }
 
     return { posts: page, nextCursor };
+  }
+
+  // ── PRIME video carousel injection ────────────────────────────────────────
+
+  /**
+   * Build a synthetic promoted post containing the 10 most recently
+   * published PRIME videos, plus a count of uploads in the last 7 days.
+   * Returned as a virtual feed item (negative ID, is_carousel=true) so the
+   * frontend can render it as a horizontal scrollable row instead of a
+   * traditional card. Returns null if the carousel can't be built.
+   */
+  static async _buildPrimeCarouselPost() {
+    try {
+      const directusUrl = (process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055').replace(/\/$/, '');
+      const [recentResp, totalResp] = await Promise.all([
+        axios.get(`${directusUrl}/items/prime_videos`, {
+          params: {
+            filter: JSON.stringify({ status: { _eq: 'published' } }),
+            fields: 'id,title,thumbnail,video_file,duration,date_created',
+            sort: '-date_created',
+            limit: 10,
+          },
+          timeout: 4_000,
+        }),
+        axios.get(`${directusUrl}/items/prime_videos`, {
+          params: {
+            filter: JSON.stringify({
+              status: { _eq: 'published' },
+              date_created: { _gte: '$NOW(-7 days)' },
+            }),
+            aggregate: JSON.stringify({ count: 'id' }),
+          },
+          timeout: 4_000,
+        }),
+      ]);
+
+      const items = (recentResp.data?.data || [])
+        .filter(v => v?.id)
+        .map(v => ({
+          id: v.id,
+          title: v.title || 'Untitled',
+          duration: v.duration || null,
+          thumbnail_url: v.thumbnail
+            ? `/cms/assets/${v.thumbnail}`
+            : (v.video_file ? `/video-thumb/${v.video_file}.jpg` : null),
+          link: `/channels?channel=prime&video=${v.id}`,
+        }));
+
+      if (items.length === 0) return null;
+
+      const newCount = parseInt(totalResp.data?.data?.[0]?.count?.id || totalResp.data?.data?.[0]?.count || '0', 10) || items.length;
+
+      return {
+        id: -1, // synthetic — won't collide with real social_posts.id
+        is_promoted: true,
+        is_carousel: true,
+        carousel_total: newCount,
+        carousel_items: items,
+        content: newCount > 0
+          ? `${newCount} new video${newCount === 1 ? '' : 's'} dropped on PRIME this week`
+          : 'Latest on PNPtv PRIME',
+        promoted_link: '/channels?channel=prime',
+        promoted_link_label: 'Browse all videos',
+        author_id: 'pnptv-official',
+        author_username: 'pnptv',
+        author_first_name: 'PNPtv',
+        author_photo: null,
+        created_at: new Date().toISOString(),
+        likes_count: 0,
+        reposts_count: 0,
+        replies_count: 0,
+        liked_by_me: false,
+        is_exclusive: false,
+        is_shareable: false,
+        content_tier: 'free',
+        content_locked: false,
+      };
+    } catch (err) {
+      logger.warn('_buildPrimeCarouselPost failed', { error: err.message });
+      return null;
+    }
   }
 
   /**

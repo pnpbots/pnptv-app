@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { updateProfile } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 
-const STORAGE_KEY = "pnptv_tutorials_seen_v2";
+const STORAGE_KEY = "pnptv_tutorials_seen_v3";
 const NEVER_SHOW_KEY = "pnptv_tutorials_never_show";
 
 function getSeenMap(): Record<string, boolean> {

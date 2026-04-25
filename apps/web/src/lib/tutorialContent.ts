@@ -40,30 +40,30 @@ export const tutorialContent: Record<string, TutorialSection> = {
   hangouts: {
     slides: [
       {
-        titleEn: "Group Hangouts",
-        titleEs: "Hangouts Grupales",
-        descEn: "Join group chats to meet and vibe with the community. Share messages, media, and have fun together.",
-        descEs: "Unete a chats grupales para conocer y compartir con la comunidad. Comparte mensajes, media y diviertete.",
+        titleEn: "Hangouts are LIVE",
+        titleEs: "Los Hangouts estan EN VIVO",
+        descEn: "Group rooms with live text chat, voice, video and screen-share — all working right now. Browse the list and tap any hangout to walk in.",
+        descEs: "Salas grupales con chat en vivo, voz, video y compartir pantalla — todo funcionando ahora. Explora la lista y toca cualquier hangout para entrar.",
         illustration: "groupChat",
       },
       {
-        titleEn: "Video Calls",
-        titleEs: "Videollamadas",
-        descEn: "Start or join live video calls right from any hangout group. Face-to-face, anytime.",
-        descEs: "Inicia o unete a videollamadas en vivo desde cualquier grupo. Cara a cara, cuando quieras.",
+        titleEn: "Voice & Video Calls",
+        titleEs: "Llamadas de Voz y Video",
+        descEn: "Tap the call button inside any hangout to start a voice or video call. Anyone in the room can join — face to face, no scheduling.",
+        descEs: "Toca el boton de llamada dentro de cualquier hangout para iniciar voz o video. Quien este en la sala puede unirse — cara a cara, sin programar.",
         illustration: "videoCall",
       },
       {
         titleEn: "Create Your Own",
         titleEs: "Crea el Tuyo",
-        descEn: "PRIME members can create private hangout groups and invite who they want.",
-        descEs: "Los miembros PRIME pueden crear grupos privados e invitar a quienes quieran.",
+        descEn: "PRIME members can create private hangouts and invite who they want. Public, members-only, or invite-only — your call.",
+        descEs: "Los miembros PRIME pueden crear hangouts privados e invitar a quienes quieran. Publico, solo-miembros o solo-por-invitacion — tu decides.",
         illustration: "createGroup",
       },
       {
         titleEn: "Community Rules",
         titleEs: "Reglas de la Comunidad",
-        descEn: "Complaints and support requests in hangouts are prohibited and may result in a ban. For help, chat with Cristina AI — your customer support assistant — available anytime from the menu.",
+        descEn: "Complaints and support requests in hangouts are prohibited and may result in a ban. For help, chat with Cristina AI — your support assistant — available anytime from the menu.",
         descEs: "Las quejas y solicitudes de soporte en hangouts estan prohibidas y pueden resultar en un ban. Para ayuda, habla con Cristina AI — tu asistente de soporte — disponible en cualquier momento desde el menu.",
         illustration: "navigate",
       },
@@ -77,21 +77,68 @@ export const tutorialContent: Record<string, TutorialSection> = {
     ],
   },
 
+  mainstage: {
+    slides: [
+      {
+        titleEn: "Welcome to the Main Stage",
+        titleEs: "Bienvenido al Main Stage",
+        descEn: "The Main Stage is the heart of PNPtv — a live room where music, video and the community come together. Always on, always free to drop in.",
+        descEs: "El Main Stage es el corazon de PNPtv — una sala en vivo donde se juntan musica, video y la comunidad. Siempre activa, siempre gratis para entrar.",
+        illustration: "liveStream",
+      },
+      {
+        titleEn: "Watch & Listen",
+        titleEs: "Mira y Escucha",
+        descEn: "Audio and PRIME videos play for everyone in the room at once. No buffering ahead, no falling behind — you're all watching the same moment.",
+        descEs: "Audio y videos PRIME se reproducen para todos a la vez. Nadie va adelantado ni atrasado — todos estan viendo el mismo momento.",
+        illustration: "primeContent",
+      },
+      {
+        titleEn: "Switch the View",
+        titleEs: "Cambia la Vista",
+        descEn: "Spotlight, Theater, Cinema, Karaoke or Everyone — pick the layout that fits the vibe. Admins set the mode for the whole room.",
+        descEs: "Spotlight, Theater, Cinema, Karaoke o Everyone — elige el layout que vaya con el ambiente. Los admins definen el modo para toda la sala.",
+        illustration: "browse",
+      },
+      {
+        titleEn: "Show Yourself",
+        titleEs: "Muestrate",
+        descEn: "Turn on your camera to join the cammer grid, or just watch and chat. Tip performers right from the room to keep the energy going.",
+        descEs: "Activa tu camara para unirte al grid de cammers, o solo mira y conversa. Manda propinas a los performers desde la misma sala para mantener la energia.",
+        illustration: "tips",
+      },
+      {
+        titleEn: "Be Yourself, Be Kind",
+        titleEs: "Se Tu Mismo, Se Amable",
+        descEn: "The Main Stage is a shared space. Consent, respect, and zero illegal content. Anything reported gets reviewed and acted on fast.",
+        descEs: "El Main Stage es un espacio compartido. Consentimiento, respeto y cero contenido ilegal. Cualquier reporte se revisa y se actua rapido.",
+        illustration: "welcome",
+      },
+    ],
+  },
+
   prime: {
     slides: [
       {
-        titleEn: "PRIME Content",
-        titleEs: "Contenido PRIME",
-        descEn: "Exclusive videos, photos, and content from top performers — only for subscribers.",
-        descEs: "Videos, fotos y contenido exclusivo de los mejores performers — solo para suscriptores.",
+        titleEn: "PNPtv PRIME Channel",
+        titleEs: "Canal PNPtv PRIME",
+        descEn: "Exclusive videos from top performers and the PNPtv crew. New uploads drop on the channel daily — keep checking back.",
+        descEs: "Videos exclusivos de los mejores performers y del equipo PNPtv. Subimos contenido nuevo al canal todos los dias — vuelve seguido.",
         illustration: "primeContent",
       },
       {
         titleEn: "Browse & Watch",
         titleEs: "Explora y Mira",
-        descEn: "Filter by performer or category. Tap any item to watch or view in full screen.",
-        descEs: "Filtra por performer o categoria. Toca cualquier elemento para ver en pantalla completa.",
+        descEn: "Filter by performer, category or tag. Tap any video to watch full-screen, like it, or share the link with someone.",
+        descEs: "Filtra por performer, categoria o tag. Toca cualquier video para verlo en pantalla completa, darle like o compartir el enlace.",
         illustration: "browse",
+      },
+      {
+        titleEn: "See It in the Feed",
+        titleEs: "Velo en el Feed",
+        descEn: "The latest 10 PRIME drops also appear in a row at the top of your Feed. Swipe through and tap to watch — no need to leave the page.",
+        descEs: "Los 10 ultimos drops de PRIME aparecen en una fila al inicio de tu Feed. Deslizate y toca para ver — sin salir de la pagina.",
+        illustration: "feed",
       },
     ],
   },
@@ -144,17 +191,17 @@ export const tutorialContent: Record<string, TutorialSection> = {
   social: {
     slides: [
       {
-        titleEn: "Social Feed",
-        titleEs: "Feed Social",
-        descEn: "Share thoughts, photos, and moments with the community. Express yourself freely.",
-        descEs: "Comparte pensamientos, fotos y momentos con la comunidad. Expresate libremente.",
+        titleEn: "The Feed is LIVE",
+        titleEs: "El Feed esta EN VIVO",
+        descEn: "Post text, photos, videos — everything the community is talking about lands here. The featured card at the top is always the latest announcement.",
+        descEs: "Publica texto, fotos, videos — todo lo que la comunidad esta hablando aterriza aqui. La tarjeta destacada arriba siempre es el anuncio mas reciente.",
         illustration: "socialPost",
       },
       {
         titleEn: "Engage & Connect",
         titleEs: "Interactua y Conecta",
-        descEn: "Like posts, follow people, and build your network within the community.",
-        descEs: "Da like a publicaciones, sigue personas y construye tu red dentro de la comunidad.",
+        descEn: "Like, comment, share and translate any post. The PRIME video row at the top of the feed shows the latest drops — tap any thumbnail to watch.",
+        descEs: "Dale like, comenta, comparte y traduce cualquier publicacion. La fila de videos PRIME al inicio del feed muestra los drops mas recientes — toca cualquier miniatura para ver.",
         illustration: "engage",
       },
       {

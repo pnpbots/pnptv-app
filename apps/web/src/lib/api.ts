@@ -845,6 +845,18 @@ export interface SocialPostItem {
   promoted_link?: string | null;
   promoted_link_label?: string | null;
   promoted_thumbnail?: string | null;
+  promoted_link2?: string | null;
+  promoted_link2_label?: string | null;
+  // Synthetic "New on PRIME" carousel — backend injects at top of feed page 1
+  is_carousel?: boolean;
+  carousel_total?: number;
+  carousel_items?: Array<{
+    id: number;
+    title: string;
+    duration: number | null;
+    thumbnail_url: string | null;
+    link: string;
+  }>;
   // Hangout feed integration
   hangout_group_id?: number | null;
   hangout_group_name?: string | null;

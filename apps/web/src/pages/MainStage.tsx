@@ -10,12 +10,15 @@ import {
 import { ConnectionState, RoomEvent, Track } from "livekit-client";
 import { useMainStage } from "@/hooks/useMainStage";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { SpotlightGrid } from "@/components/mainstage/SpotlightGrid";
 import { CinemaGrid } from "@/components/mainstage/CinemaGrid";
 import { EqualGrid } from "@/components/mainstage/EqualGrid";
 import { communityResources } from "@/lib/i18n/communityResources";
 import { getFeaturedPrimeVideos, getAssetUrl, type PrimeVideo } from "@/lib/directus";
 import { MEDIA_IDENTITY } from "@/components/mainstage/CinemaGrid";
+import { useI18n } from "@/lib/i18n";
 
 interface CammerInfo {
   identity: string;
@@ -103,6 +106,7 @@ function BottomBarInner({
   onLeave,
 }: BottomBarProps) {
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
+  const t = useI18n();
 
   // The cam button is now the single entry/exit point for being a cammer.
   // Off+gray (not cammer) → tap → joinAsCammer() promotes + LiveKit auto-
@@ -134,18 +138,13 @@ function BottomBarInner({
       <button
         type="button"
         onClick={onLeave}
-        aria-label="Leave Main Stage"
-        className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center gap-1 px-2.5 rounded-full text-xs font-bold transition-all active:scale-[0.96]"
-        style={{
-          background: "rgba(255,69,58,0.14)",
-          border: "1px solid rgba(255,69,58,0.30)",
-          color: "#FF453A",
-        }}
+        aria-label={t.live.mainStageAriaLeave}
+        className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center gap-1 px-2.5 rounded-full text-xs font-bold transition-all hover:bg-white/10 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black bg-pnp-error/15 border border-pnp-error/30 text-pnp-error"
       >
         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
         </svg>
-        <span className="hidden sm:inline">Leave</span>
+        <span className="hidden sm:inline">{t.live.mainStageLeave}</span>
       </button>
 
       {/* CAMERA / GO LIVE — prominent CTA. Always labeled so users
@@ -154,10 +153,10 @@ function BottomBarInner({
         <button
           type="button"
           onClick={handleCamToggle}
-          aria-label={isCammer ? "Stop streaming (leave cam)" : "Go live (start streaming)"}
+          aria-label={isCammer ? t.live.mainStageAriaStopCam : t.live.mainStageAriaStartCam}
           title={isCammer ? "Tap to stop streaming" : "Tap to go live"}
           aria-pressed={isCammer}
-          className="min-h-[40px] flex-shrink-0 flex items-center gap-1.5 px-3 rounded-full text-xs font-bold text-white transition-all active:scale-[0.94]"
+          className="min-h-[40px] flex-shrink-0 flex items-center gap-1.5 px-3 rounded-full text-xs font-bold text-white transition-all hover:bg-white/10 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
             background: isCammer
               ? "rgba(255,69,58,0.18)"
@@ -180,7 +179,7 @@ function BottomBarInner({
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
             </svg>
           )}
-          <span>{isCammer ? "Stop" : "Go live"}</span>
+          <span>{isCammer ? t.live.mainStageStop : t.live.mainStageGoLive}</span>
         </button>
       )}
 
@@ -192,12 +191,12 @@ function BottomBarInner({
           disabled={!isCammer}
           aria-label={
             !isCammer
-              ? "Microphone disabled (turn on camera first)"
-              : isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"
+              ? t.live.mainStageAriaMicDisabled
+              : isMicrophoneEnabled ? t.live.mainStageAriaMicMute : t.live.mainStageAriaMicUnmute
           }
           title={!isCammer ? "Turn on camera to enable mic" : isMicrophoneEnabled ? "Mute" : "Unmute"}
           aria-pressed={isMicrophoneEnabled}
-          className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center rounded-full transition-all active:scale-[0.94] disabled:cursor-not-allowed"
+          className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
             background: !isCammer
               ? "rgba(255,255,255,0.03)"
@@ -229,6 +228,7 @@ function BottomBarInner({
 }
 
 function ConnectionOverlay({ connState }: { connState: ConnectionState }) {
+  const t = useI18n();
   if (connState === ConnectionState.Connected) return null;
 
   return (
@@ -242,7 +242,7 @@ function ConnectionOverlay({ connState }: { connState: ConnectionState }) {
           style={{ borderColor: "rgba(212,0,122,0.3)", borderTopColor: "#D4007A" }}
         />
         <p className="text-white/70 text-sm">
-          {connState === ConnectionState.Reconnecting ? "Reconnecting…" : "Connecting…"}
+          {connState === ConnectionState.Reconnecting ? t.live.mainStageReconnecting : t.live.mainStageConnecting}
         </p>
       </div>
     </div>
@@ -372,6 +372,8 @@ function MainStageInner({
 
 export default function MainStage() {
   const navigate = useNavigate();
+  const t = useI18n();
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("mainstage");
   const {
     state,
     isAdmin,
@@ -418,10 +420,6 @@ export default function MainStage() {
     else localStorage.setItem(LOCAL_MODE_KEY, localViewMode);
   }, [localViewMode]);
 
-  useEffect(() => {
-    setConnState(ConnectionState.Connecting);
-  }, [token]);
-
   // Auto-start Cristina's radio when entering Main Stage so the room has
   // music over the silent video. Fires at most once per page mount. If the
   // user pauses, we don't restart. If tracks refetch after a pause, we
@@ -432,9 +430,15 @@ export default function MainStage() {
     if (hasAutoStartedMusicRef.current) return;
     if (musicIsPlaying) { hasAutoStartedMusicRef.current = true; return; }
     if (!musicTracks || musicTracks.length === 0) return; // provider still loading
+    // Skip if the admin has music streaming via LiveKit ingress — playing our
+    // local radio on top would double-up audio.
+    if (state?.media?.kind === "music" && state?.media?.playing === true) {
+      hasAutoStartedMusicRef.current = true;
+      return;
+    }
     hasAutoStartedMusicRef.current = true;
     playMusic();
-  }, [musicTracks, musicIsPlaying, playMusic]);
+  }, [musicTracks, musicIsPlaying, playMusic, state?.media?.kind, state?.media?.playing]);
 
   const handleJoinCam = useCallback(async () => {
     await joinAsCammer();
@@ -472,10 +476,9 @@ export default function MainStage() {
   if (loading) {
     return (
       <div
-        className="fixed inset-0 flex flex-col"
-        style={{ background: "var(--pnp-background, #0A0A0F)" }}
+        className="fixed inset-0 flex flex-col bg-pnp-background"
         role="status"
-        aria-label="Loading Main Stage"
+        aria-label={t.live.mainStageLoading}
       >
         <div
           className="flex-shrink-0 flex items-center justify-between px-4 h-14"
@@ -485,11 +488,11 @@ export default function MainStage() {
             paddingTop: "env(safe-area-inset-top, 0px)",
           }}
         >
-          <div className="w-20 h-4 rounded animate-pulse" style={{ background: "rgba(255,255,255,0.08)" }} />
-          <div className="w-24 h-5 rounded animate-pulse" style={{ background: "rgba(255,255,255,0.06)" }} />
-          <div className="w-8 h-8 rounded-full animate-pulse" style={{ background: "rgba(255,255,255,0.08)" }} />
+          <div className="w-20 h-4 rounded animate-pulse bg-white/[0.08]" />
+          <div className="w-24 h-5 rounded animate-pulse bg-white/[0.06]" />
+          <div className="w-8 h-8 rounded-full animate-pulse bg-white/[0.08]" />
         </div>
-        <div className="flex-1 animate-pulse" style={{ background: "rgba(255,255,255,0.03)" }}>
+        <div className="flex-1 animate-pulse bg-white/[0.03]">
           <div className="absolute inset-0 flex items-center justify-center">
             <div
               className="w-10 h-10 rounded-full border-2 animate-spin"
@@ -507,20 +510,14 @@ export default function MainStage() {
 
   if (error) {
     return (
-      <div
-        className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center"
-        style={{ background: "var(--pnp-background, #0A0A0F)" }}
-      >
-        <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center"
-          style={{ background: "rgba(255,69,58,0.12)", border: "1px solid rgba(255,69,58,0.25)" }}
-        >
+      <div className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center bg-pnp-background">
+        <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-pnp-error/[0.12] border border-pnp-error/25">
           <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
           </svg>
         </div>
         <div>
-          <p className="text-white font-semibold text-sm mb-1">Failed to connect</p>
+          <p className="text-pnp-text-primary font-semibold text-sm mb-1">{t.live.mainStageFailedToConnect}</p>
           <p className="text-white/50 text-xs">{error}</p>
         </div>
         <div className="flex gap-3">
@@ -530,15 +527,14 @@ export default function MainStage() {
             className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white transition-all active:scale-[0.97]"
             style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
           >
-            Try again
+            {t.live.mainStageTryAgain}
           </button>
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white/60 transition-all active:scale-[0.97]"
-            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
+            className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white/60 transition-all active:scale-[0.97] bg-white/[0.06] border border-white/10"
           >
-            Go back
+            {t.live.mainStageGoBack}
           </button>
         </div>
       </div>
@@ -547,21 +543,15 @@ export default function MainStage() {
 
   if (!token || !state) {
     return (
-      <div
-        className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center"
-        style={{ background: "var(--pnp-background, #0A0A0F)" }}
-      >
-        <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center"
-          style={{ background: "rgba(123,97,255,0.12)", border: "1px solid rgba(123,97,255,0.25)" }}
-        >
-          <svg className="w-8 h-8" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <div className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center bg-pnp-background">
+        <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-pnp-purple/[0.12] border border-pnp-purple/25">
+          <svg className="w-8 h-8 text-pnp-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
           </svg>
         </div>
         <div>
-          <p className="text-white font-semibold text-sm mb-1">Main Stage unavailable</p>
-          <p className="text-white/50 text-xs">No state received from the server. Try reloading.</p>
+          <p className="text-pnp-text-primary font-semibold text-sm mb-1">{t.live.mainStageUnavailable}</p>
+          <p className="text-white/50 text-xs">{t.live.mainStageNoState}</p>
         </div>
         <div className="flex gap-3">
           <button
@@ -570,15 +560,14 @@ export default function MainStage() {
             className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white transition-all active:scale-[0.97]"
             style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
           >
-            Reload
+            {t.live.mainStageReload}
           </button>
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white/60 transition-all active:scale-[0.97]"
-            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
+            className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white/60 transition-all active:scale-[0.97] bg-white/[0.06] border border-white/10"
           >
-            Go back
+            {t.live.mainStageGoBack}
           </button>
         </div>
       </div>
@@ -591,12 +580,27 @@ export default function MainStage() {
     (localViewMode ?? (state.mode as ModeId | undefined) ?? "spotlight");
   const liveCammers = state?.counts?.cammers ?? 0;
 
+  // i18n mode label lookup — used in header and toolbar aria-labels.
+  const modeLabels: Record<ModeId, string> = {
+    spotlight: t.live.mainStageModeSpotlight,
+    theater: t.live.mainStageModeTheater,
+    cinema: t.live.mainStageModeCinema,
+    karaoke: t.live.mainStageModeKaraoke,
+    equal: t.live.mainStageModeEqual,
+  };
+
   return (
     <div
       ref={stageRootRef}
-      className="fixed inset-0 flex flex-col"
-      style={{ background: "var(--pnp-background, #0A0A0F)" }}
+      className="fixed inset-0 lg:left-72 flex flex-col bg-pnp-background"
     >
+      {showTutorial && (
+        <TutorialOverlay
+          section="mainstage"
+          onDismiss={dismissTutorial}
+          onDismissForever={dismissForever}
+        />
+      )}
       <header
         className="flex-shrink-0 flex items-center justify-between px-4 gap-3"
         style={{
@@ -611,37 +615,28 @@ export default function MainStage() {
         <img
           src="/logo-login.png"
           alt="PNPtv!"
-          className="h-7 w-auto object-contain"
-          style={{ filter: "brightness(1.1)" }}
+          className="h-7 w-auto object-contain brightness-110"
         />
 
-        <div
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
-          style={{
-            background: "rgba(255,255,255,0.06)",
-            border: "1px solid rgba(255,255,255,0.10)",
-            color: "rgba(255,255,255,0.80)",
-          }}
-        >
-          <span style={{ color: "#D4007A" }}>{MODE_ICONS[mode]}</span>
-          <span>Main Stage</span>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-white/[0.06] border border-white/10 text-white/80">
+          <span className="text-pnp-accent">{MODE_ICONS[mode]}</span>
+          <span>{t.live.mainStageTitle}</span>
           <span className="text-white/30 mx-0.5">·</span>
-          <span style={{ color: "rgba(255,255,255,0.55)" }}>{MODE_LABELS[mode]}</span>
+          <span className="text-white/55">{modeLabels[mode]}</span>
           {liveCammers > 0 && (
             <>
               <span className="text-white/20 mx-0.5">·</span>
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-              <span className="tabular-nums" style={{ color: "rgba(255,255,255,0.70)" }}>{liveCammers}</span>
+              <span className="tabular-nums text-white/70">{liveCammers}</span>
             </>
           )}
         </div>
 
         <button
           type="button"
-          aria-label="Leave Main Stage"
+          aria-label={t.live.mainStageAriaLeave}
           onClick={() => navigate(-1)}
-          className="min-h-[36px] min-w-[36px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:opacity-70 active:scale-[0.92]"
-          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
+          className="min-h-[36px] min-w-[36px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:opacity-70 active:scale-[0.92] bg-white/[0.06] border border-white/10"
         >
           <svg className="w-3.5 h-3.5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -653,9 +648,10 @@ export default function MainStage() {
           always visible at any viewport size. Contains the per-user view
           controls (cycle, reset) and shared utilities (shuffle, fullscreen,
           admin). Stacked vertically so it scales down to the narrowest
-          phone without overflowing. */}
+          phone without overflowing. Hidden while AdminDrawer is open so
+          buttons remain reachable and don't bleed through the drawer scrim. */}
       <div
-        className="absolute flex flex-col items-center gap-2 z-40"
+        className={`absolute flex flex-col items-center gap-2 z-40${adminOpen ? " hidden" : ""}`}
         style={{
           top: "calc(64px + env(safe-area-inset-top, 0px))",
           right: "calc(0.5rem + env(safe-area-inset-right, 0px))",
@@ -664,16 +660,16 @@ export default function MainStage() {
         <button
           type="button"
           onClick={handleCycleMode}
-          aria-label={`Switch your view — current: ${MODE_LABELS[mode]}. Next: ${MODE_LABELS[NEXT_MODE[mode]]}`}
-          title={`Your view · ${MODE_LABELS[mode]} → ${MODE_LABELS[NEXT_MODE[mode]]}`}
-          className="relative min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.94] shadow-lg"
+          aria-label={`Switch your view — current: ${modeLabels[mode]}. Next: ${modeLabels[NEXT_MODE[mode]]}`}
+          title={`Your view · ${modeLabels[mode]} → ${modeLabels[NEXT_MODE[mode]]}`}
+          className="relative min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
             background: "linear-gradient(135deg, rgba(212,0,122,0.85), rgba(123,97,255,0.80))",
             border: "1px solid rgba(255,255,255,0.25)",
             boxShadow: "0 4px 16px rgba(0,0,0,0.45), 0 0 0 1px rgba(212,0,122,0.30)",
           }}
         >
-          <span style={{ color: "#FFF" }}>{MODE_ICONS[mode]}</span>
+          <span className="text-white">{MODE_ICONS[mode]}</span>
           {localViewMode !== null && (
             <span
               className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border"
@@ -687,9 +683,9 @@ export default function MainStage() {
           <button
             type="button"
             onClick={handleResetViewMode}
-            aria-label={`Reset to room default (${MODE_LABELS[(state?.mode as ModeId) ?? "spotlight"]})`}
-            title="Reset to room default"
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.94] shadow-lg"
+            aria-label={`Reset to room default (${modeLabels[(state?.mode as ModeId) ?? "spotlight"]})`}
+            title={t.live.mainStageAriaResetView}
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
             style={{
               background: "rgba(20,20,30,0.85)",
               border: "1px solid rgba(255,255,255,0.18)",
@@ -705,9 +701,9 @@ export default function MainStage() {
         <button
           type="button"
           onClick={handleShuffle}
-          aria-label="Shuffle cammers"
-          title="Shuffle cammers"
-          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.94] shadow-lg"
+          aria-label={t.live.mainStageAriaShuffle}
+          title={t.live.mainStageAriaShuffle}
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
             background: "rgba(20,20,30,0.85)",
             border: "1px solid rgba(229,255,0,0.35)",
@@ -715,7 +711,7 @@ export default function MainStage() {
             boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
           }}
         >
-          <svg className="w-4 h-4" style={{ color: "#E5FF00" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-4 h-4 text-pnp-lemon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 4.5l3 3m0 0l-3 3m3-3H12M7.5 19.5l-3-3m0 0l3-3m-3 3H12M4.5 5.25L12 12.75M19.5 18.75L15 14.25" />
           </svg>
         </button>
@@ -723,9 +719,9 @@ export default function MainStage() {
         {isAdmin && (
           <button
             type="button"
-            aria-label="Open admin controls"
+            aria-label={t.live.mainStageAriaOpenAdmin}
             onClick={() => setAdminOpen(true)}
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:opacity-80 active:scale-[0.94] shadow-lg"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:opacity-80 hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
             style={{
               background: "rgba(20,20,30,0.85)",
               border: "1px solid rgba(123,97,255,0.40)",
@@ -733,7 +729,7 @@ export default function MainStage() {
               boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
             }}
           >
-            <svg className="w-4 h-4" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4 text-pnp-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
@@ -742,22 +738,17 @@ export default function MainStage() {
       </div>
 
       {connState === ConnectionState.Reconnecting && (
-        <div
-          className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
-          style={{ background: "#E69138", color: "#000" }}
-        >
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-pnp-amber text-black">
           <span className="w-1.5 h-1.5 rounded-full bg-black/40 animate-pulse" />
-          Reconnecting…
+          {t.live.mainStageReconnectingBanner}
         </div>
       )}
 
       {camError && (
         <div
-          className="absolute left-1/2 -translate-x-1/2 z-40 flex items-start gap-2 px-3 py-2 rounded-xl text-xs font-semibold max-w-[92vw] sm:max-w-[480px]"
+          className="absolute left-1/2 -translate-x-1/2 z-40 flex items-start gap-2 px-3 py-2 rounded-xl text-xs font-semibold max-w-[92vw] sm:max-w-[480px] bg-pnp-error text-white"
           style={{
             top: "calc(60px + env(safe-area-inset-top, 0px))",
-            background: "rgba(255,69,58,0.95)",
-            color: "#fff",
             boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
           }}
           role="alert"
@@ -770,7 +761,7 @@ export default function MainStage() {
           <button
             type="button"
             onClick={() => setCamError(null)}
-            aria-label="Dismiss"
+            aria-label={t.live.mainStageAriaDismiss}
             className="min-h-[20px] min-w-[20px] flex-shrink-0 flex items-center justify-center rounded-full opacity-80 hover:opacity-100"
           >
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -781,31 +772,31 @@ export default function MainStage() {
       )}
 
       <LiveKitRoom
-        key={token}
+        key="main-stage-prime"
         token={token}
         serverUrl={livekitUrl}
         connect={true}
-        // Mic starts off — cammers unmute via the bottom-bar mic toggle.
-        // Camera auto-publishes via video={isCammer} on mount.
-        audio={false}
+        // Mic device is acquired when user becomes a cammer (matches video
+        // behaviour). Viewers stay at audio=false so no device prompt fires.
+        audio={isCammer}
         video={isCammer}
         options={{
           adaptiveStream: true,
           dynacast: true,
           publishDefaults: { simulcast: true },
         }}
-        style={{ display: "contents" }}
+        className="contents"
         onMediaDeviceFailure={(failure) => {
           // Surface the specific reason so users know why their cam didn't
           // turn on. Most common is NotAllowedError (permission denied)
           // or NotFoundError (no camera attached).
           const msg = failure?.toString() || "Camera failed";
           if (/NotAllowed|Permission/i.test(msg)) {
-            setCamError("Camera permission denied. Enable it in your browser settings and tap Go live again.");
+            setCamError(t.live.mainStageErrCameraPermission);
           } else if (/NotFound|Device/i.test(msg)) {
-            setCamError("No camera detected. Make sure a camera is connected.");
+            setCamError(t.live.mainStageErrNoCamera);
           } else if (/NotReadable|Overconstrained/i.test(msg)) {
-            setCamError("Camera is in use by another app. Close it and retry.");
+            setCamError(t.live.mainStageErrCameraInUse);
           } else {
             setCamError(`Camera error: ${msg}`);
           }
@@ -859,6 +850,8 @@ interface AdminDrawerProps {
 }
 
 function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
+  const t = useI18n();
+
   // Lock body scroll while drawer is open so iOS doesn't capture pan gestures
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -876,7 +869,7 @@ function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
   return (
     <>
       <div
-        className="fixed inset-0 z-40"
+        className="fixed inset-0 lg:left-72 z-40"
         style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
         onClick={onClose}
         aria-hidden
@@ -884,31 +877,28 @@ function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
       <aside
         role="dialog"
         aria-modal="true"
-        aria-label="Admin controls"
+        aria-label={t.live.mainStageAdminTitle}
         // No overflow on the wrapper — AdminPanelContent's body is the
         // single scroll container so iOS doesn't get confused.
-        className="fixed top-0 right-0 bottom-0 z-50 flex flex-col"
+        className="fixed top-0 right-0 bottom-0 z-50 flex flex-col bg-pnp-background border-l border-white/[0.08]"
         style={{
           width: "min(384px, 100vw)",
           maxHeight: "100dvh",
-          background: "var(--pnp-background, #111117)",
-          borderLeft: "1px solid rgba(255,255,255,0.08)",
         }}
       >
         {/* Always-visible close button, fixed within the drawer regardless of
             scroll. Big red circle, top-right corner, above the panel header. */}
         <button
           type="button"
-          aria-label="Close admin panel"
+          aria-label={t.live.mainStageAriaCloseAdmin}
           onClick={onClose}
-          className="absolute z-10 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.92] hover:opacity-90"
+          className="absolute z-10 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.92] hover:opacity-90 text-white"
           style={{
             top: "calc(0.5rem + env(safe-area-inset-top, 0px))",
             right: "0.5rem",
             background: "rgba(255,69,58,0.95)",
             border: "1px solid rgba(255,255,255,0.30)",
             boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
-            color: "#fff",
           }}
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.8}>
@@ -930,66 +920,42 @@ interface AdminPanelContentProps {
   onClose?: () => void;
 }
 
-const MODES: Array<{ id: ModeId; label: string; sub: string; icon: JSX.Element }> = [
-  {
-    id: "spotlight",
-    label: "Spotlight",
-    sub: "Pin one cammer as hero",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        <circle cx="12" cy="10" r="4" />
-        <path strokeLinecap="round" d="M12 14v5M8 19h8" />
-      </svg>
-    ),
-  },
-  {
-    id: "theater",
-    label: "Theater",
-    sub: "Velvet curtains frame the video",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 5v14M20 5v14M4 7c2 0 4 2 4 4s-2 4-4 4M20 7c-2 0-4 2-4 4s2 4 4 4M9 12h6" />
-      </svg>
-    ),
-  },
-  {
-    id: "cinema",
-    label: "Cinema",
-    sub: "Media takes the stage",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        <rect x="3" y="5" width="18" height="14" rx="2" />
-        <path strokeLinecap="round" d="M8 10l4 2.5L8 15z" fill="currentColor" />
-      </svg>
-    ),
-  },
-  {
-    id: "karaoke",
-    label: "Karaoke",
-    sub: "Video full, cammer in corner",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        <rect x="3" y="5" width="18" height="12" rx="1.5" />
-        <circle cx="17" cy="15" r="3" fill="currentColor" />
-      </svg>
-    ),
-  },
-  {
-    id: "equal",
-    label: "Everyone",
-    sub: "Grid of all cammers",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        <rect x="3" y="3" width="7" height="7" rx="1.5" />
-        <rect x="14" y="3" width="7" height="7" rx="1.5" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" />
-        <rect x="14" y="14" width="7" height="7" rx="1.5" />
-      </svg>
-    ),
-  },
-];
+const MODE_ICONS_ADMIN: Record<ModeId, JSX.Element> = {
+  spotlight: (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <circle cx="12" cy="10" r="4" />
+      <path strokeLinecap="round" d="M12 14v5M8 19h8" />
+    </svg>
+  ),
+  theater: (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 5v14M20 5v14M4 7c2 0 4 2 4 4s-2 4-4 4M20 7c-2 0-4 2-4 4s2 4 4 4M9 12h6" />
+    </svg>
+  ),
+  cinema: (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path strokeLinecap="round" d="M8 10l4 2.5L8 15z" fill="currentColor" />
+    </svg>
+  ),
+  karaoke: (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <rect x="3" y="5" width="18" height="12" rx="1.5" />
+      <circle cx="17" cy="15" r="3" fill="currentColor" />
+    </svg>
+  ),
+  equal: (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  ),
+};
 
 export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminPanelContentProps) {
+  const t = useI18n();
   const [mediaUrl, setMediaUrl] = useState(state.media.src ?? "");
   const [primeVideos, setPrimeVideos] = useState<PrimeVideo[]>([]);
   const [primeLoading, setPrimeLoading] = useState(true);
@@ -1046,14 +1012,11 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
         paddingBottom: "env(safe-area-inset-bottom, 0px)",
       }}
     >
-      <div
-        className="flex-shrink-0 flex items-center justify-between px-4 py-4"
-        style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}
-      >
+      <div className="flex-shrink-0 flex items-center justify-between px-4 py-4 border-b border-white/[0.07]">
         <div className="pr-12">
-          <h2 className="text-white font-bold text-sm">Admin Controls</h2>
+          <h2 className="text-pnp-text-primary font-bold text-sm">{t.live.mainStageAdminTitle}</h2>
           <p className="text-white/40 text-xs mt-0.5">
-            {state?.counts?.cammers || 0} cammers · {state?.counts?.viewers || 0} watching
+            {state?.counts?.cammers || 0} {t.live.mainStageCammers} · {state?.counts?.viewers || 0} {t.live.mainStageWatching}
           </p>
         </div>
         {/* Close button moved to a fixed-positioned overlay in AdminDrawer
@@ -1062,15 +1025,29 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
 
       <div className="flex-1 overflow-y-auto overscroll-contain space-y-5 p-4">
         <section>
-          <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">Layout Mode</h3>
+          <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">{t.live.mainStageAdminSectionLayout}</h3>
           <div className="grid grid-cols-3 gap-2">
-            {MODES.map((m) => {
-              const active = state?.mode === m.id;
+            {(["spotlight", "theater", "cinema", "karaoke", "equal"] as ModeId[]).map((modeId) => {
+              const active = state?.mode === modeId;
+              const modeLabel: Record<ModeId, string> = {
+                spotlight: t.live.mainStageModeSpotlight,
+                theater: t.live.mainStageModeTheater,
+                cinema: t.live.mainStageModeCinema,
+                karaoke: t.live.mainStageModeKaraoke,
+                equal: t.live.mainStageModeEqual,
+              };
+              const modeSub: Record<ModeId, string> = {
+                spotlight: t.live.mainStageModeSpotlightSub,
+                theater: t.live.mainStageModeTheaterSub,
+                cinema: t.live.mainStageModeCinemaSub,
+                karaoke: t.live.mainStageModeKaraokeSub,
+                equal: t.live.mainStageModeEqualSub,
+              };
               return (
                 <button
-                  key={m.id}
+                  key={modeId}
                   type="button"
-                  onClick={() => admin.setMode(m.id)}
+                  onClick={() => admin.setMode(modeId)}
                   className="flex flex-col items-center gap-1.5 p-3 rounded-2xl text-center transition-all active:scale-[0.97]"
                   style={{
                     background: active
@@ -1080,9 +1057,9 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
                     color: active ? "#fff" : "rgba(255,255,255,0.50)",
                   }}
                 >
-                  <span style={{ color: active ? "#D4007A" : "rgba(255,255,255,0.40)" }}>{m.icon}</span>
-                  <span className="text-[10px] font-bold leading-tight">{m.label}</span>
-                  <span className="text-[9px] text-white/30 leading-tight hidden sm:block">{m.sub}</span>
+                  <span className={active ? "text-pnp-accent" : "text-white/40"}>{MODE_ICONS_ADMIN[modeId]}</span>
+                  <span className="text-[10px] font-bold leading-tight">{modeLabel[modeId]}</span>
+                  <span className="text-[9px] text-white/30 leading-tight hidden sm:block">{modeSub[modeId]}</span>
                 </button>
               );
             })}
@@ -1091,20 +1068,19 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
 
         <section>
           <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">
-            Prime Videos{primeVideos.length > 0 ? ` (${primeVideos.length})` : ""}
+            {t.live.mainStageAdminSectionPrimeVideos}{primeVideos.length > 0 ? ` (${primeVideos.length})` : ""}
           </h3>
           {primeLoading ? (
             <div className="flex gap-2 overflow-hidden">
               {[0, 1, 2].map((i) => (
                 <div
                   key={i}
-                  className="flex-shrink-0 w-32 h-[88px] rounded-xl animate-pulse"
-                  style={{ background: "rgba(255,255,255,0.04)" }}
+                  className="flex-shrink-0 w-32 h-[88px] rounded-xl animate-pulse bg-white/[0.04]"
                 />
               ))}
             </div>
           ) : primeVideos.length === 0 ? (
-            <p className="text-white/30 text-xs">No published Prime Videos in CMS</p>
+            <p className="text-white/30 text-xs">{t.live.mainStageAdminNoPrimeVideos}</p>
           ) : (
             <div
               className="flex gap-2 overflow-x-auto pb-1"
@@ -1119,13 +1095,12 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
                     key={v.id}
                     type="button"
                     onClick={() => handlePickPrimeVideo(v)}
-                    className="flex-shrink-0 relative w-32 h-[88px] rounded-xl overflow-hidden transition-all active:scale-[0.97] text-left"
+                    className="flex-shrink-0 relative w-32 h-[88px] rounded-xl overflow-hidden transition-all active:scale-[0.97] text-left bg-white/[0.04]"
                     style={{
                       border: active ? "1.5px solid #D4007A" : "1.5px solid rgba(255,255,255,0.08)",
-                      background: "rgba(255,255,255,0.04)",
                       boxShadow: active ? "0 0 0 2px rgba(212,0,122,0.30)" : "none",
                     }}
-                    aria-label={`Play ${v.title}`}
+                    aria-label={t.live.mainStageAdminAriaPlayVideo(v.title)}
                     title={v.title}
                   >
                     {thumb ? (
@@ -1151,7 +1126,7 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
                       </p>
                     </div>
                     {active && (
-                      <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "#D4007A" }}>
+                      <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center bg-pnp-accent">
                         <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
                           <path d="M8 5v14l11-7z" />
                         </svg>
@@ -1165,20 +1140,16 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
         </section>
 
         <section>
-          <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">Custom URL</h3>
+          <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">{t.live.mainStageAdminSectionCustomUrl}</h3>
           <div className="space-y-3">
             <div className="flex gap-2">
               <input
                 type="url"
                 value={mediaUrl}
                 onChange={(e) => setMediaUrl(e.target.value)}
-                placeholder="Video or stream URL…"
-                className="flex-1 min-w-0 px-3 py-2 rounded-xl text-xs text-white placeholder-white/30 focus:outline-none transition-colors"
-                style={{
-                  background: "rgba(255,255,255,0.06)",
-                  border: "1px solid rgba(255,255,255,0.10)",
-                }}
-                aria-label="Media URL"
+                placeholder={t.live.mainStageAdminUrlPlaceholder}
+                className="flex-1 min-w-0 px-3 py-2 rounded-xl text-xs text-white placeholder-white/30 focus:outline-none transition-colors bg-white/[0.06] border border-white/10"
+                aria-label={t.live.mainStageAdminAriaMediaUrl}
               />
               <button
                 type="button"
@@ -1187,7 +1158,7 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
                 className="flex-shrink-0 min-h-[38px] px-3 rounded-xl text-xs font-bold text-white transition-all active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
               >
-                Play
+                {t.live.mainStageAdminPlay}
               </button>
             </div>
 
@@ -1196,35 +1167,26 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
                 <button
                   type="button"
                   onClick={handleTogglePlay}
-                  className="flex-1 min-h-[40px] flex items-center justify-center gap-2 rounded-xl text-xs font-semibold text-white transition-all active:scale-[0.97]"
-                  style={{
-                    background: "rgba(255,255,255,0.07)",
-                    border: "1px solid rgba(255,255,255,0.10)",
-                  }}
+                  className="flex-1 min-h-[40px] flex items-center justify-center gap-2 rounded-xl text-xs font-semibold text-white transition-all active:scale-[0.97] bg-white/[0.07] border border-white/10"
                 >
                   {state.media.playing ? (
                     <>
                       <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
-                      Pause
+                      {t.live.mainStageAdminPause}
                     </>
                   ) : (
                     <>
                       <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                      Resume
+                      {t.live.mainStageAdminResume}
                     </>
                   )}
                 </button>
                 <button
                   type="button"
                   onClick={handleStopMedia}
-                  className="flex-shrink-0 min-h-[40px] px-4 rounded-xl text-xs font-semibold transition-all active:scale-[0.97]"
-                  style={{
-                    background: "rgba(255,69,58,0.12)",
-                    border: "1px solid rgba(255,69,58,0.25)",
-                    color: "#FF453A",
-                  }}
+                  className="flex-shrink-0 min-h-[40px] px-4 rounded-xl text-xs font-semibold transition-all active:scale-[0.97] bg-pnp-error/[0.12] border border-pnp-error/25 text-pnp-error"
                 >
-                  Stop
+                  {t.live.mainStageAdminStop}
                 </button>
               </div>
             )}
@@ -1233,42 +1195,33 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
 
         <section>
           <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">
-            Participants{cammerInfos.length > 0 ? ` (${cammerInfos.length})` : ""}
+            {t.live.mainStageAdminSectionParticipants}{cammerInfos.length > 0 ? ` (${cammerInfos.length})` : ""}
           </h3>
           {cammerInfos.length === 0 ? (
-            <p className="text-white/30 text-xs">No cammers on stage</p>
+            <p className="text-white/30 text-xs">{t.live.mainStageAdminNoCammers}</p>
           ) : (
             <div className="space-y-1.5">
               {cammerInfos.map((c) => (
                 <div
                   key={c.identity}
-                  className="flex items-center gap-2 px-3 py-2 rounded-xl"
-                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/[0.06]"
                 >
                   <span className="flex-1 min-w-0 text-xs text-white/70 truncate">{c.name}</span>
                   <button
                     type="button"
                     onClick={() => admin.moderate("mute", c.identity)}
-                    className="flex-shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-[0.96]"
-                    style={{
-                      background: "rgba(230,145,56,0.12)",
-                      border: "1px solid rgba(230,145,56,0.25)",
-                      color: "#E69138",
-                    }}
+                    aria-label={t.live.mainStageAdminAriaMute(c.identity)}
+                    className="flex-shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-[0.96] bg-pnp-amber/[0.12] border border-pnp-amber/25 text-pnp-amber"
                   >
-                    Mute
+                    {t.live.mainStageAdminMute}
                   </button>
                   <button
                     type="button"
                     onClick={() => admin.moderate("kick", c.identity)}
-                    className="flex-shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-[0.96]"
-                    style={{
-                      background: "rgba(255,69,58,0.12)",
-                      border: "1px solid rgba(255,69,58,0.25)",
-                      color: "#FF453A",
-                    }}
+                    aria-label={t.live.mainStageAdminAriaKick(c.identity)}
+                    className="flex-shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-[0.96] bg-pnp-error/[0.12] border border-pnp-error/25 text-pnp-error"
                   >
-                    Kick
+                    {t.live.mainStageAdminKick}
                   </button>
                 </div>
               ))}
@@ -1285,6 +1238,7 @@ interface FullscreenToggleProps {
 }
 
 function FullscreenToggle({ targetRef }: FullscreenToggleProps) {
+  const t = useI18n();
   const [isFs, setIsFs] = useState(
     typeof document !== "undefined" &&
       !!(document.fullscreenElement ||
@@ -1333,13 +1287,9 @@ function FullscreenToggle({ targetRef }: FullscreenToggleProps) {
     <button
       type="button"
       onClick={handleClick}
-      aria-label={isFs ? "Exit fullscreen" : "Enter fullscreen"}
-      title={isFs ? "Exit fullscreen" : "Fullscreen"}
-      className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all active:scale-[0.94]"
-      style={{
-        background: "rgba(255,255,255,0.06)",
-        border: "1px solid rgba(255,255,255,0.10)",
-      }}
+      aria-label={isFs ? t.live.mainStageAriaExitFullscreen : t.live.mainStageAriaFullscreen}
+      title={isFs ? t.live.mainStageAriaExitFullscreen : t.live.mainStageTitleFullscreen}
+      className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black bg-white/[0.06] border border-white/10"
     >
       {isFs ? (
         <svg className="w-4 h-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1430,28 +1380,28 @@ function KaraokeCammerOverlay({ spotlightIdentity }: { spotlightIdentity: string
 }
 
 function NowPlayingChip({ title }: { title: string }) {
+  const t = useI18n();
   return (
     <div
-      className="pointer-events-none fixed z-30 flex items-center gap-2 px-3 py-1.5 rounded-full"
+      className="pointer-events-none fixed z-30 flex items-center gap-2 px-3 py-1.5 rounded-full border border-pnp-accent/[0.28]"
       style={{
         top: "calc(64px + env(safe-area-inset-top, 0px))",
         right: "1rem",
         maxWidth: "calc(100vw - 2rem)",
         background: "rgba(10,10,15,0.72)",
-        border: "1px solid rgba(212,0,122,0.28)",
         backdropFilter: "blur(12px)",
       }}
       role="status"
       aria-live="polite"
-      aria-label={`Now playing: ${title}`}
+      aria-label={t.live.mainStageNowPlayingAriaLabel(title)}
     >
       <span
-        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-        style={{ background: "#D4007A", boxShadow: "0 0 8px rgba(212,0,122,0.7)" }}
+        className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-pnp-accent"
+        style={{ boxShadow: "0 0 8px rgba(212,0,122,0.7)" }}
         aria-hidden
       />
       <span className="text-white/45 text-[10px] font-bold uppercase tracking-wider flex-shrink-0">
-        Now playing
+        {t.live.mainStageNowPlayingLabel}
       </span>
       <span className="text-white text-xs font-medium truncate">{title}</span>
     </div>
@@ -1472,6 +1422,7 @@ function getWellnessTips(): TipItem[] {
 }
 
 function WellnessTipsOverlay() {
+  const { live: wellnessT } = useI18n();
   const [tip, setTip] = useState<TipItem | null>(null);
   const [visible, setVisible] = useState(false);
   const indexRef = useRef(0);
@@ -1512,7 +1463,7 @@ function WellnessTipsOverlay() {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed left-1/2 -translate-x-1/2 z-40 w-full max-w-[480px] px-4"
+      className="pointer-events-none fixed left-1/2 lg:left-[calc(50%+9rem)] -translate-x-1/2 z-40 w-full max-w-[480px] px-4"
       style={{
         bottom: "calc(84px + env(safe-area-inset-bottom, 0px))",
         transform: `translate(-50%, ${visible ? "0" : "24px"})`,
@@ -1521,29 +1472,25 @@ function WellnessTipsOverlay() {
       }}
     >
       <div
-        className="pointer-events-auto relative rounded-2xl p-4 pr-10"
+        className="pointer-events-auto relative rounded-2xl p-4 pr-10 border border-pnp-accent/[0.35]"
         style={{
           background: "linear-gradient(135deg, rgba(15,15,22,0.92), rgba(25,15,35,0.92))",
-          border: "1px solid rgba(212,0,122,0.35)",
           backdropFilter: "blur(20px)",
           boxShadow: "0 16px 48px rgba(0,0,0,0.45), 0 0 0 1px rgba(123,97,255,0.08) inset",
         }}
       >
         <div className="flex items-start gap-3">
           <div
-            className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center mt-0.5"
-            style={{
-              background: "linear-gradient(135deg,rgba(212,0,122,0.25),rgba(123,97,255,0.25))",
-              border: "1px solid rgba(212,0,122,0.35)",
-            }}
+            className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center mt-0.5 border border-pnp-accent/[0.35]"
+            style={{ background: "linear-gradient(135deg,rgba(212,0,122,0.25),rgba(123,97,255,0.25))" }}
           >
-            <svg className="w-4 h-4" style={{ color: "#FF4FB0" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4 text-[#FF4FB0]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
             </svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "#FF4FB0" }}>
-              Wellness tip
+            <p className="text-[10px] font-bold uppercase tracking-widest mb-1 text-[#FF4FB0]">
+              {wellnessT.mainStageWellnessTipLabel}
             </p>
             <p className="text-white text-[13px] font-semibold leading-snug mb-1">
               {tip.title}
@@ -1555,10 +1502,9 @@ function WellnessTipsOverlay() {
               href="/community-resources"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 mt-2 text-[11px] font-bold"
-              style={{ color: "#7B61FF" }}
+              className="inline-flex items-center gap-1 mt-2 text-[11px] font-bold text-pnp-purple"
             >
-              More resources
+              {wellnessT.mainStageWellnessMoreResources}
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
@@ -1567,10 +1513,9 @@ function WellnessTipsOverlay() {
         </div>
         <button
           type="button"
-          aria-label="Dismiss wellness tip"
+          aria-label={wellnessT.mainStageWellnessAriaDismiss}
           onClick={handleClose}
-          className="absolute top-2.5 right-2.5 w-7 h-7 flex items-center justify-center rounded-full transition-all active:scale-[0.92]"
-          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
+          className="absolute top-2.5 right-2.5 w-7 h-7 flex items-center justify-center rounded-full transition-all active:scale-[0.92] bg-white/[0.06] border border-white/[0.08]"
         >
           <svg className="w-3 h-3 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

@@ -230,8 +230,8 @@ export default function SocialPostCard({
 
   return (
     <div
-      className="glass-card-sm pt-4 pb-4 pr-4 pl-14 cursor-pointer relative"
-      onClick={toggleReplies}
+      className={`glass-card-sm pt-4 pb-4 pr-4 pl-14 relative${post.is_carousel ? "" : " cursor-pointer"}`}
+      onClick={post.is_carousel ? undefined : toggleReplies}
       id={`post-${post.id}`}
       style={
         post.is_promoted
@@ -592,25 +592,107 @@ export default function SocialPostCard({
                 </button>
               )}
 
-              {/* Promoted CTA button */}
+              {/* Promoted PRIME video carousel (auto-injected synthetic post) */}
+              {post.is_promoted && post.is_carousel && Array.isArray(post.carousel_items) && post.carousel_items.length > 0 && (
+                <div className="mt-3 -mx-2" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex gap-2 overflow-x-auto pb-2 px-2 snap-x snap-mandatory" style={{ scrollbarWidth: "thin" }}>
+                    {post.carousel_items.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => onNavigate(item.link)}
+                        className="flex-shrink-0 w-36 snap-start text-left group"
+                        title={item.title}
+                      >
+                        <div
+                          className="relative w-36 h-24 rounded-lg overflow-hidden bg-black/40"
+                          style={{ border: "1px solid rgba(255,255,255,0.08)" }}
+                        >
+                          {item.thumbnail_url ? (
+                            <img
+                              src={item.thumbnail_url}
+                              alt={item.title}
+                              className="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
+                              loading="lazy"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-white/20">
+                              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M2 6a2 2 0 012-2h6l2 2h4a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+                              </svg>
+                            </div>
+                          )}
+                          <span
+                            className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ background: "rgba(0,0,0,0.4)" }}
+                          >
+                            <svg className="w-8 h-8" fill="#fff" viewBox="0 0 20 20">
+                              <path d="M6.3 4.7l8 5.3-8 5.3z" />
+                            </svg>
+                          </span>
+                          {item.duration && item.duration > 0 && (
+                            <span
+                              className="absolute bottom-1 right-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                              style={{ background: "rgba(0,0,0,0.7)", color: "#fff" }}
+                            >
+                              {Math.floor(item.duration / 60)}:{String(Math.floor(item.duration % 60)).padStart(2, "0")}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-xs text-white/90 line-clamp-2 leading-tight">
+                          {item.title}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Promoted CTA buttons (single or dual) */}
               {post.is_promoted && post.promoted_link && (
-                <button
-                  onClick={(e) => { e.stopPropagation();
-                    const link = post.promoted_link!;
-                    if (link.startsWith("/")) {
-                      onNavigate(link);
-                    } else if (link.startsWith("https://")) {
-                      window.open(link, "_blank", "noopener,noreferrer");
-                    }
-                  }}
-                  className="mt-3 w-full text-sm font-semibold py-2.5 rounded-lg transition-opacity hover:opacity-90"
-                  style={{
-                    background: "linear-gradient(135deg, #D4007A, #E69138)",
-                    color: "#fff",
-                  }}
+                <div
+                  className={`mt-3 ${post.promoted_link2 ? "flex gap-2" : ""}`}
                 >
-                  {post.promoted_link_label || "Watch Now"}
-                </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation();
+                      const link = post.promoted_link!;
+                      if (link.startsWith("/")) {
+                        onNavigate(link);
+                      } else if (link.startsWith("https://")) {
+                        window.open(link, "_blank", "noopener,noreferrer");
+                      }
+                    }}
+                    className={`${post.promoted_link2 ? "flex-1" : "w-full"} text-sm font-semibold py-2.5 rounded-lg transition-opacity hover:opacity-90`}
+                    style={{
+                      background: "linear-gradient(135deg, #D4007A, #E69138)",
+                      color: "#fff",
+                    }}
+                  >
+                    {post.promoted_link_label || "Watch Now"}
+                  </button>
+                  {post.promoted_link2 && (
+                    <button
+                      onClick={(e) => { e.stopPropagation();
+                        const link = post.promoted_link2!;
+                        if (link.startsWith("/")) {
+                          onNavigate(link);
+                        } else if (link.startsWith("https://")) {
+                          window.open(link, "_blank", "noopener,noreferrer");
+                        }
+                      }}
+                      className="flex-1 text-sm font-semibold py-2.5 rounded-lg transition-colors hover:bg-white/10"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        color: "#fff",
+                        border: "1px solid rgba(255,255,255,0.15)",
+                      }}
+                    >
+                      {post.promoted_link2_label || "Open"}
+                    </button>
+                  )}
+                </div>
               )}
 
               {/* Link preview — only when the post has no media */}
@@ -707,7 +789,8 @@ export default function SocialPostCard({
             </>
           )}
 
-          {/* Actions bar */}
+          {/* Actions bar — hidden on synthetic carousel posts (no real post to like) */}
+          {!post.is_carousel && (
           <div
             className="flex items-center gap-3 mt-3 flex-wrap"
             style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
@@ -843,6 +926,7 @@ export default function SocialPostCard({
               </span>
             )}
           </div>
+          )}
 
           {/* Replies section */}
           {showReplies && (
