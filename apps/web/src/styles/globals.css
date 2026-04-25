@@ -44,10 +44,48 @@
   --pnp-background:    #FFFFFF;
   --pnp-surface:       #F5F5F7;
   --pnp-surface-hover: #E8E8EB;
-  --pnp-text-primary:  #0A0A0F;
+  --pnp-text-primary:  #1C1C1E;
   --pnp-text-secondary:#5A5A60;
   --pnp-border:        #D7D7DC;
   color-scheme: light;
+}
+
+/* In light mode the swarm of legacy `text-white` utilities and inline
+   `color:#fff` declarations would render invisible on the white surfaces.
+   Reroute them to a carbon dark gray. The exceptions below restore white on
+   brand-colored buttons / gradients / arbitrary `bg-[#hex]` chips, so the
+   magenta+orange CTAs remain readable. Inline white is handled with attribute
+   selectors. */
+:root[data-theme="light"] .text-white,
+:root[data-theme="light"] [style*="color: #fff"],
+:root[data-theme="light"] [style*="color: #FFF"],
+:root[data-theme="light"] [style*="color:#fff"],
+:root[data-theme="light"] [style*="color:#FFF"],
+:root[data-theme="light"] [style*="color: #ffffff"],
+:root[data-theme="light"] [style*="color: #FFFFFF"],
+:root[data-theme="light"] [style*='color: "white"'],
+:root[data-theme="light"] [style*="color: white"] {
+  color: #1C1C1E;
+}
+
+/* Restore white text on brand-colored elements — the element itself or any
+   descendant. `bg-pnp-accent` (magenta), `bg-pnp-accentHover`, status colors,
+   gradients, and arbitrary `bg-[#hex]` Tailwind values all keep white text. */
+:root[data-theme="light"] .bg-pnp-accent.text-white,
+:root[data-theme="light"] .bg-pnp-accent .text-white,
+:root[data-theme="light"] .bg-pnp-accentHover.text-white,
+:root[data-theme="light"] .bg-pnp-accentHover .text-white,
+:root[data-theme="light"] .bg-pnp-error.text-white,
+:root[data-theme="light"] .bg-pnp-error .text-white,
+:root[data-theme="light"] .bg-pnp-success.text-white,
+:root[data-theme="light"] .bg-pnp-success .text-white,
+:root[data-theme="light"] .bg-pnp-warning.text-white,
+:root[data-theme="light"] .bg-pnp-warning .text-white,
+:root[data-theme="light"] [class*="bg-gradient-"].text-white,
+:root[data-theme="light"] [class*="bg-gradient-"] .text-white,
+:root[data-theme="light"] [class*="bg-["].text-white,
+:root[data-theme="light"] [class*="bg-["] .text-white {
+  color: #FFFFFF;
 }
 
 /* Smoothly cross-fade colors when the user toggles theme. Skip on initial
