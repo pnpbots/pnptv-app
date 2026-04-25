@@ -378,7 +378,11 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Ticket state
-  const [view, setView] = useState<WidgetView>("helpCenter");
+  // Land users directly in chat. The previous "helpCenter" hub was removed
+  // because it duplicated chat (every tile just sent a canned prompt) and
+  // mixed concerns (radio shortcuts, payment activation, AI chat). Chat is
+  // now the single primary surface; secondary tools live in a slim toolbar.
+  const [view, setView] = useState<WidgetView>("chat");
   const [ticket, setTicket] = useState<SupportTicket | null>(null);
   const [ticketMessages, setTicketMessages] = useState<TicketMessage[]>([]);
   const [selectedCategory, setSelectedCategory] =
@@ -405,27 +409,11 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   const [meruError, setMeruError] = useState<string | null>(null);
   const [meruSuccess, setMeruSuccess] = useState(false);
 
-  // Cache loaded tracks per mode so we don't re-fetch
-  const modeCacheRef = useRef<Record<string, any[]>>({});
-  const [loadingMode, setLoadingMode] = useState<string | null>(null);
-  const { play } = useMusicPlayer();
-
-  const handleRadioModeSelect = useCallback(async (mode: "takeoff" | "flying" | "landing") => {
-    setActiveTab("vj");
-    setLoadingMode(mode);
-    try {
-      let modeTracks = modeCacheRef.current[mode];
-      if (!modeTracks) {
-        const res = await getMediaTracks(0, 500, mode);
-        modeTracks = res.success ? res.tracks : [];
-        modeCacheRef.current[mode] = modeTracks;
-      }
-      if (modeTracks.length > 0) {
-        play(modeTracks[Math.floor(Math.random() * modeTracks.length)], modeTracks);
-      }
-    } catch { /* silent */ }
-    setLoadingMode(null);
-  }, [play]);
+  // Removed 2026-04-25: handleRadioModeSelect / loadingMode / modeCacheRef.
+  // Radio shortcuts (Take Off / Flying / Landing) didn't belong in the
+  // support widget — users have a dedicated Radio feature in /media. The
+  // VJ tab still retains its own controls if it ever gets re-opened from
+  // an external entry point.
 
   const handleMeruActivate = useCallback(async () => {
     const trimmedCode = meruCode.trim();
@@ -448,7 +436,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           setMeruSuccess(false);
           setMeruCode("");
           setMeruEmail("");
-          setView("helpCenter");
+          setView("chat");
         }, 3200);
       } else {
         setMeruError(result.error || (langEs ? "Error en la activación" : "Activation failed"));
@@ -709,7 +697,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
       await clearSupportHistory();
     } catch {}
     setMessages([]);
-    setView("helpCenter");
+    setView("chat");
     setSelectedTutorial(null);
     setTutorialStep(0);
   }, []);
@@ -1004,186 +992,6 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
 
       {/* ── AI Chat Tab ───────────────────────────────────────────────── */}
       <div id="tabpanel-ai" role="tabpanel" aria-labelledby="tab-ai" style={{ display: activeTab === "ai" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
-      {/* ------------------------------------------------------------------ */}
-      {/* HELP CENTER VIEW                                                     */}
-      {/* ------------------------------------------------------------------ */}
-      {view === "helpCenter" && (
-        <div className="flex-1 overflow-y-auto p-4">
-          {/* Open ticket banner */}
-          {ticket && ticket.status !== "closed" && (
-            <div
-              onClick={() => { setView("ticketView"); setHasUnreadReply(false); }}
-              className="mb-4 px-3 py-2 bg-cyan-900/40 border border-cyan-500/30 rounded-lg cursor-pointer hover:bg-cyan-900/60 transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-cyan-300">📋 {t.openTicketBanner}</span>
-                <span className="text-xs text-cyan-400 font-medium">{t.viewTicketLink}</span>
-              </div>
-            </div>
-          )}
-
-          {/* Greeting */}
-          <div className="text-center mb-5 mt-2">
-            <span role="img" aria-label="Cristina AI" className="block text-5xl mx-auto mb-2">🧜‍♀️</span>
-            <h4 className="text-sm font-semibold text-white mb-1">{t.helpCenterTitle}</h4>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>{t.helpCenterSubtitle}</p>
-          </div>
-
-          {/* Contextual suggestions for current page */}
-          {pageCtx && (
-            <div className="mb-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#7B61FF" }}>
-                {pageCtx.titleEn && lang === "es" ? pageCtx.titleEs : pageCtx.titleEn}
-              </p>
-              <div className="flex flex-col gap-1.5">
-                {contextChips.map((chip) => (
-                  <button
-                    key={chip.id}
-                    onClick={() => { setView("chat"); sendMessage(chip.label); }}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-left text-xs transition-all hover:scale-[1.01] active:scale-[0.99]"
-                    style={{ background: "rgba(123,97,255,0.1)", border: "1px solid rgba(123,97,255,0.25)" }}
-                  >
-                    <span className="text-sm shrink-0">{chip.icon}</span>
-                    <span className="text-white/90">{chip.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 2x2 category grid */}
-          <div className="grid grid-cols-2 gap-2 mb-2">
-            {/* Membership */}
-            <button
-              onClick={() => {
-                setView("chat");
-                sendMessage(lang === "es"
-                  ? "¿Cuál es mi estado de membresía actual? Cuéntame sobre los planes PRIME disponibles y qué está incluido."
-                  : "What is my current membership status? Tell me about the available PRIME plans and what's included.");
-              }}
-              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
-              style={{ background: "rgba(91,200,245,0.08)", border: "1px solid rgba(91,200,245,0.2)" }}
-            >
-              <span className="text-xl mb-1.5">💳</span>
-              <p className="text-xs font-semibold text-white leading-tight">{t.catMembership}</p>
-              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{t.catMembershipDesc}</p>
-            </button>
-
-            {/* How to Use */}
-            <button
-              onClick={() => {
-                setView("tutorial");
-                setSelectedTutorial(null);
-                setTutorialStep(0);
-              }}
-              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
-              style={{ background: "rgba(91,200,245,0.08)", border: "1px solid rgba(91,200,245,0.2)" }}
-            >
-              <span className="text-xl mb-1.5">📱</span>
-              <p className="text-xs font-semibold text-white leading-tight">{t.catHowToUse}</p>
-              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{t.catHowToUseDesc}</p>
-            </button>
-
-            {/* Being a Creator */}
-            <button
-              onClick={() => {
-                setView("chat");
-                sendMessage(lang === "es"
-                  ? "¿Cómo me convierto en creador en PNPtv? ¿Cuáles son los requisitos y beneficios?"
-                  : "How do I become a creator on PNPtv? What are the requirements and benefits?");
-              }}
-              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
-              style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.2)" }}
-            >
-              <span className="text-xl mb-1.5">🎭</span>
-              <p className="text-xs font-semibold text-white leading-tight">{t.catCreator}</p>
-              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{t.catCreatorDesc}</p>
-            </button>
-
-            {/* Wellness & Community */}
-            <button
-              onClick={() => {
-                setView("chat");
-                sendMessage(lang === "es"
-                  ? "Cuéntame sobre las pautas de la comunidad PNPtv y qué recursos de bienestar y apoyo comunitario están disponibles."
-                  : "Tell me about the PNPtv community guidelines and what wellness resources and community support are available.");
-              }}
-              className="flex flex-col items-start p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-[0.98]"
-              style={{ background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.2)" }}
-            >
-              <span className="text-xl mb-1.5">💚</span>
-              <p className="text-xs font-semibold text-white leading-tight">{t.catWellness}</p>
-              <p className="text-[10px] mt-0.5 leading-tight" style={{ color: "#8E8E93" }}>{t.catWellnessDesc}</p>
-            </button>
-          </div>
-
-          {/* Radio Buttons Row */}
-          <div className="flex gap-1.5 mb-4">
-            <button
-              onClick={() => handleRadioModeSelect("takeoff")}
-              disabled={loadingMode === "takeoff"}
-              className="flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-              style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)" }}
-            >
-              {loadingMode === "takeoff" ? <div className="w-3.5 h-3.5 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin mb-1" /> : <span className="text-base mb-0.5">🛫</span>}
-              <span className="text-[10px] font-bold text-white uppercase tracking-tighter">Take Off</span>
-            </button>
-            <button
-              onClick={() => handleRadioModeSelect("flying")}
-              disabled={loadingMode === "flying"}
-              className="flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-              style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)" }}
-            >
-              {loadingMode === "flying" ? <div className="w-3.5 h-3.5 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin mb-1" /> : <span className="text-base mb-0.5">🚀</span>}
-              <span className="text-[10px] font-bold text-white uppercase tracking-tighter">Flying</span>
-            </button>
-            <button
-              onClick={() => handleRadioModeSelect("landing")}
-              disabled={loadingMode === "landing"}
-              className="flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-              style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)" }}
-            >
-              {loadingMode === "landing" ? <div className="w-3.5 h-3.5 border-2 border-purple-400/40 border-t-purple-400 rounded-full animate-spin mb-1" /> : <span className="text-base mb-0.5">🛬</span>}
-              <span className="text-[10px] font-bold text-white uppercase tracking-tighter">Landing</span>
-            </button>
-          </div>
-
-          {/* Activate Meru Code — available to all users */}
-          <button
-            onClick={() => {
-              setMeruError(null);
-              setMeruSuccess(false);
-              setMeruEmail(user?.email || "");
-              setView("meruActivate");
-            }}
-            className="w-full mb-2 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98] flex items-center justify-center gap-2"
-            style={{ background: "linear-gradient(135deg, #FFB454, #FF6B35)" }}
-          >
-            <span>🎟️</span>
-            <span>{lang === "es" ? "Activar Código Meru" : "Activate Meru Code"}</span>
-          </button>
-
-          {/* Chat with Cristina CTA */}
-          <button
-            onClick={() => setView("chat")}
-            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98]"
-            style={{ background: "linear-gradient(135deg, #5BC8F5, #00D4E8)" }}
-          >
-            {t.helpCenterChatBtn}
-          </button>
-
-          {/* Admin-only: Payment Verification Agent */}
-          {isAdmin && (
-            <button
-              onClick={() => { setPvResult(null); setPvActivated(null); setView("paymentVerify"); }}
-              className="w-full mt-2 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98]"
-              style={{ background: "linear-gradient(135deg, #D4007A, #FF6B35)" }}
-            >
-              {lang === "es" ? "Verificar Pago (Admin)" : "Verify Payment (Admin)"}
-            </button>
-          )}
-        </div>
-      )}
 
       {/* ------------------------------------------------------------------ */}
       {/* TUTORIAL VIEW                                                        */}
@@ -1198,7 +1006,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
                   setSelectedTutorial(null);
                   setTutorialStep(0);
                 } else {
-                  setView("helpCenter");
+                  setView("chat");
                 }
               }}
               className="text-gray-400 hover:text-white transition-colors text-xs font-medium"
@@ -1525,7 +1333,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           {/* Back + title */}
           <div className="flex items-center gap-2 mb-2">
             <button
-              onClick={() => setView("helpCenter")}
+              onClick={() => setView("chat")}
               className="text-gray-400 hover:text-white transition-colors"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1803,17 +1611,8 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
 
           {messages.length === 0 && !isLoading && (
             <div className="animate-fade-in-up">
-              {/* Back to Help Center link */}
-              <button
-                onClick={() => setView("helpCenter")}
-                className="text-xs mb-4"
-                style={{ color: "#5BC8F5" }}
-              >
-                ← Back to Help Center
-              </button>
-
-              {/* Welcome message */}
-              <div className="text-center mb-6 mt-4">
+              {/* Warm greeting — single block, no ‘back’ link, no header */}
+              <div className="text-center mb-6 mt-2">
                 <span role="img" aria-label="Cristina AI" className="block text-5xl mx-auto mb-2">🧜‍♀️</span>
                 <h4 className="text-sm font-semibold text-pnp-textPrimary mb-1">
                   {t.welcomeGreeting}
@@ -1822,21 +1621,24 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
                   {t.welcomeSubtitle}
                 </p>
               </div>
-              {/* Suggestion chips — contextual first, then generic */}
-              {contextChips.length > 0 && (
-                <div className="mb-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-center" style={{ color: "#7B61FF" }}>
-                    {lang === "es" ? pageCtx!.titleEs : pageCtx!.titleEn}
-                  </p>
+              {/* Suggestion chips — contextual first, then up to 4 - context generic */}
+              {(() => {
+                const contextual = contextChips.slice(0, 2);
+                const remaining = Math.max(0, 4 - contextual.length);
+                const generic = suggestions.slice(0, remaining);
+                const all = [...contextual.map((c) => ({ ...c, kind: "context" as const })),
+                             ...generic.map((g) => ({ ...g, kind: "general" as const }))];
+                if (all.length === 0) return null;
+                return (
                   <div className="flex flex-wrap gap-2 justify-center">
-                    {contextChips.map((s) => (
+                    {all.map((s) => (
                       <button
-                        key={s.id}
+                        key={`${s.kind}-${s.id}`}
                         onClick={() => sendMessage(s.label)}
                         className="px-3 py-1.5 rounded-full text-xs font-medium transition-all hover:scale-105 active:scale-95"
                         style={{
-                          background: "rgba(123, 97, 255, 0.15)",
-                          border: "1px solid rgba(123, 97, 255, 0.3)",
+                          background: s.kind === "context" ? "rgba(123, 97, 255, 0.15)" : "rgba(0, 212, 232, 0.15)",
+                          border: s.kind === "context" ? "1px solid rgba(123, 97, 255, 0.3)" : "1px solid rgba(0, 212, 232, 0.3)",
                           color: "rgba(255, 255, 255, 0.9)",
                         }}
                       >
@@ -1844,24 +1646,8 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
                       </button>
                     ))}
                   </div>
-                </div>
-              )}
-              <div className="flex flex-wrap gap-2 justify-center">
-                {suggestions.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => sendMessage(s.label)}
-                    className="px-3 py-1.5 rounded-full text-xs font-medium transition-all hover:scale-105 active:scale-95"
-                    style={{
-                      background: "rgba(0, 212, 232, 0.15)",
-                      border: "1px solid rgba(0, 212, 232, 0.3)",
-                      color: "rgba(255, 255, 255, 0.9)",
-                    }}
-                  >
-                    {s.icon} {s.label}
-                  </button>
-                ))}
-              </div>
+                );
+              })()}
             </div>
           )}
 
@@ -1951,7 +1737,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
         <div className="flex-1 overflow-y-auto p-4">
           <div className="flex items-center gap-2 mb-3">
             <button
-              onClick={() => { setMeruError(null); setView("helpCenter"); }}
+              onClick={() => { setMeruError(null); setView("chat"); }}
               className="text-gray-400 hover:text-white transition-colors text-xs font-medium"
               disabled={meruSubmitting}
             >
@@ -2078,8 +1864,62 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
         </div>
       )}
 
-      {/* Input area — hidden in ticketForm, helpCenter, tutorial, paymentVerify, and meruActivate views */}
-      {view !== "ticketForm" && view !== "helpCenter" && view !== "tutorial" && view !== "paymentVerify" && view !== "meruActivate" && (
+      {/* Secondary toolbar — Tutorials, Activate Meru, Admin verify.
+          Tucked above the input so they're discoverable without dominating
+          the chat. Only shown in chat view. */}
+      {view === "chat" && (
+        <div
+          className="flex items-center justify-center gap-1 px-3 py-1.5 border-t flex-shrink-0"
+          style={{
+            background: "rgba(30, 30, 45, 0.95)",
+            borderColor: "rgba(255,255,255,0.06)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => { setSelectedTutorial(null); setTutorialStep(0); setView("tutorial"); }}
+            aria-label={lang === "es" ? "Tutoriales" : "Tutorials"}
+            title={lang === "es" ? "Tutoriales" : "Tutorials"}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-all active:scale-[0.95]"
+            style={{ background: "rgba(91,200,245,0.10)", border: "1px solid rgba(91,200,245,0.25)", color: "#5BC8F5" }}
+          >
+            <span>📚</span>
+            <span className="hidden sm:inline">{lang === "es" ? "Tutoriales" : "Tutorials"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMeruError(null);
+              setMeruSuccess(false);
+              setMeruEmail(user?.email || "");
+              setView("meruActivate");
+            }}
+            aria-label={lang === "es" ? "Activar código Meru" : "Activate Meru code"}
+            title={lang === "es" ? "Activar código Meru" : "Activate Meru code"}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-all active:scale-[0.95]"
+            style={{ background: "rgba(255,180,84,0.10)", border: "1px solid rgba(255,180,84,0.25)", color: "#FFB454" }}
+          >
+            <span>🎟️</span>
+            <span className="hidden sm:inline">{lang === "es" ? "Activar" : "Activate"}</span>
+          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => { setPvResult(null); setPvActivated(null); setView("paymentVerify"); }}
+              aria-label={lang === "es" ? "Verificar pago (Admin)" : "Verify payment (Admin)"}
+              title={lang === "es" ? "Verificar pago (Admin)" : "Verify payment (Admin)"}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-all active:scale-[0.95]"
+              style={{ background: "rgba(123,97,255,0.10)", border: "1px solid rgba(123,97,255,0.25)", color: "#7B61FF" }}
+            >
+              <span>⚙️</span>
+              <span className="hidden sm:inline">Admin</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Input area — hidden in ticketForm, tutorial, paymentVerify, and meruActivate views */}
+      {view !== "ticketForm" && view !== "tutorial" && view !== "paymentVerify" && view !== "meruActivate" && (
         <form
           onSubmit={handleSubmit}
           className="flex items-center gap-2 p-3 pb-safe border-t border-pnp-border flex-shrink-0"
