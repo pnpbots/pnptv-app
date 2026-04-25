@@ -325,14 +325,32 @@ const toggleLike = async (req, res) => {
   try {
     const postCheck = await dbQuery('SELECT user_id FROM social_posts WHERE id = $1 AND is_deleted = false', [postId]);
     if (!postCheck.rows.length) return res.status(404).json({ error: 'Post not found' });
-    if (String(postCheck.rows[0].user_id) === String(user.id)) {
-      return res.status(400).json({ error: 'Cannot like your own post' });
-    }
+    const isSelfLike = String(postCheck.rows[0].user_id) === String(user.id);
 
     const result = await SocialPostService.toggleLike(postId, user.id);
 
-    // Notify post author on like
-    if (result.liked) {
+    // Mirror likes_count to prime_videos.likes when post is linked to a Directus prime video.
+    // Fire-and-forget — never block the like response on Directus.
+    try {
+      const { rows: pvRows } = await dbQuery(
+        'SELECT directus_id, likes_count FROM social_posts WHERE id = $1 AND directus_id IS NOT NULL',
+        [postId]
+      );
+      if (pvRows.length && pvRows[0].directus_id) {
+        const directusUrl = process.env.DIRECTUS_URL || process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
+        const token = process.env.DIRECTUS_ADMIN_TOKEN;
+        if (token) {
+          require('axios').patch(
+            `${directusUrl}/items/prime_videos/${pvRows[0].directus_id}`,
+            { likes: pvRows[0].likes_count },
+            { headers: { Authorization: `Bearer ${token}` }, timeout: 5000 }
+          ).catch((err) => logger.warn('prime_videos.likes sync failed', { directus_id: pvRows[0].directus_id, error: err.message }));
+        }
+      }
+    } catch (_) { /* never block likes on sync */ }
+
+    // Notify post author on like (skip if it's a self-like — no point pinging yourself)
+    if (result.liked && !isSelfLike) {
       const postAuthorId = postCheck.rows[0].user_id;
       if (postAuthorId) {
         // Fetch post preview for rich notification

@@ -161,20 +161,37 @@ export default function SocialFeedTabs({
   // ── Post actions ────────────────────────────────────────────────────────────
 
   const handleLike = useCallback(async (postId: number) => {
+    // Optimistic flip — keep the UI responsive; reconcile or roll back on response.
+    let prevLiked: boolean | undefined;
+    let prevCount: number | undefined;
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (p.id !== postId) return p;
+        prevLiked = !!p.liked_by_me;
+        prevCount = p.likes_count;
+        const nowLiked = !p.liked_by_me;
+        return { ...p, liked_by_me: nowLiked, likes_count: Math.max(0, p.likes_count + (nowLiked ? 1 : -1)) };
+      })
+    );
     try {
       const res = await togglePostLike(postId);
       setPosts((prev) =>
         prev.map((p) =>
           p.id === postId
-            ? {
-                ...p,
-                liked_by_me: res.liked,
-                likes_count: res.likes_count ?? (p.likes_count + (res.liked ? 1 : -1)),
-              }
+            ? { ...p, liked_by_me: res.liked, likes_count: res.likes_count ?? p.likes_count }
             : p
         )
       );
-    } catch { /* silent */ }
+    } catch {
+      // Roll back the optimistic update so the user can retry.
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId && prevLiked !== undefined && prevCount !== undefined
+            ? { ...p, liked_by_me: prevLiked, likes_count: prevCount }
+            : p
+        )
+      );
+    }
   }, []);
 
   const handleDelete = useCallback(async (postId: number) => {
