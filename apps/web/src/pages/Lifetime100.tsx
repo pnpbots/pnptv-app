@@ -699,6 +699,14 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
   };
 
   const handleReserveSuccess = (url: string | null) => {
+    // Send the user straight to the Meru payment page. Backend already
+    // emailed them the code + activation link as a fallback. Only fall
+    // back to the confirmation modal if no payment URL came back (rare
+    // — would mean the reservation succeeded but Meru linking failed).
+    if (url) {
+      window.location.href = url;
+      return;
+    }
     setMeruUrl(url);
     setModalOpen(false);
     setShowConfirmation(true);
