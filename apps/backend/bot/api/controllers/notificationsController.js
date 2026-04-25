@@ -146,7 +146,14 @@ function unreadCacheKey(userId) {
 }
 
 /**
- * GET /api/webapp/notifications?limit=50&offset=0&category=social
+ * GET /api/webapp/notifications?limit=50&cursor=<id>&category=social
+ *
+ * Cursor pagination: pass `cursor` (the smallest `id` from the previous
+ * page) to fetch the next page. On the first call omit it.
+ *
+ * Backward-compatible: `offset` still accepted when `cursor` is absent.
+ * Both paths skip the COUNT(*) query that previously ran on every call —
+ * frontend never used totalCount; hasMore is derived from result length.
  */
 async function getNotifications(req, res) {
   try {
@@ -154,15 +161,30 @@ async function getNotifications(req, res) {
     if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
     const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-    const offset = parseInt(req.query.offset) || 0;
+    const cursorRaw = req.query.cursor;
+    const cursor = cursorRaw && /^\d+$/.test(String(cursorRaw)) ? parseInt(cursorRaw, 10) : null;
+    const offset = !cursor ? (parseInt(req.query.offset) || 0) : 0;
     const rawCategory = req.query.category || null;
     const category = rawCategory && VALID_CATEGORIES.has(rawCategory) ? rawCategory : null;
 
-    const params = [userId, limit, offset];
-    let categoryFilter = '';
+    // Build params array dynamically. Cursor path is the fast path; offset
+    // path is kept for clients that haven't migrated yet.
+    const params = [userId];
+    const where = ['n.target_user_id = $1', 'bk.id IS NULL'];
+    if (cursor !== null) {
+      where.push(`n.id < $${params.length + 1}`);
+      params.push(cursor);
+    }
     if (category) {
-      categoryFilter = 'AND n.category = $4';
+      where.push(`n.category = $${params.length + 1}`);
       params.push(category);
+    }
+    const limitParamIdx = params.length + 1;
+    params.push(limit);
+    let offsetClause = '';
+    if (cursor === null && offset > 0) {
+      offsetClause = `OFFSET $${params.length + 1}`;
+      params.push(offset);
     }
 
     const { rows } = await query(
@@ -177,43 +199,23 @@ async function getNotifications(req, res) {
        LEFT JOIN blocked_users bk
          ON (bk.user_id = $1 AND bk.blocked_user_id = n.actor_id)
          OR (bk.user_id = n.actor_id AND bk.blocked_user_id = $1)
-       WHERE n.target_user_id = $1
-         AND bk.id IS NULL
-         ${categoryFilter}
-       ORDER BY n.created_at DESC
-       LIMIT $2 OFFSET $3`,
+       WHERE ${where.join(' AND ')}
+       ORDER BY n.created_at DESC, n.id DESC
+       LIMIT $${limitParamIdx} ${offsetClause}`,
       params
     );
 
-    const countParams = [userId];
-    let countCategoryFilter = '';
-    if (category) {
-      countCategoryFilter = 'AND n.category = $2';
-      countParams.push(category);
-    }
-
-    const { rows: countRows } = await query(
-      `SELECT COUNT(*)::int AS total
-       FROM notifications n
-       LEFT JOIN blocked_users bk
-         ON (bk.user_id = $1 AND bk.blocked_user_id = n.actor_id)
-         OR (bk.user_id = n.actor_id AND bk.blocked_user_id = $1)
-       WHERE n.target_user_id = $1
-         AND bk.id IS NULL
-         ${countCategoryFilter}`,
-      countParams
-    );
-
-    const totalCount = countRows[0]?.total || 0;
     const unreadCounts = await getUnreadCounts(userId);
+    const hasMore = rows.length === limit;
+    const nextCursor = hasMore && rows.length > 0 ? rows[rows.length - 1].id : null;
 
     res.json({
       success: true,
       notifications: rows.map(formatNotification),
       count: rows.length,
-      totalCount,
       unreadCounts,
-      hasMore: offset + limit < totalCount,
+      hasMore,
+      nextCursor,
     });
   } catch (error) {
     logger.error('Get notifications error:', error);
