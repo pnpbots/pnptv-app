@@ -26,6 +26,37 @@
   }
 }
 
+/* ─── Theme tokens ──────────────────────────────────────────────────────────
+   CSS custom properties for the theme-aware tokens consumed by Tailwind via
+   packages/ui-kit/src/theme.ts. Default values match the dark theme. The
+   `[data-theme="light"]` block overrides them when the user opts in. */
+:root {
+  --pnp-background:    #121212;
+  --pnp-surface:       #1E1E1E;
+  --pnp-surface-hover: #2A2A2A;
+  --pnp-text-primary:  #FFFFFF;
+  --pnp-text-secondary:#A1A1A3;
+  --pnp-border:        #2A2A2A;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --pnp-background:    #FFFFFF;
+  --pnp-surface:       #F5F5F7;
+  --pnp-surface-hover: #E8E8EB;
+  --pnp-text-primary:  #0A0A0F;
+  --pnp-text-secondary:#5A5A60;
+  --pnp-border:        #D7D7DC;
+  color-scheme: light;
+}
+
+/* Smoothly cross-fade colors when the user toggles theme. Skip on initial
+   page load to avoid a flash. */
+.theme-transition,
+.theme-transition * {
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+
 @layer base {
   html {
     -webkit-tap-highlight-color: transparent;

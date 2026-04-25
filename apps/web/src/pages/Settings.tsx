@@ -958,6 +958,11 @@ export default function Settings() {
           <p className="text-xs mb-3" style={{ color: "#FF6B6B" }}>{langError}</p>
         )}
 
+        {/* Theme picker — Dark / Light / System.
+            Writes localStorage["pnptv:theme"] and flips the data-theme
+            attribute on <html>; CSS vars in globals.css handle the colors. */}
+        <ThemePicker />
+
         {/* Wall of Fame consent */}
         <div
           className="flex items-center justify-between rounded-lg px-3 py-3"
@@ -2091,6 +2096,102 @@ export default function Settings() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Theme picker — Dark / Light / System
+// ────────────────────────────────────────────────────────────────────────────
+type ThemeChoice = "dark" | "light" | "system";
+
+function readStoredTheme(): ThemeChoice {
+  try {
+    const raw = localStorage.getItem("pnptv:theme");
+    if (raw === "dark" || raw === "light" || raw === "system") return raw;
+  } catch { /* localStorage unavailable */ }
+  return "system";
+}
+
+function applyTheme(choice: ThemeChoice) {
+  // The bootstrap script in index.html already ran on initial page load.
+  // This function is for runtime updates after the user toggles.
+  const root = document.documentElement;
+  const effective: "dark" | "light" =
+    choice === "system"
+      ? (window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark")
+      : choice;
+  // Add a transition class so the swap cross-fades nicely (see globals.css)
+  root.classList.add("theme-transition");
+  if (effective === "light") root.setAttribute("data-theme", "light");
+  else root.removeAttribute("data-theme");
+  // Strip the transition class after the animation so future renders are
+  // instant (avoids spurious transitions on unrelated style changes).
+  setTimeout(() => root.classList.remove("theme-transition"), 250);
+}
+
+function ThemePicker() {
+  const [choice, setChoice] = useState<ThemeChoice>(() => readStoredTheme());
+
+  // Re-apply when the OS preference changes if the user picked "system"
+  useEffect(() => {
+    if (choice !== "system" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const onChange = () => applyTheme("system");
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [choice]);
+
+  const update = useCallback((next: ThemeChoice) => {
+    setChoice(next);
+    try { localStorage.setItem("pnptv:theme", next); } catch { /* noop */ }
+    applyTheme(next);
+  }, []);
+
+  const options: Array<{ id: ThemeChoice; label: string; icon: string }> = [
+    { id: "dark",   label: "Dark",   icon: "🌙" },
+    { id: "light",  label: "Light",  icon: "☀️" },
+    { id: "system", label: "System", icon: "🖥️" },
+  ];
+
+  return (
+    <div
+      className="rounded-lg px-3 py-3 mb-3"
+      style={{ background: "rgba(167,139,250,0.06)", border: "1px solid rgba(167,139,250,0.2)" }}
+    >
+      <div className="mb-2.5">
+        <p className="text-sm font-medium text-white">Theme</p>
+        <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+          Choose how PNPtv looks. System follows your device.
+        </p>
+      </div>
+      <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Theme">
+        {options.map((opt) => {
+          const active = choice === opt.id;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => update(opt.id)}
+              className="flex flex-col items-center gap-1 py-2.5 rounded-lg text-xs font-semibold transition-all active:scale-[0.97]"
+              style={{
+                background: active
+                  ? "linear-gradient(135deg, rgba(212,0,122,0.30), rgba(167,139,250,0.25))"
+                  : "rgba(255,255,255,0.04)",
+                border: active
+                  ? "1px solid rgba(212,0,122,0.45)"
+                  : "1px solid rgba(255,255,255,0.10)",
+                color: active ? "#fff" : "rgba(255,255,255,0.70)",
+              }}
+            >
+              <span className="text-base" aria-hidden>{opt.icon}</span>
+              <span>{opt.label}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
