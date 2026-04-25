@@ -468,6 +468,10 @@ const getVideoPreviewOG = async (postId) => {
   try {
     // Join users so we can build a post-specific, author-aware title.
     // Also pull x_username so we can emit twitter:creator.
+    // PRIME channel content is intentionally previewable for marketing —
+    // the video itself stays entitlement-gated, but the OG card needs to
+    // render so social shares drive sign-ups. Other exclusive (per-creator)
+    // content stays excluded from preview.
     const result = await query(
       `SELECT sp.id, sp.user_id, sp.content, sp.media_url, sp.media_type, sp.media_urls,
               sp.video_thumbnail_url, sp.video_title, sp.video_description, sp.created_at,
@@ -476,7 +480,7 @@ const getVideoPreviewOG = async (postId) => {
        JOIN users u ON sp.user_id = u.id
        WHERE sp.id = $1
          AND sp.is_deleted = false
-         AND (sp.is_exclusive IS NOT TRUE)`,
+         AND (sp.is_exclusive IS NOT TRUE OR sp.channel_id = 5)`,
       [id]
     );
 

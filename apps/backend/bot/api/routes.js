@@ -141,69 +141,6 @@ const requireMemberTier = EntitlementAccessService.requireEntitlement('pnp-membe
 const requireHangoutAccess = EntitlementAccessService.requireResourceAccess('hangout', 'id');
 const requireChannelAccess = EntitlementAccessService.requireResourceAccess('channel', 'channelId');
 
-/**
- * DM rate limit for free tier users — uses Redis daily counter
- */
-const requireFreeTierDmLimit = async (req, res, next) => {
-  const user = req.session?.user;
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Authentication required', code: 'AUTH_REQUIRED' });
-  }
-  // Admin bypass (no DB needed)
-  if (isAdminTier(user)) {
-    return next();
-  }
-  // Member/Prime bypass via live entitlement check (not stale session.tier)
-  try {
-    if (await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member')) {
-      return next();
-    }
-  } catch (err) {
-    logger.warn(`requireFreeTierDmLimit entitlement check failed for user ${user.id}: ${err.message}`);
-    // Fall through to rate limit (fail closed)
-  }
-  try {
-    const redis = getRedis();
-    const today = new Date().toISOString().slice(0, 10);
-    const key = `pnptv:dm_limit:${user.id}:${today}`;
-    // Determine limit based on account age
-    const createdAt = user.created_at || user.createdAt;
-    let limit = 3;
-    if (createdAt) {
-      const daysSince = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
-      if (daysSince > 14) limit = 1;
-    }
-    // Atomic increment — prevents race conditions with parallel requests
-    const newCount = await redis.incr(key);
-    if (newCount === 1) {
-      const now = new Date();
-      const midnight = new Date(now);
-      midnight.setUTCDate(midnight.getUTCDate() + 1);
-      midnight.setUTCHours(0, 0, 0, 0);
-      const ttl = Math.ceil((midnight - now) / 1000);
-      await redis.expire(key, ttl);
-    }
-    if (newCount > limit) {
-      // Already incremented past limit — decrement back
-      await redis.decr(key);
-      return res.status(429).json({
-        success: false,
-        error: 'Daily message limit reached',
-        code: 'DM_LIMIT_REACHED',
-        limit,
-        used: limit,
-        remaining: 0,
-        upgradeUrl: '/subscribe',
-      });
-    }
-    req.dmLimit = { limit, used: newCount, remaining: limit - newCount };
-    return next();
-  } catch (err) {
-    logger.error('DM limit check error (Redis unavailable — failing closed)', { error: err.message });
-    return res.status(503).json({ success: false, error: 'Service temporarily unavailable. Please try again.', code: 'SERVICE_UNAVAILABLE' });
-  }
-};
-
 // Rate limiter for page routes (landing pages, policies, etc.)
 const pageLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
@@ -486,6 +423,8 @@ app.use(conditionalMiddleware(helmet({
         "https://fonts.gstatic.com",
         "https://oauth.telegram.org",
         "https://api.telegram.org",
+        "wss://livekit.pnptv.app",
+        "https://livekit.pnptv.app",
       ],
       frameSrc: [
         "'self'",
@@ -626,7 +565,7 @@ const serveStaticWithBlocking = (staticPath) => {
     }
 
     // Skip static serving for protected paths (let auth routes handle them)
-    // But allow assets (/videorama/assets/, /hangouts/assets/, /live/assets/)
+    // But allow assets (/hangouts/assets/, /live/assets/)
     const isProtectedPath = PROTECTED_PATHS.some(p =>
       req.path === p ||
       req.path === p + '/' ||
@@ -667,18 +606,6 @@ const serveStaticWithBlocking = (staticPath) => {
     express.static(staticPath, { fallthrough: true })(req, res, next);
   };
 };
-
-// ==========================================
-// Redirect legacy /videorama paths to /app/videorama BEFORE static middleware
-// ==========================================
-app.get('/videorama', (req, res) => {
-  res.redirect(301, '/app/videorama');
-});
-
-app.get('/videorama/*', (req, res) => {
-  const newPath = req.path.replace('/videorama', '/app/videorama');
-  res.redirect(301, newPath);
-});
 
 // Subscription/pricing page
 app.get('/suscripcion', (req, res) => {
@@ -779,17 +706,6 @@ app.get('/nearby', pageLimiter, (req, res) => {
     return res.status(404).send('Page not found.');
   }
   res.sendFile(path.join(__dirname, '../../../public/nearby.html'));
-});
-
-// Add cache control headers for static assets to prevent browser caching issues
-app.use((req, res, next) => {
-  if (req.path.startsWith('/videorama-app/') &&
-      (req.path.endsWith('.js') || req.path.endsWith('.css') || req.path.endsWith('.html'))) {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-  }
-  next();
 });
 
 // Landing page routes
@@ -1377,16 +1293,6 @@ const healthLimiter = rateLimit({
   },
 });
 
-// Rate limiter for social post creation (10 posts per 5 minutes, per user)
-const socialPostLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  max: 10,
-  keyGenerator: (req) => req.session?.user?.id || req.ip,
-  handler: (req, res) => res.status(429).json({ error: 'Too many posts. Please wait.' }),
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
 // Rate limiter for social actions (likes, follows — 30 per minute, per user)
 const socialActionLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -1557,19 +1463,6 @@ app.post('/api/logout', (req, res) => {
 // ==========================================
 // Protected Webapp Routes (require Telegram login)
 // ==========================================
-
-// Videorama - protected
-app.get('/app/videorama', requirePageAuth, (req, res) => {
-  res.sendFile(path.join(__dirname, '../../../public/videorama/index.html'));
-});
-
-app.get('/app/videorama/*', requirePageAuth, (req, res) => {
-  const assetPath = path.join(__dirname, '../../../public/videorama', req.path.replace('/app/videorama', ''));
-  if (fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
-    return res.sendFile(assetPath);
-  }
-  res.sendFile(path.join(__dirname, '../../../public/videorama/index.html'));
-});
 
 // Hangouts - protected
 app.get('/hangouts', requirePageAuth, (req, res) => {
@@ -1787,7 +1680,7 @@ app.get('/api/subscription/subscriber/:identifier', verifyAdminJWT, asyncHandler
 app.get('/api/subscription/stats', verifyAdminJWT, asyncHandler(subscriptionController.getStatistics));
 
 // ==========================================
-// Media Library API (for Videorama)
+// Media Library API
 // ==========================================
 const MediaPlayerModel = require('../../models/mediaPlayerModel');
 
@@ -2032,100 +1925,6 @@ app.post('/api/radio/request', authenticateUser, asyncHandler(async (req, res) =
 // ==========================================
 // VIDEORAMA COLLECTIONS API
 // ==========================================
-
-// Get Videorama collections (curated playlists/featured content)
-app.get('/api/videorama/collections', asyncHandler(async (req, res) => {
-  try {
-    // Get featured playlists as collections
-    const playlistsResult = await getPool().query(`
-      SELECT
-        mp.id,
-        mp.name as title,
-        mp.description,
-        mp.cover_url as thumbnail,
-        mp.is_public,
-        COUNT(pi.id) as item_count,
-        'playlist' as type
-      FROM media_playlists mp
-      LEFT JOIN playlist_items pi ON mp.id = pi.playlist_id
-      WHERE mp.is_public = true
-      GROUP BY mp.id
-      ORDER BY mp.total_likes DESC, mp.created_at DESC
-      LIMIT 10
-    `);
-
-    // Get category-based collections
-    const categoriesResult = await getPool().query(`
-      SELECT
-        category as id,
-        category as title,
-        COUNT(*) as item_count,
-        'category' as type
-      FROM media_library
-      WHERE is_public = true AND category IS NOT NULL
-      GROUP BY category
-      ORDER BY COUNT(*) DESC
-    `);
-
-    const collections = [
-      ...playlistsResult.rows.map(p => ({
-        id: p.id,
-        title: p.title,
-        description: p.description,
-        thumbnail: p.thumbnail,
-        itemCount: parseInt(p.item_count) || 0,
-        type: 'playlist',
-      })),
-      ...categoriesResult.rows.map(c => ({
-        id: c.id,
-        title: c.title.charAt(0).toUpperCase() + c.title.slice(1),
-        description: `${c.item_count} items`,
-        thumbnail: null,
-        itemCount: parseInt(c.item_count) || 0,
-        type: 'category',
-      })),
-    ];
-
-    res.json({ success: true, collections });
-  } catch (error) {
-    logger.error('Error fetching videorama collections:', error);
-    res.json({ success: true, collections: [] });
-  }
-}));
-
-// Get collection items
-app.get('/api/videorama/collections/:collectionId', asyncHandler(async (req, res) => {
-  const { collectionId } = req.params;
-  const { type } = req.query;
-
-  try {
-    let items = [];
-
-    if (type === 'playlist') {
-      const result = await getPool().query(`
-        SELECT m.*
-        FROM playlist_items pi
-        JOIN media_library m ON pi.media_id = m.id
-        WHERE pi.playlist_id = $1
-        ORDER BY pi.position ASC
-      `, [collectionId]);
-      items = result.rows;
-    } else if (type === 'category') {
-      const result = await getPool().query(`
-        SELECT * FROM media_library
-        WHERE category = $1 AND is_public = true
-        ORDER BY plays DESC, created_at DESC
-        LIMIT 50
-      `, [collectionId]);
-      items = result.rows;
-    }
-
-    res.json({ success: true, items });
-  } catch (error) {
-    logger.error('Error fetching collection items:', error);
-    res.json({ success: true, items: [] });
-  }
-}));
 
 // Broadcast Queue API Routes
 const broadcastQueueRoutes = require('./broadcastQueueRoutes');
@@ -2913,6 +2712,87 @@ app.get('/api/webapp/users/me/tokens', requireSessionAuth, asyncHandler(async (r
   if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
   const balance = await tokenService.getBalance(userId);
   return res.json({ success: true, balance });
+}));
+
+// ── My active scoped subscriptions (paid channel/hangout 30-day passes) ────
+// Lists active channel-access and hangout-access entitlements with the
+// resource name, expiry, and renewal status so users can see/manage them.
+app.get('/api/webapp/subscriptions', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.session?.user?.id;
+  const { rows } = await getPool().query(`
+    SELECT ue.id, ue.add_on_id, ue.creator_id AS scope_id, ue.expires_at, ue.auto_renew,
+           CASE
+             WHEN ue.add_on_id = 'channel-access' THEN cc.name
+             WHEN ue.add_on_id = 'hangout-access' THEN hg.name
+             ELSE NULL
+           END AS resource_name,
+           CASE
+             WHEN ue.add_on_id = 'channel-access' THEN cc.price_usd
+             WHEN ue.add_on_id = 'hangout-access' THEN hg.price_usd
+             ELSE NULL
+           END AS price_usd
+      FROM user_entitlements ue
+      LEFT JOIN creator_channels cc ON ue.add_on_id = 'channel-access' AND cc.id::text = ue.creator_id
+      LEFT JOIN hangout_groups hg   ON ue.add_on_id = 'hangout-access' AND hg.id::text = ue.creator_id
+     WHERE ue.user_id = $1
+       AND ue.add_on_id IN ('channel-access', 'hangout-access')
+       AND ue.is_consumed = false
+       AND ue.is_lifetime = false
+       AND ue.expires_at IS NOT NULL
+       AND ue.expires_at > NOW()
+     ORDER BY ue.expires_at ASC
+  `, [String(userId)]);
+  return res.json({
+    success: true,
+    subscriptions: rows.map(r => ({
+      id: r.id,
+      kind: r.add_on_id === 'channel-access' ? 'channel' : 'hangout',
+      scopeId: r.scope_id,
+      name: r.resource_name,
+      priceUsd: r.price_usd ? Number(r.price_usd) : null,
+      expiresAt: r.expires_at,
+      autoRenew: r.auto_renew,
+    })),
+  });
+}));
+
+// Cancel auto-renewal for a scoped subscription. The current period stays
+// active until expires_at — cancellation only stops future renewal reminders.
+app.post('/api/webapp/subscriptions/:entitlementId/cancel', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.session?.user?.id;
+  const entitlementId = parseInt(req.params.entitlementId, 10);
+  if (!Number.isFinite(entitlementId)) return res.status(400).json({ success: false, error: 'Invalid id' });
+  const { rows } = await getPool().query(
+    `UPDATE user_entitlements
+        SET auto_renew = false, updated_at = NOW()
+      WHERE id = $1
+        AND user_id = $2
+        AND add_on_id IN ('channel-access', 'hangout-access')
+        AND is_consumed = false
+      RETURNING id, expires_at`,
+    [entitlementId, String(userId)]
+  );
+  if (rows.length === 0) return res.status(404).json({ success: false, error: 'Subscription not found' });
+  return res.json({ success: true, expiresAt: rows[0].expires_at, autoRenew: false });
+}));
+
+// Re-enable auto-renewal (user can change their mind before expiry).
+app.post('/api/webapp/subscriptions/:entitlementId/resume', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.session?.user?.id;
+  const entitlementId = parseInt(req.params.entitlementId, 10);
+  if (!Number.isFinite(entitlementId)) return res.status(400).json({ success: false, error: 'Invalid id' });
+  const { rows } = await getPool().query(
+    `UPDATE user_entitlements
+        SET auto_renew = true, updated_at = NOW()
+      WHERE id = $1
+        AND user_id = $2
+        AND add_on_id IN ('channel-access', 'hangout-access')
+        AND is_consumed = false
+      RETURNING id, expires_at`,
+    [entitlementId, String(userId)]
+  );
+  if (rows.length === 0) return res.status(404).json({ success: false, error: 'Subscription not found' });
+  return res.json({ success: true, expiresAt: rows[0].expires_at, autoRenew: true });
 }));
 
 // ── Admin revenue report (date range + grouping) ──────────────────────────
@@ -4505,7 +4385,6 @@ app.post('/api/webapp/admin/prime-mirror/toggle', adminGuard, asyncHandler(Prime
 app.get('/api/webapp/admin/prime-mirror/log', adminGuard, asyncHandler(PrimeMirrorController.getMigrationLog));
 
 app.get('/api/prime/latest', asyncHandler(primeController.getLatestPrimeVideo));
-app.get('/api/videorama/latest', asyncHandler(primeController.getLatestVideoramaVideo));
 app.get('/api/hangouts/most-active', (req, res) => res.json({ success: true, data: { title: 'Community Hangout', currentParticipants: 0, link: '/hangouts' } }));
 
 // Live streaming endpoint for featured content
@@ -4713,11 +4592,12 @@ app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, asyncHandler
 app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asyncHandler(socialController.dropToFeed));
 
 // Hangout video calls — LiveKit
-const { startCall, joinCall, endCall, leaveCall } = require('./controllers/hangoutGroupController');
+const { startCall, joinCall, endCall, leaveCall, refreshCallToken } = require('./controllers/hangoutGroupController');
 app.post('/api/webapp/hangouts/groups/:id/call/start', requireSessionAuth, asyncHandler(startCall));
 app.post('/api/webapp/hangouts/groups/:id/call/join', requireSessionAuth, asyncHandler(joinCall));
 app.post('/api/webapp/hangouts/groups/:id/call/end', requireSessionAuth, asyncHandler(endCall));
 app.post('/api/webapp/hangouts/groups/:id/call/leave', requireSessionAuth, asyncHandler(leaveCall));
+app.post('/api/webapp/hangouts/groups/:id/call/token/refresh', requireSessionAuth, asyncHandler(refreshCallToken));
 
 // DM Video Calls — removed (dead code, never called from frontend)
 
@@ -4910,7 +4790,7 @@ app.get('/api/webapp/dm/conversation/:partnerId', requireSessionAuth, asyncHandl
 app.get('/api/webapp/dm/user/:partnerId', requireSessionAuth, asyncHandler(dmController.getPartnerInfo));
 app.post('/api/webapp/dm/call/join', requireSessionAuth, asyncHandler(dmController.joinDmVideoCall));
 app.post('/api/webapp/dm/call/start/:partnerId', requireSessionAuth, asyncHandler(dmController.createDmVideoCallInvite));
-app.post('/api/webapp/dm/send/:recipientId', requireSessionAuth, requireFreeTierDmLimit, asyncHandler(dmController.sendMessage));
+app.post('/api/webapp/dm/send/:recipientId', requireSessionAuth, asyncHandler(dmController.sendMessage));
 // DM message management (edit / delete)
 app.patch('/api/webapp/dm/messages/:msgId', requireSessionAuth, asyncHandler(dmController.editDmMessage));
 app.delete('/api/webapp/dm/messages/:msgId', requireSessionAuth, asyncHandler(dmController.deleteDmMessage));
@@ -4926,9 +4806,9 @@ app.get('/api/webapp/social/wof-feed', asyncHandler(socialController.getWofFeed)
 app.get('/api/webapp/social/hashtag-feed', requireSessionAuth, asyncHandler(socialController.getHashtagFeed));
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));
-app.post('/api/webapp/social/posts', requireSessionAuth, socialPostLimiter, asyncHandler(socialController.createPost));
-app.post('/api/webapp/social/posts/with-media', requireSessionAuth, socialPostLimiter, uploadLimiter, attachCreatorStatus, postMediaUploadMiddleware, asyncHandler(socialController.createPostWithMedia));
-app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, socialPostLimiter, uploadLimiter, attachCreatorStatus, postMultiMediaUploadMiddleware, asyncHandler(socialController.createPostWithMultiMedia));
+app.post('/api/webapp/social/posts', requireSessionAuth, asyncHandler(socialController.createPost));
+app.post('/api/webapp/social/posts/with-media', requireSessionAuth, uploadLimiter, attachCreatorStatus, postMediaUploadMiddleware, asyncHandler(socialController.createPostWithMedia));
+app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, uploadLimiter, attachCreatorStatus, postMultiMediaUploadMiddleware, asyncHandler(socialController.createPostWithMultiMedia));
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));
 app.post('/api/webapp/social/posts/:postId/like', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.toggleLike));
 
@@ -8688,7 +8568,7 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
     return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   };
 
-  // GET /api/webapp/admin/prime-videos — list all prime_videos with poster URLs
+  // GET /api/webapp/admin/prime-videos — list all prime_videos with poster URLs + share links
   app.get('/api/webapp/admin/prime-videos', adminGuard, asyncHandler(async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const page = Math.max(Number(req.query.page) || 1, 1);
@@ -8698,12 +8578,32 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
     const url = `${directusBaseUrl()}/items/prime_videos?fields=${fields}&limit=${limit}&page=${page}&sort=-date_created&meta=filter_count`;
     try {
       const { data } = await axios.get(url, { headers: directusHeaders(), timeout: 8000 });
-      const items = (data?.data || []).map((row) => ({
-        ...row,
-        poster_url: row.video_file ? `https://cms.pnptv.app/video-thumb/${row.video_file}.jpg` : null,
-        preview_url: row.video_file ? `https://cms.pnptv.app/video-thumb/${row.video_file}_preview.mp4` : null,
-        video_url: row.video_file ? `https://cms.pnptv.app/assets/${row.video_file}` : null,
-      }));
+      const directusItems = data?.data || [];
+
+      // Look up social_posts for share URL building. directus_id is the prime_videos.id.
+      const directusIds = directusItems.map((r) => r.id).filter(Boolean);
+      const postMap = new Map();
+      if (directusIds.length) {
+        const { rows } = await getPool().query(
+          `SELECT id, directus_id FROM social_posts
+            WHERE channel_id = 5 AND directus_id = ANY($1::int[])`,
+          [directusIds]
+        );
+        for (const r of rows) postMap.set(r.directus_id, r.id);
+      }
+
+      const items = directusItems.map((row) => {
+        const postId = postMap.get(row.id) || null;
+        return {
+          ...row,
+          social_post_id: postId,
+          poster_url: row.video_file ? `https://cms.pnptv.app/video-thumb/${row.video_file}.jpg` : null,
+          preview_url: row.video_file ? `https://cms.pnptv.app/video-thumb/${row.video_file}_preview.mp4` : null,
+          video_url: row.video_file ? `https://cms.pnptv.app/assets/${row.video_file}` : null,
+          // Shareable link with OG preview — pretty slug appended for X cards
+          share_url: postId ? `https://pnptv.app/v/${postId}` : null,
+        };
+      });
       res.json({ success: true, items, total: data?.meta?.filter_count ?? items.length });
     } catch (err) {
       logger.error('admin prime-videos list failed', { error: err.message });
@@ -8837,7 +8737,10 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
     const descSnippet = row.description ? `Existing description excerpt: ${String(row.description).slice(0, 200)}` : '';
     const customHint = (req.body && typeof req.body.hint === 'string' ? req.body.hint.trim() : '').slice(0, 500);
     const hintPart = customHint ? `Editor context: ${customHint}` : '';
-    const prompt = [`Current title: "${row.title}".`, durPart, tagPart, descSnippet, hintPart].filter(Boolean).join(' ');
+    const prompt = [
+      `Current title: "${row.title}".`,
+      durPart, tagPart, descSnippet, hintPart,
+    ].filter(Boolean).join(' ');
 
     try {
       const title = await grokService.generateSafeVideoTitle({ prompt });
@@ -8888,13 +8791,14 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
       res.json({ success: true, tags, taxonomy: PRIME_TAG_TAXONOMY });
     } catch (err) {
       logger.error('grok suggest-tags failed', { id, error: err.message });
+      // Fall back to keyword heuristics so the UI still gets something useful
       const t = (row.title + ' ' + (row.description || '') + ' ' + customHint).toLowerCase();
       const fallback = PRIME_TAG_TAXONOMY.filter((tag) => t.includes(tag.replace('-', ' ')) || t.includes(tag));
       res.json({ success: true, tags: fallback.slice(0, 5), taxonomy: PRIME_TAG_TAXONOMY, fallback: true });
     }
   }));
 
-  // POST /api/webapp/admin/prime-videos/upload — multipart video upload.
+  // POST /api/webapp/admin/prime-videos/upload — multipart video upload
   // Forwards file to Directus, creates prime_videos row, mirrors to social_posts.
   const FormData = require('form-data');
   const primeUpload = multer({
@@ -8985,7 +8889,7 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
         });
       }
 
-      // Step 4 — mirror to social_posts immediately
+      // Step 4 — mirror to social_posts immediately (don't wait for the cron/flow)
       if (status === 'published') {
         try {
           const mediaUrl = `https://cms.pnptv.app/assets/${fileId}`;
@@ -9156,13 +9060,12 @@ app.post(
   mainStageController.token
 );
 
-// Layout mode — open to all authenticated users. Mode is a communal view
-// preference with no content-mutation risk; the user-keyed rate limiter
-// prevents one account from griefing the whole room. Other /api/main-stage/*
-// writes stay admin-only.
+// Layout mode — admin-only write. Guards the room experience from being
+// changed by arbitrary authenticated users.
 app.post(
   '/api/main-stage/mode',
   authenticateUser,
+  roleGuard('admin', 'superadmin'),
   mainStageMutatorLimiter,
   mainStageController.setMode
 );

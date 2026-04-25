@@ -6355,6 +6355,8 @@ export interface AdminPrimeVideo {
   poster_url: string | null;
   preview_url: string | null;
   video_url: string | null;
+  social_post_id: number | null;
+  share_url: string | null;
 }
 
 export function listAdminPrimeVideos(

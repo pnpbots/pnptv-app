@@ -530,6 +530,32 @@ export default function PrimeChannel() {
                     <span>· {item.tags.slice(0, 3).join(", ")}{item.tags.length > 3 ? "…" : ""}</span>
                   )}
                 </div>
+
+                {item.share_url && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="text"
+                      readOnly
+                      value={item.share_url}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="flex-1 min-w-0 px-2 py-1 text-[11px] rounded-md bg-pnp-background border border-pnp-border text-pnp-textSecondary font-mono"
+                    />
+                    <button
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(item.share_url!);
+                          setToast({ kind: "ok", msg: "Share link copied." });
+                        } catch {
+                          setToast({ kind: "err", msg: "Copy failed — select & copy manually." });
+                        }
+                      }}
+                      className="px-2 py-1 text-[11px] rounded-md bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:bg-pnp-surfaceHover whitespace-nowrap"
+                      title="Copy shareable link with social-media preview"
+                    >
+                      📋 Copy
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           );
