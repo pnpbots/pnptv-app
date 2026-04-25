@@ -1739,9 +1739,6 @@ const sharePostToHangouts = async (req, res) => {
   if (!post || post.is_deleted) {
     return res.status(404).json({ error: 'Post not found' });
   }
-  if (post.is_shareable === false) {
-    return res.status(403).json({ error: 'This post is not shareable' });
-  }
 
   const noteText = typeof note === 'string' ? note.trim().slice(0, 500) : '';
   const authorHandle = post.author_username ? `@${post.author_username}` : (post.author_first_name || 'User');

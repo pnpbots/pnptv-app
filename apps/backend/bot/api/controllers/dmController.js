@@ -710,7 +710,6 @@ const shareDmPost = async (req, res) => {
   );
   const post = postRows[0];
   if (!post || post.is_deleted) return res.status(404).json({ error: 'Post not found' });
-  if (post.is_shareable === false) return res.status(403).json({ error: 'Post is not shareable' });
 
   try {
     const msg = await DmService.sharePostToDm(

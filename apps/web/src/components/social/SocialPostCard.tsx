@@ -757,36 +757,34 @@ export default function SocialPostCard({
               {localReplyCount > 0 && <span>{localReplyCount}</span>}
             </button>
 
-            {/* Share — requires content disclaimer */}
-            {post.is_shareable !== false && (
-              <button
-                onClick={() => {
-                  if (contentDisclaimerAccepted) {
-                    handleShare();
-                  } else {
-                    setShowDisclaimerModal(true);
-                  }
-                }}
-                className="flex items-center gap-1.5 text-xs hover:text-green-400 transition-colors"
+            {/* Share — always visible; disclaimer modal gates first share. */}
+            <button
+              onClick={() => {
+                if (contentDisclaimerAccepted) {
+                  handleShare();
+                } else {
+                  setShowDisclaimerModal(true);
+                }
+              }}
+              className="flex items-center gap-1.5 text-xs hover:text-green-400 transition-colors"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0-12.814a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0 12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z"
-                  />
-                </svg>
-              </button>
-            )}
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0-12.814a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0 12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z"
+                />
+              </svg>
+            </button>
 
-            {/* Translate */}
-            {post.content && !post.blurred && (
+            {/* Translate — visible on every post that has any text content. */}
+            {post.content && (
               <button
                 onClick={handleTranslate}
                 disabled={isTranslating}
