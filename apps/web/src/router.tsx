@@ -406,6 +406,8 @@ export const router = createBrowserRouter([
       { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "hangouts/invite/:code", element: <HangoutInviteRedirect /> },
       { path: "hangouts/:groupId", element: <HangoutToChatRedirect /> },
+      // Short shareable alias: pnptv.app/h/123 → chat room
+      { path: "h/:groupId", element: <HangoutToChatRedirect /> },
       { path: "pnplive", element: <Navigate to="/live" replace /> },
       { path: "pnptv-haus", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "community-room", element: <Navigate to="/?view=hangouts" replace /> },

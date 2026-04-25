@@ -596,6 +596,77 @@ const getVideoPreviewOG = async (postId) => {
   }
 };
 
+// ─── Main Stage OG (the always-on community video room) ────────────────────
+const getMainStageOG = () => ({
+  title: '🔴 LIVE on PNPtv! Main Stage',
+  description: 'Drop into the always-on community video room. Real guys, real PNP, every night. Members only — join at pnptv.app/join.',
+  image: `${APP_BASE_URL}/og-default.png`,
+  imageWidth: 1200,
+  imageHeight: 630,
+  url: `${APP_BASE_URL}/main-stage`,
+  type: 'video.other',
+  video: null,
+  videoType: null,
+  videoWidth: null,
+  videoHeight: null,
+  twitterCard: 'summary_large_image',
+  playerUrl: null,
+});
+
+// ─── Hangout OG ────────────────────────────────────────────────────────────
+const getHangoutOG = async (hangoutId) => {
+  const id = parseInt(hangoutId, 10);
+  if (!Number.isFinite(id) || id <= 0) return getDefaultOG();
+
+  const cacheKey = `og:hangout:${id}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const result = await query(
+      `SELECT id, name, description, avatar_url, is_public, is_main
+         FROM hangout_groups
+        WHERE id = $1
+        LIMIT 1`,
+      [id]
+    );
+    if (!result.rows.length) return getDefaultOG();
+    const row = result.rows[0];
+    if (!row.is_public && !row.is_main) {
+      // Private hangout — don't leak any data via OG
+      return getDefaultOG();
+    }
+
+    const name = (row.name || 'PNPtv! Hangout').slice(0, 100);
+    const desc = (row.description || 'Live video hangout for PNP guys. Drop in.').replace(/\s+/g, ' ').trim().slice(0, 280)
+      || 'Live video hangout for PNP guys. Drop in.';
+    const image = row.avatar_url
+      ? (row.avatar_url.startsWith('http') ? row.avatar_url : `${APP_BASE_URL}${row.avatar_url}`)
+      : `${APP_BASE_URL}/og-default.png`;
+
+    const og = {
+      title: `🎥 ${name} — PNPtv! Hangout`,
+      description: `${desc} Members only — join at pnptv.app/join.`,
+      image,
+      imageWidth: 1200,
+      imageHeight: 630,
+      url: `${APP_BASE_URL}/h/${id}`,
+      type: 'video.other',
+      video: null,
+      videoType: null,
+      videoWidth: null,
+      videoHeight: null,
+      twitterCard: 'summary_large_image',
+      playerUrl: null,
+    };
+    await cacheSet(cacheKey, og, 300); // 5 min cache
+    return og;
+  } catch (err) {
+    logger.error('ogService.getHangoutOG error', { hangoutId: id, error: err.message });
+    return getDefaultOG();
+  }
+};
+
 module.exports = {
   getPostOG,
   getProfileOG,
@@ -604,4 +675,6 @@ module.exports = {
   getDefaultOG,
   getChannelsOG,
   getVideoPreviewOG,
+  getMainStageOG,
+  getHangoutOG,
 };

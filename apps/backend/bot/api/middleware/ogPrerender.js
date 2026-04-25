@@ -148,21 +148,46 @@ async function getLiveOg(streamId) {
 async function getGroupOg(groupId) {
   try {
     const { rows } = await getPool().query(
-      `SELECT name, description FROM hangout_groups WHERE id = $1`,
+      `SELECT name, description, avatar_url, is_public, is_main FROM hangout_groups WHERE id = $1`,
       [groupId]
     );
     if (!rows[0]) return null;
     const group = rows[0];
+    if (!group.is_public && !group.is_main) {
+      // Private — leak nothing via OG
+      return {
+        title: 'PNPtv! Hangout',
+        description: 'Members-only video hangout on PNPtv!',
+        image: DEFAULT_IMAGE,
+        url: `${BASE_URL}/chat/${groupId}`,
+        type: 'video.other',
+      };
+    }
+    const image = group.avatar_url
+      ? (group.avatar_url.startsWith('http') ? group.avatar_url : `${BASE_URL}${group.avatar_url}`)
+      : DEFAULT_IMAGE;
+    const desc = (group.description || `Join the ${group.name} hangout on PNPtv!`).replace(/\s+/g, ' ').trim().slice(0, 280);
     return {
-      title: `${group.name} — PNPtv! Hangout`,
-      description: group.description || `Join the ${group.name} hangout on PNPtv!`,
-      image: DEFAULT_IMAGE,
-      url: `${BASE_URL}/chat/${groupId}`,
+      title: `🎥 ${group.name} — PNPtv! Hangout`,
+      description: `${desc} Members only — join at pnptv.app/join.`,
+      image,
+      url: `${BASE_URL}/h/${groupId}`,
+      type: 'video.other',
     };
   } catch (err) {
     logger.warn('OG prerender: group lookup failed', { groupId, error: err.message });
     return null;
   }
+}
+
+function getMainStageOg() {
+  return {
+    title: '🔴 LIVE on PNPtv! Main Stage',
+    description: 'Drop into the always-on community video room. Real guys, real PNP, every night. Members only — join at pnptv.app/join.',
+    image: DEFAULT_IMAGE,
+    url: `${BASE_URL}/main-stage`,
+    type: 'video.other',
+  };
 }
 
 /**
@@ -180,6 +205,8 @@ function ogPrerenderMiddleware(req, res, next) {
   const profileMatch = path.match(/^\/profile\/([^/]+)$/);
   const liveMatch = path.match(/^\/live\/([^/]+)$/);
   const chatMatch = path.match(/^\/chat\/(\d+)$/);
+  const hMatch = path.match(/^\/h\/(\d+)$/);
+  const mainStageMatch = /^\/main-stage\/?$/.test(path);
 
   let ogPromise;
   if (postMatch) {
@@ -190,6 +217,11 @@ function ogPrerenderMiddleware(req, res, next) {
     ogPromise = getLiveOg(liveMatch[1]);
   } else if (chatMatch) {
     ogPromise = getGroupOg(chatMatch[1]);
+  } else if (hMatch) {
+    ogPromise = getGroupOg(hMatch[1]);
+  } else if (mainStageMatch) {
+    const html = renderOgHtml(getMainStageOg());
+    return res.type('html').send(html);
   } else {
     // Default card for any other page
     const html = renderOgHtml({

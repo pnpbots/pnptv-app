@@ -138,6 +138,23 @@ const resolveOgData = async (strippedPath) => {
     };
   }
 
+  // /main-stage  (Main Stage shareable link)
+  if (/^\/main-stage\/?$/.test(strippedPath)) {
+    return {
+      ogData: ogService.getMainStageOG(),
+      canonicalPath: '/main-stage',
+    };
+  }
+
+  // /h/:hangoutId  (shareable hangout link — short alias)
+  m = strippedPath.match(/^\/h\/(\d+)\/?$/);
+  if (m) {
+    return {
+      ogData: await ogService.getHangoutOG(m[1]),
+      canonicalPath: `/h/${m[1]}`,
+    };
+  }
+
   // /stream/:id
   m = strippedPath.match(/^\/stream\/([^/]+)\/?$/);
   if (m) {
