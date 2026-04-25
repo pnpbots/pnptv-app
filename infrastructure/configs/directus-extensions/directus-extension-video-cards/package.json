@@ -1,0 +1,21 @@
+{
+  "name": "directus-extension-video-cards",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "directus:extension": {
+    "type": "layout",
+    "path": "dist/index.js",
+    "source": "src/index.ts",
+    "host": "^11.0.0"
+  },
+  "scripts": {
+    "build": "directus-extension build",
+    "dev": "directus-extension build -w --no-minify"
+  },
+  "devDependencies": {
+    "@directus/extensions-sdk": "13.1.0",
+    "typescript": "^5.5.0",
+    "vue": "^3.4.0"
+  }
+}

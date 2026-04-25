@@ -447,7 +447,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./infrastructure/data/directus/uploads:/directus/uploads
-      - ./infrastructure/data/directus/extensions:/directus/extensions
+      - ./infrastructure/configs/directus-extensions:/directus/extensions
     environment:
       DB_CLIENT: pg
       DB_HOST: pg-directus

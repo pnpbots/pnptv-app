@@ -1,0 +1,20 @@
+{
+  "name": "directus-extension-video-thumb",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "directus:extension": {
+    "type": "endpoint",
+    "path": "dist/index.js",
+    "source": "src/index.ts",
+    "host": "^11.0.0"
+  },
+  "scripts": {
+    "build": "directus-extension build"
+  },
+  "devDependencies": {
+    "@directus/extensions-sdk": "13.1.0",
+    "@types/express": "^4.17.21",
+    "typescript": "^5.5.0"
+  }
+}

@@ -8675,6 +8675,194 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
 });
 
 // ==========================================
+// PRIME CHANNEL — ADMIN MANAGEMENT
+// In-app editor for prime_videos (Directus-backed).
+// All edits go through Directus API so the existing Directus Flow webhook
+// (which fans out to social_posts) fires automatically.
+// ==========================================
+{
+  const directusBaseUrl = () => (process.env.DIRECTUS_URL || process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055').replace(/\/$/, '');
+  const directusHeaders = () => {
+    const token = process.env.DIRECTUS_ADMIN_TOKEN;
+    if (!token) throw new Error('DIRECTUS_ADMIN_TOKEN not configured');
+    return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  };
+
+  // GET /api/webapp/admin/prime-videos — list all prime_videos with poster URLs
+  app.get('/api/webapp/admin/prime-videos', adminGuard, asyncHandler(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const fields = ['id', 'title', 'description', 'status', 'category', 'duration',
+                    'is_featured', 'is_explicit', 'tags', 'plays', 'likes',
+                    'video_file', 'thumbnail', 'date_created', 'date_updated'].join(',');
+    const url = `${directusBaseUrl()}/items/prime_videos?fields=${fields}&limit=${limit}&page=${page}&sort=-date_created&meta=filter_count`;
+    try {
+      const { data } = await axios.get(url, { headers: directusHeaders(), timeout: 8000 });
+      const items = (data?.data || []).map((row) => ({
+        ...row,
+        poster_url: row.video_file ? `https://cms.pnptv.app/video-thumb/${row.video_file}.jpg` : null,
+        preview_url: row.video_file ? `https://cms.pnptv.app/video-thumb/${row.video_file}_preview.mp4` : null,
+        video_url: row.video_file ? `https://cms.pnptv.app/assets/${row.video_file}` : null,
+      }));
+      res.json({ success: true, items, total: data?.meta?.filter_count ?? items.length });
+    } catch (err) {
+      logger.error('admin prime-videos list failed', { error: err.message });
+      res.status(502).json({ success: false, error: 'Directus fetch failed' });
+    }
+  }));
+
+  // PATCH /api/webapp/admin/prime-videos/:id — update title/description/status/is_featured
+  app.patch('/api/webapp/admin/prime-videos/:id', adminGuard, asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
+
+    const allowed = ['title', 'description', 'status', 'is_featured', 'is_explicit', 'category', 'tags'];
+    const patch = {};
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key)) patch[key] = req.body[key];
+    }
+    if (!Object.keys(patch).length) return res.status(400).json({ success: false, error: 'no fields' });
+
+    if (patch.status && !['draft', 'published', 'archived'].includes(patch.status)) {
+      return res.status(400).json({ success: false, error: 'bad status' });
+    }
+    if (typeof patch.title === 'string' && patch.title.length > 255) {
+      patch.title = patch.title.slice(0, 255);
+    }
+
+    try {
+      const { data } = await axios.patch(
+        `${directusBaseUrl()}/items/prime_videos/${id}`,
+        patch,
+        { headers: directusHeaders(), timeout: 8000 }
+      );
+      res.json({ success: true, item: data?.data });
+    } catch (err) {
+      logger.error('admin prime-videos patch failed', { id, error: err.message });
+      const status = err.response?.status === 404 ? 404 : 502;
+      res.status(status).json({ success: false, error: err.response?.data?.errors?.[0]?.message || err.message });
+    }
+  }));
+
+  // POST /api/webapp/admin/prime-videos/:id/generate-description — Grok-powered description
+  app.post('/api/webapp/admin/prime-videos/:id/generate-description', adminGuard, asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
+
+    let row;
+    try {
+      const { data } = await axios.get(
+        `${directusBaseUrl()}/items/prime_videos/${id}?fields=id,title,duration,tags,category`,
+        { headers: directusHeaders(), timeout: 5000 }
+      );
+      row = data?.data;
+    } catch (err) {
+      return res.status(502).json({ success: false, error: 'Directus fetch failed' });
+    }
+    if (!row) return res.status(404).json({ success: false, error: 'not found' });
+
+    const grokService = require('../../services/grokService');
+    const tagPart = Array.isArray(row.tags) && row.tags.length ? `Tags: ${row.tags.join(', ')}.` : '';
+    const durPart = row.duration ? `Duration: ~${Math.round(row.duration / 60)} minutes.` : '';
+    const customHint = (req.body && typeof req.body.hint === 'string' ? req.body.hint.trim() : '').slice(0, 500);
+    const hintPart = customHint ? `Additional context from the editor: ${customHint}` : '';
+    const prompt = [`Title: "${row.title}".`, durPart, tagPart, hintPart].filter(Boolean).join(' ');
+
+    try {
+      const result = await grokService.generateBilingualSafeVideoDescription({ prompt });
+      res.json({ success: true, description: result.combined, en: result.en, es: result.es });
+    } catch (err) {
+      logger.error('grok generate-description failed', { id, error: err.message });
+      const isSafetyBlock = /SAFETY_CHECK|usage guidelines/i.test(err.message || '');
+      const friendly = isSafetyBlock
+        ? "Grok's safety filter blocked this title. Add neutral context (e.g. \"two adult men, gym setting\") in the Context for Grok field and try again, or rename the title to something less explicit."
+        : (err.message || 'grok failed');
+      res.status(502).json({ success: false, error: friendly });
+    }
+  }));
+
+  // POST /api/webapp/admin/prime-videos/:id/generate-title — clean marketable title
+  app.post('/api/webapp/admin/prime-videos/:id/generate-title', adminGuard, asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
+
+    let row;
+    try {
+      const { data } = await axios.get(
+        `${directusBaseUrl()}/items/prime_videos/${id}?fields=id,title,duration,tags,description`,
+        { headers: directusHeaders(), timeout: 5000 }
+      );
+      row = data?.data;
+    } catch (err) {
+      return res.status(502).json({ success: false, error: 'Directus fetch failed' });
+    }
+    if (!row) return res.status(404).json({ success: false, error: 'not found' });
+
+    const grokService = require('../../services/grokService');
+    const tagPart = Array.isArray(row.tags) && row.tags.length ? `Tags: ${row.tags.join(', ')}.` : '';
+    const durPart = row.duration ? `Duration: ~${Math.round(row.duration / 60)} minutes.` : '';
+    const descSnippet = row.description ? `Existing description excerpt: ${String(row.description).slice(0, 200)}` : '';
+    const customHint = (req.body && typeof req.body.hint === 'string' ? req.body.hint.trim() : '').slice(0, 500);
+    const hintPart = customHint ? `Editor context: ${customHint}` : '';
+    const prompt = [`Current title: "${row.title}".`, durPart, tagPart, descSnippet, hintPart].filter(Boolean).join(' ');
+
+    try {
+      const title = await grokService.generateSafeVideoTitle({ prompt });
+      res.json({ success: true, title });
+    } catch (err) {
+      logger.error('grok generate-title failed', { id, error: err.message });
+      const isSafetyBlock = /SAFETY_CHECK|usage guidelines/i.test(err.message || '');
+      res.status(502).json({
+        success: false,
+        error: isSafetyBlock
+          ? "Grok's safety filter blocked this. Add neutral context in the Context for Grok field."
+          : (err.message || 'grok failed'),
+      });
+    }
+  }));
+
+  // POST /api/webapp/admin/prime-videos/:id/suggest-tags — pick 3-5 from the Media.tsx taxonomy
+  const PRIME_TAG_TAXONOMY = [
+    'slam', 'clouds', 'outdoors', 'group',
+    'meth-daddy', 'twink', 'colombian', 'venezuelan',
+    'threesome', 'golden-rain',
+  ];
+  app.post('/api/webapp/admin/prime-videos/:id/suggest-tags', adminGuard, asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
+
+    let row;
+    try {
+      const { data } = await axios.get(
+        `${directusBaseUrl()}/items/prime_videos/${id}?fields=id,title,duration,description`,
+        { headers: directusHeaders(), timeout: 5000 }
+      );
+      row = data?.data;
+    } catch (err) {
+      return res.status(502).json({ success: false, error: 'Directus fetch failed' });
+    }
+    if (!row) return res.status(404).json({ success: false, error: 'not found' });
+
+    const grokService = require('../../services/grokService');
+    const durPart = row.duration ? `Duration: ~${Math.round(row.duration / 60)} minutes.` : '';
+    const descSnippet = row.description ? `Description: ${String(row.description).slice(0, 300)}` : '';
+    const customHint = (req.body && typeof req.body.hint === 'string' ? req.body.hint.trim() : '').slice(0, 500);
+    const hintPart = customHint ? `Editor context: ${customHint}` : '';
+    const prompt = [`Title: "${row.title}".`, durPart, descSnippet, hintPart].filter(Boolean).join(' ');
+
+    try {
+      const tags = await grokService.suggestSafeTags({ prompt, taxonomy: PRIME_TAG_TAXONOMY });
+      res.json({ success: true, tags, taxonomy: PRIME_TAG_TAXONOMY });
+    } catch (err) {
+      logger.error('grok suggest-tags failed', { id, error: err.message });
+      const t = (row.title + ' ' + (row.description || '') + ' ' + customHint).toLowerCase();
+      const fallback = PRIME_TAG_TAXONOMY.filter((tag) => t.includes(tag.replace('-', ' ')) || t.includes(tag));
+      res.json({ success: true, tags: fallback.slice(0, 5), taxonomy: PRIME_TAG_TAXONOMY, fallback: true });
+    }
+  }));
+}
+
+// ==========================================
 // CREATOR ALBUM / MEDIA ENDPOINTS
 // ==========================================
 const creatorMediaController = require('./controllers/creatorMediaController');

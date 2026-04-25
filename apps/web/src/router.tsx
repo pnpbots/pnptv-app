@@ -116,6 +116,7 @@ const CreatorSubscriptions = lazy(() => import("@/pages/admin/CreatorSubscriptio
 const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 const MeruLinks = lazy(() => import("@/pages/admin/MeruLinks"));
 const DuplicateAccounts = lazy(() => import("@/pages/admin/DuplicateAccounts"));
+const PrimeChannel = lazy(() => import("@/pages/admin/PrimeChannel"));
 const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
 
 // Creator Studio pages
@@ -521,6 +522,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <AdminDemographics />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "prime",
+        element: (
+          <ModuleLoader>
+            <PrimeChannel />
           </ModuleLoader>
         ),
       },

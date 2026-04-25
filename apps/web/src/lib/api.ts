@@ -6332,3 +6332,87 @@ export function renameAccountToTelegramId(
     body: { sourceId, telegramId },
   });
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Admin: Prime Channel video editor
+// ──────────────────────────────────────────────────────────────────────────
+export interface AdminPrimeVideo {
+  id: number;
+  title: string;
+  description: string | null;
+  status: "draft" | "published" | "archived";
+  category: string | null;
+  duration: number | null;
+  is_featured: boolean;
+  is_explicit: boolean;
+  tags: string[] | null;
+  plays: number;
+  likes: number;
+  video_file: string | null;
+  thumbnail: string | null;
+  date_created: string | null;
+  date_updated: string | null;
+  poster_url: string | null;
+  preview_url: string | null;
+  video_url: string | null;
+}
+
+export function listAdminPrimeVideos(
+  page = 1,
+  limit = 100,
+): Promise<{ success: boolean; items: AdminPrimeVideo[]; total: number }> {
+  return request(`/api/webapp/admin/prime-videos?page=${page}&limit=${limit}`);
+}
+
+export function updateAdminPrimeVideo(
+  id: number,
+  patch: Partial<Pick<AdminPrimeVideo, "title" | "description" | "status" | "is_featured" | "is_explicit" | "category" | "tags">>,
+): Promise<{ success: boolean; item: AdminPrimeVideo }> {
+  return request(`/api/webapp/admin/prime-videos/${id}`, {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
+export function generatePrimeVideoDescription(
+  id: number,
+  options: { hint?: string; includeSantino?: boolean; includeLex?: boolean } = {},
+): Promise<{ success: boolean; description: string; en: string; es: string }> {
+  return request(`/api/webapp/admin/prime-videos/${id}/generate-description`, {
+    method: "POST",
+    body: options,
+  });
+}
+
+export function generatePrimeVideoTitle(
+  id: number,
+  options: { hint?: string } = {},
+): Promise<{ success: boolean; title: string }> {
+  return request(`/api/webapp/admin/prime-videos/${id}/generate-title`, {
+    method: "POST",
+    body: options,
+  });
+}
+
+export function suggestPrimeVideoTags(
+  id: number,
+  options: { hint?: string } = {},
+): Promise<{ success: boolean; tags: string[]; taxonomy: string[]; fallback?: boolean }> {
+  return request(`/api/webapp/admin/prime-videos/${id}/suggest-tags`, {
+    method: "POST",
+    body: options,
+  });
+}
+
+export const PRIME_TAG_TAXONOMY: { key: string; label: string }[] = [
+  { key: "slam", label: "Slam" },
+  { key: "clouds", label: "Clouds" },
+  { key: "outdoors", label: "Outdoors" },
+  { key: "group", label: "Group" },
+  { key: "meth-daddy", label: "Meth Daddy" },
+  { key: "twink", label: "Twink" },
+  { key: "colombian", label: "Colombian" },
+  { key: "venezuelan", label: "Venezuelan" },
+  { key: "threesome", label: "Threesome" },
+  { key: "golden-rain", label: "Golden Rain" },
+];
