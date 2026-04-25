@@ -89,7 +89,7 @@ class ErrorBoundary extends Component<Props, State> {
             justifyContent: "center",
             minHeight: "100vh",
             padding: "20px",
-            backgroundColor: "#1C1C1E",
+            backgroundColor: "var(--pnp-surface, #1C1C1E)",
             color: "#fff",
             textAlign: "center",
           }}
@@ -98,7 +98,7 @@ class ErrorBoundary extends Component<Props, State> {
           <h1 style={{ fontSize: "24px", marginBottom: "8px", color: "#FFB454" }}>
             {e.title}
           </h1>
-          <p style={{ marginBottom: "24px", color: "#8E8E93" }}>
+          <p style={{ marginBottom: "24px", color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {e.description}
           </p>
           <button

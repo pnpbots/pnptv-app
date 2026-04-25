@@ -451,12 +451,12 @@ function ConsentRowList({ rows }: { rows: ConsentRow[] }) {
                 {statusLabel(item.status)}
               </span>
               {isLink && (
-                <svg className="w-4 h-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                <svg className="w-4 h-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                 </svg>
               )}
               {isExpandable && (
-                <svg className={`w-4 h-4 opacity-50 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "#8E8E93" }}>
+                <svg className={`w-4 h-4 opacity-50 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                 </svg>
               )}
@@ -479,7 +479,7 @@ function ConsentRowList({ rows }: { rows: ConsentRow[] }) {
             )}
 
             {isExpanded && item.expandContent && (
-              <div className="px-4 pb-4 text-xs leading-relaxed space-y-2" style={{ color: "#8E8E93", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="px-4 pb-4 text-xs leading-relaxed space-y-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                 {item.expandContent}
               </div>
             )}

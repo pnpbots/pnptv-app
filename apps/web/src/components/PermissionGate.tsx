@@ -198,7 +198,7 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
       <div
         className="w-full max-w-sm rounded-2xl p-6 space-y-5 animate-fade-in-up"
-        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.1)" }}
       >
         {/* Icon */}
         <div className="flex justify-center">
@@ -222,7 +222,7 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
         {/* Title */}
         <div className="text-center">
           <h2 className="text-lg font-bold text-white">Camera & Microphone</h2>
-          <p className="text-sm mt-2" style={{ color: "#8E8E93" }}>
+          <p className="text-sm mt-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {inWebView && unavailable
               ? "This in-app browser doesn't support camera access. Open this link in your default browser (Safari/Chrome) for the best experience, or continue to join anyway."
               : unavailable && !denied
@@ -290,7 +290,7 @@ export function PermissionGate({ onGranted, onCancel }: PermissionGateProps) {
             <button
               onClick={onCancel}
               className="w-full py-2.5 rounded-xl text-sm font-medium transition-colors hover:bg-white/5"
-              style={{ color: "#8E8E93" }}
+              style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
             >
               Cancel
             </button>

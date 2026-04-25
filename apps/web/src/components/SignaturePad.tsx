@@ -87,7 +87,7 @@ export function SignaturePad({ onSave, width = 320, height = 120 }: SignaturePad
         onTouchEnd={endDraw}
       />
       <div className="flex items-center justify-between">
-        <p className="text-xs" style={{ color: "#8E8E93" }}>
+        <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           {hasSig ? "Signature captured" : "Draw your signature above"}
         </p>
         {hasSig && (

@@ -372,7 +372,7 @@ export function SharePostModal({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-white/50">Share to X</p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               Connect X to share posts to your timeline
             </p>
           </div>
@@ -400,7 +400,7 @@ export function SharePostModal({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium" style={{ color: "#FFA500" }}>Reconnect X</p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               Your X account needs write permission to share posts
             </p>
           </div>
@@ -423,7 +423,7 @@ export function SharePostModal({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-white/40">Share to X</p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>Only the post author can share to X</p>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Only the post author can share to X</p>
           </div>
         </div>
       );
@@ -470,7 +470,7 @@ export function SharePostModal({
               )}
             </div>
             <div className="px-3 py-2">
-              <p className="text-[11px]" style={{ color: "#8E8E93" }}>
+              <p className="text-[11px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 pnptv.app · {mediaType === "video" ? "Will post as card with video preview" : "Will post as card with image"}
               </p>
             </div>
@@ -502,7 +502,7 @@ export function SharePostModal({
             {isLoading ? (
               <svg
                 className="w-4 h-4 animate-spin"
-                style={{ color: "#8E8E93" }}
+                style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                 fill="none"
                 viewBox="0 0 24 24"
                 aria-hidden="true"
@@ -527,7 +527,7 @@ export function SharePostModal({
                     View on X →
                   </a>
                 ) : (
-                  <p className="text-xs" style={{ color: "#8E8E93" }}>Your post is now on your X timeline</p>
+                  <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Your post is now on your X timeline</p>
                 )}
               </>
             ) : isLoading ? (
@@ -542,7 +542,7 @@ export function SharePostModal({
                     <span className="text-white/40 font-normal ml-1.5 text-xs">@{xStatus.handle}</span>
                   )}
                 </p>
-                <p className="text-xs" style={{ color: "#8E8E93" }}>
+                <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   Post this to your X timeline
                 </p>
               </>
@@ -602,7 +602,7 @@ export function SharePostModal({
             <p className="text-sm font-semibold" style={{ color: "#34C759" }}>
               Shared to {hangoutsSharedCount} hangout{hangoutsSharedCount !== 1 ? "s" : ""}!
             </p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               Your post was forwarded to the selected hangouts
             </p>
           </div>
@@ -632,7 +632,7 @@ export function SharePostModal({
           </div>
           <div className="flex-1 min-w-0 text-left">
             <p className="text-sm font-semibold text-white">Share to Hangouts</p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               Forward this post to your hangout groups
             </p>
           </div>
@@ -722,7 +722,7 @@ export function SharePostModal({
                   <svg className="w-6 h-6 mb-2" style={{ color: "#555" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
                   </svg>
-                  <p className="text-sm" style={{ color: "#8E8E93" }}>
+                  <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                     You're not a member of any hangouts yet
                   </p>
                 </div>
@@ -770,7 +770,7 @@ export function SharePostModal({
                         <div className="flex-1 min-w-0 text-left">
                           <p className="text-sm font-medium text-white truncate">{g.name}</p>
                           {g.memberCount > 0 && (
-                            <p className="text-xs" style={{ color: "#8E8E93" }}>
+                            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                               {g.memberCount} member{g.memberCount !== 1 ? "s" : ""}
                             </p>
                           )}
@@ -887,7 +887,7 @@ export function SharePostModal({
             <p className="text-sm font-semibold" style={{ color: "#34C759" }}>
               Shared to {dmsSharedCount} DM{dmsSharedCount !== 1 ? "s" : ""}!
             </p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               Your post was sent to the selected conversations
             </p>
           </div>
@@ -911,7 +911,7 @@ export function SharePostModal({
           </div>
           <div className="flex-1 min-w-0 text-left">
             <p className="text-sm font-semibold text-white">Share to DM</p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               Send this post to your direct-message conversations
             </p>
           </div>
@@ -975,7 +975,7 @@ export function SharePostModal({
                 </div>
               ) : dmThreads.length === 0 ? (
                 <div className="p-4 text-center">
-                  <p className="text-xs" style={{ color: "#8E8E93" }}>
+                  <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                     You don't have any direct messages yet
                   </p>
                 </div>
@@ -1009,7 +1009,7 @@ export function SharePostModal({
                         )}
                         <div className="flex-1 min-w-0 text-left">
                           <p className="text-sm font-semibold text-white truncate">{name}</p>
-                          {t.partnerUsername && <p className="text-[11px] truncate" style={{ color: "#8E8E93" }}>@{t.partnerUsername}</p>}
+                          {t.partnerUsername && <p className="text-[11px] truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>@{t.partnerUsername}</p>}
                         </div>
                         <div
                           className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
@@ -1041,7 +1041,7 @@ export function SharePostModal({
                     rows={2}
                     className="w-full text-sm bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder:text-pnp-textSecondary/50 outline-none focus:border-white/30 resize-none"
                   />
-                  <div className="text-[10px] text-right mt-0.5" style={{ color: "#8E8E93" }}>
+                  <div className="text-[10px] text-right mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                     {dmNote.length} / 500
                   </div>
                 </div>
@@ -1093,7 +1093,7 @@ export function SharePostModal({
     >
       <div
         className="w-full max-w-lg rounded-t-2xl p-5 pb-8 space-y-2"
-        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Handle bar */}
@@ -1164,7 +1164,7 @@ export function SharePostModal({
             ) : (
               <p className="text-sm font-semibold text-white">Copy Link</p>
             )}
-            <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
+            <p className="text-xs truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {shareUrl}
             </p>
           </div>
@@ -1198,7 +1198,7 @@ export function SharePostModal({
             </div>
             <div className="flex-1 min-w-0 text-left">
               <p className="text-sm font-semibold text-white">Share via...</p>
-              <p className="text-xs" style={{ color: "#8E8E93" }}>
+              <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 Open system share sheet
               </p>
             </div>

@@ -471,11 +471,11 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
                         {rec.title || `${formatReplayDate(rec.startedAt)} \u2014 ${formatDuration(rec.durationSeconds)}`}
                       </p>
                       {rec.description ? (
-                        <p className="text-[10px] mt-0.5 truncate" style={{ color: "#8E8E93" }}>
+                        <p className="text-[10px] mt-0.5 truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                           {rec.description.length > 60 ? rec.description.slice(0, 60) + "\u2026" : rec.description}
                         </p>
                       ) : (
-                        <p className="text-[10px] mt-0.5" style={{ color: "#8E8E93" }}>
+                        <p className="text-[10px] mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                           {rec.requiresSubscription ? "Subscribe to watch" : "Tap to watch replay"}
                         </p>
                       )}

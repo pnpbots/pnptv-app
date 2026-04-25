@@ -368,7 +368,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       {/* Payout Method Card */}
       <div className="glass-card-sm p-5">
         <p className="text-sm font-semibold text-white mb-1">{t.payoutMethodTitle}</p>
-        <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>{t.payoutMethodDesc}</p>
+        <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.payoutMethodDesc}</p>
 
         {/* Method selector — Dash is the only crypto option; USDC retired */}
         <div className="grid grid-cols-3 gap-2 mb-4">
@@ -406,7 +406,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
           <div className="h-10 bg-white/5 rounded-lg animate-pulse mb-3" />
         ) : payoutMethod === "dash" ? (
           <div className="mb-3">
-            <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               Enter your Dash wallet address. When a payout is ready you'll get an email with a one-tap claim link — BTCPay sends Dash on-chain to this address. USD balance is converted to Dash at claim time using the live exchange rate.
             </p>
             <input
@@ -425,7 +425,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
           </div>
         ) : payoutMethod === "meru" ? (
           <div className="mb-3">
-            <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>{t.meruInputHint}</p>
+            <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.meruInputHint}</p>
             <input
               type="text"
               value={meruAccount}
@@ -441,7 +441,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
           </div>
         ) : payoutMethod === "fiat" ? (
           <div className="mb-3">
-            <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>{t.fiatInputHint || "Select your preferred payout provider and enter your account."}</p>
+            <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.fiatInputHint || "Select your preferred payout provider and enter your account."}</p>
             <select
               value={fiatProvider}
               onChange={(e) => {
@@ -495,14 +495,14 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
           {walletSaving ? t.savingWallet : t.savePayoutInfo}
         </button>
 
-        <p className="mt-4 text-xs leading-relaxed" style={{ color: "#8E8E93" }}>{t.payoutScheduleNote}</p>
+        <p className="mt-4 text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.payoutScheduleNote}</p>
       </div>
 
       {/* Tier milestone info — read-only */}
       {dashboard.creatorType !== "full_time" && (
         <div className="glass-card-sm p-5">
           <p className="text-sm font-semibold text-white mb-1">{t.creatorTierTitle}</p>
-          <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>{t.creatorTierDesc}</p>
+          <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creatorTierDesc}</p>
           <div className="flex gap-2">
             {TIERS.map((tier) => {
               const isCurrent = dashboard.creatorType === tier.key;
@@ -538,7 +538,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       {/* Stream Rules Card */}
       <div className="glass-card-sm p-5">
         <p className="text-sm font-semibold text-white mb-1">My Stream Rules</p>
-        <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+        <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           These rules appear in the "House Rules" section viewers see before joining your stream. Plain text only.
         </p>
         <div className="relative">
@@ -586,7 +586,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       {/* ── My Replays ── */}
       <div className="glass-card-sm p-5">
         <p className="text-sm font-semibold text-white mb-1">My Replays</p>
-        <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+        <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           Your stream recordings. Replays are available for 7 days after the stream ends.
           Subscribers see these with a paywall; you can always view and delete your own.
         </p>
@@ -602,7 +602,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
             {[1, 2].map((i) => <div key={i} className="h-14 bg-white/5 rounded-lg animate-pulse" />)}
           </div>
         ) : myRecordings.length === 0 ? (
-          <p className="text-xs text-center py-6" style={{ color: "#8E8E93" }}>No recordings yet. Start a stream to create replays.</p>
+          <p className="text-xs text-center py-6" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>No recordings yet. Start a stream to create replays.</p>
         ) : (
           <div className="space-y-2">
             {myRecordings.map((rec) => (
@@ -632,7 +632,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
                     <p className="text-xs font-medium text-white truncate">
                       {rec.title || `${fmtDate(rec.startedAt)} \u2014 ${fmtDuration(rec.durationSeconds)}`}
                     </p>
-                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "#8E8E93" }}>
+                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                       {fmtBytes(rec.sizeBytes)}
                       {rec.endedAt && ` · Expires ${fmtDate(new Date(new Date(rec.endedAt).getTime() + 7 * 86400000).toISOString())}`}
                     </p>
@@ -702,7 +702,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
                       <button
                         onClick={cancelEditRec}
                         className="px-3 py-1 rounded text-[10px] font-semibold transition-colors"
-                        style={{ color: "#8E8E93" }}
+                        style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                       >
                         Cancel
                       </button>
@@ -727,7 +727,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
             {showAddForm ? "Cancel" : "+ Add media"}
           </button>
         </div>
-        <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+        <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           Photos and videos shown on your performer card and album grid. Premium items are blurred for non-subscribers.
         </p>
 
@@ -808,7 +808,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
             {[1, 2].map((i) => <div key={i} className="h-14 bg-white/5 rounded-lg animate-pulse" />)}
           </div>
         ) : albumItems.length === 0 ? (
-          <p className="text-xs text-center py-6" style={{ color: "#8E8E93" }}>No media yet. Add photos or videos above.</p>
+          <p className="text-xs text-center py-6" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>No media yet. Add photos or videos above.</p>
         ) : (
           <div className="space-y-2">
             {albumItems.map((item, idx) => (
@@ -863,7 +863,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
                     style={
                       item.isPremium
                         ? { background: "rgba(230,145,56,0.15)", color: "#E69138" }
-                        : { background: "rgba(255,255,255,0.06)", color: "#8E8E93" }
+                        : { background: "rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary, #8E8E93)" }
                     }
                   >
                     {item.isPremium ? "Free" : "Lock"}

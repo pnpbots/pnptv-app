@@ -202,11 +202,11 @@ export default function IdentityConnections({ telegramUsername }: IdentityConnec
               <div className="min-w-0">
                 <p className="text-sm font-medium text-white">Telegram</p>
                 {telegramLinked ? (
-                  <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
+                  <p className="text-xs truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                     {telegramHandle ? `@${telegramHandle}` : telegramId ? `ID: ${telegramId}` : "Connected"}
                   </p>
                 ) : (
-                  <p className="text-xs" style={{ color: "#8E8E93" }}>Link your Telegram account</p>
+                  <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Link your Telegram account</p>
                 )}
               </div>
             </div>
@@ -291,9 +291,9 @@ export default function IdentityConnections({ telegramUsername }: IdentityConnec
                 <div>
                   <p className="text-sm font-medium text-white">Legacy Account</p>
                   {hasLegacyEmail ? (
-                    <p className="text-xs truncate" style={{ color: "#8E8E93" }}>{legacyEmail}</p>
+                    <p className="text-xs truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{legacyEmail}</p>
                   ) : (
-                    <p className="text-xs" style={{ color: "#8E8E93" }}>Link your old X or Email account</p>
+                    <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Link your old X or Email account</p>
                   )}
                 </div>
               </div>

@@ -51,16 +51,16 @@ export function ConfirmDialog({
     >
       <div
         className="w-full max-w-sm rounded-2xl p-6 space-y-4"
-        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.1)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-base font-semibold text-white">{title}</h3>
-        <p className="text-sm" style={{ color: "#8E8E93" }}>{message}</p>
+        <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{message}</p>
         <div className="flex gap-3">
           <button
             onClick={onCancel}
             className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
-            style={{ background: "rgba(255,255,255,0.08)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }}
+            style={{ background: "rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary, #8E8E93)", border: "1px solid rgba(255,255,255,0.1)" }}
           >
             {cancelLabel}
           </button>

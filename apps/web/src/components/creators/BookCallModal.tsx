@@ -585,7 +585,7 @@ export function BookCallModal({
 
     return (
       <div className="space-y-3">
-        <p className="text-xs" style={{ color: "#8E8E93" }}>
+        <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           {t.creator.pickModelHint(duration)}
         </p>
         <div
@@ -732,7 +732,7 @@ export function BookCallModal({
 
         {/* Duration options */}
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider mb-2.5" style={{ color: "#8E8E93" }}>{t.creator.selectDurationLabel}</p>
+          <p className="text-xs font-semibold uppercase tracking-wider mb-2.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.selectDurationLabel}</p>
           <div className="grid grid-cols-2 gap-3">
             {[
               { mins: 30 as const, label: t.creator.slotDuration(30), badge: t.creator.mostPopularBadge, price: packages.find((p) => p.duration_minutes === 30)?.price_usd ?? "60" },
@@ -863,7 +863,7 @@ export function BookCallModal({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold" style={{ color: "#34C759" }}>{t.creator.callNowLabel}</p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>{t.creator.callNowStartsIn(duration)}</p>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.callNowStartsIn(duration)}</p>
           </div>
           {selectedSlot === null && (
             <svg className="w-5 h-5 flex-shrink-0" style={{ color: "#34C759" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
@@ -914,7 +914,7 @@ export function BookCallModal({
       {!slotsLoading && !slotsError && slots.length > 0 && (
         <>
           <div className="max-h-[40vh] overflow-y-auto space-y-2.5 -mx-1 px-1" role="listbox" aria-label={t.creator.ariaAvailableSlots}>
-            <p className="text-xs pb-0.5" style={{ color: "#8E8E93" }}>
+            <p className="text-xs pb-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {t.creator.timesInLocalTz(Intl.DateTimeFormat().resolvedOptions().timeZone)}
             </p>
             {slots.map((slot) => {
@@ -947,7 +947,7 @@ export function BookCallModal({
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold" style={{ color: "#EBEBF5" }}>{date}</p>
-                    <p className="text-xs" style={{ color: "#8E8E93" }}>{time} — {t.creator.slotDuration(duration)}</p>
+                    <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{time} — {t.creator.slotDuration(duration)}</p>
                   </div>
                   {isSelected && (
                     <svg className="w-5 h-5 flex-shrink-0" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
@@ -975,7 +975,7 @@ export function BookCallModal({
               style={{
                 background: "rgba(255,255,255,0.05)",
                 border: "1px solid rgba(255,255,255,0.10)",
-                color: "#8E8E93",
+                color: "var(--pnp-text-secondary, #8E8E93)",
               }}
             >
               {loadingMore ? (
@@ -995,11 +995,11 @@ export function BookCallModal({
               className="rounded-xl px-4 py-3 flex items-start gap-2.5"
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
             >
-              <svg className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <svg className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 9v7.5" />
               </svg>
               <div className="flex-1 min-w-0">
-                <p className="text-xs" style={{ color: "#8E8E93" }}>
+                <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {t.creator.noneWorkQuestion}{" "}
                   <a
                     href={creator.id ? `/profile/${creator.id}` : "/live"}
@@ -1064,17 +1064,17 @@ export function BookCallModal({
         className="rounded-2xl p-4 space-y-2.5"
         style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
       >
-        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#8E8E93" }}>{t.creator.orderSummaryTitle}</p>
+        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.orderSummaryTitle}</p>
         <div className="flex justify-between text-sm">
-          <span style={{ color: "#8E8E93" }}>{t.creator.orderCreatorLabel}</span>
+          <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.orderCreatorLabel}</span>
           <span className="font-semibold" style={{ color: "#EBEBF5" }}>@{creator.username}</span>
         </div>
         <div className="flex justify-between text-sm">
-          <span style={{ color: "#8E8E93" }}>{t.creator.orderDurationLabel}</span>
+          <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.orderDurationLabel}</span>
           <span className="font-semibold" style={{ color: "#EBEBF5" }}>{t.creator.slotDuration(duration)}</span>
         </div>
         <div className="flex justify-between text-sm">
-          <span style={{ color: "#8E8E93" }}>{t.creator.orderTimeSlotLabel}</span>
+          <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.orderTimeSlotLabel}</span>
           <span className="font-semibold" style={{ color: "#EBEBF5" }}>
             {isOnline && !selectedSlot
               ? t.creator.orderSlotSoon
@@ -1094,7 +1094,7 @@ export function BookCallModal({
 
       {/* Payment provider toggle */}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wider mb-2.5" style={{ color: "#8E8E93" }}>{t.creator.paymentMethodLabel}</p>
+        <p className="text-xs font-semibold uppercase tracking-wider mb-2.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.paymentMethodLabel}</p>
         <div className="flex gap-2">
           {(["epayco", "dash"] as Provider[]).map((p) => {
             const label = p === "epayco" ? t.creator.payMethodCard : "Dash";
@@ -1111,7 +1111,7 @@ export function BookCallModal({
                 style={
                   provider === p
                     ? { background: "rgba(212,0,122,0.16)", border: "1.5px solid #D4007A", color: "#D4007A" }
-                    : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "#8E8E93" }
+                    : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "var(--pnp-text-secondary, #8E8E93)" }
                 }
               >
                 {label}
@@ -1126,7 +1126,7 @@ export function BookCallModal({
         <label
           htmlFor="checkout-email"
           className="block text-xs font-semibold uppercase tracking-wider mb-1.5"
-          style={{ color: "#8E8E93" }}
+          style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
         >
           {t.creator.emailForReceiptLabel}
         </label>
@@ -1159,7 +1159,7 @@ export function BookCallModal({
           <p className="text-sm font-semibold" style={{ color: "#FF9F0A" }}>
             Still waiting?
           </p>
-          <p className="text-xs" style={{ color: "#8E8E93" }}>
+          <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             Refresh this page after paying to check status. If you already paid, your booking will be confirmed automatically.
           </p>
           <div className="flex gap-2">
@@ -1167,7 +1167,7 @@ export function BookCallModal({
               type="button"
               onClick={onClose}
               className="flex-1 min-h-[36px] rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
-              style={{ background: "rgba(255,255,255,0.08)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.10)" }}
+              style={{ background: "rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary, #8E8E93)", border: "1px solid rgba(255,255,255,0.10)" }}
             >
               Close
             </button>
@@ -1193,7 +1193,7 @@ export function BookCallModal({
         <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
           <div className="flex items-center gap-2">
             <Spinner size={16} />
-            <span className="text-sm" style={{ color: "#8E8E93" }}>{t.creator.waitingForPayment}</span>
+            <span className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.waitingForPayment}</span>
           </div>
           <button
             type="button"
@@ -1304,7 +1304,7 @@ export function BookCallModal({
 
           <div>
             <h3 className="text-xl font-bold" style={{ color: "#EBEBF5" }}>{t.creator.bookingConfirmedTitle}</h3>
-            <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
+            <p className="text-sm mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {startTimeForJoin
                 ? (() => { const { date, time } = formatSlotDate(startTimeForJoin); return t.creator.callScheduledFor(date, time); })()
                 : isOnline
@@ -1317,16 +1317,16 @@ export function BookCallModal({
             className="w-full rounded-2xl p-4 text-left space-y-2"
             style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
           >
-            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#8E8E93" }}>{t.creator.callDetailsTitle}</p>
+            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.callDetailsTitle}</p>
             <p className="text-sm" style={{ color: "#EBEBF5" }}>
-              <span style={{ color: "#8E8E93" }}>{t.creator.callDetailCreator}</span>@{creator.username}
+              <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.callDetailCreator}</span>@{creator.username}
             </p>
             <p className="text-sm" style={{ color: "#EBEBF5" }}>
-              <span style={{ color: "#8E8E93" }}>{t.creator.callDetailDuration}</span>{t.creator.slotDuration(duration)}
+              <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.callDetailDuration}</span>{t.creator.slotDuration(duration)}
             </p>
             {startTimeForJoin && (
               <p className="text-sm" style={{ color: "#EBEBF5" }}>
-                <span style={{ color: "#8E8E93" }}>Starts: </span>
+                <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Starts: </span>
                 {(() => { const { date, time } = formatSlotDate(startTimeForJoin); return `${date} · ${time}`; })()}
               </p>
             )}
@@ -1363,7 +1363,7 @@ export function BookCallModal({
           ) : startTimeForJoin && !isWithinJoinWindow ? (
             <div
               className="w-full rounded-xl px-4 py-3 text-sm text-center"
-              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#8E8E93" }}
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary, #8E8E93)" }}
             >
               Your call with <span style={{ color: "#EBEBF5" }}>@{creator.username}</span> is scheduled for{" "}
               <span style={{ color: "#EBEBF5" }}>
@@ -1376,7 +1376,7 @@ export function BookCallModal({
             type="button"
             onClick={onClose}
             className="w-full min-h-[44px] rounded-2xl text-sm font-semibold transition-opacity hover:opacity-80 active:scale-[0.98]"
-            style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.10)" }}
+            style={{ background: "rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary, #8E8E93)", border: "1px solid rgba(255,255,255,0.10)" }}
           >
             {t.creator.closeBtn}
           </button>
@@ -1455,7 +1455,7 @@ export function BookCallModal({
         ref={modalRef}
         className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl overflow-hidden flex flex-col"
         style={{
-          background: "#1C1C1E",
+          background: "var(--pnp-surface, #1C1C1E)",
           border: "1px solid rgba(255,255,255,0.08)",
           maxHeight: "90dvh",
         }}
@@ -1521,7 +1521,7 @@ export function BookCallModal({
                 {stepTitle[step]}
               </p>
               {creator.username && (
-                <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
+                <p className="text-xs truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   @{creator.username}
                   {isOnline && (
                     <span className="ml-1.5" style={{ color: "#34C759" }}>● {t.creator.onlineIndicator}</span>
@@ -1538,7 +1538,7 @@ export function BookCallModal({
             disabled={isProcessing}
             aria-label={t.creator.ariaCloseBookingModal}
             className="w-9 h-9 flex items-center justify-center rounded-xl transition-opacity hover:opacity-80 active:scale-95 focus-visible:outline-none focus-visible:ring-2 disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{ background: "rgba(255,255,255,0.08)", color: "#8E8E93" }}
+            style={{ background: "rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

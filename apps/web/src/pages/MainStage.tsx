@@ -473,7 +473,7 @@ export default function MainStage() {
     return (
       <div
         className="fixed inset-0 flex flex-col"
-        style={{ background: "#0A0A0F" }}
+        style={{ background: "var(--pnp-background, #0A0A0F)" }}
         role="status"
         aria-label="Loading Main Stage"
       >
@@ -509,7 +509,7 @@ export default function MainStage() {
     return (
       <div
         className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center"
-        style={{ background: "#0A0A0F" }}
+        style={{ background: "var(--pnp-background, #0A0A0F)" }}
       >
         <div
           className="w-16 h-16 rounded-2xl flex items-center justify-center"
@@ -549,7 +549,7 @@ export default function MainStage() {
     return (
       <div
         className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center"
-        style={{ background: "#0A0A0F" }}
+        style={{ background: "var(--pnp-background, #0A0A0F)" }}
       >
         <div
           className="w-16 h-16 rounded-2xl flex items-center justify-center"
@@ -595,7 +595,7 @@ export default function MainStage() {
     <div
       ref={stageRootRef}
       className="fixed inset-0 flex flex-col"
-      style={{ background: "#0A0A0F" }}
+      style={{ background: "var(--pnp-background, #0A0A0F)" }}
     >
       <header
         className="flex-shrink-0 flex items-center justify-between px-4 gap-3"
@@ -891,7 +891,7 @@ function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
         style={{
           width: "min(384px, 100vw)",
           maxHeight: "100dvh",
-          background: "#111117",
+          background: "var(--pnp-background, #111117)",
           borderLeft: "1px solid rgba(255,255,255,0.08)",
         }}
       >

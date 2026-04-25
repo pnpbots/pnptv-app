@@ -91,7 +91,7 @@ export default function EnrollmentsList() {
             style={
               filter === tab.value
                 ? { background: "rgba(212,0,122,0.15)", color: "#D4007A" }
-                : { background: "rgba(255,255,255,0.05)", color: "#8E8E93" }
+                : { background: "rgba(255,255,255,0.05)", color: "var(--pnp-text-secondary, #8E8E93)" }
             }
           >
             {tab.label}
@@ -125,7 +125,7 @@ export default function EnrollmentsList() {
         <div className="space-y-3">
           {enrollments.map((enrollment) => {
             const tierInfo = ENROLLMENT_TIER_COLORS[enrollment.tier] ?? {
-              color: "#8E8E93",
+              color: "var(--pnp-text-secondary, #8E8E93)",
               rgb: "142,142,147",
               emoji: "?",
             };
@@ -141,7 +141,7 @@ export default function EnrollmentsList() {
                 key={enrollment.id}
                 className="rounded-xl p-4 backdrop-blur"
                 style={{
-                  background: "#1C1C1E",
+                  background: "var(--pnp-surface, #1C1C1E)",
                   border: isPending
                     ? `1px solid rgba(${tierInfo.rgb},0.25)`
                     : "1px solid rgba(255,255,255,0.07)",
@@ -176,7 +176,7 @@ export default function EnrollmentsList() {
                         {displayName}
                       </span>
                       {enrollment.username && (
-                        <span className="text-xs flex-shrink-0" style={{ color: "#8E8E93" }}>
+                        <span className="text-xs flex-shrink-0" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                           @{enrollment.username}
                         </span>
                       )}
@@ -216,7 +216,7 @@ export default function EnrollmentsList() {
                     </div>
 
                     {/* Payment + submitted row */}
-                    <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>
+                    <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                       {enrollment.payment_method
                         ? enrollment.payment_method.toUpperCase()
                         : "No payment method"}
@@ -225,7 +225,7 @@ export default function EnrollmentsList() {
                           {" \u00b7 "}
                           <span
                             className="font-mono"
-                            style={{ color: "#8E8E93", wordBreak: "break-all" }}
+                            style={{ color: "var(--pnp-text-secondary, #8E8E93)", wordBreak: "break-all" }}
                           >
                             {enrollment.payment_address.length > 24
                               ? `${enrollment.payment_address.slice(0, 12)}...${enrollment.payment_address.slice(-8)}`
@@ -282,7 +282,7 @@ export default function EnrollmentsList() {
                     {!isPending && (
                       <div className="mb-2">
                         {enrollment.reviewed_at && (
-                          <p className="text-xs" style={{ color: "#8E8E93" }}>
+                          <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                             Reviewed:{" "}
                             {new Date(enrollment.reviewed_at).toLocaleDateString()}
                           </p>

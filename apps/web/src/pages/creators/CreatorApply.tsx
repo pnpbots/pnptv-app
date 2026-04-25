@@ -89,7 +89,7 @@ export default function CreatorApply() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-white mb-1">You're an active creator!</h1>
-              <p className="text-sm" style={{ color: "#8E8E93" }}>
+              <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 Your creator account is live. Head to your dashboard to manage content, earnings, and more.
               </p>
             </div>
@@ -111,7 +111,7 @@ export default function CreatorApply() {
                 🎬
               </div>
               <h1 className="text-2xl font-bold text-white mb-2">Join the Creator Program</h1>
-              <p className="text-sm leading-relaxed" style={{ color: "#8E8E93" }}>
+              <p className="text-sm leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 Share exclusive content, build your subscriber base, and earn directly from your fans on PNPtv!
               </p>
             </div>
@@ -137,7 +137,7 @@ export default function CreatorApply() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                       </svg>
                     </span>
-                    <span style={{ color: "#8E8E93" }}>{perk}</span>
+                    <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{perk}</span>
                   </li>
                 ))}
               </ul>
@@ -162,7 +162,7 @@ export default function CreatorApply() {
                       <span className="text-sm font-semibold text-white">❄ {t.iceCreatorLabel}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>{t.iceStartingTier}</span>
                     </div>
-                    <p className="text-xs mt-1 mb-3" style={{ color: "#8E8E93" }}>{t.iceDesc}</p>
+                    <p className="text-xs mt-1 mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.iceDesc}</p>
                     <button
                       onClick={() => { setActivateError(null); setActivateTerms(false); setShowActivateModal(true); }}
                       className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
@@ -174,7 +174,7 @@ export default function CreatorApply() {
 
                   <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
                     <p className="text-sm font-semibold text-white">{t.fullTimeCreatorLabel}</p>
-                    <p className="text-xs mt-1 mb-3" style={{ color: "#8E8E93" }}>{t.fullTimeDesc}</p>
+                    <p className="text-xs mt-1 mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.fullTimeDesc}</p>
                     <button
                       onClick={() => navigate("/apply")}
                       className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
@@ -240,7 +240,7 @@ export default function CreatorApply() {
                     </svg>
                     <div>
                       <p className="text-sm font-semibold text-white mb-1">Share content to unlock the Creator Program</p>
-                      <p className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                         Before you can apply, you need to be an active community member. Post photos and videos,
                         engage with others, and build your following. Meet all 4 criteria below to unlock your application.
                       </p>
@@ -253,7 +253,7 @@ export default function CreatorApply() {
                       <p className="text-lg font-bold text-white">{t.becomeCreatorTitle}</p>
                       <span className="text-sm font-bold" style={{ color: totalPct >= 75 ? "#5ED1C4" : "#E69138" }}>{totalPct}%</span>
                     </div>
-                    <p className="text-sm mb-1" style={{ color: "#8E8E93" }}>
+                    <p className="text-sm mb-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                       {metCount === 0 ? t.noCriteriaMet : metCount < criteria.length ? t.someCriteriaMet(metCount, criteria.length) : ""}
                     </p>
                     {closest && !closest.met && (
@@ -265,7 +265,7 @@ export default function CreatorApply() {
                     <CriterionBar label={t.criteriaTotalLikes} {...eligibility.criteria.totalLikes} />
                     <CriterionBar label={t.criteriaFollowers} {...eligibility.criteria.followers} />
                     <CriterionBar label={t.criteriaWeekly} {...eligibility.criteria.weeklyConsistency} />
-                    <p className="text-xs mt-4 text-center" style={{ color: "#8E8E93" }}>{t.progressFootnote}</p>
+                    <p className="text-xs mt-4 text-center" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.progressFootnote}</p>
                   </div>
 
                   {/* CTA to start sharing */}
@@ -289,7 +289,7 @@ export default function CreatorApply() {
             {!isAuthenticated && (
               <div className="glass-card-sm p-6 text-center space-y-3">
                 <p className="text-sm font-semibold text-white">Sign in to check your eligibility</p>
-                <p className="text-xs" style={{ color: "#8E8E93" }}>
+                <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   Connect your account to see your progress toward becoming a creator.
                 </p>
                 <button
@@ -312,14 +312,14 @@ export default function CreatorApply() {
           >
             <div
               className="w-full max-w-sm rounded-2xl p-6 space-y-4"
-              style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}
+              style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.1)" }}
               onClick={(e) => e.stopPropagation()}
             >
               <h2 className="text-lg font-bold text-white">{t.activateTitle}</h2>
 
               <div className="rounded-xl px-4 py-3" style={{ background: "rgba(94,209,196,0.07)", border: "1px solid rgba(94,209,196,0.2)" }}>
                 <p className="text-sm font-semibold text-white mb-1">❄ {t.activateIceTierLabel}</p>
-                <p className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>{t.activateIceTierDesc}</p>
+                <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.activateIceTierDesc}</p>
               </div>
 
               <label className="flex items-start gap-3 cursor-pointer">
@@ -329,7 +329,7 @@ export default function CreatorApply() {
                   onChange={(e) => { setActivateTerms(e.target.checked); setActivateError(null); }}
                   className="mt-0.5 w-4 h-4 accent-[#D4007A]"
                 />
-                <span className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+                <span className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {t.activateTermsLabel}{" "}
                   <a
                     href="/creator-terms"
@@ -350,7 +350,7 @@ export default function CreatorApply() {
                 <button
                   onClick={() => setShowActivateModal(false)}
                   className="flex-1 py-2.5 rounded-xl text-sm font-medium"
-                  style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}
+                  style={{ background: "rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary, #8E8E93)" }}
                   disabled={activating}
                 >
                   {t.cancelBtn}

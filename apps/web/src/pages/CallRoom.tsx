@@ -51,7 +51,7 @@ function CallRoomSkeleton() {
         className="w-12 h-12 rounded-full animate-pulse"
         style={{ background: "rgba(255,255,255,0.08)" }}
       />
-      <p className="text-sm" style={{ color: "#8E8E93" }}>
+      <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
         Connecting to your call…
       </p>
     </div>
@@ -122,14 +122,14 @@ function Countdown({ targetUtc, creatorUsername }: { targetUtc: string; creatorU
         <p className="text-base font-semibold" style={{ color: "#EBEBF5" }}>
           Call with @{creatorUsername}
         </p>
-        <p className="text-sm" style={{ color: "#8E8E93" }}>
+        <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           Scheduled for {formatted}
         </p>
       </div>
 
       {remaining > 0 ? (
         <div className="space-y-1">
-          <p className="text-xs uppercase tracking-widest font-semibold" style={{ color: "#8E8E93" }}>
+          <p className="text-xs uppercase tracking-widest font-semibold" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             Starts in
           </p>
           <p className="text-4xl font-bold tabular-nums" style={{ color: "#EBEBF5" }}>
@@ -148,7 +148,7 @@ function Countdown({ targetUtc, creatorUsername }: { targetUtc: string; creatorU
         className="mt-2 min-h-[44px] px-6 rounded-2xl text-sm font-semibold transition-opacity hover:opacity-80"
         style={{
           background: "rgba(255,255,255,0.08)",
-          color: "#8E8E93",
+          color: "var(--pnp-text-secondary, #8E8E93)",
           border: "1px solid rgba(255,255,255,0.10)",
         }}
       >
@@ -276,7 +276,7 @@ export default function CallRoom() {
           className="min-h-[44px] px-6 rounded-2xl text-sm font-semibold transition-opacity hover:opacity-80"
           style={{
             background: "rgba(255,255,255,0.08)",
-            color: "#8E8E93",
+            color: "var(--pnp-text-secondary, #8E8E93)",
             border: "1px solid rgba(255,255,255,0.10)",
           }}
         >

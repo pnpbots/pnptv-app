@@ -197,7 +197,7 @@ function UserCard({
       </div>
       <div className="px-1.5 py-1.5 text-left">
         <p className="text-[10px] font-bold text-white truncate leading-tight">{displayName}</p>
-        <p className="text-[8px] truncate leading-tight mt-0.5" style={{ color: "#8E8E93" }}>
+        <p className="text-[8px] truncate leading-tight mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           {member.distance_km != null ? `${distLabel} · ${tier.short}` : "Active recently"}
         </p>
       </div>

@@ -74,7 +74,7 @@ export default function FollowListModal({
       ) : users.length === 0 ? (
         <div className="py-8 text-center">
           <p className="text-white font-medium mb-1">{mode === "followers" ? p.noFollowers : p.noFollowing}</p>
-          <p className="text-sm" style={{ color: "#8E8E93" }}>
+          <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {mode === "followers" ? p.noFollowersDesc : p.noFollowingDesc}
           </p>
         </div>
@@ -101,7 +101,7 @@ export default function FollowListModal({
                   {u.firstName}{u.lastName ? ` ${u.lastName}` : ""}
                 </p>
                 {u.username && (
-                  <p className="text-xs truncate" style={{ color: "#8E8E93" }}>@{u.username}</p>
+                  <p className="text-xs truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>@{u.username}</p>
                 )}
               </div>
             </button>

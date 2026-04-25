@@ -222,7 +222,7 @@ export function CreatorAvailabilitySettings() {
   };
 
   const inputStyle: React.CSSProperties = {
-    background: "#2C2C2E",
+    background: "var(--pnp-surface-hover, #2C2C2E)",
     border: "1px solid rgba(255,255,255,0.1)",
     color: "#EBEBF5",
     borderRadius: 8,
@@ -235,7 +235,7 @@ export function CreatorAvailabilitySettings() {
     return (
       <div className="space-y-3">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-12 rounded-xl animate-pulse" style={{ background: "#2C2C2E" }} />
+          <div key={i} className="h-12 rounded-xl animate-pulse" style={{ background: "var(--pnp-surface-hover, #2C2C2E)" }} />
         ))}
       </div>
     );
@@ -246,7 +246,7 @@ export function CreatorAvailabilitySettings() {
       {/* Online/Offline toggle */}
       <div
         className="flex items-center justify-between p-4 rounded-xl"
-        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }}
       >
         <div className="flex items-center gap-3">
           <div
@@ -275,9 +275,9 @@ export function CreatorAvailabilitySettings() {
       {/* Next Show Date */}
       <div
         className="p-4 rounded-xl space-y-3"
-        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }}
       >
-        <label className="block text-xs font-semibold" style={{ color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <label className="block text-xs font-semibold" style={{ color: "var(--pnp-text-secondary, #8E8E93)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
           Next Show Date
         </label>
         {nextShowDate && (
@@ -317,7 +317,7 @@ export function CreatorAvailabilitySettings() {
               onClick={handleClearNextShow}
               disabled={nextShowSaving}
               className="px-4 py-2 rounded-xl text-xs font-semibold transition-opacity disabled:opacity-50"
-              style={{ background: "rgba(255,255,255,0.08)", color: "#8E8E93" }}
+              style={{ background: "rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary, #8E8E93)" }}
             >
               Clear
             </button>
@@ -327,7 +327,7 @@ export function CreatorAvailabilitySettings() {
 
       {/* Timezone selector */}
       <div>
-        <label className="block text-xs font-semibold mb-1.5" style={{ color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
           Timezone
         </label>
         <select value={timezone} onChange={(e) => setTimezone(e.target.value)} style={{ ...inputStyle, width: "100%" }}>
@@ -339,7 +339,7 @@ export function CreatorAvailabilitySettings() {
 
       {/* Break time between calls */}
       <div>
-        <label className="block text-xs font-semibold mb-1.5" style={{ color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
           Break Between Calls
         </label>
         <select
@@ -360,7 +360,7 @@ export function CreatorAvailabilitySettings() {
 
       {/* Weekly schedule */}
       <div>
-        <label className="block text-xs font-semibold mb-3" style={{ color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <label className="block text-xs font-semibold mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
           Weekly Availability
         </label>
         <div className="space-y-2">

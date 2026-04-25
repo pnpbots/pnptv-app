@@ -144,7 +144,7 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
 
   return (
     <div className="space-y-3 mt-3 p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-      <p className="text-xs font-bold uppercase tracking-wider" style={{ color: "#8E8E93" }}>Edit Event</p>
+      <p className="text-xs font-bold uppercase tracking-wider" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Edit Event</p>
 
       {/* Cover image */}
       <div>
@@ -175,7 +175,7 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
           value={title}
           onChange={e => setTitle(e.target.value)}
           className="w-full rounded-lg px-3 py-2 text-white outline-none"
-          style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
+          style={{ background: "var(--pnp-surface-hover, #2C2C2E)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
         />
       </div>
       <div>
@@ -185,7 +185,7 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
           onChange={e => setDescription(e.target.value)}
           rows={3}
           className="w-full rounded-lg px-3 py-2 text-white outline-none resize-none"
-          style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
+          style={{ background: "var(--pnp-surface-hover, #2C2C2E)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
         />
       </div>
 
@@ -199,7 +199,7 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
             min={toLocalDatetimeValue(new Date(Date.now() + 15 * 60 * 1000))}
             onChange={(e) => setScheduledAt(e.target.value)}
             className="w-full rounded-lg px-3 py-2 text-white outline-none"
-            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark", fontSize: "16px" }}
+            style={{ background: "var(--pnp-surface-hover, #2C2C2E)", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark", fontSize: "16px" }}
           />
         </div>
         <div>
@@ -208,7 +208,7 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
             value={duration}
             onChange={(e) => setDuration(parseInt(e.target.value, 10))}
             className="w-full rounded-lg px-3 py-2 text-white outline-none"
-            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark", fontSize: "16px" }}
+            style={{ background: "var(--pnp-surface-hover, #2C2C2E)", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark", fontSize: "16px" }}
           >
             {EDIT_DURATIONS.map((d) => (
               <option key={d} value={d}>{formatDurationLabel(d)}</option>
@@ -225,7 +225,7 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
             value={hangoutGroupId}
             onChange={e => setHangoutGroupId(e.target.value)}
             className="w-full rounded-lg px-3 py-2 text-white outline-none"
-            style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark", fontSize: "16px" }}
+            style={{ background: "var(--pnp-surface-hover, #2C2C2E)", border: "1px solid rgba(255,255,255,0.1)", colorScheme: "dark", fontSize: "16px" }}
           >
             <option value="">No specific group</option>
             {groups.map(g => (
@@ -248,7 +248,7 @@ function EditForm({ event, onSaved, onCancel }: EditFormProps) {
         <button
           onClick={onCancel}
           className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all"
-          style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}
+          style={{ background: "rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary, #8E8E93)" }}
         >
           Cancel
         </button>
@@ -336,7 +336,7 @@ export function EventDetailModal({ event: initialEvent, onClose, onRsvp, onUpdat
       {/* Sheet */}
       <div
         className="relative w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden flex flex-col"
-        style={{ background: "#1C1C1E", maxHeight: "90dvh" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", maxHeight: "90dvh" }}
       >
         {/* Cover image */}
         <div className="relative flex-shrink-0" style={{ height: 200 }}>
@@ -401,7 +401,7 @@ export function EventDetailModal({ event: initialEvent, onClose, onRsvp, onUpdat
                 {(event.creatorName || "?")[0].toUpperCase()}
               </div>
             )}
-            <span className="text-sm font-medium" style={{ color: "#8E8E93" }}>by {event.creatorName || "Anonymous"}</span>
+            <span className="text-sm font-medium" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>by {event.creatorName || "Anonymous"}</span>
             {isCreator && (
               <span className="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide ml-1" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
                 You
@@ -411,20 +411,20 @@ export function EventDetailModal({ event: initialEvent, onClose, onRsvp, onUpdat
 
           {/* Date / duration */}
           <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2 text-sm" style={{ color: "#8E8E93" }}>
+            <div className="flex items-center gap-2 text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 9v7.5" />
               </svg>
               <span>{formatFullDate(event.scheduledAt)}</span>
             </div>
-            <div className="flex items-center gap-2 text-sm" style={{ color: "#8E8E93" }}>
+            <div className="flex items-center gap-2 text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <span>{formatDurationLabel(event.durationMinutes)}</span>
             </div>
             {event.maxAttendees && (
-              <div className="flex items-center gap-2 text-sm" style={{ color: "#8E8E93" }}>
+              <div className="flex items-center gap-2 text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
                 </svg>
@@ -444,7 +444,7 @@ export function EventDetailModal({ event: initialEvent, onClose, onRsvp, onUpdat
           {event.tags && event.tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {event.tags.map(tag => (
-                <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}>
+                <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   #{tag}
                 </span>
               ))}
@@ -505,7 +505,7 @@ export function EventDetailModal({ event: initialEvent, onClose, onRsvp, onUpdat
                 <button
                   onClick={() => setShowEdit(true)}
                   className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
-                  style={{ background: "rgba(255,255,255,0.05)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.08)" }}
+                  style={{ background: "rgba(255,255,255,0.05)", color: "var(--pnp-text-secondary, #8E8E93)", border: "1px solid rgba(255,255,255,0.08)" }}
                 >
                   Edit Event
                 </button>

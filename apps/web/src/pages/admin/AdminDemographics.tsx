@@ -40,7 +40,7 @@ function BarChart({ data, colorFn }: {
         const color = colorFn ? colorFn(d.label, i) : `hsl(${(i * 47) % 360}, 70%, 55%)`;
         return (
           <div key={d.label} className="flex items-center gap-2 text-sm">
-            <div className="w-28 shrink-0 text-xs truncate" style={{ color: "#8E8E93" }} title={LANG_LABELS[d.label] || d.label}>
+            <div className="w-28 shrink-0 text-xs truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }} title={LANG_LABELS[d.label] || d.label}>
               {LANG_LABELS[d.label] || d.label}
             </div>
             <div className="flex-1 h-5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
@@ -49,7 +49,7 @@ function BarChart({ data, colorFn }: {
                 style={{ width: `${barPct}%`, background: color }}
               />
             </div>
-            <div className="w-16 text-right text-xs" style={{ color: "#8E8E93" }}>
+            <div className="w-16 text-right text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {d.count.toLocaleString()} <span style={{ color: "#636366" }}>({pctVal}%)</span>
             </div>
           </div>
@@ -94,8 +94,8 @@ function StatPill({ label, value, sub }: { label: string; value: string | number
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl p-5" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}>
-      <h2 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "#8E8E93" }}>{title}</h2>
+    <div className="rounded-xl p-5" style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <h2 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{title}</h2>
       {children}
     </div>
   );
@@ -121,7 +121,7 @@ function FeatureRow({ label, value, icon, total }: { label: string; value: numbe
 }
 
 function SkeletonBlock({ h = "h-48" }: { h?: string }) {
-  return <div className={`rounded-xl ${h} animate-pulse`} style={{ background: "#1C1C1E" }} />;
+  return <div className={`rounded-xl ${h} animate-pulse`} style={{ background: "var(--pnp-surface, #1C1C1E)" }} />;
 }
 
 export default function AdminDemographics() {
@@ -152,12 +152,12 @@ export default function AdminDemographics() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.demographics.title}</h1>
-          <p className="text-sm mt-1" style={{ color: "#8E8E93" }}>
+          <p className="text-sm mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {t.demographics.subtitle}
           </p>
         </div>
         {!loading && (
-          <button onClick={load} className="text-xs border rounded-lg px-3 py-1.5 transition-colors hover:text-white" style={{ color: "#8E8E93", borderColor: "rgba(255,255,255,0.1)" }}>
+          <button onClick={load} className="text-xs border rounded-lg px-3 py-1.5 transition-colors hover:text-white" style={{ color: "var(--pnp-text-secondary, #8E8E93)", borderColor: "rgba(255,255,255,0.1)" }}>
             {t.shared.refresh}
           </button>
         )}
@@ -172,7 +172,7 @@ export default function AdminDemographics() {
       {/* Strategy Insights */}
       {loading ? <SkeletonBlock h="h-32" /> : data?.insights && (
         <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "#8E8E93" }}>{t.demographics.strategyInsights}</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.demographics.strategyInsights}</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {data.insights.map((ins, i) => {
               const style = INSIGHT_COLORS[ins.type] || INSIGHT_COLORS.opportunity;
@@ -182,7 +182,7 @@ export default function AdminDemographics() {
                     <span className="text-lg">{style.icon}</span>
                     <span className="text-sm font-bold text-white">{ins.title}</span>
                   </div>
-                  <p className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>{ins.body}</p>
+                  <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{ins.body}</p>
                 </div>
               );
             })}
@@ -219,7 +219,7 @@ export default function AdminDemographics() {
               {data.tiers.map((t) => (
                 <div key={t.label} className="flex items-center gap-1.5 text-xs">
                   <div className="w-2.5 h-2.5 rounded-full" style={{ background: TIER_COLORS[t.label] || "#636366" }} />
-                  <span style={{ color: "#8E8E93" }}>{t.label}</span>
+                  <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.label}</span>
                   <span className="font-semibold text-white">{pct(t.count, total)}%</span>
                 </div>
               ))}
@@ -242,7 +242,7 @@ export default function AdminDemographics() {
                 colorFn={(_, i) => `hsl(${(i * 41 + 160) % 360}, 60%, 55%)`}
               />
             ) : (
-              <p className="text-xs" style={{ color: "#8E8E93" }}>{t.demographics.noLocationData}</p>
+              <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.demographics.noLocationData}</p>
             )}
           </Section>
 
@@ -278,7 +278,7 @@ export default function AdminDemographics() {
               { label: t.demographics.ageVerified, count: data.activity.ageVerified },
             ].map((item) => (
               <div key={item.label} className="flex items-center gap-3 mb-2">
-                <div className="w-28 text-xs shrink-0" style={{ color: "#8E8E93" }}>{item.label}</div>
+                <div className="w-28 text-xs shrink-0" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{item.label}</div>
                 <div className="flex-1 h-4 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
                   <div
                     className="h-full rounded-full"
@@ -302,9 +302,9 @@ export default function AdminDemographics() {
           </div>
           <div className="mt-3 flex gap-4 text-sm">
             <span className="text-white font-bold">{data.activity.new30d.toLocaleString()}</span>
-            <span style={{ color: "#8E8E93" }}>{t.demographics.newUsersLast30}</span>
+            <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.demographics.newUsersLast30}</span>
             <span className="text-white font-bold">{data.activity.new7d.toLocaleString()}</span>
-            <span style={{ color: "#8E8E93" }}>{t.demographics.last7Days}</span>
+            <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.demographics.last7Days}</span>
           </div>
         </Section>
       )}
@@ -317,7 +317,7 @@ export default function AdminDemographics() {
               <div className="text-3xl font-bold" style={{ color: (data.retention.rate ?? 0) >= 30 ? "#30D158" : "#FF453A" }}>
                 {data.retention.rate !== null ? `${data.retention.rate}%` : "—"}
               </div>
-              <div className="text-xs mt-1" style={{ color: "#8E8E93" }}>{t.demographics.retentionRate}</div>
+              <div className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.demographics.retentionRate}</div>
             </div>
             <div className="flex-1 h-3 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
               <div
@@ -328,7 +328,7 @@ export default function AdminDemographics() {
                 }}
               />
             </div>
-            <div className="text-xs text-right" style={{ color: "#8E8E93" }}>
+            <div className="text-xs text-right" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {data.retention.retained} / {data.retention.cohortSize} users
             </div>
           </div>

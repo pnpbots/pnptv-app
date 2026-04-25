@@ -61,7 +61,7 @@ function StrikeBadge({ count, suspended }: { count: number; suspended: boolean }
   return (
     <span
       className="text-xs px-2 py-0.5 rounded-full"
-      style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93" }}
+      style={{ background: "rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary, #8E8E93)" }}
     >
       0 strikes
     </span>
@@ -284,7 +284,7 @@ function IssueStrikeForm({
           onClick={onCancel}
           disabled={form.submitting}
           className="px-3 py-1.5 rounded-lg text-xs transition-colors disabled:opacity-40"
-          style={{ background: "rgba(255,255,255,0.05)", color: "#8E8E93" }}
+          style={{ background: "rgba(255,255,255,0.05)", color: "var(--pnp-text-secondary, #8E8E93)" }}
         >
           Cancel
         </button>
@@ -391,7 +391,7 @@ export default function ActiveCreatorsTab() {
                     {displayName}
                   </button>
                   {creator.username && (
-                    <span className="text-xs flex-shrink-0" style={{ color: "#8E8E93" }}>
+                    <span className="text-xs flex-shrink-0" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                       @{creator.username}
                     </span>
                   )}
@@ -410,7 +410,7 @@ export default function ActiveCreatorsTab() {
                         ? { background: "rgba(234,179,8,0.15)", color: "#EAB308", border: "1px solid rgba(234,179,8,0.3)" }
                         : creator.creator_status === "eligible"
                           ? { background: "rgba(59,130,246,0.15)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.3)" }
-                          : { background: "rgba(255,255,255,0.06)", color: "#8E8E93" }
+                          : { background: "rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary, #8E8E93)" }
                     }
                   >
                     {creator.creator_status === "pending_review" ? "Pending Review"
@@ -420,7 +420,7 @@ export default function ActiveCreatorsTab() {
                 )}
 
                 {/* Meta row */}
-                <p className="text-xs mb-2" style={{ color: "#8E8E93" }}>
+                <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {creator.creator_type
                     ? (TYPE_LABELS[creator.creator_type] || creator.creator_type)
                     : "No tier"}
@@ -466,7 +466,7 @@ export default function ActiveCreatorsTab() {
                       className="text-xs px-3 py-1 rounded-lg transition-colors"
                       style={{
                         background: "rgba(255,255,255,0.05)",
-                        color: "#8E8E93",
+                        color: "var(--pnp-text-secondary, #8E8E93)",
                         border: "1px solid rgba(255,255,255,0.08)",
                       }}
                     >

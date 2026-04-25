@@ -184,7 +184,7 @@ export function ForwardTargetPicker({
     >
       <div
         className="w-full max-w-lg rounded-t-2xl p-5 pb-8 space-y-3"
-        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-center mb-1" aria-hidden="true">
@@ -194,7 +194,7 @@ export function ForwardTargetPicker({
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-base font-bold text-white">{title}</h2>
-            {subtitle && <p className="text-xs" style={{ color: "#8E8E93" }}>{subtitle}</p>}
+            {subtitle && <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{subtitle}</p>}
           </div>
           <button
             type="button"
@@ -269,7 +269,7 @@ export function ForwardTargetPicker({
             type="button"
             onClick={() => setTab("recents")}
             className="flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors"
-            style={tab === "recents" ? { background: "#D4007A", color: "#fff" } : { background: "transparent", color: "#8E8E93" }}
+            style={tab === "recents" ? { background: "#D4007A", color: "#fff" } : { background: "transparent", color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
             Recent
           </button>
@@ -277,7 +277,7 @@ export function ForwardTargetPicker({
             type="button"
             onClick={() => setTab("dms")}
             className="flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors"
-            style={tab === "dms" ? { background: "#D4007A", color: "#fff" } : { background: "transparent", color: "#8E8E93" }}
+            style={tab === "dms" ? { background: "#D4007A", color: "#fff" } : { background: "transparent", color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
             DMs
           </button>
@@ -285,7 +285,7 @@ export function ForwardTargetPicker({
             type="button"
             onClick={() => setTab("hangouts")}
             className="flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors"
-            style={tab === "hangouts" ? { background: "#D4007A", color: "#fff" } : { background: "transparent", color: "#8E8E93" }}
+            style={tab === "hangouts" ? { background: "#D4007A", color: "#fff" } : { background: "transparent", color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
             Hangouts
           </button>
@@ -304,17 +304,17 @@ export function ForwardTargetPicker({
         <div className="max-h-[40vh] overflow-y-auto space-y-1" role="listbox" aria-multiselectable="true">
           {loading ? (
             <div className="flex items-center gap-2 py-4 px-1">
-              <svg className="w-4 h-4 animate-spin" style={{ color: "#8E8E93" }} fill="none" viewBox="0 0 24 24" aria-hidden="true">
+              <svg className="w-4 h-4 animate-spin" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }} fill="none" viewBox="0 0 24 24" aria-hidden="true">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
-              <span className="text-xs" style={{ color: "#8E8E93" }}>Loading…</span>
+              <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Loading…</span>
             </div>
           ) : error ? (
             <p className="text-xs py-3" style={{ color: "#FF453A" }}>{error}</p>
           ) : tab === "recents" ? (
             recents.length === 0 ? (
-              <p className="text-xs py-4 text-center" style={{ color: "#8E8E93" }}>No recent conversations.</p>
+              <p className="text-xs py-4 text-center" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>No recent conversations.</p>
             ) : (
               recents.map(({ target, label, avatar }) => (
                 <TargetRow
@@ -331,7 +331,7 @@ export function ForwardTargetPicker({
             )
           ) : tab === "dms" ? (
             filteredDms.length === 0 ? (
-              <p className="text-xs py-4 text-center" style={{ color: "#8E8E93" }}>No DM contacts.</p>
+              <p className="text-xs py-4 text-center" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>No DM contacts.</p>
             ) : (
               filteredDms.map((d) => {
                 const target: ForwardTarget = { type: "dm", userId: d.partnerId };
@@ -350,7 +350,7 @@ export function ForwardTargetPicker({
               })
             )
           ) : filteredHangouts.length === 0 ? (
-            <p className="text-xs py-4 text-center" style={{ color: "#8E8E93" }}>No hangouts.</p>
+            <p className="text-xs py-4 text-center" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>No hangouts.</p>
           ) : (
             filteredHangouts.map((g) => {
               const target: ForwardTarget = { type: "hangout", groupId: g.id };
@@ -449,7 +449,7 @@ function TargetRow({ label, subtitle, avatar, icon, checked, disabled, onToggle 
           )}
         </div>
         {subtitle && (
-          <p className="text-xs truncate" style={{ color: "#8E8E93" }}>
+          <p className="text-xs truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {subtitle}
           </p>
         )}

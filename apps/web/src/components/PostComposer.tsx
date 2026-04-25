@@ -976,7 +976,7 @@ export function PostComposer({
               >
                 <option value="">No channel</option>
                 {channels.map((ch) => (
-                  <option key={ch.id} value={ch.id} style={{ background: "#1C1C1E", color: "#fff" }}>
+                  <option key={ch.id} value={ch.id} style={{ background: "var(--pnp-surface, #1C1C1E)", color: "#fff" }}>
                     {ch.name}
                   </option>
                 ))}

@@ -17,7 +17,7 @@ type CheckoutState = "loading" | "ready" | "pending" | "success" | "error";
 
 const BG_STYLES: React.CSSProperties = {
   minHeight: "100vh",
-  background: "#121212",
+  background: "var(--pnp-background, #121212)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -263,12 +263,12 @@ function EPaycoWidget({ config, tokens, usd, purchaseId, onStartPolling }: EPayc
         <div style={{ fontSize: 26, fontWeight: 700, ...GRADIENT_TEXT }}>
           ${usd.toFixed(2)} USD
         </div>
-        <div style={{ fontSize: 11, color: "#8E8E93", marginTop: 6 }}>
+        <div style={{ fontSize: 11, color: "var(--pnp-text-secondary, #8E8E93)", marginTop: 6 }}>
           Paid via credit / debit card — powered by ePayco
         </div>
       </div>
 
-      <p style={{ textAlign: "center", fontSize: 13, color: "#8E8E93", marginBottom: 16 }}>
+      <p style={{ textAlign: "center", fontSize: 13, color: "var(--pnp-text-secondary, #8E8E93)", marginBottom: 16 }}>
         Tap the button below to open the secure ePayco checkout. Your card
         details are processed entirely by ePayco and never stored on our
         servers.
@@ -478,7 +478,7 @@ export default function TokenCheckout() {
         {state === "loading" && (
           <div style={{ textAlign: "center", padding: "32px 0" }}>
             <div style={SPINNER_STYLE} />
-            <p style={{ color: "#8E8E93", fontSize: 14 }}>
+            <p style={{ color: "var(--pnp-text-secondary, #8E8E93)", fontSize: 14 }}>
               Loading payment details…
             </p>
           </div>
@@ -492,12 +492,12 @@ export default function TokenCheckout() {
               {pollElapsed >= POLL_TIMEOUT_MS ? "Payment Submitted" : "Verifying Payment…"}
             </p>
             {pollElapsed < POLL_TIMEOUT_MS ? (
-              <p style={{ fontSize: 13, color: "#8E8E93", marginBottom: 20 }}>
+              <p style={{ fontSize: 13, color: "var(--pnp-text-secondary, #8E8E93)", marginBottom: 20 }}>
                 Your payment was submitted. We&rsquo;re waiting for confirmation from ePayco.
                 This usually takes a few seconds.
               </p>
             ) : (
-              <p style={{ fontSize: 13, color: "#8E8E93", marginBottom: 20 }}>
+              <p style={{ fontSize: 13, color: "var(--pnp-text-secondary, #8E8E93)", marginBottom: 20 }}>
                 Payment confirmation is taking longer than expected. Your tokens will be
                 credited automatically once the payment clears. You can close this window —
                 check your wallet in a minute.
@@ -552,7 +552,7 @@ export default function TokenCheckout() {
             <p style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
               Payment Confirmed!
             </p>
-            <p style={{ fontSize: 13, color: "#8E8E93", marginBottom: 24 }}>
+            <p style={{ fontSize: 13, color: "var(--pnp-text-secondary, #8E8E93)", marginBottom: 24 }}>
               Your tokens have been credited to your account. You can close this
               window and return to PNPtv!.
             </p>
@@ -595,7 +595,7 @@ export default function TokenCheckout() {
             <p style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
               Unable to Process
             </p>
-            <p style={{ fontSize: 13, color: "#8E8E93", marginBottom: 24 }}>
+            <p style={{ fontSize: 13, color: "var(--pnp-text-secondary, #8E8E93)", marginBottom: 24 }}>
               {error}
             </p>
             <button

@@ -715,7 +715,7 @@ export function ContentTab({ t }: ContentTabProps) {
       {/* ── Content Modal (create/edit) ── */}
       {contentModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }} onClick={() => { setContentModal(null); setContentSaveError(null); }}>
-          <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }} onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <p className="text-base font-semibold text-white">{contentModal.mode === "create" ? t.newContentTitle : t.editContentTitle}</p>
               <button onClick={() => setContentModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
@@ -799,7 +799,7 @@ export function ContentTab({ t }: ContentTabProps) {
       {/* ── Show Modal (create/edit) ── */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }} onClick={() => { setShowModal(null); setShowSaveError(null); }}>
-          <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }} onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <p className="text-base font-semibold text-white">{showModal.mode === "create" ? t.scheduleShowTitle : t.editShowTitle}</p>
               <button onClick={() => setShowModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
@@ -870,13 +870,13 @@ export function ContentTab({ t }: ContentTabProps) {
       {/* ── Share to Feed Modal ── */}
       {shareModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }} onClick={() => setShareModal(null)}>
-          <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }} onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <p className="text-base font-semibold text-white">{t.shareToFeedTitle}</p>
               <button onClick={() => setShareModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
             </div>
 
-            <p className="text-xs" style={{ color: "#8E8E93" }}>{t.shareToFeedDesc}</p>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.shareToFeedDesc}</p>
 
             <textarea
               rows={5}
@@ -1122,7 +1122,7 @@ export function ContentTab({ t }: ContentTabProps) {
                       </span>
                     </div>
                     {ch.description && (
-                      <p className="text-xs leading-relaxed line-clamp-2" style={{ color: "#8E8E93" }}>
+                      <p className="text-xs leading-relaxed line-clamp-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                         {ch.description}
                       </p>
                     )}
@@ -1136,7 +1136,7 @@ export function ContentTab({ t }: ContentTabProps) {
                         ))}
                       </div>
                     )}
-                    <p className="text-[11px] mt-2" style={{ color: "#8E8E93" }}>
+                    <p className="text-[11px] mt-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                       {ch.postCount} post{ch.postCount !== 1 ? "s" : ""}
                     </p>
                   </div>
@@ -1208,7 +1208,7 @@ export function ContentTab({ t }: ContentTabProps) {
                 <div className="mt-3 space-y-2">
                   {ch.collaborators && ch.collaborators.length > 0 && (
                     <div className="space-y-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#8E8E93" }}>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                         Collaborators
                       </p>
                       {ch.collaborators.map((uid) => (
@@ -1307,7 +1307,7 @@ export function ContentTab({ t }: ContentTabProps) {
                               <p className="text-xs text-white/80 line-clamp-2 leading-relaxed">
                                 {post.content || (post.media_type === "video" ? "Video post" : "Image post")}
                               </p>
-                              <p className="text-[10px] mt-0.5" style={{ color: "#8E8E93" }}>
+                              <p className="text-[10px] mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                                 {new Date(post.created_at).toLocaleDateString()}
                                 {isAssigned && (
                                   <span className="ml-2 font-semibold" style={{ color: "#D4007A" }}>In this channel</span>

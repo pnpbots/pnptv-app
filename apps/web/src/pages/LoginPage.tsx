@@ -247,7 +247,7 @@ export function LoginPage() {
   return (
     <div
       className="min-h-screen flex items-center justify-center px-4 py-8 relative overflow-hidden"
-      style={{ background: "#121212" }}
+      style={{ background: "var(--pnp-background, #121212)" }}
     >
       {/* Background glows */}
       <div
@@ -309,7 +309,7 @@ export function LoginPage() {
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
             >
               <p className="text-[11px] font-bold text-white leading-tight">{b.title}</p>
-              <p className="text-[9px] mt-0.5" style={{ color: "#8E8E93" }}>{b.sub}</p>
+              <p className="text-[9px] mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{b.sub}</p>
             </div>
           ))}
         </div>
@@ -353,7 +353,7 @@ export function LoginPage() {
             <span>{t.createMyAccount}</span>
             <span aria-hidden="true">→</span>
           </button>
-          <p className="text-center text-[11px]" style={{ color: "#8E8E93" }}>
+          <p className="text-center text-[11px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {t.freeTakes30s}
           </p>
         </form>
@@ -381,14 +381,14 @@ export function LoginPage() {
               onLoadError={handleWidgetLoadError}
             />
           </div>
-          <p className="text-center text-[11px] mt-2" style={{ color: "#8E8E93" }}>
+          <p className="text-center text-[11px] mt-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {t.recommendedForBot}
           </p>
           {widgetStatus === "error" && widgetError && (
             <p className="text-center text-xs text-red-400 mt-2">{widgetError}</p>
           )}
           {widgetBlocked && (
-            <p className="text-center text-xs mt-2" style={{ color: "#8E8E93" }}>
+            <p className="text-center text-xs mt-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {t.telegramWidgetBlocked}
             </p>
           )}
@@ -400,7 +400,7 @@ export function LoginPage() {
             {t.alreadyMember}
           </p>
           {returningUser && (
-            <p className="text-center text-[11px] mb-2" style={{ color: "#8E8E93" }}>
+            <p className="text-center text-[11px] mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {t.lastLoginedWith}{" "}
               <span className="font-semibold text-white">{label}</span>
               {lastUsername ? ` (@${lastUsername})` : ""}

@@ -85,7 +85,7 @@ export function PostCallSurveyModal({ open, bookingId, creatorName, onClose }: P
       <div
         ref={modalRef}
         className="w-full max-w-sm rounded-2xl p-6"
-        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.1)" }}
         onClick={(e) => e.stopPropagation()}
       >
         {submitted ? (
@@ -100,14 +100,14 @@ export function PostCallSurveyModal({ open, bookingId, creatorName, onClose }: P
               </svg>
             </div>
             <span className="text-white font-semibold text-lg">{t.creator.surveyThankYou}</span>
-            <span className="text-sm" style={{ color: "#8E8E93" }}>{t.creator.surveyFeedbackHelps}</span>
+            <span className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.surveyFeedbackHelps}</span>
           </div>
         ) : (
           <>
             <h3 className="text-white font-semibold text-lg text-center mb-1">
               {t.creator.surveyHowWasCall}
             </h3>
-            <p className="text-sm text-center mb-5" style={{ color: "#8E8E93" }}>
+            <p className="text-sm text-center mb-5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {t.creator.surveyWith(creatorName)}
             </p>
 
@@ -150,7 +150,7 @@ export function PostCallSurveyModal({ open, bookingId, creatorName, onClose }: P
               rows={3}
               className="w-full rounded-xl px-3 py-2.5 text-sm resize-none mb-4"
               style={{
-                background: "#2C2C2E",
+                background: "var(--pnp-surface-hover, #2C2C2E)",
                 border: "1px solid rgba(255,255,255,0.1)",
                 color: "#EBEBF5",
                 outline: "none",
@@ -173,7 +173,7 @@ export function PostCallSurveyModal({ open, bookingId, creatorName, onClose }: P
             <button
               onClick={onClose}
               className="w-full py-2 mt-2 text-sm text-center"
-              style={{ color: "#8E8E93", background: "none", border: "none", cursor: "pointer" }}
+              style={{ color: "var(--pnp-text-secondary, #8E8E93)", background: "none", border: "none", cursor: "pointer" }}
             >
               {t.creator.surveySkip}
             </button>

@@ -29,7 +29,7 @@ export default function CmsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#0A0A0B" }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--pnp-background, #0A0A0B)" }}>
         <div className="w-8 h-8 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
       </div>
     );
@@ -37,7 +37,7 @@ export default function CmsPage() {
 
   if (notFound || !page) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-4" style={{ background: "#0A0A0B", color: "#fff" }}>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-4" style={{ background: "var(--pnp-background, #0A0A0B)", color: "#fff" }}>
         <p className="text-lg font-semibold">Page not found</p>
         <button onClick={() => navigate(-1)} className="text-sm underline" style={{ color: "#D4007A" }}>
           Go back
@@ -51,7 +51,7 @@ export default function CmsPage() {
       <Helmet>
         <title>{page.title} — PNPtv!</title>
       </Helmet>
-      <div className="min-h-screen" style={{ background: "#0A0A0B", color: "#fff" }}>
+      <div className="min-h-screen" style={{ background: "var(--pnp-background, #0A0A0B)", color: "#fff" }}>
         {/* Top bar */}
         <div className="sticky top-0 z-50 flex items-center gap-3 px-4 py-3" style={{ background: "rgba(10,10,11,0.92)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <button onClick={() => navigate(-1)} className="text-white/60 hover:text-white transition-colors" aria-label="Go back">

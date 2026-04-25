@@ -95,7 +95,7 @@ export function PermissionOnboarding({ isAuthenticated }: Props) {
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-sm rounded-2xl p-6 space-y-5 animate-fade-in-up" style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}>
+      <div className="w-full max-w-sm rounded-2xl p-6 space-y-5 animate-fade-in-up" style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.1)" }}>
         {/* Icon */}
         <div className="flex justify-center">
           <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))" }}>
@@ -110,7 +110,7 @@ export function PermissionOnboarding({ isAuthenticated }: Props) {
         {/* Title + description */}
         <div className="text-center">
           <h2 className="text-lg font-bold text-white">Camera &amp; Microphone</h2>
-          <p className="text-sm mt-2" style={{ color: "#8E8E93" }}>
+          <p className="text-sm mt-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             Allow camera and microphone access for video calls, live streaming, and private calls.
           </p>
         </div>
@@ -133,7 +133,7 @@ export function PermissionOnboarding({ isAuthenticated }: Props) {
           <button
             onClick={handleSkip}
             className="w-full py-2.5 rounded-xl text-sm font-medium transition-colors hover:bg-white/5"
-            style={{ color: "#8E8E93" }}
+            style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
             Skip
           </button>

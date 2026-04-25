@@ -1031,7 +1031,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
                     <span className="text-2xl flex-shrink-0">{topic.emoji}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-white">{topicName}</p>
-                      <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>{topic.steps.length} {t.tutTopicSteps}</p>
+                      <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{topic.steps.length} {t.tutTopicSteps}</p>
                     </div>
                     <svg className="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -1055,7 +1055,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
                     <span className="text-2xl">{topic.emoji}</span>
                     <div>
                       <p className="text-xs font-semibold text-white">{topicName}</p>
-                      <p className="text-[10px]" style={{ color: "#8E8E93" }}>{t.tutorialStepOf} {tutorialStep + 1} {t.tutorialOf} {topic.steps.length}</p>
+                      <p className="text-[10px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.tutorialStepOf} {tutorialStep + 1} {t.tutorialOf} {topic.steps.length}</p>
                     </div>
                   </div>
 
@@ -1823,7 +1823,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
               </div>
 
               {meruSubmitting && (
-                <p className="mt-3 text-xs" style={{ color: "#8E8E93" }}>
+                <p className="mt-3 text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {lang === "es"
                     ? "Verificando el pago con Meru… esto puede tardar unos segundos."
                     : "Verifying payment with Meru… this may take a few seconds."}

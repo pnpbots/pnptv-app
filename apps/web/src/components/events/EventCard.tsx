@@ -56,7 +56,7 @@ export function EventCard({ event, compact = false, onRsvp, onCancel, canCancel,
     return (
       <div
         className="flex items-start gap-3 rounded-xl p-3"
-        style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.05)", cursor: onViewDetails ? "pointer" : undefined }}
+        style={{ background: "var(--pnp-surface-hover, #2C2C2E)", border: "1px solid rgba(255,255,255,0.05)", cursor: onViewDetails ? "pointer" : undefined }}
         onClick={() => onViewDetails?.(event)}
       >
         {isValidUrl(event.coverImage) ? (
@@ -89,7 +89,7 @@ export function EventCard({ event, compact = false, onRsvp, onCancel, canCancel,
             </span>
           </div>
           <p className="text-white text-sm font-semibold truncate">{event.title}</p>
-          <p className="text-[11px]" style={{ color: "#8E8E93" }}>
+          <p className="text-[11px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {date} · {time} · <span style={{ color: typeColor }}>{countdown}</span>
           </p>
         </div>
@@ -171,7 +171,7 @@ export function EventCard({ event, compact = false, onRsvp, onCancel, canCancel,
               {(event.creatorName || "?")[0].toUpperCase()}
             </div>
           )}
-          <span className="text-[11px] truncate" style={{ color: "#8E8E93" }}>
+          <span className="text-[11px] truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {event.creatorName || "Anonymous"}
           </span>
         </div>
@@ -179,12 +179,12 @@ export function EventCard({ event, compact = false, onRsvp, onCancel, canCancel,
         {/* Time */}
         <p className="text-[11px] mb-2.5" style={{ color: typeColor }}>
           {date} · {time}
-          {" · "}<span style={{ color: "#8E8E93" }}>{event.durationMinutes}min</span>
+          {" · "}<span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{event.durationMinutes}min</span>
         </p>
 
         {/* RSVP footer */}
         <div className="flex items-center justify-between">
-          <span className="text-[11px]" style={{ color: "#8E8E93" }}>
+          <span className="text-[11px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {event.rsvpCount > 0 ? `${event.rsvpCount} going` : "Be first"}
             {event.maxAttendees ? ` · max ${event.maxAttendees}` : ""}
           </span>

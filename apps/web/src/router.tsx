@@ -249,7 +249,7 @@ export const router = createBrowserRouter([
         // instead of crashing the entire SPA.
         errorElement: (
           <div className="fixed inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center"
-               style={{ background: "#0A0A0F" }}>
+               style={{ background: "var(--pnp-background, #0A0A0F)" }}>
             <p className="text-white/80 text-sm font-semibold">Main Stage hit a snag</p>
             <p className="text-white/40 text-xs max-w-sm">
               Something went wrong rendering the stage. The rest of PNPtv is fine.

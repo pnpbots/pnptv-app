@@ -130,7 +130,7 @@ export default function Join() {
         <meta name="twitter:image" content="https://pnptv.app/og-image.png" />
       </Helmet>
 
-      <div className="min-h-screen" style={{ background: "#0A0A0B", color: "#fff" }}>
+      <div className="min-h-screen" style={{ background: "var(--pnp-background, #0A0A0B)", color: "#fff" }}>
 
         {/* ── Sticky Top Bar ── */}
         <div className="sticky top-0 z-50 flex items-center justify-between px-4 py-3" style={{ background: "rgba(10,10,11,0.92)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>

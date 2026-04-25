@@ -34,7 +34,7 @@ export function EqualGrid() {
   }
 
   return (
-    <div style={{ height: "100%", width: "100%", background: "#0A0A0F" }}>
+    <div style={{ height: "100%", width: "100%", background: "var(--pnp-background, #0A0A0F)" }}>
       <GridLayout tracks={tracks} style={{ height: "100%" }}>
         <ParticipantTile />
       </GridLayout>

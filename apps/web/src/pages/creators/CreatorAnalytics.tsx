@@ -69,7 +69,7 @@ function PeakViewersChart({ sessions }: BarChartProps) {
         })}
       </div>
       {displayed.length === 0 && (
-        <p className="text-xs text-center py-4" style={{ color: "#8E8E93" }}>No sessions yet.</p>
+        <p className="text-xs text-center py-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>No sessions yet.</p>
       )}
     </div>
   );
@@ -122,17 +122,17 @@ function RevenueStackedChart({ byDay }: { byDay: CreatorRevenueDayEntry[] }) {
         })}
       </div>
       {displayed.length === 0 && (
-        <p className="text-xs text-center py-4" style={{ color: "#8E8E93" }}>No revenue recorded yet.</p>
+        <p className="text-xs text-center py-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>No revenue recorded yet.</p>
       )}
       {/* Legend */}
       <div className="flex items-center gap-3 mt-3 flex-wrap">
         {(Object.keys(SOURCE_COLORS) as RevenueSource[]).map((src) => (
-          <span key={src} className="flex items-center gap-1 text-[10px]" style={{ color: "#8E8E93" }}>
+          <span key={src} className="flex items-center gap-1 text-[10px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             <span className="w-2 h-2 rounded-sm inline-block" style={{ background: SOURCE_COLORS[src] }} />
             {SOURCE_LABELS[src]}
           </span>
         ))}
-        <span className="flex items-center gap-1 text-[10px]" style={{ color: "#8E8E93" }}>
+        <span className="flex items-center gap-1 text-[10px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           <span className="w-2 h-2 rounded-sm inline-block" style={{ background: "#5ED1C4" }} />
           Tips (T)
         </span>
@@ -217,7 +217,7 @@ function RevenueSection() {
 
               return (
                 <div key={String(d)} className="glass-card-sm p-3 text-center">
-                  <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "#8E8E93" }}>
+                  <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                     {isAllTime ? "All time" : `Last ${d}d`}
                   </p>
                   <p className="text-base font-bold text-white">
@@ -238,11 +238,11 @@ function RevenueSection() {
           <div className="glass-card-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-white/5">
               <p className="text-sm font-semibold text-white">Revenue by Source</p>
-              <p className="text-[11px] mt-0.5" style={{ color: "#8E8E93" }}>All-time totals</p>
+              <p className="text-[11px] mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>All-time totals</p>
             </div>
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-[10px] uppercase" style={{ color: "#8E8E93" }}>
+                <tr className="text-[10px] uppercase" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   <th className="px-4 py-2 text-left font-medium">Source</th>
                   <th className="px-4 py-2 text-right font-medium">Count</th>
                   <th className="px-4 py-2 text-right font-medium">USD</th>
@@ -269,7 +269,7 @@ function RevenueSection() {
                           <span className="text-white">{label}</span>
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 text-right" style={{ color: "#8E8E93" }}>{row.count}</td>
+                      <td className="px-4 py-2.5 text-right" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{row.count}</td>
                       <td className="px-4 py-2.5 text-right text-white">
                         {row.usd > 0 ? `$${row.usd.toFixed(2)}` : "—"}
                       </td>
@@ -326,7 +326,7 @@ export default function CreatorAnalytics() {
       <div className="p-4 lg:p-6 space-y-6">
         <div>
           <h1 className="text-xl font-bold text-white mb-1">Analytics</h1>
-          <p className="text-sm" style={{ color: "#8E8E93" }}>Live stream performance · last 30 days</p>
+          <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Live stream performance · last 30 days</p>
         </div>
 
         {loading ? (
@@ -347,25 +347,25 @@ export default function CreatorAnalytics() {
             <div className="grid grid-cols-2 gap-3">
               <div className="glass-card-sm p-4 text-center">
                 <p className="text-2xl font-bold text-white">{summary?.total_sessions ?? 0}</p>
-                <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Total Sessions</p>
+                <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Total Sessions</p>
               </div>
               <div className="glass-card-sm p-4 text-center">
                 <p className="text-2xl font-bold" style={{ color: "#5ED1C4" }}>
                   {summary?.total_hours_live?.toFixed(1) ?? "0.0"}h
                 </p>
-                <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Hours Live</p>
+                <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Hours Live</p>
               </div>
               <div className="glass-card-sm p-4 text-center">
                 <p className="text-2xl font-bold text-white">
                   {summary?.avg_peak_viewers?.toFixed(1) ?? "0.0"}
                 </p>
-                <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Avg Peak Viewers</p>
+                <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Avg Peak Viewers</p>
               </div>
               <div className="glass-card-sm p-4 text-center">
                 <p className="text-2xl font-bold" style={{ color: "#D4007A" }}>
                   {summary?.total_tips_tokens ?? 0}
                 </p>
-                <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Tokens Earned</p>
+                <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Tokens Earned</p>
               </div>
             </div>
 
@@ -374,13 +374,13 @@ export default function CreatorAnalytics() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="glass-card-sm p-4 text-center">
                   <p className="text-2xl font-bold text-white">{dashboard.subscriberCount}</p>
-                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Subscribers</p>
+                  <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Subscribers</p>
                 </div>
                 <div className="glass-card-sm p-4 text-center">
                   <p className="text-2xl font-bold" style={{ color: "#5ED1C4" }}>
                     ${dashboard.monthlyEarnings.toFixed(2)}
                   </p>
-                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Month Earnings</p>
+                  <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Month Earnings</p>
                 </div>
               </div>
             )}
@@ -395,14 +395,14 @@ export default function CreatorAnalytics() {
               </div>
               {sessions.length === 0 ? (
                 <div className="p-6 text-center">
-                  <p className="text-sm" style={{ color: "#8E8E93" }}>No stream sessions recorded yet.</p>
-                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>Session tracking begins automatically when you go live.</p>
+                  <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>No stream sessions recorded yet.</p>
+                  <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Session tracking begins automatically when you go live.</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-xs uppercase" style={{ color: "#8E8E93" }}>
+                      <tr className="text-xs uppercase" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                         <th className="px-4 py-2 text-left font-medium">Date</th>
                         <th className="px-4 py-2 text-right font-medium">Duration</th>
                         <th className="px-4 py-2 text-right font-medium">Peak</th>
@@ -424,7 +424,7 @@ export default function CreatorAnalytics() {
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-2.5 text-right" style={{ color: "#8E8E93" }}>
+                          <td className="px-4 py-2.5 text-right" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                             {fmtDuration(s.duration_seconds)}
                           </td>
                           <td className="px-4 py-2.5 text-right" style={{ color: "#5ED1C4" }}>

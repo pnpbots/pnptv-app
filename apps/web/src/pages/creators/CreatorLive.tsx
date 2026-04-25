@@ -121,7 +121,7 @@ export default function CreatorLive() {
             </svg>
             Notify Followers Now
           </h2>
-          <p className="text-xs" style={{ color: "#8E8E93" }}>
+          <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             Alert your followers before you connect OBS. Max one notification per 6 hours.
           </p>
           <div className="space-y-2">
@@ -139,7 +139,7 @@ export default function CreatorLive() {
               disabled={broadcastDisabled}
             />
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[10px]" style={{ color: "#8E8E93" }}>
+              <span className="text-[10px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 {broadcastMsg.length}/240
               </span>
               <button
@@ -201,7 +201,7 @@ export default function CreatorLive() {
               </svg>
               How do you want to stream?
             </h2>
-            <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               Choose one. You can switch anytime.
             </p>
           </div>

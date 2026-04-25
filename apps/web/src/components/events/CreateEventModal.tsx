@@ -115,7 +115,7 @@ export function CreateEventModal({ onClose, onCreated, defaultType, canCreateLiv
     >
       <div
         className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden"
-        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)", maxHeight: "90dvh", overflowY: "auto" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)", maxHeight: "90dvh", overflowY: "auto" }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
@@ -141,7 +141,7 @@ export function CreateEventModal({ onClose, onCreated, defaultType, canCreateLiv
                   type="button"
                   onClick={() => setType(t)}
                   className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all"
-                  style={active ? { background: bg, color, border: `1px solid ${color}40` } : { background: "rgba(255,255,255,0.05)", color: "#8E8E93", border: "1px solid transparent" }}
+                  style={active ? { background: bg, color, border: `1px solid ${color}40` } : { background: "rgba(255,255,255,0.05)", color: "var(--pnp-text-secondary, #8E8E93)", border: "1px solid transparent" }}
                 >
                   {t === "live_stream" ? "📡 " : "🎉 "}{label}
                 </button>

@@ -78,7 +78,7 @@ export function HighlightCard({ item, onRsvp, onCancel, canCancel, onViewDetails
         </div>
         
         <h3 className="text-sm font-semibold text-white leading-tight line-clamp-2 mb-1">{ann.title}</h3>
-        <p className="text-[11px] leading-relaxed line-clamp-3" style={{ color: "#8E8E93" }}>
+        <p className="text-[11px] leading-relaxed line-clamp-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           {ann.body}
         </p>
         

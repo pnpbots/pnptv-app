@@ -634,7 +634,7 @@ function SidebarDmChat({ userId, myDbId, onBack }: SidebarDmChatProps) {
       )}
 
       {/* Input bar */}
-      <div className="flex items-end gap-1.5 px-2 py-2 border-t border-pnp-border flex-shrink-0" style={{ background: "#1C1C1E" }}>
+      <div className="flex items-end gap-1.5 px-2 py-2 border-t border-pnp-border flex-shrink-0" style={{ background: "var(--pnp-surface, #1C1C1E)" }}>
         <input
           ref={mediaInputRef}
           type="file"
@@ -1622,7 +1622,7 @@ function FloatingMainStagePlayer() {
         height: 130,
         right: "calc(1rem + env(safe-area-inset-right, 0px))",
         bottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
-        background: "#0A0A0F",
+        background: "var(--pnp-background, #0A0A0F)",
         border: "1px solid rgba(212,0,122,0.40)",
         boxShadow: "0 12px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04) inset",
       }}

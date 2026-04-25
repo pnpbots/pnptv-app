@@ -102,7 +102,7 @@ export default function CreatorEnrollmentWizard({
     >
       <div
         className="w-full max-w-sm rounded-2xl flex flex-col"
-        style={{ background: "#1C1C1E", border: `1px solid rgba(${t.rgb},0.25)`, maxHeight: "90vh" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", border: `1px solid rgba(${t.rgb},0.25)`, maxHeight: "90vh" }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-3 flex-shrink-0">
@@ -141,7 +141,7 @@ export default function CreatorEnrollmentWizard({
             <>
               <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">{pr.termsAndConditions}</p>
 
-              <div className="space-y-3 text-xs" style={{ color: "#8E8E93" }}>
+              <div className="space-y-3 text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
                   <p className="font-semibold text-white">{pr.programTerms}</p>
                   <p>{pr.programTermsBody}</p>
@@ -205,13 +205,13 @@ export default function CreatorEnrollmentWizard({
 
               <div className="rounded-xl p-3 text-xs space-y-1.5" style={{ background: `rgba(${t.rgb},0.08)`, border: `1px solid rgba(${t.rgb},0.2)` }}>
                 <p className="font-semibold text-white">{pr.payoutTermsTitle}</p>
-                <p style={{ color: "#8E8E93" }}>{pr.youReceive70}</p>
-                <p style={{ color: "#8E8E93" }}>{pr.payoutsEveryTuesday}</p>
-                <p style={{ color: "#8E8E93" }}>{pr.minimumPayout}</p>
+                <p style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{pr.youReceive70}</p>
+                <p style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{pr.payoutsEveryTuesday}</p>
+                <p style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{pr.minimumPayout}</p>
               </div>
 
               <div>
-                <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>{pr.selectPaymentMethod}</p>
+                <p className="text-xs font-medium mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{pr.selectPaymentMethod}</p>
                 <div className="grid grid-cols-3 gap-2">
                   {([
                     { id: "meru" as const, label: pr.meruApp, icon: "💳" },
@@ -232,7 +232,7 @@ export default function CreatorEnrollmentWizard({
                       }
                     >
                       <p className="text-lg mb-0.5">{m.icon}</p>
-                      <p className="text-xs font-semibold" style={{ color: paymentMethod === m.id ? t.color : "#8E8E93" }}>{m.label}</p>
+                      <p className="text-xs font-semibold" style={{ color: paymentMethod === m.id ? t.color : "var(--pnp-text-secondary, #8E8E93)" }}>{m.label}</p>
                     </button>
                   ))}
                 </div>
@@ -240,7 +240,7 @@ export default function CreatorEnrollmentWizard({
 
               {(paymentMethod === "usdc" || paymentMethod === "usdt") && (
                 <div>
-                  <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>{pr.network}</p>
+                  <p className="text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{pr.network}</p>
                   <div className="grid grid-cols-2 gap-2">
                     {(paymentMethod === "usdc"
                       ? [{ id: "base", label: "Base" }, { id: "ethereum", label: "Ethereum" }]
@@ -252,7 +252,7 @@ export default function CreatorEnrollmentWizard({
                         className="py-2 rounded-lg text-xs font-medium transition-colors border"
                         style={paymentNetwork === n.id
                           ? { background: `rgba(${t.rgb},0.12)`, color: t.color, borderColor: `rgba(${t.rgb},0.3)` }
-                          : { background: "rgba(255,255,255,0.04)", color: "#8E8E93", borderColor: "rgba(255,255,255,0.08)" }
+                          : { background: "rgba(255,255,255,0.04)", color: "var(--pnp-text-secondary, #8E8E93)", borderColor: "rgba(255,255,255,0.08)" }
                         }
                       >
                         {n.label}
@@ -263,7 +263,7 @@ export default function CreatorEnrollmentWizard({
               )}
 
               <div>
-                <label className="text-xs font-medium block mb-1.5" style={{ color: "#8E8E93" }}>
+                <label className="text-xs font-medium block mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {paymentMethod === "meru" ? pr.meruAccountOrPhone : pr.walletAddress}
                 </label>
                 <input
@@ -286,13 +286,13 @@ export default function CreatorEnrollmentWizard({
 
               <div className="rounded-xl p-3 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
                 <p className="font-semibold text-white mb-1">{pr.whyWeNeedThis}</p>
-                <p style={{ color: "#8E8E93" }}>
+                <p style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {pr.idVerificationExplanation}
                 </p>
               </div>
 
               <div>
-                <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>
+                <p className="text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {pr.governmentIdFront} <span className="text-red-400">*</span>
                 </p>
                 {idPreview ? (
@@ -319,7 +319,7 @@ export default function CreatorEnrollmentWizard({
                     <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: t.color }}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" />
                     </svg>
-                    <p className="text-xs" style={{ color: "#8E8E93" }}>{pr.tapToUploadId}</p>
+                    <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{pr.tapToUploadId}</p>
                     <input type="file" accept="image/*" className="hidden" onChange={handleIdUpload} />
                   </label>
                 )}
@@ -336,13 +336,13 @@ export default function CreatorEnrollmentWizard({
               </p>
 
               <div className="rounded-xl p-3 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                <p style={{ color: "#8E8E93" }}>
+                <p style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {pr.idVerificationExplanation}
                 </p>
               </div>
 
               <div>
-                <p className="text-xs font-medium mb-2" style={{ color: "#8E8E93" }}>
+                <p className="text-xs font-medium mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {pr.digitalSignature} <span className="text-red-400">*</span>
                 </p>
                 <SignaturePad
@@ -362,7 +362,7 @@ export default function CreatorEnrollmentWizard({
               <div className="space-y-2 text-xs">
                 <div className="rounded-xl p-3" style={{ background: `rgba(${t.rgb},0.08)`, border: `1px solid rgba(${t.rgb},0.2)` }}>
                   <p className="font-semibold text-white mb-2">{t.emoji} {t.name}</p>
-                  <div className="space-y-1.5" style={{ color: "#8E8E93" }}>
+                  <div className="space-y-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                     <div className="flex justify-between">
                       <span>{pr.subscriptionPrice}</span>
                       <span className="text-white font-medium">${t.price}/mo</span>
@@ -380,7 +380,7 @@ export default function CreatorEnrollmentWizard({
 
                 <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
                   <p className="font-semibold text-white mb-2">{pr.paymentDetails}</p>
-                  <div className="space-y-1.5" style={{ color: "#8E8E93" }}>
+                  <div className="space-y-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                     <div className="flex justify-between">
                       <span>{pr.method}</span>
                       <span className="text-white font-medium capitalize">{paymentMethod}</span>
@@ -403,13 +403,13 @@ export default function CreatorEnrollmentWizard({
                     <p className="font-semibold text-white">{pr.idVerificationProvided}</p>
                     <span className="text-xs" style={{ color: "#4ADE80" }}>{pr.idProvided}</span>
                   </div>
-                  <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>
+                  <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                     {pr.idCapturedNote}
                   </p>
                 </div>
               </div>
 
-              <p className="text-xs text-center" style={{ color: "#8E8E93" }}>
+              <p className="text-xs text-center" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 {pr.reviewNote}
               </p>
 
@@ -450,7 +450,7 @@ export default function CreatorEnrollmentWizard({
             <button
               onClick={() => setStep((s) => s - 1)}
               className="w-full py-2 text-xs text-center"
-              style={{ color: "#8E8E93" }}
+              style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
             >
               {pr.backStep}
             </button>

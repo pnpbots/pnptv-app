@@ -78,10 +78,10 @@ export default function BookingConfirmation() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#121212" }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--pnp-background, #121212)" }}>
         <div className="space-y-4 w-full max-w-md px-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: "#1C1C1E" }} />
+            <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: "var(--pnp-surface, #1C1C1E)" }} />
           ))}
         </div>
       </div>
@@ -90,12 +90,12 @@ export default function BookingConfirmation() {
 
   if (error || !booking) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-4" style={{ background: "#121212" }}>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-4" style={{ background: "var(--pnp-background, #121212)" }}>
         <p className="text-sm" style={{ color: "#FF6B6B" }}>{error || "Booking not found"}</p>
         <button
           onClick={() => navigate(-1)}
           className="px-6 py-2 rounded-xl text-sm font-medium text-white"
-          style={{ background: "#2C2C2E" }}
+          style={{ background: "var(--pnp-surface-hover, #2C2C2E)" }}
         >
           Go Back
         </button>
@@ -104,7 +104,7 @@ export default function BookingConfirmation() {
   }
 
   return (
-    <div className="min-h-screen py-8 px-4" style={{ background: "#121212" }}>
+    <div className="min-h-screen py-8 px-4" style={{ background: "var(--pnp-background, #121212)" }}>
       <div className="max-w-md mx-auto space-y-5">
         {/* Header */}
         <div className="flex flex-col items-center gap-3 pt-4 pb-2">
@@ -117,31 +117,31 @@ export default function BookingConfirmation() {
             </svg>
           </div>
           <h1 className="text-white font-bold text-xl">Your Call is Confirmed!</h1>
-          <p className="text-sm" style={{ color: "#8E8E93" }}>{timeUntilStart}</p>
+          <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{timeUntilStart}</p>
         </div>
 
         {/* Call details card */}
         <div
           className="rounded-2xl p-5 space-y-3"
-          style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}
+          style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }}
         >
           <div className="flex justify-between text-sm">
-            <span style={{ color: "#8E8E93" }}>Creator</span>
+            <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Creator</span>
             <span className="text-white font-medium">{booking.creator_username || booking.creator_id}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span style={{ color: "#8E8E93" }}>Date & Time</span>
+            <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Date & Time</span>
             <span className="text-white font-medium">
               {startTime?.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}{" "}
               {startTime?.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
             </span>
           </div>
           <div className="flex justify-between text-sm">
-            <span style={{ color: "#8E8E93" }}>Duration</span>
+            <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Duration</span>
             <span className="text-white font-medium">{booking.duration_minutes} minutes</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span style={{ color: "#8E8E93" }}>Status</span>
+            <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Status</span>
             <span
               className="px-2 py-0.5 rounded-full text-xs font-semibold"
               style={{
@@ -167,7 +167,7 @@ export default function BookingConfirmation() {
         {/* Tutorial / Rules */}
         <details
           className="rounded-2xl overflow-hidden"
-          style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.08)" }}
+          style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }}
         >
           <summary className="px-5 py-3.5 text-sm font-semibold text-white cursor-pointer select-none">
             How to Join & Call Rules
@@ -198,7 +198,7 @@ export default function BookingConfirmation() {
         <button
           onClick={() => navigate("/hangouts")}
           className="w-full py-2.5 rounded-xl text-sm font-medium"
-          style={{ color: "#8E8E93", background: "none", border: "1px solid rgba(255,255,255,0.1)" }}
+          style={{ color: "var(--pnp-text-secondary, #8E8E93)", background: "none", border: "1px solid rgba(255,255,255,0.1)" }}
         >
           Back to Hangouts
         </button>

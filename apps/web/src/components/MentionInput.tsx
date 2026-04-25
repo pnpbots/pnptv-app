@@ -208,14 +208,14 @@ export function MentionInput({
           ref={dropdownRef}
           className="absolute bottom-full left-0 right-0 mb-1 rounded-xl overflow-hidden shadow-xl z-50"
           style={{
-            background: "#1C1C1E",
+            background: "var(--pnp-surface, #1C1C1E)",
             border: "1px solid rgba(255,255,255,0.12)",
             maxHeight: "220px",
             overflowY: "auto",
           }}
         >
           {dropdownLoading && dropdown.length === 0 ? (
-            <div className="px-3 py-2 text-xs" style={{ color: "#8E8E93" }}>
+            <div className="px-3 py-2 text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               Searching...
             </div>
           ) : (
@@ -263,7 +263,7 @@ export function MentionInput({
                   {user.creator_status === "approved" && (
                     <span
                       className="text-[10px] leading-none"
-                      style={{ color: "#8E8E93" }}
+                      style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                     >
                       Creator
                     </span>

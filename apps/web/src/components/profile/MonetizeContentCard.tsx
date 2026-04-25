@@ -69,7 +69,7 @@ export default function MonetizeContentCard({ creatorStatus, interestExpressed =
           </div>
           <div>
             <p className="text-sm font-semibold text-white">{p.enrollmentUnderReview}</p>
-            <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {enrollment?.tier || ""} {tc.emoji} {p.enrollmentUnderReviewDesc}
             </p>
           </div>
@@ -84,7 +84,7 @@ export default function MonetizeContentCard({ creatorStatus, interestExpressed =
     return (
       <div className="glass-card-sm p-4 mt-4" style={{ borderColor: "rgba(239,68,68,0.25)" }}>
         <p className="text-sm font-semibold text-white mb-1">{p.enrollmentNotApproved}</p>
-        <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+        <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           {enrollment.admin_notes || p.enrollmentRejectedDefault}
         </p>
         <button
@@ -136,7 +136,7 @@ export default function MonetizeContentCard({ creatorStatus, interestExpressed =
 
         {isEligible ? (
           <>
-            <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {p.creatorMonetizeDesc}
             </p>
 
@@ -175,7 +175,7 @@ export default function MonetizeContentCard({ creatorStatus, interestExpressed =
           </>
         ) : (
           <>
-            <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+            <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {p.meetRequirementsToUnlock}
             </p>
 

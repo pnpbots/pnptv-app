@@ -112,7 +112,7 @@ export default function MainStageAdmin({ standalone = true }: MainStageAdminProp
     return (
       <div
         className="fixed inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center"
-        style={{ background: "#0A0A0F" }}
+        style={{ background: "var(--pnp-background, #0A0A0F)" }}
       >
         <div
           className="w-14 h-14 rounded-2xl flex items-center justify-center"
@@ -142,7 +142,7 @@ export default function MainStageAdmin({ standalone = true }: MainStageAdminProp
     return (
       <div
         className="fixed inset-0 flex flex-col items-center justify-center gap-4"
-        style={{ background: "#0A0A0F" }}
+        style={{ background: "var(--pnp-background, #0A0A0F)" }}
       >
         <div
           className="w-8 h-8 rounded-full border-2 animate-spin"
@@ -157,7 +157,7 @@ export default function MainStageAdmin({ standalone = true }: MainStageAdminProp
     return (
       <div
         className="fixed inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center"
-        style={{ background: "#0A0A0F" }}
+        style={{ background: "var(--pnp-background, #0A0A0F)" }}
       >
         <p className="text-red-400 text-sm">{error ?? "Failed to load state"}</p>
         <button
@@ -177,7 +177,7 @@ export default function MainStageAdmin({ standalone = true }: MainStageAdminProp
       <div
         className="fixed inset-0 flex flex-col"
         style={{
-          background: "#111117",
+          background: "var(--pnp-background, #111117)",
           paddingTop: "env(safe-area-inset-top, 0px)",
           paddingBottom: "env(safe-area-inset-bottom, 0px)",
         }}

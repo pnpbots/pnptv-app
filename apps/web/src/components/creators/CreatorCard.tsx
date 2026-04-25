@@ -178,14 +178,14 @@ export function CreatorCard({
           {creator.bio && (
             <p
               className="text-xs leading-relaxed line-clamp-2"
-              style={{ color: "#8E8E93" }}
+              style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
             >
               {creator.bio}
             </p>
           )}
 
           {/* Price */}
-          <p className="text-xs" style={{ color: "#8E8E93" }}>
+          <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             From{" "}
             <span className="font-semibold" style={{ color: "#EBEBF5" }}>
               ${creator.creator_price_usd}/30 min

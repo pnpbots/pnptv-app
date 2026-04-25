@@ -414,7 +414,7 @@ function TicketChat({ userId }: { userId: string }) {
 
       {/* Input bar */}
       {ticket.status === "open" && (
-        <div className="flex items-end gap-2 px-3 py-2 border-t border-pnp-border" style={{ background: "#1C1C1E" }}>
+        <div className="flex items-end gap-2 px-3 py-2 border-t border-pnp-border" style={{ background: "var(--pnp-surface, #1C1C1E)" }}>
           <textarea value={messageInput} onChange={(e) => setMessageInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder="Type a message..." className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2.5 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-24" rows={1} style={{ minHeight: "40px", fontSize: "16px" }} />
           <button type="button" onClick={handleSend} disabled={sending || !messageInput.trim()} className="p-2 rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }} aria-label="Send">
             {sending ? (

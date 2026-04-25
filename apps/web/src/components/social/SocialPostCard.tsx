@@ -292,11 +292,11 @@ export default function SocialPostCard({
               {post.author_first_name || post.author_username || "Anonymous"}
             </button>
             {post.author_username && (
-              <span className="text-xs" style={{ color: "#8E8E93" }}>
+              <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 @{post.author_username}
               </span>
             )}
-            <span className="text-xs" style={{ color: "#8E8E93" }}>
+            <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               &middot; {timeAgo(post.created_at, t.translating)}
             </span>
 
@@ -400,7 +400,7 @@ export default function SocialPostCard({
               <button
                 onClick={(e) => { e.stopPropagation(); handleStartEdit(); }}
                 className="ml-auto text-xs hover:text-cyan-400 transition-colors"
-                style={{ color: "#8E8E93" }}
+                style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                 aria-label="Edit post"
                 title="Edit post"
               >
@@ -426,7 +426,7 @@ export default function SocialPostCard({
                 onClick={(e) => { e.stopPropagation(); handleDelete(); }}
                 disabled={deleting}
                 className={`${isOwn && !isEditing && !post.blurred ? "" : "ml-auto"} text-xs hover:text-red-400 transition-colors`}
-                style={{ color: "#8E8E93" }}
+                style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                 aria-label={
                   isAdmin && !isOwn ? "Delete post (admin)" : "Delete post"
                 }
@@ -569,7 +569,7 @@ export default function SocialPostCard({
                       onClick={(e) => { e.stopPropagation(); handleCancelEdit(); }}
                       disabled={savingEdit}
                       className="px-3 py-1 rounded-full text-xs font-semibold transition-all"
-                      style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }}
+                      style={{ background: "rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary, #8E8E93)", border: "1px solid rgba(255,255,255,0.1)" }}
                     >
                       Cancel
                     </button>
@@ -586,7 +586,7 @@ export default function SocialPostCard({
                 <button
                   onClick={(e) => { e.stopPropagation(); setTranslatedContent(null); }}
                   className="text-xs mt-0.5"
-                  style={{ color: "#8E8E93" }}
+                  style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                 >
                   {t.showOriginal}
                 </button>
@@ -710,7 +710,7 @@ export default function SocialPostCard({
           {/* Actions bar */}
           <div
             className="flex items-center gap-3 mt-3 flex-wrap"
-            style={{ color: "#8E8E93" }}
+            style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Heart like */}
@@ -791,7 +791,7 @@ export default function SocialPostCard({
                 onClick={handleTranslate}
                 disabled={isTranslating}
                 className="flex items-center gap-1 text-xs transition-colors hover:text-teal-400 disabled:opacity-40"
-                style={translatedContent ? { color: "#5ED1C4" } : { color: "#8E8E93" }}
+                style={translatedContent ? { color: "#5ED1C4" } : { color: "var(--pnp-text-secondary, #8E8E93)" }}
                 title={translatedContent ? t.showOriginal : t.translate}
               >
                 {isTranslating ? (
@@ -820,7 +820,7 @@ export default function SocialPostCard({
                 onClick={handleRequestWofDeletion}
                 disabled={wofDeleting}
                 className="flex items-center gap-1.5 text-xs ml-auto hover:text-red-400 transition-colors"
-                style={{ color: "#8E8E93" }}
+                style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                 title="Request removal from feed"
               >
                 <svg
@@ -850,11 +850,11 @@ export default function SocialPostCard({
           {showReplies && (
             <div className="mt-3 pt-3 border-t border-white/10" onClick={(e) => e.stopPropagation()}>
               {loadingReplies ? (
-                <p className="text-xs" style={{ color: "#8E8E93" }}>
+                <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {t.loadingComments}
                 </p>
               ) : replies.length === 0 ? (
-                <p className="text-xs" style={{ color: "#8E8E93" }}>
+                <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {t.noCommentsYet}
                 </p>
               ) : (
@@ -909,7 +909,7 @@ export default function SocialPostCard({
                           <span className="text-xs font-semibold text-white truncate">
                             {reply.author_first_name || reply.author_username}
                           </span>
-                          <span className="text-xs" style={{ color: "#8E8E93" }}>
+                          <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                             {timeAgo(reply.created_at, t.translating)}
                           </span>
                         </div>
@@ -956,7 +956,7 @@ export default function SocialPostCard({
                         viewBox="0 0 24 24"
                         stroke="currentColor"
                         strokeWidth={2}
-                        style={{ color: "#8E8E93" }}
+                        style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                       >
                         <path
                           strokeLinecap="round"
@@ -964,7 +964,7 @@ export default function SocialPostCard({
                           d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"
                         />
                       </svg>
-                      <span style={{ color: "#8E8E93" }}>
+                      <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                         {t.replyingTo}{" "}
                         <span
                           className="font-medium"
@@ -1011,7 +1011,7 @@ export default function SocialPostCard({
           <div
             className="w-full max-w-sm rounded-2xl p-5 space-y-4"
             style={{
-              background: "#1C1C1E",
+              background: "var(--pnp-surface, #1C1C1E)",
               border: "1px solid rgba(212,0,122,0.25)",
             }}
             onClick={(e) => e.stopPropagation()}

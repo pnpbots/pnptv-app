@@ -232,7 +232,7 @@ export default function SocialFeedTabs({
           <span className="text-sm font-semibold" style={{ color: "#D4007A" }}>
             #{hashtagFilter}
           </span>
-          <span className="text-xs flex-1" style={{ color: "#8E8E93" }}>
+          <span className="text-xs flex-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             Showing posts tagged with this hashtag
           </span>
           <button
@@ -278,7 +278,7 @@ export default function SocialFeedTabs({
         <div className="glass-card-sm p-8 text-center">
           <svg
             className="w-12 h-12 mx-auto mb-3"
-            style={{ color: "#8E8E93" }}
+            style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -291,7 +291,7 @@ export default function SocialFeedTabs({
             />
           </svg>
           <p className="text-white font-medium mb-1">{t.feedUnavailable}</p>
-          <p className="text-sm mb-4" style={{ color: "#8E8E93" }}>
+          <p className="text-sm mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {error}
           </p>
           <button
@@ -309,7 +309,7 @@ export default function SocialFeedTabs({
         <div className="glass-card-sm p-8 text-center">
           <svg
             className="w-12 h-12 mx-auto mb-3"
-            style={{ color: "#8E8E93" }}
+            style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -322,7 +322,7 @@ export default function SocialFeedTabs({
             />
           </svg>
           <p className="text-white font-medium mb-1">{t.noPostsYet}</p>
-          <p className="text-sm" style={{ color: "#8E8E93" }}>
+          <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {t.beTheFirst}
           </p>
         </div>

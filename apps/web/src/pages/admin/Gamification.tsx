@@ -105,7 +105,7 @@ function HoldersPanel({
         <button
           onClick={onClose}
           className="text-xs transition-colors min-h-[32px] px-2"
-          style={{ color: "#8E8E93" }}
+          style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
           aria-label={t.common.close}
         >
           {t.common.close}
@@ -129,7 +129,7 @@ function HoldersPanel({
           </button>
         </div>
       ) : holders.length === 0 ? (
-        <p className="text-xs py-3 text-center" style={{ color: "#8E8E93" }}>
+        <p className="text-xs py-3 text-center" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           {g.noHolders}
         </p>
       ) : (
@@ -144,12 +144,12 @@ function HoldersPanel({
                 <p className="text-xs font-medium text-white truncate">
                   {holder.first_name || holder.username || String(holder.id)}
                   {holder.username && (
-                    <span className="ml-1.5 font-normal" style={{ color: "#8E8E93" }}>
+                    <span className="ml-1.5 font-normal" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                       @{holder.username}
                     </span>
                   )}
                 </p>
-                <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {g.awardedAt}:{" "}
                   {new Date(holder.awarded_at).toLocaleDateString()}
                 </p>
@@ -218,7 +218,7 @@ function BadgeRow({
               {g.level} {badge.level}
             </span>
           </div>
-          <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+          <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {badge.slug}
           </p>
         </div>
@@ -235,7 +235,7 @@ function BadgeRow({
                 }
               : {
                   background: "rgba(255,255,255,0.06)",
-                  color: "#8E8E93",
+                  color: "var(--pnp-text-secondary, #8E8E93)",
                   border: "1px solid rgba(255,255,255,0.1)",
                 }
           }
@@ -322,7 +322,7 @@ function AwardForm({ allBadges, lang }: { allBadges: GamificationBadge[]; lang: 
       }}
     >
       <h3 className="text-base font-bold text-white mb-1">{g.awardFormTitle}</h3>
-      <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+      <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
         {g.awardFormSubtitle}
       </p>
 
@@ -372,11 +372,11 @@ function AwardForm({ allBadges, lang }: { allBadges: GamificationBadge[]; lang: 
             disabled={form.submitting}
             aria-required="true"
           >
-            <option value="" disabled style={{ background: "#1E1E1E" }}>
+            <option value="" disabled style={{ background: "var(--pnp-surface, #1E1E1E)" }}>
               {g.selectBadgePlaceholder}
             </option>
             {allBadges.map((b) => (
-              <option key={b.slug} value={b.slug} style={{ background: "#1E1E1E" }}>
+              <option key={b.slug} value={b.slug} style={{ background: "var(--pnp-surface, #1E1E1E)" }}>
                 {lang === "es" ? b.name_es : b.name_en} (lvl {b.level})
               </option>
             ))}
@@ -473,7 +473,7 @@ function BulkAwardPanel() {
         </div>
         <div className="min-w-0">
           <h3 className="text-sm font-bold text-white">{g.meCuido} — {g.awardBadge}</h3>
-          <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+          <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {g.awardAllCreators}
           </p>
         </div>
@@ -515,7 +515,7 @@ function BulkAwardPanel() {
               onClick={() => setConfirming(false)}
               disabled={running}
               className="px-4 py-2 rounded-lg text-xs transition-colors disabled:opacity-40 min-h-[36px]"
-              style={{ background: "rgba(255,255,255,0.05)", color: "#8E8E93" }}
+              style={{ background: "rgba(255,255,255,0.05)", color: "var(--pnp-text-secondary, #8E8E93)" }}
             >
               {t.common.cancel}
             </button>
@@ -576,13 +576,13 @@ function CategorySection({
           <span className="text-base font-bold text-white group-hover:text-pnp-accent transition-colors">
             {categoryName}
           </span>
-          <span className="ml-2 text-xs" style={{ color: "#8E8E93" }}>
+          <span className="ml-2 text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {category.badges.length} {g.badges.toLowerCase()}
           </span>
         </div>
         <svg
           className={`w-4 h-4 flex-shrink-0 transition-transform ${collapsed ? "" : "rotate-180"}`}
-          style={{ color: "#8E8E93" }}
+          style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -596,7 +596,7 @@ function CategorySection({
       {!collapsed && (
         <div className="space-y-2 pl-0">
           {category.badges.length === 0 ? (
-            <p className="text-xs py-3 text-center" style={{ color: "#8E8E93" }}>
+            <p className="text-xs py-3 text-center" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {g.noBadges}
             </p>
           ) : (
@@ -667,7 +667,7 @@ export default function Gamification() {
       <button
         onClick={() => navigate("/admin")}
         className="flex items-center gap-2 text-sm mb-4 hover:text-pnp-accent transition-colors min-h-[44px]"
-        style={{ color: "#8E8E93" }}
+        style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
       >
         <svg
           className="w-4 h-4"
@@ -684,7 +684,7 @@ export default function Gamification() {
 
       {/* Page header */}
       <h1 className="text-2xl font-bold text-white mb-1">{g.title}</h1>
-      <p className="text-sm mb-6" style={{ color: "#8E8E93" }}>
+      <p className="text-sm mb-6" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
         {g.subtitle}
       </p>
 

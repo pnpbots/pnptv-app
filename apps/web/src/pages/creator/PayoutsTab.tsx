@@ -107,7 +107,7 @@ function InfoTooltip({ text }: { text: string }) {
         <span
           role="tooltip"
           className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-52 text-[11px] leading-relaxed rounded-lg px-3 py-2 text-white/80 pointer-events-none"
-          style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)" }}
+          style={{ background: "var(--pnp-surface-hover, #2C2C2E)", border: "1px solid rgba(255,255,255,0.1)" }}
         >
           {text}
         </span>
@@ -158,8 +158,8 @@ function BalanceCard({ balance, loading, error, onRetry, onCashout, t }: Balance
   if (!balance || bothZero) {
     return (
       <div className="glass-card-sm p-5 text-center py-8">
-        <Wallet size={28} className="mx-auto mb-3" style={{ color: "#8E8E93" }} aria-hidden="true" />
-        <p className="text-sm" style={{ color: "#8E8E93" }}>{t.cashoutNoEarnings}</p>
+        <Wallet size={28} className="mx-auto mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }} aria-hidden="true" />
+        <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.cashoutNoEarnings}</p>
       </div>
     );
   }
@@ -173,7 +173,7 @@ function BalanceCard({ balance, loading, error, onRetry, onCashout, t }: Balance
         {/* Holding column */}
         <div>
           <div className="flex items-center mb-1">
-            <span className="text-xs font-medium" style={{ color: "#8E8E93" }}>
+            <span className="text-xs font-medium" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {t.cashoutHoldingLabel}
             </span>
             <InfoTooltip text={t.cashoutHoldingTooltip} />
@@ -181,7 +181,7 @@ function BalanceCard({ balance, loading, error, onRetry, onCashout, t }: Balance
           <p className="text-lg font-bold text-white">
             ${balance.holding_usd.toFixed(2)}
           </p>
-          <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+          <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {t.cashoutHoldingCount(balance.holding_count)}
           </p>
           {timeUntil !== null && (
@@ -193,7 +193,7 @@ function BalanceCard({ balance, loading, error, onRetry, onCashout, t }: Balance
 
         {/* Available column */}
         <div className="flex flex-col items-end">
-          <p className="text-xs font-medium mb-1" style={{ color: "#8E8E93" }}>
+          <p className="text-xs font-medium mb-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {t.cashoutAvailableLabel}
           </p>
           <p className="text-lg font-bold" style={{ color: "#D4007A" }}>
@@ -211,7 +211,7 @@ function BalanceCard({ balance, loading, error, onRetry, onCashout, t }: Balance
             {t.cashoutCashOutBtn}
           </button>
           {!canCashout && (
-            <p className="text-[10px] mt-1 text-center" style={{ color: "#8E8E93" }}>
+            <p className="text-[10px] mt-1 text-center" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {t.cashoutMinimum}
             </p>
           )}
@@ -280,13 +280,13 @@ function OnchainTab({ availableUsd, submitting, onSubmit, t }: OnchainTabProps) 
 
   return (
     <div className="space-y-4 pt-2">
-      <p className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+      <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
         {t.cashoutOnchainDesc}
       </p>
 
       {/* Amount */}
       <div>
-        <label className="block text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}
+        <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
           htmlFor="cashout-amount-onchain">
           {t.cashoutAmountLabel}
         </label>
@@ -314,7 +314,7 @@ function OnchainTab({ availableUsd, submitting, onSubmit, t }: OnchainTabProps) 
 
       {/* Chain selector */}
       <div>
-        <p className="text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>{t.cashoutChainLabel}</p>
+        <p className="text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.cashoutChainLabel}</p>
         <div className="space-y-2">
           {chains.map((c) => (
             <button
@@ -346,7 +346,7 @@ function OnchainTab({ availableUsd, submitting, onSubmit, t }: OnchainTabProps) 
 
       {/* Address */}
       <div>
-        <label className="block text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}
+        <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
           htmlFor="cashout-address">
           {t.cashoutAddressLabel}
         </label>
@@ -408,7 +408,7 @@ function GiftCardsTab({ t }: GiftCardsTabProps) {
 
   return (
     <div className="space-y-4 pt-2">
-      <p className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+      <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
         {t.cashoutGiftDesc}
       </p>
       {!bitrefillEnabled ? (
@@ -526,13 +526,13 @@ function BankTab({ availableUsd, submitting, onInitiateTransak, transakIframeUrl
 
   return (
     <div className="space-y-4 pt-2">
-      <p className="text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+      <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
         {t.cashoutBankDesc}
       </p>
 
       {/* Amount */}
       <div>
-        <label className="block text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}
+        <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
           htmlFor="cashout-amount-bank">
           {t.cashoutAmountLabel}
         </label>
@@ -560,7 +560,7 @@ function BankTab({ availableUsd, submitting, onInitiateTransak, transakIframeUrl
 
       {/* Country */}
       <div>
-        <label className="block text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}
+        <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
           htmlFor="cashout-country">
           {t.cashoutBankCountryLabel}
         </label>
@@ -580,7 +580,7 @@ function BankTab({ availableUsd, submitting, onInitiateTransak, transakIframeUrl
           }}
         >
           {TRANSAK_COUNTRIES.map((c) => (
-            <option key={c.code} value={c.code} style={{ background: "#1C1C1E" }}>
+            <option key={c.code} value={c.code} style={{ background: "var(--pnp-surface, #1C1C1E)" }}>
               {c.label}
             </option>
           ))}
@@ -639,7 +639,7 @@ function CashoutHistory({ items, loading, error, t }: CashoutHistoryProps) {
 
   if (items.length === 0) {
     return (
-      <p className="text-xs text-center py-4" style={{ color: "#8E8E93" }}>
+      <p className="text-xs text-center py-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
         {t.cashoutHistoryEmpty}
       </p>
     );
@@ -654,7 +654,7 @@ function CashoutHistory({ items, loading, error, t }: CashoutHistoryProps) {
         >
           <div>
             <p className="text-sm font-medium text-white">${item.amount_usd.toFixed(2)}</p>
-            <p className="text-xs" style={{ color: "#8E8E93" }}>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {new Date(item.requested_at).toLocaleDateString()} &middot; {laneLabelKey(item.lane, t)}
             </p>
           </div>
@@ -820,7 +820,7 @@ function CashoutModal({ open, balance, onClose, onSuccess, t }: CashoutModalProp
       <div
         ref={modalRef}
         className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col max-h-[90vh]"
-        style={{ background: "#1C1C1E", border: "1px solid rgba(255,255,255,0.1)" }}
+        style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.1)" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -833,13 +833,13 @@ function CashoutModal({ open, balance, onClose, onSuccess, t }: CashoutModalProp
             aria-label={t.cancelBtn}
             className="flex items-center justify-center w-8 h-8 rounded-full transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
           >
-            <X size={16} style={{ color: "#8E8E93" }} aria-hidden="true" />
+            <X size={16} style={{ color: "var(--pnp-text-secondary, #8E8E93)" }} aria-hidden="true" />
           </button>
         </div>
 
         {/* Available balance summary */}
         <div className="px-5 pb-3 flex-shrink-0">
-          <p className="text-xs" style={{ color: "#8E8E93" }}>
+          <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             {t.cashoutAvailableLabel}:{" "}
             <strong style={{ color: "#D4007A" }}>${balance.available_usd.toFixed(2)}</strong>
           </p>
@@ -981,13 +981,13 @@ function LegacyWithdrawCard({ withdrawable, withdrawals, t, onReload }: LegacyWi
       {/* Withdraw card */}
       <div className="glass-card-sm p-5" style={{ borderColor: "rgba(94,209,196,0.2)" }}>
         <p className="text-sm font-semibold text-white mb-1">{t.requestWithdrawalTitle}</p>
-        <p className="text-xs mb-4" style={{ color: "#8E8E93" }}>
+        <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
           {t.availableBalance} <strong style={{ color: "#5ED1C4" }}>${withdrawable.toFixed(2)}</strong>
         </p>
 
         {/* Payout method selector */}
         <div className="mb-4">
-          <label className="block text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>
+          <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             Payout Method
           </label>
           <div className="flex gap-2">
@@ -1021,7 +1021,7 @@ function LegacyWithdrawCard({ withdrawable, withdrawals, t, onReload }: LegacyWi
         {payoutMethod === "bank_transfer" && (
           <div
             className="mb-4 px-3 py-3 rounded-lg text-xs"
-            style={{ background: "rgba(255,255,255,0.04)", color: "#8E8E93", lineHeight: "1.6" }}
+            style={{ background: "rgba(255,255,255,0.04)", color: "var(--pnp-text-secondary, #8E8E93)", lineHeight: "1.6" }}
           >
             <strong style={{ color: "#fff", display: "block", marginBottom: 4 }}>Bank Transfer</strong>
             To receive payouts via bank transfer, contact{" "}
@@ -1034,7 +1034,7 @@ function LegacyWithdrawCard({ withdrawable, withdrawals, t, onReload }: LegacyWi
 
         {payoutMethod === "dash" && (
           <div className="mb-4">
-            <label className="block text-xs font-medium mb-1.5" style={{ color: "#8E8E93" }}>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               Dash Wallet Address
             </label>
             <input
@@ -1052,7 +1052,7 @@ function LegacyWithdrawCard({ withdrawable, withdrawals, t, onReload }: LegacyWi
             {dashAddressError && (
               <p className="mt-1 text-xs" style={{ color: "#ef4444" }}>{dashAddressError}</p>
             )}
-            <p className="mt-1 text-xs leading-relaxed" style={{ color: "#8E8E93" }}>
+            <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               You'll receive an email with a claim link. Open it, paste this Dash address, and BTCPay sends the funds on-chain. Your USD balance is converted to Dash at the live exchange rate at claim time.
             </p>
           </div>
@@ -1083,14 +1083,14 @@ function LegacyWithdrawCard({ withdrawable, withdrawals, t, onReload }: LegacyWi
       <div className="glass-card-sm p-4">
         <p className="text-sm font-semibold text-white mb-3">{t.withdrawalHistoryTitle}</p>
         {withdrawals.length === 0 ? (
-          <p className="text-xs text-center py-4" style={{ color: "#8E8E93" }}>{t.noWithdrawalsYet}</p>
+          <p className="text-xs text-center py-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.noWithdrawalsYet}</p>
         ) : (
           <div className="space-y-2">
             {withdrawals.map((w) => (
               <div key={w.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
                 <div>
                   <p className="text-sm font-medium text-white">${w.amountUsd.toFixed(2)}</p>
-                  <p className="text-xs" style={{ color: "#8E8E93" }}>
+                  <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                     {new Date(w.requestedAt).toLocaleDateString()} &middot; {w.method.replace("_", " ")}
                   </p>
                 </div>

@@ -84,7 +84,7 @@ export function SpotlightGrid({ focusIdentity, nextAt, onTileClick }: SpotlightG
   }
 
   return (
-    <div className="flex flex-col h-full" style={{ background: "#0A0A0F" }}>
+    <div className="flex flex-col h-full" style={{ background: "var(--pnp-background, #0A0A0F)" }}>
       {/* Hero */}
       <div className="relative flex-1 min-h-0">
         {heroTrack && (

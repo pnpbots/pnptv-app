@@ -144,7 +144,7 @@ export default function CreatorApplications() {
       <button
         onClick={() => navigate("/admin")}
         className="flex items-center gap-2 text-sm mb-4 hover:text-pnp-accent transition-colors"
-        style={{ color: "#8E8E93" }}
+        style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -153,7 +153,7 @@ export default function CreatorApplications() {
       </button>
 
       <h1 className="text-2xl font-bold text-white mb-1">{t.creators.title}</h1>
-      <p className="text-sm mb-5" style={{ color: "#8E8E93" }}>
+      <p className="text-sm mb-5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
         {t.creators.subtitle}
       </p>
 
@@ -178,7 +178,7 @@ export default function CreatorApplications() {
                     color: "#fff",
                     border: "1px solid rgba(212,0,122,0.3)",
                   }
-                : { color: "#8E8E93" }
+                : { color: "var(--pnp-text-secondary, #8E8E93)" }
             }
           >
             {tab.label}
@@ -209,7 +209,7 @@ export default function CreatorApplications() {
                   style={
                     castingFilter === tab.value
                       ? { background: "rgba(212,0,122,0.15)", color: "#D4007A" }
-                      : { background: "rgba(255,255,255,0.05)", color: "#8E8E93" }
+                      : { background: "rgba(255,255,255,0.05)", color: "var(--pnp-text-secondary, #8E8E93)" }
                   }
                 >
                   {tab.label}
@@ -252,7 +252,7 @@ export default function CreatorApplications() {
                         <button onClick={() => navigate(`/profile/${app.user_id}`)} className="text-sm font-semibold text-white hover:underline">
                           {app.first_name || app.username}
                         </button>
-                        {app.username && <span className="text-xs" style={{ color: "#8E8E93" }}>@{app.username}</span>}
+                        {app.username && <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>@{app.username}</span>}
                         <span
                           className="text-xs px-2 py-0.5 rounded-full font-medium"
                           style={{
@@ -263,7 +263,7 @@ export default function CreatorApplications() {
                           {app.status}
                         </span>
                       </div>
-                      <p className="text-xs mb-1" style={{ color: "#8E8E93" }}>
+                      <p className="text-xs mb-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                         Tier: <strong className="text-white">{app.tier}</strong>
                         {" \u00b7 "}
                         Posts: <strong className="text-white">{app.post_count}</strong>
@@ -341,7 +341,7 @@ export default function CreatorApplications() {
                 style={
                   filter === tab.value
                     ? { background: "rgba(212,0,122,0.15)", color: "#D4007A" }
-                    : { background: "rgba(255,255,255,0.05)", color: "#8E8E93" }
+                    : { background: "rgba(255,255,255,0.05)", color: "var(--pnp-text-secondary, #8E8E93)" }
                 }
               >
                 {tab.label}
@@ -397,7 +397,7 @@ export default function CreatorApplications() {
                           {app.stage_name || app.first_name || app.username}
                         </button>
                         {app.username && (
-                          <span className="text-xs" style={{ color: "#8E8E93" }}>
+                          <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                             @{app.username}
                           </span>
                         )}
@@ -426,7 +426,7 @@ export default function CreatorApplications() {
                         </span>
                       </div>
 
-                      <p className="text-xs mb-1" style={{ color: "#8E8E93" }}>
+                      <p className="text-xs mb-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                         {t.creators.type}{" "}
                         <strong className="text-white">
                           {TYPE_LABELS[app.application_type] || app.application_type}

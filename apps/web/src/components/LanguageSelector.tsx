@@ -76,7 +76,7 @@ export function LanguageSelector({ position = "topbar" }: LanguageSelectorProps)
               : "right-0 top-10"
           }`}
           style={{
-            background: "#1C1C1E",
+            background: "var(--pnp-surface, #1C1C1E)",
             border: "1px solid rgba(255,255,255,0.12)",
             minWidth: "160px",
             boxShadow: "0 8px 32px rgba(0,0,0,0.5)",

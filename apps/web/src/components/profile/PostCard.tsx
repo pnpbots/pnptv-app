@@ -459,11 +459,11 @@ export default function PostCard({
               {post.author_first_name || post.author_username || p.anonymous}
             </button>
             {post.author_username && (
-              <span className="text-xs" style={{ color: "#8E8E93" }}>
+              <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 @{post.author_username}
               </span>
             )}
-            <span className="text-xs" style={{ color: "#8E8E93" }}>
+            <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               &middot; {timeAgo(post.created_at)}
             </span>
             {post.author_city && post.author_country && (
@@ -539,7 +539,7 @@ export default function PostCard({
             <button
               onClick={() => setTranslatedContent(null)}
               className="text-xs mt-0.5"
-              style={{ color: "#8E8E93" }}
+              style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
             >
               {ft.showOriginal}
             </button>
@@ -602,7 +602,7 @@ export default function PostCard({
           {/* Actions bar */}
           <div
             className="flex items-center gap-5 mt-3"
-            style={{ color: "#8E8E93" }}
+            style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
             {/* Like */}
             <button
@@ -687,7 +687,7 @@ export default function PostCard({
                 style={
                   translatedContent
                     ? { color: "#5ED1C4" }
-                    : { color: "#8E8E93" }
+                    : { color: "var(--pnp-text-secondary, #8E8E93)" }
                 }
                 title={translatedContent ? ft.showOriginal : ft.translate}
               >
@@ -718,7 +718,7 @@ export default function PostCard({
                 className="ml-auto text-xs hover:text-amber-400 transition-colors"
                 title={p.reportPost}
                 aria-label={p.reportPost}
-                style={{ color: "#8E8E93" }}
+                style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v1.5M3 21v-6m0 0l2.77-.693a9 9 0 016.208.682l.108.054a9 9 0 006.086.71l3.114-.732a48.524 48.524 0 01-.005-10.499l-3.11.732a9 9 0 01-6.085-.711l-.108-.054a9 9 0 00-6.208-.682L3 4.5M3 15V4.5" />
@@ -731,7 +731,7 @@ export default function PostCard({
               <button
                 onClick={(e) => { e.stopPropagation(); handleStartEdit(); }}
                 className="ml-auto text-xs hover:text-cyan-400 transition-colors"
-                style={{ color: "#8E8E93" }}
+                style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                 aria-label="Edit post"
                 title="Edit post"
               >
@@ -805,7 +805,7 @@ export default function PostCard({
                   ))}
                 </div>
               ) : replies.length === 0 ? (
-                <p className="text-xs mb-3" style={{ color: "#8E8E93" }}>
+                <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {ft.noRepliesYet}
                 </p>
               ) : (
@@ -850,7 +850,7 @@ export default function PostCard({
                             <span className="text-xs font-semibold text-white truncate">
                               {reply.author_first_name || reply.author_username}
                             </span>
-                            <span className="text-xs" style={{ color: "#8E8E93" }}>
+                            <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                               {pending ? ft.sending : timeAgo(reply.created_at)}
                             </span>
                           </div>
@@ -881,7 +881,7 @@ export default function PostCard({
                                   type="button"
                                   onClick={() => replyToUser(reply.author_username || null)}
                                   className="inline-flex items-center gap-1 transition-colors hover:text-white/80"
-                                  style={{ color: "#8E8E93" }}
+                                  style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                                   aria-label={ft.replyToAuthor.replace("{name}", reply.author_username)}
                                 >
                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -976,7 +976,7 @@ export default function PostCard({
           <div
             className="w-full max-w-sm rounded-2xl p-5 space-y-4"
             style={{
-              background: "#1C1C1E",
+              background: "var(--pnp-surface, #1C1C1E)",
               border: "1px solid rgba(212,0,122,0.25)",
             }}
             onClick={(e) => e.stopPropagation()}

@@ -17,13 +17,13 @@ export function EarningsTab({ earnings, t }: EarningsTabProps) {
               <p className="text-xl font-bold" style={{ color: "#5ED1C4" }}>
                 ${(earnings.summary.total_creator || 0).toFixed(2)}
               </p>
-              <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>{t.yourEarnings70}</p>
+              <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.yourEarnings70}</p>
             </div>
             <div className="glass-card-sm p-4 text-center">
               <p className="text-xl font-bold text-white">
                 ${(earnings.summary.total_gross || 0).toFixed(2)}
               </p>
-              <p className="text-xs mt-1" style={{ color: "#8E8E93" }}>{t.grossRevenue}</p>
+              <p className="text-xs mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.grossRevenue}</p>
             </div>
           </div>
 
@@ -37,7 +37,7 @@ export function EarningsTab({ earnings, t }: EarningsTabProps) {
                   const pct = (trend.amount / maxAmount) * 100;
                   return (
                     <div key={i} className="flex items-center gap-3">
-                      <span className="text-xs w-16 flex-shrink-0" style={{ color: "#8E8E93" }}>
+                      <span className="text-xs w-16 flex-shrink-0" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                         {new Date(trend.month).toLocaleDateString("en-US", { month: "short", year: "2-digit" })}
                       </span>
                       <div className="flex-1 h-4 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
