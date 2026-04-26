@@ -312,7 +312,7 @@ async function createPullPayment({ amountUsd, creatorId, description, autoApprov
   const payload = {
     name: description || `PNPtv creator payout — ${creatorId}`,
     description: description || `PNPtv creator earnings payout — ${creatorId}`,
-    amount: String(amountUsd.toFixed(2)),
+    amount: Number(amountUsd).toFixed(2),
     currency: 'USD',
     paymentMethods: ['DASH'],
     autoApproveClaims: !!autoApprove,
@@ -402,6 +402,5 @@ module.exports = {
   createPullPayment,
   getPullPayment,
   archivePullPayment,
-  BTCPAY_WEBHOOK_SECRET,
   get isConfigured() { return !!(BTCPAY_API_KEY && BTCPAY_STORE_ID); },
 };

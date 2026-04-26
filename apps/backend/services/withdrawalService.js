@@ -437,53 +437,30 @@ class WithdrawalService {
   }
 
   /**
-   * Process scheduled withdrawals (admin action)
+   * Process pending withdrawals — surveys the queue and reports counts.
+   * SECURITY: Auto-approval was previously triggered after 1 hour with no admin
+   * action; that behavior was removed because `_executeWithdrawal` mints a fake
+   * `PENDING-<id>` transaction reference and flips status to `completed`,
+   * making the row irrecoverable. Approval must now be an explicit admin action
+   * via `approveWithdrawal`. This function is read-only and returns counts.
    */
   static async processPendingWithdrawals() {
     try {
       const pendingWithdrawals = await WithdrawalModel.getPendingWithdrawals(50);
 
-      logger.info('Processing pending withdrawals', {
+      logger.info('Pending withdrawals queue surveyed (no auto-approval)', {
         count: pendingWithdrawals.length,
       });
 
-      const results = {
+      return {
         processed: 0,
         successful: 0,
         failed: 0,
+        pendingCount: pendingWithdrawals.length,
+        message: 'Auto-approval disabled — withdrawals require explicit admin approval',
       };
-
-      for (const withdrawal of pendingWithdrawals) {
-        try {
-          // Auto-approve pending withdrawals older than 1 hour
-          const createdAt = new Date(withdrawal.requestedAt);
-          const hoursSince = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60);
-
-          if (hoursSince >= 1) {
-            const approved = await this.approveWithdrawal(withdrawal.id, null);
-            if (approved) {
-              const processed = await this.processWithdrawal(withdrawal.id);
-              results.processed++;
-              if (processed.status === 'completed') {
-                results.successful++;
-              } else {
-                results.failed++;
-              }
-            }
-          }
-        } catch (error) {
-          logger.error('Error processing withdrawal', {
-            withdrawalId: withdrawal.id,
-            error: error.message,
-          });
-          results.failed++;
-        }
-      }
-
-      logger.info('Withdrawal processing batch complete', results);
-      return results;
     } catch (error) {
-      logger.error('Error in scheduled withdrawal processing:', error);
+      logger.error('Error surveying pending withdrawals:', error);
       throw error;
     }
   }

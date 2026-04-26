@@ -428,19 +428,18 @@ app.use(conditionalMiddleware(helmet({
       ],
       frameSrc: [
         "'self'",
-        "https://checkout.epayco.co",
-        "https://secure.epayco.co",
-        "https://secure.payco.co",
-        "https://api.secure.payco.co",
-        "https://songbird.cardinalcommerce.com",
-        "https://songbirdstag.cardinalcommerce.com",
-        "https://centinelapi.cardinalcommerce.com",
-        "https://centinelapistag.cardinalcommerce.com",
-        "https://3ds.epayco.com",
-        "https://3ds-green.epayco.com",
+        // Wildcards mirror CHECKOUT_CSP — required because ePayco rotates 3DS
+        // sub-hosts between deploys (apiflow-*.epayco.co, eks-ms-3ds-*.epayco.io).
+        // Without wildcards, helmet-served backend pages that host ePayco iframes
+        // silently break post-rotation. Issuer bank ACS pages also live on
+        // unenumerable hosts → see form-action 'https:' below.
+        "https://*.epayco.co",
+        "https://*.epayco.com",
+        "https://*.epayco.io",
+        "https://*.payco.co",
+        "https://*.cardinalcommerce.com",
         "https://oauth.telegram.org",
         "https://telegram.org",
-        // 8x8.vc removed — video calls use Telegram native
       ],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -1525,7 +1524,9 @@ app.post(
   express.raw({ type: 'application/webhook+json' }),
   webhookController.handleLiveKitWebhook
 );
-app.get('/api/payment-response', webhookController.handlePaymentResponse);
+// HIGH-01: rate-limited so the unauthenticated payment-response page can't be
+// looped to enumerate paymentIds or harvest plan/email data via x_extra3 polls.
+app.get('/api/payment-response', webhookLimiter, webhookController.handlePaymentResponse);
 
 // Cal.com webhook — booking lifecycle events (C-03)
 // Rate-limited at 10 req/min; verified via HMAC-SHA256 (no session auth).
@@ -5980,6 +5981,8 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
         `INSERT INTO dash_subscription_orders
            (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
          VALUES ($1, 'hangout_access', $2, $3, $4, 'pending', $5)
+         ON CONFLICT (btcpay_invoice_id) DO UPDATE
+           SET status = dash_subscription_orders.status
          RETURNING id`,
         [userId, email || null, hangoutPrice, invoice.invoiceId, JSON.stringify(scopeMetadata)]
       );
@@ -6076,6 +6079,8 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
         `INSERT INTO dash_subscription_orders
            (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
          VALUES ($1, 'channel_access', $2, $3, $4, 'pending', $5)
+         ON CONFLICT (btcpay_invoice_id) DO UPDATE
+           SET status = dash_subscription_orders.status
          RETURNING id`,
         [userId, email || null, channelPrice, invoice.invoiceId, JSON.stringify(scopeMetadata)]
       );
@@ -6627,7 +6632,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
 
     // --- Dash direct tip (BTCPay invoice) ---
     if (paymentMethod === 'dash') {
-      const { createDashInvoice } = require('../../config/btcpay');
+      const { createInvoice: createBtcpayInvoiceForTip } = require('../../config/btcpay');
 
       // Create tip record first (pending)
       const tip = await PNPLiveTipsService.createTip(
@@ -6641,33 +6646,53 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
         return res.status(500).json({ success: false, error: 'Failed to create tip' });
       }
 
-      // Create BTCPay invoice with tip metadata
-      const inv = await createDashInvoice({
-        amount: numAmount,
-        currency: 'USD',
-        metadata: {
-          type: 'tip',
-          tipId: tip.id,
+      // Create BTCPay invoice — use createInvoice (not createDashInvoice) so tip
+      // metadata is threaded into BTCPay's record. The webhook handler reads
+      // event.metadata.{type,tipId,userId,performerId} on InvoiceSettled.
+      // planId='tip' is required by createInvoice but is informational only here.
+      try {
+        const inv = await createBtcpayInvoiceForTip({
+          amount: numAmount,
+          currency: 'USD',
+          orderId: `pnptv-tip-${tip.id}-${Date.now()}`,
           userId,
-          performerId: String(resolvedPerformerId),
-        },
-      });
+          planId: 'tip',
+          metadata: {
+            type: 'tip',
+            tipId: tip.id,
+            userId,
+            performerId: String(resolvedPerformerId),
+          },
+          redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/live`,
+        });
 
-      // Store invoice ID on the tip record
-      await getPool().query(
-        `UPDATE pnp_tips SET transaction_id = $2, payment_method = 'dash' WHERE id = $1`,
-        [tip.id, inv.invoiceId]
-      );
+        // Store invoice ID on the tip record
+        await getPool().query(
+          `UPDATE pnp_tips SET transaction_id = $2, payment_method = 'dash' WHERE id = $1`,
+          [tip.id, inv.invoiceId]
+        );
 
-      return res.json({
-        success: true,
-        tipId: tip.id,
-        invoiceId: inv.invoiceId,
-        checkoutUrl: inv.checkoutUrl,
-        paymentUrl: null,
-        amount: numAmount,
-        paymentMethod: 'dash',
-      });
+        return res.json({
+          success: true,
+          tipId: tip.id,
+          invoiceId: inv.invoiceId,
+          checkoutUrl: inv.checkoutLink,
+          paymentUrl: null,
+          amount: numAmount,
+          paymentMethod: 'dash',
+        });
+      } catch (tipInvErr) {
+        logger.error(`Live tip Dash invoice creation failed: ${tipInvErr.message}`);
+        // Mark the tip cancelled so it doesn't sit pending forever
+        await getPool().query(
+          `UPDATE pnp_tips SET payment_status = 'cancelled' WHERE id = $1 AND payment_status = 'pending'`,
+          [tip.id]
+        ).catch(() => {});
+        if (tipInvErr.message?.includes('not configured')) {
+          return res.status(503).json({ success: false, error: 'Crypto tips are not available yet. Please use tokens.', code: 'BTCPAY_NOT_CONFIGURED' });
+        }
+        return res.status(500).json({ success: false, error: 'Failed to create Dash tip invoice. Please try again.', code: 'BTCPAY_ERROR' });
+      }
     }
 
     // Unreachable — the early payment-method gate above guarantees one of the
@@ -6820,23 +6845,22 @@ app.get('/api/webapp/dash/btcpay-status', requireSessionAuth, asyncHandler(async
 }));
 
 // GET /api/wallet/balance — get current user's token balance + DPNS
-app.get('/api/wallet/balance', asyncHandler(async (req, res) => {
+app.get('/api/wallet/balance', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
-  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
   const userId = String(user.telegram_id || user.id);
   const wallet = await DashTokenService.getWallet(userId);
   res.json({ success: true, balance: wallet.balance_tokens, dpnsHandle: wallet.dash_dpns || null });
 }));
 
-// GET /api/wallet/packages — available token packages
-app.get('/api/wallet/packages', (req, res) => {
+// GET /api/wallet/packages — available token packages (auth required to prevent
+// information disclosure of pricing/availability to unauthenticated visitors)
+app.get('/api/wallet/packages', requireSessionAuth, (req, res) => {
   res.json({ success: true, packages: DashTokenService.TOKEN_PACKAGES });
 });
 
 // GET /api/wallet/history — purchase history
-app.get('/api/wallet/history', asyncHandler(async (req, res) => {
+app.get('/api/wallet/history', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
-  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
   const userId = String(user.telegram_id || user.id);
   const history = await DashTokenService.getPurchaseHistory(userId, 20);
   res.json({ success: true, history });
@@ -6845,9 +6869,8 @@ app.get('/api/wallet/history', asyncHandler(async (req, res) => {
 const TokenCheckoutService = require('../../services/tokenCheckoutService');
 
 // POST /api/wallet/buy — create a BTCPay Dash invoice for token purchase
-app.post('/api/wallet/buy', asyncHandler(async (req, res) => {
+app.post('/api/wallet/buy', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
-  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
 
   const { packageId } = req.body;
   if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
@@ -6873,9 +6896,8 @@ app.post('/api/wallet/buy', asyncHandler(async (req, res) => {
 }));
 
 // POST /api/wallet/buy-card — purchase tokens via ePayco card checkout
-app.post('/api/wallet/buy-card', asyncHandler(async (req, res) => {
+app.post('/api/wallet/buy-card', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
-  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
 
   const { packageId } = req.body;
   if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
@@ -6926,6 +6948,14 @@ app.get('/api/token-checkout/:purchaseId', requireSessionAuth, asyncHandler(asyn
     const { userId: _userId, ...clientData } = data;
     res.json({ success: true, ...clientData });
   } catch (err) {
+    if (err.code === 'FX_RATE_UNAVAILABLE') {
+      logger.error('[ePayco FX] Rate unavailable for token checkout page', { error: err.message, purchaseId });
+      return res.status(503).json({
+        success: false,
+        error: 'FX rate unavailable, please retry in a few minutes',
+        code: 'FX_RATE_UNAVAILABLE',
+      });
+    }
     logger.error(`Token checkout data error: ${err.message}`, { purchaseId });
     res.status(500).json({ success: false, error: 'Failed to load checkout data. Please try again.' });
   }
@@ -6940,9 +6970,8 @@ app.get('/token-checkout/:purchaseId', (req, res) => {
 });
 
 // POST /api/wallet/link-dpns — link a Dash DPNS handle
-app.post('/api/wallet/link-dpns', asyncHandler(async (req, res) => {
+app.post('/api/wallet/link-dpns', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
-  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
 
   const { dpnsHandle } = req.body;
   if (!dpnsHandle) return res.status(400).json({ success: false, error: 'dpnsHandle is required' });
@@ -7018,7 +7047,8 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(as
 
     await dbQuery(
       `INSERT INTO dash_subscription_orders (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id)
-       VALUES ($1, $2, $3, $4, $5, 'pending', $6)`,
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+       ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
       [userId, planId, email || null, usdAmount, invoice.invoiceId, creatorId ? String(creatorId) : null]
     );
 
@@ -7042,11 +7072,14 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(as
 }));
 
 // GET /api/webapp/payments/dash/status/:invoiceId — poll invoice status
-app.get('/api/webapp/payments/dash/status/:invoiceId', asyncHandler(async (req, res) => {
+app.get('/api/webapp/payments/dash/status/:invoiceId', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
 
   const { invoiceId } = req.params;
+  if (!invoiceId || !/^[A-Za-z0-9_-]{5,64}$/.test(invoiceId)) {
+    return res.status(400).json({ success: false, error: 'Invalid invoiceId' });
+  }
   const { query: dbQuery } = require('../../config/postgres');
   const result = await dbQuery(
     `SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2`,
@@ -7060,11 +7093,13 @@ app.get('/api/webapp/payments/dash/status/:invoiceId', asyncHandler(async (req, 
 // GET /api/webapp/payments/dash/details/:invoiceId — fetch Dash payment address + amount for a pending invoice
 app.get('/api/webapp/payments/dash/details/:invoiceId', requireSessionAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const user = req.session?.user;
+    if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+    const userId = String(user.telegram_id || user.id);
     const { invoiceId } = req.params;
 
-    if (!invoiceId) {
-      return res.status(400).json({ success: false, error: 'Missing invoiceId' });
+    if (!invoiceId || !/^[A-Za-z0-9_-]{5,64}$/.test(invoiceId)) {
+      return res.status(400).json({ success: false, error: 'Invalid invoiceId' });
     }
 
     // Verify ownership — check both subscription orders and token purchases
@@ -7130,7 +7165,7 @@ app.get('/api/webapp/payments/dash/details/:invoiceId', requireSessionAuth, asyn
       invoiceAmount,
     });
   } catch (err) {
-    console.error('[Dash] Failed to get payment details:', err.message);
+    logger.error('[Dash] Failed to get payment details', { error: err.message, invoiceId: req.params.invoiceId });
     res.status(500).json({ success: false, error: 'Failed to fetch payment details' });
   }
 });
@@ -7277,8 +7312,8 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       return res.json({ success: true, type: terminalStatus, rowsUpdated: affected });
     }
 
-    // Fix 1.4: InvoiceMarkedInvalid — revoke entitlements for any completed subscription order.
-    // Handles manual admin invalidations and chargeback-equivalent scenarios on BTCPay.
+    // Fix 1.4: InvoiceMarkedInvalid — revoke entitlements for any completed subscription order
+    // and reverse token-purchase credits on chargeback-equivalent scenarios.
     if (event.type === 'InvoiceMarkedInvalid') {
       const { query: dbQuery } = require('../../config/postgres');
 
@@ -7288,6 +7323,50 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
          RETURNING id, user_id, plan_id, status AS old_status`,
         [invoiceId]
       );
+
+      // Reverse any token wallet credit that was applied for this invoice
+      const tokenInvalidRes = await dbQuery(
+        `UPDATE token_purchases SET status = 'invalid'
+         WHERE btcpay_invoice_id = $1 AND status IN ('pending', 'paid')
+         RETURNING user_id, tokens_credited, status AS old_status`,
+        [invoiceId]
+      );
+      for (const row of tokenInvalidRes.rows) {
+        if (row.old_status === 'paid' && row.tokens_credited > 0) {
+          try {
+            await dbQuery(
+              `UPDATE user_token_wallets
+                 SET balance_tokens = GREATEST(balance_tokens - $1, 0), updated_at = NOW()
+                 WHERE user_id = $2`,
+              [row.tokens_credited, row.user_id]
+            );
+            logger.info('BTCPay InvoiceMarkedInvalid: token wallet debited', {
+              userId: row.user_id, tokensReversed: row.tokens_credited, invoiceId,
+            });
+          } catch (debitErr) {
+            logger.error('BTCPay InvoiceMarkedInvalid: token wallet debit failed', {
+              userId: row.user_id, error: debitErr.message,
+            });
+          }
+        }
+      }
+
+      // Void any creator_earnings sourced from this invoice (channel/hangout/tip/creator-sub)
+      try {
+        const voidEarn = await dbQuery(
+          `UPDATE creator_earnings SET status = 'void'
+           WHERE source_payment_id = $1 AND status IN ('holding', 'available')
+           RETURNING id, creator_id, amount_creator`,
+          [invoiceId]
+        );
+        if (voidEarn.rowCount > 0) {
+          logger.info('BTCPay InvoiceMarkedInvalid: creator_earnings voided', {
+            invoiceId, count: voidEarn.rowCount,
+          });
+        }
+      } catch (voidErr) {
+        logger.warn('BTCPay InvoiceMarkedInvalid: creator_earnings void failed (non-critical)', { error: voidErr.message });
+      }
 
       if (markedResult.rows.length > 0) {
         const { user_id: invalidUserId, plan_id: invalidPlanId } = markedResult.rows[0];
@@ -7321,11 +7400,16 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
         } catch (tierErr) {
           logger.error('BTCPay InvoiceMarkedInvalid: tier downgrade failed', { userId: invalidUserId, error: tierErr.message });
         }
-      } else {
-        logger.info('BTCPay InvoiceMarkedInvalid: no pending/completed order found — no action taken', { invoiceId });
+      } else if (tokenInvalidRes.rowCount === 0) {
+        logger.info('BTCPay InvoiceMarkedInvalid: no order or purchase found — no action taken', { invoiceId });
       }
 
-      return res.json({ success: true, type: 'marked_invalid', rowsUpdated: markedResult.rowCount || 0 });
+      return res.json({
+        success: true,
+        type: 'marked_invalid',
+        ordersUpdated: markedResult.rowCount || 0,
+        tokenPurchasesUpdated: tokenInvalidRes.rowCount || 0,
+      });
     }
 
     // Only process successful invoice settlements beyond this point.
@@ -7704,7 +7788,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
 
       // PAY-006: Invalidate Redis user cache after raw SQL tier update.
       try {
-        const { cache } = require('../../../config/redis');
+        const { cache } = require('../../config/redis');
         await cache.del(`user:${order.user_id}`);
         logger.info('Cleared user cache after BTCPay subscription activation', { userId: order.user_id });
       } catch (cacheErr) {

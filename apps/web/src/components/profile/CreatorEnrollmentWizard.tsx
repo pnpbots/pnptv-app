@@ -45,9 +45,13 @@ export default function CreatorEnrollmentWizard({
   const [commitmentAccepted, setCommitmentAccepted] = useState(false);
 
   // Step 2 state (payment)
-  const [paymentMethod, setPaymentMethod] = useState<"meru" | "usdc" | "usdt">("usdc");
+  // Dash via BTCPay is the canonical crypto payout path post-Daimo retirement
+  // (2026-04-21). Meru is the fiat off-ramp. usdc/usdt remain UI options for
+  // creators who already set them up before the migration; new creators are
+  // nudged to Dash by ordering it first.
+  const [paymentMethod, setPaymentMethod] = useState<"dash" | "meru" | "usdc" | "usdt">("dash");
   const [paymentAddress, setPaymentAddress] = useState("");
-  const [paymentNetwork, setPaymentNetwork] = useState("base");
+  const [paymentNetwork, setPaymentNetwork] = useState("dash");
 
   // Step 3 state (ID + signature)
   const [idFile, setIdFile] = useState<File | null>(null);
@@ -212,8 +216,9 @@ export default function CreatorEnrollmentWizard({
 
               <div>
                 <p className="text-xs font-medium mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{pr.selectPaymentMethod}</p>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {([
+                    { id: "dash" as const, label: "Dash", icon: "💎" },
                     { id: "meru" as const, label: pr.meruApp, icon: "💳" },
                     { id: "usdc" as const, label: "USDC", icon: "🔵" },
                     { id: "usdt" as const, label: "USDT", icon: "🟢" },
@@ -223,7 +228,10 @@ export default function CreatorEnrollmentWizard({
                       onClick={() => {
                         setPaymentMethod(m.id);
                         setPaymentAddress("");
-                        setPaymentNetwork(m.id === "usdt" ? "tron" : "base");
+                        if (m.id === "dash") setPaymentNetwork("dash");
+                        else if (m.id === "usdt") setPaymentNetwork("tron");
+                        else if (m.id === "usdc") setPaymentNetwork("base");
+                        else setPaymentNetwork("");
                       }}
                       className="py-3 rounded-xl text-center transition-all"
                       style={paymentMethod === m.id

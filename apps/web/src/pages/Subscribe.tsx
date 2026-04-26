@@ -14,12 +14,14 @@ import {
   getLabelColor,
   assertPaymentUrl,
   validatePromoCode,
+  ApiError,
   type SubscriptionPlan,
 } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
+import { isTelegramContext } from "@/lib/telegram";
 
 type Provider = "epayco" | "dash";
 
@@ -253,7 +255,7 @@ export default function Subscribe() {
     setSearchParams(next, { replace: true });
   }
 
-  // Poll payment status after Daimo checkout opens
+  // Poll payment status after card checkout opens (ePayco redirect flow).
   useEffect(() => {
     if (!pollingPaymentId) return;
 
@@ -261,11 +263,13 @@ export default function Subscribe() {
     let attempts = 0;
     const maxAttempts = 120; // 10 minutes at 5s intervals
     const interval = 5000;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
 
     const poll = async () => {
       if (cancelled || attempts >= maxAttempts) {
         if (attempts >= maxAttempts) {
           setPollingPaymentId(null);
+          try { sessionStorage.removeItem("pnp_pending_payment"); } catch {}
           setError(s.paymentTimedOut);
         }
         return;
@@ -276,34 +280,50 @@ export default function Subscribe() {
         if (cancelled) return;
         if (data.status === "completed" || data.status === "paid" || data.status === "success") {
           setPollingPaymentId(null);
+          try { sessionStorage.removeItem("pnp_pending_payment"); } catch {}
           setPaymentSuccess(true);
           await refreshUser();
           return;
         }
         if (data.status === "failed" || data.status === "refunded") {
           setPollingPaymentId(null);
+          try { sessionStorage.removeItem("pnp_pending_payment"); } catch {}
           setError(data.message || s.paymentNotSuccessful);
           return;
         }
-        setTimeout(poll, interval);
+        if (!cancelled) timerId = setTimeout(poll, interval);
       } catch {
-        if (!cancelled) setTimeout(poll, interval);
+        if (!cancelled) timerId = setTimeout(poll, interval);
       }
     };
 
     poll();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
   }, [pollingPaymentId, refreshUser]);
 
-  // Poll Dash invoice status after showing checkout
+  // Poll Dash invoice status after showing checkout.
+  // Cap matches the BTCPay 15-minute invoice TTL so the polling outlives the
+  // backend timer (avoiding the prior 10-min stop window where late confirms
+  // left the UI stuck). Backoff: 5s → 8s → 12s, capped at 12s, to ease load.
   useEffect(() => {
     if (!dashInvoice || !dashPolling) return;
     let cancelled = false;
     let attempts = 0;
-    const maxAttempts = 120; // 10 minutes at 5s intervals
+    const maxDurationMs = 15 * 60 * 1000; // 15 min, matches BTCPay TTL
+    const startedAt = Date.now();
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const nextDelay = (n: number) => Math.min(5000 + Math.floor(n / 5) * 3000, 12000);
 
     const poll = async () => {
-      if (cancelled || attempts >= maxAttempts) return;
+      if (cancelled) return;
+      if (Date.now() - startedAt >= maxDurationMs) {
+        setDashPolling(false);
+        return;
+      }
       attempts++;
       try {
         const data = await getDashSubscriptionStatus(dashInvoice.invoiceId);
@@ -311,8 +331,9 @@ export default function Subscribe() {
         if (data.status === "completed") {
           setDashPolling(false);
           setDashPaymentSuccess(true);
+          try { sessionStorage.removeItem("pnp_pending_dash_invoice"); } catch {}
           await refreshUser();
-          setTimeout(() => {
+          timerId = setTimeout(() => {
             setDashInvoice(null);
             setDashPaymentSuccess(false);
             setPaymentSuccess(true);
@@ -322,15 +343,19 @@ export default function Subscribe() {
         if (data.status === "expired" || data.status === "invalid") {
           setDashPolling(false);
           setError(s.dashExpired);
+          try { sessionStorage.removeItem("pnp_pending_dash_invoice"); } catch {}
           return;
         }
-        setTimeout(poll, 5000);
+        if (!cancelled) timerId = setTimeout(poll, nextDelay(attempts));
       } catch {
-        if (!cancelled) setTimeout(poll, 5000);
+        if (!cancelled) timerId = setTimeout(poll, nextDelay(attempts));
       }
     };
     poll();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
   }, [dashInvoice, dashPolling, refreshUser]);
 
   // Countdown timer for Dash invoice (15-minute expiry)
@@ -384,6 +409,14 @@ export default function Subscribe() {
           setDashInvoice(invoice);
           setDashSecondsLeft(900);
           setDashPolling(true);
+          // Persist invoice id so a same-tab navigation / accidental reload can
+          // resume polling on mount instead of orphaning the in-flight payment.
+          try {
+            sessionStorage.setItem(
+              "pnp_pending_dash_invoice",
+              JSON.stringify({ invoiceId: result.invoiceId, createdAt: invoice.createdAt, planName: invoice.planName })
+            );
+          } catch {}
           // Fetch payment details for in-app widget
           getDashPaymentDetails(result.invoiceId)
             .then((details) => {
@@ -406,14 +439,10 @@ export default function Subscribe() {
               setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: "Could not load payment details" } : prev);
             });
         } else {
-          const code = (result as { code?: string }).code;
-          if (code === "BTCPAY_NOT_CONFIGURED") {
-            setError(s.dashNotConfigured);
-          } else if (code === "BTCPAY_UNREACHABLE") {
-            setError(s.dashServerUnavailable);
-          } else {
-            setError(result.error || s.failedToCreateDashInvoice);
-          }
+          // Defensive: request() throws on non-2xx, so this branch is unreachable
+          // for typical BTCPay errors. Keep as a safety net for future success:false
+          // 200-OK shapes.
+          setError(s.failedToCreateDashInvoice);
         }
       } else {
         const result = await createPayment(
@@ -423,9 +452,28 @@ export default function Subscribe() {
           appliedPromo?.code,
         );
         if (result.success && result.paymentUrl) {
-          window.open(assertPaymentUrl(result.paymentUrl), "_blank", "noopener,noreferrer");
+          const safeUrl = assertPaymentUrl(result.paymentUrl);
+
+          // F2: Write resume key BEFORE navigation so it survives a same-tab redirect.
           if (result.paymentId) {
+            try { sessionStorage.setItem("pnp_pending_payment", result.paymentId); } catch {}
             setPollingPaymentId(result.paymentId);
+          }
+
+          // F1: Branch on Telegram WebView vs. normal browser.
+          // window.open() after an await loses the user-gesture context in Telegram WebView
+          // and mobile Safari, silently returning null or doing nothing.
+          if (isTelegramContext()) {
+            // Telegram Mini App SDK openLink() is safe to call outside a gesture context.
+            window.Telegram!.WebApp.openLink(safeUrl);
+          } else {
+            // F5: Detect popup-blocked condition (window.open returns null).
+            const newWin = window.open(safeUrl, "_blank", "noopener,noreferrer");
+            if (newWin === null) {
+              // Popup was blocked — inform the user, then fall back to same-tab navigation.
+              setError("Popup blocked — opening checkout in this tab…");
+              window.location.href = safeUrl;
+            }
           }
         } else {
           // If the promo got rejected at claim-time (e.g. already_redeemed),
@@ -437,8 +485,24 @@ export default function Subscribe() {
         }
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : s.paymentErrorGeneric;
-      setError(message);
+      // Map BTCPay error codes from the thrown ApiError to translated user copy.
+      // request() throws ApiError on any non-2xx, so the create-dash error
+      // codes (BTCPAY_NOT_CONFIGURED / BTCPAY_UNREACHABLE / BTCPAY_ERROR) only
+      // ever land here, never in the result.success === false branch above.
+      if (err instanceof ApiError) {
+        if (err.code === "BTCPAY_NOT_CONFIGURED") {
+          setError(s.dashNotConfigured);
+        } else if (err.code === "BTCPAY_UNREACHABLE") {
+          setError(s.dashServerUnavailable);
+        } else if (err.code === "BTCPAY_ERROR" && provider === "dash") {
+          setError(s.failedToCreateDashInvoice);
+        } else {
+          setError(err.message || s.paymentErrorGeneric);
+        }
+      } else {
+        const message = err instanceof Error ? err.message : s.paymentErrorGeneric;
+        setError(message);
+      }
     } finally {
       setSubmitting(false);
     }

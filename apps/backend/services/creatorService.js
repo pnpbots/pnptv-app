@@ -120,6 +120,33 @@ class CreatorService {
     diamond: { price: 15.00, label: 'Diamond Profile' },
   };
 
+  /**
+   * Grant lifetime pnp-member entitlement to a newly-active creator/model and
+   * invalidate their entitlement caches. Idempotent — safe to call repeatedly.
+   * Per project_creator_entitlements policy: creators get pnp-member (full
+   * platform access except PRIME-exclusive content), not prime.
+   */
+  static async _grantCreatorMembership(userId) {
+    if (!userId) return;
+    try {
+      await query(
+        `INSERT INTO user_entitlements (user_id, add_on_id, granted_at, is_lifetime, is_consumed, expires_at)
+         VALUES ($1, 'pnp-member', NOW(), true, false, NULL)
+         ON CONFLICT (user_id, add_on_id, creator_id) DO UPDATE
+         SET is_lifetime = true,
+             is_consumed = false,
+             expires_at = NULL,
+             updated_at = NOW()`,
+        [String(userId)]
+      );
+      const EntitlementAccessService = require('./entitlementAccessService');
+      await EntitlementAccessService.invalidateCache(userId);
+      logger.info('Granted lifetime pnp-member to new creator', { userId });
+    } catch (err) {
+      logger.error('_grantCreatorMembership failed (non-fatal)', { userId, error: err.message });
+    }
+  }
+
   // ── Activate (Tiered) ─────────────────────────────────────────────────────
 
   static async activateCreator(userId, tier = 'ice', termsAccepted = false) {
@@ -147,6 +174,9 @@ class CreatorService {
        WHERE id = $1`,
       [userId, tier, price]
     );
+
+    // Grant lifetime pnp-member so the creator immediately has full platform access
+    await this._grantCreatorMembership(userId);
 
     // Sync Authentik Creators group — non-fatal
     try {
@@ -197,6 +227,9 @@ class CreatorService {
        WHERE id = $1`,
       [app.user_id, priceUsd]
     );
+
+    // Grant lifetime pnp-member so the approved creator immediately has full access
+    await this._grantCreatorMembership(app.user_id);
 
     // Generate subscription code, live channel slug, and set DM policy
     try {
@@ -1023,7 +1056,11 @@ class CreatorService {
     const validTiers = { ice: 5.00, crystal: 10.00, diamond: 15.00 };
     if (!validTiers[tier]) throw new Error('Invalid tier. Choose ice, crystal, or diamond.');
 
-    const validMethods = ['meru', 'usdc', 'usdt'];
+    // 'dash' is the canonical crypto payout path (BTCPay Pull Payments) since
+    // the Daimo USDC retirement on 2026-04-21. usdc/usdt remain accepted for
+    // compatibility with creators enrolled pre-retirement; the monthly cron
+    // routes them to the manual review queue rather than auto-paying.
+    const validMethods = ['dash', 'meru', 'usdc', 'usdt'];
     if (!validMethods.includes(paymentMethod)) throw new Error('Invalid payment method.');
     if (!paymentAddress?.trim()) throw new Error('Payment address or Meru account ID is required.');
     if (!signatureData) throw new Error('Digital signature is required.');

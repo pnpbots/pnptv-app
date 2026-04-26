@@ -48,26 +48,30 @@ class CreatorPayoutService {
     // Aggregate available earnings by creator; only those meeting the minimum threshold
     let rows;
     try {
+      // GROUP BY creator_id only — aggregate user fields with MAX so the same
+      // creator never splits into multiple aggregate rows when their profile
+      // (dash address, email, etc.) changed mid-month. LEFT JOIN so a creator
+      // whose users row was removed (e.g. UUID rename via account dedup) still
+      // surfaces in the result with NULL contact fields, surfacing as a SKIP
+      // rather than silently dropping their earnings.
       const result = await query(`
         SELECT
           ce.creator_id,
           COALESCE(SUM(ce.amount_creator), 0)::numeric  AS total_creator,
           ARRAY_AGG(ce.id)                               AS earning_ids,
-          u.creator_dash_address,
-          u.payout_method,
-          u.fiat_payout_method,
-          u.fiat_payout_account,
-          u.email,
-          u.username,
-          u.first_name,
-          u.language
+          MAX(u.creator_dash_address)                    AS creator_dash_address,
+          MAX(u.payout_method)                           AS payout_method,
+          MAX(u.fiat_payout_method)                      AS fiat_payout_method,
+          MAX(u.fiat_payout_account)                     AS fiat_payout_account,
+          MAX(u.email)                                   AS email,
+          MAX(u.username)                                AS username,
+          MAX(u.first_name)                              AS first_name,
+          MAX(u.language)                                AS language
         FROM creator_earnings ce
-        JOIN users u ON u.id = ce.creator_id
+        LEFT JOIN users u ON u.id = ce.creator_id
         WHERE ce.status  = 'available'
           AND ce.paid_at IS NULL
-        GROUP BY ce.creator_id, u.creator_dash_address, u.payout_method,
-                 u.fiat_payout_method, u.fiat_payout_account, u.email,
-                 u.username, u.first_name, u.language
+        GROUP BY ce.creator_id
         HAVING COALESCE(SUM(ce.amount_creator), 0) >= $1
       `, [MINIMUM_PAYOUT_USD]);
       rows = result.rows;
@@ -538,7 +542,8 @@ class CreatorPayoutService {
       const { query: dbQuery } = require('../config/postgres');
       await dbQuery(
         `INSERT INTO dash_subscription_orders (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id)
-         VALUES ($1, 'creator_monthly', NULL, $2, $3, 'pending', $4)`,
+         VALUES ($1, 'creator_monthly', NULL, $2, $3, 'pending', $4)
+         ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
         [String(subscriber_id), priceUsd, invoice.invoiceId, String(creator_id)]
       );
 
@@ -663,6 +668,204 @@ class CreatorPayoutService {
         error: err.message,
       });
     }
+  }
+
+  // ── Scoped Subscription Renewals (paid channels & paid hangouts) ─────────────
+
+  /**
+   * Run daily renewal reminders for paid channel-access and hangout-access
+   * entitlements expiring within the next 3 days. Sends multi-channel reminders
+   * (in-app notification + push + Telegram bot DM via NotificationEmitter, plus
+   * email via EmailService) — does NOT create any invoice. The user follows the
+   * reminder link back to the channel/hangout and re-purchases through the
+   * existing /api/webapp/{channels,hangouts}/:id/purchase flow when they're ready.
+   *
+   * Triggered by CHANNEL_HANGOUT_RENEWAL_CRON (default: '15 9 * * *').
+   */
+  static async runScopedSubscriptionRenewals() {
+    logger.info('CreatorPayoutService: starting scoped (channel/hangout) renewal reminders');
+
+    let entitlements;
+    try {
+      const result = await query(`
+        SELECT
+          ue.id            AS entitlement_id,
+          ue.user_id,
+          ue.add_on_id,
+          ue.creator_id    AS scope_id,
+          ue.expires_at,
+          u.email          AS user_email,
+          u.language       AS user_language,
+          u.first_name     AS subscriber_first_name,
+          u.username       AS subscriber_username
+        FROM user_entitlements ue
+        JOIN users u ON u.id = ue.user_id
+        WHERE ue.add_on_id IN ('channel-access', 'hangout-access')
+          AND ue.is_consumed = false
+          AND ue.is_lifetime = false
+          AND ue.auto_renew  = true
+          AND ue.expires_at IS NOT NULL
+          AND ue.expires_at <= NOW() + INTERVAL '3 days'
+          AND ue.expires_at >  NOW()
+        ORDER BY ue.expires_at ASC
+      `);
+      entitlements = result.rows;
+    } catch (err) {
+      logger.error('CreatorPayoutService: failed to fetch scoped renewal batch', { error: err.message });
+      return { success: false, error: err.message };
+    }
+
+    if (entitlements.length === 0) {
+      logger.info('CreatorPayoutService: no scoped subscriptions due for renewal reminder');
+      return { success: true, processed: 0, reminded: 0, failed: 0 };
+    }
+
+    logger.info(`CreatorPayoutService: sending renewal reminders for ${entitlements.length} scoped subscription(s)`);
+
+    let reminded = 0;
+    let failed = 0;
+
+    for (const ent of entitlements) {
+      try {
+        const result = await this._sendScopedRenewalReminder(ent);
+        if (result.reminded) reminded++;
+        else failed++;
+      } catch (err) {
+        failed++;
+        logger.error('CreatorPayoutService: unhandled error during scoped renewal reminder', {
+          entitlementId: ent.entitlement_id,
+          error: err.message,
+        });
+      }
+    }
+
+    logger.info('CreatorPayoutService: scoped renewal reminders complete', {
+      processed: entitlements.length, reminded, failed,
+    });
+    return { success: true, processed: entitlements.length, reminded, failed };
+  }
+
+  /**
+   * Send a renewal reminder for a single channel-access or hangout-access
+   * entitlement. Multi-channel: in-app + push + Telegram bot DM (via
+   * NotificationEmitter, which respects the user's notification preferences)
+   * plus email (if the user has one). No payment record is created — the user
+   * re-purchases through the existing flow when they choose to.
+   */
+  static async _sendScopedRenewalReminder(ent) {
+    const { entitlement_id, user_id, add_on_id, scope_id, expires_at, user_email, user_language } = ent;
+    const webAppUrl = process.env.WEB_APP_URL || 'https://pnptv.app';
+
+    // Look up the resource so we know it's still active + for the deep link / current price
+    let priceUsd, resourceName, scopeMetadata, deepLink, kindLabel;
+    try {
+      if (add_on_id === 'channel-access') {
+        const { rows } = await query(
+          `SELECT id, name, price_usd, hangout_group_id, access_type
+             FROM creator_channels WHERE id = $1 AND is_active = true LIMIT 1`,
+          [scope_id]
+        );
+        if (!rows.length || rows[0].access_type !== 'paid' || Number(rows[0].price_usd) <= 0) {
+          logger.warn('Scoped renewal reminder skipped — channel no longer paid/active', {
+            entitlementId: entitlement_id, channelId: scope_id,
+          });
+          // Auto-disable renewal so we stop reminding
+          await query(`UPDATE user_entitlements SET auto_renew = false WHERE id = $1`, [entitlement_id]);
+          return { reminded: false };
+        }
+        const ch = rows[0];
+        priceUsd = Number(ch.price_usd);
+        resourceName = ch.name;
+        scopeMetadata = { channelId: ch.id, hangoutGroupId: ch.hangout_group_id, channelName: ch.name };
+        deepLink = `${webAppUrl}/channels/${ch.id}`;
+        kindLabel = 'channel';
+      } else {
+        const { rows } = await query(
+          `SELECT id, name, price_usd, is_paid
+             FROM hangout_groups WHERE id = $1 LIMIT 1`,
+          [scope_id]
+        );
+        if (!rows.length || !rows[0].is_paid || Number(rows[0].price_usd) <= 0) {
+          logger.warn('Scoped renewal reminder skipped — hangout no longer paid/active', {
+            entitlementId: entitlement_id, hangoutId: scope_id,
+          });
+          await query(`UPDATE user_entitlements SET auto_renew = false WHERE id = $1`, [entitlement_id]);
+          return { reminded: false };
+        }
+        const hg = rows[0];
+        priceUsd = Number(hg.price_usd);
+        resourceName = hg.name;
+        scopeMetadata = { hangoutGroupId: hg.id, hangoutName: hg.name };
+        deepLink = `${webAppUrl}/chat/${hg.id}`;
+        kindLabel = 'hangout';
+      }
+    } catch (lookupErr) {
+      logger.error('Scoped renewal reminder: resource lookup failed', {
+        entitlementId: entitlement_id, error: lookupErr.message,
+      });
+      return { reminded: false };
+    }
+
+    const daysLeft = Math.max(0, Math.ceil((new Date(expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+    const lang = (user_language || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
+    const expiresLabel = new Date(expires_at).toUTCString();
+
+    // 1. In-app + push + Telegram bot — handled by NotificationEmitter respecting per-channel prefs
+    try {
+      const messageEn = `Your ${kindLabel} subscription to "${resourceName}" expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. Tap to renew for $${priceUsd.toFixed(2)}.`;
+      const messageEs = `Tu suscripción al ${kindLabel === 'channel' ? 'canal' : 'hangout'} "${resourceName}" vence en ${daysLeft} día${daysLeft === 1 ? '' : 's'}. Toca para renovar por $${priceUsd.toFixed(2)}.`;
+      await NotificationEmitter.emit({
+        type: 'payment',
+        category: 'commerce',
+        priority: 'high',
+        actorId: null,
+        targetUserId: user_id,
+        entityType: kindLabel,
+        entityId: String(scope_id),
+        message: lang === 'es' ? messageEs : messageEn,
+        metadata: { ...scopeMetadata, priceUsd, daysLeft, deepLink, expiresAt: expires_at },
+      });
+    } catch (notifyErr) {
+      logger.warn('Scoped renewal reminder: in-app/push/bot notify failed (non-fatal)', {
+        entitlementId: entitlement_id, error: notifyErr.message,
+      });
+    }
+
+    // 2. Email — if the user has one
+    if (user_email) {
+      try {
+        const EmailService = require('./emailService');
+        const subject = lang === 'es'
+          ? `Tu suscripción a "${resourceName}" vence en ${daysLeft} día${daysLeft === 1 ? '' : 's'}`
+          : `Your "${resourceName}" subscription expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`;
+        const html = lang === 'es'
+          ? `<div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:24px">
+              <h2 style="color:#D4007A">Renueva tu suscripción</h2>
+              <p>Tu suscripción al ${kindLabel === 'channel' ? 'canal' : 'hangout'} <strong>${resourceName}</strong> vence el ${expiresLabel} (en ${daysLeft} día${daysLeft === 1 ? '' : 's'}).</p>
+              <p>Renueva ahora por <strong>$${priceUsd.toFixed(2)}</strong> para mantener tu acceso.</p>
+              <p style="margin:24px 0"><a href="${deepLink}" style="background:#D4007A;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Renovar acceso</a></p>
+              <p style="color:#888;font-size:12px">Puedes cancelar la renovación automática en cualquier momento desde tu cuenta.</p>
+            </div>`
+          : `<div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:24px">
+              <h2 style="color:#D4007A">Renew your subscription</h2>
+              <p>Your ${kindLabel} subscription to <strong>${resourceName}</strong> expires on ${expiresLabel} (in ${daysLeft} day${daysLeft === 1 ? '' : 's'}).</p>
+              <p>Renew now for <strong>$${priceUsd.toFixed(2)}</strong> to keep your access.</p>
+              <p style="margin:24px 0"><a href="${deepLink}" style="background:#D4007A;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Renew access</a></p>
+              <p style="color:#888;font-size:12px">You can cancel auto-renewal anytime from your account.</p>
+            </div>`;
+        await EmailService.send({ to: user_email, subject, html });
+      } catch (emailErr) {
+        logger.warn('Scoped renewal reminder: email failed (non-fatal)', {
+          entitlementId: entitlement_id, error: emailErr.message,
+        });
+      }
+    }
+
+    logger.info('CreatorPayoutService: scoped renewal reminder sent', {
+      entitlementId: entitlement_id, userId: user_id, addOnId: add_on_id, scopeId: scope_id,
+      daysLeft, hasEmail: !!user_email,
+    });
+    return { reminded: true };
   }
 }
 

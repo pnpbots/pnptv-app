@@ -100,11 +100,11 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     id: "nearby",
     emoji: "📍",
     steps: [
-      { title: "Open Nearby", description: "Tap the map pin icon in the bottom navigation to open Nearby. The first time, your browser will ask permission to access your location — tap 'Allow'. Your exact coordinates are never stored, only a general area." },
+      { title: "Open Connect", description: "Tap the map pin icon in the bottom navigation to open Connect. The first time, your browser will ask permission to access your location — tap 'Allow'. Your exact coordinates are never stored, only a general area." },
       { title: "Map & List Views", description: "PNP Connect has two views: Map (shows pins on a map where users are) and List (shows profile cards sorted by distance). Switch between them using the toggle at the top." },
       { title: "Adjust Your Radius", description: "Use the distance radius filter to control how far you want to search. You can set it from a few kilometers to a wider range. Only users within your selected radius will appear." },
-      { title: "View a Profile", description: "Tap any user card or map pin to view their profile. You'll see their photo, bio, interests, and distance from you. From there you can follow them or send a DM (PRIME required for DMs).", action: "Go to Nearby" },
-      { title: "Privacy: Hide Your Location", description: "Go to Profile → Settings. You can toggle 'Show location' off to hide yourself from Nearby entirely. Other users won't see you on the map or list. You can re-enable it anytime." },
+      { title: "View a Profile", description: "Tap any user card or map pin to view their profile. You'll see their photo, bio, interests, and distance from you. From there you can follow them or send a DM.", action: "Go to Connect" },
+      { title: "Privacy: Hide Your Location", description: "Go to Profile → Settings. You can toggle 'Show location' off to hide yourself from Connect entirely. Other users won't see you on the map or list. You can re-enable it anytime." },
       { title: "Privacy: Control Visibility", description: "In Profile → Settings, you can control what others see: show/hide your bio, date of birth, interests, and online status. You can also toggle 'Allow messages' to block DMs from strangers." },
     ],
   },
@@ -126,14 +126,13 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     id: "prime",
     emoji: "👑",
     steps: [
-      { title: "What PRIME Unlocks", description: "PRIME is the premium tier. It unlocks: unlimited Direct Messages (FREE gets 3/day), exclusive creator content, priority in Nearby, HD live streaming, Hangout hosting, full Videorama catalog, and VIP support." },
+      { title: "What PRIME Unlocks", description: "PRIME is the premium tier. It unlocks: exclusive creator content, priority in Connect, HD live streaming, Hangout hosting, and VIP support." },
       { title: "Choose Your Plan", description: "Go to the Subscribe page. Available plans: PRIME Trial Week ($14.99, 7 days), Monthly ($24.99, 30 days), Crystal ($49.99, 6 months), Diamond ($99.99, 1 year — best value), and Lifetime ($249.99, pay once, forever).", action: "Go to Subscribe" },
       { title: "Pay with Credit/Debit Card", description: "On the Subscribe page, select your plan and tap 'Pay with Card'. This uses ePayco and supports Visa, Mastercard, and other major cards. You can pay in USD or COP (Colombian pesos). Follow the secure checkout form." },
-      { title: "Pay with Crypto (Daimo)", description: "Select your plan and tap 'Pay with Crypto'. A Daimo checkout modal appears with a QR code and wallet address. Send USDC to the address. Your PRIME activates automatically when the payment confirms on-chain." },
-      { title: "Pay with Dash/BTCPay", description: "If available, you'll see a 'Pay with Dash' option. This creates a BTCPay invoice for anonymous cryptocurrency payment. Scan the QR code with your Dash wallet. The system polls for payment confirmation." },
+      { title: "Pay with Dash (Crypto)", description: "Select your plan and tap 'Pay with Dash'. The in-app widget shows a QR code, the exact Dash amount, and the destination address. Open your Dash wallet, scan the code, and send the amount. The system polls for confirmation and activates your PRIME automatically — usually within a few minutes." },
       { title: "Use an Activation Code", description: "Have a Meru activation code? On the Subscribe page, enter it in the activation code field. If you forgot your code, you must provide a bank statement screenshot showing the amount, date, and exact hour of payment via support ticket." },
       { title: "Check Your Membership Status", description: "Go to Profile → Settings → Membership section. You'll see your current tier (FREE, Member, or PRIME), your plan name, expiry date, and subscription status. This refreshes automatically from the database.", action: "Go to Profile" },
-      { title: "FREE vs PRIME Comparison", description: "FREE: basic Social Feed, public Hangouts, basic Nearby, limited Videorama, 3 DMs/day, Cristina AI support. PRIME adds: unlimited DMs, exclusive content, private Hangouts hosting, HD streaming, full Videorama, priority Nearby, VIP support." },
+      { title: "FREE vs PRIME Comparison", description: "FREE: Social Feed, public Hangouts, basic Connect, unlimited DMs, Cristina AI support. PRIME adds: exclusive content, private Hangouts hosting, HD streaming, priority Connect, VIP support." },
     ],
   },
   {
@@ -153,13 +152,12 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     id: "payments",
     emoji: "💳",
     steps: [
-      { title: "Payment Methods Overview", description: "PNPtv accepts four payment methods: ePayco (credit/debit cards), Daimo (USDC crypto), Dash via BTCPay (anonymous crypto), and Meru activation codes. Choose whichever is most convenient for you." },
+      { title: "Payment Methods Overview", description: "PNPtv accepts three payment methods: ePayco (credit/debit cards), Dash via BTCPay (private crypto), and Meru activation codes. Choose whichever is most convenient for you." },
       { title: "Step 1: Choose Your Plan", description: "Go to the Subscribe page from the bottom nav or the upgrade banner on Home. Browse available plans — each shows the price, duration, and what's included. Tap a plan card to select it.", action: "Go to Subscribe" },
       { title: "Credit/Debit Card via ePayco", description: "After selecting a plan, tap 'Pay with Card'. The ePayco secure checkout opens. Enter your card number, expiry date, CVV, and name. Supports Visa, Mastercard, Amex. Payments can be in USD or COP (auto-detected by your region)." },
       { title: "ePayco: Completing Payment", description: "After entering your card details, tap 'Pay'. You may need to complete 3D Secure verification (a popup from your bank). Once approved, your PRIME status activates automatically and you're redirected back to PNPtv." },
-      { title: "Crypto via Daimo (USDC)", description: "Tap 'Pay with Crypto' after selecting a plan. A Daimo checkout modal appears showing a QR code and wallet address. Open your crypto wallet (Coinbase, MetaMask, any USDC wallet), scan the QR or paste the address, and send the exact USDC amount shown." },
-      { title: "Daimo: Payment Confirmation", description: "After sending USDC, the app monitors the blockchain for your payment. Once confirmed (usually within a few minutes), your PRIME activates automatically. You'll see a confirmation screen." },
-      { title: "Anonymous Crypto via Dash/BTCPay", description: "If available, tap 'Pay with Dash'. A BTCPay invoice is generated with a QR code. Open your Dash wallet, scan the code, and send the amount. The system polls for confirmation. Good for maximum privacy — no personal info required." },
+      { title: "Anonymous Crypto via Dash/BTCPay", description: "Tap 'Pay with Dash'. A BTCPay invoice is generated with a QR code, the exact Dash amount, and the destination address. Open your Dash wallet, scan the code, and send the amount. The system polls for confirmation. Good for maximum privacy — no personal info required." },
+      { title: "Dash: Payment Confirmation", description: "After sending Dash, the app polls BTCPay for confirmation. Once confirmed (usually 2–5 minutes thanks to InstantSend), your PRIME activates automatically. You'll see a confirmation screen." },
       { title: "Activation Codes (Meru)", description: "If you have a Meru code (from email, promotions, or referrals), go to Subscribe and enter it in the activation code field. Tap 'Activate'. If you forgot your code, you must provide a bank statement screenshot showing the amount, date, and hour of payment via support ticket to recover it." },
       { title: "Payment Issues?", description: "If your payment fails: check your card has sufficient funds, ensure 3D Secure popup wasn't blocked, or try a different payment method. For crypto, make sure you sent the exact amount to the correct address. Contact Cristina AI or email support@pnptv.app for help." },
     ],
@@ -170,7 +168,7 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     steps: [
       { title: "What are PNP Tokens?", description: "PNP Tokens are the in-app currency. You can use tokens to tip creators, make in-app purchases, and unlock special features. Tokens are separate from your PRIME subscription." },
       { title: "Buy Tokens", description: "Go to the Token Checkout page. You'll see available token packages at different price points. Select a package to proceed to payment.", action: "Go to Token Checkout" },
-      { title: "Pay for Tokens", description: "Token purchases support the same payment methods as subscriptions: ePayco (credit/debit cards) and Daimo (USDC crypto). Select your preferred method and complete the payment flow." },
+      { title: "Pay for Tokens", description: "Token purchases support ePayco (credit/debit cards) and Dash via BTCPay (private crypto). Select your preferred method and complete the payment flow." },
       { title: "Check Your Balance", description: "Your token balance is shown in your wallet. You can access it from your Profile or the token section. The balance updates in real time after purchases." },
       { title: "View Purchase History", description: "Your token transaction history shows all purchases and spending. Each entry includes the amount, date, and type of transaction." },
     ],
@@ -320,7 +318,6 @@ const PAGE_CONTEXT: { match: (p: string) => boolean; ctx: PageContext }[] = [
       titleEs: "Media y Contenido",
       chips: [
         { icon: "🎵", en: "How does the radio/music player work?", es: "¿Cómo funciona el reproductor de música/radio?" },
-        { icon: "🎬", en: "What is Videorama?", es: "¿Qué es Videorama?" },
         { icon: "📻", en: "How do I request a song?", es: "¿Cómo pido una canción?" },
         { icon: "📺", en: "What content is available on Channels?", es: "¿Qué contenido hay en Canales?" },
       ],
@@ -883,7 +880,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           <div>
             <h3 className="text-sm font-semibold text-pnp-textPrimary">{t.widgetName}</h3>
             <p className="text-[10px] text-pnp-textSecondary">
-              {activeTab === "vj" ? "PNP Radio" : activeTab === "nearby" ? "PNP Connect" : pageCtx ? (lang === "es" ? pageCtx.titleEs : pageCtx.titleEn) : t.widgetSubtitle}
+              {activeTab === "vj" ? "PNP Radio" : pageCtx ? (lang === "es" ? pageCtx.titleEs : pageCtx.titleEn) : t.widgetSubtitle}
             </p>
           </div>
         </div>
@@ -1365,7 +1362,6 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
                   className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500/50"
                 >
                   <option value="epayco">ePayco (Card)</option>
-                  <option value="daimo">Daimo (USDC)</option>
                   <option value="btcpay">BTCPay (Dash)</option>
                   <option value="visa">Visa Cybersource</option>
                 </select>

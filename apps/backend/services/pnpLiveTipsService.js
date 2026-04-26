@@ -223,14 +223,20 @@ class PNPLiveTipsService {
   }
 
   /**
-   * Confirm tip payment
+   * Confirm tip payment and record the 70/30 creator earnings split.
+   * Idempotent: the WHERE payment_status='pending' clause guarantees at-most-once
+   * earnings recording even if BTCPay redelivers the webhook.
    * @param {number} tipId - Tip ID
-   * @param {string} transactionId - Payment transaction ID
+   * @param {string} transactionId - Payment transaction ID (BTCPay invoiceId for Dash tips)
    * @returns {Promise<Object>} Updated tip
    */
   static async confirmTipPayment(tipId, transactionId) {
+    let client;
     try {
-      const result = await query(
+      client = await getClient();
+      await client.query('BEGIN');
+
+      const result = await client.query(
         `UPDATE pnp_tips
          SET payment_status = 'completed',
              transaction_id = $1,
@@ -244,14 +250,53 @@ class PNPLiveTipsService {
       const updatedCount = typeof result.rowCount === 'number' ? result.rowCount : updatedRows.length;
 
       if (updatedCount === 0) {
+        await client.query('ROLLBACK');
         logger.info('confirmTipPayment: already confirmed or not found — idempotent no-op', { tipId });
         return null;
       }
 
-      return updatedRows[0] || null;
+      const tip = updatedRows[0];
+
+      // Record 70/30 earnings for the performer if not already recorded
+      // (token-tip path inserts earnings inline at tip creation; Dash-tip path
+      // arrives here after webhook settlement). Use transaction_id as the
+      // source_payment_id so a future invoice invalidation can void the row.
+      const performerId = tip.performer_id || (tip.model_id != null ? String(tip.model_id) : null);
+      const tipAmount = parseFloat(tip.amount);
+      if (performerId && Number.isFinite(tipAmount) && tipAmount > 0) {
+        const amountCreator = Math.round(tipAmount * CREATOR_REVENUE_RATE * 100) / 100;
+        const amountPlatform = Math.round(tipAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
+        const sourcePaymentId = transactionId || tip.transaction_id || null;
+        // Skip if an earnings row for this exact source_payment_id already exists
+        // (defense-in-depth on top of the WHERE-pending guard above).
+        const existing = await client.query(
+          `SELECT id FROM creator_earnings WHERE source_payment_id = $1 AND creator_id = $2 LIMIT 1`,
+          [sourcePaymentId, performerId]
+        );
+        if (existing.rowCount === 0) {
+          await client.query(
+            `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+             VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+            [performerId, tipAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
+          );
+          logger.info('Tip earnings recorded (70/30, holding)', {
+            tipId, performerId, tipAmount, amountCreator, sourcePaymentId,
+          });
+        } else {
+          logger.info('Tip earnings already recorded — idempotent no-op', { tipId, sourcePaymentId });
+        }
+      }
+
+      await client.query('COMMIT');
+      return tip;
     } catch (error) {
+      if (client) {
+        try { await client.query('ROLLBACK'); } catch (_) { /* best effort */ }
+      }
       logger.error('Error confirming tip payment:', error);
       throw new Error('Failed to confirm tip payment');
+    } finally {
+      if (client) client.release();
     }
   }
 

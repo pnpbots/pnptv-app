@@ -8,12 +8,174 @@ const PromoService = require('./promoService');
 const SubscriberModel = require('../models/subscriberModel');
 const ModelService = require('./modelService');
 const PNPLiveService = require('./pnpLiveService');
-const { cache } = require('../config/redis');
+const { cache, getRedis } = require('../config/redis');
 const { query, getClient } = require('../config/postgres');
 const logger = require('../utils/logger');
 const crypto = require('crypto');
+const https = require('https');
 const { Telegraf } = require('telegraf');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
+
+// ─── ePayco USD→COP FX Rate ──────────────────────────────────────────────────
+// PNPtv displays prices in USD to international users but settles via ePayco's
+// Colombian acquiring network in COP. The rate is fetched daily from a public
+// FX API and stored in Redis. Do not hardcode a fallback — fail closed instead.
+
+const FX_REDIS_KEY = 'epayco:cop_rate';
+const FX_TTL_SECONDS = 48 * 60 * 60;   // 48-hour Redis TTL
+const FX_MAX_AGE_MS  = 36 * 60 * 60 * 1000; // treat stale if older than 36h
+const FX_RATE_MIN = 1000;
+const FX_RATE_MAX = 10000;
+
+/**
+ * Fetch a HTTPS URL and return parsed JSON.
+ * Uses Node's built-in https module — no new dependency added.
+ * @param {string} url
+ * @param {number} [timeoutMs=8000]
+ * @returns {Promise<object>}
+ */
+function _httpsGetJson(url, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { timeout: timeoutMs }, (res) => {
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode} from ${url}`));
+      }
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (e) {
+          reject(new Error(`JSON parse error from ${url}: ${e.message}`));
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(new Error(`Timeout fetching ${url}`)); });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Fetch COP/USD rate from public APIs (no API key required).
+ * Primary:  open.er-api.com
+ * Fallback: api.frankfurter.app
+ * @returns {Promise<{rate: number, source: string}>}
+ * @throws if both APIs fail or return an out-of-band rate
+ */
+async function fetchCopRateFromUpstream() {
+  const sources = [
+    {
+      name: 'open.er-api.com',
+      url: 'https://open.er-api.com/v6/latest/USD',
+      extract: (data) => {
+        if (data && data.result === 'success' && data.rates && typeof data.rates.COP === 'number') {
+          return data.rates.COP;
+        }
+        return null;
+      },
+    },
+    {
+      name: 'api.frankfurter.app',
+      url: 'https://api.frankfurter.app/latest?from=USD&to=COP',
+      extract: (data) => {
+        if (data && data.rates && typeof data.rates.COP === 'number') {
+          return data.rates.COP;
+        }
+        return null;
+      },
+    },
+  ];
+
+  let lastError;
+  for (const source of sources) {
+    try {
+      const data = await _httpsGetJson(source.url);
+      const rate = source.extract(data);
+      if (rate === null) {
+        throw new Error(`Unexpected response shape from ${source.name}`);
+      }
+      if (rate < FX_RATE_MIN || rate > FX_RATE_MAX) {
+        throw new Error(
+          `Sanity check failed: ${source.name} returned COP rate ${rate} — outside [${FX_RATE_MIN},${FX_RATE_MAX}]`,
+        );
+      }
+      logger.info('[ePayco FX] Rate fetched from upstream', { source: source.name, rate });
+      return { rate, source: source.name };
+    } catch (err) {
+      logger.warn('[ePayco FX] Source failed, trying next', { source: source.name, error: err.message });
+      lastError = err;
+    }
+  }
+  throw new Error(`All FX sources failed. Last error: ${lastError ? lastError.message : 'unknown'}`);
+}
+
+/**
+ * Fetch the live COP/USD rate, write it to Redis with a 48h TTL, and return it.
+ * Used by the daily cron AND as a self-heal inline fetch when the key is missing.
+ * @returns {Promise<number>} The COP per 1 USD rate
+ */
+async function refreshEpaycoCopRate() {
+  const { rate, source } = await fetchCopRateFromUpstream();
+  const payload = JSON.stringify({ rate, fetchedAt: Date.now(), source });
+  const redis = getRedis();
+  await redis.set(FX_REDIS_KEY, payload, 'EX', FX_TTL_SECONDS);
+  logger.info('[ePayco FX] Rate stored in Redis', { rate, source, ttlHours: FX_TTL_SECONDS / 3600 });
+  return rate;
+}
+
+/**
+ * Read the COP/USD rate from Redis.
+ * If the key is missing or older than 36 h, attempts ONE inline self-heal fetch.
+ * If self-heal also fails, throws FX_RATE_UNAVAILABLE so callers can fail closed.
+ * @returns {Promise<number>}
+ * @throws {Error} with message 'FX_RATE_UNAVAILABLE'
+ */
+async function getEpaycoCopRate() {
+  let raw;
+  try {
+    const redis = getRedis();
+    raw = await redis.get(FX_REDIS_KEY);
+  } catch (redisErr) {
+    logger.warn('[ePayco FX] Redis read failed, attempting self-heal fetch', { error: redisErr.message });
+  }
+
+  if (raw) {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_) {
+      logger.warn('[ePayco FX] Corrupt Redis entry, attempting self-heal fetch');
+    }
+    if (parsed && typeof parsed.rate === 'number' && typeof parsed.fetchedAt === 'number') {
+      const ageMs = Date.now() - parsed.fetchedAt;
+      if (ageMs < FX_MAX_AGE_MS) {
+        return parsed.rate;
+      }
+      logger.warn('[ePayco FX] Cached rate is stale, attempting self-heal fetch', {
+        ageHours: (ageMs / 3600000).toFixed(1),
+        cachedRate: parsed.rate,
+      });
+    }
+  } else {
+    logger.warn('[ePayco FX] No rate in Redis, attempting self-heal fetch');
+  }
+
+  // Self-heal: try primary source once before giving up.
+  try {
+    const rate = await refreshEpaycoCopRate();
+    logger.info('[ePayco FX] Self-heal fetch succeeded', { rate });
+    return rate;
+  } catch (selfHealErr) {
+    logger.error('[ePayco FX] Self-heal fetch failed — throwing FX_RATE_UNAVAILABLE', {
+      error: selfHealErr.message,
+    });
+    const err = new Error('FX_RATE_UNAVAILABLE');
+    err.code = 'FX_RATE_UNAVAILABLE';
+    throw err;
+  }
+}
 
 // Singleton bot instance — avoids spawning a new Telegraf per payment event.
 let _botInstance = null;
@@ -269,7 +431,7 @@ class PaymentService {
     };
   }
 
-  static resolveExpectedEpaycoAmountAndCurrency(payment) {
+  static async resolveExpectedEpaycoAmountAndCurrency(payment) {
     const metadata = payment?.metadata || {};
     const rawCurrencyCandidates = [
       metadata.expected_epayco_currency,
@@ -296,9 +458,16 @@ class PaymentService {
 
     // Fallback for one-time card charges in this project:
     // Internal amount is stored in USD and ePayco charge is sent in COP.
+    // PNPtv displays prices in USD to international users but settles via ePayco's
+    // Colombian acquiring network in COP. The rate is fetched daily from a public
+    // FX API (see getEpaycoCopRate above). Do not hardcode a fallback — fail closed instead.
     const internalAmount = Number(payment?.amount);
     if (Number.isFinite(internalAmount) && internalAmount > 0) {
-      rawAmountCandidates.push(Math.round(internalAmount * parseFloat(process.env.EPAYCO_USD_TO_COP || '4000')));
+      let _fxRate;
+      try { _fxRate = await getEpaycoCopRate(); } catch (_) { /* rate unavailable — skip COP candidate, USD candidate stays */ }
+      if (_fxRate) {
+        rawAmountCandidates.push(Math.round(internalAmount * _fxRate));
+      }
       rawAmountCandidates.push(internalAmount);
     }
 
@@ -312,12 +481,12 @@ class PaymentService {
     };
   }
 
-  static validateWebhookAmountCurrency(payment, webhookData) {
+  static async validateWebhookAmountCurrency(payment, webhookData) {
     if (!payment || !webhookData) {
       return { valid: false, reason: 'missing_context' };
     }
 
-    const expected = this.resolveExpectedEpaycoAmountAndCurrency(payment);
+    const expected = await this.resolveExpectedEpaycoAmountAndCurrency(payment);
     if (expected.amountCandidates.length === 0 || expected.currencyCandidates.length === 0) {
       return {
         valid: true,
@@ -353,22 +522,24 @@ class PaymentService {
         if (Number.isFinite(received) && closest > 0) {
           const deltaPct = ((received - closest) / closest) * 100;
           if (Math.abs(deltaPct) >= 10) {
-            const envRate = process.env.EPAYCO_USD_TO_COP || '4000';
             const deltaPercent = Number(deltaPct.toFixed(2));
+            // Fetch the live rate for the drift report (best-effort; fall back to 'unknown' if unavailable).
+            let _liveRate = 'unknown';
+            try { _liveRate = String(await getEpaycoCopRate()); } catch (_) { /* non-critical */ }
             logger.warn('[ePayco] FX rate drift — webhook COP amount differs from stored expected by >10%', {
               paymentId: payment.id,
               received,
               expectedClosest: closest,
               deltaPercent,
-              envRate,
-              hint: 'Update EPAYCO_USD_TO_COP env var if the market rate has shifted permanently.',
+              liveRate: _liveRate,
+              hint: 'The stored expected_epayco_amount used the rate at checkout time. Check getEpaycoCopRate() for current rate.',
             });
             PaymentService.notifyFxDrift({
               paymentId: payment.id,
               received,
               expectedClosest: closest,
               deltaPercent,
-              envRate,
+              envRate: _liveRate,
             }).catch((err) => logger.error('[ePayco] FX drift notify failed', { error: err?.message }));
           }
         }
@@ -417,12 +588,12 @@ class PaymentService {
         '⚠️ <b>FX RATE DRIFT — ePayco</b>',
         '',
         `📉 Drift: ${deltaPercent}% (>=10% threshold)`,
-        `💱 Env rate (USD→COP): ${envRate}`,
+        `💱 Live rate (USD→COP): ${envRate}`,
         `🎯 Reference (closest expected): ${expectedClosest}`,
         `📨 Webhook amount received: ${received}`,
         `🧾 Payment: <code>${paymentId || 'N/A'}</code>`,
         '',
-        'Review <code>EPAYCO_USD_TO_COP</code> env var.',
+        'Rate is managed via Redis key <code>epayco:cop_rate</code> (refreshEpaycoCopRate). Run cron or smoke test if stale.',
       ].join('\n');
       await BusinessNotificationService.send(msg);
     } catch (err) {
@@ -620,8 +791,10 @@ class PaymentService {
         // C3: Persist the expected COP amount so validateWebhookAmountCurrency can verify
         // the webhook amount even when the charge is completed via the checkout UI.
         // ePayco webhooks report amounts in COP regardless of the plan's USD price.
-        // Exchange rate approximation: 1 USD ≈ 4000 COP (overridden by EPAYCO_USD_TO_COP env var).
-        const usdToCopRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+        // PNPtv displays prices in USD to international users but settles via ePayco's
+        // Colombian acquiring network in COP. The rate is fetched daily from a public
+        // FX API (see getEpaycoCopRate above). Do not hardcode a fallback — fail closed instead.
+        const usdToCopRate = await getEpaycoCopRate();
         const expectedCOP = String(Math.round(paymentAmount * usdToCopRate));
 
         await PaymentModel.updateStatus(payment.id, 'pending', {
@@ -737,9 +910,15 @@ class PaymentService {
       throw new Error('EPAYCO_P_KEY or EPAYCO_PRIVATE_KEY must be configured');
     }
 
-    const envCustId = process.env.EPAYCO_P_CUST_ID || process.env.EPAYCO_PUBLIC_KEY;
+    // MED-02: p_cust_id_cliente is a numeric merchant ID. EPAYCO_PUBLIC_KEY is a
+    // distinct credential string. Falling back from one to the other silently
+    // produced bad signatures whenever EPAYCO_P_CUST_ID was missing. Accept the
+    // documented alias EPAYCO_P_CUST_ID_CLIENTE first, then EPAYCO_P_CUST_ID,
+    // and only fall back to webhook-provided x_cust_id_cliente (never to the
+    // public key).
+    const envCustId = process.env.EPAYCO_P_CUST_ID || process.env.EPAYCO_P_CUST_ID_CLIENTE;
     if (!envCustId && process.env.NODE_ENV === 'production') {
-      throw new Error('EPAYCO_P_CUST_ID or EPAYCO_PUBLIC_KEY must be configured in production');
+      throw new Error('EPAYCO_P_CUST_ID (or alias EPAYCO_P_CUST_ID_CLIENTE) must be configured in production');
     }
 
     const custId = envCustId || webhookData?.x_cust_id_cliente;
@@ -927,6 +1106,26 @@ class PaymentService {
       }
 
       if (x_transaction_state === 'Aceptada' || x_transaction_state === 'Aprobada') {
+        // HIGH-04: Idempotency guard. The outer Redis lock (refPayco+stateCode, 180s)
+        // protects against rapid duplicates, but ePayco retries can land hours apart and
+        // would re-confirm an already-confirmed booking + re-mark payment. Detect both
+        // booking-side ('confirmed') and payment-side ('paid') prior completion.
+        const alreadyConfirmed = booking
+          && (
+            booking.status === 'confirmed'
+            || booking.booking_status === 'confirmed'
+            || booking.payment_status === 'paid'
+          );
+        if (alreadyConfirmed) {
+          logger.info(`${bookingType} booking already confirmed — skipping duplicate webhook`, {
+            bookingId,
+            userId,
+            transactionId: x_transaction_id,
+            refPayco: x_ref_payco,
+          });
+          return { success: true, alreadyProcessed: true };
+        }
+
         await bookingService.updateBookingStatus(bookingId, 'confirmed');
         await bookingService.updatePaymentStatus(bookingId, 'paid', x_transaction_id);
 
@@ -1195,7 +1394,7 @@ class PaymentService {
 
       // Financial integrity check: webhook amount and currency must match internal expectations.
       if (payment) {
-        const amountCurrencyCheck = this.validateWebhookAmountCurrency(payment, webhookData);
+        const amountCurrencyCheck = await this.validateWebhookAmountCurrency(payment, webhookData);
         if (!amountCurrencyCheck.valid) {
           logger.error('ePayco webhook amount/currency mismatch', {
             paymentId: payment.id,
@@ -1381,6 +1580,20 @@ class PaymentService {
         // Handle call package purchase — credit call credits instead of activating a subscription
         if (payment?.metadata?.type === 'call_package' && paymentIdOrType) {
           try {
+            // HIGH-05: idempotency guard. If onCallPaymentSuccess succeeded but the
+            // PaymentModel.updateStatus call failed on the first delivery, the next
+            // ePayco retry would credit the user a second time. Re-read the payment
+            // and skip the credit grant when status is already 'completed'.
+            const freshPayment = await PaymentModel.getById(paymentIdOrType);
+            if (freshPayment && freshPayment.status === 'completed') {
+              logger.info('ePayco call package: payment already completed — skipping duplicate credit grant', {
+                paymentId: paymentIdOrType,
+                userId,
+                refPayco: x_ref_payco,
+              });
+              return { success: true, type: 'call_package', alreadyProcessed: true };
+            }
+
             const callCheckoutService = require('./callCheckoutService');
             await callCheckoutService.onCallPaymentSuccess(paymentIdOrType);
 
@@ -1410,7 +1623,25 @@ class PaymentService {
             const { handleTicketSettlement } = require('../bot/api/controllers/webappLiveController');
             const slotId = payment.metadata.slotId;
             const effectiveUserId = userId || payment.user_id;
-            const pricePaidUsd = parseFloat(x_amount || payment.amount || 0);
+            // HIGH-06: x_amount from the ePayco webhook is in the charge currency (COP for
+            // ePayco). Using it directly as USD inflated commission/earnings rows by the FX
+            // rate (~4000×). The canonical USD price was stored on the payment row at
+            // checkout-init, so prefer payment.amount; fall back to USD-only metadata fields.
+            const usdFromMetadata = parseFloat(
+              payment?.metadata?.amount_usd
+              || payment?.metadata?.expected_epayco_amount_usd
+              || 0
+            );
+            const pricePaidUsd = parseFloat(payment.amount) || usdFromMetadata || 0;
+            if (!(pricePaidUsd > 0)) {
+              logger.error('ePayco live_show_ticket: refusing to settle with non-positive USD price', {
+                paymentId: paymentIdOrType,
+                slotId,
+                paymentAmount: payment.amount,
+                metadataKeys: Object.keys(payment?.metadata || {}),
+              });
+              return { success: false, error: 'Missing USD price for live show ticket settlement' };
+            }
             await handleTicketSettlement(effectiveUserId, slotId, 'epayco', pricePaidUsd);
 
             await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
@@ -2339,7 +2570,10 @@ class PaymentService {
       }
 
       const userId = payment.userId || payment.user_id;
-      const USD_TO_COP_RATE = Number(process.env.EPAYCO_USD_TO_COP || process.env.USD_TO_COP_RATE || 4000);
+      // PNPtv displays prices in USD to international users but settles via ePayco's
+      // Colombian acquiring network in COP. The rate is fetched daily from a public
+      // FX API (see getEpaycoCopRate above). Do not hardcode a fallback — fail closed instead.
+      const USD_TO_COP_RATE = await getEpaycoCopRate();
       const amountCOP = Math.round((payment.amount || parseFloat(plan.price)) * USD_TO_COP_RATE);
       const paymentRef = `PAY-${paymentId.substring(0, 8).toUpperCase()}`;
       const normalizedBrowserInfo = this.buildChargeBrowserInfo({
@@ -2820,6 +3054,16 @@ class PaymentService {
           epayco_respuesta: errorMessage,
           error: errorMessage,
         });
+
+        // Security: Log SDK-level charge failure
+        PaymentSecurityService.logPaymentError({
+          paymentId,
+          userId,
+          provider: 'epayco',
+          errorCode: 'SDK_ERROR',
+          errorMessage: errorMessage,
+          stackTrace: null,
+        }).catch(() => {});
 
         return {
           success: false,
@@ -3801,17 +4045,72 @@ class PaymentService {
             const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
             const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
             const sourcePaymentId = paymentMetadata?.paymentId || null;
-            await query(
-              `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
-               VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
-              [channelRes.rows[0].creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
-            );
-            logger.info('Channel access earnings recorded (70/30, holding)', {
-              creatorId: channelRes.rows[0].creator_id, channelId: paymentMetadata.channelId, grossAmount, amountCreator,
-            });
+            // Idempotent: skip if an earnings row for this exact source_payment_id
+            // already exists (defends against webhook replays after Redis flush).
+            const existing = sourcePaymentId
+              ? await query(
+                  `SELECT id FROM creator_earnings WHERE source_payment_id = $1 AND creator_id = $2 LIMIT 1`,
+                  [sourcePaymentId, channelRes.rows[0].creator_id]
+                )
+              : { rowCount: 0 };
+            if (existing.rowCount === 0) {
+              await query(
+                `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+                 VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+                [channelRes.rows[0].creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
+              );
+              logger.info('Channel access earnings recorded (70/30, holding)', {
+                creatorId: channelRes.rows[0].creator_id, channelId: paymentMetadata.channelId, grossAmount, amountCreator,
+              });
+            } else {
+              logger.info('Channel access earnings already recorded — idempotent no-op', {
+                creatorId: channelRes.rows[0].creator_id, channelId: paymentMetadata.channelId, sourcePaymentId,
+              });
+            }
           }
         } catch (earningsErr) {
           logger.warn('Failed to record channel access earnings (non-critical)', { error: earningsErr.message });
+        }
+      }
+
+      // Record 70/30 earnings split for hangout access payments (parity with channel_access)
+      if (planId === 'hangout_access' && paymentMetadata?.hangoutGroupId) {
+        try {
+          // Resolve creator_id and price from hangout_groups
+          const hangoutRes = await query(
+            'SELECT creator_id, price_usd FROM hangout_groups WHERE id = $1',
+            [paymentMetadata.hangoutGroupId]
+          );
+          const ownerId = hangoutRes.rows[0]?.creator_id;
+          const priceCol = hangoutRes.rows[0]?.price_usd;
+          const grossAmount = priceCol != null ? parseFloat(priceCol) : null;
+          if (ownerId && Number.isFinite(grossAmount) && grossAmount > 0) {
+            const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
+            const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
+            const sourcePaymentId = paymentMetadata?.paymentId || null;
+            const existing = sourcePaymentId
+              ? await query(
+                  `SELECT id FROM creator_earnings WHERE source_payment_id = $1 AND creator_id = $2 LIMIT 1`,
+                  [sourcePaymentId, ownerId]
+                )
+              : { rowCount: 0 };
+            if (existing.rowCount === 0) {
+              await query(
+                `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+                 VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+                [ownerId, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
+              );
+              logger.info('Hangout access earnings recorded (70/30, holding)', {
+                ownerId, hangoutGroupId: paymentMetadata.hangoutGroupId, grossAmount, amountCreator,
+              });
+            } else {
+              logger.info('Hangout access earnings already recorded — idempotent no-op', {
+                ownerId, hangoutGroupId: paymentMetadata.hangoutGroupId, sourcePaymentId,
+              });
+            }
+          }
+        } catch (hangoutEarningsErr) {
+          logger.warn('Failed to record hangout access earnings (non-critical)', { error: hangoutEarningsErr.message });
         }
       }
 
@@ -3921,3 +4220,5 @@ class PaymentService {
 }
 
 module.exports = PaymentService;
+module.exports.getEpaycoCopRate = getEpaycoCopRate;
+module.exports.refreshEpaycoCopRate = refreshEpaycoCopRate;

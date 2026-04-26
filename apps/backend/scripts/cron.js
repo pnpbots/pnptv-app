@@ -8,6 +8,7 @@ const backendPath = path.join(basePath, '..');
 
 const { initializeRedis } = require(path.join(backendPath, 'config/redis'));
 const { initializePostgres } = require(path.join(backendPath, 'config/postgres'));
+const { refreshEpaycoCopRate } = require(path.join(backendPath, 'services/paymentService'));
 const UserService = require(path.join(backendPath, 'services/userService'));
 const MembershipCleanupService = require(path.join(backendPath, 'services/membershipCleanupService'));
 const TutorialReminderService = require(path.join(backendPath, 'services/tutorialReminderService'));
@@ -84,6 +85,56 @@ const startCronJobs = async (bot = null) => {
         });
       } catch (error) {
         logger.error('Error in abandoned payment cleanup cron:', error);
+      }
+    });
+
+    // Dash/BTCPay reconciliation — every 30 min
+    // Polls BTCPay for stuck pending invoices (missed webhooks) and either
+    // marks them terminal (Expired/Invalid) or logs Settled-but-unprocessed
+    // for operator replay. Idempotent and respects per-run Redis lock.
+    cron.schedule(process.env.DASH_RECONCILE_CRON || '*/30 * * * *', async () => {
+      try {
+        logger.info('Running Dash/BTCPay reconciliation...');
+        const results = await PaymentRecoveryService.processStuckDashInvoices();
+        logger.info('Dash/BTCPay reconciliation completed', {
+          checked: results.checked,
+          settled: results.settled,
+          expired: results.expired,
+          invalid: results.invalid,
+          stillPending: results.stillPending,
+          errors: results.errors,
+        });
+      } catch (error) {
+        logger.error('Error in Dash reconciliation cron:', error);
+      }
+    });
+
+    // ── ePayco USD→COP FX rate refresh — daily at 06:00 UTC ─────────────────
+    // PNPtv displays prices in USD to international users but settles via ePayco's
+    // Colombian acquiring network in COP. A stale rate means every transaction
+    // is systematically mis-priced. The cron keeps the Redis key fresh; the
+    // self-heal path in getEpaycoCopRate() covers missed-cron windows.
+    cron.schedule('0 6 * * *', async () => {
+      try {
+        const rate = await refreshEpaycoCopRate();
+        logger.info('[ePayco FX] Daily rate refresh completed', { rate });
+      } catch (err) {
+        logger.error('[ePayco FX] Daily rate refresh FAILED — next request will self-heal or fail closed', {
+          error: err.message,
+        });
+      }
+    }, { timezone: 'UTC' });
+
+    // Boot-time FX fetch — runs once when cron jobs start.
+    // Ensures the rate is available immediately on first deploy without waiting for 06:00 UTC.
+    setImmediate(async () => {
+      try {
+        const rate = await refreshEpaycoCopRate();
+        logger.info('[ePayco FX] Boot-time rate fetch completed', { rate });
+      } catch (err) {
+        logger.error('[ePayco FX] Boot-time rate fetch failed (next request will self-heal or fail closed)', {
+          error: err.message,
+        });
       }
     });
 
@@ -218,6 +269,21 @@ const startCronJobs = async (bot = null) => {
         logger.info('Creator subscription renewal completed', results);
       } catch (error) {
         logger.error('Error in creator subscription renewal cron:', error);
+      }
+    });
+
+    // ── Channel/Hangout Subscription Renewals — daily at 09:15 UTC ──────────
+    // Mirrors the creator renewal pattern for channel-access and hangout-access
+    // entitlements. Creates a Dash invoice 3 days before expiry and notifies
+    // the subscriber. expires_at extends only when BTCPay webhook confirms payment.
+    // Runs 15 min after creator renewal to spread DB load.
+    cron.schedule(process.env.CHANNEL_HANGOUT_RENEWAL_CRON || '15 9 * * *', async () => {
+      try {
+        logger.info('Running channel/hangout scoped subscription renewal...');
+        const results = await CreatorPayoutService.runScopedSubscriptionRenewals();
+        logger.info('Channel/hangout renewal completed', results);
+      } catch (error) {
+        logger.error('Error in channel/hangout renewal cron:', error);
       }
     });
 
