@@ -232,8 +232,11 @@ async function restart() {
 
 /**
  * Hot-reload source. Triggers ingress delete + recreate if currently playing.
+ * Also clears the ingressDisabled latch so an admin swapping sources after
+ * an infra fix gets a fresh attempt rather than a permanent no-op.
  */
 async function updateSource(src) {
+  ingressDisabled = false;
   currentSrc = src || null;
   logger.info('[MainStageMedia] source updated', { src: src?.slice(0, 80) });
   await reconcile();
@@ -241,8 +244,10 @@ async function updateSource(src) {
 
 /**
  * Toggle playback. If true + we have a source, creates ingress; if false, deletes.
+ * Clears the ingressDisabled latch on Play so admin recovery works without a restart.
  */
 async function setPlaying(bool) {
+  if (bool) ingressDisabled = false;
   isPlaying = Boolean(bool);
   logger.info('[MainStageMedia] setPlaying', { isPlaying });
   await reconcile();

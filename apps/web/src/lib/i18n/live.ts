@@ -225,6 +225,146 @@ const strings = {
     failedToLoadStreams: "Couldn't load streams. Pull down to refresh.",
     loadingBookingFailed: "Booking calendar couldn't load.",
     retryLoading: "Retry",
+
+    // Main Stage — modes
+    mainStageModeSpotlight: "Spotlight",
+    mainStageModeTheater: "Theater",
+    mainStageModeCinema: "Cinema",
+    mainStageModeKaraoke: "Karaoke",
+    mainStageModeEqual: "Everyone",
+
+    // Main Stage — mode subtitles (admin panel)
+    mainStageModeSpotlightSub: "Pin one cammer as hero",
+    mainStageModeTheaterSub: "Velvet curtains frame the video",
+    mainStageModeCinemaSub: "Media takes the stage",
+    mainStageModeKaraokeSub: "Video full, cammer in corner",
+    mainStageModeEqualSub: "Grid of all cammers",
+
+    // Main Stage — header
+    mainStageTitle: "Main Stage",
+
+    // Main Stage — bottom bar buttons
+    mainStageLeave: "Leave",
+    mainStageStop: "Stop",
+    mainStageGoLive: "Go live",
+
+    // Main Stage — bottom bar aria-labels
+    mainStageAriaLeave: "Leave Main Stage",
+    mainStageAriaStopCam: "Stop streaming (leave cam)",
+    mainStageAriaStartCam: "Go live (start streaming)",
+    mainStageAriaMicDisabled: "Microphone disabled (turn on camera first)",
+    mainStageAriaMicMute: "Mute microphone",
+    mainStageAriaMicUnmute: "Unmute microphone",
+    mainStageAriaOpenAdmin: "Open admin controls",
+    mainStageAriaCloseAdmin: "Close admin panel",
+    mainStageAriaDismiss: "Dismiss",
+
+    // Main Stage — connection overlay
+    mainStageReconnecting: "Reconnecting…",
+    mainStageConnecting: "Connecting…",
+
+    // Main Stage — error / unavailable states
+    mainStageFailedToConnect: "Failed to connect",
+    mainStageNoState: "No state received from the server. Try reloading.",
+    mainStageUnavailable: "Main Stage unavailable",
+    mainStageTryAgain: "Try again",
+    mainStageGoBack: "Go back",
+    mainStageReload: "Reload",
+    mainStageAdminOnly: "Admin only",
+    mainStageNoPermission: "You don't have permission to view this page.",
+    mainStageBackToStage: "Back to Main Stage",
+    mainStageLoading: "Loading…",
+    mainStageFailedToLoadState: "Failed to load state",
+    mainStageRetry: "Retry",
+
+    // Main Stage — camera / device errors
+    mainStageErrCameraPermission: "Camera permission denied. Enable it in your browser settings and tap Go live again.",
+    mainStageErrNoCamera: "No camera detected. Make sure a camera is connected.",
+    mainStageErrCameraInUse: "Camera is in use by another app. Close it and retry.",
+
+    // Main Stage — toolbar buttons (aria / title)
+    mainStageAriaFullscreen: "Enter fullscreen",
+    mainStageAriaExitFullscreen: "Exit fullscreen",
+    mainStageTitleFullscreen: "Fullscreen",
+    mainStageAriaShuffle: "Shuffle cammers",
+    mainStageAriaResetView: "Reset to room default",
+    mainStageAriaGoToStage: "Go to Main Stage",
+
+    // Main Stage — FAB labels
+    mainStageFabLabel: "Main Stage",
+    mainStageFabOnCam: "ON CAM",
+    mainStageFabLiveNow: "LIVE NOW",
+
+    // Main Stage — admin panel
+    mainStageAdminTitle: "Admin Controls",
+    mainStageAdminSectionLayout: "Layout Mode",
+    mainStageAdminSectionPrimeVideos: "Prime Videos",
+    mainStageAdminSectionCustomUrl: "Custom URL",
+    mainStageAdminSectionParticipants: "Participants",
+    mainStageAdminNoCammers: "No cammers on stage",
+    mainStageAdminSpotlighted: "Spotlighted",
+    mainStageAdminMute: "Mute",
+    mainStageAdminKick: "Kick",
+    mainStageAdminTitleSpotlight: "Set as spotlight",
+    mainStageAdminAriaSpotlight: (identity: string) => `Spotlight ${identity}`,
+    mainStageAdminAriaMute: (identity: string) => `Mute ${identity}`,
+    mainStageAdminAriaKick: (identity: string) => `Kick ${identity}`,
+    mainStageAdminPause: "Pause",
+    mainStageAdminResume: "Resume",
+    mainStageAdminStop: "Stop",
+    mainStageAdminPlay: "Play",
+    mainStageAdminNoPrimeVideos: "No published Prime Videos in CMS",
+    mainStageAdminUrlPlaceholder: "Video or stream URL…",
+    mainStageAdminAriaMediaUrl: "Media URL",
+    mainStageAdminAriaPlayVideo: (title: string) => `Play ${title}`,
+    mainStageAdminConsole: "Admin Console",
+    mainStageAdminSectionAudio: "Audio Mix",
+    mainStageAdminAudioMedia: "Media",
+    mainStageAdminAudioCams: "Cammers",
+    mainStageAdminAudioHint: "Drops are debounced. Release to commit.",
+    mainStageQueuePosition: (pos: number, total: number) =>
+      `Position ${pos} / ${total}`,
+    mainStageQueueLive: "Live now",
+    mainStageQueueNext: (sec: number) =>
+      sec > 0 ? `~${sec}s to live` : "Live next",
+
+    // Main Stage — standby / empty states
+    mainStageStandby: "Standby",
+    mainStageNoMediaPlaying: "No media playing · Admin controls playback",
+    mainStageStageQuiet: "Stage is quiet",
+    mainStageStageQuietHint: "Tap Go live to hop on cam — everyone's welcome",
+    mainStageNobodyOnCam: "Nobody on cam yet",
+    mainStageNobodyOnCamHint: "Main Stage is open to everyone — tap Go live to be first on",
+
+    // Main Stage — media player
+    mainStageNowPlaying: "Now Playing",
+    mainStagePaused: "Paused",
+    mainStageTapForSound: "Tap for sound",
+    mainStageAriaUnmute: "Unmute",
+    mainStageNowPlayingLabel: "Now playing",
+    mainStageNowPlayingAriaLabel: (title: string) => `Now playing: ${title}`,
+
+    // Main Stage — Prime watermark
+    mainStageWatermarkSubscribeTo: "Subscribe to",
+    mainStageWatermarkCta: "to watch without limits →",
+    mainStageWatermarkAria: "Subscribe to PNPtv! PRIME",
+
+    // Main Stage — spotlight countdown chip
+    mainStageCountdownRotating: "Rotating...",
+    mainStageCountdownNext: (m: number, s: string) => `Next: ${m}:${s}`,
+    mainStageAriaFocusTile: (identity: string) => `Focus ${identity}`,
+
+    // Main Stage — wellness tips overlay
+    mainStageWellnessTipLabel: "Wellness tip",
+    mainStageWellnessMoreResources: "More resources",
+    mainStageWellnessAriaDismiss: "Dismiss wellness tip",
+
+    // Main Stage — reconnecting banner
+    mainStageReconnectingBanner: "Reconnecting…",
+
+    // Main Stage — admin counts subtitle
+    mainStageCammers: "cammers",
+    mainStageWatching: "watching",
   },
 
   es: {
@@ -458,6 +598,146 @@ const strings = {
     failedToLoadStreams: "No se pudieron cargar las transmisiones. Desliza hacia abajo para refrescar.",
     loadingBookingFailed: "No se pudo cargar el calendario de reservas.",
     retryLoading: "Reintentar",
+
+    // Main Stage — modes
+    mainStageModeSpotlight: "Destacado",
+    mainStageModeTheater: "Teatro",
+    mainStageModeCinema: "Cine",
+    mainStageModeKaraoke: "Karaoke",
+    mainStageModeEqual: "Todes",
+
+    // Main Stage — mode subtitles (admin panel)
+    mainStageModeSpotlightSub: "Un cammer como protagonista",
+    mainStageModeTheaterSub: "Cortinas de terciopelo enmarcan el video",
+    mainStageModeCinemaSub: "El contenido toma el escenario",
+    mainStageModeKaraokeSub: "Video completo, cammer en esquina",
+    mainStageModeEqualSub: "Grilla con todes los cammers",
+
+    // Main Stage — header
+    mainStageTitle: "Escenario Principal",
+
+    // Main Stage — bottom bar buttons
+    mainStageLeave: "Salir",
+    mainStageStop: "Detener",
+    mainStageGoLive: "Salir al aire",
+
+    // Main Stage — bottom bar aria-labels
+    mainStageAriaLeave: "Salir del Escenario Principal",
+    mainStageAriaStopCam: "Dejar de transmitir (salir del cam)",
+    mainStageAriaStartCam: "Salir al aire (iniciar transmisión)",
+    mainStageAriaMicDisabled: "Micrófono desactivado (enciende la cámara primero)",
+    mainStageAriaMicMute: "Silenciar micrófono",
+    mainStageAriaMicUnmute: "Activar micrófono",
+    mainStageAriaOpenAdmin: "Abrir controles de administración",
+    mainStageAriaCloseAdmin: "Cerrar panel de administración",
+    mainStageAriaDismiss: "Descartar",
+
+    // Main Stage — connection overlay
+    mainStageReconnecting: "Reconectando…",
+    mainStageConnecting: "Conectando…",
+
+    // Main Stage — error / unavailable states
+    mainStageFailedToConnect: "Error al conectar",
+    mainStageNoState: "No se recibió información del servidor. Intenta recargar.",
+    mainStageUnavailable: "Escenario Principal no disponible",
+    mainStageTryAgain: "Intentar de nuevo",
+    mainStageGoBack: "Volver",
+    mainStageReload: "Recargar",
+    mainStageAdminOnly: "Solo administradores",
+    mainStageNoPermission: "No tenés permiso para ver esta página.",
+    mainStageBackToStage: "Volver al Escenario",
+    mainStageLoading: "Cargando…",
+    mainStageFailedToLoadState: "Error al cargar el estado",
+    mainStageRetry: "Reintentar",
+
+    // Main Stage — camera / device errors
+    mainStageErrCameraPermission: "Permiso de cámara denegado. Actívalo en la configuración de tu navegador y volvé a tocar Salir al aire.",
+    mainStageErrNoCamera: "No se detectó cámara. Asegurate de tener una conectada.",
+    mainStageErrCameraInUse: "La cámara está en uso por otra app. Cerrala y volvé a intentar.",
+
+    // Main Stage — toolbar buttons (aria / title)
+    mainStageAriaFullscreen: "Pantalla completa",
+    mainStageAriaExitFullscreen: "Salir de pantalla completa",
+    mainStageTitleFullscreen: "Pantalla completa",
+    mainStageAriaShuffle: "Mezclar cammers",
+    mainStageAriaResetView: "Restablecer vista predeterminada",
+    mainStageAriaGoToStage: "Ir al Escenario Principal",
+
+    // Main Stage — FAB labels
+    mainStageFabLabel: "Escenario",
+    mainStageFabOnCam: "EN CAM",
+    mainStageFabLiveNow: "EN VIVO",
+
+    // Main Stage — admin panel
+    mainStageAdminTitle: "Controles de Admin",
+    mainStageAdminSectionLayout: "Modo de Vista",
+    mainStageAdminSectionPrimeVideos: "Videos PRIME",
+    mainStageAdminSectionCustomUrl: "URL Personalizada",
+    mainStageAdminSectionParticipants: "Participantes",
+    mainStageAdminNoCammers: "Ningún cammer en escena",
+    mainStageAdminSpotlighted: "Destacado",
+    mainStageAdminMute: "Silenciar",
+    mainStageAdminKick: "Expulsar",
+    mainStageAdminTitleSpotlight: "Poner en spotlight",
+    mainStageAdminAriaSpotlight: (identity: string) => `Destacar a ${identity}`,
+    mainStageAdminAriaMute: (identity: string) => `Silenciar a ${identity}`,
+    mainStageAdminAriaKick: (identity: string) => `Expulsar a ${identity}`,
+    mainStageAdminPause: "Pausar",
+    mainStageAdminResume: "Reanudar",
+    mainStageAdminStop: "Detener",
+    mainStageAdminPlay: "Reproducir",
+    mainStageAdminNoPrimeVideos: "Sin videos PRIME publicados en el CMS",
+    mainStageAdminUrlPlaceholder: "URL de video o stream…",
+    mainStageAdminAriaMediaUrl: "URL de contenido",
+    mainStageAdminAriaPlayVideo: (title: string) => `Reproducir ${title}`,
+    mainStageAdminConsole: "Consola de Admin",
+    mainStageAdminSectionAudio: "Mezcla de audio",
+    mainStageAdminAudioMedia: "Contenido",
+    mainStageAdminAudioCams: "Cammers",
+    mainStageAdminAudioHint: "Se aplica al soltar (debounced).",
+    mainStageQueuePosition: (pos: number, total: number) =>
+      `Posición ${pos} / ${total}`,
+    mainStageQueueLive: "En vivo",
+    mainStageQueueNext: (sec: number) =>
+      sec > 0 ? `~${sec}s para entrar` : "Entras a continuación",
+
+    // Main Stage — standby / empty states
+    mainStageStandby: "En espera",
+    mainStageNoMediaPlaying: "Sin contenido · El admin controla la reproducción",
+    mainStageStageQuiet: "El escenario está en silencio",
+    mainStageStageQuietHint: "Tocá Salir al aire para prenderte la cámara — todes son bienvenides",
+    mainStageNobodyOnCam: "Nadie en cámara todavía",
+    mainStageNobodyOnCamHint: "El Escenario está abierto a todes — tocá Salir al aire para ser el primero",
+
+    // Main Stage — media player
+    mainStageNowPlaying: "Reproduciendo",
+    mainStagePaused: "Pausado",
+    mainStageTapForSound: "Tocá para escuchar",
+    mainStageAriaUnmute: "Activar sonido",
+    mainStageNowPlayingLabel: "Reproduciendo ahora",
+    mainStageNowPlayingAriaLabel: (title: string) => `Reproduciendo ahora: ${title}`,
+
+    // Main Stage — Prime watermark
+    mainStageWatermarkSubscribeTo: "Suscribite a",
+    mainStageWatermarkCta: "para ver sin límites →",
+    mainStageWatermarkAria: "Suscribite a PNPtv! PRIME",
+
+    // Main Stage — spotlight countdown chip
+    mainStageCountdownRotating: "Rotando...",
+    mainStageCountdownNext: (m: number, s: string) => `Siguiente: ${m}:${s}`,
+    mainStageAriaFocusTile: (identity: string) => `Enfocar ${identity}`,
+
+    // Main Stage — wellness tips overlay
+    mainStageWellnessTipLabel: "Consejo de bienestar",
+    mainStageWellnessMoreResources: "Más recursos",
+    mainStageWellnessAriaDismiss: "Descartar consejo de bienestar",
+
+    // Main Stage — reconnecting banner
+    mainStageReconnectingBanner: "Reconectando…",
+
+    // Main Stage — admin counts subtitle
+    mainStageCammers: "cammers",
+    mainStageWatching: "viendo",
   },
 } as const;
 

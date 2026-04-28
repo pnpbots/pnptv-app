@@ -308,13 +308,30 @@ const moderate = asyncHandler(async (req, res) => {
     }
     case 'mute': {
       try {
-        // Mute all tracks for the participant via LiveKit RoomServiceClient
-        await roomClient.mutePublishedTrack(ROOM_NAME, String(identity), '', true);
+        const participant = await roomClient.getParticipant(ROOM_NAME, String(identity));
+        const tracks = (participant && participant.tracks) ? participant.tracks : [];
+        if (tracks.length === 0) {
+          logger.warn('[MainStage] mute: participant has no published tracks', { identity });
+          return res.json({ success: false, error: 'participant has no published tracks' });
+        }
+        let mutedCount = 0;
+        for (const track of tracks) {
+          try {
+            await roomClient.mutePublishedTrack(ROOM_NAME, String(identity), track.sid, true);
+            mutedCount++;
+          } catch (trackErr) {
+            logger.warn('[MainStage] mutePublishedTrack failed for track', {
+              error: trackErr.message, identity, trackSid: track.sid,
+            });
+          }
+        }
+        await mainStageService.logAdminAction(req.user.id, 'moderate_mute', { identity, mutedCount });
+        logger.info('[MainStage] moderation action', { userId: req.user.id, action, identity, mutedCount });
+        return res.json({ success: true, action, identity, mutedTrackCount: mutedCount });
       } catch (err) {
-        logger.warn('[MainStage] mutePublishedTrack failed', { error: err.message, identity });
+        logger.error('[MainStage] mute: getParticipant failed', { error: err.message, identity });
+        return res.status(500).json({ success: false, error: err.message });
       }
-      await mainStageService.logAdminAction(req.user.id, 'moderate_mute', { identity });
-      break;
     }
     case 'kick': {
       try {

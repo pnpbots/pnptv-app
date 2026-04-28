@@ -1,10 +1,18 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getMainStageState } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
-export function MainStageFAB() {
+interface MainStageFABProps {
+  /** When the FloatingMainStagePlayer PiP widget is also visible, push the
+   *  FAB up so they don't overlap in the bottom-right corner. */
+  isPipVisible?: boolean;
+}
+
+export function MainStageFAB({ isPipVisible = false }: MainStageFABProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const t = useI18n();
   const [isLive, setIsLive] = useState(false);
   const [participantCount, setParticipantCount] = useState(0);
   const isMainStageRoute = location.pathname === "/main-stage";
@@ -38,20 +46,21 @@ export function MainStageFAB() {
   if (isMainStageRoute || !isLive) return null;
 
   return (
-    <div className="fixed bottom-32 right-4 z-[40] animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div
+      className={`fixed right-4 z-[40] animate-in fade-in slide-in-from-bottom-4 duration-500 transition-[bottom] ${isPipVisible ? "bottom-56" : "bottom-32"}`}
+    >
       <div className="main-stage-cristina-float">
         <button
           onClick={() => navigate("/main-stage")}
-          className="relative group flex items-center gap-2 pl-3 pr-4 py-2.5 rounded-2xl shadow-2xl transition-all hover:scale-105 active:scale-95 overflow-hidden"
+          className="relative group flex items-center gap-2 pl-3 pr-4 py-2.5 rounded-2xl shadow-2xl transition-all hover:scale-105 active:scale-95 overflow-hidden border border-white/20"
           style={{
             background: "linear-gradient(135deg, #D4007A, #7B61FF)",
-            border: "1px solid rgba(255,255,255,0.2)",
           }}
-          aria-label="Go to Main Stage"
+          aria-label={t.live.mainStageAriaGoToStage}
         >
           {/* Animated background glow */}
           <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-          
+
           {/* Pulsing "Live" indicator */}
           <div className="relative flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
@@ -59,9 +68,9 @@ export function MainStageFAB() {
           </div>
 
           <div className="flex flex-col items-start leading-tight">
-            <span className="text-[10px] font-bold text-white/80 uppercase tracking-widest">Main Stage</span>
+            <span className="text-[10px] font-bold text-white/80 uppercase tracking-widest">{t.live.mainStageFabLabel}</span>
             <span className="text-xs font-extrabold text-white">
-              {isLive ? `${participantCount} ON CAM` : "LIVE NOW"}
+              {isLive ? `${participantCount} ${t.live.mainStageFabOnCam}` : t.live.mainStageFabLiveNow}
             </span>
           </div>
 

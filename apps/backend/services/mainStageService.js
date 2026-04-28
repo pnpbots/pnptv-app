@@ -256,18 +256,29 @@ async function setCamsVolume(v) {
 // Implemented as a Lua script so the dedup + cap check + push run in a single
 // Redis round-trip, eliminating the TOCTOU race that allowed concurrent token
 // requests to all pass a stale cap check and collectively exceed MAX_CAMMERS.
+//
+// KEYS[1] = mainstage:spotlight:queue
+// KEYS[2] = mainstage:spotlight:queue:timestamps
+// ARGV[1] = identity
+// ARGV[2] = cap
+// ARGV[3] = now (ms since epoch as string)
 const ADD_CAMMER_LUA = `
-local key = KEYS[1]
-local id  = ARGV[1]
-local cap = tonumber(ARGV[2])
+local key      = KEYS[1]
+local tsKey    = KEYS[2]
+local id       = ARGV[1]
+local cap      = tonumber(ARGV[2])
+local now      = ARGV[3]
 local list = redis.call('LRANGE', key, 0, -1)
 for i = 1, #list do
   if list[i] == id then return 'duplicate' end
 end
 if #list >= cap then return 'full' end
 redis.call('RPUSH', key, id)
+redis.call('HSET', tsKey, id, now)
 return 'added'
 `;
+
+const QUEUE_TS_KEY = 'mainstage:spotlight:queue:timestamps';
 
 async function addCammer(identity) {
   if (!identity) return 'invalid';
@@ -275,7 +286,8 @@ async function addCammer(identity) {
   const queueKey = 'mainstage:spotlight:queue';
 
   const result = await redis.eval(
-    ADD_CAMMER_LUA, 1, queueKey, String(identity), String(MAX_CAMMERS),
+    ADD_CAMMER_LUA, 2, queueKey, QUEUE_TS_KEY,
+    String(identity), String(MAX_CAMMERS), String(Date.now()),
   );
 
   if (result === 'duplicate') {
@@ -369,6 +381,7 @@ async function removeCammer(identity) {
   const queueKey = 'mainstage:spotlight:queue';
 
   await redis.lrem(queueKey, 0, String(identity));
+  await redis.hdel(QUEUE_TS_KEY, String(identity));
 
   // If this was the spotlight cammer, advance to the next
   const current = await redis.get('mainstage:spotlight:cammer');
@@ -547,11 +560,50 @@ async function sweepGhostCammers() {
   try {
     const participants = await livekit.listParticipants(ROOM_NAME);
     if (!participants) return;
+
+    const redis = getRedis();
+    const queue = await redis.lrange('mainstage:spotlight:queue', 0, -1);
+
     // If LiveKit returned zero participants but our queue has entries, we do
-    // NOT nuke the queue — that's more likely a transient LiveKit hiccup than
-    // all users disconnecting at once. Require at least one live participant
-    // before we trust LiveKit's view of the world.
-    if (participants.length === 0) return;
+    // NOT nuke the queue based on LiveKit alone — that's more likely a transient
+    // LiveKit hiccup than all users disconnecting at once. However, if any
+    // queue entry's join timestamp is older than 2× ROTATE_INTERVAL_MS we
+    // trust they are truly gone and sweep anyway to prevent slot squatting.
+    if (participants.length === 0) {
+      if (queue.length === 0) return;
+
+      const now = Date.now();
+      const staleThresholdMs = 2 * ROTATE_INTERVAL_MS;
+      const timestamps = await redis.hgetall(QUEUE_TS_KEY);
+      const staleEntries = queue.filter(id => {
+        if (id === MEDIA_BOT_IDENTITY) return false;
+        const ts = timestamps && timestamps[id] ? parseInt(timestamps[id], 10) : null;
+        if (ts === null) return false; // no timestamp = recently added without timestamp; be conservative
+        return (now - ts) > staleThresholdMs;
+      });
+
+      if (staleEntries.length === 0) return; // LiveKit hiccup — preserve queue
+
+      logger.warn(
+        '[MainStage] sweepGhostCammers: LiveKit returned 0 participants but stale queue entries found — ' +
+        'sweeping via timestamp fallback',
+        { staleEntries, staleThresholdMs },
+      );
+
+      for (const id of staleEntries) {
+        await redis.lrem('mainstage:spotlight:queue', 0, id);
+        await redis.hdel(QUEUE_TS_KEY, id);
+        logger.info('[MainStage] swept stale ghost cammer (0-participant fallback)', { identity: id });
+      }
+
+      const currentSpot = await redis.get('mainstage:spotlight:cammer');
+      if (currentSpot && staleEntries.includes(currentSpot)) {
+        await advanceSpotlight();
+      } else {
+        await emitState();
+      }
+      return;
+    }
 
     // Build a lookup: identity -> canPublish permission. A queue entry is a
     // "ghost" if (a) the identity isn't connected to LiveKit at all, or
@@ -563,8 +615,6 @@ async function sweepGhostCammers() {
       canPublishByIdentity.set(p.identity, Boolean(p.permission?.canPublish));
     }
 
-    const redis = getRedis();
-    const queue = await redis.lrange('mainstage:spotlight:queue', 0, -1);
     const ghosts = queue.filter(id => {
       if (id === MEDIA_BOT_IDENTITY) return false;
       if (!canPublishByIdentity.has(id)) return true; // not in LiveKit
@@ -575,6 +625,7 @@ async function sweepGhostCammers() {
 
     for (const id of ghosts) {
       await redis.lrem('mainstage:spotlight:queue', 0, id);
+      await redis.hdel(QUEUE_TS_KEY, id);
       logger.info('[MainStage] swept ghost cammer', { identity: id });
     }
 

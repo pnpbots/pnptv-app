@@ -154,12 +154,23 @@ export function useMainStage(): UseMainStageReturn {
       setError(msg);
     }
 
+    // Re-fetch state on (re)connect. Server broadcasts are debounced 200ms
+    // and only fire on mutations, so a client reconnecting between admin
+    // changes would otherwise sit on stale state until the next mutation.
+    function onConnect() {
+      getMainStageState()
+        .then((s) => { if (mountedRef.current) setState(s); })
+        .catch(() => { /* next broadcast will recover */ });
+    }
+
     socket.on("mainstage:state", onState);
     socket.on("mainstage:error", onError);
+    socket.on("connect", onConnect);
 
     return () => {
       socket.off("mainstage:state", onState);
       socket.off("mainstage:error", onError);
+      socket.off("connect", onConnect);
     };
   }, [isAuthenticated]);
 
@@ -198,6 +209,10 @@ export function useMainStage(): UseMainStageReturn {
   }, [scheduleTokenRefresh]);
 
   const leaveCammer = useCallback(async () => {
+    // Reset the cammer ref FIRST so that if any subsequent step throws, the
+    // 5h30m refresh timer does not re-mint a cammer token for someone who left.
+    tokenAsCammerRef.current = false;
+
     // Tell the server to remove us from the spotlight queue BEFORE re-minting
     // the viewer token, otherwise our identity lingers in state.spotlight.queue.
     try {
@@ -216,11 +231,12 @@ export function useMainStage(): UseMainStageReturn {
         setLivekitUrl(res.livekitUrl);
         setRoomName(res.roomName);
         setRole(res.role);
-        tokenAsCammerRef.current = false;
         scheduleTokenRefresh();
       }
-    } catch {
-      // silent — user still sees the feed
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : "Failed to leave cammer — please reload if the issue persists");
+      }
     }
   }, [scheduleTokenRefresh]);
 

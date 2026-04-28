@@ -8,7 +8,7 @@ import {
   useTracks,
 } from "@livekit/components-react";
 import { ConnectionState, RoomEvent, Track } from "livekit-client";
-import { useMainStage } from "@/hooks/useMainStage";
+import { useMainStage, type MainStageState } from "@/hooks/useMainStage";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -96,6 +96,7 @@ interface BottomBarProps {
   onJoinCam: () => void;
   onLeaveCam: () => void;
   onLeave: () => void;
+  spotlight?: MainStageState["spotlight"];
 }
 
 function BottomBarInner({
@@ -104,9 +105,51 @@ function BottomBarInner({
   onJoinCam,
   onLeaveCam,
   onLeave,
+  spotlight,
 }: BottomBarProps) {
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
   const t = useI18n();
+
+  // Queue-position indicator for cammers: shows "Position X / Y" or "Live now".
+  // Re-renders every second when nextAt is set so the countdown stays current.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isCammer || !spotlight?.nextAt) return;
+    const iv = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, [isCammer, spotlight?.nextAt]);
+
+  const queueChip = (() => {
+    if (!isCammer || !spotlight) return null;
+    const myIdentity = localParticipant?.identity || "";
+    const queue = spotlight.queue || [];
+    const myPos = queue.indexOf(myIdentity);
+    const isLive = !!myIdentity && spotlight.cammer === myIdentity;
+    if (isLive) {
+      return (
+        <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-pnp-accent/15 border border-pnp-accent/30 text-pnp-accent">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full bg-pnp-accent opacity-75" />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-pnp-accent" />
+          </span>
+          {t.live.mainStageQueueLive}
+        </span>
+      );
+    }
+    if (myPos < 0) return null;
+    const total = queue.length || 1;
+    const secsToNext = spotlight.nextAt
+      ? Math.max(0, Math.ceil((spotlight.nextAt - nowMs) / 1000))
+      : 0;
+    return (
+      <span className="hidden md:inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-white/[0.06] border border-white/10 text-white/70 tabular-nums">
+        <span>{t.live.mainStageQueuePosition(myPos + 1, total)}</span>
+        {spotlight.nextAt && myPos === 0 && (
+          <span className="text-pnp-amber">· {t.live.mainStageQueueNext(secsToNext)}</span>
+        )}
+      </span>
+    );
+  })();
 
   // The cam button is now the single entry/exit point for being a cammer.
   // Off+gray (not cammer) → tap → joinAsCammer() promotes + LiveKit auto-
@@ -146,6 +189,8 @@ function BottomBarInner({
         </svg>
         <span className="hidden sm:inline">{t.live.mainStageLeave}</span>
       </button>
+
+      {queueChip}
 
       {/* CAMERA / GO LIVE — prominent CTA. Always labeled so users
           understand it's the control to start streaming. */}
@@ -289,6 +334,7 @@ interface MainStageInnerProps {
   onConnectionStateChange: (state: ConnectionState) => void;
   onCammersChange: (cammers: CammerInfo[]) => void;
   onLeave: () => void;
+  spotlight?: MainStageState["spotlight"];
 }
 
 function MainStageInner({
@@ -308,6 +354,7 @@ function MainStageInner({
   onConnectionStateChange,
   onCammersChange,
   onLeave,
+  spotlight,
 }: MainStageInnerProps) {
   return (
     <>
@@ -365,6 +412,7 @@ function MainStageInner({
         onJoinCam={onJoinCam}
         onLeaveCam={onLeaveCam}
         onLeave={onLeave}
+        spotlight={spotlight}
       />
     </>
   );
@@ -655,6 +703,11 @@ export default function MainStage() {
         style={{
           top: "calc(64px + env(safe-area-inset-top, 0px))",
           right: "calc(0.5rem + env(safe-area-inset-right, 0px))",
+          // Defensive cap on small viewports — if more buttons get added,
+          // the toolbar scrolls instead of running off-screen.
+          maxHeight: "calc(100dvh - 200px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))",
+          overflowY: "auto",
+          scrollbarWidth: "none",
         }}
       >
         <button
@@ -819,6 +872,7 @@ export default function MainStage() {
           onConnectionStateChange={setConnState}
           onCammersChange={handleCammersChange}
           onLeave={handleLeave}
+          spotlight={state?.spotlight}
         />
       </LiveKitRoom>
 
@@ -953,6 +1007,81 @@ const MODE_ICONS_ADMIN: Record<ModeId, JSX.Element> = {
     </svg>
   ),
 };
+
+// Two-slider audio mix for the admin panel. Values are committed on
+// pointer-up / blur to avoid spamming the API on every drag tick. Local
+// optimistic state keeps the slider responsive even before the server
+// broadcast catches up.
+function AudioMixControls({
+  mediaVolume,
+  camsVolume,
+  onSetMediaVolume,
+  onSetCamsVolume,
+}: {
+  mediaVolume: number;
+  camsVolume: number;
+  onSetMediaVolume: (v: number) => void;
+  onSetCamsVolume: (v: number) => void;
+}) {
+  const t = useI18n();
+  const [localMedia, setLocalMedia] = useState(mediaVolume);
+  const [localCams, setLocalCams] = useState(camsVolume);
+
+  // Sync from server when not actively dragging.
+  const draggingRef = useRef<"media" | "cams" | null>(null);
+  useEffect(() => {
+    if (draggingRef.current !== "media") setLocalMedia(mediaVolume);
+  }, [mediaVolume]);
+  useEffect(() => {
+    if (draggingRef.current !== "cams") setLocalCams(camsVolume);
+  }, [camsVolume]);
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label htmlFor="ms-vol-media" className="text-[11px] font-semibold text-white/80">
+            {t.live.mainStageAdminAudioMedia}
+          </label>
+          <span className="text-[11px] text-white/50 tabular-nums">{localMedia}</span>
+        </div>
+        <input
+          id="ms-vol-media"
+          type="range"
+          min={0}
+          max={100}
+          value={localMedia}
+          onChange={(e) => { draggingRef.current = "media"; setLocalMedia(parseInt(e.target.value, 10)); }}
+          onPointerUp={() => { draggingRef.current = null; onSetMediaVolume(localMedia); }}
+          onBlur={() => { draggingRef.current = null; onSetMediaVolume(localMedia); }}
+          className="w-full accent-pnp-accent"
+          aria-label={t.live.mainStageAdminAudioMedia}
+        />
+      </div>
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label htmlFor="ms-vol-cams" className="text-[11px] font-semibold text-white/80">
+            {t.live.mainStageAdminAudioCams}
+          </label>
+          <span className="text-[11px] text-white/50 tabular-nums">{localCams}</span>
+        </div>
+        <input
+          id="ms-vol-cams"
+          type="range"
+          min={0}
+          max={100}
+          value={localCams}
+          onChange={(e) => { draggingRef.current = "cams"; setLocalCams(parseInt(e.target.value, 10)); }}
+          onPointerUp={() => { draggingRef.current = null; onSetCamsVolume(localCams); }}
+          onBlur={() => { draggingRef.current = null; onSetCamsVolume(localCams); }}
+          className="w-full accent-pnp-accent"
+          aria-label={t.live.mainStageAdminAudioCams}
+        />
+      </div>
+      <p className="text-[10px] text-white/30">{t.live.mainStageAdminAudioHint}</p>
+    </div>
+  );
+}
 
 export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminPanelContentProps) {
   const t = useI18n();
@@ -1191,6 +1320,18 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
               </div>
             )}
           </div>
+        </section>
+
+        <section>
+          <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">
+            {t.live.mainStageAdminSectionAudio}
+          </h3>
+          <AudioMixControls
+            mediaVolume={state?.media?.volume ?? 70}
+            camsVolume={state?.cams?.volume ?? 80}
+            onSetMediaVolume={(v) => admin.setVolume({ media: v })}
+            onSetCamsVolume={(v) => admin.setVolume({ cams: v })}
+          />
         </section>
 
         <section>

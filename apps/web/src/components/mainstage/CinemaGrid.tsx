@@ -4,8 +4,10 @@ import {
   useTracks,
 } from "@livekit/components-react";
 import type { TrackReferenceOrPlaceholder } from "@livekit/components-react";
-import { Track } from "livekit-client";
+import { Track, VideoQuality } from "livekit-client";
+import type { RemoteTrackPublication } from "livekit-client";
 import Hls from "hls.js";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * Identity of the media-bot participant that publishes URL-backed media
@@ -34,6 +36,7 @@ interface UrlMediaPlayerProps {
 }
 
 function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
+  const t = useI18n().live;
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -50,7 +53,7 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
     hlsRef.current?.destroy();
     hlsRef.current = null;
 
-    if (isHls && Hls.isSupported() && kind === "video") {
+    if (isHls && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
@@ -70,6 +73,10 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
         else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
       });
+      return () => {
+        hlsRef.current?.destroy();
+        hlsRef.current = null;
+      };
     } else {
       el.src = src;
       el.load();
@@ -82,13 +89,11 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
       return () => {
         el.removeEventListener("loadedmetadata", onReady);
         clearTimeout(fallbackTimer);
+        // Release the media resource so the browser frees decode/network resources.
+        el.src = "";
+        el.load();
       };
     }
-
-    return () => {
-      hlsRef.current?.destroy();
-      hlsRef.current = null;
-    };
   }, [src, isHls, kind]);
 
   useEffect(() => {
@@ -112,6 +117,9 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
     } else {
       el.pause();
     }
+    return () => {
+      el.pause();
+    };
   }, [playing, volume, muted, canPlay, kind]);
 
   const handleUnmute = () => {
@@ -146,7 +154,7 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
         </div>
         <div>
           <p className="text-white/80 text-sm font-semibold tracking-wide">
-            {playing ? "Now Playing" : "Paused"}
+            {playing ? t.mainStageNowPlaying : t.mainStagePaused}
           </p>
           <p className="text-white/30 text-[11px] mt-1 max-w-[240px] truncate mx-auto" title={src}>
             {decodeURIComponent(src.split("/").pop() || src)}
@@ -159,10 +167,10 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
             className="min-h-[40px] px-4 rounded-full text-xs font-bold text-white transition-all active:scale-[0.96]"
             style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)", boxShadow: "0 4px 16px rgba(212,0,122,0.35)" }}
           >
-            Tap for sound
+            {t.mainStageTapForSound}
           </button>
         )}
-        <audio ref={audioRef} autoPlay playsInline preload="auto" />
+        <audio ref={audioRef} autoPlay playsInline preload="auto" muted />
       </div>
     );
   }
@@ -180,10 +188,10 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
       />
       <PrimeWatermark />
       {!canPlay && (
-        <div className="absolute inset-0 flex items-center justify-center" style={{ background: "rgba(10,10,15,0.6)" }}>
+        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
           <div
-            className="w-10 h-10 rounded-full border-2 animate-spin"
-            style={{ borderColor: "rgba(212,0,122,0.3)", borderTopColor: "#D4007A" }}
+            className="w-10 h-10 rounded-full border-2 animate-spin border-pnp-accent/30"
+            style={{ borderTopColor: "#D4007A" }}
           />
         </div>
       )}
@@ -191,7 +199,7 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
         <button
           type="button"
           onClick={handleUnmute}
-          aria-label="Unmute"
+          aria-label={t.mainStageAriaUnmute}
           className="absolute bottom-4 right-4 z-10 flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold text-white transition-all active:scale-[0.96]"
           style={{
             background: "linear-gradient(135deg,#D4007A,#7B61FF)",
@@ -202,7 +210,7 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
           <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
             <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2a4.5 4.5 0 00-2.5-4v8a4.5 4.5 0 002.5-4z" />
           </svg>
-          Tap for sound
+          {t.mainStageTapForSound}
         </button>
       )}
     </div>
@@ -224,6 +232,7 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
  *    affordance obvious, drifts through all four corners on a timer.
  */
 function PrimeWatermark() {
+  const t = useI18n().live;
   const [cornerIdx, setCornerIdx] = useState(() => Math.floor(Math.random() * 4));
   const [patternOffset, setPatternOffset] = useState(() => Math.floor(Math.random() * 300));
   useEffect(() => {
@@ -278,7 +287,7 @@ function PrimeWatermark() {
       {/* Layer 2 — clickable corner badge with the CTA */}
       <a
         href="/subscribe"
-        aria-label="Subscribe to PNPtv! PRIME"
+        aria-label={t.mainStageWatermarkAria}
         className="absolute z-[12] select-none transition-[top,bottom,left,right] duration-700 ease-out"
         style={{ ...positions[cornerIdx], pointerEvents: "auto", textDecoration: "none" }}
       >
@@ -296,7 +305,7 @@ function PrimeWatermark() {
             className="text-[9px] font-bold uppercase tracking-[0.22em]"
             style={{ color: "rgba(255,255,255,0.80)", textShadow: "0 1px 2px rgba(0,0,0,0.9)" }}
           >
-            Subscribe to
+            {t.mainStageWatermarkSubscribeTo}
           </span>
           <span
             className="text-sm sm:text-base font-extrabold leading-none"
@@ -314,11 +323,39 @@ function PrimeWatermark() {
             className="text-[9px] font-medium"
             style={{ color: "rgba(255,255,255,0.65)", textShadow: "0 1px 2px rgba(0,0,0,0.9)" }}
           >
-            to watch without limits →
+            {t.mainStageWatermarkCta}
           </span>
         </div>
       </a>
     </>
+  );
+}
+
+/**
+ * Strip tile for the Cinema layout cammer row.
+ * Requests VideoQuality.LOW to reduce decoder pressure when many participants
+ * are visible simultaneously (12 cammers + ingress can saturate ~16 slots).
+ * Tile height uses viewport-relative clamping for clean desktop scaling.
+ */
+function CinemaStripTile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
+  useEffect(() => {
+    const pub = trackRef.publication as RemoteTrackPublication | undefined;
+    if (!pub || !("setVideoQuality" in pub)) return;
+    pub.setVideoQuality(VideoQuality.LOW);
+  }, [trackRef.publication]);
+
+  return (
+    <div
+      className="flex-shrink-0 rounded-2xl overflow-hidden"
+      style={{
+        width: "calc(16/9 * clamp(120px, 17vh, 210px))",
+        height: "clamp(120px, 17vh, 210px)",
+        border: "2px solid rgba(212,0,122,0.28)",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.45), 0 0 20px rgba(212,0,122,0.15)",
+      }}
+    >
+      <ParticipantTile trackRef={trackRef} style={{ width: "100%", height: "100%" }} />
+    </div>
   );
 }
 
@@ -330,6 +367,7 @@ export function CinemaGrid({
   mediaVolume = 0.8,
   hideCammerStrip = false,
 }: CinemaGridProps) {
+  const t = useI18n().live;
   const tracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: false }],
     { onlySubscribed: false }
@@ -344,21 +382,18 @@ export function CinemaGrid({
   const showStandby = mediaKind === "off" || (!mediaTrack && !mediaSrc);
 
   return (
-    <div className="flex flex-col h-full" style={{ background: "#000" }}>
-      <div className="relative flex-1 min-h-0 flex items-center justify-center" style={{ background: "#000" }}>
+    <div className="flex flex-col h-full bg-black">
+      <div className="relative flex-1 min-h-0 flex items-center justify-center bg-black">
         {showStandby ? (
           <div className="flex flex-col items-center gap-4 px-6 text-center">
-            <div
-              className="w-20 h-20 rounded-2xl flex items-center justify-center"
-              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
-            >
+            <div className="w-20 h-20 rounded-2xl flex items-center justify-center bg-white/[0.04] border border-white/[0.08]">
               <svg className="w-10 h-10 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-3.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-1.5A1.125 1.125 0 0118 18.375M20.625 4.5H3.375m17.25 0c.621 0 1.125.504 1.125 1.125M20.625 4.5h-1.5C18.504 4.5 18 5.004 18 5.625m3.75 0v1.5c0 .621-.504 1.125-1.125 1.125M3.375 4.5c-.621 0-1.125.504-1.125 1.125M3.375 4.5h1.5C5.496 4.5 6 5.004 6 5.625m-3.75 0v1.5c0 .621.504 1.125 1.125 1.125m0 0h1.5m-1.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m1.5-3.75C5.496 8.25 6 8.754 6 9.375v1.5m0-5.25v5.25m0-5.25C6 5.004 6.504 4.5 7.125 4.5h9.75c.621 0 1.125.504 1.125 1.125m1.125 2.625h1.5m-1.5 0A1.125 1.125 0 0118 9.375v1.5m1.5-3.75C19.496 8.25 20 8.754 20 9.375v1.5m0-5.25v5.25m0-5.25C20 5.004 19.496 4.5 18.875 4.5M9 11.25v1.5M12 9v3.75m3-6v6" />
               </svg>
             </div>
             <div>
-              <p className="text-white/40 font-medium text-sm">Standby</p>
-              <p className="text-white/25 text-xs mt-1">No media playing · Admin controls playback</p>
+              <p className="text-white/40 font-medium text-sm">{t.mainStageStandby}</p>
+              <p className="text-white/25 text-xs mt-1">{t.mainStageNoMediaPlaying}</p>
             </div>
           </div>
         ) : mediaTrack ? (
@@ -382,29 +417,15 @@ export function CinemaGrid({
         <div
           className="flex-shrink-0 flex gap-2 overflow-x-auto"
           style={{
-            height: "200px",
+            height: "clamp(140px, 20vh, 240px)",
             padding: "12px 14px",
             background: "rgba(0,0,0,0.85)",
             scrollbarWidth: "none",
             msOverflowStyle: "none",
           }}
         >
-          {cammerTracks.map((t) => (
-            <div
-              key={t.participant.identity}
-              className="flex-shrink-0 rounded-2xl overflow-hidden"
-              style={{
-                width: "calc(16/9 * 176px)",
-                height: "176px",
-                border: "2px solid rgba(212,0,122,0.28)",
-                boxShadow: "0 6px 18px rgba(0,0,0,0.45), 0 0 20px rgba(212,0,122,0.15)",
-              }}
-            >
-              <ParticipantTile
-                trackRef={t}
-                style={{ width: "100%", height: "100%" }}
-              />
-            </div>
+          {cammerTracks.map((track) => (
+            <CinemaStripTile key={track.participant.identity} trackRef={track} />
           ))}
         </div>
       )}
