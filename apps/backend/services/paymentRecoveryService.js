@@ -392,7 +392,7 @@ class PaymentRecoveryService {
       );
       if (settle.rowCount === 0) return { alreadyProcessed: true };
       const PaymentService = require('./paymentService');
-      const grantResult = await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'dash', meta);
+      const grantResult = await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'dash', meta, invoiceId);
       try { await cache.del(`user:${order.user_id}`); } catch {}
       return { type: 'scoped', grantResult };
     }
@@ -444,7 +444,7 @@ class PaymentRecoveryService {
     let grantResult = null;
     try {
       const PaymentService = require('./paymentService');
-      grantResult = await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay');
+      grantResult = await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay', null, invoiceId);
     } catch (entErr) {
       logger.error('settleStuckDashInvoice: grantEntitlementsForPlan failed (tier already set)', {
         userId: order.user_id, planId: order.plan_id, error: entErr.message,

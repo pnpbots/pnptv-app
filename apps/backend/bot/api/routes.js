@@ -7670,7 +7670,8 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
             order.user_id,
             order.plan_id,
             'dash',
-            orderMetadata
+            orderMetadata,
+            invoiceId
           );
           logger.info('BTCPay scoped resource purchase granted', {
             invoiceId,
@@ -7774,7 +7775,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       // This matches the post-payment flow used by ePayco.
       try {
         const PaymentService = require('../../services/paymentService');
-        await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay');
+        await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay', null, invoiceId);
         logger.info('BTCPay: entitlements granted', { userId: order.user_id, planId: order.plan_id });
       } catch (entErr) {
         // Non-fatal: users.tier is already set so legacy access paths still work.
@@ -7925,7 +7926,7 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       let metaGrantResult;
       try {
         const PaymentServiceGf = require('../../services/paymentService');
-        metaGrantResult = await PaymentServiceGf.grantEntitlementsForPlan(metaUserId, metaPlanId, 'btcpay');
+        metaGrantResult = await PaymentServiceGf.grantEntitlementsForPlan(metaUserId, metaPlanId, 'btcpay', null, invoiceId);
         logger.info('BTCPay metadata flow: entitlements granted', {
           invoiceId,
           userId: metaUserId,

@@ -1696,7 +1696,7 @@ class PaymentService {
             // Grant entitlements based on plan_add_ons mapping
             let grantResult;
             try {
-              grantResult = await PaymentService.grantEntitlementsForPlan(userId, planIdOrBookingId, 'epayco', payment?.metadata);
+              grantResult = await PaymentService.grantEntitlementsForPlan(userId, planIdOrBookingId, 'epayco', payment?.metadata, payment?.id || null);
             } catch (entitlementErr) {
               logger.error('grantEntitlementsForPlan threw unexpectedly — ePayco will retry', {
                 error: entitlementErr.message, userId, planId: planIdOrBookingId,
@@ -3896,8 +3896,11 @@ class PaymentService {
    * @param {string} [source='payment'] - Source for audit log
    * @returns {Promise<{granted: number, errors: number}>}
    */
-  static async grantEntitlementsForPlan(userId, planId, source = 'payment', paymentMetadata = null) {
+  static async grantEntitlementsForPlan(userId, planId, source = 'payment', paymentMetadata = null, sourcePaymentId = null) {
     const result = { granted: 0, errors: 0 };
+    // Resolve sourcePaymentId from explicit arg OR paymentMetadata.paymentId for
+    // backward compat with callers that thread paymentId through metadata.
+    const resolvedPaymentId = sourcePaymentId || paymentMetadata?.paymentId || null;
     try {
       // Look up what add-ons this plan grants, with per-add-on duration overrides
       const addOnsResult = await query(`
@@ -3938,21 +3941,27 @@ class PaymentService {
           }
 
           if (isLifetime) {
-            // Lifetime: upsert with no expiry
+            // Lifetime: upsert with no expiry. source_payment_id is set on first
+            // insert; on conflict we COALESCE so an existing audit trail is preserved.
             await txClient.query(`
-              INSERT INTO user_entitlements (user_id, add_on_id, creator_id, is_lifetime, source_plan_id)
-              VALUES ($1, $2, $3, true, $4)
+              INSERT INTO user_entitlements (user_id, add_on_id, creator_id, is_lifetime, source_plan_id, source_payment_id)
+              VALUES ($1, $2, $3, true, $4, $5)
               ON CONFLICT (user_id, add_on_id, creator_id)
-              DO UPDATE SET is_lifetime = true, is_consumed = false, updated_at = NOW()
-            `, [userId, row.add_on_id, scopeCreatorId, planId]);
+              DO UPDATE SET is_lifetime = true, is_consumed = false,
+                            source_payment_id = COALESCE(user_entitlements.source_payment_id, EXCLUDED.source_payment_id),
+                            updated_at = NOW()
+            `, [userId, row.add_on_id, scopeCreatorId, planId, resolvedPaymentId]);
           } else {
             // Time-limited: extend from current expiry if still active, else from now.
             // For scoped add-ons we MUST pass creator_id so the ON CONFLICT clause
             // matches the (user_id, add_on_id, creator_id) unique key correctly and
             // we don't stomp on a global row of the same add_on_id.
+            // source_payment_id is updated on every renewal so the audit trail
+            // points at the most recent paying transaction (refund/chargeback flows
+            // need the LATEST payment that re-enabled the entitlement).
             await txClient.query(`
-              INSERT INTO user_entitlements (user_id, add_on_id, creator_id, expires_at, source_plan_id)
-              VALUES ($1, $2, $3, NOW() + ($4::integer * INTERVAL '1 day'), $5)
+              INSERT INTO user_entitlements (user_id, add_on_id, creator_id, expires_at, source_plan_id, source_payment_id)
+              VALUES ($1, $2, $3, NOW() + ($4::integer * INTERVAL '1 day'), $5, $6)
               ON CONFLICT (user_id, add_on_id, creator_id)
               DO UPDATE SET
                 expires_at = CASE
@@ -3962,9 +3971,10 @@ class PaymentService {
                   ELSE NOW() + ($4::integer * INTERVAL '1 day')
                 END,
                 is_consumed = false,
+                source_payment_id = COALESCE(EXCLUDED.source_payment_id, user_entitlements.source_payment_id),
                 updated_at = NOW()
               WHERE NOT user_entitlements.is_lifetime
-            `, [userId, row.add_on_id, scopeCreatorId, parseInt(durationDays, 10), planId]);
+            `, [userId, row.add_on_id, scopeCreatorId, parseInt(durationDays, 10), planId, resolvedPaymentId]);
           }
 
           // Dual-write to legacy creator_subscriptions so old read paths stay working.

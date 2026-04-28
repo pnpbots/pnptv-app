@@ -1382,6 +1382,7 @@ class PaymentController {
               planId,
               'epayco_3ds2',
               payment?.metadata || null,
+              paymentId || null,
             );
           } catch (entitlementErr) {
             logger.error('grantEntitlementsForPlan threw during 3DS2 completion', {
