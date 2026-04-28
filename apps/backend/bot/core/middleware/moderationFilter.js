@@ -39,8 +39,16 @@ const moderationFilter = () => async (ctx, next) => {
         return next();
       }
     } catch (error) {
-      logger.error('Error checking chat member status:', error);
-      // Continue with moderation if we can't verify admin status
+      // CHAT_ADMIN_REQUIRED is expected in chats where the bot isn't an admin —
+      // we can't fetch member info, so just treat user as non-admin and proceed.
+      if (error?.description === 'Bad Request: CHAT_ADMIN_REQUIRED') {
+        logger.debug('Bot lacks admin in chat, skipping admin check', {
+          chatId: ctx.chat.id,
+          userId,
+        });
+      } else {
+        logger.error('Error checking chat member status:', error);
+      }
     }
 
     // Process message through moderation service

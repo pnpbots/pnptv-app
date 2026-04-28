@@ -238,8 +238,9 @@ class UserModel {
       try {
         result = await executeInsert(userData.username || null);
       } catch (error) {
+        const constraint = String(error?.constraint || '');
         const isDuplicateUsername = error?.code === '23505'
-          && String(error?.constraint || '').includes('users_username_key');
+          && (constraint.includes('users_username_key') || constraint.includes('username'));
         if (isDuplicateUsername) {
           logger.warn('Duplicate username on create/update, retrying without username', {
             userId,

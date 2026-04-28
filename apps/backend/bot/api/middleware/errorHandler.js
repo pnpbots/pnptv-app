@@ -25,20 +25,34 @@ function errorHandler(err, req, res, _next) {
     return res.status(400).json({ error: err.message });
   }
 
-  // Log the error
-  logger.error('Express error handler:', {
-    error: err.message,
-    stack: err.stack,
-    url: req.url,
-    method: req.method,
-    body: sanitizeBody(req.body),
-    params: req.params,
-    query: req.query,
-    ip: req.ip,
-  });
+  // Determine status code (also accept legacy `err.status` from older throw sites)
+  const statusCode = err.statusCode || err.status || 500;
+  const isClientError = statusCode >= 400 && statusCode < 500;
 
-  // Send to Sentry if configured
-  if (process.env.SENTRY_DSN) {
+  // Log at the appropriate level: 4xx are user-input/validation, not exceptions
+  if (isClientError) {
+    logger.warn('Client error:', {
+      status: statusCode,
+      error: err.message,
+      url: req.url,
+      method: req.method,
+      ip: req.ip,
+    });
+  } else {
+    logger.error('Express error handler:', {
+      error: err.message,
+      stack: err.stack,
+      url: req.url,
+      method: req.method,
+      body: sanitizeBody(req.body),
+      params: req.params,
+      query: req.query,
+      ip: req.ip,
+    });
+  }
+
+  // Only send 5xx errors to Sentry — 4xx are expected user-input failures
+  if (process.env.SENTRY_DSN && !isClientError) {
     Sentry.captureException(err, {
       extra: {
         url: req.url,
@@ -50,11 +64,9 @@ function errorHandler(err, req, res, _next) {
     });
   }
 
-  // Determine status code
-  const statusCode = err.statusCode || 500;
-
-  // Determine if we should expose the error message
-  const isOperational = isOperationalError(err);
+  // Determine if we should expose the error message — 4xx errors carry
+  // user-facing validation messages, so expose them too.
+  const isOperational = isOperationalError(err) || isClientError;
   const message = isOperational ? err.message : 'Internal server error';
 
   // Build error response

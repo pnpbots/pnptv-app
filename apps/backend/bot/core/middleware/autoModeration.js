@@ -22,7 +22,14 @@ async function isExempt(ctx) {
     const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
     if (['creator', 'administrator'].includes(member.status)) return true;
   } catch (error) {
-    logger.error('Error checking telegram exempt status:', error);
+    if (error?.description === 'Bad Request: CHAT_ADMIN_REQUIRED') {
+      logger.debug('Bot lacks admin in chat, treating user as non-exempt', {
+        chatId: ctx.chat.id,
+        userId: ctx.from.id,
+      });
+    } else {
+      logger.error('Error checking telegram exempt status:', error);
+    }
   }
 
   try {
