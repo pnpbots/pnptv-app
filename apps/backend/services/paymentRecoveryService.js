@@ -277,17 +277,27 @@ class PaymentRecoveryService {
               [row.invoice_id]
             );
           } else if (eventType === 'InvoiceSettled') {
-            // Settled but our DB still pending → we missed the webhook.
-            // Log loudly so an operator can replay the webhook from BTCPay's
-            // delivery log. Auto-replay would require minting an HMAC, which
-            // we cannot do safely from inside this service.
-            logger.error('Dash reconciliation: SETTLED invoice with pending DB row — manual webhook replay needed', {
-              invoiceId: row.invoice_id,
-              source: row.source,
-              createdAt: row.created_at,
-              btcpayStatus: status,
-              webhookUrl,
-            });
+            // Settled but our DB still pending → webhook delivery failed.
+            // Run the grant in-process. Idempotency comes from the same atomic
+            // UPDATE-WHERE-status='pending' guard the webhook uses, so a
+            // concurrent webhook delivery cannot double-grant.
+            try {
+              const grantResult = await PaymentRecoveryService.settleStuckDashInvoice(row.invoice_id, row.source);
+              logger.info('Dash reconciliation: settled in-process', {
+                invoiceId: row.invoice_id,
+                source: row.source,
+                grantResult,
+              });
+            } catch (grantErr) {
+              logger.error('Dash reconciliation: in-process settlement failed — operator must investigate', {
+                invoiceId: row.invoice_id,
+                source: row.source,
+                createdAt: row.created_at,
+                webhookUrl,
+                error: grantErr.message,
+              });
+              results.errors++;
+            }
           }
         } catch (invErr) {
           results.errors++;
@@ -322,6 +332,128 @@ class PaymentRecoveryService {
     } finally {
       await cache.releaseLock(lockKey);
     }
+  }
+
+  /**
+   * Settle a Settled-in-BTCPay invoice that our DB still has as `pending`.
+   * Mirrors the subscription branch of the /api/webhooks/btcpay handler. Used
+   * by the reconciler when webhook delivery fails (network, 4xx, signature).
+   * Idempotency comes from atomic UPDATE-WHERE-status='pending' guards — if
+   * the real webhook lands first, our UPDATE returns 0 rows and we exit clean.
+   *
+   * Token purchases are out of scope here — those route through dashTokenService
+   * which still requires the real webhook. Source='token_purchases' rows are
+   * left for the InvoicePaymentSettled webhook (or operator) to settle.
+   */
+  static async settleStuckDashInvoice(invoiceId, source) {
+    if (source !== 'dash_subscription_orders') {
+      return { skipped: true, reason: 'token_purchases_not_supported' };
+    }
+
+    const { rows: orderRows } = await query(
+      `SELECT id, user_id, plan_id, status, creator_id, metadata, usd_amount
+       FROM dash_subscription_orders WHERE btcpay_invoice_id = $1`,
+      [invoiceId]
+    );
+    if (orderRows.length === 0) {
+      return { skipped: true, reason: 'no_order_row' };
+    }
+    const order = orderRows[0];
+    if (order.status !== 'pending') {
+      return { alreadyProcessed: true, finalStatus: order.status };
+    }
+
+    const meta = order.metadata && typeof order.metadata === 'object'
+      ? order.metadata
+      : (typeof order.metadata === 'string'
+          ? (() => { try { return JSON.parse(order.metadata); } catch { return null; } })()
+          : null);
+
+    // Resource-typed orders (live_show_ticket, private_call_booking, call_package)
+    // depend on services we don't want to invoke from the reconciler — mark for
+    // operator review instead of guessing.
+    if (meta && (meta.resource === 'live_show_ticket'
+        || meta.resource === 'private_call_booking'
+        || meta.resource === 'call_package')) {
+      await query(
+        `UPDATE dash_subscription_orders SET notes = $2 WHERE id = $1`,
+        [order.id, `reconciler_skipped_resource_${meta.resource}`]
+      );
+      return { skipped: true, reason: `resource_${meta.resource}` };
+    }
+
+    // Scoped purchases (channel-access / hangout-access) — same grant path the
+    // webhook uses for these plans.
+    if (meta && (meta.hangoutGroupId || meta.channelId)) {
+      const settle = await query(
+        `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = 'reconciler_settled'
+         WHERE id = $1 AND status = 'pending' RETURNING id`,
+        [order.id]
+      );
+      if (settle.rowCount === 0) return { alreadyProcessed: true };
+      const PaymentService = require('./paymentService');
+      const grantResult = await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'dash', meta);
+      try { await cache.del(`user:${order.user_id}`); } catch {}
+      return { type: 'scoped', grantResult };
+    }
+
+    // Creator subscription — route through CreatorService.subscribeToCreator
+    // which handles entitlement + creator_subscriptions row + 70/30 split.
+    const isCreatorSub = order.plan_id === 'creator_monthly' && order.creator_id;
+    let plan;
+    if (isCreatorSub) {
+      plan = { id: 'creator_monthly', tier: null, duration_days: 30 };
+    } else {
+      const PlanModel = require('../models/planModel');
+      plan = await PlanModel.getById(order.plan_id);
+      if (!plan) {
+        await query(
+          `UPDATE dash_subscription_orders SET status = 'failed', notes = 'plan_not_found' WHERE id = $1`,
+          [order.id]
+        );
+        throw new Error(`plan_not_found: ${order.plan_id}`);
+      }
+    }
+
+    const durationDays = plan.duration_days || plan.duration || 30;
+    const isLifetime = durationDays >= 36500;
+    const expiryDate = isLifetime ? null : new Date(Date.now() + durationDays * 86400000);
+    const newTier = (plan.tier === 'member' || order.plan_id.startsWith('member_')) ? 'member' : 'PRIME';
+
+    const settle = await query(
+      `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = 'reconciler_settled'
+       WHERE id = $1 AND status = 'pending' RETURNING id`,
+      [order.id]
+    );
+    if (settle.rowCount === 0) return { alreadyProcessed: true };
+
+    if (isCreatorSub) {
+      const CreatorService = require('./creatorService');
+      await CreatorService.subscribeToCreator(order.user_id, order.creator_id, null);
+      try { await cache.del(`user:${order.user_id}`); } catch {}
+      return { type: 'creator_subscription', creatorId: order.creator_id };
+    }
+
+    await query(
+      `UPDATE users
+       SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW()
+       WHERE id = $1 OR telegram = $1`,
+      [order.user_id, newTier, order.plan_id, expiryDate]
+    );
+
+    let grantResult = null;
+    try {
+      const PaymentService = require('./paymentService');
+      grantResult = await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay');
+    } catch (entErr) {
+      logger.error('settleStuckDashInvoice: grantEntitlementsForPlan failed (tier already set)', {
+        userId: order.user_id, planId: order.plan_id, error: entErr.message,
+      });
+    }
+
+    try { await cache.del(`user:${order.user_id}`); } catch {}
+
+    return { type: 'subscription', tier: newTier, expiryDate, grantResult };
   }
 
   /**
