@@ -131,6 +131,79 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // Video leak detector — every hour at :17
+    // Scans video_fetch_log over the last 60 min and alerts the operator
+    // group when an exclusive video URL has been fetched by 3+ distinct
+    // user_ids OR 5+ distinct IPs — the signature of a paid user sharing
+    // a URL on Twitter/Discord and randos piling on. The hotlink + entitlement
+    // gates already block most leak attempts (those return 401/403 and don't
+    // make it into the log) but a paid user who hands their cookie to friends
+    // is still a leak vector this catches.
+    cron.schedule(process.env.VIDEO_LEAK_DETECTOR_CRON || '17 * * * *', async () => {
+      try {
+        const { query } = require(path.join(backendPath, 'config/postgres'));
+        const { rows: suspects } = await query(`
+          SELECT vfl.media_url,
+                 COUNT(DISTINCT vfl.user_id) FILTER (WHERE vfl.user_id IS NOT NULL) AS distinct_users,
+                 COUNT(DISTINCT vfl.ip_address) FILTER (WHERE vfl.ip_address IS NOT NULL) AS distinct_ips,
+                 COUNT(*) AS total_fetches
+          FROM video_fetch_log vfl
+          JOIN social_posts sp ON sp.media_url = vfl.media_url
+          WHERE vfl.fetched_at > NOW() - INTERVAL '60 minutes'
+            AND (sp.is_exclusive = true OR COALESCE(sp.content_tier, 'free') = 'prime')
+            AND sp.is_deleted = false
+          GROUP BY vfl.media_url
+          HAVING COUNT(DISTINCT vfl.user_id) FILTER (WHERE vfl.user_id IS NOT NULL) >= 3
+              OR COUNT(DISTINCT vfl.ip_address) FILTER (WHERE vfl.ip_address IS NOT NULL) >= 5
+          ORDER BY distinct_users DESC, distinct_ips DESC
+          LIMIT 10
+        `);
+
+        if (suspects.length === 0) {
+          logger.info('Video leak detector: no suspicious patterns in the last hour');
+          return;
+        }
+
+        // Throttle alerts to one per 6h per URL via Redis.
+        const { cache } = require(path.join(backendPath, 'config/redis'));
+        const fresh = [];
+        for (const s of suspects) {
+          const tk = `videoLeakAlert:${s.media_url}`;
+          const got = await cache.acquireLock(tk, 6 * 3600);
+          if (got) fresh.push(s);
+        }
+        if (fresh.length === 0) return;
+
+        const BusinessNotificationService = require(path.join(backendPath, 'services/businessNotificationService'));
+        const lines = [
+          '🟠 <b>Possible video URL leak detected</b>',
+          '',
+          `${fresh.length} exclusive video URL(s) fetched by suspicious patterns in the last hour:`,
+          '',
+          ...fresh.map(s => `• <code>${s.media_url}</code>\n  ${s.distinct_users} users, ${s.distinct_ips} IPs, ${s.total_fetches} fetches`),
+          '',
+          'Investigate: the entitlement gate already blocks unauthorized fetches, so these are PRIME users hitting the same URL — likely a shared cookie or a screen-share. Consider rotating the post or revoking the leaker.',
+        ].join('\n');
+        await BusinessNotificationService.send(lines);
+        logger.warn('Video leak detector: alert dispatched', { count: fresh.length });
+      } catch (error) {
+        logger.error('Error in video leak detector cron:', error);
+      }
+    });
+
+    // Video fetch log retention — daily at 03:13 UTC
+    cron.schedule(process.env.VIDEO_LOG_CLEANUP_CRON || '13 3 * * *', async () => {
+      try {
+        const { query } = require(path.join(backendPath, 'config/postgres'));
+        const result = await query(
+          `DELETE FROM video_fetch_log WHERE fetched_at < NOW() - INTERVAL '14 days'`
+        );
+        logger.info('Video fetch log retention sweep completed', { deleted: result.rowCount });
+      } catch (error) {
+        logger.error('Error in video log cleanup cron:', error);
+      }
+    });
+
     // BTCPay webhook URL probe — daily at 06:30 UTC
     // Catches the exact failure mode that caused the Apr-2026 incident: BTCPay
     // store webhook silently pointing at a 404 URL. Calls verifyWebhookRegistration

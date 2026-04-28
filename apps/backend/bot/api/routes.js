@@ -666,11 +666,11 @@ app.get('/cms/assets/:assetId', async (req, res) => {
 // request fetches per playback and we don't want each one to hit Postgres.
 const VIDEO_PATH_RE = /^\/uploads\/posts\/(vid-[^/]+\.(?:mp4|webm|mov))$/i;
 const videoMetaCache = new Map(); // url → { isExclusive, authorId, expiresAt }
-const videoFetchRateMap = new Map(); // key → { count, windowExpires }
 const VIDEO_FETCH_RATE_LIMIT = parseInt(process.env.VIDEO_FETCH_RATE_LIMIT || '300', 10);
-const VIDEO_FETCH_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const VIDEO_FETCH_RATE_WINDOW_SEC = 60 * 60; // 1 hour
 const { query: videoGuardQuery } = require('../../config/postgres');
 const { validateTierFresh: videoGuardValidateTier } = require('../../services/accessService');
+const { cache: videoGuardCache, getRedis: videoGuardGetRedis } = require('../../config/redis');
 
 const allowedHotlinkHosts = new Set([
   'app.pnptv.app',
@@ -702,24 +702,20 @@ app.use(async (req, res, next) => {
   }
 
   // Layer 3 (run before DB lookup so scrapers don't get free DB pressure):
-  // rate-limit per session-user-id, falling back to IP.
-  const rateKey = req.session?.user?.id ? `u:${req.session.user.id}` : `ip:${req.ip}`;
+  // rate-limit per session-user-id, falling back to IP. Backed by Redis so
+  // it survives bot restarts — a brief restart used to reset all attackers'
+  // counters with the in-memory map.
+  const rateKey = `videofetch:${req.session?.user?.id ? `u:${req.session.user.id}` : `ip:${req.ip}`}`;
   const now = Date.now();
-  let rate = videoFetchRateMap.get(rateKey);
-  if (!rate || rate.windowExpires < now) {
-    rate = { count: 0, windowExpires: now + VIDEO_FETCH_RATE_WINDOW_MS };
-    videoFetchRateMap.set(rateKey, rate);
-  }
-  rate.count++;
-  if (rate.count > VIDEO_FETCH_RATE_LIMIT) {
-    logger.warn('Video fetch rate limit exceeded', { rateKey, count: rate.count, path: req.path });
-    return res.status(429).json({ error: 'Too many video requests. Try again later.' });
-  }
-  // Cap the rate map to 5000 keys (FIFO-ish trim).
-  if (videoFetchRateMap.size > 5000) {
-    const drop = [...videoFetchRateMap.entries()]
-      .sort((a, b) => a[1].windowExpires - b[1].windowExpires).slice(0, 1000);
-    for (const [k] of drop) videoFetchRateMap.delete(k);
+  try {
+    const count = await videoGuardCache.incr(rateKey, VIDEO_FETCH_RATE_WINDOW_SEC);
+    if (count > VIDEO_FETCH_RATE_LIMIT) {
+      logger.warn('Video fetch rate limit exceeded', { rateKey, count, path: req.path });
+      return res.status(429).json({ error: 'Too many video requests. Try again later.' });
+    }
+  } catch (rateErr) {
+    // If Redis is down, fail open (don't block legitimate viewers). Logged.
+    logger.warn('Video rate-limit Redis error — failing open', { error: rateErr.message });
   }
 
   try {
@@ -747,7 +743,26 @@ app.use(async (req, res, next) => {
       }
     }
 
+    // View logging — record every fetch for leak detection. Deduped per
+    // (viewer, url) over 5 min via Redis SET-NX so a single playback's 50+
+    // range requests count as ONE view. Fire-and-forget: failures don't block.
+    try {
+      const viewerKey = req.session?.user?.id || `ip:${req.ip}`;
+      const dedupeKey = `videolog:${viewerKey}:${url}`;
+      const redis = videoGuardGetRedis();
+      const set = await redis.set(dedupeKey, '1', 'EX', 300, 'NX');
+      if (set === 'OK') {
+        videoGuardQuery(
+          `INSERT INTO video_fetch_log (media_url, user_id, ip_address) VALUES ($1, $2, $3)`,
+          [url, req.session?.user?.id || null, req.ip || null]
+        ).catch(() => {});
+      }
+    } catch { /* logging failure is never fatal */ }
+
     if (!entry.isExclusive) return next();
+
+    // Exclusive content from here on: prevent intermediate caching.
+    res.set('Cache-Control', 'private, no-store, max-age=0');
 
     // Layer 2: Mirror getPost access logic — admin OR author OR prime tier.
     const viewerId = req.session?.user?.id;
