@@ -334,7 +334,12 @@ class PaymentSettlementService {
    */
   static async settleSubscription(order, invoiceId, plan, dbQuery, opts = {}) {
     const durationDays = plan.duration_days || plan.duration || 30;
-    const isLifetime = durationDays >= 36500;
+    // Lifetime detection: prefer the explicit `is_lifetime` field on the plan
+    // row. Fall back to the duration heuristic only for legacy plans where
+    // the column may be missing. The 36500-day heuristic alone misclassified
+    // the `lifetime100` plan (60-day duration + lifetime add-on) and was a
+    // documented trap.
+    const isLifetime = plan.is_lifetime === true || durationDays >= 36500;
     const expiryDate = isLifetime ? null : new Date(Date.now() + durationDays * 86400000);
     const newTier = (plan.tier === 'member' || order.plan_id.startsWith('member_')) ? 'member' : 'PRIME';
 

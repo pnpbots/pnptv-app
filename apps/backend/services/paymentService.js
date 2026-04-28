@@ -4003,11 +4003,17 @@ class PaymentService {
           if (isLifetime) {
             // Lifetime: upsert with no expiry. source_payment_id is set on first
             // insert; on conflict we COALESCE so an existing audit trail is preserved.
+            //
+            // CRITICAL: explicitly set expires_at = NULL on conflict — without
+            // this, an existing TIMED row being upgraded to lifetime keeps its
+            // stale expires_at, then the lifetime trigger locks the row and
+            // the corruption becomes self-sealing. (This is the root cause of
+            // the 2026-04 lifetime-with-expiry incident.)
             await txClient.query(`
-              INSERT INTO user_entitlements (user_id, add_on_id, creator_id, is_lifetime, source_plan_id, source_payment_id)
-              VALUES ($1, $2, $3, true, $4, $5)
+              INSERT INTO user_entitlements (user_id, add_on_id, creator_id, is_lifetime, expires_at, source_plan_id, source_payment_id)
+              VALUES ($1, $2, $3, true, NULL, $4, $5)
               ON CONFLICT (user_id, add_on_id, creator_id)
-              DO UPDATE SET is_lifetime = true, is_consumed = false,
+              DO UPDATE SET is_lifetime = true, expires_at = NULL, is_consumed = false,
                             source_payment_id = COALESCE(user_entitlements.source_payment_id, EXCLUDED.source_payment_id),
                             updated_at = NOW()
             `, [userId, row.add_on_id, scopeCreatorId, planId, resolvedPaymentId]);
@@ -4216,11 +4222,14 @@ class PaymentService {
             const memberLifetime = primeRow?.is_lifetime || false;
             const memberDays = primeRow?.addon_duration_days || primeRow?.plan_duration_days || 30;
             if (memberLifetime) {
+              // Same reason as the main lifetime branch above: must set
+              // expires_at = NULL on conflict so a pre-existing timed
+              // pnp-member row gets cleared, not left with a stale expiry.
               await query(`
-                INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, source_plan_id)
-                VALUES ($1, 'pnp-member', true, $2)
+                INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, source_plan_id)
+                VALUES ($1, 'pnp-member', true, NULL, $2)
                 ON CONFLICT (user_id, add_on_id, creator_id)
-                DO UPDATE SET is_lifetime = true, is_consumed = false, updated_at = NOW()
+                DO UPDATE SET is_lifetime = true, expires_at = NULL, is_consumed = false, updated_at = NOW()
               `, [userId, planId]);
             } else {
               await query(`

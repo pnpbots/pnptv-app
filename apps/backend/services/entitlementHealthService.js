@@ -98,13 +98,19 @@ class EntitlementHealthService {
       // lifetimeWithExpiry: is_lifetime=true MUST imply expires_at IS NULL.
       // Schema drift would mean a code path is writing both fields, which
       // breaks the cleanup query above (it filters lifetime=false only).
+      // After migration 236 a CHECK constraint enforces this at INSERT time,
+      // so this should be 0 forever. We still surface row IDs (no PII) so
+      // operators can dig into any drift that ever appears.
       const r4 = await query(`
-        SELECT COUNT(*)::int AS n
+        SELECT id
         FROM user_entitlements
         WHERE is_lifetime = true
           AND expires_at IS NOT NULL
+        ORDER BY id
+        LIMIT 10
       `);
-      counts.lifetimeWithExpiry = r4.rows[0]?.n || 0;
+      counts.lifetimeWithExpiry = r4.rowCount || 0;
+      counts.lifetimeWithExpirySampleIds = r4.rows.map(r => r.id);
     } catch (err) {
       pgReachable = false;
       logger.warn(`entitlementHealth: pg query failed: ${err.message}`);
