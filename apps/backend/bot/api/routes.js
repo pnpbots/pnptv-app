@@ -759,7 +759,39 @@ app.use(async (req, res, next) => {
       }
     } catch { /* logging failure is never fatal */ }
 
-    if (!entry.isExclusive) return next();
+    // Helper: hand off to R2 with a 1h presigned URL when available.
+    // Falls through to express.static (disk) on any error, so a broken R2
+    // doesn't break video playback — disk copy is the safety net during
+    // migration and after.
+    const tryR2Redirect = async () => {
+      try {
+        const objectStorage = require('../../services/objectStorageService');
+        if (!objectStorage.isConfigured()) return false;
+        const key = objectStorage.keyForMediaUrl(req.path);
+        if (!key) return false;
+        // Cache "exists in R2" on the videoMetaCache entry so we don't HEAD
+        // on every range-request fetch.
+        if (entry.r2Status === undefined) {
+          entry.r2Status = await objectStorage.exists(key) ? 'present' : 'missing';
+        }
+        if (entry.r2Status !== 'present') return false;
+        const url = await objectStorage.getPresignedUrl(key, 3600);
+        // Set Cache-Control before redirect; browsers honor headers on 302.
+        res.set('Cache-Control', 'private, no-store, max-age=0');
+        res.redirect(302, url);
+        return true;
+      } catch (r2Err) {
+        logger.warn('R2 redirect failed — falling back to disk', { path: req.path, error: r2Err.message });
+        return false;
+      }
+    };
+
+    if (!entry.isExclusive) {
+      // Public videos: try R2 redirect first (saves bandwidth + faster CDN),
+      // fall through to disk otherwise.
+      if (await tryR2Redirect()) return;
+      return next();
+    }
 
     // Exclusive content from here on: prevent intermediate caching.
     res.set('Cache-Control', 'private, no-store, max-age=0');
@@ -770,20 +802,23 @@ app.use(async (req, res, next) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
     const viewerRole = req.session?.user?.role || '';
-    if (viewerRole === 'admin' || viewerRole === 'superadmin') return next();
-    if (entry.authorId && String(viewerId) === entry.authorId) return next();
-
-    // Use validateTierFresh — defeats stale sessions where a user's PRIME
-    // expired but the session cookie still says tier='prime'. Costs one
-    // entitlement check per range-request burst (the validator has its own
-    // short-lived cache so this is not a per-segment cost in practice).
-    const sessionTier = (req.session?.user?.tier || 'free').toLowerCase();
-    const freshTier = await videoGuardValidateTier(viewerId, sessionTier);
-    if (freshTier === 'prime') {
-      // Repair stale session if it differed.
-      if (sessionTier !== freshTier && req.session?.user) {
-        req.session.user.tier = freshTier;
+    const passEntitlement = async () => {
+      if (viewerRole === 'admin' || viewerRole === 'superadmin') return true;
+      if (entry.authorId && String(viewerId) === entry.authorId) return true;
+      const sessionTier = (req.session?.user?.tier || 'free').toLowerCase();
+      const freshTier = await videoGuardValidateTier(viewerId, sessionTier);
+      if (freshTier === 'prime') {
+        if (sessionTier !== freshTier && req.session?.user) {
+          req.session.user.tier = freshTier;
+        }
+        return true;
       }
+      return false;
+    };
+
+    if (await passEntitlement()) {
+      // Authorized — try R2 first, fall back to disk
+      if (await tryR2Redirect()) return;
       return next();
     }
 

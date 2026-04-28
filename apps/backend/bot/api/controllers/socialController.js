@@ -1301,9 +1301,9 @@ const bulkCreateVideos = async (req, res) => {
 
       // Generate thumbnail (non-fatal)
       let videoThumbnailUrl = null;
+      const thumbFilename = `thumb-${user.id}-${Date.now()}-${i}.jpg`;
+      const thumbPath = path.join(uploadDir, thumbFilename);
       try {
-        const thumbFilename = `thumb-${user.id}-${Date.now()}-${i}.jpg`;
-        const thumbPath = path.join(uploadDir, thumbFilename);
         await new Promise((resolve, reject) => {
           ffmpeg(finalPath)
             .screenshots({ count: 1, timemarks: ['2'], filename: thumbFilename, folder: uploadDir })
@@ -1313,6 +1313,29 @@ const bulkCreateVideos = async (req, res) => {
         videoThumbnailUrl = `/uploads/posts/${thumbFilename}`;
       } catch (thumbErr) {
         logger.warn('bulkCreateVideos: thumbnail generation failed', { userId: user.id, index: i, err: thumbErr.message });
+      }
+
+      // Upload to object storage (R2) if configured. We keep the local file
+      // as a backup until the migration script confirms successful R2 sync;
+      // the video access guard will prefer R2 (presigned URL redirect) when
+      // both copies exist. Failures here are non-fatal — disk copy still works.
+      try {
+        const objectStorage = require('../../../services/objectStorageService');
+        if (objectStorage.isConfigured()) {
+          await objectStorage.uploadFile(finalPath, `posts/${filename}`, detectedMime === 'video/webm' ? 'video/webm' : 'video/mp4');
+          logger.info('Video uploaded to object storage', { userId: user.id, key: `posts/${filename}` });
+          if (videoThumbnailUrl) {
+            try {
+              await objectStorage.uploadFile(thumbPath, `posts/${thumbFilename}`, 'image/jpeg');
+            } catch (thumbUploadErr) {
+              logger.warn('Thumbnail R2 upload failed (non-fatal)', { error: thumbUploadErr.message });
+            }
+          }
+        }
+      } catch (uploadErr) {
+        logger.error('Object storage upload failed — falling back to disk-only', {
+          userId: user.id, filename, error: uploadErr.message,
+        });
       }
 
       const post = await SocialPostService.createPost(
