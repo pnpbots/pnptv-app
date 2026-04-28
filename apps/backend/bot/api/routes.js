@@ -3020,6 +3020,25 @@ app.get('/api/webapp/admin/payments/webhook-events', adminGuard, asyncHandler(as
   res.json({ success: true, recent, summary });
 }));
 
+// GET /api/health/entitlements — public read-only entitlement-system audit.
+// Verifies MembershipCleanupService is actually working and no users are
+// stuck in inconsistent state (PRIME tier without entitlement, expired-but-
+// not-consumed rows, etc.). Same architecture as /api/health/payments.
+app.get('/api/health/entitlements', healthLimiter, asyncHandler(async (req, res) => {
+  const EntitlementHealthService = require('../../services/entitlementHealthService');
+  const snapshot = await EntitlementHealthService.getSnapshot();
+  res.status(snapshot.ok ? 200 : 503).json(snapshot);
+}));
+
+// GET /api/health/moderation — public read-only moderation queue triage.
+// Surfaces stuck reports/appeals/applications so the support team can clear
+// them. Counts only — no PII (no reporter/reported identifiers).
+app.get('/api/health/moderation', healthLimiter, asyncHandler(async (req, res) => {
+  const ModerationHealthService = require('../../services/moderationHealthService');
+  const snapshot = await ModerationHealthService.getSnapshot();
+  res.status(snapshot.ok ? 200 : 503).json(snapshot);
+}));
+
 // GET /api/health/payments — public read-only payment-pipeline health snapshot.
 // Zero PII surfaces. Returns booleans, counts, ISO timestamps. Used by external
 // auditors (the scheduled remote regression agent) to verify production state
