@@ -650,25 +650,81 @@ app.get('/cms/assets/:assetId', async (req, res) => {
   }
 });
 
-// Video access guard — gates exclusive-content video files behind the same
-// access logic getPost uses (admin OR author OR prime tier). Without this,
-// a `/uploads/posts/vid-XXX.mp4` URL leaked from a paid user's session
-// streams forever to anyone with the link. Non-exclusive videos pass through
-// unchanged (preserves shareable preview/og:video flows).
+// Video access guard — multiple layers:
+//   1. Hotlink protection: reject requests from external Referer (allows
+//      same-origin and direct fetches; blocks <video src="..."> embeds on
+//      third-party sites)
+//   2. Exclusive-content gate: mirrors getPost access logic — admin OR author
+//      OR prime tier — but uses validateTierFresh to defeat stale sessions
+//      (a user whose PRIME just expired must not get in via a cached cookie)
+//   3. Rate-limit: per-user/IP cap on video fetches to deter bulk scraping
 //
-// Cache lookups for 60s — video players send many range-request fetches per
-// playback and we don't want each one to round-trip to Postgres.
+// Non-exclusive videos pass through (preserves preview/og:video flows) but
+// still get the hotlink + rate-limit checks.
+//
+// Cache the post-metadata lookup for 60s — video players send many range-
+// request fetches per playback and we don't want each one to hit Postgres.
 const VIDEO_PATH_RE = /^\/uploads\/posts\/(vid-[^/]+\.(?:mp4|webm|mov))$/i;
 const videoMetaCache = new Map(); // url → { isExclusive, authorId, expiresAt }
+const videoFetchRateMap = new Map(); // key → { count, windowExpires }
+const VIDEO_FETCH_RATE_LIMIT = parseInt(process.env.VIDEO_FETCH_RATE_LIMIT || '300', 10);
+const VIDEO_FETCH_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const { query: videoGuardQuery } = require('../../config/postgres');
+const { validateTierFresh: videoGuardValidateTier } = require('../../services/accessService');
+
+const allowedHotlinkHosts = new Set([
+  'app.pnptv.app',
+  'pnptv.app',
+  'www.pnptv.app',
+  'auth.pnptv.app',
+  'cms.pnptv.app',
+]);
+
 app.use(async (req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
   if (!VIDEO_PATH_RE.test(req.path)) return next();
 
+  // Layer 1: Hotlink protection. Allow direct fetches (no Referer) and
+  // same-origin Referers. Block external embeds. Range-request bursts within
+  // a single playback all carry the same Referer so this is consistent.
+  const referer = req.get('Referer') || req.get('Referrer') || '';
+  if (referer) {
+    try {
+      const refHost = new URL(referer).hostname;
+      if (!allowedHotlinkHosts.has(refHost)) {
+        logger.info('Video hotlink blocked', { path: req.path, refererHost: refHost, ip: req.ip });
+        return res.status(403).json({ error: 'Hotlinking not allowed' });
+      }
+    } catch {
+      // Malformed Referer — treat as suspicious, block.
+      return res.status(403).json({ error: 'Invalid referer' });
+    }
+  }
+
+  // Layer 3 (run before DB lookup so scrapers don't get free DB pressure):
+  // rate-limit per session-user-id, falling back to IP.
+  const rateKey = req.session?.user?.id ? `u:${req.session.user.id}` : `ip:${req.ip}`;
+  const now = Date.now();
+  let rate = videoFetchRateMap.get(rateKey);
+  if (!rate || rate.windowExpires < now) {
+    rate = { count: 0, windowExpires: now + VIDEO_FETCH_RATE_WINDOW_MS };
+    videoFetchRateMap.set(rateKey, rate);
+  }
+  rate.count++;
+  if (rate.count > VIDEO_FETCH_RATE_LIMIT) {
+    logger.warn('Video fetch rate limit exceeded', { rateKey, count: rate.count, path: req.path });
+    return res.status(429).json({ error: 'Too many video requests. Try again later.' });
+  }
+  // Cap the rate map to 5000 keys (FIFO-ish trim).
+  if (videoFetchRateMap.size > 5000) {
+    const drop = [...videoFetchRateMap.entries()]
+      .sort((a, b) => a[1].windowExpires - b[1].windowExpires).slice(0, 1000);
+    for (const [k] of drop) videoFetchRateMap.delete(k);
+  }
+
   try {
     const url = req.path;
     let entry = videoMetaCache.get(url);
-    const now = Date.now();
     if (!entry || entry.expiresAt < now) {
       const { rows } = await videoGuardQuery(
         `SELECT user_id AS author_id, is_exclusive, COALESCE(content_tier, 'free') AS tier
@@ -693,8 +749,7 @@ app.use(async (req, res, next) => {
 
     if (!entry.isExclusive) return next();
 
-    // Mirror the access logic in getPost (socialController.js:1382-1394):
-    // admin OR author OR prime tier.
+    // Layer 2: Mirror getPost access logic — admin OR author OR prime tier.
     const viewerId = req.session?.user?.id;
     if (!viewerId) {
       return res.status(401).json({ error: 'Authentication required' });
@@ -703,15 +758,27 @@ app.use(async (req, res, next) => {
     if (viewerRole === 'admin' || viewerRole === 'superadmin') return next();
     if (entry.authorId && String(viewerId) === entry.authorId) return next();
 
-    const viewerTier = (req.session?.user?.tier || 'free').toLowerCase();
-    if (viewerTier === 'prime') return next();
+    // Use validateTierFresh — defeats stale sessions where a user's PRIME
+    // expired but the session cookie still says tier='prime'. Costs one
+    // entitlement check per range-request burst (the validator has its own
+    // short-lived cache so this is not a per-segment cost in practice).
+    const sessionTier = (req.session?.user?.tier || 'free').toLowerCase();
+    const freshTier = await videoGuardValidateTier(viewerId, sessionTier);
+    if (freshTier === 'prime') {
+      // Repair stale session if it differed.
+      if (sessionTier !== freshTier && req.session?.user) {
+        req.session.user.tier = freshTier;
+      }
+      return next();
+    }
 
     return res.status(403).json({ error: 'Active PRIME membership required for this content' });
   } catch (err) {
     logger.error('Video access guard error', { error: err.message, path: req.path });
-    // Fail closed for exclusive content — but we don't know yet, so fail open
-    // to avoid breaking public videos on a transient DB blip. Logged for review.
-    return next();
+    // Fail open ONLY for non-exclusive content — for exclusive we already
+    // know the post is exclusive (otherwise we'd have returned next() above).
+    // If we got here on an exception in the auth path, default to deny.
+    return res.status(500).json({ error: 'Access check failed' });
   }
 });
 
