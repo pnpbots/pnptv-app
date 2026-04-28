@@ -207,7 +207,7 @@ const BusinessNotificationService = require('./businessNotificationService');
 const PaymentNotificationService = require('./paymentNotificationService');
 const NotificationEmitter = require('./notificationEmitter');
 const PaymentSecurityService = require('./paymentSecurityService');
-const { isSubscriptionPlan, getEpaycoSubscriptionUrl, normalizePlanId } = require('../config/epaycoSubscriptionPlans');
+const { isSubscriptionPlan, getEpaycoSubscriptionUrl } = require('../config/epaycoSubscriptionPlans');
 const PaymentHistoryService = require('./paymentHistoryService');
 const axios = require('axios');
 const PaymentWebhookEventModel = require('../models/paymentWebhookEventModel');
@@ -1278,9 +1278,19 @@ class PaymentService {
       let paymentIdOrType = webhookData.x_extra3;
       let payment = null;
 
-      // Normalize plan ID: ePayco extras may use hyphens but DB uses underscores
+      // Resolve plan ID against DB. The plans table uses BOTH conventions —
+      // hyphens (prime-week-pass-7d, lifetime-pass) AND underscores (member_monthly,
+      // pnp_col_lifetime). Try the ID as-is first; only fall back to the swapped
+      // form if the as-is lookup misses. The previous always-swap behavior broke
+      // activation for every hyphenated plan (≈27 stuck payments at time of fix).
       if (planIdOrBookingId) {
-        planIdOrBookingId = normalizePlanId(planIdOrBookingId);
+        const original = String(planIdOrBookingId);
+        const planAsIs = await PlanModel.getById(original);
+        if (!planAsIs && original.includes('-')) {
+          const swapped = original.replace(/-/g, '_');
+          const planSwapped = await PlanModel.getById(swapped);
+          if (planSwapped) planIdOrBookingId = swapped;
+        }
       }
 
       // Validate required fields
@@ -1921,15 +1931,21 @@ class PaymentService {
           }
         }
 
-        // Send admin notification for purchase (always, regardless of email)
-        if (userId && planIdOrBookingId) {
+        // Send admin + business notifications for purchase. Two guardrails:
+        //   1. _recovery=true means the recovery cron is replaying a stuck webhook
+        //      — the original (or a prior recovery) already attempted notifications,
+        //      and replaying floods the operator group ("PAGO RECIBIDO — Plan: N/A"
+        //      every cron tick). Skip in that case.
+        //   2. Both notifications are gated on plan being resolvable. Without a plan
+        //      the activation block above didn't run, so nothing was actually granted
+        //      — sending a "purchase complete" message would mislead the operator.
+        if (userId && planIdOrBookingId && !webhookData._recovery) {
           try {
             const plan = await PlanModel.getById(planIdOrBookingId);
             const user = await UserModel.getById(userId);
 
             if (plan) {
               const bot = getBotInstance();
-              // Check if this was a promo purchase
               const promoInfo = payment?.metadata?.promoCode
                 ? ` (Promo: ${payment.metadata.promoCode})`
                 : '';
@@ -1943,33 +1959,27 @@ class PaymentService {
                 customerName: x_customer_name || user?.first_name || 'Unknown',
                 customerEmail: customerEmail || 'N/A',
               });
+
+              await BusinessNotificationService.notifyPayment({
+                userId,
+                planName: (plan.display_name || plan.name) + promoInfo,
+                amount: parseFloat(x_amount),
+                provider: 'ePayco',
+                transactionId: x_ref_payco,
+                customerName: x_customer_name || user?.first_name || 'Unknown',
+              });
+            } else {
+              logger.warn('ePayco webhook: plan not resolvable, skipping operator notifications', {
+                userId, planIdOrBookingId, refPayco: x_ref_payco,
+              });
             }
-          } catch (adminError) {
-            logger.error('Error sending admin notification (non-critical):', {
-              error: adminError.message,
+          } catch (notifError) {
+            logger.error('Operator notification failed (non-critical):', {
+              error: notifError.message,
               refPayco: x_ref_payco,
             });
           }
-
-          // Business channel notification
-          try {
-            const plan = await PlanModel.getById(planIdOrBookingId);
-            const user = await UserModel.getById(userId);
-            const promoInfo = payment?.metadata?.promoCode
-              ? ` (Promo: ${payment.metadata.promoCode})`
-              : '';
-            await BusinessNotificationService.notifyPayment({
-              userId,
-              planName: (plan?.display_name || plan?.name || 'N/A') + promoInfo,
-              amount: parseFloat(x_amount),
-              provider: 'ePayco',
-              transactionId: x_ref_payco,
-              customerName: x_customer_name || user?.first_name || 'Unknown',
-            });
-          } catch (bizError) {
-            logger.error('Business notification failed (non-critical):', { error: bizError.message });
-          }
-        } else {
+        } else if (!userId || !planIdOrBookingId) {
           logger.warn('ePayco webhook missing required data', {
             userId,
             planIdOrBookingId,
