@@ -650,6 +650,71 @@ app.get('/cms/assets/:assetId', async (req, res) => {
   }
 });
 
+// Video access guard — gates exclusive-content video files behind the same
+// access logic getPost uses (admin OR author OR prime tier). Without this,
+// a `/uploads/posts/vid-XXX.mp4` URL leaked from a paid user's session
+// streams forever to anyone with the link. Non-exclusive videos pass through
+// unchanged (preserves shareable preview/og:video flows).
+//
+// Cache lookups for 60s — video players send many range-request fetches per
+// playback and we don't want each one to round-trip to Postgres.
+const VIDEO_PATH_RE = /^\/uploads\/posts\/(vid-[^/]+\.(?:mp4|webm|mov))$/i;
+const videoMetaCache = new Map(); // url → { isExclusive, authorId, expiresAt }
+const { query: videoGuardQuery } = require('../../config/postgres');
+app.use(async (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  if (!VIDEO_PATH_RE.test(req.path)) return next();
+
+  try {
+    const url = req.path;
+    let entry = videoMetaCache.get(url);
+    const now = Date.now();
+    if (!entry || entry.expiresAt < now) {
+      const { rows } = await videoGuardQuery(
+        `SELECT user_id AS author_id, is_exclusive, COALESCE(content_tier, 'free') AS tier
+         FROM social_posts WHERE media_url = $1 AND is_deleted = false LIMIT 1`,
+        [url]
+      );
+      const r = rows[0];
+      entry = {
+        // Treat unknown rows as non-exclusive (legacy uploads not tied to a post)
+        isExclusive: r ? (r.is_exclusive === true || (r.tier || '').toLowerCase() === 'prime') : false,
+        authorId: r ? String(r.author_id) : null,
+        expiresAt: now + 60_000,
+      };
+      videoMetaCache.set(url, entry);
+      // Keep the cache from growing unbounded — drop oldest 200 once over 1000.
+      if (videoMetaCache.size > 1000) {
+        const drop = [...videoMetaCache.entries()]
+          .sort((a, b) => a[1].expiresAt - b[1].expiresAt).slice(0, 200);
+        for (const [k] of drop) videoMetaCache.delete(k);
+      }
+    }
+
+    if (!entry.isExclusive) return next();
+
+    // Mirror the access logic in getPost (socialController.js:1382-1394):
+    // admin OR author OR prime tier.
+    const viewerId = req.session?.user?.id;
+    if (!viewerId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    const viewerRole = req.session?.user?.role || '';
+    if (viewerRole === 'admin' || viewerRole === 'superadmin') return next();
+    if (entry.authorId && String(viewerId) === entry.authorId) return next();
+
+    const viewerTier = (req.session?.user?.tier || 'free').toLowerCase();
+    if (viewerTier === 'prime') return next();
+
+    return res.status(403).json({ error: 'Active PRIME membership required for this content' });
+  } catch (err) {
+    logger.error('Video access guard error', { error: err.message, path: req.path });
+    // Fail closed for exclusive content — but we don't know yet, so fail open
+    // to avoid breaking public videos on a transient DB blip. Logged for review.
+    return next();
+  }
+});
+
 // Serve static files from public directory with blocking
 app.use(serveStaticWithBlocking(path.join(__dirname, '../../../../public')));
 
