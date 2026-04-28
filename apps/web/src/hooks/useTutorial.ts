@@ -80,5 +80,11 @@ export function useTutorial(section: string) {
     }
   }, [section]);
 
-  return { showTutorial, dismissTutorial, dismissForever };
+  // Manual reopen — bypasses seen / never-show flags. Used by in-page
+  // "Help" buttons that let users re-read the tutorial after dismissing.
+  const openTutorial = useCallback(() => {
+    setShowTutorial(true);
+  }, []);
+
+  return { showTutorial, dismissTutorial, dismissForever, openTutorial };
 }

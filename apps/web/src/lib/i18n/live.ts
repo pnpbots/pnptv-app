@@ -289,6 +289,11 @@ const strings = {
     mainStageAriaShuffle: "Shuffle cammers",
     mainStageAriaResetView: "Reset to room default",
     mainStageAriaGoToStage: "Go to Main Stage",
+    mainStageAriaShowTutorial: "Show how-to guide",
+    mainStageSettingsTitle: "Settings",
+    mainStageHostControlsBanner: "Video, audio, and participants are managed by the host.",
+    mainStageResetToRoomDefault: "Reset to room default",
+    mainStageLayoutPersonalHint: "Pick your view — only you see this. The host's pick is the room default.",
 
     // Main Stage — FAB labels
     mainStageFabLabel: "Main Stage",
@@ -662,6 +667,11 @@ const strings = {
     mainStageAriaShuffle: "Mezclar cammers",
     mainStageAriaResetView: "Restablecer vista predeterminada",
     mainStageAriaGoToStage: "Ir al Escenario Principal",
+    mainStageAriaShowTutorial: "Mostrar guía",
+    mainStageSettingsTitle: "Ajustes",
+    mainStageHostControlsBanner: "El video, audio y los participantes los maneja el host.",
+    mainStageResetToRoomDefault: "Volver a la vista del host",
+    mainStageLayoutPersonalHint: "Elige tu vista — solo tú la ves. La elección del host es la predeterminada.",
 
     // Main Stage — FAB labels
     mainStageFabLabel: "Escenario",

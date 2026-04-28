@@ -421,7 +421,7 @@ function MainStageInner({
 export default function MainStage() {
   const navigate = useNavigate();
   const t = useI18n();
-  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("mainstage");
+  const { showTutorial, dismissTutorial, dismissForever, openTutorial } = useTutorial("mainstage");
   const {
     state,
     isAdmin,
@@ -769,25 +769,41 @@ export default function MainStage() {
           </svg>
         </button>
         <FullscreenToggle targetRef={stageRootRef} />
-        {isAdmin && (
-          <button
-            type="button"
-            aria-label={t.live.mainStageAriaOpenAdmin}
-            onClick={() => setAdminOpen(true)}
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:opacity-80 hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
-            style={{
-              background: "rgba(20,20,30,0.85)",
-              border: "1px solid rgba(123,97,255,0.40)",
-              backdropFilter: "blur(6px)",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
-            }}
-          >
-            <svg className="w-4 h-4 text-pnp-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
-        )}
+        <button
+          type="button"
+          aria-label={isAdmin ? t.live.mainStageAriaOpenAdmin : t.live.mainStageSettingsTitle}
+          title={isAdmin ? t.live.mainStageAriaOpenAdmin : t.live.mainStageSettingsTitle}
+          onClick={() => setAdminOpen(true)}
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:opacity-80 hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+          style={{
+            background: "rgba(20,20,30,0.85)",
+            border: "1px solid rgba(123,97,255,0.40)",
+            backdropFilter: "blur(6px)",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+          }}
+        >
+          <svg className="w-4 h-4 text-pnp-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          aria-label={t.live.mainStageAriaShowTutorial}
+          title={t.live.mainStageAriaShowTutorial}
+          onClick={openTutorial}
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+          style={{
+            background: "rgba(20,20,30,0.85)",
+            border: "1px solid rgba(255,255,255,0.18)",
+            backdropFilter: "blur(6px)",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+          }}
+        >
+          <svg className="w-4 h-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.5M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+          </svg>
+        </button>
       </div>
 
       {connState === ConnectionState.Reconnecting && (
@@ -890,6 +906,10 @@ export default function MainStage() {
           admin={admin}
           cammerInfos={cammerInfos}
           onClose={() => setAdminOpen(false)}
+          isAdmin={isAdmin}
+          localViewMode={localViewMode}
+          onSetLocalView={setLocalViewMode}
+          onResetLocalView={handleResetViewMode}
         />
       )}
     </div>
@@ -901,9 +921,13 @@ interface AdminDrawerProps {
   admin: ReturnType<typeof useMainStage>["admin"];
   cammerInfos: CammerInfo[];
   onClose: () => void;
+  isAdmin: boolean;
+  localViewMode: ModeId | null;
+  onSetLocalView: (mode: ModeId) => void;
+  onResetLocalView: () => void;
 }
 
-function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
+function AdminDrawer({ state, admin, cammerInfos, onClose, isAdmin, localViewMode, onSetLocalView, onResetLocalView }: AdminDrawerProps) {
   const t = useI18n();
 
   // Lock body scroll while drawer is open so iOS doesn't capture pan gestures
@@ -931,7 +955,7 @@ function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
       <aside
         role="dialog"
         aria-modal="true"
-        aria-label={t.live.mainStageAdminTitle}
+        aria-label={isAdmin ? t.live.mainStageAdminTitle : t.live.mainStageSettingsTitle}
         // No overflow on the wrapper — AdminPanelContent's body is the
         // single scroll container so iOS doesn't get confused.
         className="fixed top-0 right-0 bottom-0 z-50 flex flex-col bg-pnp-background border-l border-white/[0.08]"
@@ -959,7 +983,16 @@ function AdminDrawer({ state, admin, cammerInfos, onClose }: AdminDrawerProps) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
-        <AdminPanelContent state={state} admin={admin} cammerInfos={cammerInfos} onClose={onClose} />
+        <AdminPanelContent
+          state={state}
+          admin={admin}
+          cammerInfos={cammerInfos}
+          onClose={onClose}
+          isAdmin={isAdmin}
+          localViewMode={localViewMode}
+          onSetLocalView={onSetLocalView}
+          onResetLocalView={onResetLocalView}
+        />
       </aside>
     </>
   );
@@ -972,6 +1005,13 @@ interface AdminPanelContentProps {
   admin: AdminType;
   cammerInfos: CammerInfo[];
   onClose?: () => void;
+  // When non-admin opens the same drawer, layout buttons set their personal
+  // view (local-only) and the video / audio / participants sections are
+  // greyed out. Server permissions still enforce admin-only on the API.
+  isAdmin?: boolean;
+  localViewMode?: ModeId | null;
+  onSetLocalView?: (mode: ModeId) => void;
+  onResetLocalView?: () => void;
 }
 
 const MODE_ICONS_ADMIN: Record<ModeId, JSX.Element> = {
@@ -1083,11 +1123,25 @@ function AudioMixControls({
   );
 }
 
-export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminPanelContentProps) {
+export function AdminPanelContent({
+  state,
+  admin,
+  cammerInfos,
+  onClose,
+  isAdmin = true,
+  localViewMode = null,
+  onSetLocalView,
+  onResetLocalView,
+}: AdminPanelContentProps) {
   const t = useI18n();
   const [mediaUrl, setMediaUrl] = useState(state.media.src ?? "");
   const [primeVideos, setPrimeVideos] = useState<PrimeVideo[]>([]);
   const [primeLoading, setPrimeLoading] = useState(true);
+  // For non-admins, the active highlight on layout buttons reflects their
+  // *personal* view (local override or, if none, the room default).
+  const effectiveLayoutMode: ModeId =
+    !isAdmin ? ((localViewMode ?? (state?.mode as ModeId | undefined) ?? "spotlight"))
+    : ((state?.mode as ModeId | undefined) ?? "spotlight");
 
   useEffect(() => {
     let cancelled = false;
@@ -1143,7 +1197,7 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
     >
       <div className="flex-shrink-0 flex items-center justify-between px-4 py-4 border-b border-white/[0.07]">
         <div className="pr-12">
-          <h2 className="text-pnp-text-primary font-bold text-sm">{t.live.mainStageAdminTitle}</h2>
+          <h2 className="text-pnp-text-primary font-bold text-sm">{isAdmin ? t.live.mainStageAdminTitle : t.live.mainStageSettingsTitle}</h2>
           <p className="text-white/40 text-xs mt-0.5">
             {state?.counts?.cammers || 0} {t.live.mainStageCammers} · {state?.counts?.viewers || 0} {t.live.mainStageWatching}
           </p>
@@ -1155,9 +1209,12 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
       <div className="flex-1 overflow-y-auto overscroll-contain space-y-5 p-4">
         <section>
           <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">{t.live.mainStageAdminSectionLayout}</h3>
+          {!isAdmin && (
+            <p className="text-white/45 text-[11px] leading-snug mb-2.5">{t.live.mainStageLayoutPersonalHint}</p>
+          )}
           <div className="grid grid-cols-3 gap-2">
             {(["spotlight", "theater", "cinema", "karaoke", "equal"] as ModeId[]).map((modeId) => {
-              const active = state?.mode === modeId;
+              const active = effectiveLayoutMode === modeId;
               const modeLabel: Record<ModeId, string> = {
                 spotlight: t.live.mainStageModeSpotlight,
                 theater: t.live.mainStageModeTheater,
@@ -1176,7 +1233,13 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
                 <button
                   key={modeId}
                   type="button"
-                  onClick={() => admin.setMode(modeId)}
+                  onClick={() => {
+                    if (isAdmin) {
+                      admin.setMode(modeId);
+                    } else if (onSetLocalView) {
+                      onSetLocalView(modeId);
+                    }
+                  }}
                   className="flex flex-col items-center gap-1.5 p-3 rounded-2xl text-center transition-all active:scale-[0.97]"
                   style={{
                     background: active
@@ -1193,7 +1256,50 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
               );
             })}
           </div>
+          {!isAdmin && localViewMode !== null && onResetLocalView && (
+            <button
+              type="button"
+              onClick={onResetLocalView}
+              className="mt-3 w-full min-h-[40px] flex items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-white/80 transition-all active:scale-[0.97] bg-white/[0.06] border border-white/10 hover:bg-white/[0.10]"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+              </svg>
+              {t.live.mainStageResetToRoomDefault}
+            </button>
+          )}
         </section>
+
+        {!isAdmin && (
+          <div
+            role="note"
+            className="rounded-xl px-3 py-2.5 text-[11px] text-white/65 leading-snug flex items-start gap-2"
+            style={{
+              background: "rgba(123,97,255,0.08)",
+              border: "1px solid rgba(123,97,255,0.20)",
+            }}
+          >
+            <svg className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-pnp-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>{t.live.mainStageHostControlsBanner}</span>
+          </div>
+        )}
+
+        {/* Video / audio / participants — admins get full controls,
+            non-admins see them greyed-out (visible but uninteractive) so
+            they understand what the host can do without being able to
+            broadcast changes themselves. The server still enforces
+            admin-only on the underlying API regardless of UI state. */}
+        <div
+          aria-hidden={!isAdmin}
+          style={
+            !isAdmin
+              ? { opacity: 0.4, pointerEvents: "none", filter: "grayscale(70%)" }
+              : undefined
+          }
+          className="space-y-5"
+        >
 
         <section>
           <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">
@@ -1369,6 +1475,7 @@ export function AdminPanelContent({ state, admin, cammerInfos, onClose }: AdminP
             </div>
           )}
         </section>
+        </div>
       </div>
     </div>
   );
