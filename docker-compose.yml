@@ -887,7 +887,7 @@ services:
       NBXPLORER_BIND: 0.0.0.0:24444
       NBXPLORER_DASHNODEENDPOINT: dashd:9999
       NBXPLORER_DASHNODERPCURL: http://dashd:9998/
-      NBXPLORER_DASHNODERPCAUTH: ${NBXPLORER_DASH_RPC_AUTH}
+      NBXPLORER_DASHNODERPCAUTH: ${NBXPLORER_DASH_RPC_AUTH:-}
       NBXPLORER_POSTGRES: "Host=pg-btcpay;Database=nbxplorer;Username=btcpay;Password=${BTCPAY_POSTGRES_PASSWORD}"
     networks:
       - pnptvapp_net
@@ -923,7 +923,7 @@ services:
       BTCPAY_OIDC__ENABLED: "true"
       BTCPAY_OIDC__PROVIDERURL: https://auth.pnptv.app/application/o/btcpay/
       BTCPAY_OIDC__CLIENTID: btcpay
-      BTCPAY_OIDC__CLIENTSECRET: "${BTCPAY_OIDC_CLIENT_SECRET}"
+      BTCPAY_OIDC__CLIENTSECRET: "${BTCPAY_OIDC_CLIENT_SECRET:-}"
     networks:
       - pnptvapp_net
     depends_on:
