@@ -487,6 +487,22 @@ Type /subscribe to view membership plans and reactivate your access!`;
         logger.warn('user_entitlements table not available, falling back to plan_id lifetime check', { error: e.message });
       }
 
+      // ── Collect lifetime plan IDs from plans table (data-driven) ─────
+      // The previous string-match `plan_id ILIKE '%lifetime%'` was brittle —
+      // a future lifetime plan with a different ID would slip through. By
+      // pulling the list from `plans.is_lifetime = true` we stay correct as
+      // new lifetime plans are added without touching this code (FS-arch
+      // L-7 finding 2026-04-28).
+      let lifetimePlanIds = ['lifetime-pass', 'lifetime100', 'pnp_col_lifetime'];
+      try {
+        const lpResult = await query(`SELECT id FROM plans WHERE is_lifetime = true`);
+        if (lpResult.rowCount > 0) {
+          lifetimePlanIds = lpResult.rows.map(r => r.id);
+        }
+      } catch (e) {
+        logger.warn('plans.is_lifetime query failed, using hardcoded lifetime plan list', { error: e.message });
+      }
+
       // Build parameterized lifetime exclusion.
       // lifetimeUserIds is a plain JS array of user ID strings. Passing the array as a
       // single bound parameter with the ANY($N::text[]) construct is safe against injection.
@@ -502,20 +518,32 @@ Type /subscribe to view membership plans and reactivate your access!`;
         : '';
 
       /**
-       * Build a safe parameterized query with the lifetime exclusion clause.
-       * @param {string} sql - SQL string containing '$LIFETIME_IDS' as a placeholder token
-       * @param {Array}  baseParams - Bound parameters that appear before the lifetime array
+       * Build a safe parameterized query with the lifetime exclusion clauses.
+       *   $LIFETIME_IDS   → array of user IDs with active lifetime entitlements
+       *   $LIFETIME_PLANS → array of plan IDs marked is_lifetime=true (data-driven)
+       * Either token may be absent from the SQL; only the present ones are bound.
+       * @param {string} sql
+       * @param {Array}  baseParams
        * @returns {{ text: string, values: Array }}
        */
       const buildQuery = (sql, baseParams = []) => {
-        if (!hasLifetimeIds) {
-          return { text: sql.replace('$LIFETIME_IDS', ''), values: baseParams };
+        let text = sql;
+        const values = [...baseParams];
+        if (text.includes('$LIFETIME_IDS')) {
+          if (hasLifetimeIds) {
+            const nextIdx = values.length + 1;
+            text = text.replace('$LIFETIME_IDS', `$${nextIdx}::text[]`);
+            values.push(lifetimeUserIdStrings);
+          } else {
+            text = text.replace('$LIFETIME_IDS', '');
+          }
         }
-        const nextIdx = baseParams.length + 1;
-        return {
-          text: sql.replace('$LIFETIME_IDS', `$${nextIdx}::text[]`),
-          values: [...baseParams, lifetimeUserIdStrings],
-        };
+        if (text.includes('$LIFETIME_PLANS')) {
+          const nextIdx = values.length + 1;
+          text = text.replace('$LIFETIME_PLANS', `$${nextIdx}::text[]`);
+          values.push(lifetimePlanIds);
+        }
+        return { text, values };
       };
 
       // Step 1a: Activate member-tier users (member_monthly plan with valid expiry)
@@ -547,9 +575,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_expiry > NOW()
           AND (plan_id IS NULL OR plan_id != 'member_monthly')
           AND (subscription_status != 'active' OR tier != 'PRIME')
-          AND plan_id NOT ILIKE '%lifetime%'
-          AND plan_id NOT ILIKE '%life-time%'
-          AND plan_id != 'lifetime100'
+          AND (plan_id IS NULL OR plan_id != ALL($LIFETIME_PLANS))
           ${lifetimeExclusionTemplate}
         RETURNING id, username
       `);
@@ -671,8 +697,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
             updated_at = NOW()
         WHERE plan_expiry IS NOT NULL
           AND plan_expiry <= NOW()
-          AND plan_id NOT ILIKE '%lifetime%'
-          AND plan_id NOT ILIKE '%life-time%'
+          AND (plan_id IS NULL OR plan_id != ALL($LIFETIME_PLANS))
           AND subscription_status NOT IN ('churned', 'free')
           ${lifetimeExclusionTemplate}
         RETURNING id, username
@@ -690,9 +715,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
             updated_at = NOW()
         WHERE subscription_status IN ('churned', 'expired', 'free')
           AND tier != 'free'
-          AND plan_id NOT ILIKE '%lifetime%'
-          AND plan_id NOT ILIKE '%life-time%'
-          AND plan_id != 'lifetime100'
+          AND (plan_id IS NULL OR plan_id != ALL($LIFETIME_PLANS))
           ${lifetimeExclusionTemplate}
         RETURNING id
       `);

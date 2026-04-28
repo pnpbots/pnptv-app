@@ -129,16 +129,17 @@ class CreatorService {
   static async _grantCreatorMembership(userId) {
     if (!userId) return;
     try {
-      await query(
-        `INSERT INTO user_entitlements (user_id, add_on_id, granted_at, is_lifetime, is_consumed, expires_at)
-         VALUES ($1, 'pnp-member', NOW(), true, false, NULL)
-         ON CONFLICT (user_id, add_on_id, creator_id) DO UPDATE
-         SET is_lifetime = true,
-             is_consumed = false,
-             expires_at = NULL,
-             updated_at = NOW()`,
-        [String(userId)]
-      );
+      // Route through the canonical EntitlementModel.grantEntitlement so the
+      // creator-onboarding path inherits the same invariant guards, audit
+      // log, and cascade behavior as paid grants. Direct INSERTs here used
+      // to be a structural smell (FS-architect L-6 finding 2026-04-28).
+      const EntitlementModel = require('../models/entitlementModel');
+      await EntitlementModel.grantEntitlement(String(userId), 'pnp-member', {
+        isLifetime: true,
+        source: 'system',
+        actorId: 'creator-onboarding',
+        reason: 'auto-grant on creator role assignment',
+      });
       const EntitlementAccessService = require('./entitlementAccessService');
       await EntitlementAccessService.invalidateCache(userId);
       logger.info('Granted lifetime pnp-member to new creator', { userId });

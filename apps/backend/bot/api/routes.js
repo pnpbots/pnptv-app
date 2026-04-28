@@ -2720,8 +2720,13 @@ app.get('/api/webapp/users/me/tokens', requireSessionAuth, asyncHandler(async (r
 // resource name, expiry, and renewal status so users can see/manage them.
 app.get('/api/webapp/subscriptions', requireSessionAuth, asyncHandler(async (req, res) => {
   const userId = req.session?.user?.id;
+  // Include both lifetime and time-limited active grants. The previous
+  // `is_lifetime = false` filter silently hid lifetime channel/hangout
+  // grants from the user's "My Access" page even though their access
+  // was working — surfaced by the 2026-04-28 lifetime audit.
   const { rows } = await getPool().query(`
-    SELECT ue.id, ue.add_on_id, ue.creator_id AS scope_id, ue.expires_at, ue.auto_renew,
+    SELECT ue.id, ue.add_on_id, ue.creator_id AS scope_id, ue.expires_at,
+           ue.auto_renew, ue.is_lifetime,
            CASE
              WHEN ue.add_on_id = 'channel-access' THEN cc.name
              WHEN ue.add_on_id = 'hangout-access' THEN hg.name
@@ -2738,10 +2743,8 @@ app.get('/api/webapp/subscriptions', requireSessionAuth, asyncHandler(async (req
      WHERE ue.user_id = $1
        AND ue.add_on_id IN ('channel-access', 'hangout-access')
        AND ue.is_consumed = false
-       AND ue.is_lifetime = false
-       AND ue.expires_at IS NOT NULL
-       AND ue.expires_at > NOW()
-     ORDER BY ue.expires_at ASC
+       AND (ue.is_lifetime = true OR (ue.expires_at IS NOT NULL AND ue.expires_at > NOW()))
+     ORDER BY ue.is_lifetime DESC, ue.expires_at ASC NULLS LAST
   `, [String(userId)]);
   return res.json({
     success: true,
@@ -2751,7 +2754,10 @@ app.get('/api/webapp/subscriptions', requireSessionAuth, asyncHandler(async (req
       scopeId: r.scope_id,
       name: r.resource_name,
       priceUsd: r.price_usd ? Number(r.price_usd) : null,
-      expiresAt: r.expires_at,
+      // Frontends should display 'Lifetime' when isLifetime is true;
+      // expiresAt will be null in that case.
+      expiresAt: r.is_lifetime ? null : r.expires_at,
+      isLifetime: r.is_lifetime,
       autoRenew: r.auto_renew,
     })),
   });
