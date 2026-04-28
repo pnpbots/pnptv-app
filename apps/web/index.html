@@ -139,8 +139,16 @@
       <!-- Tagline -->
       <p style="position:relative;z-index:1;margin-top:20px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;font-weight:500;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.45);animation:splash-text .6s .2s cubic-bezier(.22,1,.36,1) both">PNPtv!</p>
       <!-- Loading bar -->
-      <div style="position:relative;z-index:1;margin-top:28px;width:120px;height:2px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden">
+      <div id="splash-loading" style="position:relative;z-index:1;margin-top:28px;width:120px;height:2px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden">
         <div style="width:40%;height:100%;border-radius:2px;background:linear-gradient(90deg,#D4007A,#E69138);animation:splash-bar 1.2s ease-in-out infinite"></div>
+      </div>
+      <!-- Boot-failure recovery UI (hidden until watchdog or error handler reveals it) -->
+      <div id="splash-error" style="display:none;position:relative;z-index:1;margin-top:24px;flex-direction:column;align-items:center;gap:14px;padding:0 24px;max-width:340px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,sans-serif">
+        <p style="margin:0;font-size:14px;font-weight:600;color:rgba(255,255,255,.85);line-height:1.4">The app didn’t load.<br/><span style="font-weight:400;color:rgba(255,255,255,.55);font-size:12px">Your browser may have blocked the bundle, or a stale cache is in the way.</span></p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+          <button id="splash-error-reload" type="button" style="appearance:none;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;font-size:13px;font-weight:600;padding:10px 18px;border-radius:10px;cursor:pointer;min-height:40px">Reload</button>
+          <button id="splash-error-reset" type="button" style="appearance:none;border:none;background:linear-gradient(90deg,#D4007A,#E69138);color:#fff;font-size:13px;font-weight:700;padding:10px 18px;border-radius:10px;cursor:pointer;min-height:40px">Clear cache &amp; reload</button>
+        </div>
       </div>
       <style>
         @keyframes splash-pulse{0%,100%{transform:scale(1);opacity:.7}50%{transform:scale(1.15);opacity:1}}
@@ -150,6 +158,57 @@
         #splash.hide{opacity:0;visibility:hidden}
       </style>
     </div>
+
+    <!-- Splash boot-failure watchdog — runs before main.tsx so it covers the
+         worst case where the module bundle never loads (old in-app webviews,
+         CSP / extension blocks, network failure on /assets/*.js). If React
+         mounts within 10s, main.tsx adds .hide to #splash and this no-ops.
+         Doesn't change any page logic — only swaps the spinner for an
+         actionable error UI when the splash would otherwise hang forever. -->
+    <script>
+      (function () {
+        var SPLASH_WATCHDOG_MS = 10000;
+        function isSplashVisible() {
+          var s = document.getElementById("splash");
+          return !!(s && !s.classList.contains("hide"));
+        }
+        function show(reason) {
+          if (!isSplashVisible()) return;
+          try { console.warn("[pnptv] boot failure:", reason); } catch (_) {}
+          var loading = document.getElementById("splash-loading");
+          var error = document.getElementById("splash-error");
+          if (loading) loading.style.display = "none";
+          if (error) error.style.display = "flex";
+          var reloadBtn = document.getElementById("splash-error-reload");
+          var resetBtn = document.getElementById("splash-error-reset");
+          if (reloadBtn) reloadBtn.onclick = function () { window.location.reload(); };
+          if (resetBtn) resetBtn.onclick = function () {
+            try {
+              var u = new URL(window.location.href);
+              u.searchParams.set("update", "1");
+              window.location.replace(u.toString());
+            } catch (_) {
+              window.location.reload();
+            }
+          };
+        }
+        window.__pnptvShowBootError = show;
+        // 1) Watchdog — fires if React never hides the splash.
+        setTimeout(function () { show("timeout"); }, SPLASH_WATCHDOG_MS);
+        // 2) Capture-phase resource error listener — catches /assets/*.js
+        //    404s, parse failures, and any <script>/<link> load failures
+        //    that happen before React mounts.
+        window.addEventListener("error", function (event) {
+          if (!isSplashVisible()) return;
+          var t = event && event.target;
+          if (!t || t === window) return;
+          var src = t.src || t.href || "";
+          if (typeof src === "string" && src.indexOf("/assets/") !== -1) {
+            show("asset-load");
+          }
+        }, true);
+      })();
+    </script>
 
     <script type="module" src="/src/main.tsx"></script>
   </body>

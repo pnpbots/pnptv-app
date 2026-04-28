@@ -76,11 +76,17 @@ if (typeof Node !== "undefined") {
 try { (screen.orientation as any)?.lock?.("portrait").catch(() => {}); } catch {}
 
 if (!resetInProgress) {
-  ReactDOM.createRoot(document.getElementById("root")!).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
+  try {
+    ReactDOM.createRoot(document.getElementById("root")!).render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>
+    );
+  } catch (err) {
+    const w = window as unknown as { __pnptvShowBootError?: (r: string) => void };
+    if (typeof w.__pnptvShowBootError === "function") w.__pnptvShowBootError("render-throw");
+    throw err;
+  }
 }
 
 // Hide splash screen after React mounts
