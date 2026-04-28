@@ -3020,6 +3020,21 @@ app.get('/api/webapp/admin/payments/webhook-events', adminGuard, asyncHandler(as
   res.json({ success: true, recent, summary });
 }));
 
+// GET /api/health/payments — public read-only payment-pipeline health snapshot.
+// Zero PII surfaces. Returns booleans, counts, ISO timestamps. Used by external
+// auditors (the scheduled remote regression agent) to verify production state
+// without VPS or DB credentials.
+//
+// Why public: this endpoint intentionally has no auth so a third-party
+// auditing agent can hit it directly. Defense-in-depth comes from rate
+// limiting and from the strict no-PII output guarantee in
+// PaymentHealthService.getSnapshot.
+app.get('/api/health/payments', healthLimiter, asyncHandler(async (req, res) => {
+  const PaymentHealthService = require('../../services/paymentHealthService');
+  const snapshot = await PaymentHealthService.getSnapshot();
+  res.status(snapshot.ok ? 200 : 503).json(snapshot);
+}));
+
 // GET /metrics — Prometheus-format metrics endpoint.
 // Authentication: bearer token via METRICS_BEARER env var, OR admin session.
 // Designed for Grafana Cloud remote_write (single-tenant agent) to scrape

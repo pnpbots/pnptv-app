@@ -354,6 +354,7 @@ const startBot = async () => {
     // BTCPAY_AUTOCONFIGURE_WEBHOOK=true to self-heal in non-prod.
     try {
       const { verifyWebhookRegistration, isConfigured: btcpayConfigured } = require('../../config/btcpay');
+      const PaymentHealthService = require('../../services/paymentHealthService');
       if (btcpayConfigured) {
         const expectedUrl = `${process.env.EPAYCO_WEBHOOK_DOMAIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app'}/api/webhooks/btcpay`;
         const autoConfigure = String(process.env.BTCPAY_AUTOCONFIGURE_WEBHOOK || '').toLowerCase() === 'true';
@@ -364,8 +365,14 @@ const startBot = async () => {
           } else {
             logger.info(`✓ BTCPay webhook verified at ${result.url}`);
           }
+          await PaymentHealthService.recordBootCheckResult({
+            ok: true, expectedUrl, autoConfigured: !!result.autoConfigured,
+          });
         } else {
           logger.error('CRITICAL: BTCPay webhook misconfigured — Dash payments will NOT activate', result);
+          await PaymentHealthService.recordBootCheckResult({
+            ok: false, expectedUrl, reason: result.reason || 'unknown',
+          });
           if (process.env.NODE_ENV === 'production' && !autoConfigure) {
             logger.error('Refusing to start in production with broken BTCPay webhook. Set BTCPAY_AUTOCONFIGURE_WEBHOOK=true to self-heal, or fix manually.');
             process.exit(1);
@@ -373,6 +380,9 @@ const startBot = async () => {
         }
       } else {
         logger.warn('BTCPay not configured — skipping webhook verification (Dash payments disabled)');
+        await PaymentHealthService.recordBootCheckResult({
+          ok: false, expectedUrl: null, reason: 'btcpay_not_configured',
+        });
       }
     } catch (btcpayCheckErr) {
       logger.error(`BTCPay webhook verification threw: ${btcpayCheckErr.message}`);
