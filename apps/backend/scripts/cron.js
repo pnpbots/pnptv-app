@@ -109,6 +109,28 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // Meru lifetime100 reconciliation — every 15 min
+    // Meru does not deliver webhooks; users must come back and POST /activate
+    // after paying. If they don't, the link stays paid forever and we never
+    // grant entitlements. This cron polls Meru for every meru_payment_link in
+    // 'active'/'reserved' state and: auto-heals if reservation owner is known,
+    // alerts ops if orphan (paid by direct-share with no reservation).
+    // 18 stuck payments accumulated over 5 months before this cron existed.
+    cron.schedule(process.env.MERU_RECONCILE_CRON || '7,22,37,52 * * * *', async () => {
+      try {
+        const results = await PaymentRecoveryService.processStuckMeruPayments();
+        logger.info('Meru reconciliation completed', {
+          checked: results.checked,
+          autoHealed: results.autoHealed,
+          orphans: results.orphans,
+          stillUnpaid: results.stillUnpaid,
+          errors: results.errors,
+        });
+      } catch (error) {
+        logger.error('Error in Meru reconciliation cron:', error);
+      }
+    });
+
     // BTCPay webhook URL probe — daily at 06:30 UTC
     // Catches the exact failure mode that caused the Apr-2026 incident: BTCPay
     // store webhook silently pointing at a 404 URL. Calls verifyWebhookRegistration

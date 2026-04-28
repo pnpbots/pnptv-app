@@ -505,6 +505,162 @@ class PaymentRecoveryService {
   }
 
   /**
+   * Reconcile stuck Meru lifetime100 payments.
+   *
+   * Meru does not deliver webhooks — the user must come back and POST
+   * /api/public/lifetime100/activate after paying. If they don't (closed tab,
+   * lost the email, didn't understand the flow), the Meru link stays paid
+   * forever and we never grant entitlements. This cron polls Meru for every
+   * meru_payment_link still in `active` or `reserved` state and:
+   *
+   *   1. If Meru shows PAID and we have a `reserved_for_user_id`: auto-grant
+   *      lifetime100 entitlements (pnp-member lifetime + 60d PRIME), mark
+   *      code `used`, send confirmation DM.
+   *   2. If Meru shows PAID but no reservation owner: the buyer paid via a
+   *      direct link share (founder gift) and we have no DB record of who.
+   *      Log + send admin alert. Heal manually after identifying recipient.
+   *   3. If Meru shows CREATED/EXPIRED: leave alone (not paid yet).
+   *
+   * @returns {Promise<Object>} Reconciliation results
+   */
+  static async processStuckMeruPayments() {
+    logger.info('Starting Meru lifetime100 reconciliation...');
+
+    const results = {
+      checked: 0,
+      autoHealed: 0,
+      orphans: 0,
+      stillUnpaid: 0,
+      errors: 0,
+      startTime: new Date(),
+      endTime: null,
+    };
+
+    const lockKey = 'meru:reconcile:lock';
+    const lockAcquired = await cache.acquireLock(lockKey, 600);
+    if (!lockAcquired) {
+      logger.warn('Meru reconciliation already running, skipping');
+      return results;
+    }
+
+    try {
+      const meruPaymentService = require('./meruPaymentService');
+      const EntitlementModel = require('../models/entitlementModel');
+      const EntitlementAccessService = require('./entitlementAccessService');
+      const UserModel = require('../models/userModel');
+
+      const { rows: candidates } = await query(`
+        SELECT code, status, reserved_for_user_id, reserved_for_email, created_at
+        FROM meru_payment_links
+        WHERE product = 'lifetime100'
+          AND status IN ('active', 'reserved')
+          AND created_at > NOW() - INTERVAL '90 days'
+        ORDER BY created_at DESC
+        LIMIT 100
+      `);
+
+      results.checked = candidates.length;
+      logger.info(`Meru reconciler: ${candidates.length} candidate codes to verify`);
+
+      const orphans = [];
+
+      for (const c of candidates) {
+        try {
+          const verification = await meruPaymentService.verifyPayment(c.code);
+          if (!verification.isPaid) {
+            results.stillUnpaid++;
+            continue;
+          }
+
+          // Paid on Meru — check if we have a reservation owner to auto-heal
+          if (!c.reserved_for_user_id) {
+            results.orphans++;
+            orphans.push({ code: c.code, paidAt: verification.paidAt });
+            continue;
+          }
+
+          // Auto-heal: grant entitlements + mark used
+          const userId = c.reserved_for_user_id;
+
+          await UserModel.updateSubscription(userId, {
+            status: 'active',
+            planId: 'lifetime100',
+            expiry: null,
+          });
+
+          await EntitlementModel.grantEntitlement(userId, 'pnp-member', {
+            isLifetime: true,
+            source: 'meru_reconciler',
+            actorId: 'system',
+            reason: `Meru reconciliation auto-heal — code ${c.code}, paid ${verification.paidAt}`,
+          });
+          await EntitlementModel.grantEntitlement(userId, 'prime', {
+            isLifetime: false,
+            durationDays: 60,
+            source: 'meru_reconciler',
+            actorId: 'system',
+            reason: `Meru reconciliation auto-heal — 60d PRIME bonus, code ${c.code}`,
+          });
+          await EntitlementAccessService.invalidateCache(userId);
+
+          await query(
+            `UPDATE meru_payment_links
+             SET status='used', used_by=$2, used_at=$3
+             WHERE code=$1 AND status IN ('active','reserved')`,
+            [c.code, userId, verification.paidAt]
+          );
+
+          results.autoHealed++;
+          logger.info('Meru reconciler: auto-healed paid code', {
+            code: c.code, userId, email: c.reserved_for_email, paidAt: verification.paidAt,
+          });
+        } catch (err) {
+          results.errors++;
+          logger.error('Meru reconciler: per-code error', { code: c.code, error: err.message });
+        }
+
+        // Rate-limit Meru fetches (1.1s between calls — they're public HTML scrapes)
+        await new Promise(resolve => setTimeout(resolve, 1100));
+      }
+
+      // Alert ops about orphan paid codes (paid on Meru, no DB reservation owner)
+      if (orphans.length > 0) {
+        const throttleKey = 'meru:reconcile:orphan:alarm';
+        try {
+          const redis = getRedis();
+          const set = await redis.set(throttleKey, '1', 'EX', 6 * 3600, 'NX');
+          if (set === 'OK') {
+            const BusinessNotificationService = require('./businessNotificationService');
+            const lines = [
+              '🟠 <b>Meru orphan codes — paid but unclaimed</b>',
+              '',
+              `${orphans.length} Meru lifetime100 link(s) show PAID but have no reservation owner in our DB.`,
+              'These need manual recipient identification (IP match, support ticket lookup).',
+              '',
+              ...orphans.slice(0, 8).map(o => `• <code>${o.code}</code> paid ${o.paidAt}`),
+              orphans.length > 8 ? `…and ${orphans.length - 8} more` : '',
+            ].filter(Boolean).join('\n');
+            await BusinessNotificationService.send(lines);
+          }
+        } catch (alertErr) {
+          logger.warn('Meru orphan alert dispatch failed', { error: alertErr.message });
+        }
+      }
+
+      results.endTime = new Date();
+      logger.info('Meru reconciliation complete', results);
+      return results;
+    } catch (error) {
+      logger.error('Meru reconciliation: fatal error', { error: error.message });
+      results.errors++;
+      results.endTime = new Date();
+      return results;
+    } finally {
+      await cache.releaseLock(lockKey).catch(() => {});
+    }
+  }
+
+  /**
    * Mark stuck pending payments older than 24h as 'abandoned'.
    * Covers both ePayco (3DS timeout) and any straggler Daimo rows from before retirement.
    */
