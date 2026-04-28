@@ -3020,6 +3020,52 @@ app.get('/api/webapp/admin/payments/webhook-events', adminGuard, asyncHandler(as
   res.json({ success: true, recent, summary });
 }));
 
+// POST /api/admin/alert — send a structured alert to the operator Telegram
+// channel. Used by remote audit routines to escalate P0/P1 findings in
+// near-real-time (Notion comments are the audit trail; this is the page).
+//
+// Auth: Bearer token via ADMIN_ALERT_BEARER env var. Same shape as the
+// /metrics bearer pattern; should be a long random hex.
+//
+// Body shape:
+//   { severity: 'P0'|'P1'|'P2', source: string, title: string, body?: string, url?: string }
+app.post('/api/admin/alert', healthLimiter, asyncHandler(async (req, res) => {
+  const bearer = req.headers.authorization?.replace(/^Bearer\s+/, '');
+  const expected = process.env.ADMIN_ALERT_BEARER;
+  if (!expected || bearer !== expected) {
+    return res.status(401).json({ success: false, error: 'unauthorized' });
+  }
+  const { severity = 'P2', source = 'unknown', title = '(no title)', body = '', url = '' } = req.body || {};
+  if (typeof title !== 'string' || title.length === 0 || title.length > 200) {
+    return res.status(400).json({ success: false, error: 'title required (1-200 chars)' });
+  }
+
+  const sevEmoji = severity === 'P0' ? '🔴' : severity === 'P1' ? '🟠' : '🟡';
+  const safeTitle = String(title).slice(0, 200).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const safeBody = String(body || '').slice(0, 1500).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const safeSource = String(source).slice(0, 80).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const safeUrl = url && /^https?:\/\//.test(url) ? String(url).slice(0, 500) : null;
+
+  const message = [
+    `${sevEmoji} <b>${severity} ALERT — ${safeSource}</b>`,
+    '',
+    safeTitle,
+    safeBody ? '' : null,
+    safeBody || null,
+    safeUrl ? `\n🔗 ${safeUrl}` : null,
+  ].filter(line => line !== null).join('\n');
+
+  try {
+    const BusinessNotificationService = require('../../services/businessNotificationService');
+    await BusinessNotificationService.send(message);
+    logger.info('Admin alert dispatched', { severity, source, title: safeTitle });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error(`Admin alert dispatch failed: ${err.message}`);
+    res.status(500).json({ success: false, error: 'dispatch_failed' });
+  }
+}));
+
 // GET /api/health/webhooks — public ePayco webhook delivery health (7d window).
 // Reports invalid-signature rate (security) + state-code distribution.
 app.get('/api/health/webhooks', healthLimiter, asyncHandler(async (req, res) => {
