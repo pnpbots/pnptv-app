@@ -109,6 +109,45 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // BTCPay webhook URL probe — daily at 06:30 UTC
+    // Catches the exact failure mode that caused the Apr-2026 incident: BTCPay
+    // store webhook silently pointing at a 404 URL. Calls verifyWebhookRegistration
+    // (config/btcpay.js) and dispatches a P0 alert if the configured URL drifts
+    // from the expected handler path.
+    cron.schedule(process.env.BTCPAY_WEBHOOK_PROBE_CRON || '30 6 * * *', async () => {
+      try {
+        const btcpay = require(path.join(backendPath, 'config/btcpay'));
+        if (!btcpay.isConfigured) {
+          logger.info('BTCPay webhook probe: BTCPay not configured — skipping');
+          return;
+        }
+        const expectedUrl = `${process.env.WEBAPP_URL || 'http://localhost:3000'}/api/webhooks/btcpay`;
+        const result = await btcpay.verifyWebhookRegistration({ expectedUrl });
+        if (result.ok) {
+          logger.info('BTCPay webhook probe: OK', { url: result.url });
+          return;
+        }
+        logger.error('BTCPay webhook probe: MISCONFIGURED', result);
+        try {
+          const BusinessNotificationService = require(path.join(backendPath, 'services/businessNotificationService'));
+          const reasonLine = result.reason === 'url_mismatch'
+            ? `URL mismatch — expected ${result.expected}, found ${(result.foundUrls || []).join(', ') || '(none)'}`
+            : `Reason: ${result.reason}${result.detail ? ` — ${result.detail}` : ''}`;
+          await BusinessNotificationService.send([
+            '🔴 <b>P0 ALERT — BTCPay webhook misconfigured</b>',
+            '',
+            reasonLine,
+            '',
+            'Action: BTCPay → Settings → Webhooks. Set URL + secret. The Apr-2026 incident took 7 weeks to spot — do not delay.',
+          ].join('\n'));
+        } catch (alertErr) {
+          logger.warn('BTCPay webhook probe alert dispatch failed', { error: alertErr.message });
+        }
+      } catch (error) {
+        logger.error('Error in BTCPay webhook probe cron:', error);
+      }
+    });
+
     // ── ePayco USD→COP FX rate refresh — daily at 06:00 UTC ─────────────────
     // PNPtv displays prices in USD to international users but settles via ePayco's
     // Colombian acquiring network in COP. A stale rate means every transaction

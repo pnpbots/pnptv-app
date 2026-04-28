@@ -3,7 +3,7 @@ const PaymentService = require('./paymentService');
 // Daimo retired — checkDaimoPaymentStatus require removed. processStuckDaimoPayments
 // is a no-op stub below (the recovery scheduler that called it is also disabled).
 const { query } = require('../config/postgres');
-const { cache } = require('../config/redis');
+const { cache, getRedis } = require('../config/redis');
 const logger = require('../utils/logger');
 
 /**
@@ -337,6 +337,47 @@ class PaymentRecoveryService {
 
       results.endTime = new Date();
       logger.info('Dash reconciliation complete', results);
+
+      // Alarm: dispatch a P1 to operator Telegram when the reconciler sees
+      // signal of webhook delivery failure or in-process settlement errors.
+      // Throttled to one alert per 6h via Redis to avoid storming on each
+      // 30-min run while the underlying issue persists.
+      try {
+        const stuckTooMany = results.stillPending > 3;
+        const settlementsFailing = results.errors > 0;
+        if (stuckTooMany || settlementsFailing) {
+          const throttleKey = 'dash:reconcile:alarm:throttle';
+          let shouldAlert = true;
+          try {
+            const redis = getRedis();
+            const set = await redis.set(throttleKey, '1', 'EX', 6 * 3600, 'NX');
+            shouldAlert = set === 'OK';
+          } catch (_throttleErr) {
+            // Redis unavailable → fail-open and let the alert through.
+          }
+          if (shouldAlert) {
+            const BusinessNotificationService = require('./businessNotificationService');
+            const reasons = [];
+            if (stuckTooMany) reasons.push(`${results.stillPending} invoice(s) stuck pending`);
+            if (settlementsFailing) reasons.push(`${results.errors} settlement error(s)`);
+            const msg = [
+              '🟠 <b>P1 ALERT — Dash reconciler</b>',
+              '',
+              `Reason: ${reasons.join(' + ')}`,
+              `Window: last reconciler pass (${results.checked} invoice(s) checked)`,
+              `Settled: ${results.settled} · Expired: ${results.expired} · Invalid: ${results.invalid}`,
+              '',
+              'Action: check BTCPay webhook delivery + /api/health/payments. Throttled 6h.',
+            ].join('\n');
+            BusinessNotificationService.send(msg).catch((alertErr) =>
+              logger.warn('Dash reconciliation alarm dispatch failed', { error: alertErr.message })
+            );
+          }
+        }
+      } catch (alarmErr) {
+        logger.warn('Dash reconciliation alarm pre-check failed', { error: alarmErr.message });
+      }
+
       return results;
     } catch (err) {
       logger.error('Dash reconciliation: top-level error', { error: err.message });
