@@ -1128,7 +1128,10 @@ export function AdminPanelContent({
   admin,
   cammerInfos,
   onClose,
-  isAdmin = true,
+  // Default to non-admin so any future caller that forgets to pass this
+  // prop gets the safer rendered surface (greyed video/audio/participants,
+  // local-only Layout) instead of full broadcast controls.
+  isAdmin = false,
   localViewMode = null,
   onSetLocalView,
   onResetLocalView,
