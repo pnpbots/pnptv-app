@@ -8,6 +8,7 @@ import { CallStage } from "@/pages/CallRoom";
 import { ConnectionState, RoomEvent } from "livekit-client";
 import type { LocalUserChoices } from "@livekit/components-core";
 import { useHangoutMusic } from "@/hooks/useHangoutMusic";
+import { joinHangoutCall, muteHangoutCallParticipant, kickHangoutCallParticipant } from "@/lib/api";
 
 interface LiveKitCallPanelProps {
   open: boolean;
@@ -41,13 +42,34 @@ function formatDuration(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
 }
 
+type PresenceToast = { id: number; name: string; kind: "joined" | "left" };
+
 // Inner overlay — uses room hooks, so must live inside <LiveKitRoom>.
-function CallOverlay({ startedBy }: { startedBy: string | null }) {
+function CallOverlay({
+  startedBy,
+  isModerator,
+  groupId,
+}: {
+  startedBy: string | null;
+  isModerator: boolean;
+  groupId: number | null;
+}) {
   const room = useRoomContext();
   const participants = useParticipants();
   const [elapsed, setElapsed] = useState(0);
   const [connState, setConnState] = useState<ConnectionState>(ConnectionState.Connecting);
   const joinTsRef = useRef<number | null>(null);
+
+  // Presence toasts ("Sara joined" / "John left")
+  const [presenceToasts, setPresenceToasts] = useState<PresenceToast[]>([]);
+  const prevRemoteIdsRef = useRef<Set<string> | null>(null);
+  const prevRemoteNamesRef = useRef<Map<string, string>>(new Map());
+  const presenceSeqRef = useRef(0);
+
+  // Moderator participant roster
+  const [rosterOpen, setRosterOpen] = useState(false);
+  const [mutingId, setMutingId] = useState<string | null>(null);
+  const [kickingId, setKickingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!room) return;
@@ -70,6 +92,56 @@ function CallOverlay({ startedBy }: { startedBy: string | null }) {
     }, 1000);
     return () => clearInterval(iv);
   }, []);
+
+  // Diff remote participants on every change → emit transient toasts.
+  // Skip the initial population so we don't spam "X joined" for everyone
+  // already in the call when the local user joins.
+  useEffect(() => {
+    const remote = participants.filter((p) => !p.isLocal);
+    const currentIds = new Set(remote.map((p) => p.identity));
+    const currentNames = new Map(
+      remote.map((p) => [p.identity, p.name?.trim() || p.identity] as const),
+    );
+
+    const prev = prevRemoteIdsRef.current;
+    if (prev === null) {
+      prevRemoteIdsRef.current = currentIds;
+      prevRemoteNamesRef.current = currentNames;
+      return;
+    }
+
+    const toAdd: PresenceToast[] = [];
+    for (const id of currentIds) {
+      if (!prev.has(id)) {
+        toAdd.push({
+          id: ++presenceSeqRef.current,
+          name: currentNames.get(id) || "Someone",
+          kind: "joined",
+        });
+      }
+    }
+    for (const id of prev) {
+      if (!currentIds.has(id)) {
+        toAdd.push({
+          id: ++presenceSeqRef.current,
+          name: prevRemoteNamesRef.current.get(id) || "Someone",
+          kind: "left",
+        });
+      }
+    }
+
+    if (toAdd.length > 0) {
+      setPresenceToasts((curr) => [...curr, ...toAdd].slice(-3));
+      for (const t of toAdd) {
+        setTimeout(() => {
+          setPresenceToasts((curr) => curr.filter((x) => x.id !== t.id));
+        }, 3000);
+      }
+    }
+
+    prevRemoteIdsRef.current = currentIds;
+    prevRemoteNamesRef.current = currentNames;
+  }, [participants]);
 
   const isConnected = connState === ConnectionState.Connected;
   const isConnecting = connState === ConnectionState.Connecting;
@@ -104,11 +176,102 @@ function CallOverlay({ startedBy }: { startedBy: string | null }) {
               {formatDuration(elapsed)}
             </span>
           )}
-          <span className="px-2 sm:px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10 whitespace-nowrap">
+          <button
+            type="button"
+            onClick={() => setRosterOpen((v) => !v)}
+            aria-label={`${participants.length} participants — ${rosterOpen ? "close" : "open"} roster`}
+            className="px-2 sm:px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10 whitespace-nowrap hover:bg-black/70 active:scale-95 transition-all pointer-events-auto"
+          >
             <span className="mr-1" aria-hidden>👥</span>{participants.length}
-          </span>
+          </button>
         </div>
       </div>
+
+      {/* Moderator participant roster — slides in from the top */}
+      {rosterOpen && (
+        <div
+          className="absolute left-2 right-12 z-10 mt-1 rounded-xl overflow-hidden shadow-2xl animate-fade-in-up"
+          style={{
+            top: "calc(2.75rem + env(safe-area-inset-top, 0px))",
+            background: "rgba(10,10,20,0.92)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            backdropFilter: "blur(12px)",
+            maxHeight: "min(55dvh, 320px)",
+            overflowY: "auto",
+          }}
+        >
+          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-white/40 font-semibold border-b border-white/10">
+            Participants ({participants.length})
+          </div>
+          {participants.map((p) => {
+            const name = p.name?.trim() || p.identity;
+            const isLocal = p.isLocal;
+            return (
+              <div
+                key={p.identity}
+                className="flex items-center gap-2 px-3 py-2 hover:bg-white/5 transition-colors"
+              >
+                <div className="w-6 h-6 rounded-full bg-pink-500/30 flex items-center justify-center text-[10px] font-bold text-pink-200 flex-shrink-0">
+                  {name.slice(0, 1).toUpperCase()}
+                </div>
+                <span className="flex-1 text-xs text-white truncate min-w-0">
+                  {name}
+                  {isLocal && (
+                    <span className="ml-1 text-[10px] text-white/40">(you)</span>
+                  )}
+                </span>
+                {isModerator && !isLocal && groupId != null && (
+                  <div className="flex gap-1 flex-shrink-0">
+                    <button
+                      type="button"
+                      title="Mute"
+                      disabled={mutingId === p.identity}
+                      onClick={async () => {
+                        setMutingId(p.identity);
+                        try { await muteHangoutCallParticipant(groupId, p.identity); }
+                        catch { /* best-effort */ }
+                        finally { setMutingId(null); }
+                      }}
+                      className="w-6 h-6 rounded-full flex items-center justify-center bg-white/10 hover:bg-amber-500/30 active:scale-90 transition-all disabled:opacity-40"
+                      aria-label={`Mute ${name}`}
+                    >
+                      {mutingId === p.identity ? (
+                        <span className="w-2.5 h-2.5 border border-white/40 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <svg className="w-3 h-3 text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                          <line x1="3" y1="3" x2="21" y2="21" strokeLinecap="round" />
+                        </svg>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      title="Remove"
+                      disabled={kickingId === p.identity}
+                      onClick={async () => {
+                        setKickingId(p.identity);
+                        try { await kickHangoutCallParticipant(groupId, p.identity); }
+                        catch { /* best-effort */ }
+                        finally { setKickingId(null); }
+                      }}
+                      className="w-6 h-6 rounded-full flex items-center justify-center bg-white/10 hover:bg-red-500/30 active:scale-90 transition-all disabled:opacity-40"
+                      aria-label={`Remove ${name}`}
+                    >
+                      {kickingId === p.identity ? (
+                        <span className="w-2.5 h-2.5 border border-white/40 border-t-red-400 rounded-full animate-spin" />
+                      ) : (
+                        <svg className="w-3 h-3 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {isReconnecting && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded-full bg-amber-500/95 text-black text-xs font-semibold backdrop-blur-sm shadow-lg flex items-center gap-2">
@@ -128,14 +291,35 @@ function CallOverlay({ startedBy }: { startedBy: string | null }) {
       )}
 
       {isConnecting && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black">
-          <div className="flex flex-col items-center gap-3 text-white">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded-full bg-pink-500/95 text-white text-xs font-semibold backdrop-blur-sm shadow-lg flex items-center gap-2">
+          <span
+            className="w-3 h-3 rounded-full border-2 border-white/30 animate-spin"
+            style={{ borderTopColor: "#fff" }}
+          />
+          Connecting…
+        </div>
+      )}
+
+      {presenceToasts.length > 0 && (
+        <div
+          className="pointer-events-none absolute z-20 flex flex-col items-end gap-1.5"
+          style={{
+            top: "calc(3.25rem + env(safe-area-inset-top, 0px))",
+            right: "calc(0.75rem + env(safe-area-inset-right, 0px))",
+            maxWidth: "min(70vw, 240px)",
+          }}
+        >
+          {presenceToasts.map((toast) => (
             <div
-              className="w-10 h-10 rounded-full border-2 border-white/15 animate-spin"
-              style={{ borderTopColor: "#D4007A" }}
-            />
-            <div className="text-sm text-white/80">Connecting…</div>
-          </div>
+              key={toast.id}
+              className="px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md border border-white/10 text-white text-[11px] font-medium animate-fade-in-up shadow-lg flex items-center gap-1.5 max-w-full"
+            >
+              <span aria-hidden>{toast.kind === "joined" ? "→" : "←"}</span>
+              <span className="truncate">
+                {toast.name} {toast.kind === "joined" ? "joined" : "left"}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </>
@@ -162,6 +346,15 @@ function CristinaWidget({ groupId, isModerator }: { groupId: number | null; isMo
 
   const [expanded, setExpanded] = useState(false);
   const [input, setInput] = useState("");
+  // F3: video must start muted so autoPlay is permitted by browsers.
+  // Users can unmute with the tap-for-sound button.
+  const [videoMuted, setVideoMuted] = useState(true);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Reset muted state each time a new Cristina video starts.
+  useEffect(() => {
+    if (cristinaVideo) setVideoMuted(true);
+  }, [cristinaVideo?.url]);
 
   useEffect(() => {
     if (groupId != null) cristinaAttach();
@@ -184,14 +377,38 @@ function CristinaWidget({ groupId, isModerator }: { groupId: number | null; isMo
           }}
         >
           <div className="rounded-xl overflow-hidden border border-white/15 bg-black/80 backdrop-blur-md shadow-lg">
-            <video
-              src={cristinaVideo.url}
-              poster={cristinaVideo.thumbUrl || undefined}
-              controls
-              autoPlay
-              playsInline
-              className="w-full aspect-video bg-black"
-            />
+            <div className="relative">
+              <video
+                ref={videoRef}
+                src={cristinaVideo.url}
+                poster={cristinaVideo.thumbUrl || undefined}
+                controls
+                autoPlay
+                playsInline
+                muted={videoMuted}
+                className="w-full aspect-video bg-black"
+              />
+              {videoMuted && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVideoMuted(false);
+                    if (videoRef.current) {
+                      videoRef.current.muted = false;
+                      videoRef.current.play().catch(() => {});
+                    }
+                  }}
+                  className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+                >
+                  <span className="px-3 py-1.5 rounded-full bg-black/70 border border-white/20 text-white text-[11px] font-semibold flex items-center gap-1.5">
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                      <path d="M9.293 3.293a1 1 0 011.414 0l5 5A1 1 0 0115 10H5a1 1 0 01-.707-1.707l5-5zM3 14a1 1 0 011-1h12a1 1 0 010 2H4a1 1 0 01-1-1z" />
+                    </svg>
+                    Tap for sound
+                  </span>
+                </button>
+              )}
+            </div>
             <div className="px-2.5 py-1.5 text-[11px] text-white/80 flex items-center justify-between gap-2">
               <span className="truncate" title={cristinaVideo.title}>
                 💖 {cristinaVideo.title}
@@ -365,6 +582,46 @@ function LiveKitCallPanel({
 
   useEffect(() => { setActiveToken(token); }, [token]);
 
+  // Proactive token refresh: re-mint 30 min before the 2h token expires so
+  // users are never silently kicked by LiveKit at the token TTL boundary.
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const scheduleTokenRefresh = useCallback((groupId: number | null) => {
+    if (groupId == null) return;
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    // Refresh 30 min before the 2h hangout token expires → fire at 1h30m.
+    const REFRESH_MS = (90) * 60 * 1000;
+    refreshTimerRef.current = setTimeout(async () => {
+      if (!mountedRef.current) return;
+      try {
+        const res = await joinHangoutCall(groupId);
+        if (!mountedRef.current) return;
+        setActiveToken(res.token);
+        scheduleTokenRefresh(groupId);
+      } catch {
+        // Retry in 5 minutes if the refresh endpoint fails.
+        refreshTimerRef.current = setTimeout(
+          () => scheduleTokenRefresh(groupId),
+          5 * 60 * 1000,
+        );
+      }
+    }, REFRESH_MS);
+  }, []);
+
+  useEffect(() => {
+    if (!open || !token) return;
+    const groupId = extractGroupId(roomName);
+    scheduleTokenRefresh(groupId);
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, [open, token, roomName, scheduleTokenRefresh]);
+
   // Allow landscape while the call is open (portrait-lock CSS otherwise blocks it).
   useEffect(() => {
     if (!open) return;
@@ -470,7 +727,11 @@ function LiveKitCallPanel({
         style={{ display: "contents" }}
       >
         <CallStage />
-        <CallOverlay startedBy={startedBy} />
+        <CallOverlay
+          startedBy={startedBy}
+          isModerator={isModerator}
+          groupId={extractGroupId(roomName)}
+        />
       </LiveKitRoom>
 
       <CristinaWidget groupId={extractGroupId(roomName)} isModerator={isModerator} />

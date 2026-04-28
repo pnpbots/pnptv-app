@@ -8,6 +8,7 @@ const strings = {
     // Header
     hangoutsTitle: "PNP Hangouts",
     hangoutsSubtitle: "Chat groups with video rooms, a 24/7 Main Stage, and community events",
+    mainStageStripDescription: "Online cinema — watch PRIME videos with the room while camming with other guys",
 
     // Group creation
     newGroup: "+ New Group",
@@ -82,6 +83,11 @@ const strings = {
       "Video call URL is invalid. Please contact support.",
     joinCall: "Join",
     leaveCall: "Leave",
+    callActiveBanner: "Call in progress — tap to join",
+    callActiveBannerWith: (name: string) =>
+      `${name} started a call — tap to join`,
+    callActiveParticipants: (n: number) =>
+      `${n} ${n === 1 ? "person" : "people"} in call`,
 
     // Delete / leave group confirmations
     leaveGroupConfirm: "Leave this group?",
@@ -129,6 +135,7 @@ const strings = {
     // Header
     hangoutsTitle: "PNP Hangouts",
     hangoutsSubtitle: "Grupos de chat con video, un Main Stage 24/7 y eventos comunitarios",
+    mainStageStripDescription: "Cine online — mira videos PRIME con la sala mientras cameas con otros chicos",
 
     // Group creation
     newGroup: "+ Nuevo grupo",
@@ -204,6 +211,11 @@ const strings = {
       "La URL de la videollamada no es válida. Contacta con soporte.",
     joinCall: "Unirse",
     leaveCall: "Salir",
+    callActiveBanner: "Llamada en curso — toca para unirte",
+    callActiveBannerWith: (name: string) =>
+      `${name} inició una llamada — toca para unirte`,
+    callActiveParticipants: (n: number) =>
+      `${n} ${n === 1 ? "persona" : "personas"} en la llamada`,
 
     // Delete / leave group confirmations
     leaveGroupConfirm: "¿Salir de este grupo?",

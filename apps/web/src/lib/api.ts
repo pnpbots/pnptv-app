@@ -5897,7 +5897,17 @@ export function leaveHangoutCall(groupId: number | string): Promise<{ ok: boolea
   return request(`/api/webapp/hangouts/groups/${groupId}/call/leave`, { method: "POST" });
 }
 
+export function muteHangoutCallParticipant(groupId: number | string, identity: string): Promise<{ success: boolean; mutedCount: number }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/call/mute-participant`, {
+    method: "POST", body: JSON.stringify({ identity }),
+  });
+}
 
+export function kickHangoutCallParticipant(groupId: number | string, identity: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/call/kick-participant`, {
+    method: "POST", body: JSON.stringify({ identity }),
+  });
+}
 
 // ── Online Users ──────────────────────────────────────────────────────────────
 

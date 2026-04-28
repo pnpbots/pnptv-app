@@ -69,6 +69,8 @@ import {
   type SocialPostItem,
   type MessageReaction,
   type ForwardTarget,
+  type ForwardSource,
+  type PostCardSnapshot,
 } from "@/lib/api";
 import SocialPostCard from "@/components/social/SocialPostCard";
 import { PostComposer } from "@/components/PostComposer";
@@ -784,7 +786,7 @@ function HangoutChatPanel({
                             </div>
                           )}
                           {msg.message_type === "post_card" && msg.meta?.kind === "forward" ? (() => {
-                            const src = msg.meta.source || {};
+                            const src: ForwardSource = msg.meta.source || ({} as ForwardSource);
                             const author = src.authorUsername
                               ? `@${src.authorUsername}`
                               : (src.authorFirstName || "User");
@@ -852,7 +854,7 @@ function HangoutChatPanel({
                               </>
                             );
                           })() : msg.message_type === "post_card" && msg.meta?.postId ? (() => {
-                            const snap = msg.meta.snapshot || {};
+                            const snap: PostCardSnapshot = msg.meta.snapshot || ({} as PostCardSnapshot);
                             const handleName = snap.authorUsername
                               ? `@${snap.authorUsername}`
                               : (snap.authorFirstName || "User");
@@ -1569,6 +1571,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [creating, setCreating] = useState(false);
   const [newTags, setNewTags] = useState<string[]>([]);
   const [newIsPaid, setNewIsPaid] = useState(false);
+  const [newPriceUsd, setNewPriceUsd] = useState<number>(5);
   const [newPrice, setNewPrice] = useState("");
   const [newRules, setNewRules] = useState("");
   const [newReadOnly, setNewReadOnly] = useState(false);
@@ -1864,13 +1867,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     } catch (err: unknown) {
       console.error("[Chat] Video call start/join failed", err);
       if (err instanceof ApiError) {
-        if (err.code === "TIER_NOT_ELIGIBLE_FOR_CALLS") {
-          setCallError("Your plan doesn't include video calls. Upgrade to join or host a call.");
-        } else if (err.code === "CALL_PARTICIPANT_LIMIT_REACHED") {
-          setCallError(err.message || "This call is full. Try again when someone leaves.");
-        } else if (err.code === "CALL_ROOMS_PER_DAY_EXCEEDED") {
-          setCallError(err.message || "You've hit your daily call limit. Try again tomorrow.");
-        } else if (err.status === 403) {
+        if (err.status === 403) {
           setCallError("You were removed from this hangout.");
           loadGroups();
         } else if (err.status === 402) {
@@ -2059,8 +2056,17 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     try {
       // When linked to a channel, access rules come from the channel — no standalone paid
       const isPaidEffective = newChannelId ? false : newIsPaid;
-      // Standalone paid hangouts are fixed at $5
-      const paidPrice = isPaidEffective ? 5 : 0;
+      // Standalone paid hangouts: creator-set monthly price ($0.99 – $999.99)
+      let paidPrice = 0;
+      if (isPaidEffective) {
+        const parsed = Number(newPriceUsd);
+        if (!Number.isFinite(parsed) || parsed < 0.99 || parsed > 999.99) {
+          setCreateError("Price must be between $0.99 and $999.99");
+          setCreating(false);
+          return;
+        }
+        paidPrice = Math.round(parsed * 100) / 100;
+      }
       const result = await createHangoutGroup(
         newName.trim(),
         newDesc.trim(),
@@ -2090,6 +2096,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setNewDesc("");
       setNewIsPublic(true);
       setNewIsPaid(false);
+      setNewPriceUsd(5);
       setNewPrice("");
       setNewRules("");
       setNewTags([]);
@@ -2630,6 +2637,43 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             </div>
           </div>
         </div>
+
+        {/* Call-active banner — visible when a call is running and the user
+            is not currently in the dock. One tap re-uses handleStartCall,
+            which routes to the join flow when a call already exists. */}
+        {activeGroup?.hasActiveCall && !showTelegramDock && (
+          <button
+            type="button"
+            onClick={handleStartCall}
+            className="mx-3 mt-2 px-3 py-2 rounded-xl flex items-center gap-2 bg-gradient-to-r from-pink-500/15 to-amber-500/15 border border-pink-500/25 hover:from-pink-500/25 hover:to-amber-500/25 active:scale-[0.99] transition-all text-left animate-fade-in-up min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+            aria-label={
+              callStartedBy
+                ? t.chat.callActiveBannerWith(callStartedBy)
+                : t.chat.callActiveBanner
+            }
+          >
+            <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+              <span className="motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-400" />
+            </span>
+            <svg className="w-4 h-4 text-pnp-amber flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-white truncate">
+                {callStartedBy
+                  ? t.chat.callActiveBannerWith(callStartedBy)
+                  : t.chat.callActiveBanner}
+              </p>
+              {callParticipantCount > 0 && (
+                <p className="text-[10px] text-pnp-textSecondary truncate">
+                  {t.chat.callActiveParticipants(callParticipantCount)}
+                </p>
+              )}
+            </div>
+            <span className="text-[11px] font-bold text-pnp-amber flex-shrink-0">{t.chat.joinCall}</span>
+          </button>
+        )}
 
         {/* Error toast (video call errors etc.) */}
         {chatError && (
@@ -3797,10 +3841,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               </div>
               <div className="text-left">
                 <span className="text-sm text-pnp-textPrimary font-medium block">
-                  {newIsPaid ? "Paid Hangout" : "Free Hangout"}
+                  {newIsPaid ? "Paid Hangout (30-day pass)" : "Free Hangout"}
                 </span>
                 <span className="text-[11px] text-pnp-textSecondary">
-                  {newIsPaid ? "Members pay to join" : "Anyone can join for free"}
+                  {newIsPaid ? "Basic/PRIME members buy 30-day passes" : "Members can join for free"}
                 </span>
               </div>
             </div>
@@ -3809,11 +3853,38 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             </div>
           </button>}
 
-          {/* Standalone paid hangout: fixed $5 price info */}
+          {/* Standalone paid hangout: creator-set 30-day pass price */}
           {!newChannelId && newIsPaid && (
-            <div className="px-3 py-2.5 rounded-xl" style={{ background: "rgba(230,145,56,0.1)", border: "1px solid rgba(230,145,56,0.2)" }}>
-              <p className="text-sm font-semibold text-amber-400">$5.00 entry fee</p>
-              <p className="text-[11px] text-white/40 mt-0.5">Standalone hangouts have a fixed $5 entry fee.</p>
+            <div className="px-3 py-2.5 rounded-xl space-y-2" style={{ background: "rgba(230,145,56,0.1)", border: "1px solid rgba(230,145,56,0.2)" }}>
+              <p className="text-[11px] text-amber-300/70">30-day access pass. Subscribers get an email + push + Telegram reminder 3 days before expiry, with a one-tap renewal link. They can cancel reminders anytime.</p>
+              <label className="block text-xs text-white/60">Price per 30 days (USD)</label>
+              <div className="flex gap-2 flex-wrap items-center">
+                {[5, 10, 15, 20, 25].map((price) => (
+                  <button
+                    key={price}
+                    type="button"
+                    onClick={() => setNewPriceUsd(price)}
+                    className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-all border"
+                    style={newPriceUsd === price
+                      ? { background: "rgba(230,145,56,0.25)", color: "#E69138", borderColor: "rgba(230,145,56,0.6)" }
+                      : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)", borderColor: "rgba(255,255,255,0.1)" }
+                    }
+                  >
+                    ${price}/mo
+                  </button>
+                ))}
+                <input
+                  type="number"
+                  min="0.99"
+                  max="999.99"
+                  step="0.01"
+                  value={newPriceUsd || ""}
+                  onChange={(e) => setNewPriceUsd(Number(e.target.value) || 0)}
+                  placeholder="Custom"
+                  className="w-24 px-3 py-1.5 rounded-lg text-sm bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-orange-500/50"
+                />
+              </div>
+              <p className="text-[10px] text-white/40">Free users cannot subscribe — must upgrade to Basic or PRIME first. Range: $0.99 – $999.99 per 30-day pass.</p>
             </div>
           )}
 
@@ -4749,6 +4820,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
  */
 function MainStageStrip() {
   const navigate = useNavigate();
+  const t = useI18n();
   const [state, setState] = useState<MainStageState | null>(null);
 
   useEffect(() => {
@@ -4775,7 +4847,7 @@ function MainStageStrip() {
       type="button"
       onClick={() => navigate("/main-stage")}
       aria-label="Enter Main Stage"
-      className="relative w-full h-28 sm:h-32 mb-6 rounded-2xl overflow-hidden transition-transform active:scale-[0.99]"
+      className="relative w-full h-32 sm:h-36 mb-6 rounded-2xl overflow-hidden transition-transform active:scale-[0.99]"
       style={{
         background:
           "radial-gradient(ellipse at 50% 85%, rgba(255,180,80,0.35) 0%, rgba(180,30,50,0.55) 35%, rgba(60,10,20,0.95) 75%)",
@@ -4871,6 +4943,13 @@ function MainStageStrip() {
         >
           MAIN STAGE
         </h2>
+
+        <p
+          className="text-[10px] sm:text-[11px] text-white/70 max-w-[90%] leading-snug"
+          style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}
+        >
+          {t.chat.mainStageStripDescription}
+        </p>
 
         <div className="flex items-center gap-2 text-[11px] sm:text-xs text-white/80">
           <span className="font-semibold tabular-nums">{cammers}</span>

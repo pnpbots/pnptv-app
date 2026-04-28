@@ -4861,12 +4861,14 @@ app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, asyncHandler
 app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asyncHandler(socialController.dropToFeed));
 
 // Hangout video calls — LiveKit
-const { startCall, joinCall, endCall, leaveCall, refreshCallToken } = require('./controllers/hangoutGroupController');
+const { startCall, joinCall, endCall, leaveCall, refreshCallToken, muteCallParticipant, kickCallParticipant } = require('./controllers/hangoutGroupController');
 app.post('/api/webapp/hangouts/groups/:id/call/start', requireSessionAuth, asyncHandler(startCall));
 app.post('/api/webapp/hangouts/groups/:id/call/join', requireSessionAuth, asyncHandler(joinCall));
 app.post('/api/webapp/hangouts/groups/:id/call/end', requireSessionAuth, asyncHandler(endCall));
 app.post('/api/webapp/hangouts/groups/:id/call/leave', requireSessionAuth, asyncHandler(leaveCall));
 app.post('/api/webapp/hangouts/groups/:id/call/token/refresh', requireSessionAuth, asyncHandler(refreshCallToken));
+app.post('/api/webapp/hangouts/groups/:id/call/mute-participant', requireSessionAuth, asyncHandler(muteCallParticipant));
+app.post('/api/webapp/hangouts/groups/:id/call/kick-participant', requireSessionAuth, asyncHandler(kickCallParticipant));
 
 // DM Video Calls — removed (dead code, never called from frontend)
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   CarouselLayout,
@@ -11,11 +11,13 @@ import {
   ParticipantTile,
   RoomAudioRenderer,
   useCreateLayoutContext,
+  useMaybeTrackRefContext,
   usePinnedTracks,
   useTracks,
 } from "@livekit/components-react";
 import type { TrackReferenceOrPlaceholder } from "@livekit/components-react";
-import { Track } from "livekit-client";
+import { Track, VideoQuality } from "livekit-client";
+import type { RemoteTrackPublication } from "livekit-client";
 import { getCallBooking } from "@/lib/api";
 
 // ── View modes ───────────────────────────────────────────────────────────────
@@ -56,6 +58,39 @@ function CallRoomSkeleton() {
       </p>
     </div>
   );
+}
+
+// ── Tile quality wrappers ─────────────────────────────────────────────────────
+
+/**
+ * Carousel strip tile: consumed as a child of `<CarouselLayout>` which injects
+ * the trackRef via TrackRefContext. Requests VideoQuality.LOW to reduce decoder
+ * pressure on the small thumbnail strip.
+ */
+function CarouselStripTile() {
+  const trackRef = useMaybeTrackRefContext();
+  useEffect(() => {
+    if (!trackRef) return;
+    const pub = trackRef.publication as RemoteTrackPublication | undefined;
+    if (!pub || !("setVideoQuality" in pub)) return;
+    pub.setVideoQuality(VideoQuality.LOW);
+  }, [trackRef?.publication]);
+
+  return <ParticipantTile />;
+}
+
+/**
+ * Focus/hero tile: receives trackRef directly (not via context).
+ * Requests VideoQuality.HIGH for the primary spotlighted feed.
+ */
+function FocusHeroTile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
+  useEffect(() => {
+    const pub = trackRef.publication as RemoteTrackPublication | undefined;
+    if (!pub || !("setVideoQuality" in pub)) return;
+    pub.setVideoQuality(VideoQuality.HIGH);
+  }, [trackRef.publication]);
+
+  return <ParticipantTile trackRef={trackRef} />;
 }
 
 // ── Countdown ────────────────────────────────────────────────────────────────
@@ -178,6 +213,45 @@ export default function CallRoom() {
   const [error, setError] = useState<string | null>(null);
 
   const hasFetched = useRef(false);
+  const mountedRef = useRef(true);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
+
+  // Mint a fresh token 30 min before the 2h booking token expires.
+  const scheduleTokenRefresh = useCallback((bId: string) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    const REFRESH_MS = 90 * 60 * 1000; // 1h30m — 30 min before 2h expiry
+    refreshTimerRef.current = setTimeout(async () => {
+      if (!mountedRef.current) return;
+      try {
+        const r = await fetch(
+          `/api/webapp/bookings/${encodeURIComponent(bId)}/join`,
+          { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" } },
+        );
+        if (!r.ok) throw new Error("refresh failed");
+        const data = await r.json() as { token?: string; livekitUrl?: string; roomName?: string };
+        if (!mountedRef.current) return;
+        if (data.token) {
+          setJoinData((prev) =>
+            prev
+              ? { ...prev, token: data.token!, livekitUrl: data.livekitUrl ?? prev.livekitUrl, roomName: data.roomName ?? prev.roomName }
+              : prev,
+          );
+        }
+        scheduleTokenRefresh(bId);
+      } catch {
+        // Retry in 5 minutes on failure.
+        refreshTimerRef.current = setTimeout(() => scheduleTokenRefresh(bId), 5 * 60 * 1000);
+      }
+    }, REFRESH_MS);
+  }, []);
 
   useEffect(() => {
     if (!bookingId || hasFetched.current) return;
@@ -242,6 +316,7 @@ export default function CallRoom() {
               startAt: booking.start_at,
             });
             setLoading(false);
+            scheduleTokenRefresh(bookingId!);
           });
       })
       .catch((err: unknown) => {
@@ -327,7 +402,7 @@ export default function CallRoom() {
         token={joinData.token}
         serverUrl={joinData.livekitUrl}
         connect={true}
-        audio={true}
+        audio={false}
         video={true}
         options={{ adaptiveStream: true, dynacast: true }}
         onDisconnected={() => navigate(-1)}
@@ -357,7 +432,7 @@ export function CallStage() {
       { source: Track.Source.Camera, withPlaceholder: true },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
     ],
-    { onlySubscribed: false },
+    { onlySubscribed: true },
   );
 
   const layoutContext = useCreateLayoutContext();
@@ -417,15 +492,15 @@ export function CallStage() {
         {mode === "spotlight" && focusTrack && (
           <FocusLayoutContainer style={{ height: "100%" }}>
             <CarouselLayout tracks={carouselTracks}>
-              <ParticipantTile />
+              <CarouselStripTile />
             </CarouselLayout>
-            <FocusLayout trackRef={focusTrack} />
+            <FocusHeroTile trackRef={focusTrack} />
           </FocusLayoutContainer>
         )}
 
         {mode === "cinema" && focusTrack && (
           <div className="w-full h-full flex items-center justify-center">
-            <FocusLayout trackRef={focusTrack} style={{ width: "100%", height: "100%" }} />
+            <FocusHeroTile trackRef={focusTrack} />
           </div>
         )}
       </div>

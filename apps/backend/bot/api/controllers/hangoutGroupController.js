@@ -291,16 +291,14 @@ const createGroup = async (req, res) => {
       linkedChannel = chRes.rows[0];
     }
 
-    // Standalone hangout price validation: only free or $5 allowed
+    // Standalone hangout price (creator-set monthly fee): $0.99 to $999.99 for paid
     let sanitizedPrice = 0;
-    if (!linkedChannel) {
-      if (isPaid) {
-        const parsedPrice = Number(priceUsd) || 0;
-        if (parsedPrice !== 0 && parsedPrice !== 5) {
-          return res.status(400).json({ error: 'Standalone hangout price must be $0 or $5' });
-        }
-        sanitizedPrice = parsedPrice;
+    if (!linkedChannel && isPaid) {
+      const parsedPrice = Number(priceUsd);
+      if (!Number.isFinite(parsedPrice) || parsedPrice < 0.99 || parsedPrice > 999.99) {
+        return res.status(400).json({ error: 'Paid hangout price must be between $0.99 and $999.99' });
       }
+      sanitizedPrice = Math.round(parsedPrice * 100) / 100;
     }
     // Linked hangouts inherit channel pricing — don't store redundant price
     const finalIsPaid = linkedChannel ? false : !!isPaid;
@@ -771,9 +769,12 @@ const updateGroup = async (req, res) => {
     }
 
     if (price_usd !== undefined) {
-      const price = Math.max(0, Math.min(9999.99, Number(price_usd) || 0));
+      const parsed = Number(price_usd);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 999.99) {
+        return res.status(400).json({ error: 'Hangout price must be between $0 and $999.99' });
+      }
       updates.push(`price_usd = $${idx++}`);
-      values.push(price);
+      values.push(Math.round(parsed * 100) / 100);
     }
 
     if (updates.length === 0) {
@@ -2633,6 +2634,9 @@ module.exports = {
   joinCall,
   endCall,
   leaveCall,
+  refreshCallToken,
+  muteCallParticipant,
+  kickCallParticipant,
   forwardMessage,
   pinGroup,
   muteGroupForUser,
@@ -2642,31 +2646,58 @@ module.exports = {
 // ── LiveKit video calls ──────────────────────────────────────────────────────
 
 const livekitService = require('../../../services/livekitService');
-
-// Per-tier video-call caps. Admins bypass almost everything. Free users can't
-// start or join. Override at runtime via env var HANGOUT_CALL_LIMITS_BY_TIER
-// (JSON map of tier → { maxParticipants, maxRoomsPerDay }).
-const CALL_LIMITS_DEFAULTS = {
-  admin:      { maxParticipants: 1000, maxRoomsPerDay: 999 },
-  superadmin: { maxParticipants: 1000, maxRoomsPerDay: 999 },
-  prime:      { maxParticipants: 50,   maxRoomsPerDay: 5 },
-  member:     { maxParticipants: 10,   maxRoomsPerDay: 3 },
-  free:       { maxParticipants: 0,    maxRoomsPerDay: 0 },
-};
-const CALL_LIMITS_OVERRIDE = (() => {
-  try { return JSON.parse(process.env.HANGOUT_CALL_LIMITS_BY_TIER || '{}'); }
-  catch { return {}; }
-})();
-function effectiveCallLimits(userRole, userTier) {
-  const role = String(userRole || '').toLowerCase();
-  if (role === 'admin' || role === 'superadmin') {
-    return CALL_LIMITS_OVERRIDE[role] || CALL_LIMITS_DEFAULTS[role];
-  }
-  const tier = String(userTier || 'free').toLowerCase();
-  return CALL_LIMITS_OVERRIDE[tier] || CALL_LIMITS_DEFAULTS[tier] || CALL_LIMITS_DEFAULTS.free;
-}
+const { randomBytes } = require('crypto');
 
 // ── Video-call shared helpers ─────────────────────────────────────────────────
+
+// Notify all hangout members that a call has started (push).
+// Excludes the starter; respects per-member notification_mode (skips 'muted').
+async function notifyCallStartedToMembers(groupId, callId, starter, starterDisplayName) {
+  let PushNotificationService;
+  try {
+    PushNotificationService = require('../../../services/pushNotificationService');
+  } catch (err) {
+    logger.warn('notifyCallStartedToMembers: push service unavailable', { error: err.message });
+    return;
+  }
+
+  const { rows: memberRows } = await query(
+    `SELECT user_id FROM hangout_group_members
+     WHERE group_id = $1 AND user_id <> $2
+       AND is_banned = FALSE
+       AND COALESCE(notification_mode, 'all') <> 'muted'`,
+    [groupId, starter.id]
+  );
+  if (memberRows.length === 0) return;
+  const memberIds = memberRows.map((r) => String(r.user_id));
+
+  const { rows: gnRows } = await query(
+    'SELECT name FROM hangout_groups WHERE id = $1',
+    [groupId]
+  );
+  const groupName = gnRows[0]?.name || 'a hangout';
+  const startedBy = starterDisplayName || 'Someone';
+
+  await PushNotificationService.sendToUsers(memberIds, {
+    title: `📞 Call in ${groupName}`,
+    body: `${startedBy} started a video call — tap to join`,
+    url: `/chat/${groupId}`,
+    tag: `hangout-call-${callId}`,
+  });
+}
+
+// Helper: can this user moderate the active call in this group?
+// Group owners/mods always can; the call's creator can for the lifetime of
+// their own call (matches the moderator-grant rule in generateCallAccess).
+async function canModerateCall(groupId, userId) {
+  if (await isOwnerOrMod(groupId, userId)) return true;
+  const { rows } = await query(
+    `SELECT 1 FROM hangout_video_calls
+     WHERE group_id = $1 AND status = 'active' AND creator_id = $2 LIMIT 1`,
+    [groupId, userId]
+  );
+  return rows.length > 0;
+}
 
 function emitToHangoutGroup(groupId, event, data) {
   const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
@@ -2711,18 +2742,38 @@ async function checkPaidHangoutAccess(groupId, user, res) {
 
 // Generates a LiveKit token, upserts the participant row, and returns the call response payload.
 // Does NOT handle capacity checks — callers must do that before invoking.
+// Each mint gets a unique 4-byte hex suffix appended to the identity so that the same user
+// opening two browser tabs is treated as two distinct LiveKit participants (B1 fix).
 async function generateCallAccess(groupId, callId, roomName, user) {
   const displayName = user.firstName || user.first_name || user.username || 'User';
   const isOwnerMod = await isOwnerOrMod(groupId, user.id);
-  const ttl = isOwnerMod ? 4 * 3600 : 2 * 3600;
-  const token = await livekitService.generateToken(roomName, String(user.id), displayName, isOwnerMod, { ttlSeconds: ttl });
+  // Per-call moderator: the user who started this specific call retains
+  // moderator grants for its full lifetime — even on rejoin/refresh.
+  const { rows: callRows } = await query(
+    'SELECT creator_id FROM hangout_video_calls WHERE id = $1',
+    [callId]
+  );
+  const isCallCreator = callRows.length > 0
+    && String(callRows[0].creator_id) === String(user.id);
+  const isModerator = isOwnerMod || isCallCreator;
+  const ttl = isModerator ? 4 * 3600 : 2 * 3600;
+  const suffix = randomBytes(4).toString('hex');
+  const identityOverride = `${user.id}-${suffix}`;
+  const token = await livekitService.generateToken(
+    roomName,
+    String(user.id),
+    displayName,
+    isModerator,
+    { ttlSeconds: ttl, identityOverride },
+  );
   await query(
     `INSERT INTO hangout_call_participants (call_id, user_id, display_name, joined_at)
      VALUES ($1, $2, $3, NOW())
      ON CONFLICT (call_id, user_id) DO UPDATE SET left_at = NULL, joined_at = EXCLUDED.joined_at`,
     [callId, user.id, displayName]
   );
-  return { token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName };
+  const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+  return { token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName, expiresAt };
 }
 
 // ── Video-call controllers ────────────────────────────────────────────────────
@@ -2736,29 +2787,7 @@ async function startCall(req, res) {
   try {
     if (!(await validateUserGroupAccess(user.id, groupId, user.language, res))) return;
 
-    const starterLimits = effectiveCallLimits(user.role, user.tier);
-    if (starterLimits.maxRoomsPerDay === 0) {
-      return res.status(403).json({ error: 'Your tier cannot start video calls', code: 'TIER_NOT_ELIGIBLE_FOR_CALLS' });
-    }
-
     if (!(await checkPaidHangoutAccess(groupId, user, res))) return;
-
-    // Rooms-per-day cap — owner/mods of THIS group bypass so hosts aren't
-    // blocked; admins bypass via their limit being 999.
-    const isOwnerModForGroup = await isOwnerOrMod(groupId, user.id);
-    if (!isOwnerModForGroup && starterLimits.maxRoomsPerDay < 999) {
-      const { rows: [rpd] } = await query(
-        `SELECT COUNT(*)::int AS count FROM hangout_video_calls
-         WHERE creator_id = $1 AND created_at > NOW() - INTERVAL '24 hours'`,
-        [user.id]
-      );
-      if ((rpd?.count || 0) >= starterLimits.maxRoomsPerDay) {
-        return res.status(429).json({
-          error: `Daily call limit reached (${starterLimits.maxRoomsPerDay} rooms/day)`,
-          code: 'CALL_ROOMS_PER_DAY_EXCEEDED',
-        });
-      }
-    }
 
     const roomName = `hangout-${groupId}`;
 
@@ -2771,29 +2800,13 @@ async function startCall(req, res) {
 
     // If an active call already exists, join it instead of creating a new one
     const { rows: existing } = await query(
-      `SELECT hvc.id, hvc.room_name, hvc.creator_id, u.role AS creator_role, u.tier AS creator_tier
-       FROM hangout_video_calls hvc LEFT JOIN users u ON u.id = hvc.creator_id
-       WHERE hvc.group_id=$1 AND hvc.status='active' ORDER BY hvc.created_at DESC LIMIT 1`,
+      `SELECT id, room_name FROM hangout_video_calls
+       WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
       [groupId]
     );
 
     if (existing.length > 0) {
       const { id: existingCallId, room_name: activeRoomName } = existing[0];
-      // Capacity check — skip if user is already an active participant (re-fetching token)
-      const { rows: [already] } = await query(
-        `SELECT 1 FROM hangout_call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL`,
-        [existingCallId, user.id]
-      );
-      if (!already) {
-        const creatorLimits = effectiveCallLimits(existing[0].creator_role, existing[0].creator_tier);
-        const count = await getActiveParticipantCount(existingCallId);
-        if (count >= creatorLimits.maxParticipants) {
-          return res.status(409).json({
-            error: `Call is full (${creatorLimits.maxParticipants} participants max)`,
-            code: 'CALL_PARTICIPANT_LIMIT_REACHED',
-          });
-        }
-      }
       return res.json(await generateCallAccess(groupId, existingCallId, activeRoomName, user));
     }
 
@@ -2829,8 +2842,19 @@ async function startCall(req, res) {
        ON CONFLICT (call_id, user_id) DO UPDATE SET left_at = NULL, joined_at = EXCLUDED.joined_at`,
       [callId, user.id, displayName]
     );
-    // Creator of a new call is always owner/mod — use 4h TTL
-    const token = await livekitService.generateToken(roomName, String(user.id), displayName, true, { ttlSeconds: 4 * 3600 });
+    // Creator of a new call is always owner/mod — use 4h TTL.
+    // Per-mint suffix so opening a second tab doesn't kick the first (B1 fix).
+    const creatorSuffix = randomBytes(4).toString('hex');
+    const creatorIdentity = `${user.id}-${creatorSuffix}`;
+    const ttlCreator = 4 * 3600;
+    const token = await livekitService.generateToken(
+      roomName,
+      String(user.id),
+      displayName,
+      true,
+      { ttlSeconds: ttlCreator, identityOverride: creatorIdentity },
+    );
+    const expiresAt = new Date(Date.now() + ttlCreator * 1000).toISOString();
 
     emitToHangoutGroup(groupId, 'hangout:call:started', {
       groupId,
@@ -2841,8 +2865,15 @@ async function startCall(req, res) {
     // Cache active call for 60s so listGroups can skip the DB sub-query
     getRedis().set(`hangout:active_call:${groupId}`, JSON.stringify({ id: callId, roomName, participantCount: 1 }), 'EX', 60).catch(() => {});
 
+    // Fire-and-forget push notifications so members not currently in the
+    // hangout's socket room (other tabs, app closed, other webapp pages)
+    // still hear about the call. Skips users with notification_mode='muted'.
+    notifyCallStartedToMembers(groupId, callId, user, displayName).catch((err) =>
+      logger.warn('startCall push dispatch failed', { groupId, callId, error: err.message })
+    );
+
     logger.info(`startCall: group=${groupId} call=${callId} user=${user.id}`);
-    return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName });
+    return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName, expiresAt });
   } catch (err) {
     logger.error('startCall error', err);
     return res.status(500).json({ error: 'Failed to start call' });
@@ -2858,38 +2889,16 @@ async function joinCall(req, res) {
   try {
     if (!(await validateUserGroupAccess(user.id, groupId, user.language, res))) return;
 
-    const joinerLimits = effectiveCallLimits(user.role, user.tier);
-    if (joinerLimits.maxParticipants === 0) {
-      return res.status(403).json({ error: 'Your tier cannot join video calls', code: 'TIER_NOT_ELIGIBLE_FOR_CALLS' });
-    }
-
     if (!(await checkPaidHangoutAccess(groupId, user, res))) return;
 
     const { rows } = await query(
-      `SELECT hvc.id, hvc.room_name, u.role AS creator_role, u.tier AS creator_tier
-       FROM hangout_video_calls hvc LEFT JOIN users u ON u.id = hvc.creator_id
-       WHERE hvc.group_id=$1 AND hvc.status='active' ORDER BY hvc.created_at DESC LIMIT 1`,
+      `SELECT id, room_name FROM hangout_video_calls
+       WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
       [groupId]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'No active call for this group' });
 
     const { id: callId, room_name: roomName } = rows[0];
-    const creatorLimits = effectiveCallLimits(rows[0].creator_role, rows[0].creator_tier);
-
-    // Capacity check — skip if user already active (re-fetching token)
-    const { rows: [already] } = await query(
-      `SELECT 1 FROM hangout_call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL`,
-      [callId, user.id]
-    );
-    if (!already) {
-      const count = await getActiveParticipantCount(callId);
-      if (count >= creatorLimits.maxParticipants) {
-        return res.status(409).json({
-          error: `Call is full (${creatorLimits.maxParticipants} participants max)`,
-          code: 'CALL_PARTICIPANT_LIMIT_REACHED',
-        });
-      }
-    }
 
     const result = await generateCallAccess(groupId, callId, roomName, user);
 
@@ -2978,6 +2987,70 @@ async function leaveCall(req, res) {
   } catch (err) {
     logger.error('leaveCall error', err);
     return res.status(500).json({ error: 'Failed to leave call' });
+  }
+}
+
+// POST /api/webapp/hangouts/groups/:id/call/token/refresh
+// Re-mints a LiveKit token for an already-active call without touching participant rows.
+// The frontend calls this before the existing token expires (e.g. every ~90 min for 2h tokens).
+// Returns: { token, livekitUrl, roomName, expiresAt }
+async function refreshCallToken(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    // Membership check — same gate as joinCall
+    if (!(await validateUserGroupAccess(user.id, groupId, user.language, res))) return;
+
+    // Confirm there is an active call for this group
+    const { rows } = await query(
+      `SELECT id, room_name FROM hangout_video_calls
+       WHERE group_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 1`,
+      [groupId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'No active call for this group' });
+
+    const { id: callId, room_name: roomName } = rows[0];
+
+    // Confirm the user is currently a participant (joined but not yet left)
+    const { rows: partRows } = await query(
+      `SELECT 1 FROM hangout_call_participants
+       WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL`,
+      [callId, user.id]
+    );
+    if (partRows.length === 0) {
+      return res.status(403).json({ error: 'You are not an active participant in this call' });
+    }
+
+    // Mint a fresh token with a new per-mint suffix (multi-tab safety)
+    const displayName = user.firstName || user.first_name || user.username || 'User';
+    const isOwnerMod = await isOwnerOrMod(groupId, user.id);
+    // Per-call moderator: the call's creator keeps mod grants on token refresh.
+    const { rows: callRows } = await query(
+      'SELECT creator_id FROM hangout_video_calls WHERE id = $1',
+      [callId]
+    );
+    const isCallCreator = callRows.length > 0
+      && String(callRows[0].creator_id) === String(user.id);
+    const isModerator = isOwnerMod || isCallCreator;
+    const ttl = isModerator ? 4 * 3600 : 2 * 3600;
+    const suffix = randomBytes(4).toString('hex');
+    const identityOverride = `${user.id}-${suffix}`;
+    const token = await livekitService.generateToken(
+      roomName,
+      String(user.id),
+      displayName,
+      isModerator,
+      { ttlSeconds: ttl, identityOverride },
+    );
+    const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+
+    logger.info(`refreshCallToken: group=${groupId} call=${callId} user=${user.id}`);
+    return res.json({ token, livekitUrl: livekitService.LIVEKIT_WS_URL, roomName, expiresAt });
+  } catch (err) {
+    logger.error('refreshCallToken error', err);
+    return res.status(500).json({ error: 'Failed to refresh call token' });
   }
 }
 
@@ -3112,5 +3185,75 @@ async function unlinkTelegramGroup(req, res) {
   } catch (err) {
     logger.error('unlinkTelegramGroup error', err);
     return res.status(500).json({ error: 'Failed to unlink Telegram group' });
+  }
+}
+
+// POST /api/webapp/hangouts/groups/:id/call/mute-participant
+async function muteCallParticipant(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  const { identity } = req.body || {};
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!identity || typeof identity !== 'string') return res.status(400).json({ error: 'identity required' });
+
+  try {
+    if (!(await canModerateCall(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+    const { rows } = await query(
+      `SELECT room_name FROM hangout_video_calls
+       WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
+      [groupId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'No active call' });
+    const { room_name: roomName } = rows[0];
+
+    const roomClient = livekitService.getRoomClient();
+    const participant = await roomClient.getParticipant(roomName, identity);
+    const tracks = participant?.tracks || [];
+    let mutedCount = 0;
+    for (const t of tracks) {
+      try {
+        await roomClient.mutePublishedTrack(roomName, identity, t.sid, true);
+        mutedCount++;
+      } catch (trackErr) {
+        logger.warn('hangout mute: track failed', { error: trackErr.message });
+      }
+    }
+    logger.info(`muteCallParticipant: group=${groupId} identity=${identity} mutedCount=${mutedCount} by=${user.id}`);
+    return res.json({ success: true, mutedCount });
+  } catch (err) {
+    logger.error('muteCallParticipant error', err);
+    return res.status(500).json({ error: 'Failed to mute participant' });
+  }
+}
+
+// POST /api/webapp/hangouts/groups/:id/call/kick-participant
+async function kickCallParticipant(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  const { identity } = req.body || {};
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+  if (!identity || typeof identity !== 'string') return res.status(400).json({ error: 'identity required' });
+
+  try {
+    if (!(await canModerateCall(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+    const { rows } = await query(
+      `SELECT room_name FROM hangout_video_calls
+       WHERE group_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
+      [groupId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'No active call' });
+    const { room_name: roomName } = rows[0];
+
+    const roomClient = livekitService.getRoomClient();
+    try {
+      await roomClient.removeParticipant(roomName, identity);
+    } catch (lkErr) {
+      logger.warn('hangout kick: removeParticipant failed', { error: lkErr.message });
+    }
+    logger.info(`kickCallParticipant: group=${groupId} identity=${identity} by=${user.id}`);
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('kickCallParticipant error', err);
+    return res.status(500).json({ error: 'Failed to kick participant' });
   }
 }
