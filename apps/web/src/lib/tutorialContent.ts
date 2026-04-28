@@ -114,13 +114,6 @@ export const tutorialContent: Record<string, TutorialSection> = {
         descEs: "La radio de Cristina suena de fondo. Pausala, cambia el track, mete algo mas caliente — incluso con un video puesto. Pon el ambiente.",
         illustration: "tips",
       },
-      {
-        titleEn: "Show yourself or just watch",
-        titleEs: "Muestrate o solo mira",
-        descEn: "Turn on your cam to join the grid and show off — or stay in the back and just watch. Tip the cammers, chat with the room. Consent and respect, always.",
-        descEs: "Activa tu cam para unirte al grid y mostrarte — o quedate atras y solo mira. Manda propinas a los cammers, conversa con la sala. Consentimiento y respeto, siempre.",
-        illustration: "welcome",
-      },
     ],
   },
 
