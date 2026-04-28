@@ -2777,6 +2777,102 @@ app.post('/api/webapp/reports', requireSessionAuth, socialActionLimiter, asyncHa
   return res.json({ success: true, report: { id: result.report.id, status: result.report.status } });
 }));
 
+// GET /api/webapp/admin/payment-health — operational dashboard data
+// Surfaces stuck payments, recent leak alerts, and reconciler activity in one
+// endpoint so the operator has a single page to scan instead of manually
+// SQLing each table when alerts fire in the notifications group.
+app.get('/api/webapp/admin/payment-health', adminGuard, asyncHandler(async (req, res) => {
+  const { query: q } = require('../../config/postgres');
+
+  // ePayco: payments still pending past the abandon threshold (24h cutoff handled
+  // by cleanupAbandonedPayments cron — anything pending >1h is interesting).
+  const epaycoStuck = await q(`
+    SELECT id, user_id, plan_id, amount, currency, reference,
+           created_at,
+           EXTRACT(EPOCH FROM (NOW() - created_at))/3600 AS hours_pending
+    FROM payments
+    WHERE status = 'pending'
+      AND provider = 'epayco'
+      AND created_at < NOW() - INTERVAL '1 hour'
+      AND created_at > NOW() - INTERVAL '30 days'
+    ORDER BY created_at ASC
+    LIMIT 50
+  `);
+
+  // Meru: orphan paid links (auto-heal alerts the ops group; this surfaces the
+  // pile so the operator can confirm at a glance) plus reserved-pending older
+  // than 60 min.
+  const meruStuck = await q(`
+    SELECT code, status, reserved_for_email, reserved_for_user_id,
+           created_at,
+           EXTRACT(EPOCH FROM (NOW() - created_at))/3600 AS hours_since_create
+    FROM meru_payment_links
+    WHERE product = 'lifetime100'
+      AND status IN ('active', 'reserved')
+      AND created_at > NOW() - INTERVAL '90 days'
+      AND (status = 'active' OR (reserved_until IS NOT NULL AND reserved_until < NOW()))
+    ORDER BY created_at DESC
+    LIMIT 50
+  `);
+
+  // BTCPay/Dash: stuck pending invoices (reconciler runs every 30 min).
+  const dashStuck = await q(`
+    SELECT id, user_id, plan_id, btcpay_invoice_id, usd_amount,
+           created_at,
+           EXTRACT(EPOCH FROM (NOW() - created_at))/60 AS minutes_pending
+    FROM dash_subscription_orders
+    WHERE status = 'pending'
+      AND created_at < NOW() - INTERVAL '15 minutes'
+      AND created_at > NOW() - INTERVAL '14 days'
+    ORDER BY created_at DESC
+    LIMIT 50
+  `);
+
+  // Leak detector signals from the last 7 days — group by URL and surface
+  // anything where 2+ users hit the same exclusive video (3+ is the alert
+  // threshold; 2+ is "watch this" tier).
+  const leaks = await q(`
+    SELECT vfl.media_url,
+           COUNT(DISTINCT vfl.user_id) FILTER (WHERE vfl.user_id IS NOT NULL) AS distinct_users,
+           COUNT(DISTINCT vfl.ip_address) FILTER (WHERE vfl.ip_address IS NOT NULL) AS distinct_ips,
+           COUNT(*) AS total_fetches,
+           MAX(vfl.fetched_at) AS last_fetched
+    FROM video_fetch_log vfl
+    JOIN social_posts sp ON sp.media_url = vfl.media_url
+    WHERE vfl.fetched_at > NOW() - INTERVAL '7 days'
+      AND (sp.is_exclusive = true OR COALESCE(sp.content_tier, 'free') = 'prime')
+      AND sp.is_deleted = false
+    GROUP BY vfl.media_url
+    HAVING COUNT(DISTINCT vfl.user_id) FILTER (WHERE vfl.user_id IS NOT NULL) >= 2
+        OR COUNT(DISTINCT vfl.ip_address) FILTER (WHERE vfl.ip_address IS NOT NULL) >= 4
+    ORDER BY distinct_users DESC, distinct_ips DESC
+    LIMIT 25
+  `);
+
+  // 7-day activity context — successful settlement counts to spot-check that
+  // the reconcilers aren't silently broken.
+  const settlements = await q(`
+    SELECT
+      (SELECT COUNT(*) FROM payments WHERE status='completed' AND provider='epayco' AND completed_at > NOW() - INTERVAL '7 days') AS epayco_completed_7d,
+      (SELECT COUNT(*) FROM dash_subscription_orders WHERE status='completed' AND completed_at > NOW() - INTERVAL '7 days') AS dash_completed_7d,
+      (SELECT COUNT(*) FROM meru_payment_links WHERE status='used' AND used_at > NOW() - INTERVAL '7 days') AS meru_completed_7d,
+      (SELECT COUNT(*) FROM video_fetch_log WHERE fetched_at > NOW() - INTERVAL '7 days') AS video_views_7d,
+      (SELECT COUNT(DISTINCT media_url) FROM video_fetch_log WHERE fetched_at > NOW() - INTERVAL '7 days') AS distinct_videos_7d
+  `);
+
+  return res.json({
+    success: true,
+    stuck: {
+      epayco: { count: epaycoStuck.rowCount, items: epaycoStuck.rows },
+      meru: { count: meruStuck.rowCount, items: meruStuck.rows },
+      dash: { count: dashStuck.rowCount, items: dashStuck.rows },
+    },
+    leaks: { count: leaks.rowCount, items: leaks.rows },
+    activity: settlements.rows[0] || {},
+    generated_at: new Date().toISOString(),
+  });
+}));
+
 // GET /api/webapp/admin/reports — admin list
 app.get('/api/webapp/admin/reports', adminGuard, asyncHandler(async (req, res) => {
   const { status, limit, offset } = req.query || {};

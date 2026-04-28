@@ -4115,6 +4115,56 @@ export function getAdminStats(): Promise<{ success: boolean; stats: AdminStats }
   return request("/api/webapp/admin/stats");
 }
 
+// Admin Payment Health (operational dashboard)
+export interface PaymentHealthStuckPayment {
+  id?: string;
+  code?: string;
+  user_id?: string;
+  plan_id?: string;
+  amount?: string | number;
+  currency?: string;
+  reference?: string;
+  reserved_for_email?: string | null;
+  reserved_for_user_id?: string | null;
+  btcpay_invoice_id?: string;
+  usd_amount?: string | number;
+  created_at: string;
+  hours_pending?: number;
+  hours_since_create?: number;
+  minutes_pending?: number;
+  status?: string;
+}
+
+export interface PaymentHealthLeak {
+  media_url: string;
+  distinct_users: string | number;
+  distinct_ips: string | number;
+  total_fetches: string | number;
+  last_fetched: string;
+}
+
+export interface PaymentHealth {
+  success: boolean;
+  stuck: {
+    epayco: { count: number; items: PaymentHealthStuckPayment[] };
+    meru: { count: number; items: PaymentHealthStuckPayment[] };
+    dash: { count: number; items: PaymentHealthStuckPayment[] };
+  };
+  leaks: { count: number; items: PaymentHealthLeak[] };
+  activity: {
+    epayco_completed_7d?: string | number;
+    dash_completed_7d?: string | number;
+    meru_completed_7d?: string | number;
+    video_views_7d?: string | number;
+    distinct_videos_7d?: string | number;
+  };
+  generated_at: string;
+}
+
+export function getPaymentHealth(): Promise<PaymentHealth> {
+  return request("/api/webapp/admin/payment-health");
+}
+
 // Admin Demographics
 export interface AdminDemographics {
   tiers: { label: string; count: number }[];

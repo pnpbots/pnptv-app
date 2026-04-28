@@ -20,6 +20,7 @@ const CREATOR_RESTRICTED_PATHS = new Set([
   "/admin/streams",
   "/admin/media-packs",
   "/admin/duplicate-accounts",
+  "/admin/payment-health",
 ]);
 
 // Nav item definitions — internal items use { to, labelKey }; external items use { externalUrl, label }
@@ -51,6 +52,7 @@ const allNavItems: NavItem[] = [
   { to: "/admin/creator-subscriptions", labelKey: "creatorSubs", icon: "M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z", creatorAllowed: true },
   { to: "/admin/meru-links", labelKey: "meruLinks", icon: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1", creatorAllowed: false },
   { to: "/admin/duplicate-accounts", labelKey: "duplicateAccounts", icon: "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z", creatorAllowed: false },
+  { to: "/admin/payment-health", label: "Payment Health", icon: "M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z", creatorAllowed: false },
   { to: "/admin/prime", label: "Prime Channel", icon: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z", creatorAllowed: false },
   // Direct CMS (Directus) shortcuts — open in a new tab
   { externalUrl: "https://cms.pnptv.app/admin/content/social_posts", label: "CMS: X Posts", icon: "M6 18L18 6M6 6l12 12", creatorAllowed: false },
