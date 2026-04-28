@@ -3020,6 +3020,30 @@ app.get('/api/webapp/admin/payments/webhook-events', adminGuard, asyncHandler(as
   res.json({ success: true, recent, summary });
 }));
 
+// GET /api/health/webhooks — public ePayco webhook delivery health (7d window).
+// Reports invalid-signature rate (security) + state-code distribution.
+app.get('/api/health/webhooks', healthLimiter, asyncHandler(async (req, res) => {
+  const WebhookHealthService = require('../../services/webhookHealthService');
+  const snapshot = await WebhookHealthService.getSnapshot();
+  res.status(snapshot.ok ? 200 : 503).json(snapshot);
+}));
+
+// GET /api/health/admins — public dormant-admin audit. Surfaces admin /
+// superadmin accounts that haven't logged in for 30+/90+ days. Counts only.
+app.get('/api/health/admins', healthLimiter, asyncHandler(async (req, res) => {
+  const AdminHealthService = require('../../services/adminHealthService');
+  const snapshot = await AdminHealthService.getSnapshot();
+  res.status(snapshot.ok ? 200 : 503).json(snapshot);
+}));
+
+// GET /api/health/schema — verifies critical schema invariants are intact.
+// Catches dropped indexes, rolled-back migrations, drifted constraints.
+app.get('/api/health/schema', healthLimiter, asyncHandler(async (req, res) => {
+  const SchemaHealthService = require('../../services/schemaHealthService');
+  const snapshot = await SchemaHealthService.getSnapshot();
+  res.status(snapshot.ok ? 200 : 503).json(snapshot);
+}));
+
 // GET /api/health/entitlements — public read-only entitlement-system audit.
 // Verifies MembershipCleanupService is actually working and no users are
 // stuck in inconsistent state (PRIME tier without entitlement, expired-but-
