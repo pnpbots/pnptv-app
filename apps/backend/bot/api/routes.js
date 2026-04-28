@@ -2879,6 +2879,147 @@ app.get('/api/webapp/live/schedule/notify/:slotId', requireSessionAuth, asyncHan
 app.get('/api/webapp/admin/live/channels', adminGuard, asyncHandler(webappLiveController.listChannels));
 app.post('/api/webapp/admin/live/assign-channel', adminGuard, asyncHandler(webappLiveController.assignChannel));
 
+// ────────────────────────────────────────────────────────────────────────
+// Admin: payment operations (replaces SSH-only backfill scripts)
+// ────────────────────────────────────────────────────────────────────────
+
+// GET /api/webapp/admin/payments/stuck-dash — list pending Dash orders >10min
+app.get('/api/webapp/admin/payments/stuck-dash', adminGuard, asyncHandler(async (req, res) => {
+  const { rows } = await query(
+    `SELECT id, user_id, plan_id, btcpay_invoice_id, usd_amount, status, created_at, completed_at, notes,
+            EXTRACT(EPOCH FROM (NOW() - created_at)) / 60 AS age_minutes
+     FROM dash_subscription_orders
+     WHERE status = 'pending'
+       AND btcpay_invoice_id IS NOT NULL
+       AND created_at < NOW() - INTERVAL '10 minutes'
+       AND created_at > NOW() - INTERVAL '30 days'
+     ORDER BY created_at DESC
+     LIMIT 200`
+  );
+  res.json({ success: true, count: rows.length, orders: rows });
+}));
+
+// POST /api/webapp/admin/payments/dash/:invoiceId/settle — manually settle an invoice
+// Calls the same code path the reconciler uses (settleStuckDashInvoice).
+// Verifies BTCPay status first to avoid granting on unpaid invoices.
+app.post('/api/webapp/admin/payments/dash/:invoiceId/settle', adminGuard, asyncHandler(async (req, res) => {
+  const { invoiceId } = req.params;
+  if (!invoiceId || !/^[A-Za-z0-9_-]{6,128}$/.test(invoiceId)) {
+    return res.status(400).json({ success: false, error: 'Invalid invoice id' });
+  }
+
+  const { getInvoice } = require('../../config/btcpay');
+  let inv;
+  try {
+    inv = await getInvoice(invoiceId);
+  } catch (err) {
+    return res.status(502).json({ success: false, error: 'btcpay_unreachable', detail: err.message });
+  }
+  if (inv?.status !== 'Settled') {
+    return res.status(409).json({
+      success: false,
+      error: 'invoice_not_settled',
+      btcpayStatus: inv?.status || 'unknown',
+    });
+  }
+
+  const PaymentRecoveryService = require('../../services/paymentRecoveryService');
+  // Try subscription order first, fall back to token purchase.
+  let result = await PaymentRecoveryService.settleStuckDashInvoice(invoiceId, 'dash_subscription_orders');
+  if (result.skipped && result.reason === 'no_order_row') {
+    result = await PaymentRecoveryService.settleStuckDashInvoice(invoiceId, 'token_purchases');
+  }
+
+  logger.info('Admin manually settled Dash invoice', {
+    actorId: req.session?.user?.id, invoiceId, result,
+  });
+  res.json({ success: true, invoiceId, btcpayStatus: inv.status, result });
+}));
+
+// POST /api/webapp/admin/payments/dash/:invoiceId/expire — mark a stuck invoice expired
+app.post('/api/webapp/admin/payments/dash/:invoiceId/expire', adminGuard, asyncHandler(async (req, res) => {
+  const { invoiceId } = req.params;
+  if (!invoiceId || !/^[A-Za-z0-9_-]{6,128}$/.test(invoiceId)) {
+    return res.status(400).json({ success: false, error: 'Invalid invoice id' });
+  }
+  const sub = await query(
+    `UPDATE dash_subscription_orders SET status = 'expired',
+       notes = COALESCE(notes,'') || ' admin_expired'
+     WHERE btcpay_invoice_id = $1 AND status = 'pending' RETURNING id`,
+    [invoiceId]
+  );
+  const tok = await query(
+    `UPDATE token_purchases SET status = 'expired'
+     WHERE btcpay_invoice_id = $1 AND status = 'pending' RETURNING id`,
+    [invoiceId]
+  );
+  logger.info('Admin manually expired Dash invoice', {
+    actorId: req.session?.user?.id, invoiceId,
+    subRows: sub.rowCount, tokRows: tok.rowCount,
+  });
+  res.json({ success: true, invoiceId, subscriptionRowsExpired: sub.rowCount, tokenRowsExpired: tok.rowCount });
+}));
+
+// POST /api/webapp/admin/payments/dash/:invoiceId/redeliver — ask BTCPay to resend
+// the most recent webhook delivery for this invoice. Useful when reconciler is
+// unavailable or to test webhook handler changes.
+app.post('/api/webapp/admin/payments/dash/:invoiceId/redeliver', adminGuard, asyncHandler(async (req, res) => {
+  const { invoiceId } = req.params;
+  if (!invoiceId || !/^[A-Za-z0-9_-]{6,128}$/.test(invoiceId)) {
+    return res.status(400).json({ success: false, error: 'Invalid invoice id' });
+  }
+  const axios = require('axios');
+  const { BTCPAY_URL = process.env.BTCPAY_URL, BTCPAY_API_KEY = process.env.BTCPAY_API_KEY, BTCPAY_STORE_ID = process.env.BTCPAY_STORE_ID } = process.env;
+  try {
+    const whRes = await axios.get(`${BTCPAY_URL}/api/v1/stores/${BTCPAY_STORE_ID}/webhooks`, {
+      headers: { Authorization: `token ${BTCPAY_API_KEY}` }, timeout: 8000,
+    });
+    const wh = (whRes.data || []).find(w => w.enabled);
+    if (!wh) return res.status(503).json({ success: false, error: 'no_enabled_webhook' });
+
+    const delivRes = await axios.get(
+      `${BTCPAY_URL}/api/v1/stores/${BTCPAY_STORE_ID}/webhooks/${wh.id}/deliveries?count=50`,
+      { headers: { Authorization: `token ${BTCPAY_API_KEY}` }, timeout: 8000 }
+    );
+    // BTCPay delivery list does not include invoiceId per record — we have to
+    // fetch each individually to find one matching this invoice. Take the
+    // most recent for safety.
+    let target = null;
+    for (const d of delivRes.data || []) {
+      try {
+        const detail = await axios.get(
+          `${BTCPAY_URL}/api/v1/stores/${BTCPAY_STORE_ID}/webhooks/${wh.id}/deliveries/${d.id}/request`,
+          { headers: { Authorization: `token ${BTCPAY_API_KEY}` }, timeout: 4000 }
+        );
+        if (detail.data?.invoiceId === invoiceId) { target = d; break; }
+      } catch { /* try next */ }
+    }
+    if (!target) return res.status(404).json({ success: false, error: 'no_delivery_found_for_invoice' });
+
+    const redel = await axios.post(
+      `${BTCPAY_URL}/api/v1/stores/${BTCPAY_STORE_ID}/webhooks/${wh.id}/deliveries/${target.id}/redeliver`,
+      {}, { headers: { Authorization: `token ${BTCPAY_API_KEY}` }, timeout: 8000 }
+    );
+    logger.info('Admin triggered BTCPay redeliver', {
+      actorId: req.session?.user?.id, invoiceId, originalDeliveryId: target.id, newDeliveryId: redel.data,
+    });
+    res.json({ success: true, invoiceId, newDeliveryId: redel.data });
+  } catch (err) {
+    res.status(502).json({ success: false, error: 'btcpay_api_error', detail: err.message });
+  }
+}));
+
+// GET /api/webapp/admin/payments/webhook-events — recent webhook events
+app.get('/api/webapp/admin/payments/webhook-events', adminGuard, asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+  const PaymentWebhookEventModel = require('../../models/paymentWebhookEventModel');
+  const [recent, summary] = await Promise.all([
+    PaymentWebhookEventModel.getRecent(limit),
+    PaymentWebhookEventModel.getSummary({ sinceHours: 24 }),
+  ]);
+  res.json({ success: true, recent, summary });
+}));
+
 // Ticketed live shows — ticket status + purchase
 app.get('/api/webapp/live/slot/:id/ticket-status', requireSessionAuth, asyncHandler(webappLiveController.getSlotTicketStatus));
 app.post('/api/webapp/live/slot/:id/buy-ticket', requireSessionAuth, asyncHandler(webappLiveController.buySlotTicket));
@@ -7371,13 +7512,22 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
       if (markedResult.rows.length > 0) {
         const { user_id: invalidUserId, plan_id: invalidPlanId } = markedResult.rows[0];
 
-        // Revoke user_entitlements granted by this plan payment
+        // Revoke ONLY the entitlements sourced from THIS specific invoice.
+        // source_payment_id is populated by grantEntitlementsForPlan with the
+        // BTCPay invoice id. Filtering by source_plan_id alone would also nuke
+        // any valid renewal the user has on the same plan — this incident
+        // scope must stay narrow.
+        let revokedCount = 0;
         try {
-          await dbQuery(
-            `DELETE FROM user_entitlements WHERE user_id = $1 AND source_plan_id = $2 AND is_lifetime = false`,
-            [invalidUserId, invalidPlanId]
+          const revokeRes = await dbQuery(
+            `DELETE FROM user_entitlements
+             WHERE user_id = $1 AND source_payment_id = $2 AND is_lifetime = false`,
+            [invalidUserId, invoiceId]
           );
-          logger.info('BTCPay InvoiceMarkedInvalid: entitlements revoked', { userId: invalidUserId, planId: invalidPlanId, invoiceId });
+          revokedCount = revokeRes.rowCount || 0;
+          logger.info('BTCPay InvoiceMarkedInvalid: entitlements revoked', {
+            userId: invalidUserId, planId: invalidPlanId, invoiceId, revokedCount,
+          });
         } catch (revokeEntErr) {
           logger.error('BTCPay InvoiceMarkedInvalid: entitlement revocation failed', { userId: invalidUserId, planId: invalidPlanId, error: revokeEntErr.message });
         }
@@ -7389,16 +7539,30 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
           logger.warn('BTCPay InvoiceMarkedInvalid: cache invalidation failed', { error: cacheErr.message });
         }
 
-        // Downgrade tier
+        // Only downgrade tier if the user has NO remaining active entitlements.
+        // A user with a valid renewal on the same plan must keep their tier.
         try {
-          await dbQuery(
-            `UPDATE users SET tier = 'free', subscription_status = 'churned', plan_id = NULL, plan_expiry = NOW(), updated_at = NOW()
-             WHERE id = $1 OR telegram = $1`,
+          const remaining = await dbQuery(
+            `SELECT 1 FROM user_entitlements
+             WHERE user_id = $1
+               AND add_on_id IN ('prime', 'pnp-member')
+               AND (is_lifetime = true OR (expires_at IS NOT NULL AND expires_at > NOW()))
+               AND is_consumed = false
+             LIMIT 1`,
             [invalidUserId]
           );
-          logger.info('BTCPay InvoiceMarkedInvalid: user tier downgraded', { userId: invalidUserId });
+          if (remaining.rowCount === 0) {
+            await dbQuery(
+              `UPDATE users SET tier = 'free', subscription_status = 'churned', plan_id = NULL, plan_expiry = NOW(), updated_at = NOW()
+               WHERE id = $1 OR telegram = $1`,
+              [invalidUserId]
+            );
+            logger.info('BTCPay InvoiceMarkedInvalid: user tier downgraded (no remaining entitlements)', { userId: invalidUserId });
+          } else {
+            logger.info('BTCPay InvoiceMarkedInvalid: user retains active entitlements — tier preserved', { userId: invalidUserId });
+          }
         } catch (tierErr) {
-          logger.error('BTCPay InvoiceMarkedInvalid: tier downgrade failed', { userId: invalidUserId, error: tierErr.message });
+          logger.error('BTCPay InvoiceMarkedInvalid: tier downgrade check failed', { userId: invalidUserId, error: tierErr.message });
         }
       } else if (tokenInvalidRes.rowCount === 0) {
         logger.info('BTCPay InvoiceMarkedInvalid: no order or purchase found — no action taken', { invoiceId });
@@ -7680,6 +7844,12 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
             scope: orderMetadata.hangoutGroupId ? `hangout:${orderMetadata.hangoutGroupId}` : `channel:${orderMetadata.channelId}`,
             grantResult,
           });
+          await markInvoiceProcessed(invoiceId, {
+            userId: order.user_id,
+            planId: order.plan_id,
+            source: 'scoped_purchase',
+            scope: orderMetadata.hangoutGroupId ? `hangout:${orderMetadata.hangoutGroupId}` : `channel:${orderMetadata.channelId}`,
+          });
           return res.json({ success: true, scopedPurchase: true, grantResult });
         } catch (grantErr) {
           logger.error('BTCPay scoped grant failed', {
@@ -7762,28 +7932,43 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
         return res.json({ success: true, creatorSubscription: true, creatorId: order.creator_id });
       }
 
-      await dbQuery(
-        `UPDATE users
-         SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW()
-         WHERE id = $1 OR telegram = $1`,
-        [order.user_id, newTier, order.plan_id, expiryDate]
-      );
-
-      logger.info('BTCPay: subscription activated', { userId: order.user_id, planId: order.plan_id, invoiceId });
-
-      // Grant entitlements — sole source of truth for access control (users.tier is display only).
-      // This matches the post-payment flow used by ePayco.
+      // Grant entitlements FIRST — they're the source of truth for access.
+      // If the grant fails the user has no actual access, so a 200 here would
+      // hide a broken account behind a successful-looking response. Roll back
+      // the order to pending and return 500 so BTCPay redelivers.
       try {
         const PaymentService = require('../../services/paymentService');
-        await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay', null, invoiceId);
+        const grantResult = await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay', null, invoiceId);
+        if (!grantResult || grantResult.granted === 0) {
+          throw new Error(`grant_returned_zero: ${JSON.stringify(grantResult || {})}`);
+        }
         logger.info('BTCPay: entitlements granted', { userId: order.user_id, planId: order.plan_id });
       } catch (entErr) {
-        // Non-fatal: users.tier is already set so legacy access paths still work.
-        // Entitlements will be reconciled by the daily cleanup cron.
-        logger.error('BTCPay: entitlement grant failed (non-fatal, tier already set)', {
-          userId: order.user_id,
-          planId: order.plan_id,
-          error: entErr.message,
+        logger.error('BTCPay: entitlement grant failed — rolling back to pending for retry', {
+          userId: order.user_id, planId: order.plan_id, invoiceId, error: entErr.message,
+        });
+        await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'pending', completed_at = NULL,
+              notes = $2 WHERE id = $1`,
+          [order.id, `entitlement_grant_failed: ${entErr.message}`.slice(0, 500)]
+        );
+        return res.status(500).json({ success: false, error: 'entitlement_grant_failed', invoiceId });
+      }
+
+      // Tier/expiry update on users (display only — entitlements above are the
+      // real gate). Failure here is non-fatal because access already works via
+      // entitlements.
+      try {
+        await dbQuery(
+          `UPDATE users
+           SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW()
+           WHERE id = $1 OR telegram = $1`,
+          [order.user_id, newTier, order.plan_id, expiryDate]
+        );
+        logger.info('BTCPay: subscription activated', { userId: order.user_id, planId: order.plan_id, invoiceId });
+      } catch (tierErr) {
+        logger.warn('BTCPay: users.tier sync failed (non-fatal — entitlements already granted)', {
+          userId: order.user_id, error: tierErr.message,
         });
       }
 
@@ -8042,12 +8227,19 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(async (req, res) =
     }
 
     if (purchaseResult.rows.length === 0) {
-      logger.warn('BTCPay webhook: unknown invoice — no subscription order, no metadata planId, no token purchase', {
+      // Return 200 (not 404) so BTCPay does NOT treat this as a permanent
+      // failure and stop retrying. A missing local row may be a timing race
+      // (token_purchases INSERT lost or still in flight) — letting BTCPay
+      // redeliver gives the row time to appear, and the reconciler will pick
+      // it up if not. Returning 4xx here lost real money during the Apr-2026
+      // incident: paid invoices that arrived before the local INSERT landed
+      // were permanently abandoned.
+      logger.warn('BTCPay webhook: unknown invoice — no subscription order, no metadata planId, no token purchase (returning 200 to allow retry)', {
         invoiceId,
         eventType: event.type,
         metadataKeys: Object.keys(event.metadata || {}),
       });
-      return res.status(404).json({ success: false, error: 'Purchase not found' });
+      return res.json({ success: false, ignored: true, reason: 'no_local_record_yet', invoiceId });
     }
 
     const { user_id: userId, tokens_credited: tokens, usd_amount: usdAmount } = purchaseResult.rows[0];

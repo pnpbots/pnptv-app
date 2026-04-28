@@ -389,6 +389,80 @@ async function checkBtcpayHealth() {
   }
 }
 
+/**
+ * Verify the BTCPay store webhook is configured to deliver to our handler.
+ * If BTCPAY_AUTOCONFIGURE_WEBHOOK=true and a mismatch is found, attempts to
+ * PUT the correct URL + secret in place. Otherwise returns the diagnosis so
+ * the caller can crash startup loudly instead of letting payments silently
+ * 404 (this exact failure mode caused the Apr-2026 49-day incident).
+ *
+ * Returns:
+ *   { ok: true, webhookId, url } — webhook is correct
+ *   { ok: false, reason, ... }  — caller should crash
+ */
+async function verifyWebhookRegistration({ expectedUrl, autoConfigure = false } = {}) {
+  if (!BTCPAY_API_KEY || !BTCPAY_STORE_ID) {
+    return { ok: false, reason: 'not_configured' };
+  }
+  if (!BTCPAY_WEBHOOK_SECRET) {
+    return { ok: false, reason: 'webhook_secret_missing', detail: 'BTCPAY_WEBHOOK_SECRET env var is empty' };
+  }
+  if (!expectedUrl) {
+    return { ok: false, reason: 'expected_url_missing' };
+  }
+  let webhooks;
+  try {
+    const res = await btcpayClient.get(`/stores/${BTCPAY_STORE_ID}/webhooks`);
+    webhooks = res.data || [];
+  } catch (err) {
+    return { ok: false, reason: 'api_unreachable', detail: err.message };
+  }
+
+  const enabled = webhooks.filter(w => w.enabled);
+  const matching = enabled.find(w => w.url === expectedUrl);
+
+  if (matching) {
+    return { ok: true, webhookId: matching.id, url: matching.url };
+  }
+
+  // Mismatch — either fix it or report.
+  if (!autoConfigure) {
+    return {
+      ok: false,
+      reason: 'url_mismatch',
+      expected: expectedUrl,
+      foundUrls: enabled.map(w => w.url),
+      webhookCount: enabled.length,
+    };
+  }
+
+  // Autoconfigure: prefer updating an existing enabled webhook over creating
+  // a new one (avoids leaking duplicate webhooks across deploys).
+  try {
+    const target = enabled[0];
+    if (target) {
+      await btcpayClient.put(`/stores/${BTCPAY_STORE_ID}/webhooks/${target.id}`, {
+        url: expectedUrl,
+        enabled: true,
+        automaticRedelivery: true,
+        secret: BTCPAY_WEBHOOK_SECRET,
+        authorizedEvents: { everything: true, specificEvents: [] },
+      });
+      return { ok: true, webhookId: target.id, url: expectedUrl, autoConfigured: true, action: 'updated' };
+    }
+    const createRes = await btcpayClient.post(`/stores/${BTCPAY_STORE_ID}/webhooks`, {
+      url: expectedUrl,
+      enabled: true,
+      automaticRedelivery: true,
+      secret: BTCPAY_WEBHOOK_SECRET,
+      authorizedEvents: { everything: true, specificEvents: [] },
+    });
+    return { ok: true, webhookId: createRes.data?.id, url: expectedUrl, autoConfigured: true, action: 'created' };
+  } catch (err) {
+    return { ok: false, reason: 'autoconfigure_failed', detail: err.message };
+  }
+}
+
 module.exports = {
   createDashInvoice,
   createInvoice,
@@ -398,6 +472,7 @@ module.exports = {
   markInvoiceProcessed,
   validateWebhookSignature,
   checkBtcpayHealth,
+  verifyWebhookRegistration,
   // Outbound (creator payouts via Dash Pull Payments)
   createPullPayment,
   getPullPayment,

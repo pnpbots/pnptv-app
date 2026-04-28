@@ -40,22 +40,24 @@ class PaymentRecoveryService {
       }
 
       try {
-        // Query payments stuck pending for > 10 minutes
-        // Only process payments from last 24 hours (avoid very old orphaned records)
-        // Phase 5: scan BOTH metadata->>'epayco_ref' AND the legacy `reference`
-        // column. resolveEpaycoRef() in paymentController also resolves either,
-        // so the recovery cron must match — otherwise legacy-shape rows get
-        // marked 'abandoned' at 24h despite ePayco having approved them.
+        // Query payments stuck pending for > 10 minutes.
+        //
+        // Restricted to rows that have an ePayco-issued ref (metadata.epayco_ref).
+        // Pre-checkout rows have only our internal PAY-XXXX reference; passing
+        // those to ePayco's validation API always returns 404 and inflates the
+        // failed-recovery counter. Such rows are abandoned checkouts (user did
+        // not finish 3DS) and should be cleaned up by cleanupAbandonedPayments
+        // at the 24h mark, not retried here.
+        //
+        // Legacy `reference`-only shapes (from before metadata.epayco_ref was
+        // standardized) are queried via the legacy fallback below.
         const stuckPayments = await query(`
           SELECT id, reference, metadata->>'epayco_ref' as epayco_ref,
                  user_id, plan_id, created_at
           FROM payments
           WHERE status = 'pending'
             AND provider = 'epayco'
-            AND (
-              metadata->>'epayco_ref' IS NOT NULL
-              OR (reference IS NOT NULL AND reference <> '')
-            )
+            AND metadata->>'epayco_ref' IS NOT NULL
             AND created_at > NOW() - INTERVAL '24 hours'
             AND created_at < NOW() - INTERVAL '10 minutes'
           ORDER BY created_at ASC
@@ -73,15 +75,14 @@ class PaymentRecoveryService {
         for (const payment of payments) {
           try {
             const { id: paymentId } = payment;
-            // Resolve refPayco from either source (legacy `reference` column or
-            // `metadata.epayco_ref`). recoverStuckPendingPayment can accept null
-            // and re-resolve, but supplying it here saves an extra DB lookup.
-            const refPayco = payment.epayco_ref || payment.reference || null;
+            // After H-2 tightening above, every row reaching this loop has a
+            // valid ePayco-issued ref in metadata.epayco_ref. Pre-checkout
+            // rows (PAY-XXXX only) are excluded from the query.
+            const refPayco = payment.epayco_ref;
 
             logger.info('Processing stuck payment', {
               paymentId,
               refPayco,
-              refSource: payment.epayco_ref ? 'metadata' : (payment.reference ? 'reference_column' : 'none'),
               createdAt: payment.created_at,
             });
 
@@ -346,8 +347,32 @@ class PaymentRecoveryService {
    * left for the InvoicePaymentSettled webhook (or operator) to settle.
    */
   static async settleStuckDashInvoice(invoiceId, source) {
+    // Token-purchase reconciliation: credit the user wallet directly via
+    // DashTokenService (which is idempotent on btcpay_invoice_id). Mirrors
+    // routes.js token_purchase webhook branch.
+    if (source === 'token_purchases') {
+      const { rows: tokRows } = await query(
+        `SELECT user_id, tokens_credited, usd_amount, status
+         FROM token_purchases WHERE btcpay_invoice_id = $1`,
+        [invoiceId]
+      );
+      if (tokRows.length === 0) return { skipped: true, reason: 'no_token_purchase_row' };
+      const tok = tokRows[0];
+      if (tok.status !== 'pending') return { alreadyProcessed: true, finalStatus: tok.status };
+
+      const DashTokenService = require('./dashTokenService');
+      const { newBalance, alreadyProcessed } = await DashTokenService.creditTokens(
+        tok.user_id, tok.tokens_credited, invoiceId, { usdAmount: tok.usd_amount }
+      );
+      try {
+        const { markInvoiceProcessed } = require('../config/btcpay');
+        await markInvoiceProcessed(invoiceId, { userId: tok.user_id, source: 'reconciler_token_purchase' });
+      } catch {}
+      return { type: 'token_purchase', userId: tok.user_id, tokensCredited: tok.tokens_credited, newBalance, alreadyProcessed };
+    }
+
     if (source !== 'dash_subscription_orders') {
-      return { skipped: true, reason: 'token_purchases_not_supported' };
+      return { skipped: true, reason: `unsupported_source:${source}` };
     }
 
     const { rows: orderRows } = await query(
@@ -394,6 +419,12 @@ class PaymentRecoveryService {
       const PaymentService = require('./paymentService');
       const grantResult = await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'dash', meta, invoiceId);
       try { await cache.del(`user:${order.user_id}`); } catch {}
+      // Set the 48h Redis replay marker so a delayed real webhook delivery
+      // skips the entire grant flow instead of re-extending expires_at.
+      try {
+        const { markInvoiceProcessed } = require('../config/btcpay');
+        await markInvoiceProcessed(invoiceId, { userId: order.user_id, planId: order.plan_id, source: 'reconciler_scoped' });
+      } catch {}
       return { type: 'scoped', grantResult };
     }
 
@@ -431,6 +462,10 @@ class PaymentRecoveryService {
       const CreatorService = require('./creatorService');
       await CreatorService.subscribeToCreator(order.user_id, order.creator_id, null);
       try { await cache.del(`user:${order.user_id}`); } catch {}
+      try {
+        const { markInvoiceProcessed } = require('../config/btcpay');
+        await markInvoiceProcessed(invoiceId, { userId: order.user_id, creatorId: order.creator_id, source: 'reconciler_creator_sub' });
+      } catch {}
       return { type: 'creator_subscription', creatorId: order.creator_id };
     }
 
@@ -452,6 +487,14 @@ class PaymentRecoveryService {
     }
 
     try { await cache.del(`user:${order.user_id}`); } catch {}
+
+    // Set the 48h Redis replay marker so a delayed real webhook delivery
+    // doesn't re-enter grantEntitlementsForPlan and stack another period of
+    // expires_at on top of what we already granted.
+    try {
+      const { markInvoiceProcessed } = require('../config/btcpay');
+      await markInvoiceProcessed(invoiceId, { userId: order.user_id, planId: order.plan_id, source: 'reconciler_subscription' });
+    } catch {}
 
     return { type: 'subscription', tier: newTier, expiryDate, grantResult };
   }

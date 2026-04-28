@@ -347,6 +347,38 @@ const startBot = async () => {
       // Don't exit — continue and try again later in the startup sequence
     }
 
+    // ─── Payment integration sanity checks ──────────────────────────────
+    // BTCPay webhook URL was misconfigured for 7+ weeks during the Apr-2026
+    // incident because nothing asserted at boot that the configured URL
+    // matches our handler. This block fires loudly on mismatch — set
+    // BTCPAY_AUTOCONFIGURE_WEBHOOK=true to self-heal in non-prod.
+    try {
+      const { verifyWebhookRegistration, isConfigured: btcpayConfigured } = require('../../config/btcpay');
+      if (btcpayConfigured) {
+        const expectedUrl = `${process.env.EPAYCO_WEBHOOK_DOMAIN || process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app'}/api/webhooks/btcpay`;
+        const autoConfigure = String(process.env.BTCPAY_AUTOCONFIGURE_WEBHOOK || '').toLowerCase() === 'true';
+        const result = await verifyWebhookRegistration({ expectedUrl, autoConfigure });
+        if (result.ok) {
+          if (result.autoConfigured) {
+            logger.warn(`✓ BTCPay webhook auto-${result.action} to ${result.url} (id=${result.webhookId})`);
+          } else {
+            logger.info(`✓ BTCPay webhook verified at ${result.url}`);
+          }
+        } else {
+          logger.error('CRITICAL: BTCPay webhook misconfigured — Dash payments will NOT activate', result);
+          if (process.env.NODE_ENV === 'production' && !autoConfigure) {
+            logger.error('Refusing to start in production with broken BTCPay webhook. Set BTCPAY_AUTOCONFIGURE_WEBHOOK=true to self-heal, or fix manually.');
+            process.exit(1);
+          }
+        }
+      } else {
+        logger.warn('BTCPay not configured — skipping webhook verification (Dash payments disabled)');
+      }
+    } catch (btcpayCheckErr) {
+      logger.error(`BTCPay webhook verification threw: ${btcpayCheckErr.message}`);
+      // Non-fatal in non-production; in production the explicit branch above already exits.
+    }
+
     // Create bot instance
     const bot = new Telegraf(process.env.BOT_TOKEN);
 

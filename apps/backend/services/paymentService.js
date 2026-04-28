@@ -236,14 +236,22 @@ class PaymentService {
   static safeCompareHex(expectedHex, receivedHex) {
     if (!expectedHex || !receivedHex) return false;
 
-    const expected = String(expectedHex).toLowerCase();
-    const received = String(receivedHex).toLowerCase();
-    const expectedBuffer = Buffer.from(expected, 'utf8');
-    const receivedBuffer = Buffer.from(received, 'utf8');
+    const expected = String(expectedHex).toLowerCase().trim();
+    const received = String(receivedHex).toLowerCase().trim();
 
-    if (expectedBuffer.length !== receivedBuffer.length) {
-      return false;
-    }
+    // Reject non-hex / odd-length inputs early. Buffer.from with 'hex'
+    // encoding silently truncates malformed strings, which would let two
+    // different inputs hash to the same byte buffer.
+    const hexRe = /^[0-9a-f]+$/;
+    if (expected.length === 0 || expected.length % 2 !== 0 || !hexRe.test(expected)) return false;
+    if (received.length === 0 || received.length % 2 !== 0 || !hexRe.test(received)) return false;
+    if (expected.length !== received.length) return false;
+
+    // Compare the actual binary digest (hex-decoded) so timingSafeEqual
+    // operates on the cryptographic value, not its ASCII representation.
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    const receivedBuffer = Buffer.from(received, 'hex');
+    if (expectedBuffer.length !== receivedBuffer.length) return false;
 
     return crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
   }
@@ -1211,6 +1219,29 @@ class PaymentService {
          )
       || webhookData.x_transaction_state
       || 'unknown';
+
+    // Postgres-backed permanent idempotency claim. Survives Redis flushes
+    // and concurrent recovery replays in a way the 2-minute Redis lock
+    // below cannot. Recovery synthetic replays carry _recovery=true and
+    // bypass this guard so a missed webhook can be re-driven by the cron
+    // (the Redis lock + atomic payment status update still prevent
+    // double-grant in that case).
+    if (!webhookData._recovery) {
+      const claim = await PaymentWebhookEventModel.tryClaimEvent({
+        provider: 'epayco',
+        eventId: webhookData.x_ref_payco,
+        stateCode,
+        status: webhookData.x_transaction_state,
+        payload: webhookData,
+      });
+      if (!claim.claimed) {
+        logger.info('ePayco webhook duplicate (Postgres idempotency claim)', {
+          refPayco: webhookData.x_ref_payco, stateCode,
+        });
+        return { success: true, alreadyProcessed: true, dedupSource: 'postgres' };
+      }
+    }
+
     const lockKey = `epayco_webhook:${webhookData.x_ref_payco}:${stateCode}`;
     const acquired = await cache.acquireLock(lockKey, 120); // 2-minute lock
     if (!acquired) {
@@ -2111,40 +2142,38 @@ class PaymentService {
           planId: planIdOrBookingId,
         });
 
-        // PAY-004: Revoke user tier when ePayco payment is reversed.
-        if (userId) {
-          try {
-            await UserModel.updateSubscription(userId, {
-              status: 'churned',
-              planId: null,
-              expiry: new Date(),
-            });
-            logger.info('User tier revoked due to payment reversal', { userId, refPayco: x_ref_payco });
-          } catch (revokeErr) {
-            logger.error('Failed to revoke tier after reversal', { userId, error: revokeErr.message });
-          }
-        }
+        // PAY-004: Revoke user tier on payment reversal — but ONLY if the user
+        // has no other active entitlement. Multi-plan users who hold a separate
+        // valid subscription must keep their tier; the entitlement-level revoke
+        // below already removes access for the specific reversed payment.
+        // (We defer the tier downgrade until AFTER entitlement revocation runs
+        // so the SELECT below sees the correct post-revoke state.)
 
-        // H2: Revoke entitlements granted by this plan when a payment is reversed.
-        // Expire all user_entitlements that were sourced from this plan, and invalidate
-        // the entitlement cache so the next access check reflects the revocation immediately.
-        //
-        // C-05 (confirmed intentional): The WHERE clause filters on source_plan_id = planId,
-        // NOT on all of the user's entitlements. This is correct for multi-plan users — a
-        // reversal of plan A should only revoke what plan A granted, leaving entitlements
-        // sourced from plan B (e.g. a separate active subscription) intact.
-        // source_plan_id is set to planId in both INSERT paths of grantEntitlementsForPlan,
-        // so this revocation is always accurate.
-        if (userId && planIdOrBookingId) {
+        // Revoke ONLY entitlements sourced from THIS specific payment.
+        // source_payment_id was added so a reversal can be scoped to a single
+        // transaction without nuking the user's other valid renewals on the
+        // same plan. Falls back to source_plan_id ONLY if the payment id is
+        // unavailable (legacy rows pre-source_payment_id).
+        if (userId && (paymentIdOrType || planIdOrBookingId)) {
           try {
-            await query(
-              `UPDATE user_entitlements
-                 SET expires_at = NOW(), is_lifetime = false, updated_at = NOW()
-               WHERE user_id = $1 AND source_plan_id = $2 AND is_lifetime = false`,
-              [userId, planIdOrBookingId]
-            );
+            if (paymentIdOrType) {
+              await query(
+                `UPDATE user_entitlements
+                   SET expires_at = NOW(), is_lifetime = false, updated_at = NOW()
+                 WHERE user_id = $1 AND source_payment_id = $2 AND is_lifetime = false`,
+                [userId, String(paymentIdOrType)]
+              );
+            } else {
+              // Legacy fallback: pre-source_payment_id rows have no payment-scoped trail
+              await query(
+                `UPDATE user_entitlements
+                   SET expires_at = NOW(), is_lifetime = false, updated_at = NOW()
+                 WHERE user_id = $1 AND source_plan_id = $2 AND is_lifetime = false`,
+                [userId, planIdOrBookingId]
+              );
+            }
             logger.info('Entitlements revoked due to payment reversal', {
-              userId, planId: planIdOrBookingId, refPayco: x_ref_payco,
+              userId, planId: planIdOrBookingId, paymentId: paymentIdOrType, refPayco: x_ref_payco,
             });
             try {
               const EntitlementAccessService = require('./entitlementAccessService');
@@ -2158,6 +2187,33 @@ class PaymentService {
             logger.error('Failed to revoke entitlements after payment reversal', {
               userId, planId: planIdOrBookingId, error: revokeEntitlementErr.message,
             });
+          }
+        }
+
+        // Tier downgrade — only if no remaining active entitlements.
+        if (userId) {
+          try {
+            const remaining = await query(
+              `SELECT 1 FROM user_entitlements
+               WHERE user_id = $1
+                 AND add_on_id IN ('prime', 'pnp-member')
+                 AND (is_lifetime = true OR (expires_at IS NOT NULL AND expires_at > NOW()))
+                 AND is_consumed = false
+               LIMIT 1`,
+              [userId]
+            );
+            if (remaining.rowCount === 0) {
+              await UserModel.updateSubscription(userId, {
+                status: 'churned',
+                planId: null,
+                expiry: new Date(),
+              });
+              logger.info('User tier revoked due to payment reversal (no remaining entitlements)', { userId, refPayco: x_ref_payco });
+            } else {
+              logger.info('Payment reversed but user retains active entitlements — tier preserved', { userId, refPayco: x_ref_payco });
+            }
+          } catch (revokeErr) {
+            logger.error('Failed to evaluate tier after reversal', { userId, error: revokeErr.message });
           }
         }
 

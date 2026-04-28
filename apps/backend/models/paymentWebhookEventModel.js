@@ -57,6 +57,48 @@ const scrubPii = (payload) => {
 };
 
 class PaymentWebhookEventModel {
+  /**
+   * Atomic idempotency claim. Returns true if this is the first time we've
+   * seen the (provider, event_id, state_code) tuple, false if it was already
+   * claimed (in which case the caller should exit early — DO NOT process
+   * the event again).
+   *
+   * Survives Redis flushes, container restarts, and concurrent recovery
+   * replays — backed by the uq_payment_webhook_events_dedup partial index
+   * (migration 234). Fall-open behavior on DB error: returns true so a DB
+   * outage doesn't block payment processing entirely (Redis lock + atomic
+   * UPDATE-WHERE-pending guards remain as backstops).
+   */
+  static async tryClaimEvent({ provider, eventId, paymentId, status, stateCode, isValidSignature = true, payload = {} }) {
+    if (!provider || !eventId) {
+      // Without an event_id the unique index doesn't apply — fall back to logEvent and let downstream guards handle dedup.
+      await this.logEvent({ provider, eventId, paymentId, status, stateCode, isValidSignature, payload });
+      return { claimed: true, reason: 'no_event_id' };
+    }
+    try {
+      const safePaymentId = isUuid(paymentId) ? paymentId : null;
+      const payloadJson = JSON.stringify(scrubPii(payload));
+      const result = await query(
+        `INSERT INTO payment_webhook_events
+         (provider, event_id, payment_id, status, state_code, is_valid_signature, payload)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+         ON CONFLICT (provider, event_id, state_code) WHERE event_id IS NOT NULL
+         DO NOTHING
+         RETURNING id`,
+        [provider, eventId, safePaymentId, status || null, stateCode || null, isValidSignature, payloadJson]
+      );
+      if (result.rowCount === 0) {
+        return { claimed: false, reason: 'duplicate' };
+      }
+      return { claimed: true, eventRowId: result.rows[0].id };
+    } catch (error) {
+      logger.error('tryClaimEvent failed (falling open)', {
+        provider, eventId, error: error.message, errorCode: error.code,
+      });
+      return { claimed: true, reason: 'db_error_fallthrough' };
+    }
+  }
+
   static async logEvent({
     provider,
     eventId,
