@@ -3020,6 +3020,23 @@ app.get('/api/webapp/admin/payments/webhook-events', adminGuard, asyncHandler(as
   res.json({ success: true, recent, summary });
 }));
 
+// GET /metrics — Prometheus-format metrics endpoint.
+// Authentication: bearer token via METRICS_BEARER env var, OR admin session.
+// Designed for Grafana Cloud remote_write (single-tenant agent) to scrape
+// internally. Do NOT expose this through the public proxy without auth —
+// the Node.js default metrics include heap/GC info attackers can leverage.
+app.get('/metrics', asyncHandler(async (req, res) => {
+  const bearer = req.headers.authorization?.replace(/^Bearer\s+/, '');
+  const expected = process.env.METRICS_BEARER;
+  const isAdmin = req.session?.user?.role === 'admin' || req.session?.user?.role === 'superadmin';
+  if (!isAdmin && (!expected || bearer !== expected)) {
+    return res.status(401).json({ success: false, error: 'unauthorized' });
+  }
+  const MetricsService = require('../../services/metricsService');
+  res.setHeader('Content-Type', MetricsService.contentType());
+  res.send(await MetricsService.render());
+}));
+
 // Ticketed live shows — ticket status + purchase
 app.get('/api/webapp/live/slot/:id/ticket-status', requireSessionAuth, asyncHandler(webappLiveController.getSlotTicketStatus));
 app.post('/api/webapp/live/slot/:id/buy-ticket', requireSessionAuth, asyncHandler(webappLiveController.buySlotTicket));

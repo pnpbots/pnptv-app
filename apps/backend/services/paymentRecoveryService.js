@@ -236,6 +236,19 @@ class PaymentRecoveryService {
       results.checked = stuck.rows.length;
       logger.info(`Dash reconciliation: ${stuck.rows.length} stuck invoices to poll`);
 
+      // Emit observability gauge: oldest pending invoice age + count.
+      // A single Grafana alert on `pnptv_pending_dash_invoices_age_max_minutes > 30`
+      // is the primary regression detector for the entire Dash pipeline.
+      try {
+        const MetricsService = require('./metricsService');
+        let ageMaxMinutes = 0;
+        if (stuck.rows.length > 0) {
+          const oldest = new Date(stuck.rows[0].created_at);
+          ageMaxMinutes = Math.floor((Date.now() - oldest.getTime()) / 60000);
+        }
+        MetricsService.setPendingDashStats({ ageMaxMinutes, count: stuck.rows.length });
+      } catch (_metricsErr) { /* non-fatal */ }
+
       const axios = require('axios');
       const webhookUrl = `${process.env.WEBAPP_URL || 'http://localhost:3000'}/api/webhooks/btcpay`;
 

@@ -354,6 +354,7 @@ class PaymentSettlementService {
     // If the grant fails the user has no actual access, so a 200 here would
     // hide a broken account behind a successful-looking response. Roll back
     // the order to pending and return an error so BTCPay redelivers.
+    const MetricsService = require('./metricsService');
     try {
       const PaymentService = require('./paymentService');
       const grantResult = await PaymentService.grantEntitlementsForPlan(
@@ -363,10 +364,12 @@ class PaymentSettlementService {
         throw new Error(`grant_returned_zero: ${JSON.stringify(grantResult || {})}`);
       }
       logger.info('BTCPay: entitlements granted', { userId: order.user_id, planId: order.plan_id });
+      MetricsService.recordGrantSucceeded('btcpay', order.plan_id);
     } catch (entErr) {
       logger.error('BTCPay: entitlement grant failed — rolling back to pending for retry', {
         userId: order.user_id, planId: order.plan_id, invoiceId, error: entErr.message,
       });
+      MetricsService.recordGrantFailed('btcpay', entErr.message?.includes('grant_returned_zero') ? 'grant_returned_zero' : 'grant_threw');
       await dbQuery(
         `UPDATE dash_subscription_orders SET status = 'pending', completed_at = NULL,
              notes = $2 WHERE id = $1`,

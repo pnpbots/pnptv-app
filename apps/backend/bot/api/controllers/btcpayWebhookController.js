@@ -53,16 +53,19 @@ function parseMetadata(raw) {
  * @param {import('express').Response} res
  */
 async function handleBtcpayWebhook(req, res) {
+  const MetricsService = require('../../../services/metricsService');
   const signature = req.headers['btcpay-sig'];
   // Require rawBody captured by express.json verify callback — fallback silently breaks HMAC
   if (!req.rawBody) {
     logger.error('BTCPay webhook rejected: rawBody missing — express.json verify callback not firing', { ip: req.ip });
+    MetricsService.recordWebhookFailed('btcpay', 'raw_body_missing');
     return res.status(400).json({ success: false, error: 'Raw body unavailable' });
   }
   const rawBody = req.rawBody.toString('utf8');
 
   if (!validateWebhookSignature(rawBody, signature)) {
     logger.warn('BTCPay webhook rejected: invalid signature', { ip: req.ip });
+    MetricsService.recordWebhookFailed('btcpay', 'invalid_signature');
     return res.status(401).json({ success: false, error: 'Invalid signature' });
   }
 
@@ -70,8 +73,10 @@ async function handleBtcpayWebhook(req, res) {
   try {
     event = JSON.parse(rawBody);
   } catch {
+    MetricsService.recordWebhookFailed('btcpay', 'invalid_json');
     return res.status(400).json({ success: false, error: 'Invalid JSON' });
   }
+  MetricsService.recordWebhookReceived('btcpay', event.type);
 
   // ── Pull-Payment / Payout events (creator outbound payouts in Dash) ──────
   if (event.type === 'PayoutCompleted' || event.type === 'PayoutCancelled') {

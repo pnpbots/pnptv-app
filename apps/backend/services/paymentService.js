@@ -1726,12 +1726,14 @@ class PaymentService {
 
             // Grant entitlements based on plan_add_ons mapping
             let grantResult;
+            const MetricsService = require('./metricsService');
             try {
               grantResult = await PaymentService.grantEntitlementsForPlan(userId, planIdOrBookingId, 'epayco', payment?.metadata, payment?.id || null);
             } catch (entitlementErr) {
               logger.error('grantEntitlementsForPlan threw unexpectedly — ePayco will retry', {
                 error: entitlementErr.message, userId, planId: planIdOrBookingId,
               });
+              MetricsService.recordGrantFailed('epayco', 'grant_threw');
               return { success: false, code: 'ENTITLEMENT_GRANT_FAILED', error: entitlementErr.message };
             }
             const isPaidPlan = plan && (parseFloat(plan.price) > 0);
@@ -1739,8 +1741,10 @@ class PaymentService {
               logger.error('grantEntitlementsForPlan returned partial/zero grants — ePayco will retry', {
                 userId, planId: planIdOrBookingId, grantResult,
               });
+              MetricsService.recordGrantFailed('epayco', 'grant_returned_zero');
               return { success: false, code: 'ENTITLEMENT_GRANT_FAILED', error: 'Entitlement grant failed or incomplete for paid plan' };
             }
+            MetricsService.recordGrantSucceeded('epayco', planIdOrBookingId);
 
             // Mark payment completed immediately after core activation (before notifications)
             // to prevent recovery cron from re-activating on crash during notification phase
