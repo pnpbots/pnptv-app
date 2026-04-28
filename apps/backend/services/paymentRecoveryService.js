@@ -337,38 +337,32 @@ class PaymentRecoveryService {
 
   /**
    * Settle a Settled-in-BTCPay invoice that our DB still has as `pending`.
-   * Mirrors the subscription branch of the /api/webhooks/btcpay handler. Used
-   * by the reconciler when webhook delivery fails (network, 4xx, signature).
-   * Idempotency comes from atomic UPDATE-WHERE-status='pending' guards — if
-   * the real webhook lands first, our UPDATE returns 0 rows and we exit clean.
+   * Delegates all grant logic to PaymentSettlementService — the single source
+   * of truth for settlement across webhook + reconciler.
+   * Idempotency comes from atomic UPDATE-WHERE-status='pending' guards inside
+   * each PaymentSettlementService method — if the real webhook lands first,
+   * the UPDATE returns 0 rows and we get alreadyProcessed back.
    *
-   * Token purchases are out of scope here — those route through dashTokenService
-   * which still requires the real webhook. Source='token_purchases' rows are
-   * left for the InvoicePaymentSettled webhook (or operator) to settle.
+   * Resource-typed orders (live_show_ticket, private_call_booking, call_package)
+   * are skipped here — those depend on external services the reconciler cannot
+   * safely call. Mark for operator review instead.
    */
   static async settleStuckDashInvoice(invoiceId, source) {
-    // Token-purchase reconciliation: credit the user wallet directly via
-    // DashTokenService (which is idempotent on btcpay_invoice_id). Mirrors
-    // routes.js token_purchase webhook branch.
-    if (source === 'token_purchases') {
-      const { rows: tokRows } = await query(
-        `SELECT user_id, tokens_credited, usd_amount, status
-         FROM token_purchases WHERE btcpay_invoice_id = $1`,
-        [invoiceId]
-      );
-      if (tokRows.length === 0) return { skipped: true, reason: 'no_token_purchase_row' };
-      const tok = tokRows[0];
-      if (tok.status !== 'pending') return { alreadyProcessed: true, finalStatus: tok.status };
+    const PaymentSettlementService = require('./paymentSettlementService');
 
+    // Token-purchase reconciliation delegates to settleTokenPurchase.
+    if (source === 'token_purchases') {
       const DashTokenService = require('./dashTokenService');
-      const { newBalance, alreadyProcessed } = await DashTokenService.creditTokens(
-        tok.user_id, tok.tokens_credited, invoiceId, { usdAmount: tok.usd_amount }
-      );
-      try {
-        const { markInvoiceProcessed } = require('../config/btcpay');
-        await markInvoiceProcessed(invoiceId, { userId: tok.user_id, source: 'reconciler_token_purchase' });
-      } catch {}
-      return { type: 'token_purchase', userId: tok.user_id, tokensCredited: tok.tokens_credited, newBalance, alreadyProcessed };
+      const result = await PaymentSettlementService.settleTokenPurchase(invoiceId, DashTokenService, query, {});
+      if (result.noLocalRecord) return { skipped: true, reason: 'no_token_purchase_row' };
+      // Stamp the replay key with reconciler context
+      if (result.ok && !result.alreadyProcessed) {
+        try {
+          const { markInvoiceProcessed } = require('../config/btcpay');
+          await markInvoiceProcessed(invoiceId, { userId: result.userId, source: 'reconciler_token_purchase' });
+        } catch {}
+      }
+      return result;
     }
 
     if (source !== 'dash_subscription_orders') {
@@ -394,9 +388,8 @@ class PaymentRecoveryService {
           ? (() => { try { return JSON.parse(order.metadata); } catch { return null; } })()
           : null);
 
-    // Resource-typed orders (live_show_ticket, private_call_booking, call_package)
-    // depend on services we don't want to invoke from the reconciler — mark for
-    // operator review instead of guessing.
+    // Resource-typed orders depend on external services the reconciler cannot
+    // safely invoke — mark for operator review instead of guessing.
     if (meta && (meta.resource === 'live_show_ticket'
         || meta.resource === 'private_call_booking'
         || meta.resource === 'call_package')) {
@@ -407,96 +400,54 @@ class PaymentRecoveryService {
       return { skipped: true, reason: `resource_${meta.resource}` };
     }
 
-    // Scoped purchases (channel-access / hangout-access) — same grant path the
-    // webhook uses for these plans.
+    // Scoped purchases (channel-access / hangout-access)
     if (meta && (meta.hangoutGroupId || meta.channelId)) {
-      const settle = await query(
-        `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = 'reconciler_settled'
-         WHERE id = $1 AND status = 'pending' RETURNING id`,
+      const result = await PaymentSettlementService.settleScopedPurchase(order, invoiceId, meta, query);
+      if (!result.alreadyProcessed && result.ok) {
+        try { await cache.del(`user:${order.user_id}`); } catch {}
+        // Override the replay key source to indicate reconciler origin
+        try {
+          const { markInvoiceProcessed } = require('../config/btcpay');
+          await markInvoiceProcessed(invoiceId, { userId: order.user_id, planId: order.plan_id, source: 'reconciler_scoped' });
+        } catch {}
+      }
+      return result;
+    }
+
+    // Creator subscription
+    if (order.plan_id === 'creator_monthly' && order.creator_id) {
+      const result = await PaymentSettlementService.settleCreatorSubscription(order, invoiceId, query);
+      if (!result.alreadyProcessed && result.ok) {
+        try { await cache.del(`user:${order.user_id}`); } catch {}
+        try {
+          const { markInvoiceProcessed } = require('../config/btcpay');
+          await markInvoiceProcessed(invoiceId, { userId: order.user_id, creatorId: order.creator_id, source: 'reconciler_creator_sub' });
+        } catch {}
+      }
+      return result;
+    }
+
+    // Standard subscription — need the plan row to compute tier/expiry
+    const PlanModel = require('../models/planModel');
+    const plan = await PlanModel.getById(order.plan_id);
+    if (!plan) {
+      await query(
+        `UPDATE dash_subscription_orders SET status = 'failed', notes = 'plan_not_found' WHERE id = $1`,
         [order.id]
       );
-      if (settle.rowCount === 0) return { alreadyProcessed: true };
-      const PaymentService = require('./paymentService');
-      const grantResult = await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'dash', meta, invoiceId);
-      try { await cache.del(`user:${order.user_id}`); } catch {}
-      // Set the 48h Redis replay marker so a delayed real webhook delivery
-      // skips the entire grant flow instead of re-extending expires_at.
+      throw new Error(`plan_not_found: ${order.plan_id}`);
+    }
+
+    // Pass no socketIo — reconciler runs headless; users get notified on next session load.
+    const result = await PaymentSettlementService.settleSubscription(order, invoiceId, plan, query, { cache });
+    if (!result.alreadyProcessed && result.ok) {
+      // Override the replay key source to indicate reconciler origin
       try {
         const { markInvoiceProcessed } = require('../config/btcpay');
-        await markInvoiceProcessed(invoiceId, { userId: order.user_id, planId: order.plan_id, source: 'reconciler_scoped' });
+        await markInvoiceProcessed(invoiceId, { userId: order.user_id, planId: order.plan_id, source: 'reconciler_subscription' });
       } catch {}
-      return { type: 'scoped', grantResult };
     }
-
-    // Creator subscription — route through CreatorService.subscribeToCreator
-    // which handles entitlement + creator_subscriptions row + 70/30 split.
-    const isCreatorSub = order.plan_id === 'creator_monthly' && order.creator_id;
-    let plan;
-    if (isCreatorSub) {
-      plan = { id: 'creator_monthly', tier: null, duration_days: 30 };
-    } else {
-      const PlanModel = require('../models/planModel');
-      plan = await PlanModel.getById(order.plan_id);
-      if (!plan) {
-        await query(
-          `UPDATE dash_subscription_orders SET status = 'failed', notes = 'plan_not_found' WHERE id = $1`,
-          [order.id]
-        );
-        throw new Error(`plan_not_found: ${order.plan_id}`);
-      }
-    }
-
-    const durationDays = plan.duration_days || plan.duration || 30;
-    const isLifetime = durationDays >= 36500;
-    const expiryDate = isLifetime ? null : new Date(Date.now() + durationDays * 86400000);
-    const newTier = (plan.tier === 'member' || order.plan_id.startsWith('member_')) ? 'member' : 'PRIME';
-
-    const settle = await query(
-      `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = 'reconciler_settled'
-       WHERE id = $1 AND status = 'pending' RETURNING id`,
-      [order.id]
-    );
-    if (settle.rowCount === 0) return { alreadyProcessed: true };
-
-    if (isCreatorSub) {
-      const CreatorService = require('./creatorService');
-      await CreatorService.subscribeToCreator(order.user_id, order.creator_id, null);
-      try { await cache.del(`user:${order.user_id}`); } catch {}
-      try {
-        const { markInvoiceProcessed } = require('../config/btcpay');
-        await markInvoiceProcessed(invoiceId, { userId: order.user_id, creatorId: order.creator_id, source: 'reconciler_creator_sub' });
-      } catch {}
-      return { type: 'creator_subscription', creatorId: order.creator_id };
-    }
-
-    await query(
-      `UPDATE users
-       SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW()
-       WHERE id = $1 OR telegram = $1`,
-      [order.user_id, newTier, order.plan_id, expiryDate]
-    );
-
-    let grantResult = null;
-    try {
-      const PaymentService = require('./paymentService');
-      grantResult = await PaymentService.grantEntitlementsForPlan(order.user_id, order.plan_id, 'btcpay', null, invoiceId);
-    } catch (entErr) {
-      logger.error('settleStuckDashInvoice: grantEntitlementsForPlan failed (tier already set)', {
-        userId: order.user_id, planId: order.plan_id, error: entErr.message,
-      });
-    }
-
-    try { await cache.del(`user:${order.user_id}`); } catch {}
-
-    // Set the 48h Redis replay marker so a delayed real webhook delivery
-    // doesn't re-enter grantEntitlementsForPlan and stack another period of
-    // expires_at on top of what we already granted.
-    try {
-      const { markInvoiceProcessed } = require('../config/btcpay');
-      await markInvoiceProcessed(invoiceId, { userId: order.user_id, planId: order.plan_id, source: 'reconciler_subscription' });
-    } catch {}
-
-    return { type: 'subscription', tier: newTier, expiryDate, grantResult };
+    return result;
   }
 
   /**
