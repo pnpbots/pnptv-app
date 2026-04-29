@@ -252,7 +252,13 @@ class AuthController {
           logger.info('User logged out', { userId });
         }
 
-        res.clearCookie('__pnptv_sid', { path: '/' });
+        res.clearCookie('__pnptv_sid', {
+          path: '/',
+          domain: process.env.NODE_ENV === 'production' ? '.pnptv.app' : undefined,
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+        });
         res.json({
           success: true,
           data: {

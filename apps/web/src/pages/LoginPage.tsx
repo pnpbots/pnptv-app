@@ -305,8 +305,9 @@ export function LoginPage() {
     setOidcLoading(true);
     try {
       localStorage.setItem("pnptv_last_auth", "pnptv_id");
-      await oidcLogin();
-      // signinRedirect() navigates away; no need to reset loading state
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+      const loginUrl = "/api/webapp/auth/oidc/login" + (returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : "");
+      window.location.href = loginUrl;
     } catch {
       setOidcLoading(false);
     }

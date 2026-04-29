@@ -259,7 +259,7 @@ export function apiLogout(): Promise<{ success: boolean }> {
 }
 
 export function oidcLogout(): Promise<{ success: boolean }> {
-  return request("/auth/oidc/logout", { method: "POST" });
+  return request("/api/webapp/auth/oidc/logout", { method: "POST" });
 }
 
 

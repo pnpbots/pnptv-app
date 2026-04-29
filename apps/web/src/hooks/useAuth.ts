@@ -148,8 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } else {
       // Browser context without Telegram initData — redirect to Authentik OIDC
-      const { login: oidcLogin } = await import("@/lib/auth");
-      await oidcLogin();
+      window.location.href = "/api/webapp/auth/oidc/login";
     }
   }, []);
 

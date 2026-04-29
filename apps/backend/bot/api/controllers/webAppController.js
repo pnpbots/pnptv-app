@@ -418,7 +418,8 @@ const telegramCheckToken = async (req, res) => {
     const telegramId = String(telegramUser.id);
 
     // Authentik sync — source of truth for identity
-    const pnptvId = await AuthentikService.syncTelegramUser(telegramUser);
+    const authentikResult = await AuthentikService.syncTelegramUser(telegramUser);
+    const pnptvId = authentikResult?.uuid;
     if (pnptvId) {
       logger.info(`[DeepLink] Authentik synced for Telegram ${telegramId}: ${pnptvId}`);
     } else {
@@ -2343,7 +2344,8 @@ const telegramWidgetAuth = async (req, res) => {
     const telegramId = String(id);
 
     // Authentik sync — source of truth for identity
-    const pnptvId = await AuthentikService.syncTelegramUser({ id: telegramId, first_name, username });
+    const authentikResult = await AuthentikService.syncTelegramUser({ id: telegramId, first_name, username });
+    const pnptvId = authentikResult?.uuid;
     if (pnptvId) {
       logger.info(`[TelegramWidget] Authentik synced for Telegram ${telegramId}: ${pnptvId}`);
     } else {
