@@ -353,6 +353,13 @@ const GEO_BLOCK_BYPASS_PATHS = [
   /^\/assets\//,
   /^\/sw\.js$/,
   /^\/favicon\.ico$/,
+  // Webhooks must never be geo-blocked. Telegram's server IPs sometimes
+  // resolve to GB or other blocked regions in the offline GeoIP DB; if we
+  // 451 those, the bot stops receiving updates and the platform goes dark
+  // for everyone. Same for ePayco/BTCPay/Meru — payment provider servers
+  // shouldn't be blocked even if their IP geolocates oddly.
+  /^\/webhook\b/,
+  /^\/api\/webhooks?\b/,
 ];
 function classifyGeo(ip) {
   if (!ip) return null;
@@ -376,6 +383,36 @@ app.use(async (req, res, next) => {
   // Admin bypass — once authenticated, admins can travel into blocked regions
   // to debug. Pre-auth requests fall through to the geo check.
   if (req.session?.user?.role === 'admin' || req.session?.user?.role === 'superadmin') return next();
+
+  // Grandfathered users — anyone who has an active paid entitlement bypasses
+  // the geo-block. The risk we're managing is for NEW signups from hostile
+  // jurisdictions; cutting off existing paying customers (some of whom paid
+  // hundreds of dollars) is its own kind of liability. Server-side cached.
+  const sessionUserId = req.session?.user?.id;
+  if (sessionUserId) {
+    try {
+      const cacheKey = `geoblock_grandfathered:${sessionUserId}`;
+      let grandfathered = await geoCache.get(cacheKey);
+      if (grandfathered === null || grandfathered === undefined) {
+        const { query: q } = require('../../config/postgres');
+        const { rows } = await q(
+          `SELECT 1 FROM user_entitlements
+           WHERE user_id = $1
+             AND (is_lifetime = true OR (expires_at IS NOT NULL AND expires_at > NOW()))
+           LIMIT 1`,
+          [sessionUserId]
+        );
+        grandfathered = rows.length > 0 ? '1' : '0';
+        await geoCache.set(cacheKey, grandfathered, 300); // 5 min cache
+      }
+      if (grandfathered === '1' || grandfathered === true) {
+        return next();
+      }
+    } catch (gfErr) {
+      logger.warn('Grandfather check failed (proceeding with geo-block)', { error: gfErr.message });
+    }
+  }
+
   try {
     const ip = req.ip;
     const cacheKey = `geoblock:${ip}`;
