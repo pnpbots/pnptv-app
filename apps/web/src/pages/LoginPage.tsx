@@ -484,7 +484,10 @@ export function LoginPage() {
           <div className="flex-1 h-px bg-white/10" />
         </div>
 
-        {/* Telegram widget — great for returning Telegram users */}
+        {/* Telegram login — always-visible deep-link button + the
+            official widget below as a secondary option. The widget gets
+            silently blocked by Brave Shields / uBlock / Firefox Strict
+            Mode for many users; the button reaches everyone. */}
         <div>
           {widgetStatus === "verifying" && (
             <div className="flex items-center justify-center gap-3 py-4 text-white text-sm font-medium">
@@ -492,7 +495,26 @@ export function LoginPage() {
               <span>{t.telegramWidgetVerifying}</span>
             </div>
           )}
-          <div className={widgetStatus === "verifying" ? "hidden" : ""}>
+          {widgetStatus !== "verifying" && (
+            <a
+              href={`https://t.me/${getBotUsername()}?start=login`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.98]"
+              style={{
+                background: "#229ED9",
+                color: "#FFFFFF",
+                boxShadow: "0 0 16px rgba(34, 158, 217, 0.35)",
+              }}
+              aria-label="Continue with Telegram"
+            >
+              <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor" aria-hidden="true">
+                <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+              </svg>
+              <span>{t.telegramInstructions}</span>
+            </a>
+          )}
+          <div className={widgetStatus === "verifying" ? "hidden" : "mt-3"}>
             <TelegramLoginWidget
               onAuth={handleWidgetAuth}
               onLoadError={handleWidgetLoadError}
@@ -503,29 +525,6 @@ export function LoginPage() {
           </p>
           {widgetStatus === "error" && widgetError && (
             <p className="text-center text-xs text-red-400 mt-2">{widgetError}</p>
-          )}
-          {widgetBlocked && (
-            <div className="mt-3 space-y-2">
-              <p className="text-center text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                {t.telegramWidgetBlocked}
-              </p>
-              <a
-                href={`https://t.me/${getBotUsername()}?start=login`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.98]"
-                style={{
-                  background: "#229ED9",
-                  color: "#FFFFFF",
-                  boxShadow: "0 0 16px rgba(34, 158, 217, 0.35)",
-                }}
-              >
-                <svg viewBox="0 0 24 24" className="w-4 h-4" fill="currentColor" aria-hidden="true">
-                  <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
-                </svg>
-                <span>{t.telegramInstructions}</span>
-              </a>
-            </div>
           )}
         </div>
 
