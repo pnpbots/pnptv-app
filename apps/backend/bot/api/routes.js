@@ -2312,15 +2312,71 @@ app.post('/api/webapp/auth/recover-account', authLimiter, asyncHandler(async (re
   }
   try {
     const { rows } = await getPool().query(
-      `SELECT id, pnptv_id, first_name, language FROM users
+      `SELECT id, pnptv_id, first_name, language, password_hash FROM users
         WHERE LOWER(email) = $1 AND is_deleted = false LIMIT 1`,
       [email]
     );
-    if (rows.length === 0 || !rows[0].pnptv_id) {
+    if (rows.length === 0) {
       logger.info('[recover-account] no match', { email });
       return res.json({ success: true });
     }
     const u = rows[0];
+
+    // Email/password users: reset the local password_hash so that emailLogin works
+    // after the reset. Authentik recovery only changes Authentik's copy, leaving
+    // users.password_hash stale and login broken.
+    if (u.password_hash) {
+      await getPool().query(`
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token TEXT NOT NULL UNIQUE,
+          expires_at TIMESTAMP NOT NULL,
+          used BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await getPool().query('UPDATE password_reset_tokens SET used = TRUE WHERE user_id = $1 AND used = FALSE', [u.id]);
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      await getPool().query(
+        'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+        [u.id, tokenHash, expiresAt.toISOString()]
+      );
+      const resetUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/reset-password?token=${rawToken}`;
+      const lang = (u.language || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
+      const displayName = u.first_name || (lang === 'es' ? 'usuario' : 'there');
+      const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+      const subject = lang === 'es' ? 'Restablecer contraseña — PNPtv' : 'Reset your PNPtv password';
+      const html = lang === 'es'
+        ? `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111;">
+              <h2 style="color:#D4007A;margin:0 0 16px;">Restablecer contraseña</h2>
+              <p>Hola ${escape(displayName)},</p>
+              <p>Recibimos una solicitud para restablecer tu contraseña en PNPtv. Haz clic en el botón para crear una contraseña nueva. El enlace expira en 1 hora y solo se puede usar una vez.</p>
+              <p style="margin:24px 0;"><a href="${resetUrl}" style="background:#D4007A;color:#fff;padding:14px 24px;border-radius:10px;text-decoration:none;display:inline-block;font-weight:700;">Restablecer contraseña</a></p>
+              <p style="color:#636366;font-size:13px;">Si no solicitaste esto, ignora este correo.</p>
+              <p style="margin-top:24px;color:#636366;font-size:13px;">— Equipo PNPtv</p>
+            </div>`
+        : `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111;">
+              <h2 style="color:#D4007A;margin:0 0 16px;">Reset your password</h2>
+              <p>Hey ${escape(displayName)},</p>
+              <p>We got a request to reset your PNPtv password. Click below to set a new one. The link expires in 1 hour and can only be used once.</p>
+              <p style="margin:24px 0;"><a href="${resetUrl}" style="background:#D4007A;color:#fff;padding:14px 24px;border-radius:10px;text-decoration:none;display:inline-block;font-weight:700;">Reset password</a></p>
+              <p style="color:#636366;font-size:13px;">If you didn't request this, ignore this email.</p>
+              <p style="margin-top:24px;color:#636366;font-size:13px;">— The PNPtv Team</p>
+            </div>`;
+      const EmailService = require('../../services/emailService');
+      await EmailService.send({ to: email, subject, html });
+      logger.info('[recover-account] local token reset email sent', { userId: u.id });
+      return res.json({ success: true });
+    }
+
+    // Telegram/OIDC-only accounts (no password_hash): use Authentik recovery.
+    if (!u.pnptv_id) {
+      logger.info('[recover-account] no pnptv_id, nothing to recover', { userId: u.id });
+      return res.json({ success: true });
+    }
     let authentikPk = await AuthentikService._getUserPkBySub(u.pnptv_id);
 
     // Fallback: if PK not found by sub, try to find by email in Authentik and heal the pnptv_id
