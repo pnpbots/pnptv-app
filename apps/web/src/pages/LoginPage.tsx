@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { telegramWidgetAuth, recoverAccount, type TelegramWidgetUser } from "@/lib/api";
+import {
+  telegramWidgetAuth,
+  recoverAccount,
+  telegramGenerateLoginToken,
+  telegramCheckLoginToken,
+  type TelegramWidgetUser,
+} from "@/lib/api";
 import { login as oidcLogin, rememberReturnTo, sanitizeReturnTo } from "@/lib/auth";
 import { getI18n, getLang } from "@/lib/i18n";
 import { useAuth } from "@/hooks/useAuth";
@@ -245,6 +251,320 @@ function TelegramLoginWidget({ onAuth, onLoadError }: TelegramWidgetProps) {
   return <div ref={containerRef} className="flex justify-center" />;
 }
 
+// ── TelegramDeepLinkPanel ─────────────────────────────────────────────────────
+// Replaces the static <a> deep-link button. Manages the full poll lifecycle:
+// starting → waiting (recursive setTimeout poll) → success / expired / error.
+
+type TgFlowStatus = "idle" | "starting" | "waiting" | "success" | "expired" | "error";
+
+interface TelegramDeepLinkPanelProps {
+  t: ReturnType<typeof getI18n>["login"];
+  lastMethod: string | null;
+  lastUsername: string | null;
+  returnTo: string | null;
+  onWidgetVerifying: boolean;
+  refreshUser: () => Promise<void>;
+}
+
+function TelegramDeepLinkPanel({
+  t,
+  lastMethod,
+  lastUsername,
+  returnTo,
+  onWidgetVerifying,
+  refreshUser,
+}: TelegramDeepLinkPanelProps) {
+  const [tgFlowStatus, setTgFlowStatus] = useState<TgFlowStatus>("idle");
+  const [tgError, setTgError] = useState<string | null>(null);
+
+  // Stable refs that survive re-renders without triggering effect re-runs
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deadlineRef = useRef<number>(0);
+  const tokenRef = useRef<string>("");
+  const deepLinkRef = useRef<string>("");
+  const statusRef = useRef<TgFlowStatus>("idle");
+
+  // Keep statusRef in sync so the poll closure can read current status
+  // without capturing a stale closure value.
+  useEffect(() => {
+    statusRef.current = tgFlowStatus;
+  }, [tgFlowStatus]);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopPolling();
+    };
+  }, [stopPolling]);
+
+  const schedulePoll = useCallback((delayMs: number) => {
+    stopPolling();
+    pollTimerRef.current = setTimeout(async () => {
+      // Guard: only continue if we're still in "waiting"
+      if (statusRef.current !== "waiting") return;
+
+      // Guard: deadline check
+      if (Date.now() > deadlineRef.current) {
+        setTgFlowStatus("expired");
+        return;
+      }
+
+      try {
+        const result = await telegramCheckLoginToken(tokenRef.current);
+        if (statusRef.current !== "waiting") return; // status changed during await
+
+        if (result.authenticated && result.user) {
+          stopPolling();
+          localStorage.setItem("pnptv_last_auth", "telegram");
+          if (result.user.username) {
+            localStorage.setItem("pnptv_last_username", result.user.username);
+          }
+          setTgFlowStatus("success");
+          // Brief success flash, then redirect
+          setTimeout(async () => {
+            await refreshUser();
+            window.location.href = returnTo || "/";
+          }, 500);
+        } else {
+          // Not yet — check deadline then schedule next poll
+          if (Date.now() > deadlineRef.current) {
+            setTgFlowStatus("expired");
+          } else {
+            schedulePoll(2000);
+          }
+        }
+      } catch {
+        // Network/transient error — back off and keep trying until deadline
+        if (statusRef.current !== "waiting") return;
+        if (Date.now() > deadlineRef.current) {
+          setTgFlowStatus("expired");
+        } else {
+          schedulePoll(4000);
+        }
+      }
+    }, delayMs);
+  }, [stopPolling, refreshUser, returnTo]);
+
+  const handleStart = useCallback(async () => {
+    if (tgFlowStatus === "starting") return;
+    setTgFlowStatus("starting");
+    setTgError(null);
+
+    try {
+      const result = await telegramGenerateLoginToken();
+      if (!result.success || !result.token || !result.deepLink) {
+        throw new Error(result.error || t.telegramWidgetError);
+      }
+
+      tokenRef.current = result.token;
+      deepLinkRef.current = result.deepLink;
+      deadlineRef.current = Date.now() + 300_000; // 5 min TTL matches backend
+
+      // Open Telegram — works regardless of browser extension restrictions
+      // because it's a direct user-gesture initiated window.open call.
+      window.open(result.deepLink, "_blank", "noopener,noreferrer");
+
+      setTgFlowStatus("waiting");
+      schedulePoll(2000);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t.telegramWidgetError;
+      setTgFlowStatus("error");
+      setTgError(message);
+    }
+  }, [tgFlowStatus, t.telegramWidgetError, schedulePoll]);
+
+  const handleCancel = useCallback(() => {
+    stopPolling();
+    setTgFlowStatus("idle");
+    setTgError(null);
+  }, [stopPolling]);
+
+  const handleRetry = useCallback(() => {
+    setTgFlowStatus("idle");
+    setTgError(null);
+  }, []);
+
+  // Countdown display derived from deadline ref — recalculated each second
+  const [countdown, setCountdown] = useState<string>("");
+  useEffect(() => {
+    if (tgFlowStatus !== "waiting") {
+      setCountdown("");
+      return;
+    }
+    const tick = () => {
+      const remaining = Math.max(0, deadlineRef.current - Date.now());
+      const m = Math.floor(remaining / 60000);
+      const s = Math.floor((remaining % 60000) / 1000);
+      setCountdown(`${m}:${s.toString().padStart(2, "0")}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [tgFlowStatus]);
+
+  const botUsername = getBotUsername();
+  const isPersonalized = lastMethod === "telegram" && !!lastUsername;
+
+  // ── render: idle ──────────────────────────────────────────────────────────
+  if (tgFlowStatus === "idle" && !onWidgetVerifying) {
+    return (
+      <button
+        type="button"
+        onClick={handleStart}
+        className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.98]"
+        style={{
+          background: "#229ED9",
+          color: "#FFFFFF",
+          boxShadow: "0 0 16px rgba(34, 158, 217, 0.35)",
+        }}
+        aria-label={isPersonalized ? `Continue as @${lastUsername}` : "Continue with Telegram"}
+      >
+        <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor" aria-hidden="true">
+          <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+        </svg>
+        <span>
+          {isPersonalized
+            ? `Continue as @${lastUsername}`
+            : t.telegramInstructions}
+        </span>
+      </button>
+    );
+  }
+
+  // ── render: starting ──────────────────────────────────────────────────────
+  if (tgFlowStatus === "starting") {
+    return (
+      <button
+        type="button"
+        disabled
+        className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 opacity-70 cursor-not-allowed"
+        style={{ background: "#229ED9", color: "#FFFFFF" }}
+      >
+        <Spinner className="h-4 w-4" />
+        <span>{t.tgDeepLinkOpening}</span>
+      </button>
+    );
+  }
+
+  // ── render: waiting ───────────────────────────────────────────────────────
+  if (tgFlowStatus === "waiting") {
+    return (
+      <div
+        className="rounded-xl p-4 space-y-3"
+        style={{ background: "rgba(34,158,217,0.1)", border: "1px solid rgba(34,158,217,0.3)" }}
+      >
+        <div className="flex items-center gap-3">
+          <Spinner className="h-5 w-5 text-[#229ED9] flex-shrink-0" />
+          <div>
+            <p className="text-sm font-bold text-white leading-tight">
+              {t.tgDeepLinkConfirm}
+              {isPersonalized ? ` as @${lastUsername}` : ""}
+            </p>
+            <p className="text-[11px] mt-0.5" style={{ color: "#8E8E93" }}>
+              Tap <strong>Start</strong> in the chat with @{botUsername}
+            </p>
+          </div>
+        </div>
+
+        {countdown && (
+          <p className="text-center text-[10px]" style={{ color: "#636366" }}>
+            Expires in {countdown}
+          </p>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="flex-1 min-h-[36px] rounded-lg text-xs font-semibold transition-all active:scale-[0.97] text-white/70 border border-white/10"
+            style={{ background: "rgba(255,255,255,0.06)" }}
+          >
+            {t.cancel}
+          </button>
+          <a
+            href={deepLinkRef.current}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 min-h-[36px] rounded-lg text-xs font-semibold flex items-center justify-center transition-all active:scale-[0.97] text-white"
+            style={{ background: "#229ED9" }}
+          >
+            {t.tgDeepLinkOpenAgain}
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // ── render: success ───────────────────────────────────────────────────────
+  if (tgFlowStatus === "success") {
+    return (
+      <div className="flex items-center justify-center gap-3 py-4">
+        <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 flex-shrink-0" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" fill="#22c55e" />
+          <path
+            d="M7.5 12l3 3 6-6"
+            stroke="white"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <span className="text-sm font-bold" style={{ color: "#22c55e" }}>
+          Logged in! Redirecting…
+        </span>
+      </div>
+    );
+  }
+
+  // ── render: expired ───────────────────────────────────────────────────────
+  if (tgFlowStatus === "expired") {
+    return (
+      <div className="space-y-2">
+        <p className="text-center text-xs text-yellow-400">{t.tgDeepLinkExpired}</p>
+        <button
+          type="button"
+          onClick={handleRetry}
+          className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.98]"
+          style={{ background: "#229ED9", color: "#FFFFFF" }}
+        >
+          <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor" aria-hidden="true">
+            <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+          </svg>
+          <span>{t.telegramWidgetRetry}</span>
+        </button>
+      </div>
+    );
+  }
+
+  // ── render: error ─────────────────────────────────────────────────────────
+  // (tgFlowStatus === "error")
+  return (
+    <div className="space-y-2">
+      {tgError && (
+        <p className="text-center text-xs text-red-400">{tgError}</p>
+      )}
+      <button
+        type="button"
+        onClick={handleRetry}
+        className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.98]"
+        style={{ background: "#229ED9", color: "#FFFFFF" }}
+      >
+        <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor" aria-hidden="true">
+          <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+        </svg>
+        <span>{t.telegramWidgetRetry}</span>
+      </button>
+    </div>
+  );
+}
+
 // ── LoginPage ─────────────────────────────────────────────────────────────────
 
 export function LoginPage() {
@@ -484,10 +804,10 @@ export function LoginPage() {
           <div className="flex-1 h-px bg-white/10" />
         </div>
 
-        {/* Telegram login — always-visible deep-link button + the
+        {/* Telegram login — stateful deep-link button/panel (primary) +
             official widget below as a secondary option. The widget gets
             silently blocked by Brave Shields / uBlock / Firefox Strict
-            Mode for many users; the button reaches everyone. */}
+            Mode for many users; the deep-link flow reaches everyone. */}
         <div>
           {widgetStatus === "verifying" && (
             <div className="flex items-center justify-center gap-3 py-4 text-white text-sm font-medium">
@@ -496,27 +816,14 @@ export function LoginPage() {
             </div>
           )}
           {widgetStatus !== "verifying" && (
-            <a
-              href={`https://t.me/${getBotUsername()}?start=login`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.98]"
-              style={{
-                background: "#229ED9",
-                color: "#FFFFFF",
-                boxShadow: "0 0 16px rgba(34, 158, 217, 0.35)",
-              }}
-              aria-label={lastMethod === "telegram" && lastUsername ? `Continue as @${lastUsername}` : "Continue with Telegram"}
-            >
-              <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor" aria-hidden="true">
-                <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
-              </svg>
-              <span>
-                {lastMethod === "telegram" && lastUsername
-                  ? `Continue as @${lastUsername}`
-                  : t.telegramInstructions}
-              </span>
-            </a>
+            <TelegramDeepLinkPanel
+              t={t}
+              lastMethod={lastMethod}
+              lastUsername={lastUsername}
+              returnTo={returnTo}
+              onWidgetVerifying={false}
+              refreshUser={refreshUser}
+            />
           )}
           <div className={widgetStatus === "verifying" ? "hidden" : "mt-3"}>
             <TelegramLoginWidget

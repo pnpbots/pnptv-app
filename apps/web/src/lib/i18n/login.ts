@@ -46,6 +46,12 @@ const strings = {
     redirectingToX: "Redirecting to X...",
     loginWithEmail: "Login with Email",
 
+    // Telegram deep-link poll flow
+    tgDeepLinkOpening: "Opening Telegram…",
+    tgDeepLinkConfirm: "Confirm in Telegram",
+    tgDeepLinkOpenAgain: "Open Telegram again",
+    tgDeepLinkExpired: "The login link expired. Try again.",
+
     // Telegram Widget flow
     telegramWidgetVerifying: "Verifying with Telegram...",
     telegramWidgetError: "Telegram verification failed. Please try again.",
@@ -157,6 +163,12 @@ const strings = {
     redirectingToX: "Redirigiendo a X...",
     loginWithEmail: "Entrar con Email",
 
+    // Telegram deep-link poll flow
+    tgDeepLinkOpening: "Abriendo Telegram…",
+    tgDeepLinkConfirm: "Confirmar en Telegram",
+    tgDeepLinkOpenAgain: "Abrir Telegram de nuevo",
+    tgDeepLinkExpired: "El enlace de inicio expiró. Intenta de nuevo.",
+
     // Telegram Widget flow
     telegramWidgetVerifying: "Verificando con Telegram...",
     telegramWidgetError: "Verificación de Telegram fallida. Por favor intenta de nuevo.",
@@ -243,6 +255,12 @@ const strings = {
     redirectingToX: "Redirecionando para X...",
     loginWithEmail: "Entrar com Email",
 
+    // Telegram deep-link poll flow
+    tgDeepLinkOpening: "Abrindo Telegram…",
+    tgDeepLinkConfirm: "Confirmar no Telegram",
+    tgDeepLinkOpenAgain: "Abrir Telegram novamente",
+    tgDeepLinkExpired: "O link expirou. Tente novamente.",
+
     telegramWidgetVerifying: "Verificando com Telegram...",
     telegramWidgetError: "Verificação do Telegram falhou. Por favor, tente novamente.",
     telegramWidgetRetry: "Tentar novamente",
@@ -327,6 +345,11 @@ const strings = {
     loginWithX: "使用 X 登录",
     redirectingToX: "正在跳转至 X...",
     loginWithEmail: "使用邮箱登录",
+
+    tgDeepLinkOpening: "正在打开 Telegram…",
+    tgDeepLinkConfirm: "在 Telegram 中确认",
+    tgDeepLinkOpenAgain: "再次打开 Telegram",
+    tgDeepLinkExpired: "登录链接已过期，请重试。",
 
     telegramWidgetVerifying: "正在通过 Telegram 验证...",
     telegramWidgetError: "Telegram 验证失败，请重试。",
@@ -413,6 +436,11 @@ const strings = {
     redirectingToX: "正在跳轉至 X...",
     loginWithEmail: "使用電子郵件登入",
 
+    tgDeepLinkOpening: "正在開啟 Telegram…",
+    tgDeepLinkConfirm: "在 Telegram 中確認",
+    tgDeepLinkOpenAgain: "再次開啟 Telegram",
+    tgDeepLinkExpired: "登入連結已過期，請重試。",
+
     telegramWidgetVerifying: "正在透過 Telegram 驗證...",
     telegramWidgetError: "Telegram 驗證失敗，請重試。",
     telegramWidgetRetry: "重試",
@@ -497,6 +525,11 @@ const strings = {
     loginWithX: "Se connecter avec X",
     redirectingToX: "Redirection vers X...",
     loginWithEmail: "Se connecter avec l'e-mail",
+
+    tgDeepLinkOpening: "Ouverture de Telegram…",
+    tgDeepLinkConfirm: "Confirmer dans Telegram",
+    tgDeepLinkOpenAgain: "Rouvrir Telegram",
+    tgDeepLinkExpired: "Le lien a expiré. Réessayez.",
 
     telegramWidgetVerifying: "Vérification avec Telegram...",
     telegramWidgetError: "La vérification Telegram a échoué. Veuillez réessayer.",
@@ -583,6 +616,11 @@ const strings = {
     redirectingToX: "Weiterleitung zu X...",
     loginWithEmail: "Mit E-Mail einloggen",
 
+    tgDeepLinkOpening: "Telegram wird geöffnet…",
+    tgDeepLinkConfirm: "In Telegram bestätigen",
+    tgDeepLinkOpenAgain: "Telegram erneut öffnen",
+    tgDeepLinkExpired: "Der Login-Link ist abgelaufen. Nochmals versuchen.",
+
     telegramWidgetVerifying: "Verifizierung mit Telegram...",
     telegramWidgetError: "Telegram-Verifizierung fehlgeschlagen. Bitte versuche es erneut.",
     telegramWidgetRetry: "Erneut versuchen",
@@ -667,6 +705,11 @@ const strings = {
     loginWithX: "เข้าสู่ระบบด้วย X",
     redirectingToX: "กำลังไปที่ X...",
     loginWithEmail: "เข้าสู่ระบบด้วยอีเมล",
+
+    tgDeepLinkOpening: "Opening Telegram…",
+    tgDeepLinkConfirm: "Confirm in Telegram",
+    tgDeepLinkOpenAgain: "Open Telegram again",
+    tgDeepLinkExpired: "The login link expired. Try again.",
 
     telegramWidgetVerifying: "กำลังยืนยันตัวตนผ่าน Telegram...",
     telegramWidgetError: "การยืนยันตัวตนผ่าน Telegram ล้มเหลว กรุณาลองใหม่",
@@ -753,6 +796,11 @@ const strings = {
     redirectingToX: "Reindirizzamento a X...",
     loginWithEmail: "Accedi con Email",
 
+    tgDeepLinkOpening: "Apertura Telegram…",
+    tgDeepLinkConfirm: "Conferma in Telegram",
+    tgDeepLinkOpenAgain: "Riapri Telegram",
+    tgDeepLinkExpired: "Il link è scaduto. Riprova.",
+
     telegramWidgetVerifying: "Verifica con Telegram in corso...",
     telegramWidgetError: "Verifica Telegram fallita. Per favore riprova.",
     telegramWidgetRetry: "Riprova",
@@ -837,6 +885,11 @@ const strings = {
     loginWithX: "X ile giriş yap",
     redirectingToX: "X'e yönlendiriliyor...",
     loginWithEmail: "E-posta ile giriş yap",
+
+    tgDeepLinkOpening: "Telegram açılıyor…",
+    tgDeepLinkConfirm: "Telegram'da onayla",
+    tgDeepLinkOpenAgain: "Telegram'ı tekrar aç",
+    tgDeepLinkExpired: "Giriş bağlantısı süresi doldu. Tekrar dene.",
 
     telegramWidgetVerifying: "Telegram ile doğrulanıyor...",
     telegramWidgetError: "Telegram doğrulaması başarısız oldu. Lütfen tekrar dene.",
@@ -923,6 +976,11 @@ const strings = {
     redirectingToX: "Перенаправление в X...",
     loginWithEmail: "Войти через Email",
 
+    tgDeepLinkOpening: "Открываем Telegram…",
+    tgDeepLinkConfirm: "Подтвердите в Telegram",
+    tgDeepLinkOpenAgain: "Открыть Telegram снова",
+    tgDeepLinkExpired: "Ссылка для входа истекла. Попробуйте снова.",
+
     telegramWidgetVerifying: "Проверка через Telegram...",
     telegramWidgetError: "Верификация Telegram не удалась. Пожалуйста, попробуйте снова.",
     telegramWidgetRetry: "Попробовать снова",
@@ -1007,6 +1065,11 @@ const strings = {
     loginWithX: "Inloggen met X",
     redirectingToX: "Doorsturen naar X...",
     loginWithEmail: "Inloggen met e-mail",
+
+    tgDeepLinkOpening: "Telegram wordt geopend…",
+    tgDeepLinkConfirm: "Bevestig in Telegram",
+    tgDeepLinkOpenAgain: "Telegram opnieuw openen",
+    tgDeepLinkExpired: "De loginlink is verlopen. Probeer opnieuw.",
 
     telegramWidgetVerifying: "Verificatie via Telegram...",
     telegramWidgetError: "Telegram-verificatie mislukt. Probeer het opnieuw.",
@@ -1093,6 +1156,11 @@ const strings = {
     redirectingToX: "Đang chuyển hướng đến X...",
     loginWithEmail: "Đăng nhập bằng Email",
 
+    tgDeepLinkOpening: "Đang mở Telegram…",
+    tgDeepLinkConfirm: "Xác nhận trong Telegram",
+    tgDeepLinkOpenAgain: "Mở Telegram lại",
+    tgDeepLinkExpired: "Liên kết đăng nhập đã hết hạn. Thử lại.",
+
     telegramWidgetVerifying: "Đang xác minh qua Telegram...",
     telegramWidgetError: "Xác minh Telegram thất bại. Vui lòng thử lại.",
     telegramWidgetRetry: "Thử lại",
@@ -1177,6 +1245,11 @@ const strings = {
     loginWithX: "X でログイン",
     redirectingToX: "X にリダイレクト中...",
     loginWithEmail: "メールでログイン",
+
+    tgDeepLinkOpening: "Telegram を開いています…",
+    tgDeepLinkConfirm: "Telegram で確認",
+    tgDeepLinkOpenAgain: "Telegram をもう一度開く",
+    tgDeepLinkExpired: "ログインリンクが切れました。もう一度お試しください。",
 
     telegramWidgetVerifying: "Telegram で認証中...",
     telegramWidgetError: "Telegram 認証に失敗しました。もう一度お試しください。",
@@ -1263,6 +1336,11 @@ const strings = {
     redirectingToX: "Mengalihkan ke X...",
     loginWithEmail: "Masuk dengan Email",
 
+    tgDeepLinkOpening: "Membuka Telegram…",
+    tgDeepLinkConfirm: "Konfirmasi di Telegram",
+    tgDeepLinkOpenAgain: "Buka Telegram lagi",
+    tgDeepLinkExpired: "Tautan login sudah kadaluarsa. Coba lagi.",
+
     telegramWidgetVerifying: "Memverifikasi dengan Telegram...",
     telegramWidgetError: "Verifikasi Telegram gagal. Silakan coba lagi.",
     telegramWidgetRetry: "Coba lagi",
@@ -1347,6 +1425,11 @@ const strings = {
     loginWithX: "الدخول عبر X",
     redirectingToX: "جارٍ التحويل إلى X...",
     loginWithEmail: "الدخول عبر البريد الإلكتروني",
+
+    tgDeepLinkOpening: "جارٍ فتح Telegram…",
+    tgDeepLinkConfirm: "أكّد في Telegram",
+    tgDeepLinkOpenAgain: "افتح Telegram مجدداً",
+    tgDeepLinkExpired: "انتهت صلاحية رابط الدخول. حاول مجدداً.",
 
     telegramWidgetVerifying: "جارٍ التحقق عبر Telegram...",
     telegramWidgetError: "فشل التحقق عبر Telegram. يرجى المحاولة مجدداً.",
