@@ -330,7 +330,7 @@
                     <div class="field-row">
                         <div class="field">
                             <label for="docType">Doc Type</label>
-                            <select id="docType" name="docType">
+                            <select id="docType" name="docType" onchange="updateDocNumberField(this.value)">
                                 <option value="CC">CC (Citizenship)</option>
                                 <option value="CE">CE (Foreign ID)</option>
                                 <option value="NIT">NIT (Tax ID)</option>
@@ -339,7 +339,7 @@
                         </div>
                         <div class="field">
                             <label for="docNumber">Doc Number</label>
-                            <input type="text" id="docNumber" name="docNumber" required placeholder="1234567890" inputmode="numeric">
+                            <input type="text" id="docNumber" name="docNumber" required placeholder="Ej: 1234567890" inputmode="text" pattern="[A-Za-z0-9]+" title="Digits only for CC/CE/NIT/TI; letters and digits allowed for Passport (PP)">
                         </div>
                     </div>
                     <div class="field">
@@ -403,6 +403,11 @@
             <div class="spinner-container">
                 <div class="spinner"></div>
                 <p id="processing-msg" style="color:#8E8E93; font-size:14px;">Processing your payment...</p>
+                <!-- F3: 3DS-specific guidance — hidden until handle3DS2() shows it -->
+                <p id="processing-3ds-guidance" style="display:none; color:#8E8E93; font-size:12px; margin-top:10px; max-width:320px; margin-left:auto; margin-right:auto; line-height:1.5;">
+                    Tu banco te está enviando un código de verificación. Revisa tu teléfono — puede llegar como SMS o notificación de tu app bancaria. Este paso puede tomar 2–5 minutos; por favor no cierres esta ventana.<br>
+                    <span style="color:#555; font-size:11px;">Your bank is sending you a verification code. Check your phone for an SMS or push notification from your banking app. This step can take 2–5 minutes — please don't close this window.</span>
+                </p>
             </div>
         </div>
 
@@ -727,6 +732,9 @@
             document.getElementById('btn-pay').disabled = true;
             showState('processing');
             document.getElementById('processing-msg').textContent = 'Processing your payment securely...';
+            // Ensure 3DS guidance is hidden for the tokenization step
+            var guidanceOnPay = document.getElementById('processing-3ds-guidance');
+            if (guidanceOnPay) guidanceOnPay.style.display = 'none';
 
             try {
                 // Send raw card data to backend for server-side tokenization via ePayco Node SDK.
@@ -863,7 +871,13 @@
 
         function handle3DS2(threeDSecure) {
             showState('processing');
-            document.getElementById('processing-msg').textContent = 'Completing 3D Secure verification...';
+            // F3: Replace generic spinner text with actionable 3DS guidance.
+            // Guarded here (not in showState) so card-tokenization spinner stays generic.
+            document.getElementById('processing-msg').textContent = 'Verifying with your bank';
+            var guidanceEl = document.getElementById('processing-3ds-guidance');
+            if (guidanceEl) {
+                guidanceEl.style.display = 'block';
+            }
 
             var txData = threeDSecure.transactionData || {};
             var environment = (paymentData && paymentData.testMode) ? 'test' : 'prod';
@@ -1050,6 +1064,8 @@
                     // Re-submit the payment
                     showState('processing');
                     document.getElementById('processing-msg').textContent = 'Retrying payment after verification...';
+                    var guidanceOnOtp = document.getElementById('processing-3ds-guidance');
+                    if (guidanceOnOtp) guidanceOnOtp.style.display = 'none';
                     // Re-trigger the form
                     await handlePayment();
                 } else {
@@ -1068,6 +1084,21 @@
         function handleRetry() {
             document.getElementById('btn-pay').disabled = false;
             showState('form');
+        }
+
+        // ── F4: Update docNumber placeholder based on selected document type ──
+        function updateDocNumberField(docType) {
+            var input = document.getElementById('docNumber');
+            if (!input) return;
+            if (docType === 'PP') {
+                // Passport — alphanumeric
+                input.placeholder = 'Ej: AB1234567';
+                input.setAttribute('inputmode', 'text');
+            } else {
+                // CC, CE, NIT, TI — numeric digits only
+                input.placeholder = 'Ej: 1234567890';
+                input.setAttribute('inputmode', 'numeric');
+            }
         }
     </script>
 </body>

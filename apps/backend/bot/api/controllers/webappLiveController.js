@@ -3,6 +3,7 @@ const { getPool } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
 const axios = require('axios');
 const restreamerService = require('../../../services/restreamerService');
+const { getEpaycoCopRate } = require('../../../services/paymentService');
 
 /**
  * Module-level cache for the Restreamer auth token.
@@ -1158,7 +1159,20 @@ const buySlotTicket = async (req, res) => {
       const { v4: uuidv4 } = require('uuid');
 
       const paymentId = uuidv4();
-      const usdToCopRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+      // PNPtv displays prices in USD to international users but settles via ePayco's
+      // Colombian acquiring network in COP. The rate is fetched daily from a public
+      // FX API (see services/paymentService.js getEpaycoCopRate). Do not hardcode a fallback — fail closed instead.
+      let usdToCopRate;
+      try {
+        usdToCopRate = await getEpaycoCopRate();
+      } catch (fxErr) {
+        logger.error('[ePayco FX] Rate unavailable for live slot payment', { error: fxErr.message });
+        return res.status(503).json({
+          success: false,
+          error: 'FX rate unavailable, please retry in a few minutes',
+          code: 'FX_RATE_UNAVAILABLE',
+        });
+      }
       const priceInCOP = Math.round(priceUsd * usdToCopRate);
       const CHECKOUT_DOMAIN = process.env.CHECKOUT_DOMAIN || process.env.WEB_APP_URL || 'https://pnptv.app';
       const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
@@ -1181,8 +1195,16 @@ const buySlotTicket = async (req, res) => {
           slotId: id,
           slotTitle: slot.title || null,
           email: userEmail,
+          // Phase 4: Persist USD + COP explicitly. payment.amount is the canonical USD
+          // value; amount_usd in metadata is a defensive duplicate so the webhook-side
+          // settlement (paymentService.js live_show_ticket branch) can never confuse
+          // x_amount (COP from ePayco) with the original USD price.
+          amount_usd: priceUsd,
           expected_epayco_amount: String(priceInCOP),
           expected_epayco_currency: 'COP',
+          expected_epayco_amount_usd: String(priceUsd),
+          fx_rate_at_checkout: usdToCopRate,
+          fx_locked_at: new Date().toISOString(),
           payment_url: checkoutUrl,
         },
       });

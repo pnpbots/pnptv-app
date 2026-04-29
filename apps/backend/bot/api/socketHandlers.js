@@ -30,7 +30,7 @@ return redis.call('DECR', KEYS[1])
 async function atomicViewerDecrement(redis, streamId) {
   const result = await redis.eval(VIEWER_DECR_CLAMP_SCRIPT, 1, `live:viewers:${streamId}`);
   const count = Math.max(0, parseInt(result, 10) || 0);
-  await redis.expire(`live:viewers:${streamId}`, 3600);
+  await redis.expire(`live:viewers:${streamId}`, 28800);
   return count;
 }
 
@@ -1557,37 +1557,6 @@ function initSocketIO(io) {
       if (content.length > 4000) { socket.emit('dm:error', { error: 'Message too long' }); return; }
       if (recipientId === user.id) return;
 
-      // Free-tier daily DM limit — users without pnp-member entitlement are limited
-      const EntitlementAccessService = require('../../services/entitlementAccessService');
-      const role = user.role || '';
-      const hasDmMembership = role === 'admin' || role === 'superadmin' || await EntitlementAccessService.hasEntitlement(user.id, 'pnp-member');
-      const isFreeUser = !hasDmMembership;
-      if (isFreeUser) {
-        try {
-          const redis = getRedis();
-          const today = new Date().toISOString().slice(0, 10);
-          const dmKey = `pnptv:dm_limit:${user.id}:${today}`;
-          const createdAt = user.created_at || user.createdAt;
-          let dmLimit = 3;
-          if (createdAt) {
-            const daysSince = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
-            if (daysSince > 14) dmLimit = 1;
-          }
-          const newCount = await redis.incr(dmKey);
-          if (newCount === 1) await redis.expire(dmKey, 86400);
-          if (newCount > dmLimit) {
-            await redis.decr(dmKey);
-            socket.emit('dm:error', { message: 'Daily message limit reached. Upgrade for unlimited messaging.', code: 'DM_LIMIT_REACHED' });
-            return;
-          }
-        } catch (limErr) {
-          logger.error('dm:send tier limit check failed (fail-closed)', { userId: user.id, error: limErr.message });
-          socket.emit('dm:error', { message: 'Unable to verify message limit. Please try again shortly.', code: 'LIMIT_CHECK_FAILED' });
-          return;
-        }
-      }
-
-
       try {
         // ── PG insert via DmService (handles blocks, privacy, thread upsert, push) ──
         const isAdmin = user.role === 'admin' || user.role === 'superadmin';
@@ -1858,14 +1827,20 @@ function initSocketIO(io) {
 
         // SOCK-H1: Deduplicate viewer-count increments per user per stream.
         // A user opening multiple tabs or reconnecting rapidly must only count
-        // once in the viewer total.  SET NX with a 1-hour TTL acts as the gate;
-        // if the key already exists the increment (and broadcast) are skipped.
+        // once in the viewer total.  SET NX with an 8-hour TTL acts as the gate;
+        // if the key already exists the increment is skipped, but the TTL is
+        // still refreshed so long-running streams never reset to 0 at hour 1.
         const joinKey = `live:joined:${streamId}:${user.id}`;
-        const firstJoin = await redis.set(joinKey, '1', 'EX', 3600, 'NX');
+        const firstJoin = await redis.set(joinKey, '1', 'EX', 28800, 'NX');
         if (firstJoin === 'OK') {
           await redis.incr(`live:viewers:${streamId}`);
-          await redis.expire(`live:viewers:${streamId}`, 3600);
+        } else {
+          // Reconnect path: slide the dedup window forward so it doesn't expire
+          // mid-stream and accidentally double-count on the next reconnect.
+          await redis.expire(joinKey, 28800);
         }
+        // Always refresh the viewer-count key TTL — keeps long streams alive.
+        await redis.expire(`live:viewers:${streamId}`, 28800);
         const countRaw = await redis.get(`live:viewers:${streamId}`);
         const count = parseInt(countRaw, 10) || 0;
 
@@ -1957,6 +1932,27 @@ function initSocketIO(io) {
         socket.emit('live:error', { message: 'Invalid stream ID' });
         return;
       }
+
+      // SOCK-L3: Per-user sliding-window rate limit — max 5 messages per 10 s.
+      // Checked before content validation so the limit fires even on empty/long
+      // payloads, preventing a client from burning through rate budget for free.
+      try {
+        const redis = getRedis();
+        const rateKey = `live:chat:rate:${streamId}:${user.id}`;
+        const count = await redis.incr(rateKey);
+        if (count === 1) {
+          await redis.expire(rateKey, 10);
+        }
+        if (count > 5) {
+          socket.emit('live:error', { code: 'rate_limited', message: 'Slow down — max 5 messages per 10 seconds' });
+          return;
+        }
+      } catch (rateErr) {
+        // Non-fatal: if Redis is unavailable, allow the message through rather
+        // than silently dropping legitimate chat during an outage.
+        logger.warn('live:message rate-limit check failed (Redis error)', { streamId, userId: user.id, error: rateErr.message });
+      }
+
       if (!content || !String(content).trim()) {
         socket.emit('live:error', { message: 'Message cannot be empty' });
         return;

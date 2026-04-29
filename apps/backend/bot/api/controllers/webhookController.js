@@ -6,6 +6,7 @@ const logger = require('../../../utils/logger');
 // tiny 200-OK stub kept only so the routes.js import resolves. The active
 // route registration is inline in routes.js with the same retired no-op.
 const PaymentWebhookEventModel = require('../../../models/paymentWebhookEventModel');
+const PaymentModel = require('../../../models/paymentModel');
 
 const { cache } = require('../../../config/redis');
 
@@ -155,10 +156,21 @@ const handleEpaycoWebhook = async (req, res) => {
 
     try {
       const paymentId = isUuid(req.body.x_extra3) ? req.body.x_extra3 : null;
+
+      // x_extra3 is often empty — fall back to looking up the payment by x_ref_payco
+      // which ePayco reliably populates (x_id_invoice e.g. "PAY-F780D02C" is our own reference)
+      let resolvedPaymentId = paymentId;
+      if (!resolvedPaymentId && req.body.x_ref_payco) {
+        try {
+          const found = await PaymentModel.getById(String(req.body.x_ref_payco));
+          if (found?.id) resolvedPaymentId = found.id;
+        } catch (_) { /* non-fatal */ }
+      }
+
       const eventMeta = {
         provider: 'epayco',
         eventId: req.body.x_ref_payco || req.body.x_transaction_id,
-        paymentId,
+        paymentId: resolvedPaymentId,
         status: normalizedState || req.body.x_transaction_state,
         stateCode: req.body.x_cod_transaction_state || normalizedState || req.body.x_transaction_state,
         payload: req.body,
@@ -340,8 +352,25 @@ const handlePaymentResponse = async (req, res) => {
     res.removeHeader('Cross-Origin-Embedder-Policy');
     res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
     res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
-    // H8: Restrict frame-ancestors to known ePayco/3DS domains only — not the entire https: scheme
-    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://*.epayco.co https://*.payco.co https://*.cardinalcommerce.com");
+    // Phase 3: Mirror CHECKOUT_CSP wildcards used by /payment/:id. The previous
+    // header only set frame-ancestors and let the page fall back to helmet's
+    // exact-match list — that list misses ePayco-rotated 3DS sub-hosts (e.g.
+    // apiflow-blue.epayco.co), which would silently break the post-3DS landing.
+    // H8 frame-ancestors restriction kept (banks + ePayco only, not all of https:).
+    const RESPONSE_CSP = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com https://*.epayco.co https://*.epayco.com https://*.epayco.io https://*.payco.co https://*.cardinalcommerce.com",
+      "style-src 'self' 'unsafe-inline' https:",
+      "font-src 'self' https: data:",
+      "img-src 'self' https: data:",
+      "connect-src 'self' https:",
+      "frame-src https:",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self' https:",
+      "frame-ancestors 'self' https://*.epayco.co https://*.payco.co https://*.cardinalcommerce.com",
+    ].join('; ');
+    res.setHeader('Content-Security-Policy', RESPONSE_CSP);
     res.send(`<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -563,18 +592,48 @@ const handleLiveKitWebhook = async (req, res) => {
     if (roomName.startsWith(HANGOUT_ROOM_PREFIX)) {
       const groupId = roomName.slice(HANGOUT_ROOM_PREFIX.length);
 
-      if (eventType === 'participant_joined' || eventType === 'participant_left') {
+      if (eventType === 'participant_left') {
+        // LiveKit identities now carry a per-mint suffix (e.g. "12345-a1b2c3d4") to support
+        // multi-tab usage (B1 fix). Strip the suffix to recover the stable user_id for the
+        // DB lookup. Idempotent: left_at IS NULL guard prevents double-stamping.
+        const rawIdentity = String(event.participant?.identity || '');
+        const userIdRaw = rawIdentity.split('-')[0];
+        if (userIdRaw) {
+          await query(
+            `UPDATE hangout_call_participants
+             SET left_at = NOW()
+             FROM hangout_video_calls
+             WHERE hangout_video_calls.id = hangout_call_participants.call_id
+               AND hangout_video_calls.room_name = $1
+               AND hangout_call_participants.user_id = $2
+               AND hangout_call_participants.left_at IS NULL`,
+            [roomName, userIdRaw]
+          );
+          logger.info('LiveKit participant_left: stamped left_at', { roomName, userIdRaw });
+        }
+      } else if (eventType === 'participant_joined') {
         // Participant rows and the DB trigger own participant_count. The webhook
         // only observes transport events, which can arrive after REST writes or
         // disconnect races; mutating the counter here causes drift/double-counts.
       } else if (eventType === 'room_finished') {
-        await query(
+        // Mark the call ended first, then bulk-stamp any participants still missing left_at.
+        // This covers abrupt disconnects that bypassed the /call/leave REST endpoint.
+        const { rows: callRows } = await query(
           `UPDATE hangout_video_calls
            SET status = 'ended', ended_at = NOW(), participant_count = 0
-           WHERE group_id = $1 AND status = 'active'`,
+           WHERE group_id = $1 AND status = 'active'
+           RETURNING id`,
           [groupId]
         );
-        logger.info('LiveKit room_finished: hangout call marked ended', { groupId, roomName });
+        if (callRows.length > 0) {
+          const callId = callRows[0].id;
+          await query(
+            `UPDATE hangout_call_participants SET left_at = NOW()
+             WHERE call_id = $1 AND left_at IS NULL`,
+            [callId]
+          );
+        }
+        logger.info('LiveKit room_finished: hangout call marked ended, participants stamped', { groupId, roomName });
       }
     }
 

@@ -82,8 +82,8 @@ module.exports = {
   // PAYMENT SETTINGS
   // ==========================================
   payment: {
-    // Supported providers
-    providers: ['epayco', 'daimo', 'paypal'],
+    // Supported providers — Daimo retired 2026-04-21; PayPal never implemented
+    providers: ['epayco', 'btcpay', 'dash'],
 
     // Default provider
     defaultProvider: process.env.DEFAULT_PAYMENT_PROVIDER || 'epayco',
@@ -91,8 +91,8 @@ module.exports = {
     // Payment methods
     methods: {
       epayco: ['credit_card', 'pse', 'bank_transfer'],
-      daimo: ['usdc'],
-      paypal: ['paypal_wallet'],
+      btcpay: ['btc', 'lightning'],
+      dash: ['dash'],
     },
 
     // Minimum amounts
@@ -241,17 +241,16 @@ module.exports = {
   // ==========================================
   // EXCHANGE RATES
   // ==========================================
+  // NOTE: USD→COP rate is managed exclusively by getEpaycoCopRate() in services/paymentService.js.
+  // These config entries are kept for structural compatibility only — do NOT read defaultRate
+  // or fallback.COP in payment code. Use getEpaycoCopRate() and fail closed if unavailable.
   exchangeRates: {
-    // Default rate: 1 USD = 4000 COP
-    defaultRate: parseFloat(process.env.USD_TO_COP_RATE || '4000'),
-
     // Update interval (hours)
-    updateInterval: 1,
+    updateInterval: 24,
 
-    // Fallback rates
+    // Fallback rates — for non-payment display purposes only (NOT used for ePayco charges)
     fallback: {
       'USD': 1.0,
-      'COP': 4000,
       'EUR': 1.10,
     },
   },

@@ -34,12 +34,15 @@ const schemas = {
 
   /**
    * Payment provider validation
+   * Daimo retired 2026-04-21 — kept out of valid() so any stray daimo-tagged
+   * request fails at the validation boundary (not later via runtime no-op).
+   * btcpay/dash are accepted as they remain active payment rails.
    */
   provider: Joi.string()
-    .valid('daimo', 'epayco')
+    .valid('epayco', 'btcpay', 'dash')
     .required()
     .messages({
-      'any.only': 'Payment provider must be one of: daimo, epayco',
+      'any.only': 'Payment provider must be one of: epayco, btcpay, dash',
       'any.required': 'Payment provider is required',
     }),
 
@@ -91,7 +94,7 @@ const schemas = {
     userId: Joi.string().pattern(/^\d+$/).required(),
     planId: Joi.string().pattern(/^[a-z0-9_-]+$/).required(),
     amount: Joi.number().positive().precision(2).required(),
-    provider: Joi.string().valid('daimo', 'epayco').required(),
+    provider: Joi.string().valid('epayco', 'btcpay', 'dash').required(),
     currency: Joi.string().valid('USD', 'COP', 'USDC').default('USD'),
     metadata: Joi.object().optional(),
   }),
@@ -142,8 +145,8 @@ const schemas = {
       .valid('Aceptada', 'Aprobada', 'Rechazada', 'Pendiente', 'Fallida', 'Abandonada', 'Cancelada', 'Reversada')
       .optional(),
     x_cod_transaction_state: Joi.alternatives().try(
-      Joi.string().valid('1', '2', '3', '4', '5', '6', '10'),
-      Joi.number().valid(1, 2, 3, 4, 5, 6, 10),
+      Joi.string().valid('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'),
+      Joi.number().valid(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
     ).optional(),
     x_signature: Joi.string().optional(), // present in body-hash mode, absent in header-HMAC mode
   }).or('x_transaction_state', 'x_cod_transaction_state').unknown(true),
@@ -154,7 +157,7 @@ const schemas = {
   paymentQuery: Joi.object({
     userId: Joi.string().pattern(/^\d+$/).optional(),
     status: Joi.string().valid('pending', 'completed', 'failed', 'refunded', 'cancelled').optional(),
-    provider: Joi.string().valid('daimo', 'epayco').optional(),
+    provider: Joi.string().valid('epayco', 'btcpay', 'dash').optional(),
     startDate: Joi.date().iso().optional(),
     endDate: Joi.date().iso().min(Joi.ref('startDate')).optional(),
     minAmount: Joi.number().positive().optional(),

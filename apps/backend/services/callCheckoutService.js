@@ -18,6 +18,7 @@ const { sendNotificationViaTelegram } = require('./notificationBotDelivery');
 const emailService = require('./emailservice');
 const logger = require('../utils/logger');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
+const { getEpaycoCopRate } = require('./paymentService');
 
 // Loaded lazily to avoid circular-require on startup
 function getBtcpay() {
@@ -138,7 +139,10 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     // ePayco tokenized checkout page — same pattern as subscription payments
     checkoutUrl = `${CHECKOUT_DOMAIN}/payment/${payment.id}`;
 
-    const usdToCopRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+    // PNPtv displays prices in USD to international users but settles via ePayco's
+    // Colombian acquiring network in COP. The rate is fetched daily from a public
+    // FX API (see services/paymentService.js getEpaycoCopRate). Do not hardcode a fallback — fail closed instead.
+    const usdToCopRate = await getEpaycoCopRate();
     const expectedCOP = String(Math.round(parseFloat(pkg.price_usd) * usdToCopRate));
 
     await query(

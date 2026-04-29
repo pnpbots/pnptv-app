@@ -2,6 +2,7 @@ const PaymentModel = require('../../../models/paymentModel');
 const PlanModel = require('../../../models/planModel');
 const ConfirmationTokenService = require('../../../services/confirmationTokenService');
 const PaymentService = require('../../../services/paymentService');
+const { getEpaycoCopRate } = require('../../../services/paymentService');
 const PaymentSecurityService = require('../../../services/paymentSecurityService');
 const FraudDetectionService = require('../../../services/fraudDetectionService');
 const logger = require('../../../utils/logger');
@@ -18,7 +19,7 @@ const { ensureEmailCredentials } = require('../../../services/userService');
  * Payment Controller - Handles payment-related API endpoints
  */
 class PaymentController {
-  static EPAYCO_3DS_PENDING_TIMEOUT_MINUTES = Number(process.env.EPAYCO_3DS_PENDING_TIMEOUT_MINUTES || 6);
+  static EPAYCO_3DS_PENDING_TIMEOUT_MINUTES = Number(process.env.EPAYCO_3DS_PENDING_TIMEOUT_MINUTES || 20);
 
   static EPAYCO_3DS_AUTHENTICATED_PENDING_TIMEOUT_MINUTES = Number(
     process.env.EPAYCO_3DS_AUTHENTICATED_PENDING_TIMEOUT_MINUTES || 3
@@ -166,7 +167,20 @@ class PaymentController {
       if (paymentType === 'token_purchase') {
         const tokenAmount = payment.metadata?.tokensAmount || 0;
         const paymentAmountUsd = parseFloat(payment.amount) || payment.metadata?.usdAmount || 0;
-        const copRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+        // PNPtv displays prices in USD to international users but settles via ePayco's
+        // Colombian acquiring network in COP. The rate is fetched daily from a public
+        // FX API (see services/paymentService.js getEpaycoCopRate). Do not hardcode a fallback — fail closed instead.
+        let copRate;
+        try {
+          copRate = await getEpaycoCopRate();
+        } catch (fxErr) {
+          logger.error('[ePayco FX] Rate unavailable for token purchase checkout', { error: fxErr.message, paymentId });
+          return res.status(503).json({
+            success: false,
+            error: 'FX rate unavailable, please retry in a few minutes',
+            code: 'FX_RATE_UNAVAILABLE',
+          });
+        }
         const priceInCOP = Math.round(paymentAmountUsd * copRate);
         const amountCOPString = String(priceInCOP);
         const currencyCode = 'COP';
@@ -254,8 +268,20 @@ class PaymentController {
       const paymentAmount = payment.amount || parseFloat(plan.price);
       const isPromo = payment.metadata?.promoId ? true : false;
 
-      // Calculate price in COP using the actual payment amount
-      const copRate = parseFloat(process.env.EPAYCO_USD_TO_COP || '4000');
+      // PNPtv displays prices in USD to international users but settles via ePayco's
+      // Colombian acquiring network in COP. The rate is fetched daily from a public
+      // FX API (see services/paymentService.js getEpaycoCopRate). Do not hardcode a fallback — fail closed instead.
+      let copRate;
+      try {
+        copRate = await getEpaycoCopRate();
+      } catch (fxErr) {
+        logger.error('[ePayco FX] Rate unavailable for plan payment checkout', { error: fxErr.message, paymentId });
+        return res.status(503).json({
+          success: false,
+          error: 'FX rate unavailable, please retry in a few minutes',
+          code: 'FX_RATE_UNAVAILABLE',
+        });
+      }
       const priceInCOP = Math.round(paymentAmount * copRate);
       const amountCOPString = String(priceInCOP);
       const currencyCode = 'COP';
@@ -1057,9 +1083,31 @@ class PaymentController {
         });
       }
 
+      // HIGH-02: Ownership check — without this, anyone with a paymentId UUID
+      // could brute-force the 6-digit OTP for someone else's payment.
+      const sessionUserIdOtp = String(req.session?.user?.id || req.user?.id || '');
+      const paymentForOtp = await PaymentModel.getById(paymentId).catch(() => null);
+      const paymentOwnerOtp = paymentForOtp ? String(paymentForOtp.user_id || paymentForOtp.userId || '') : '';
+      if (!paymentForOtp || !sessionUserIdOtp || sessionUserIdOtp !== paymentOwnerOtp) {
+        logger.warn('verify2FA ownership check failed', { paymentId, sessionUserId: sessionUserIdOtp, paymentOwner: paymentOwnerOtp });
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+
       const { cache } = require('../../../config/redis');
       const key = `payment:2fa:${paymentId}`;
+      // HIGH-02: Persistent attempts counter survives OTP key expiry (which would
+      // otherwise let an attacker re-request a fresh OTP and reset attempts).
+      const persistentLockKey = `payment:2fa:lock:${paymentId}`;
       const data = await cache.get(key);
+      const persistentAttempts = parseInt(await cache.get(persistentLockKey)) || 0;
+
+      if (persistentAttempts >= 9) {
+        // 9 = 3 attempts × 3 OTP requests; lock for the full 30-min TTL.
+        return res.status(429).json({
+          success: false,
+          error: 'Demasiados intentos en esta sesión de pago. Reinicia el pago en 30 minutos.',
+        });
+      }
 
       if (!data) {
         return res.status(400).json({
@@ -1080,6 +1128,7 @@ class PaymentController {
       if (data.otp !== otp) {
         data.attempts = (data.attempts || 0) + 1;
         await cache.set(key, data, 300);
+        await cache.set(persistentLockKey, String(persistentAttempts + 1), 1800);
         return res.status(400).json({
           success: false,
           error: 'Código incorrecto. Intentos restantes: ' + (3 - data.attempts),
@@ -1089,8 +1138,9 @@ class PaymentController {
       // OTP valid - mark as verified (10-minute window to complete payment)
       await cache.set(`payment:2fa:verified:${paymentId}`, true, 600);
       await cache.del(key);
+      await cache.del(persistentLockKey);
 
-      logger.info('2FA verification successful', { paymentId });
+      logger.info('2FA verification successful', { paymentId, userId: sessionUserIdOtp });
 
       res.json({
         success: true,
@@ -1223,12 +1273,17 @@ class PaymentController {
         });
       }
 
+      // CRIT-04: Only trust signals the client cannot forge. `validationData` is
+      // produced by ePayco's validateThreeds.min.js after the issuer challenge
+      // completes; `challengeCompleted` is set by the same SDK on frictionless
+      // flows. The previous `authenticated === true` shortcut let a client POST
+      // its own truthy flag and pass this gate — the ePayco status API was the
+      // real backstop, but accepting client assertions made auditing harder.
       const has3DSValidationResult = Boolean(
         threeDSecure
         && typeof threeDSecure === 'object'
         && (
           (threeDSecure.validationData && typeof threeDSecure.validationData === 'object')
-          || threeDSecure.authenticated === true
           || threeDSecure.challengeCompleted === true
         )
       );
@@ -1413,6 +1468,21 @@ class PaymentController {
             paymentId,
           });
 
+          // CRIT-01: Mark payment completed BEFORE the notification chain.
+          // The notification chain (Telegram DM + 2× emails + bot DMs) can run
+          // longer than the 60s activation lock TTL. If it crashed before the
+          // updateStatus call (which used to be at the end of this branch), a
+          // late-arriving webhook would find the payment still 'pending' and
+          // re-grant entitlements. Mirrors processEpaycoWebhook flow ordering.
+          await PaymentModel.updateStatus(paymentId, 'completed', {
+            transaction_id: refPayco || payment.transactionId,
+            reference: refPayco || payment.reference,
+            epayco_ref: refPayco,
+            payment_method: 'tokenized_card',
+            three_ds_authenticated: true,
+            webhook_processed_at: new Date().toISOString(),
+          });
+
           NotificationEmitter.emit({
             type: 'payment', category: 'commerce', priority: 'high',
             targetUserId: userId,
@@ -1520,16 +1590,8 @@ class PaymentController {
           }
         }
 
-        await PaymentModel.updateStatus(paymentId, 'completed', {
-          transaction_id: refPayco || payment.transactionId,
-          reference: refPayco || payment.reference,
-          epayco_ref: refPayco,
-          payment_method: 'tokenized_card',
-          three_ds_authenticated: true,
-          webhook_processed_at: new Date().toISOString(),
-        });
-
-        await cache.releaseLock(activationLockKey);
+        // Payment was already marked 'completed' before the notification chain (CRIT-01).
+        // Lock release happens in the surrounding finally block.
         return res.json({
           success: true,
           status: 'authenticated',

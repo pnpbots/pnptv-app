@@ -37,6 +37,7 @@ const { createDashInvoice } = require('../config/btcpay');
 const DashTokenService = require('./dashTokenService');
 const logger = require('../utils/logger');
 const { cache } = require('../config/redis');
+const { getEpaycoCopRate } = require('./paymentService');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -366,7 +367,11 @@ class TokenCheckoutService {
 
     // ── ePayco ───────────────────────────────────────────────────────────────
     if (provider === 'epayco') {
-      const priceInCOP = Math.round(usdAmount * 4000);
+      // PNPtv displays prices in USD to international users but settles via ePayco's
+      // Colombian acquiring network in COP. The rate is fetched daily from a public
+      // FX API (see services/paymentService.js getEpaycoCopRate). Do not hardcode a fallback — fail closed instead.
+      const _fxRate = await getEpaycoCopRate();
+      const priceInCOP = Math.round(usdAmount * _fxRate);
       const amountCOPString = String(priceInCOP);
       const currencyCode = 'COP';
       const paymentRef = `TOK-${purchaseUuid.substring(0, 8).toUpperCase()}`;

@@ -47,13 +47,23 @@ async function listParticipants(roomName) {
  *                                         LiveKit until this time. Useful to gate pre-start joins.
  * @param {boolean} [options.canPublishAudio] - Override audio publish capability (default follows isModerator).
  * @param {boolean} [options.canPublishVideo] - Override video publish capability (default follows isModerator).
+ * @param {string}  [options.identityOverride] - When set, replaces participantIdentity entirely.
+ *                                         Hangout calls pass `${userId}-${randomHex}` here so that
+ *                                         a user opening two tabs gets distinct LiveKit participant
+ *                                         slots instead of being kicked from the first tab.
+ *                                         Main Stage callers must NOT set this — stable identity is
+ *                                         required there for cammer-queue dedup.
  * @returns {Promise<string>} Signed JWT string.
  */
 async function generateToken(roomName, participantIdentity, participantName, isModerator = false, options = {}) {
   const ttlSeconds = options.ttlSeconds || 6 * 60 * 60; // 6h default
 
+  // Use caller-supplied override when present (hangout multi-tab support).
+  // Falls back to participantIdentity unchanged, preserving Main Stage dedup behaviour.
+  const resolvedIdentity = options.identityOverride ? String(options.identityOverride) : String(participantIdentity);
+
   const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
-    identity: String(participantIdentity),
+    identity: resolvedIdentity,
     name: String(participantName).slice(0, 100),
     ttl: ttlSeconds,
   });
@@ -107,7 +117,7 @@ async function generateToken(roomName, participantIdentity, participantName, isM
   });
 
   const token = await at.toJwt();
-  logger.debug(`livekitService: generated token for identity=${participantIdentity} room=${roomName} moderator=${isModerator}`);
+  logger.debug(`livekitService: generated token for identity=${resolvedIdentity} room=${roomName} moderator=${isModerator}`);
   return token;
 }
 

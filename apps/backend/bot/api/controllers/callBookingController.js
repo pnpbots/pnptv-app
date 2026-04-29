@@ -90,6 +90,13 @@ async function createCheckout(req, res) {
   } catch (err) {
     logger.error('[callBookingController] createCheckout error', { error: err.message, code: err.code });
 
+    if (err.code === 'FX_RATE_UNAVAILABLE') {
+      return res.status(503).json({
+        success: false,
+        error: 'FX rate unavailable, please retry in a few minutes',
+        code: 'FX_RATE_UNAVAILABLE',
+      });
+    }
     if (err.code === 'PACKAGE_NOT_FOUND') {
       return res.status(404).json({ success: false, error: 'Call package not found or inactive' });
     }

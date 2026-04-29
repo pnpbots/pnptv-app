@@ -28,15 +28,6 @@ const initializeEpayco = () => {
       );
     }
 
-    // H3: Warn if the USD→COP conversion rate is falling back to its hardcoded
-    // default. The rate is used to compute the expected webhook amount, so a
-    // stale default silently overcharges or undercharges users compared to
-    // what the checkout UI displays.
-    if (!process.env.EPAYCO_USD_TO_COP) {
-      logger.warn('EPAYCO_USD_TO_COP not set — falling back to hardcoded 4000 COP/USD. ' +
-        'This value should be refreshed from a live FX source; add EPAYCO_USD_TO_COP to .env.production.');
-    }
-
     // Paper trail for the HMAC header verification path. This fires at boot,
     // not on every webhook, so we can detect misconfiguration during deploy
     // without polluting webhook logs.
