@@ -318,12 +318,12 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
 
           {/* ── Zone 1: Hero ── */}
           <div className="relative w-full aspect-video bg-black flex-shrink-0">
-            {isLive ? (
-              <iframe
-                src={`/live/${liveStreamId}`}
+            {isLive && performer.hlsUrl ? (
+              <LivePlayer
+                src={performer.hlsUrl}
+                title={displayName}
+                poster={posterSrc || undefined}
                 className="w-full h-full"
-                allow="autoplay; encrypted-media"
-                title={`${displayName} live stream`}
               />
             ) : videoTeaser ? (
               <video
