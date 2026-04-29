@@ -553,13 +553,13 @@ VOCABULARY TO AVOID (boring / cheesy):
 - Anything that sounds like a perfume ad or a romance novel
 
 OUTPUT RULES:
-- TITLE on the first line in ALL CAPS, raw and punchy, no quotes
-- Blank line
-- DESCRIPTION: 3-5 short punchy sentences. Concrete details over abstractions. Use the community slang naturally — don't fake it. Stay descriptive, not graphic (no anatomy spelled out).
-- Blank line
-- HASHTAGS: 3-5 relevant tags on a single line, lowercase
+- MAXIMUM 5 LINES TOTAL. No exceptions. Count every line including blank lines.
+- Line 1: TITLE in ALL CAPS, raw and punchy, no quotes
+- Line 2: blank
+- Lines 3-4: DESCRIPTION — at most TWO short punchy sentences. Concrete details over abstractions. Use the community slang naturally — don't fake it. Stay descriptive, not graphic (no anatomy spelled out).
+- Line 5: HASHTAGS — 3-5 relevant tags on a single line, lowercase
 - No markdown (no asterisks, underscores, headers, bullets)
-- Stay under 500 characters total
+- Stay under 400 characters total
 - Output ONLY the title, description, and hashtags. No labels, no preamble.`;
 
 async function generateSafeVideoDescription({ prompt, language = 'English' }) {
@@ -580,10 +580,13 @@ async function generateSafeVideoDescription({ prompt, language = 'English' }) {
 }
 
 async function generateBilingualSafeVideoDescription({ prompt }) {
+  // English-only by product decision (2026-04-29). Function name retained to
+  // avoid breaking the /admin/prime-videos/:id/generate-description route;
+  // `es` returned as empty string for response-shape compatibility.
   const en = await generateSafeVideoDescription({ prompt, language: 'English' });
-  const es = await generateSafeVideoDescription({ prompt, language: 'Spanish' });
-  const combined = `🇬🇧 ENGLISH:\n${en}\n\n🇪🇸 ESPAÑOL:\n${es}`;
-  return { combined, en, es };
+  // Hard-cap to 5 lines as a defense-in-depth on top of the system-prompt rule.
+  const trimmed = en.split('\n').slice(0, 5).join('\n').trim();
+  return { combined: trimmed, en: trimmed, es: '' };
 }
 
 // ── CSAM-safe single-line title rewriter ──────────────────────────────────
