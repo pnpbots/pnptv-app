@@ -800,7 +800,9 @@ const emailLogin = async (req, res) => {
     const emailLower = email.toLowerCase().trim();
     const result = await query(
       `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
-              terms_accepted, photo_file_id, bio, language, password_hash, email, role, email_verified
+              tier, terms_accepted, photo_file_id, bio, language, role, email_verified,
+              password_hash, email, creator_status, content_disclaimer,
+              x_user_id, x_id, twitter
        FROM users WHERE email = $1 AND is_deleted = false`,
       [emailLower]
     );
@@ -811,6 +813,9 @@ const emailLogin = async (req, res) => {
 
     const user = result.rows[0];
     if (!user.password_hash) {
+      if (user.pnptv_id) {
+        return res.status(401).json({ error: 'pnptv_id_login', message: 'This account uses PNPtv ID to sign in. Click "Sign in with PNPtv ID" instead.' });
+      }
       return res.status(401).json({ error: 'This account uses Telegram or X to sign in. Please use those options.' });
     }
 

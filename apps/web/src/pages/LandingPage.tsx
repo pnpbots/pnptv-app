@@ -372,6 +372,11 @@ export function LandingPage() {
       } else if (res.status === 403 && data.error === "email_not_verified") {
         setEmailNotVerified(true);
         setEmailError(null);
+      } else if (res.status === 401 && data.error === "pnptv_id_login") {
+        // Authentik-registered account — no local password; redirect to OIDC
+        setLoginView("options");
+        setEmailError(null);
+        window.location.href = "/api/webapp/auth/oidc/login";
       } else {
         // Normalize Spanish-only backend messages to friendly English
         const raw = data.error || data.message || "Login failed";
@@ -582,15 +587,8 @@ export function LandingPage() {
                       </a>
                     </p>
 
-                    <a
-                      href={RECOVERY_FLOW_URL}
-                      className="block text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1 underline"
-                    >
+                    <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1 underline">
                       Forgot password?
-                    </a>
-
-                    <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1">
-                      Had an X (Twitter) account? Recover it here
                     </button>
                   </>
                 )}
@@ -602,8 +600,8 @@ export function LandingPage() {
                       Back
                     </button>
                     <div className="text-center space-y-1 pb-2">
-                      <p className="text-sm font-semibold text-white">Account Recovery</p>
-                      <p className="text-xs text-pnp-textSecondary">Enter the email linked to your old X or PNPtv account. We'll send a recovery link to set a new password.</p>
+                      <p className="text-sm font-semibold text-white">Reset Password</p>
+                      <p className="text-xs text-pnp-textSecondary">Enter your email address and we'll send a link to set a new password.</p>
                     </div>
                     {recoverSent ? (
                       <div className="text-center py-4 space-y-2">
@@ -698,12 +696,9 @@ export function LandingPage() {
                       {emailLoading && <Spinner />}
                       {emailLoading ? "Logging in…" : "Log in"}
                     </button>
-                    <a
-                      href={RECOVERY_FLOW_URL}
-                      className="block text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1 underline"
-                    >
+                    <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1 underline">
                       Forgot password?
-                    </a>
+                    </button>
                   </div>
                 )}
 
