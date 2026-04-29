@@ -278,6 +278,36 @@ async function mergeUserAccounts(sourceId, targetId, { reason, dimension, perfor
     }
 
     if (Object.keys(updateFields).length > 0) {
+      // Pre-step: clear unique-constrained columns on the source row before
+      // absorbing them onto the target. Without this, columns like email,
+      // telegram, x_user_id, and atproto_did fail with 23505 because both
+      // rows would briefly hold the same value during the absorb UPDATE.
+      // Source eventually has these nulled out at soft-delete (step 4) but
+      // that runs AFTER the absorb, which is too late to release the
+      // constraint. We clear them here, inside the same transaction —
+      // worst case is a rollback returns everything to the pre-merge state.
+      const releaseFields = {};
+      if ('email' in updateFields) releaseFields.email = null;
+      if ('telegram' in updateFields) releaseFields.telegram = null;
+      if ('x_user_id' in updateFields) {
+        releaseFields.x_user_id = null;
+        releaseFields.x_username = null;
+      }
+      if ('atproto_did' in updateFields) {
+        releaseFields.atproto_did = null;
+        releaseFields.atproto_handle = null;
+        releaseFields.atproto_pds_url = null;
+      }
+      if (Object.keys(releaseFields).length > 0) {
+        const releaseClauses = Object.keys(releaseFields)
+          .map((k, i) => `${k} = $${i + 2}`)
+          .join(', ');
+        await client.query(
+          `UPDATE users SET ${releaseClauses} WHERE id = $1`,
+          [sourceId, ...Object.values(releaseFields)]
+        );
+      }
+
       const setClauses = Object.keys(updateFields)
         .map((k, i) => `${k} = $${i + 2}`)
         .join(', ');
