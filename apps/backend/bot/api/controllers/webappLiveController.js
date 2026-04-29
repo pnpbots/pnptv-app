@@ -185,6 +185,10 @@ const listStreams = async (req, res) => {
           const safeHostedRef = sanitizeRefId(hostedRef);
           if (!safeHostedRef) return enriched;
           const target = baseStreams.find((t) => t.id === safeHostedRef);
+          // LOW-04 TODO: hostedChannelName is resolved from the in-memory baseStreams list
+          // fetched at the start of listStreams. If a host sets a new hosted channel after
+          // this list was cached (24h TTL in Redis), the name will be stale until cache
+          // expiry. Acceptable — UX-only label. Refresh on next host-set to fix immediately.
           return {
             ...enriched,
             hostedChannelRef: safeHostedRef,
@@ -1155,6 +1159,32 @@ const buySlotTicket = async (req, res) => {
         return res.status(400).json({ success: false, error: 'USD price not configured for this slot' });
       }
 
+      // HIGH-02: Idempotency guard — return the existing pending checkout URL if the user
+      // already initiated a payment for this slot within the last 15 minutes. This prevents
+      // a double-charge when the user clicks the purchase button multiple times or the
+      // frontend retries. Fail-open on DB error: the existing UNIQUE on live_show_tickets
+      // prevents a double-grant even if two payments complete.
+      try {
+        const { rows: existingPayment } = await getPool().query(
+          `SELECT id, metadata->>'payment_url' AS checkout_url, gateway
+             FROM payments
+            WHERE user_id = $1
+              AND status = 'pending'
+              AND metadata->>'type' = 'live_show_ticket'
+              AND metadata->>'slotId' = $2
+              AND created_at > NOW() - INTERVAL '15 minutes'
+            ORDER BY created_at DESC
+            LIMIT 1`,
+          [userId, id]
+        );
+        if (existingPayment.length > 0 && existingPayment[0].checkout_url) {
+          logger.info('buySlotTicket (epayco): returning existing pending checkout', { userId, slotId: id, paymentId: existingPayment[0].id });
+          return res.json({ success: true, provider: 'epayco', paymentId: existingPayment[0].id, checkoutUrl: existingPayment[0].checkout_url, idempotent: true });
+        }
+      } catch (idempErr) {
+        logger.warn('buySlotTicket (epayco): idempotency check failed, proceeding with new payment', { error: idempErr.message });
+      }
+
       const PaymentModel = require('../../../models/paymentModel');
       const { v4: uuidv4 } = require('uuid');
 
@@ -1249,6 +1279,38 @@ const buySlotTicket = async (req, res) => {
       const priceUsd = parseFloat(slot.ticket_price_usd);
       if (!priceUsd || priceUsd <= 0) {
         return res.status(400).json({ success: false, error: 'USD price not configured for this slot' });
+      }
+
+      // HIGH-02: Idempotency guard — return the existing pending Dash invoice if one was
+      // created within the last 15 minutes. Prevents double-charge on retry. Fail-open.
+      try {
+        const { rows: existingDash } = await getPool().query(
+          `SELECT btcpay_invoice_id, metadata
+             FROM dash_subscription_orders
+            WHERE user_id = $1
+              AND status = 'pending'
+              AND metadata->>'resource' = 'live_show_ticket'
+              AND metadata->>'slotId' = $2
+              AND created_at > NOW() - INTERVAL '15 minutes'
+            ORDER BY created_at DESC
+            LIMIT 1`,
+          [userId, id]
+        );
+        if (existingDash.length > 0) {
+          const { createDashInvoice: _cdi } = require('../../../config/btcpay');
+          const WEB_APP_URL_CHECK = process.env.WEB_APP_URL || 'https://pnptv.app';
+          const existingInvoiceId = existingDash[0].btcpay_invoice_id;
+          logger.info('buySlotTicket (dash): returning existing pending invoice', { userId, slotId: id, invoiceId: existingInvoiceId });
+          return res.json({
+            success: true,
+            provider: 'dash',
+            invoiceId: existingInvoiceId,
+            checkoutUrl: `${process.env.BTCPAY_URL || 'https://btcpay.pnptv.app'}/i/${existingInvoiceId}`,
+            idempotent: true,
+          });
+        }
+      } catch (dashIdempErr) {
+        logger.warn('buySlotTicket (dash): idempotency check failed, proceeding with new invoice', { error: dashIdempErr.message });
       }
 
       const { createDashInvoice } = require('../../../config/btcpay');

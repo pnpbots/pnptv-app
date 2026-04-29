@@ -126,6 +126,17 @@ class PlatformBanService {
         logger.warn('PlatformBanService — failed to clear Redis cache', { userId, error: redisErr.message });
       }
 
+      // ── 6b. HIGH-03: Instantly disconnect any active Socket.IO sessions ────
+      // Publish to the user:banned Redis channel. socketHandlers.js subscribes
+      // to this channel and forcibly disconnects matching sockets within milliseconds,
+      // eliminating the up-to-5-minute window where a banned user could keep chatting.
+      try {
+        const redisPub = getRedis();
+        await redisPub.publish('user:banned', JSON.stringify({ userId: String(userId), reason }));
+      } catch (pubErr) {
+        logger.warn('PlatformBanService — failed to publish ban event to Redis', { userId, error: pubErr.message });
+      }
+
       // ── 7. Send Telegram message to the user ─────────────────────────────────
       const telegramId = u.telegram || String(userId);
       if (botContext) {

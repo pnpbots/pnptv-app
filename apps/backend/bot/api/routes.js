@@ -3647,15 +3647,15 @@ app.get('/api/webapp/live/analytics/sessions', requireSessionAuth, creatorGuard,
 app.get('/api/webapp/live/analytics/summary', requireSessionAuth, creatorGuard, asyncHandler(webappLiveController.getAnalyticsSummary));
 
 // Creator revenue aggregation (tips + tickets + subs + calls)
-app.get('/api/webapp/creator/revenue', requireSessionAuth, asyncHandler(webappLiveController.getCreatorRevenue));
+app.get('/api/webapp/creator/revenue', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.getCreatorRevenue));
 
 // Manual going-live broadcast to followers
-app.post('/api/webapp/live/broadcast-live-now', requireSessionAuth, asyncHandler(webappLiveController.broadcastLiveNow));
+app.post('/api/webapp/live/broadcast-live-now', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.broadcastLiveNow));
 
 // VOD replay recordings
 app.get('/api/webapp/creators/:creatorId/recordings', softAuth, asyncHandler(webappLiveController.listCreatorRecordings));
-app.delete('/api/webapp/recordings/:id', requireSessionAuth, asyncHandler(webappLiveController.deleteRecordingEndpoint));
-app.patch('/api/webapp/recordings/:id', requireSessionAuth, asyncHandler(webappLiveController.updateRecordingEndpoint));
+app.delete('/api/webapp/recordings/:id', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.deleteRecordingEndpoint));
+app.patch('/api/webapp/recordings/:id', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.updateRecordingEndpoint));
 
 // Streamer Settings: persistent encoder + filter preferences
 const streamerSettingsController = require('./controllers/streamerSettingsController');
@@ -3663,10 +3663,11 @@ app.get('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSe
 app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.updateSettings));
 // Gap 2: Persistent thumbnail upload
 app.post('/api/webapp/live/thumbnail', requireSessionAuth, asyncHandler(streamerSettingsController.uploadThumbnail));
-app.post('/api/webapp/live/snapshot', requireSessionAuth, asyncHandler(webappLiveController.uploadSnapshot));
+// MED-02: 6 MB body limit for snapshot uploads (base64-encoded frame); role guard restricts to creators only
+app.post('/api/webapp/live/snapshot', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), express.json({ limit: '6mb' }), asyncHandler(webappLiveController.uploadSnapshot));
 
 // Gap 1: Past-session earnings history for studio panel
-app.get('/api/webapp/live/earnings', requireSessionAuth, asyncHandler(webappLiveController.getEarningsHistory));
+app.get('/api/webapp/live/earnings', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.getEarningsHistory));
 
 // Gap 4: User-uploaded local recording blob
 app.post('/api/webapp/live/recording', requireSessionAuth, webappLiveController.uploadLocalRecording);
@@ -7375,6 +7376,22 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
       return res.status(404).json({ success: false, error: 'Performer not found' });
     }
 
+    // CRIT-03: Self-tip prevention (route-level gate).
+    // Look up the user_id that owns this performer record and reject if it matches
+    // the authenticated tipper. This blocks a creator from tipping themselves to
+    // farm platform earnings or inflate token stats.
+    try {
+      const selfCheck = await getPool().query(
+        'SELECT user_id FROM performers WHERE id::text = $1 OR user_id = $1 LIMIT 1',
+        [resolvedPerformerId]
+      );
+      if (selfCheck.rows.length > 0 && String(selfCheck.rows[0].user_id) === String(userId)) {
+        return res.status(400).json({ success: false, error: 'self_tip_forbidden' });
+      }
+    } catch (selfErr) {
+      logger.warn(`Tips: self-tip check failed (non-fatal): ${selfErr.message}`);
+    }
+
     // Look up performer name for payment description
     let performerName = resolvedPerformerId;
     try {
@@ -7395,7 +7412,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
                AND performer_id = $2
                AND amount = $3
                AND payment_method = 'tokens'
-               AND created_at > NOW() - INTERVAL '5 seconds'
+               AND created_at > NOW() - INTERVAL '60 seconds'
              ORDER BY created_at DESC
              LIMIT 1`,
             [userId, String(resolvedPerformerId), numAmount]

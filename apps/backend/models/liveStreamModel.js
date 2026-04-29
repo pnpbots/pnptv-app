@@ -26,7 +26,7 @@ class LiveStreamModel {
 
     // Use hardcoded schema for known tables to avoid information_schema queries
     const KNOWN_SCHEMAS = {
-      live_streams: ['id','host_id','title','description','category','stream_url','thumbnail_url','status','is_public','scheduled_at','started_at','ended_at','viewers_count_old','max_viewers','created_at','updated_at','channel_name','host_name','ai_moderation_enabled','moderation_thresholds','auto_moderate','is_paid','price','scheduled_for','tags','allow_comments','record_stream','language','duration','current_viewers','total_views','peak_viewers','likes','total_comments','viewers','banned_users','moderators','tokens','recording_url','analytics','chat_settings','viewers_count'],
+      live_streams: ['id','host_id','title','description','category','stream_url','thumbnail_url','status','is_public','scheduled_at','started_at','ended_at','viewers_count_old','max_viewers','created_at','updated_at','channel_name','host_name','ai_moderation_enabled','moderation_thresholds','auto_moderate','is_paid','price','scheduled_for','tags','allow_comments','record_stream','language','duration','current_viewers','total_views','peak_viewers','likes','total_comments','viewers','banned_users','moderators','tokens','recording_url','analytics','chat_settings','viewers_count','is_ticketed','ticket_price_tokens','ticket_price_usd'],
     };
 
     if (KNOWN_SCHEMAS[tableName]) {
