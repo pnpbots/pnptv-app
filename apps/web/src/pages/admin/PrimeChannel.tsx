@@ -78,6 +78,18 @@ export default function PrimeChannel() {
   const [filterStatus, setFilterStatus] = useState<"all" | AdminPrimeVideo["status"]>("all");
   const [search, setSearch] = useState("");
   const [hoverId, setHoverId] = useState<number | null>(null);
+  const [gridCols, setGridColsState] = useState<1 | 2>(() => {
+    try {
+      const saved = localStorage.getItem("pnptv:admin:primeGridCols");
+      return saved === "1" ? 1 : 2;
+    } catch {
+      return 2;
+    }
+  });
+  const setGridCols = (n: 1 | 2) => {
+    setGridColsState(n);
+    try { localStorage.setItem("pnptv:admin:primeGridCols", String(n)); } catch { /* ignore */ }
+  };
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
 
   // Upload modal state
@@ -305,6 +317,38 @@ export default function PrimeChannel() {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 min-w-[200px] px-3 py-2 text-sm rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary placeholder-pnp-textSecondary"
         />
+
+        <div className="flex gap-1 rounded-lg bg-pnp-surface border border-pnp-border p-1" role="group" aria-label="Grid size">
+          <button
+            type="button"
+            onClick={() => setGridCols(1)}
+            title="1 video per row"
+            aria-label="Show 1 video per row"
+            aria-pressed={gridCols === 1}
+            className={`px-2.5 py-1.5 rounded-md transition ${
+              gridCols === 1 ? "bg-pnp-accent text-white" : "text-pnp-textSecondary hover:text-pnp-textPrimary"
+            }`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <rect x="2" y="3" width="12" height="10" rx="1" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => setGridCols(2)}
+            title="2 videos per row"
+            aria-label="Show 2 videos per row"
+            aria-pressed={gridCols === 2}
+            className={`px-2.5 py-1.5 rounded-md transition ${
+              gridCols === 2 ? "bg-pnp-accent text-white" : "text-pnp-textSecondary hover:text-pnp-textPrimary"
+            }`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <rect x="2" y="3" width="5" height="10" rx="1" />
+              <rect x="9" y="3" width="5" height="10" rx="1" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Toast */}
@@ -334,7 +378,7 @@ export default function PrimeChannel() {
         <div className="text-center py-12 text-pnp-textSecondary">No videos match this filter.</div>
       )}
 
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
+      <div className={`grid gap-4 ${gridCols === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
         {filtered.map((item) => {
           const draft = drafts[item.id] || buildDraft(item);
           const dirty = Object.keys(diffPatch(item, draft)).length > 0;
