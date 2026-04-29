@@ -1242,24 +1242,6 @@ export default function Channels() {
           </div>
         </div>
 
-        {/* PNPtv PRIME Telegram banner */}
-        <a
-          href="https://t.me/+EqPmsr1ZeQ5iMzlh"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-3 px-4 py-3 rounded-xl border transition-all hover:scale-[1.01] active:scale-[0.99]"
-          style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(230,145,56,0.12))", borderColor: "rgba(212,0,122,0.3)" }}
-        >
-          <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-            <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 2.3L2.1 9.7c-1.2.5-1.2 1.7-.2 2l4.8 1.5 1.8 5.6c.2.7 1 .9 1.5.4l2.7-2.7 5.3 3.9c1 .7 1.8.3 2-1L22.8 3.7c.3-1.3-.5-1.8-1-.4z" /></svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white">PNPtv PRIME on Telegram</p>
-            <p className="text-xs text-pnp-textSecondary">Watch exclusive videos while we migrate content to the app</p>
-          </div>
-          <svg className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
-        </a>
-
         {/* ── CHANNELS VIEW (primary) ── */}
         <>
             {/* Search + Create button row */}

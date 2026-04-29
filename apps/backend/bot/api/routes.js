@@ -2667,6 +2667,43 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     }
   }
 
+  // Fallback #3 — username match. Telegram-widget users have placeholder
+  // @telegram.pnptv.app emails in Authentik that don't match their real email
+  // in our users table, so the email lookup misses. Match by preferred_username
+  // before falling through to INSERT (otherwise the unique-username constraint
+  // throws 500 on every login attempt).
+  if (!userRow && preferred_username) {
+    const usernameLookup = await pool.query(
+      `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
+              tier, terms_accepted, photo_file_id, bio, language, role,
+              creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
+              email, last_login_method
+       FROM users
+       WHERE LOWER(username) = LOWER($1) AND is_deleted = false
+       LIMIT 1`,
+      [preferred_username]
+    );
+    if (usernameLookup.rows.length > 0) {
+      userRow = usernameLookup.rows[0];
+      const displayName = name || preferred_username || userRow.first_name || null;
+      await pool.query(
+        `UPDATE users
+         SET pnptv_id = $1,
+             last_login_method = 'oidc',
+             last_login_at = NOW(),
+             first_name = COALESCE(NULLIF($2, ''), first_name),
+             photo_file_id = COALESCE(NULLIF($3, ''), photo_file_id),
+             email = COALESCE(NULLIF($4, ''), email)
+         WHERE id = $5`,
+        [sub, displayName, picture || null, email || null, userRow.id]
+      );
+      userRow.pnptv_id = sub;
+      userRow.first_name = displayName || userRow.first_name;
+      userRow.last_login_method = 'oidc';
+      logger.info('[OIDC] Linked pnptv_id to existing username account', { userId: userRow.id, sub, username: preferred_username });
+    }
+  }
+
   if (!userRow) {
     // No existing user — create a new PNPtv account linked to this Authentik identity
     const baseUsername = (preferred_username || (email ? email.split('@')[0] : null) || `user_${crypto.randomBytes(4).toString('hex')}`)
@@ -2676,8 +2713,10 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
 
     // Ensure username uniqueness by appending a random hex suffix if needed
     let finalUsername = baseUsername || `user_${crypto.randomBytes(4).toString('hex')}`;
+    // Probe for collisions (active OR soft-deleted rows). The unique index
+    // covers ALL rows, not just active ones, so we must include soft-deleted.
     const usernameCheck = await pool.query(
-      'SELECT 1 FROM users WHERE username = $1 LIMIT 1',
+      'SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1',
       [finalUsername]
     );
     if (usernameCheck.rows.length > 0) {
@@ -2685,28 +2724,63 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     }
 
     const newUserId = crypto.randomUUID();
-    const newPnptvId = crypto.randomUUID();
-    const insertResult = await pool.query(
-      `INSERT INTO users
-         (id, pnptv_id, username, first_name, email, email_verified,
-          photo_file_id, tier, subscription_status, terms_accepted,
-          role, last_login_method, last_login_at, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'free', 'free', false,
-               'user', 'oidc', NOW(), NOW(), NOW())
-       RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
-                 tier, terms_accepted, photo_file_id, bio, language, role,
-                 creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
-                 email, last_login_method`,
-      [
-        newUserId,
-        sub,  // pnptv_id = Authentik sub (source of truth)
-        finalUsername,
-        name || preferred_username || finalUsername,
-        email ? email.toLowerCase() : null,
-        email_verified === true,
-        picture || null,
-      ]
-    );
+    let insertResult;
+    try {
+      insertResult = await pool.query(
+        `INSERT INTO users
+           (id, pnptv_id, username, first_name, email, email_verified,
+            photo_file_id, tier, subscription_status, terms_accepted,
+            role, last_login_method, last_login_at, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'free', 'free', false,
+                 'user', 'oidc', NOW(), NOW(), NOW())
+         RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
+                   tier, terms_accepted, photo_file_id, bio, language, role,
+                   creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
+                   email, last_login_method`,
+        [
+          newUserId,
+          sub,
+          finalUsername,
+          name || preferred_username || finalUsername,
+          email ? email.toLowerCase() : null,
+          email_verified === true,
+          picture || null,
+        ]
+      );
+    } catch (err) {
+      // Race or soft-deleted-row collision survived the precheck. Last-resort
+      // recovery: append entropy and retry once. If that also fails, abort
+      // gracefully instead of 500-bouncing the user.
+      if (err.code === '23505' && /username/i.test(err.constraint || '')) {
+        const recoverUsername = `${finalUsername}_${crypto.randomBytes(4).toString('hex')}`;
+        logger.warn('[OIDC] Username collision survived precheck, retrying with entropy suffix', {
+          original: finalUsername, retry: recoverUsername, sub,
+        });
+        insertResult = await pool.query(
+          `INSERT INTO users
+             (id, pnptv_id, username, first_name, email, email_verified,
+              photo_file_id, tier, subscription_status, terms_accepted,
+              role, last_login_method, last_login_at, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'free', 'free', false,
+                   'user', 'oidc', NOW(), NOW(), NOW())
+           RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
+                     tier, terms_accepted, photo_file_id, bio, language, role,
+                     creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
+                     email, last_login_method`,
+          [
+            newUserId,
+            sub,
+            recoverUsername,
+            name || preferred_username || recoverUsername,
+            email ? email.toLowerCase() : null,
+            email_verified === true,
+            picture || null,
+          ]
+        );
+      } else {
+        throw err;
+      }
+    }
     userRow = insertResult.rows[0];
     logger.info('[OIDC] Created new PNPtv user via Authentik OIDC', {
       userId: userRow.id,

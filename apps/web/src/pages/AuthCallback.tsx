@@ -63,7 +63,7 @@ export default function AuthCallback() {
           localStorage.removeItem("pnptv:adminRedirect");
           navigate("/admin", { replace: true });
         } else {
-          navigate("/media", { replace: true });
+          navigate("/", { replace: true });
         }
       })
       .catch((err) => {

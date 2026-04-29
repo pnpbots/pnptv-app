@@ -206,7 +206,21 @@ function TelegramLoginWidget({ onAuth, onLoadError }: TelegramWidgetProps) {
       onLoadErrorRef.current();
     }, LOAD_TIMEOUT_MS);
 
-    script.onload = () => clearTimeout(timer);
+    // Even when the script loads, the iframe can be silently dropped by ad
+    // blockers, privacy shields, or third-party-cookie blockers. We re-check
+    // ~2.5s after onload — if no <iframe> rendered, treat it as blocked.
+    let renderCheck: ReturnType<typeof setTimeout> | null = null;
+    script.onload = () => {
+      clearTimeout(timer);
+      renderCheck = setTimeout(() => {
+        if (
+          containerRef.current &&
+          !containerRef.current.querySelector("iframe")
+        ) {
+          onLoadErrorRef.current();
+        }
+      }, 2500);
+    };
     script.onerror = () => {
       clearTimeout(timer);
       onLoadErrorRef.current();
@@ -217,6 +231,7 @@ function TelegramLoginWidget({ onAuth, onLoadError }: TelegramWidgetProps) {
 
     return () => {
       clearTimeout(timer);
+      if (renderCheck) clearTimeout(renderCheck);
       delete (window as unknown as Record<string, unknown>)["onTelegramAuth"];
       if (
         scriptRef.current &&
@@ -490,9 +505,27 @@ export function LoginPage() {
             <p className="text-center text-xs text-red-400 mt-2">{widgetError}</p>
           )}
           {widgetBlocked && (
-            <p className="text-center text-xs mt-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-              {t.telegramWidgetBlocked}
-            </p>
+            <div className="mt-3 space-y-2">
+              <p className="text-center text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                {t.telegramWidgetBlocked}
+              </p>
+              <a
+                href={`https://t.me/${getBotUsername()}?start=login`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.98]"
+                style={{
+                  background: "#229ED9",
+                  color: "#FFFFFF",
+                  boxShadow: "0 0 16px rgba(34, 158, 217, 0.35)",
+                }}
+              >
+                <svg viewBox="0 0 24 24" className="w-4 h-4" fill="currentColor" aria-hidden="true">
+                  <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+                </svg>
+                <span>{t.telegramInstructions}</span>
+              </a>
+            </div>
           )}
         </div>
 

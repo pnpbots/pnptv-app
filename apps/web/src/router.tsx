@@ -57,7 +57,6 @@ import { TierGate } from "@/components/TierGate";
 const Home = lazy(() => import("@/pages/Home"));
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
-const Media = lazy(() => import("@/pages/Media"));
 const Live = lazy(() => import("@/pages/Live"));
 const Stream = lazy(() => import("@/pages/Stream"));
 const Nearby = lazy(() => import("@/pages/Nearby"));
@@ -152,13 +151,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "media",
-        element: (
-          <ModuleLoader>
-            <VerificationGate>
-              <Media />
-            </VerificationGate>
-          </ModuleLoader>
-        ),
+        element: <Navigate to="/channels" replace />,
       },
       {
         path: "live",
