@@ -18,3 +18,4 @@ public/uploads/
 
 # Runtime-downloaded binaries
 apps/backend/yt-dlp_linux
+.claude/
