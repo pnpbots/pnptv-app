@@ -332,6 +332,78 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 app.use(ipTracker); // Log every authenticated request IP for security
 
+// Geo-block for jurisdictions with hostile age-verification regimes.
+//
+// Blocks: US states TX/TN/FL (state laws with $50k/violation penalties and/or
+// onerous retention requirements like Tennessee's hourly re-verification +
+// 7-year retention) and the UK (Online Safety Act / Ofcom HEAA enforcement
+// from April 2026 — fines up to 10% global revenue or £18M).
+//
+// Returns 451 (Unavailable For Legal Reasons) on API; redirects to a static
+// /blocked-jurisdiction page on browser navigation. Admins bypass for debug.
+// Cached per-IP in Redis 1h to avoid the geoip lookup on every request.
+// (geoip module is already required at the top of the file — reuse it.)
+const BLOCKED_US_REGIONS = new Set(['TX', 'TN', 'FL']);
+const BLOCKED_COUNTRIES = new Set(['GB']);
+const GEO_BLOCK_BYPASS_PATHS = [
+  /^\/blocked-jurisdiction$/,
+  /^\/health$/,
+  /^\/api\/health\b/,
+  /^\/auth\//,                  // login flow stays open so admins can sign in
+  /^\/assets\//,
+  /^\/sw\.js$/,
+  /^\/favicon\.ico$/,
+];
+function classifyGeo(ip) {
+  if (!ip) return null;
+  const cleanIp = ip.replace(/^::ffff:/, '');
+  const lookup = geoip.lookup(cleanIp);
+  if (!lookup) return null;
+  const country = lookup.country;
+  const region = lookup.region || '';
+  if (BLOCKED_COUNTRIES.has(country)) {
+    return { blocked: true, country, region, reason: 'UK_OSA' };
+  }
+  if (country === 'US' && BLOCKED_US_REGIONS.has(region)) {
+    return { blocked: true, country, region, reason: `US_${region}_AGE_VERIFICATION` };
+  }
+  return { blocked: false, country, region };
+}
+
+const { cache: geoCache } = require('../../config/redis');
+app.use(async (req, res, next) => {
+  if (GEO_BLOCK_BYPASS_PATHS.some(rx => rx.test(req.path))) return next();
+  // Admin bypass — once authenticated, admins can travel into blocked regions
+  // to debug. Pre-auth requests fall through to the geo check.
+  if (req.session?.user?.role === 'admin' || req.session?.user?.role === 'superadmin') return next();
+  try {
+    const ip = req.ip;
+    const cacheKey = `geoblock:${ip}`;
+    let cached = await geoCache.get(cacheKey);
+    let result;
+    if (cached) {
+      result = typeof cached === 'string' ? JSON.parse(cached) : cached;
+    } else {
+      result = classifyGeo(ip);
+      if (result) await geoCache.set(cacheKey, JSON.stringify(result), 3600);
+    }
+    if (result?.blocked) {
+      logger.info('Geo-block triggered', { ip, country: result.country, region: result.region, path: req.path });
+      if (req.path.startsWith('/api/')) {
+        return res.status(451).json({
+          error: `This service is not available in your jurisdiction (${result.country}${result.region ? '/' + result.region : ''}) due to local age-verification laws.`,
+          code: 'GEO_BLOCKED',
+          reason: result.reason,
+        });
+      }
+      return res.redirect(302, '/blocked-jurisdiction');
+    }
+  } catch (err) {
+    logger.warn('Geo-block check failed open', { error: err.message });
+  }
+  return next();
+});
+
 // Wellness Mode access guard. When a user has active wellness mode (set
 // themselves for self-imposed sober break / recovery), block access to any
 // route NOT in the wellness allowlist. Public routes and unauthenticated
@@ -1024,6 +1096,7 @@ const legalPages = {
   '/creator-terms': 'creator-terms.html',
   '/dmca': 'content-policy.html',  // DMCA is covered in content policy
   '/safety': 'safety.html',
+  '/blocked-jurisdiction': 'blocked-jurisdiction.html',
 };
 for (const [route, file] of Object.entries(legalPages)) {
   app.get(route, pageLimiter, (req, res) => {
