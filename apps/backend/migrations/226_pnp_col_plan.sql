@@ -7,7 +7,7 @@
 -- the entitlements through the existing plan_add_ons pipeline after payment.
 --
 -- Two SKUs per the approved plan: monthly $49.99 (30-day recurring) and
--- lifetime $49.99 (one-time). Both grant the marker 'pnp-col' plus 'prime'
+-- lifetime $249.99 (one-time). Both grant the marker 'pnp-col' plus 'prime'
 -- for full-UX parity with global Prime subscribers.
 --
 -- Idempotent: safe to re-run.
@@ -46,7 +46,7 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- 3. Plan: PNP Col Lifetime (one-time, $49.99 USD)
+-- 3. Plan: PNP Col Lifetime (one-time, $249.99 USD)
 INSERT INTO plans (
   id, sku, name, display_name, tier,
   price, currency, price_in_cop,
@@ -60,14 +60,17 @@ VALUES (
   'PNP Col Lifetime',
   'PNP Col — Lifetime',
   'pnp-col',
-  49.99, 'USD', ROUND(49.99 * 4000)::numeric(10,2),
+  249.99, 'USD', ROUND(249.99 * 4000)::numeric(10,2),
   36500, 36500,
   'Lifetime platform access for users in Colombia. One-time payment.',
   '["Full platform access for Colombia","Prime UX tier","One-time payment — never expires"]'::jsonb,
   true, true,
   false
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+  SET price = EXCLUDED.price,
+      price_in_cop = EXCLUDED.price_in_cop,
+      updated_at = NOW();
 
 -- 4. Plan → add-on mappings.
 -- Monthly grants 30-day pnp-col + 30-day prime. Lifetime grants lifetime both.

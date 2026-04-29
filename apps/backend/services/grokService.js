@@ -523,61 +523,6 @@ async function generateVideoDescription({ prompt, hasMedia = false, includeLex =
   return { combined, en: enContent, es: esContent, english: enContent, spanish: esContent };
 }
 
-/**
- * Generate bilingual sales post content
- * @param {Object} options - Generation options
- * @param {string} options.prompt - Sales pitch details (product, price, benefits, etc.)
- * @param {boolean} options.hasMedia - Whether post has media
- * @param {boolean} options.includeLex - Include Lex persona
- * @param {boolean} options.includeSantino - Include Santino persona
- * @returns {Promise<{combined: string, en: string, es: string}>}
- */
-async function generateSalesPost({ prompt, hasMedia = false, includeLex = false, includeSantino = false }) {
-  const maxCharsPerLang = 500;
-  const chatFn = module.exports.chat || chat;
-
-  let lexInstruction = includeLex ? '- Include Lex hashtags (#LexPer #PNPtvLex)\n' : '';
-  let santinoInstruction = includeSantino ? '- Include Santino hashtags (#Santino #MethDaddy #CultoSantino)\n' : '';
-
-  // Generate English version
-  const enPrompt = `Create a sales post for: ${prompt}\n\nRequirements:\n- Language: English\n- HOOK in ALL CAPS (scroll-stopping)\n- Include price and benefits clearly\n- CTA with approved link (t.me/pnplatinotv_bot?start=plans or pnptv.app)\n${lexInstruction}${santinoInstruction}- End with hashtags`;
-
-  let enContent = await chatFn({
-    mode: 'salesPost',
-    language: 'English',
-    prompt: enPrompt,
-    maxTokens: 280,
-  });
-
-  if (enContent.length > maxCharsPerLang) {
-    enContent = enContent.substring(0, maxCharsPerLang - 3) + '...';
-  }
-
-  // Generate Spanish version
-  const esPrompt = `Create a sales post for: ${prompt}\n\nRequirements:\n- Language: Spanish\n- HOOK in ALL CAPS (scroll-stopping)\n- Include price and benefits clearly\n- CTA with approved link (t.me/pnplatinotv_bot?start=plans or pnptv.app)\n${lexInstruction}${santinoInstruction}- End with hashtags`;
-
-  let esContent = await chatFn({
-    mode: 'salesPost',
-    language: 'Spanish',
-    prompt: esPrompt,
-    maxTokens: 280,
-  });
-
-  if (esContent.length > maxCharsPerLang) {
-    esContent = esContent.substring(0, maxCharsPerLang - 3) + '...';
-  }
-
-  const combined = `🇬🇧 ENGLISH:\n${enContent}\n\n🇪🇸 ESPAÑOL:\n${esContent}`;
-
-  logger.info('Generated sales post', {
-    enLength: enContent.length,
-    esLength: esContent.length,
-    combinedLength: combined.length
-  });
-
-  return { combined, en: enContent, es: esContent, english: enContent, spanish: esContent };
-}
-
 // ---------------------------------------------------------------------------
 // CSAM-safe video description generator.
 // xAI's safety classifier rejects requests when the heavy "Meth Daddy" persona
@@ -658,6 +603,7 @@ async function generateSafeVideoTitle({ prompt }) {
     maxTokens: 40,
     systemOverride: SAFE_TITLE_SYSTEM,
   });
+  // Clean stray quotes, trailing punctuation, line breaks
   title = String(title).split('\n')[0].trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\.$/, '');
   if (title.length > 80) title = title.slice(0, 80);
   return title;
@@ -692,7 +638,63 @@ Rules:
     .split(/[,\n]/)
     .map((s) => s.trim().toLowerCase().replace(/^["'`#]+|["'`]+$/g, ''))
     .filter((s) => allowed.has(s));
+  // de-dupe, cap at 5
   return Array.from(new Set(picked)).slice(0, 5);
+}
+
+/**
+ * Generate bilingual sales post content
+ * @param {Object} options - Generation options
+ * @param {string} options.prompt - Sales pitch details (product, price, benefits, etc.)
+ * @param {boolean} options.hasMedia - Whether post has media
+ * @param {boolean} options.includeLex - Include Lex persona
+ * @param {boolean} options.includeSantino - Include Santino persona
+ * @returns {Promise<{combined: string, en: string, es: string}>}
+ */
+async function generateSalesPost({ prompt, hasMedia = false, includeLex = false, includeSantino = false }) {
+  const maxCharsPerLang = 500;
+  const chatFn = module.exports.chat || chat;
+
+  let lexInstruction = includeLex ? '- Include Lex hashtags (#LexPer #PNPtvLex)\n' : '';
+  let santinoInstruction = includeSantino ? '- Include Santino hashtags (#Santino #MethDaddy #CultoSantino)\n' : '';
+
+  // Generate English version
+  const enPrompt = `Create a sales post for: ${prompt}\n\nRequirements:\n- Language: English\n- HOOK in ALL CAPS (scroll-stopping)\n- Include price and benefits clearly\n- CTA with approved link (t.me/pnplatinotv_bot?start=plans or pnptv.app)\n${lexInstruction}${santinoInstruction}- End with hashtags`;
+
+  let enContent = await chatFn({
+    mode: 'salesPost',
+    language: 'English',
+    prompt: enPrompt,
+    maxTokens: 280,
+  });
+
+  if (enContent.length > maxCharsPerLang) {
+    enContent = enContent.substring(0, maxCharsPerLang - 3) + '...';
+  }
+
+  // Generate Spanish version
+  const esPrompt = `Create a sales post for: ${prompt}\n\nRequirements:\n- Language: Spanish\n- HOOK in ALL CAPS (scroll-stopping)\n- Include price and benefits clearly\n- CTA with approved link (t.me/pnplatinotv_bot?start=plans or pnptv.app)\n${lexInstruction}${santinoInstruction}- End with hashtags`;
+
+  let esContent = await chatFn({
+    mode: 'salesPost',
+    language: 'Spanish',
+    prompt: esPrompt,
+    maxTokens: 280,
+  });
+
+  if (esContent.length > maxCharsPerLang) {
+    esContent = esContent.substring(0, maxCharsPerLang - 3) + '...';
+  }
+
+  const combined = `🇬🇧 ENGLISH:\n${enContent}\n\n🇪🇸 ESPAÑOL:\n${esContent}`;
+
+  logger.info('Generated sales post', {
+    enLength: enContent.length,
+    esLength: esContent.length,
+    combinedLength: combined.length
+  });
+
+  return { combined, en: enContent, es: esContent, english: enContent, spanish: esContent };
 }
 
 module.exports = {
