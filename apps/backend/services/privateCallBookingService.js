@@ -551,19 +551,28 @@ class PrivateCallBookingService {
       // Generate a cryptographically unpredictable room ID using a full UUID suffix
       const roomId = `pnptv-priv-${uuidv4()}`;
 
-      // Generate per-participant LiveKit tokens (6h TTL, built into livekitService)
+      // Per-participant LiveKit tokens. TTL = booking duration + 5 min buffer
+      // (caps at 90 min) so a leaked token doesn't extend beyond the paid
+      // session window. Bookings reaching the cap should be re-issued tokens
+      // by the controller if a longer call is required.
+      const tokenTtlSec = Math.min(
+        Math.max(15 * 60, ((booking.durationMinutes || 30) * 60) + 300),
+        90 * 60
+      );
       const userToken = await generateToken(
         roomId,
         String(booking.userId),
         booking.userName || 'User',
-        false
+        false,
+        { ttlSeconds: tokenTtlSec }
       );
 
       const performerToken = await generateToken(
         roomId,
         `performer-${booking.performerId}`,
         booking.performerName || 'Performer',
-        true
+        true,
+        { ttlSeconds: tokenTtlSec }
       );
 
       // Store LiveKit connection info as join URLs (JSON-encoded for the frontend)

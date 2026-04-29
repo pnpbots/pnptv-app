@@ -56,7 +56,12 @@ async function listParticipants(roomName) {
  * @returns {Promise<string>} Signed JWT string.
  */
 async function generateToken(roomName, participantIdentity, participantName, isModerator = false, options = {}) {
-  const ttlSeconds = options.ttlSeconds || 6 * 60 * 60; // 6h default
+  // Default TTL is 2h — covers most call/DM/booking scenarios. Callers with
+  // legitimately longer-lived rooms (Main Stage rotation, persistent hangouts)
+  // must pass options.ttlSeconds explicitly. Booking flows should pass the
+  // actual slot duration + a small buffer so a leaked token doesn't outlast
+  // the call window.
+  const ttlSeconds = options.ttlSeconds || 2 * 60 * 60;
 
   // Use caller-supplied override when present (hangout multi-tab support).
   // Falls back to participantIdentity unchanged, preserving Main Stage dedup behaviour.

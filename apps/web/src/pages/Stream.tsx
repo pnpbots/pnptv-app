@@ -110,6 +110,10 @@ export default function Stream() {
   const [chatInput, setChatInput] = useState("");
   const [tipPaymentTab, setTipPaymentTab] = useState<"tokens" | "dash">("tokens");
   const [tipping, setTipping] = useState(false);
+  // tippingRef gates re-entrant calls to handleTip — setTipping is async,
+  // so a fast double-click could fire two tips before the first state update
+  // disables the button. The ref is synchronous and bulletproof.
+  const tippingRef = useRef(false);
   const [tipSubmitting, setTipSubmitting] = useState(false);
   const [tipError, setTipError] = useState<string | null>(null);
   const [tipSuccess, setTipSuccess] = useState<string | null>(null);
@@ -472,6 +476,11 @@ export default function Stream() {
       return;
     }
     const channelRef = streamId ? extractChannelRef(streamId) : null;
+    // localStorage fallback key MUST be tied to a real user id. Without one
+    // the key collapses to `live_rules_ack_undefined` which gets shared
+    // across every account that uses this device — a returning user could
+    // bypass the rules gate based on a previous user's acknowledgment.
+    const cacheKey = user?.id ? `live_rules_ack_${user.id}` : null;
     setRulesLoading(true);
     getLiveRulesStatus(channelRef)
       .then((data) => {
@@ -479,16 +488,18 @@ export default function Stream() {
           setRulesAcknowledged(data.acknowledged);
           setCreatorRules(data.creatorRules ?? null);
           setCreatorRulesName(data.creatorName ?? null);
-        } else {
+        } else if (cacheKey) {
           // On unexpected API error, fail closed; use localStorage cache as fallback
-          const cached = localStorage.getItem(`live_rules_ack_${user?.id}`);
+          const cached = localStorage.getItem(cacheKey);
           setRulesAcknowledged(cached === 'true');
         }
       })
       .catch(() => {
         // Network failure — fail closed; use localStorage cache as fallback
-        const cached = localStorage.getItem(`live_rules_ack_${user?.id}`);
-        setRulesAcknowledged(cached === 'true');
+        if (cacheKey) {
+          const cached = localStorage.getItem(cacheKey);
+          setRulesAcknowledged(cached === 'true');
+        }
       })
       .finally(() => {
         setRulesLoading(false);
@@ -870,6 +881,23 @@ export default function Stream() {
   const handleTip = async (amount: number) => {
     if (!isAuthenticated) { login(); return; }
 
+    // Re-entry guard against rapid double-clicks. Returns immediately if a
+    // tip is already in flight; the visible button is also disabled via
+    // `tipping` state but useState is async, so the synchronous ref is the
+    // bulletproof gate.
+    if (tippingRef.current) return;
+    tippingRef.current = true;
+
+    // Pre-flight balance check for token tips. Server still enforces this
+    // (UPDATE WHERE balance_tokens >= amount), but failing on the server
+    // shows the user a generic error toast — checking client-side lets us
+    // give them the precise "you have X, need Y" message before the round-trip.
+    if (tipPaymentTab === "tokens" && tokenBalance !== null && tokenBalance < amount) {
+      setTipError(t.live.insufficientTokens(tokenBalance));
+      tippingRef.current = false;
+      return;
+    }
+
     // Dash tip — create BTCPay invoice, show in-app QR
     if (tipPaymentTab === "dash") {
       setTipping(true);
@@ -922,6 +950,7 @@ export default function Stream() {
       } finally {
         setTipping(false);
         setTipSubmitting(false);
+        tippingRef.current = false;
       }
       return;
     }
@@ -944,6 +973,7 @@ export default function Stream() {
     } finally {
       setTipping(false);
       setTipSubmitting(false);
+      tippingRef.current = false;
     }
   };
 

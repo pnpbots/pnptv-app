@@ -210,9 +210,16 @@ class PNPLiveService {
       // SVC-M1: Acquire a per-slot Redis lock to prevent two concurrent requests
       // from both passing the overlap check and double-booking the exact same slot.
       // Lock key is at slot granularity: modelId + ISO start time (minute precision).
+      //
+      // Lock TTL is duration + buffer rather than a fixed 10s — a slow payment
+      // tokenization or 3DS challenge can hold the request for 30+s, during
+      // which the original 10s lock expired and a second request could acquire
+      // it. The atomic UPDATE on the bookings table is the final correctness
+      // gate, but this lock is the load-shed in front of it.
       const slotStartIso = bookingTimeUtc.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
       bookingLockKey = `booking:lock:slot:${modelId}:${slotStartIso}`;
-      const lockAcquired = await cache.acquireLock(bookingLockKey, 10); // 10-second TTL
+      const lockTtlSeconds = Math.max(60, Math.min(durationMinutes * 60 + 300, 3600));
+      const lockAcquired = await cache.acquireLock(bookingLockKey, lockTtlSeconds);
       if (!lockAcquired) {
         return {
           success: false,
@@ -1012,18 +1019,28 @@ class PNPLiveService {
   /**
    * Request refund for a booking
    * @param {number} bookingId - Booking ID
-   * @param {string} userId - User ID
+   * @param {string} userId - User ID. **MUST** be derived from a trusted
+   *                          source (req.session.user.id, ctx.from.id) and
+   *                          NEVER from a request body — passing a victim's
+   *                          userId here would let an attacker refund any
+   *                          booking they can guess the ID of. The
+   *                          booking.user_id === userId comparison below is
+   *                          the protection, but it depends on userId being
+   *                          authoritative.
    * @param {string} reason - Refund reason
    * @returns {Promise<Object>} Created refund request
    */
   static async requestRefund(bookingId, userId, reason) {
     try {
+      if (!userId) {
+        throw new Error('userId is required and must come from session');
+      }
       const booking = await this.getBookingById(bookingId);
       if (!booking) {
         throw new Error('Booking not found');
       }
 
-      if (booking.user_id !== userId) {
+      if (String(booking.user_id) !== String(userId)) {
         throw new Error('Only the booking user can request refund');
       }
 

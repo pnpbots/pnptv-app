@@ -80,6 +80,26 @@ class PNPLiveTipsService {
     if (performerId) {
       const CreatorService = require('./creatorService');
       await CreatorService.assertCreatorUnlocked(performerId);
+
+      // Block tips when the performer has blocked the tipper. The platform
+      // already blocks DMs and other interactions for blocked users; allowing
+      // a blocked tipper to keep funneling tokens to the creator who blocked
+      // them is a real abuse vector (and confusing to creators who think
+      // their block was effective). The reverse check (tipper blocked the
+      // performer) is intentionally NOT enforced — if a viewer tipped someone
+      // they later blocked, that's their choice.
+      const { query: q } = require('../config/postgres');
+      const { rows: blocks } = await q(
+        `SELECT 1 FROM blocked_users
+         WHERE user_id = $1 AND blocked_user_id = $2 LIMIT 1`,
+        [String(performerId), String(userId)]
+      );
+      if (blocks.length > 0) {
+        const err = new Error('You cannot tip this performer');
+        err.name = 'BlockedByPerformerError';
+        err.status = 403;
+        throw err;
+      }
     }
 
     let client;
@@ -105,13 +125,17 @@ class PNPLiveTipsService {
 
       const newBalance = debitResult.rows[0].balance_tokens;
 
-      // Insert tip record as already paid
+      // Insert tip record as already paid. transaction_id uses crypto.randomUUID
+      // (collision-resistant) instead of `TOKEN-${userId}-${Date.now()}` which
+      // collides if two tips are sent in the same millisecond by the same user
+      // and breaks the idempotency contract of source_payment_id on creator_earnings.
+      const txId = `TOKEN-${require('crypto').randomUUID()}`;
       const tipResult = await client.query(
         `INSERT INTO pnp_tips
          (user_id, model_id, performer_id, booking_id, amount, message, payment_status, transaction_id, created_at, completed_at)
          VALUES ($1, NULL, $2, NULL, $3, $4, 'completed', $5, NOW(), NOW())
          RETURNING *`,
-        [userId, String(performerId), amount, (message || '').slice(0, 200), `TOKEN-${userId}-${Date.now()}`]
+        [userId, String(performerId), amount, (message || '').slice(0, 200), txId]
       );
 
       const tip = tipResult.rows[0];
