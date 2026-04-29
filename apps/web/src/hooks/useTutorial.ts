@@ -49,6 +49,35 @@ export function resetAllTutorials() {
   }
 }
 
+/**
+ * One-shot per-browser reset of specific tutorial sections, used to re-show
+ * tutorials when a feature gets a meaningful upgrade. Each call ID is gated
+ * by its own localStorage flag so a given reset only fires once per user
+ * even if the call site is on every page mount.
+ *
+ * Does NOT touch user.hasSeenTutorial (server-side opt-out) — users who
+ * explicitly clicked "never show again" continue to be respected.
+ */
+export function applyTargetedTutorialReset(resetId: string, sections: string[]) {
+  try {
+    const flagKey = `pnptv_tutorial_reset:${resetId}`;
+    if (localStorage.getItem(flagKey)) return false;
+    const map = getSeenMap();
+    let mutated = false;
+    for (const s of sections) {
+      if (map[s]) {
+        delete map[s];
+        mutated = true;
+      }
+    }
+    if (mutated) localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+    localStorage.setItem(flagKey, "true");
+    return mutated;
+  } catch {
+    return false;
+  }
+}
+
 export function useTutorial(section: string) {
   const [showTutorial, setShowTutorial] = useState(false);
   const { user } = useAuth();

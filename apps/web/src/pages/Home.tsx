@@ -3,7 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier, useLatam } from "@/hooks/useTier";
-import { useTutorial } from "@/hooks/useTutorial";
+import { useTutorial, applyTargetedTutorialReset } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { updateProfile, getHangoutGroups, getSocialFeedPosts, type HangoutGroup, type SocialPostItem } from "@/lib/api";
 import { SocialFeedTabs } from "@/components/social";
@@ -36,6 +36,13 @@ export default function Home() {
   const location = useLocation();
   const { tier, isPrime, isMember, isAdmin } = useTier();
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("home");
+
+  // One-shot reset of the hangouts/mainstage/dm tutorials so existing users
+  // re-encounter the upgraded flows when they next visit those features.
+  // Gated by a localStorage flag so it only happens once per browser.
+  useEffect(() => {
+    applyTargetedTutorialReset("upgrade_2026_04_29", ["hangouts", "mainstage", "dm"]);
+  }, []);
 
   const [contentDisclaimer, setContentDisclaimer] = useState(user?.contentDisclaimer || false);
   const [myHangouts, setMyHangouts] = useState<HangoutGroup[]>([]);
@@ -217,75 +224,86 @@ export default function Home() {
       <div className="hidden lg:block mb-6 space-y-4">
         <NearbyWidget />
 
-        {/* Quick access cards */}
+        {/* Try-the-new-features cards. Each highlights a recently upgraded
+            feature and dives the user straight into it. The "NEW" pill on
+            each card hooks the eye; the brief subtitle calls out what's
+            actually new in the upgrade. */}
         <div className="grid grid-cols-3 gap-3">
-          {/* PNP Bank */}
+          {/* Hangouts */}
           <button
-            onClick={() => navigate("/bank")}
+            onClick={() => navigate("/hangouts")}
             className="group rounded-2xl p-4 text-left transition-all hover:scale-[1.02]"
             style={{
-              background: "linear-gradient(135deg, rgba(0,141,228,0.1), rgba(0,84,166,0.08))",
-              border: "1px solid rgba(0,141,228,0.2)",
+              background: "linear-gradient(135deg, rgba(167,139,250,0.12), rgba(139,92,246,0.06))",
+              border: "1px solid rgba(167,139,250,0.25)",
             }}
           >
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
-              style={{ background: "rgba(0,141,228,0.15)" }}
-            >
-              <svg className="w-5 h-5" style={{ color: "#008DE4" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z" />
-              </svg>
+            <div className="flex items-start justify-between mb-3">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: "rgba(167,139,250,0.2)" }}
+              >
+                <svg className="w-5 h-5" style={{ color: "#A78BFA" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+                </svg>
+              </div>
+              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: "rgba(167,139,250,0.25)", color: "#A78BFA" }}>NEW</span>
             </div>
-            <h3 className="text-sm font-bold text-white mb-0.5">PNP Bank</h3>
+            <h3 className="text-sm font-bold text-white mb-0.5">Hangouts</h3>
             <p className="text-[11px] leading-relaxed" style={{ color: "var(--pnp-text-secondary)" }}>
-              Pay with Dash — 20% OFF this week
+              Voice + video group rooms — drop in face-to-face, no schedule
             </p>
           </button>
 
-          {/* Subscribe */}
+          {/* Main Stage */}
           <button
-            onClick={() => navigate("/subscribe")}
+            onClick={() => navigate("/main-stage")}
             className="group rounded-2xl p-4 text-left transition-all hover:scale-[1.02]"
             style={{
-              background: "linear-gradient(135deg, rgba(212,0,122,0.1), rgba(230,145,56,0.08))",
-              border: "1px solid rgba(212,0,122,0.2)",
+              background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(230,145,56,0.06))",
+              border: "1px solid rgba(212,0,122,0.25)",
             }}
           >
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
-              style={{ background: "rgba(212,0,122,0.15)" }}
-            >
-              <svg className="w-5 h-5" style={{ color: "#D4007A" }} fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-              </svg>
+            <div className="flex items-start justify-between mb-3">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: "rgba(212,0,122,0.2)" }}
+              >
+                <svg className="w-5 h-5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m-17.25 0V5.625m0 12.75h17.25M3.375 5.625h17.25c.621 0 1.125.504 1.125 1.125v1.5M2.25 5.625v-.001M21.75 5.624V5.625m-7.5 13.875h-4.5m4.5 0h.008m-4.508 0h.008" />
+                </svg>
+              </div>
+              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: "rgba(212,0,122,0.25)", color: "#D4007A" }}>NEW</span>
             </div>
-            <h3 className="text-sm font-bold text-white mb-0.5">Subscribe</h3>
+            <h3 className="text-sm font-bold text-white mb-0.5">Main Stage</h3>
             <p className="text-[11px] leading-relaxed" style={{ color: "var(--pnp-text-secondary)" }}>
-              Unlock PRIME — DMs, calls & more
+              Cinema + camming — synced PRIME videos with the whole room on cam
             </p>
           </button>
 
-          {/* Settings */}
+          {/* DM Video Calls */}
           <button
-            onClick={() => navigate("/settings")}
+            onClick={() => navigate("/dm")}
             className="group rounded-2xl p-4 text-left transition-all hover:scale-[1.02]"
             style={{
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.08)",
+              background: "linear-gradient(135deg, rgba(34,197,94,0.1), rgba(16,185,129,0.06))",
+              border: "1px solid rgba(34,197,94,0.25)",
             }}
           >
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
-              style={{ background: "rgba(255,255,255,0.06)" }}
-            >
-              <svg className="w-5 h-5" style={{ color: "var(--pnp-text-secondary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
+            <div className="flex items-start justify-between mb-3">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: "rgba(34,197,94,0.2)" }}
+              >
+                <svg className="w-5 h-5" style={{ color: "#22C55E" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+              </div>
+              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: "rgba(34,197,94,0.25)", color: "#22C55E" }}>NEW</span>
             </div>
-            <h3 className="text-sm font-bold text-white mb-0.5">Settings</h3>
+            <h3 className="text-sm font-bold text-white mb-0.5">DM Video Calls</h3>
             <p className="text-[11px] leading-relaxed" style={{ color: "var(--pnp-text-secondary)" }}>
-              Profile, privacy & preferences
+              {isPrime ? "Private 1:1 video — call any DM directly" : "PRIME unlocks 1:1 video calls in DMs"}
             </p>
           </button>
         </div>
