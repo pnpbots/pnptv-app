@@ -16,7 +16,7 @@ export const strings = {
     benefits: [
       "Lifetime Member access — Hangouts, Live streams, Social feed, Direct Messages, and Booking forever.",
       "2 months of PRIME — Exclusive adult content, premium media library, and all PRIME features included.",
-      "Access to PNP Connect, PNP Hangouts, PNP Live, and PNP Videorama.",
+      "Access to PNP Connect, PNP Hangouts, and PNP Live.",
       "Access to our Community Telegram Group.",
       "24/7 Support through our AI powered chat bot.",
     ],
@@ -99,7 +99,7 @@ export const strings = {
     benefits: [
       "Acceso Member de por vida — Hangouts, Live streams, Social feed, Mensajes Directos y Reservas para siempre.",
       "2 meses de PRIME — Contenido adulto exclusivo, biblioteca multimedia premium y todas las funciones PRIME incluidas.",
-      "Acceso a PNP Connect, Hangouts, Live y Videorama.",
+      "Acceso a PNP Connect, Hangouts y Live.",
       "Acceso a nuestro Grupo de Comunidad en Telegram.",
       "Soporte 24/7 a través de nuestro chat bot con IA.",
     ],

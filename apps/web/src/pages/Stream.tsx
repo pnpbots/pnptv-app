@@ -197,7 +197,6 @@ export default function Stream() {
     socketError,
     raidEvent,
     dismissRaid,
-    emitRaid,
   } = useLiveSocket(streamId || null);
 
   // Cleanup all timers/intervals on unmount. Dash tip polling + countdown
@@ -212,6 +211,10 @@ export default function Stream() {
       if (dashTipSettleTimerRef.current) clearTimeout(dashTipSettleTimerRef.current);
       if (shareCopiedTimerRef.current) clearTimeout(shareCopiedTimerRef.current);
       if (healthPollRef.current) clearInterval(healthPollRef.current);
+      if (raidCountdownRef.current) {
+        clearInterval(raidCountdownRef.current);
+        raidCountdownRef.current = null;
+      }
     };
   }, []);
 
@@ -276,7 +279,6 @@ export default function Stream() {
   const loadStream = useCallback(() => {
     if (!streamId) return Promise.resolve();
     const channelRef = extractChannelRef(streamId);
-    console.log("[Stream] Looking for:", streamId, "channelRef:", channelRef);
 
     return Promise.all([
       getLiveStreams().catch(() => ({ streams: [] })),
@@ -286,12 +288,9 @@ export default function Stream() {
         const hlsStreams = hlsData.streams || [];
         const performers = perfData.performers || [];
 
-        console.log("[Stream] HLS streams:", hlsStreams.length, "Performers:", performers.length);
-
         // 1. Direct match in Restreamer HLS streams
         const hlsMatch = hlsStreams.find((s: any) => s.id === streamId || s.id === channelRef);
         if (hlsMatch && hlsMatch.isLive) {
-          console.log("[Stream] Matched HLS stream:", hlsMatch.id);
           setStream(hlsMatch);
           setError(null);
           setStreamError(false);
@@ -306,7 +305,6 @@ export default function Stream() {
             (p.slug && p.slug === streamId)
         );
         if (performer && performer.isLive && performer.hlsUrl) {
-          console.log("[Stream] Matched performer:", performer.id);
           setStream({
             id: performer.id,
             name: performer.displayName,
@@ -330,7 +328,6 @@ export default function Stream() {
           (s: any) => matchesSuffix(s.id, streamId) || (channelRef && matchesSuffix(s.id, channelRef))
         );
         if (fuzzyMatch) {
-          console.log("[Stream] Fuzzy-matched HLS stream:", fuzzyMatch.id);
           setStream(fuzzyMatch);
           setError(null);
           setStreamError(false);
@@ -346,7 +343,6 @@ export default function Stream() {
             (p.live_channel && p.live_channel === streamId)
         );
         if (offlinePerformer) {
-          console.log("[Stream] Performer found but offline:", offlinePerformer.id);
           setStream({
             id: channelRef || streamId,
             name: offlinePerformer.displayName || offlinePerformer.name || channelRef || streamId,
@@ -360,7 +356,6 @@ export default function Stream() {
           return;
         }
 
-        console.log("[Stream] No stream found for:", streamId);
         if (streamPollRef.current) {
           clearInterval(streamPollRef.current);
           streamPollRef.current = null;
@@ -772,13 +767,11 @@ export default function Stream() {
         if (!result.success) {
           setRaidError(result.error || 'Raid failed');
         }
-        // Also emit via socket for instant delivery
-        if (streamId) emitRaid(streamId, targetRef);
       } catch (err) {
         setRaidError(err instanceof Error ? err.message : 'Raid failed');
       }
     },
-    [streamId, emitRaid]
+    [streamId]
   );
 
   const handleOpenHostPicker = useCallback(async () => {

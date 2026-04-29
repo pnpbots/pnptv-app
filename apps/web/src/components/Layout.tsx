@@ -1208,7 +1208,7 @@ export function Layout() {
                     { to: "/main-stage", label: "Main Stage", isLive: true },
                     { to: "/channels", label: "PNP Channels" },
                     { to: "/?view=hangouts", label: "PNP Hangouts" },
-                    { to: "/nearby", label: "Nearby" },
+                    { to: "/nearby", label: "PNP Connect" },
                   ].map((link) => (
                     <NavLink
                       key={link.to}
@@ -1374,13 +1374,7 @@ export function Layout() {
         const inVideoCall = location.pathname.startsWith("/chat/");
         const showCompact = isLandscape && isMobile && inVideoCall;
         return (
-          <>
-            <MainStageFAB />
-            <FloatingMainStagePlayer />
-            <Suspense fallback={null}>
-              <CristinaWidget compact={showCompact} />
-            </Suspense>
-          </>
+          <FloatingWidgets showCompact={showCompact} />
         );
       })()}
 
@@ -1561,6 +1555,23 @@ export function Layout() {
 }
 
 /**
+ * Wrapper that manages the PiP visibility state so MainStageFAB can
+ * shift upward when the PiP player is rendered in the same corner.
+ */
+function FloatingWidgets({ showCompact }: { showCompact: boolean }) {
+  const [isPipVisible, setIsPipVisible] = useState(false);
+  return (
+    <>
+      <MainStageFAB isPipVisible={isPipVisible} />
+      <FloatingMainStagePlayer onVisibilityChange={setIsPipVisible} />
+      <Suspense fallback={null}>
+        <CristinaWidget compact={showCompact} />
+      </Suspense>
+    </>
+  );
+}
+
+/**
  * Picture-in-picture-style floating Main Stage player.
  *
  * Shows a small muted <video> of the current auto-rotated Prime Video in the
@@ -1571,7 +1582,7 @@ export function Layout() {
  * cammer feeds aren't ported here — that would require hoisting LiveKitRoom
  * to the app root and reworking token mint on every page.
  */
-function FloatingMainStagePlayer() {
+function FloatingMainStagePlayer({ onVisibilityChange }: { onVisibilityChange?: (visible: boolean) => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [state, setState] = useState<MainStageState | null>(null);
@@ -1610,9 +1621,14 @@ function FloatingMainStagePlayer() {
   const mediaSrc  = state?.media?.src || null;
   const mediaTitle = state?.media?.title || null;
 
-  if (onMainStage) return null;
-  if (dismissed) return null;
-  if (mediaKind !== "video" || !mediaSrc) return null;
+  const isVisible = !onMainStage && !dismissed && mediaKind === "video" && !!mediaSrc;
+
+  // Notify parent so sibling widgets (e.g. MainStageFAB) can avoid overlapping.
+  useEffect(() => {
+    onVisibilityChange?.(isVisible);
+  }, [isVisible, onVisibilityChange]);
+
+  if (!isVisible) return null;
 
   return (
     <div

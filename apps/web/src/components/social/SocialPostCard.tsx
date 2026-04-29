@@ -225,6 +225,7 @@ export default function SocialPostCard({
   // (e.g. a founder blog crosspost), show their photo and allow profile nav.
   const showPlatformLogo =
     post.is_promoted &&
+    !post.is_carousel &&
     !isValidPhotoUrl(effectiveAuthorPhoto) &&
     post.author_id !== "cristina-ai";
 
@@ -244,10 +245,20 @@ export default function SocialPostCard({
     >
       {/* Avatar — pinned to upper-left corner */}
       <button
-        onClick={(e) => { e.stopPropagation(); if (!showPlatformLogo) onNavigate(authorPath); }}
+        onClick={(e) => { e.stopPropagation(); if (!showPlatformLogo && !post.is_carousel) onNavigate(authorPath); }}
         className="absolute -top-2 -left-2 z-10 flex-shrink-0"
       >
-        {showPlatformLogo ? (
+        {post.is_carousel ? (
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center ring-2 ring-[#1C1C1E]"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label="PNPtv PRIME"
+          >
+            <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M2.5 18.5L5 9l4.5 4L12 4l2.5 9L19 9l2.5 9.5H2.5z" />
+            </svg>
+          </div>
+        ) : showPlatformLogo ? (
           <img
             src="/Logo2-50.png"
             alt="PNPtv!"
@@ -268,7 +279,7 @@ export default function SocialPostCard({
             }}
           />
         ) : null}
-        {!showPlatformLogo && post.author_id !== "cristina-ai" && (
+        {!post.is_carousel && !showPlatformLogo && post.author_id !== "cristina-ai" && (
           <div
             className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ring-2 ring-[#1C1C1E]"
             style={{
@@ -285,13 +296,19 @@ export default function SocialPostCard({
       {/* Content */}
       <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={(e) => { e.stopPropagation(); onNavigate(authorPath); }}
-              className="font-semibold text-white text-sm truncate hover:underline"
-            >
-              {post.author_first_name || post.author_username || "Anonymous"}
-            </button>
-            {post.author_username && (
+            {post.is_carousel ? (
+              <span className="font-semibold text-white text-sm truncate">
+                {post.author_first_name || post.author_username || "Anonymous"}
+              </span>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); onNavigate(authorPath); }}
+                className="font-semibold text-white text-sm truncate hover:underline"
+              >
+                {post.author_first_name || post.author_username || "Anonymous"}
+              </button>
+            )}
+            {post.author_username && !post.is_carousel && (
               <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 @{post.author_username}
               </span>

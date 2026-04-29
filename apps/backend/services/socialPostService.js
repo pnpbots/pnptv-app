@@ -156,58 +156,50 @@ class SocialPostService {
   static async _buildPrimeCarouselPost() {
     try {
       const directusUrl = (process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055').replace(/\/$/, '');
-      const [recentResp, totalResp] = await Promise.all([
-        axios.get(`${directusUrl}/items/prime_videos`, {
-          params: {
-            filter: JSON.stringify({ status: { _eq: 'published' } }),
-            fields: 'id,title,thumbnail,video_file,duration,date_created',
-            sort: '-date_created',
-            limit: 10,
-          },
-          timeout: 4_000,
-        }),
-        axios.get(`${directusUrl}/items/prime_videos`, {
-          params: {
-            filter: JSON.stringify({
-              status: { _eq: 'published' },
-              date_created: { _gte: '$NOW(-7 days)' },
-            }),
-            aggregate: JSON.stringify({ count: 'id' }),
-          },
-          timeout: 4_000,
-        }),
-      ]);
+      // Single request: filter_count meta gives us the total published count
+      // for free, so we don't need a second aggregate query (the previous
+      // $NOW(-7 days) filter was returning the wrong number).
+      const resp = await axios.get(`${directusUrl}/items/prime_videos`, {
+        params: {
+          filter: JSON.stringify({ status: { _eq: 'published' } }),
+          fields: 'id,title,video_file,duration',
+          sort: '-date_created',
+          limit: 20,
+          meta: 'filter_count',
+        },
+        timeout: 4_000,
+      });
 
-      const items = (recentResp.data?.data || [])
-        .filter(v => v?.id)
+      const items = (resp.data?.data || [])
+        .filter(v => v?.id && v.video_file)
         .map(v => ({
           id: v.id,
           title: v.title || 'Untitled',
           duration: v.duration || null,
-          thumbnail_url: v.thumbnail
-            ? `/cms/assets/${v.thumbnail}`
-            : (v.video_file ? `/video-thumb/${v.video_file}.jpg` : null),
+          // The Directus video-thumb extension auto-extracts a frame from
+          // the video file — works whether or not the thumbnail field is
+          // populated, and never accidentally returns the raw MP4 (the
+          // thumbnail field sometimes holds the video UUID itself).
+          thumbnail_url: `/cms/video-thumb/${v.video_file}.jpg`,
           link: `/media?play=${v.id}`,
         }));
 
       if (items.length === 0) return null;
 
-      const newCount = parseInt(totalResp.data?.data?.[0]?.count?.id || totalResp.data?.data?.[0]?.count || '0', 10) || items.length;
+      const totalCount = parseInt(resp.data?.meta?.filter_count, 10) || items.length;
 
       return {
         id: -1, // synthetic — won't collide with real social_posts.id
         is_promoted: true,
         is_carousel: true,
-        carousel_total: newCount,
+        carousel_total: totalCount,
         carousel_items: items,
-        content: newCount > 0
-          ? `${newCount} new video${newCount === 1 ? '' : 's'} dropped on PRIME this week`
-          : 'Latest on PNPtv PRIME',
+        content: `${totalCount} video${totalCount === 1 ? '' : 's'} on PNPtv PRIME — latest drops`,
         promoted_link: '/media',
         promoted_link_label: 'Browse all videos',
         author_id: 'pnptv-official',
         author_username: 'pnptv',
-        author_first_name: 'PNPtv',
+        author_first_name: 'PNPtv PRIME',
         author_photo: null,
         created_at: new Date().toISOString(),
         likes_count: 0,
