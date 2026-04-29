@@ -2321,14 +2321,43 @@ app.post('/api/webapp/auth/recover-account', authLimiter, asyncHandler(async (re
       return res.json({ success: true });
     }
     const u = rows[0];
-    const authentikPk = await AuthentikService._getUserPkBySub(u.pnptv_id);
+    let authentikPk = await AuthentikService._getUserPkBySub(u.pnptv_id);
+
+    // Fallback: if PK not found by sub, try to find by email in Authentik and heal the pnptv_id
     if (!authentikPk) {
-      logger.warn('[recover-account] user has pnptv_id but no Authentik PK', { userId: u.id });
+      logger.info('[recover-account] PK not found by sub, trying email fallback', { userId: u.id, email });
+      const AuthentikURL = process.env.AUTHENTIK_URL || 'http://authentik-server:9000';
+      const AuthentikToken = process.env.AUTHENTIK_API_TOKEN;
+      try {
+        const searchRes = await axios.get(`${AuthentikURL}/api/v3/core/users/`, {
+          params: { email: email },
+          headers: { 'Authorization': `Bearer ${AuthentikToken}` },
+          timeout: 5000,
+        });
+        const match = searchRes.data.results.find(au => (au.email || '').toLowerCase() === email);
+        if (match) {
+          authentikPk = match.pk;
+          // Heal the mismatch in our DB
+          await getPool().query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [match.uuid, u.id]);
+          logger.info('[recover-account] healed pnptv_id mismatch via email fallback', { userId: u.id, newSub: match.uuid });
+        }
+      } catch (err) {
+        logger.warn('[recover-account] Authentik email search failed', { userId: u.id, error: err.message });
+      }
+    }
+
+    if (!authentikPk) {
+      logger.warn('[recover-account] user has no matching Authentik account', { userId: u.id });
+      // Final attempt: trigger Authentik's built-in email recovery flow (less customized)
+      await AuthentikService.requestPasswordReset(email).catch(() => {});
       return res.json({ success: true });
     }
-    const recoveryLink = await AuthentikService.generateRecoveryLink(authentikPk);
+
+    const recoveryLink = (await AuthentikService.generateRecoveryLink(authentikPk))
+      ?.replace('http://authentik-server:9000', 'https://auth.pnptv.app');
     if (!recoveryLink) {
-      logger.error('[recover-account] generateRecoveryLink failed', { userId: u.id, pk: authentikPk });
+      logger.error('[recover-account] generateRecoveryLink failed, falling back to built-in flow', { userId: u.id, pk: authentikPk });
+      await AuthentikService.requestPasswordReset(email).catch(() => {});
       return res.json({ success: true });
     }
     const lang = (u.language || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
