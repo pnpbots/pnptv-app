@@ -117,6 +117,7 @@ const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 const MeruLinks = lazy(() => import("@/pages/admin/MeruLinks"));
 const DuplicateAccounts = lazy(() => import("@/pages/admin/DuplicateAccounts"));
 const PaymentHealth = lazy(() => import("@/pages/admin/PaymentHealth"));
+const WellnessShell = lazy(() => import("@/pages/WellnessShell"));
 const PrimeChannel = lazy(() => import("@/pages/admin/PrimeChannel"));
 const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
 
@@ -352,6 +353,17 @@ export const router = createBrowserRouter([
             <VerificationGate>
               <Settings />
             </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        // Wellness Mode shell — accessible even when wellness mode is active
+        // (the API guard's allowlist permits this route). Renders only the
+        // wellness hangouts + Cristina + crisis resources.
+        path: "wellness",
+        element: (
+          <ModuleLoader>
+            <WellnessShell />
           </ModuleLoader>
         ),
       },

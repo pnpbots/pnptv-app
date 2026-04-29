@@ -332,6 +332,41 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 app.use(ipTracker); // Log every authenticated request IP for security
 
+// Wellness Mode access guard. When a user has active wellness mode (set
+// themselves for self-imposed sober break / recovery), block access to any
+// route NOT in the wellness allowlist. Public routes and unauthenticated
+// requests pass through. The check is Redis-cached for 60s so it doesn't
+// hammer Postgres on every API call.
+const wellnessModeService = require('../../services/wellnessModeService');
+const { cache: wellnessGuardCache } = require('../../config/redis');
+app.use(async (req, res, next) => {
+  const userId = req.session?.user?.id;
+  if (!userId) return next();
+  // Fast path: every endpoint runs through this middleware. Skip the
+  // wellness check for whitelisted paths immediately to avoid the cache
+  // lookup entirely.
+  if (wellnessModeService.isPathAllowed(req.path)) return next();
+  try {
+    const cacheKey = `wellnessActive:${userId}`;
+    let active = await wellnessGuardCache.get(cacheKey);
+    if (active === null || active === undefined) {
+      active = await wellnessModeService.isActive(userId);
+      await wellnessGuardCache.set(cacheKey, active ? '1' : '0', 60);
+    } else {
+      active = active === '1' || active === true;
+    }
+    if (active) {
+      return res.status(403).json({
+        error: 'Wellness Mode active — only wellness resources accessible',
+        code: 'WELLNESS_MODE',
+      });
+    }
+  } catch (err) {
+    logger.warn('Wellness guard failed open', { error: err.message, path: req.path });
+  }
+  return next();
+});
+
 // express-session handles Set-Cookie automatically — no custom middleware needed
 
 // Geo country detection endpoint retained for compatibility.
@@ -5070,6 +5105,57 @@ app.post(
 
 // ── Hangout Groups ───────────────────────────────────────────────────────────
 app.get('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.listGroups));
+
+// Wellness hangouts — surfaces only is_wellness=true groups. Used by the
+// wellness shell when wellness-mode is active (the regular /hangouts/groups
+// endpoint would be blocked by the wellness guard for non-allowlisted paths).
+app.get('/api/webapp/hangouts/wellness', requireSessionAuth, asyncHandler(async (req, res) => {
+  const { query: q } = require('../../config/postgres');
+  const { rows } = await q(`
+    SELECT g.id, g.name, g.description, g.avatar_url, g.is_public, g.is_paid,
+           g.created_at,
+           (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) AS member_count
+    FROM hangout_groups g
+    WHERE g.is_wellness = true
+    ORDER BY g.created_at ASC
+  `);
+  return res.json({ success: true, groups: rows });
+}));
+
+// Wellness Mode — self-imposed access restriction.
+const WellnessModeService = require('../../services/wellnessModeService');
+app.get('/api/webapp/wellness-mode', requireSessionAuth, asyncHandler(async (req, res) => {
+  const status = await WellnessModeService.getStatus(req.session.user.id);
+  return res.json({ success: true, ...status, coolingOffHours: WellnessModeService.COOLING_OFF_HOURS });
+}));
+
+app.post('/api/webapp/wellness-mode/enable', requireSessionAuth, asyncHandler(async (req, res) => {
+  const raw = req.body?.durationDays;
+  // null/undefined = indefinite. String forms allowed for forgiving frontend behavior.
+  let durationDays = null;
+  if (raw !== null && raw !== undefined && raw !== 'indefinite') {
+    durationDays = parseInt(raw, 10);
+    if (isNaN(durationDays)) {
+      return res.status(400).json({ error: 'durationDays must be 1, 7, 30, or null (indefinite).' });
+    }
+  }
+  const status = await WellnessModeService.enable(req.session.user.id, durationDays);
+  // Bust the wellness-active cache so the next request picks up the new state.
+  try { await wellnessGuardCache.del(`wellnessActive:${req.session.user.id}`); } catch {}
+  return res.json({ success: true, ...status });
+}));
+
+app.post('/api/webapp/wellness-mode/disable', requireSessionAuth, asyncHandler(async (req, res) => {
+  const status = await WellnessModeService.disable(req.session.user.id);
+  try { await wellnessGuardCache.del(`wellnessActive:${req.session.user.id}`); } catch {}
+  return res.json({ success: true, ...status });
+}));
+
+app.post('/api/webapp/wellness-mode/cancel-disable', requireSessionAuth, asyncHandler(async (req, res) => {
+  const status = await WellnessModeService.cancelDisable(req.session.user.id);
+  try { await wellnessGuardCache.del(`wellnessActive:${req.session.user.id}`); } catch {}
+  return res.json({ success: true, ...status });
+}));
 app.post('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.createGroup));
 
 

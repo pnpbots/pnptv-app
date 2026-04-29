@@ -23,11 +23,16 @@ import {
   unsubscribePush,
   getUpcomingBookings,
   enablePnptvIdLogin,
+  getWellnessMode,
+  enableWellnessMode,
+  disableWellnessMode,
+  cancelDisableWellnessMode,
   type ReferralStats,
   type BlockedUser,
   type EraseAccountReceipt,
   type TokenPurchase,
   type UpcomingBooking,
+  type WellnessModeStatus,
 } from "@/lib/api";
 import IdentityConnections from "@/components/profile/IdentityConnections";
 
@@ -85,6 +90,186 @@ function Section({
         {title}
       </h2>
       {children}
+    </div>
+  );
+}
+
+// ── Wellness Mode Card ────────────────────────────────────────────────────────
+//
+// Self-imposed access restriction. When enabled, the user only sees wellness
+// hangouts + Cristina + settings. Once enabled with a duration, it cannot be
+// turned off until the duration expires OR a 24h cooling-off period passes
+// after clicking "Disable" — friction is the point.
+
+function fmtUntil(iso: string | null, indefinite: boolean): string {
+  if (indefinite) return "indefinite";
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function WellnessModeCard() {
+  const [status, setStatus] = useState<WellnessModeStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [duration, setDuration] = useState<1 | 7 | 30 | "indefinite">(7);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await getWellnessMode();
+      setStatus(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const onEnable = async () => {
+    setBusy(true); setError(null);
+    try {
+      const days = duration === "indefinite" ? null : duration;
+      const r = await enableWellnessMode(days);
+      setStatus(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to enable");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDisableClick = async () => {
+    setBusy(true); setError(null);
+    try {
+      const r = await disableWellnessMode();
+      setStatus(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to disable");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCancelDisable = async () => {
+    setBusy(true); setError(null);
+    try {
+      const r = await cancelDisableWellnessMode();
+      setStatus(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to cancel");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="glass-card-sm p-5 mt-4">
+        <h2 className="text-sm font-semibold text-white mb-4 tracking-wide uppercase opacity-60">Wellness Break Mode</h2>
+        <div className="h-12 rounded bg-white/5 animate-pulse" />
+      </div>
+    );
+  }
+  if (!status) return null;
+
+  const inCoolingOff = status.active && status.disableRequestedAt && (status.hoursLeftUntilDisableAllowed ?? 0) > 0;
+  const hoursLeft = Math.ceil(status.hoursLeftUntilDisableAllowed ?? 0);
+
+  return (
+    <div className="glass-card-sm p-5 mt-4" style={{ borderColor: status.active ? "rgba(94,209,196,0.4)" : undefined }}>
+      <h2 className="text-sm font-semibold text-white mb-4 tracking-wide uppercase opacity-60 flex items-center gap-2">
+        <span>🧘 Wellness Break Mode</span>
+        {status.active && (
+          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded" style={{ background: "rgba(94,209,196,0.2)", color: "#5ED1C4" }}>
+            ACTIVE
+          </span>
+        )}
+      </h2>
+
+      {!status.active && (
+        <>
+          <p className="text-sm text-white/70 mb-4 leading-relaxed">
+            Hide everything except wellness hangouts, Cristina, and your settings. For when you need a sober break, are in recovery, or just want to step away from the rest of the platform. <strong className="text-white">Once enabled, it cannot be turned off without a 24-hour wait</strong> — that's the point.
+          </p>
+          <div className="space-y-3">
+            <label className="block text-xs uppercase tracking-wider text-white/50">Duration</label>
+            <div className="grid grid-cols-4 gap-2">
+              {([1, 7, 30, "indefinite"] as const).map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setDuration(d)}
+                  disabled={busy}
+                  className="rounded-lg py-2 text-sm font-semibold transition-all"
+                  style={{
+                    background: duration === d ? "rgba(94,209,196,0.2)" : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${duration === d ? "rgba(94,209,196,0.5)" : "rgba(255,255,255,0.08)"}`,
+                    color: duration === d ? "#5ED1C4" : "rgba(255,255,255,0.7)",
+                  }}
+                >
+                  {d === "indefinite" ? "∞" : `${d}d`}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={onEnable}
+              disabled={busy}
+              className="w-full rounded-lg py-2.5 text-sm font-semibold transition-all"
+              style={{
+                background: "linear-gradient(135deg, #5ED1C4 0%, #4FB3A8 100%)",
+                color: "#0d1f1c",
+              }}
+            >
+              {busy ? "Enabling…" : `Enable for ${duration === "indefinite" ? "indefinite" : duration + " day" + (duration === 1 ? "" : "s")}`}
+            </button>
+          </div>
+        </>
+      )}
+
+      {status.active && !inCoolingOff && (
+        <>
+          <p className="text-sm text-white/70 mb-3 leading-relaxed">
+            You're in Wellness Break Mode {status.indefinite ? "indefinitely" : `until ${fmtUntil(status.until, false)}`}.
+            Only the Wellness Break hangouts, Cristina, and Settings are accessible.
+          </p>
+          {!status.indefinite && status.until && new Date(status.until).getTime() > Date.now() && (
+            <p className="text-xs text-white/50 mb-3">
+              Mode will end automatically at the time above. You can extend by re-enabling with a longer duration.
+            </p>
+          )}
+          <button
+            onClick={onDisableClick}
+            disabled={busy}
+            className="w-full rounded-lg py-2.5 text-sm font-semibold border transition-all"
+            style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)", background: "transparent" }}
+          >
+            {busy ? "…" : `Request to disable (24h cooling-off)`}
+          </button>
+        </>
+      )}
+
+      {inCoolingOff && (
+        <>
+          <p className="text-sm text-amber-200/80 mb-3 leading-relaxed">
+            <strong>Disable requested.</strong> Wellness Mode will turn off in <strong>{hoursLeft} hour{hoursLeft === 1 ? "" : "s"}</strong> if you don't cancel before then. The wait is a feature — give yourself time to make sure this is what you want.
+          </p>
+          <button
+            onClick={onCancelDisable}
+            disabled={busy}
+            className="w-full rounded-lg py-2.5 text-sm font-semibold transition-all"
+            style={{ background: "rgba(94,209,196,0.2)", border: "1px solid rgba(94,209,196,0.4)", color: "#5ED1C4" }}
+          >
+            {busy ? "…" : "Cancel disable request — stay in Wellness Mode"}
+          </button>
+        </>
+      )}
+
+      {error && (
+        <p className="text-xs text-red-400 mt-3">{error}</p>
+      )}
     </div>
   );
 }
@@ -1758,6 +1943,9 @@ export default function Settings() {
           </div>
         )}
       </Section>
+
+      {/* ── Wellness Mode ─────────────────────────────────────────────────── */}
+      <WellnessModeCard />
 
       {/* ── Data & Privacy ───────────────────────────────────────────────── */}
       <Section title={p.dataPrivacySection}>

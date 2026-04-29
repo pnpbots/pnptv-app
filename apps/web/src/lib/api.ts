@@ -91,6 +91,17 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
         ) {
           window.location.replace("/subscribe?plan=pnp_col");
         }
+        // Wellness Mode gate: user has self-imposed restriction. Redirect to
+        // the wellness shell which surfaces only allowed resources. Skip when
+        // already on the shell or settings (where they can manage the mode).
+        if (
+          errorCode === "WELLNESS_MODE" &&
+          typeof window !== "undefined" &&
+          !window.location.pathname.startsWith("/wellness") &&
+          !window.location.pathname.startsWith("/settings")
+        ) {
+          window.location.replace("/wellness");
+        }
         // Extract structured access details for scoped-resource 403 responses so
         // callers can render the right in-context purchase modal instead of
         // bouncing to /subscribe.
@@ -4113,6 +4124,50 @@ export interface PaginatedResponse<T> {
 // Admin Stats
 export function getAdminStats(): Promise<{ success: boolean; stats: AdminStats }> {
   return request("/api/webapp/admin/stats");
+}
+
+// Wellness Mode — self-imposed access restriction
+export interface WellnessModeStatus {
+  active: boolean;
+  until: string | null;          // ISO timestamp; null when indefinite or off
+  indefinite: boolean;
+  disableRequestedAt: string | null;
+  hoursLeftUntilDisableAllowed: number | null;
+  coolingOffHours?: number;
+}
+
+export interface WellnessHangout {
+  id: number;
+  name: string;
+  description: string;
+  avatar_url: string | null;
+  is_public: boolean;
+  is_paid: boolean;
+  member_count: number;
+  created_at: string;
+}
+
+export function getWellnessMode(): Promise<{ success: boolean } & WellnessModeStatus> {
+  return request("/api/webapp/wellness-mode");
+}
+
+export function enableWellnessMode(durationDays: 1 | 7 | 30 | null): Promise<{ success: boolean } & WellnessModeStatus> {
+  return request("/api/webapp/wellness-mode/enable", {
+    method: "POST",
+    body: JSON.stringify({ durationDays }),
+  });
+}
+
+export function disableWellnessMode(): Promise<{ success: boolean } & WellnessModeStatus> {
+  return request("/api/webapp/wellness-mode/disable", { method: "POST" });
+}
+
+export function cancelDisableWellnessMode(): Promise<{ success: boolean } & WellnessModeStatus> {
+  return request("/api/webapp/wellness-mode/cancel-disable", { method: "POST" });
+}
+
+export function getWellnessHangouts(): Promise<{ success: boolean; groups: WellnessHangout[] }> {
+  return request("/api/webapp/hangouts/wellness");
 }
 
 // Admin Payment Health (operational dashboard)
