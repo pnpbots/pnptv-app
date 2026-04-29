@@ -108,6 +108,19 @@ export default function Stream() {
 
   // Chat & tips
   const [chatInput, setChatInput] = useState("");
+  // chatSendingRef gates rapid Enter-Enter and click-click to keep both
+  // handlers from emitting two messages before setChatInput("") propagates.
+  // 250ms is enough to clear the input + render; faster than a typist's
+  // double-tap.
+  const chatSendingRef = useRef(false);
+  const submitChat = useCallback(() => {
+    const text = chatInput.trim();
+    if (!text || chatSendingRef.current) return;
+    chatSendingRef.current = true;
+    sendMessage(text);
+    setChatInput("");
+    setTimeout(() => { chatSendingRef.current = false; }, 250);
+  }, [chatInput, sendMessage]);
   const [tipPaymentTab, setTipPaymentTab] = useState<"tokens" | "dash">("tokens");
   const [tipping, setTipping] = useState(false);
   // tippingRef gates re-entrant calls to handleTip — setTipping is async,
@@ -198,6 +211,7 @@ export default function Stream() {
     sendMessage,
     latestTip,
     walletBalance: socketBalance,
+    socketBalanceReceived,
     socketError,
     raidEvent,
     dismissRaid,
@@ -254,16 +268,20 @@ export default function Stream() {
     return () => clearTimeout(t);
   }, [chatReconnecting]);
 
-  // Load initial balance
+  // Load initial balance — but never overwrite a fresher socket-pushed value.
+  // The socket can deliver a balance update before the HTTP response lands;
+  // applying the older HTTP value would briefly flash stale tokens to the
+  // user (e.g. fresh tip just deducted). Mirrors the Live.tsx pattern.
   useEffect(() => {
-    if (isAuthenticated) {
-      getWalletBalance().then((data) => {
+    if (!isAuthenticated) return;
+    getWalletBalance().then((data) => {
+      if (!socketBalanceReceived) {
         setTokenBalance(data.balance);
-      }).catch(() => {});
-    }
-  }, [isAuthenticated]);
+      }
+    }).catch(() => {});
+  }, [isAuthenticated, socketBalanceReceived]);
 
-  // Sync socket-pushed balance
+  // Sync socket-pushed balance — always wins over HTTP.
   useEffect(() => {
     if (socketBalance !== null) setTokenBalance(socketBalance);
   }, [socketBalance]);
@@ -1932,22 +1950,18 @@ export default function Stream() {
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && chatInput.trim()) {
-                      sendMessage(chatInput.trim());
-                      setChatInput("");
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      submitChat();
                     }
                   }}
                   maxLength={500}
                   className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
                 />
                 <button
-                  onClick={() => {
-                    if (chatInput.trim()) {
-                      sendMessage(chatInput.trim());
-                      setChatInput("");
-                    }
-                  }}
-                  className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium"
+                  onClick={submitChat}
+                  disabled={!chatInput.trim()}
+                  className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Send
                 </button>
