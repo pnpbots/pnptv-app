@@ -454,11 +454,27 @@ const createChannel = async (req, res) => {
       return res.status(403).json({ error: 'Active creator status required' });
     }
 
-    const { name, description, tags, isPremium, collaborators, telegramChannelId, bridgeEnabled } = req.body;
+    const { name, description, tags, isPremium, collaborators, telegramChannelId, bridgeEnabled, accessType, priceUsd } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Channel name is required' });
     }
     const trimmedName = name.trim().slice(0, 100);
+
+    // Access tier — creators choose:
+    //   free         — open to everyone
+    //   paid         — separate monthly fee for this specific channel
+    //   subscription — included with creator's profile subscription (Ice/Crystal/Diamond)
+    //   prime        — included with PRIME (any active prime entitlement unlocks)
+    const ALLOWED_ACCESS_TYPES = new Set(['free', 'paid', 'subscription', 'prime']);
+    const safeAccessType = ALLOWED_ACCESS_TYPES.has(accessType) ? accessType : 'free';
+    let safePriceUsd = 0;
+    if (safeAccessType === 'paid') {
+      const parsed = Number(priceUsd);
+      if (!Number.isFinite(parsed) || parsed < 0.99 || parsed > 999.99) {
+        return res.status(400).json({ error: 'Paid channel price must be between $0.99 and $999.99' });
+      }
+      safePriceUsd = Math.round(parsed * 100) / 100;
+    }
 
     try {
       const { assertCleanText } = require('../../../services/contentModerationFilter');
@@ -522,10 +538,10 @@ const createChannel = async (req, res) => {
     }
 
     const result = await query(
-      `INSERT INTO creator_channels (creator_id, name, slug, description, tags, is_premium, collaborators, telegram_channel_id, bridge_enabled)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO creator_channels (creator_id, name, slug, description, tags, is_premium, collaborators, telegram_channel_id, bridge_enabled, access_type, price_usd)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [req.user.id, trimmedName, slug, (description || '').slice(0, 2000), safeTags, isPremium === true, safeCollaborators, safeTelegramChannelId, safeBridgeEnabled]
+      [req.user.id, trimmedName, slug, (description || '').slice(0, 2000), safeTags, isPremium === true, safeCollaborators, safeTelegramChannelId, safeBridgeEnabled, safeAccessType, safePriceUsd]
     );
     return res.json({ success: true, channel: result.rows[0] });
   } catch (err) {
@@ -549,7 +565,7 @@ const updateChannel = async (req, res) => {
     const params = [];
     let idx = 1;
 
-    const { name, slug, description, coverImageUrl, tags, isPremium, sortOrder, collaborators, telegramChannelId, bridgeEnabled } = req.body;
+    const { name, slug, description, coverImageUrl, tags, isPremium, sortOrder, collaborators, telegramChannelId, bridgeEnabled, accessType, priceUsd } = req.body;
 
     try {
       const { assertCleanText } = require('../../../services/contentModerationFilter');
@@ -620,6 +636,30 @@ const updateChannel = async (req, res) => {
     }
     if (bridgeEnabled !== undefined) {
       updates.push(`bridge_enabled = $${idx++}`); params.push(bridgeEnabled === true);
+    }
+
+    // Access tier + price (creator-set: free | paid | subscription | prime)
+    if (accessType !== undefined || priceUsd !== undefined) {
+      const ALLOWED_ACCESS_TYPES = new Set(['free', 'paid', 'subscription', 'prime']);
+      const newAccessType = accessType !== undefined
+        ? (ALLOWED_ACCESS_TYPES.has(accessType) ? accessType : null)
+        : chRes.rows[0].access_type;
+      if (newAccessType === null) {
+        return res.status(400).json({ error: 'Invalid accessType. Must be free, paid, subscription, or prime.' });
+      }
+      let newPrice = 0;
+      if (newAccessType === 'paid') {
+        const rawPrice = priceUsd !== undefined ? priceUsd : chRes.rows[0].price_usd;
+        const parsed = Number(rawPrice);
+        if (!Number.isFinite(parsed) || parsed < 0.99 || parsed > 999.99) {
+          return res.status(400).json({ error: 'Paid channel price must be between $0.99 and $999.99' });
+        }
+        newPrice = Math.round(parsed * 100) / 100;
+      }
+      if (accessType !== undefined) {
+        updates.push(`access_type = $${idx++}`); params.push(newAccessType);
+      }
+      updates.push(`price_usd = $${idx++}`); params.push(newPrice);
     }
 
     if (!updates.length) return res.status(400).json({ error: 'No fields to update' });

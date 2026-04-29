@@ -560,15 +560,15 @@ function ChannelDetailView({
                 <div className="grid grid-cols-2 gap-2">
                   {([
                     { value: "free" as const, label: "Free", color: "#5ED1C4", bg: "rgba(94,209,196,0.15)" },
-                    { value: "prime" as const, label: "Prime", color: "#A78BFA", bg: "rgba(167,139,250,0.15)" },
-                    { value: "subscription" as const, label: "Subscription", color: "#D4007A", bg: "rgba(212,0,122,0.15)" },
-                    { value: "paid" as const, label: "Paid ($)", color: "#E69138", bg: "rgba(230,145,56,0.15)" },
+                    { value: "subscription" as const, label: "Incl. with my subscription", color: "#D4007A", bg: "rgba(212,0,122,0.15)" },
+                    { value: "prime" as const, label: "Included with PRIME", color: "#A78BFA", bg: "rgba(167,139,250,0.15)" },
+                    { value: "paid" as const, label: "Paid (monthly)", color: "#E69138", bg: "rgba(230,145,56,0.15)" },
                   ]).map(({ value, label, color, bg }) => (
                     <button
                       key={value}
                       type="button"
                       onClick={() => setEditForm((p) => ({ ...p, accessType: value, priceUsd: value !== "paid" ? 0 : (p.priceUsd || 5) }))}
-                      className="py-2 px-3 rounded-lg text-sm font-medium transition-all border"
+                      className="py-2 px-3 rounded-lg text-xs font-medium transition-all border"
                       style={editForm.accessType === value
                         ? { background: bg, color, borderColor: color }
                         : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.4)", borderColor: "rgba(255,255,255,0.1)" }
@@ -581,8 +581,8 @@ function ChannelDetailView({
               </div>
               {editForm.accessType === "paid" && (
                 <div>
-                  <label className="block text-xs text-white/50 mb-2">Price (USD)</label>
-                  <div className="flex gap-2 flex-wrap">
+                  <label className="block text-xs text-white/50 mb-2">Price per 30 days (USD)</label>
+                  <div className="flex gap-2 flex-wrap items-center">
                     {[5, 10, 15, 20, 25].map((price) => (
                       <button
                         key={price}
@@ -594,10 +594,21 @@ function ChannelDetailView({
                           : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)", borderColor: "rgba(255,255,255,0.1)" }
                         }
                       >
-                        ${price}
+                        ${price}/mo
                       </button>
                     ))}
+                    <input
+                      type="number"
+                      min="0.99"
+                      max="999.99"
+                      step="0.01"
+                      value={editForm.priceUsd || ""}
+                      onChange={(e) => setEditForm((p) => ({ ...p, priceUsd: Number(e.target.value) || 0 }))}
+                      placeholder="Custom"
+                      className="w-24 px-3 py-1.5 rounded-lg text-sm bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-orange-500/50"
+                    />
                   </div>
+                  <p className="text-[10px] text-white/30 mt-1.5">$0.99 – $999.99 per 30-day pass</p>
                 </div>
               )}
               {/* Telegram Bridge */}
