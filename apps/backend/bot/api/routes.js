@@ -384,34 +384,12 @@ app.use(async (req, res, next) => {
   // to debug. Pre-auth requests fall through to the geo check.
   if (req.session?.user?.role === 'admin' || req.session?.user?.role === 'superadmin') return next();
 
-  // Grandfathered users — anyone who has an active paid entitlement bypasses
-  // the geo-block. The risk we're managing is for NEW signups from hostile
-  // jurisdictions; cutting off existing paying customers (some of whom paid
-  // hundreds of dollars) is its own kind of liability. Server-side cached.
-  const sessionUserId = req.session?.user?.id;
-  if (sessionUserId) {
-    try {
-      const cacheKey = `geoblock_grandfathered:${sessionUserId}`;
-      let grandfathered = await geoCache.get(cacheKey);
-      if (grandfathered === null || grandfathered === undefined) {
-        const { query: q } = require('../../config/postgres');
-        const { rows } = await q(
-          `SELECT 1 FROM user_entitlements
-           WHERE user_id = $1
-             AND (is_lifetime = true OR (expires_at IS NOT NULL AND expires_at > NOW()))
-           LIMIT 1`,
-          [sessionUserId]
-        );
-        grandfathered = rows.length > 0 ? '1' : '0';
-        await geoCache.set(cacheKey, grandfathered, 300); // 5 min cache
-      }
-      if (grandfathered === '1' || grandfathered === true) {
-        return next();
-      }
-    } catch (gfErr) {
-      logger.warn('Grandfather check failed (proceeding with geo-block)', { error: gfErr.message });
-    }
-  }
+  // NOTE: paying users are NOT grandfathered. Per platform policy, the
+  // geo-block applies uniformly to everyone in TX/TN/FL/UK — including
+  // existing PRIME members. The block page asks them to comply with their
+  // local legislation. Operator decision: maximum legal protection > keeping
+  // individual paying customers happy. Refunds are handled case-by-case at
+  // support@pnptv.app.
 
   try {
     const ip = req.ip;
