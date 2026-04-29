@@ -2296,11 +2296,71 @@ app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppCont
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
 app.post('/api/webapp/auth/oidc/token-exchange', authLimiter, asyncHandler(webAppController.oidcTokenExchange));
 
-// Request account recovery — delegates to the existing forgot-password handler
+// Request account recovery — Authentik-based password reset.
+// Why this path exists: most users (especially Telegram-shadow accounts) have a
+// placeholder @telegram.pnptv.app email inside Authentik but their *real* email
+// in our DB. Authentik's /if/flow/pnptv-recovery/ form looks up identifiers in
+// Authentik directly, so real-email submissions get rejected with
+// invalid_identifier. This handler resolves user → pnptv_id → Authentik PK,
+// generates a one-time recovery URL via the Authentik admin API, and emails
+// it through our SMTP. Always returns 200 to prevent email enumeration.
 app.post('/api/webapp/auth/recover-account', authLimiter, asyncHandler(async (req, res) => {
-  // Reuse the existing forgot-password flow (sends real SMTP email with reset link)
-  req.body.email = req.body.email || '';
-  return webAppController.forgotPassword(req, res);
+  const email = String(req.body?.email || '').toLowerCase().trim();
+  // Validate shape only — never reveal whether the email is in our DB.
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+    return res.json({ success: true });
+  }
+  try {
+    const { rows } = await getPool().query(
+      `SELECT id, pnptv_id, first_name, language FROM users
+        WHERE LOWER(email) = $1 AND is_deleted = false LIMIT 1`,
+      [email]
+    );
+    if (rows.length === 0 || !rows[0].pnptv_id) {
+      logger.info('[recover-account] no match', { email });
+      return res.json({ success: true });
+    }
+    const u = rows[0];
+    const authentikPk = await AuthentikService._getUserPkBySub(u.pnptv_id);
+    if (!authentikPk) {
+      logger.warn('[recover-account] user has pnptv_id but no Authentik PK', { userId: u.id });
+      return res.json({ success: true });
+    }
+    const recoveryLink = await AuthentikService.generateRecoveryLink(authentikPk);
+    if (!recoveryLink) {
+      logger.error('[recover-account] generateRecoveryLink failed', { userId: u.id, pk: authentikPk });
+      return res.json({ success: true });
+    }
+    const lang = (u.language || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
+    const displayName = u.first_name || (lang === 'es' ? 'usuario' : 'there');
+    const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    const subject = lang === 'es'
+      ? 'Restablecer contraseña — PNPtv'
+      : 'Reset your PNPtv password';
+    const html = lang === 'es'
+      ? `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111;">
+            <h2 style="color:#D4007A;margin:0 0 16px;">Restablecer contraseña</h2>
+            <p>Hola ${escape(displayName)},</p>
+            <p>Recibimos una solicitud para restablecer tu contraseña en PNPtv. Haz clic en el botón para crear una contraseña nueva. El enlace expira pronto y solo se puede usar una vez.</p>
+            <p style="margin:24px 0;"><a href="${recoveryLink}" style="background:#D4007A;color:#fff;padding:14px 24px;border-radius:10px;text-decoration:none;display:inline-block;font-weight:700;">Restablecer contraseña</a></p>
+            <p style="color:#636366;font-size:13px;">Si no solicitaste esto, ignora este correo.</p>
+            <p style="margin-top:24px;color:#636366;font-size:13px;">— Equipo PNPtv</p>
+          </div>`
+      : `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111;">
+            <h2 style="color:#D4007A;margin:0 0 16px;">Reset your password</h2>
+            <p>Hey ${escape(displayName)},</p>
+            <p>We got a request to reset your PNPtv password. Click the button below to set a new one. The link expires shortly and can be used only once.</p>
+            <p style="margin:24px 0;"><a href="${recoveryLink}" style="background:#D4007A;color:#fff;padding:14px 24px;border-radius:10px;text-decoration:none;display:inline-block;font-weight:700;">Reset password</a></p>
+            <p style="color:#636366;font-size:13px;">If you didn't request this, ignore this email.</p>
+            <p style="margin-top:24px;color:#636366;font-size:13px;">— The PNPtv Team</p>
+          </div>`;
+    const EmailService = require('../../services/emailService');
+    await EmailService.send({ to: email, subject, html });
+    logger.info('[recover-account] recovery email sent', { userId: u.id, pk: authentikPk });
+  } catch (err) {
+    logger.error('[recover-account] handler error', { email, error: err.message });
+  }
+  return res.json({ success: true });
 }));
 app.get('/api/webapp/auth/verify-email', verifyEmailLimiter, asyncHandler(webAppController.verifyEmail));
 app.post('/api/webapp/auth/resend-verification', authLimiter, asyncHandler(webAppController.resendVerification));

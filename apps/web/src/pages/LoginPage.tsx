@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { telegramWidgetAuth, type TelegramWidgetUser } from "@/lib/api";
+import { telegramWidgetAuth, recoverAccount, type TelegramWidgetUser } from "@/lib/api";
 import { login as oidcLogin, rememberReturnTo, sanitizeReturnTo } from "@/lib/auth";
 import { getI18n, getLang } from "@/lib/i18n";
 import { useAuth } from "@/hooks/useAuth";
 
 const AUTHENTIK_URL = import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app";
 const ENROLLMENT_FLOW_URL = `${AUTHENTIK_URL}/if/flow/pnptv-enrollment/`;
-const RECOVERY_FLOW_URL = `${AUTHENTIK_URL}/if/flow/pnptv-recovery/`;
 
 // Strip leading '@' if present (BotFather usernames may be stored with it)
 function getBotUsername(): string {
@@ -59,6 +58,108 @@ function ShieldIcon() {
         clipRule="evenodd"
       />
     </svg>
+  );
+}
+
+// ── ForgotPasswordPanel ───────────────────────────────────────────────────────
+// Click "Forgot password?" → reveals an inline email input → submits to our
+// /api/webapp/auth/recover-account endpoint, which resolves the email against
+// our DB and triggers Authentik's recovery flow (bypassing the placeholder
+// @telegram.pnptv.app emails that broke the direct Authentik flow). Always
+// shows a success message regardless of whether the email is on file.
+
+interface ForgotPasswordPanelProps {
+  t: ReturnType<typeof getI18n>["login"];
+}
+
+function ForgotPasswordPanel({ t }: ForgotPasswordPanelProps) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open && !sent) {
+      const id = setTimeout(() => inputRef.current?.focus(), 60);
+      return () => clearTimeout(id);
+    }
+  }, [open, sent]);
+
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = email.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    try {
+      await recoverAccount(trimmed);
+    } catch {
+      // Backend always returns 200 to avoid email enumeration. Swallow
+      // network errors so the user still sees the neutral success message.
+    }
+    setSent(true);
+    setSending(false);
+  }, [email, sending]);
+
+  if (!open) {
+    return (
+      <p className="text-center text-xs mt-3">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="underline text-pnp-accent hover:brightness-125 transition-all"
+        >
+          {t.forgotPassword}
+        </button>
+      </p>
+    );
+  }
+
+  if (sent) {
+    return (
+      <p className="text-center text-xs mt-3 px-2 leading-snug" style={{ color: "#9ce19c" }}>
+        ✓ {t.forgotPasswordSent}
+      </p>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-3 space-y-2 px-2">
+      <p className="text-center text-[11px] leading-snug" style={{ color: "#8E8E93" }}>
+        {t.forgotPasswordPrompt}
+      </p>
+      <input
+        ref={inputRef}
+        type="email"
+        autoComplete="email"
+        inputMode="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="you@example.com"
+        disabled={sending}
+        required
+        className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-pnp-accent transition-all"
+        style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.15)" }}
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => { setOpen(false); setEmail(""); }}
+          disabled={sending}
+          className="flex-1 min-h-[40px] rounded-lg text-xs font-semibold transition-all active:scale-[0.97] bg-white/[0.06] border border-white/10 text-white/70 disabled:opacity-50"
+        >
+          {t.forgotPasswordCancel}
+        </button>
+        <button
+          type="submit"
+          disabled={sending || !email.trim()}
+          className="flex-1 min-h-[40px] rounded-lg text-xs font-bold text-white transition-all active:scale-[0.97] disabled:opacity-50"
+          style={{ background: "linear-gradient(90deg, #D4007A, #E69138)" }}
+        >
+          {sending ? t.forgotPasswordSending : t.forgotPasswordSubmit}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -422,14 +523,7 @@ export function LoginPage() {
           <p className="text-center text-[10px] mt-1.5" style={{ color: "#636366" }}>
             {t.signInSubLabel}
           </p>
-          <p className="text-center text-xs mt-3">
-            <a
-              href={RECOVERY_FLOW_URL}
-              className="underline text-pnp-accent hover:brightness-125 transition-all"
-            >
-              {t.forgotPassword}
-            </a>
-          </p>
+          <ForgotPasswordPanel t={t} />
         </div>
 
         {/* Signup fallback if they click without typing email — edge case kept accessible */}
