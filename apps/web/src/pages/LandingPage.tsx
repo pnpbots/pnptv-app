@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { telegramWidgetAuth, recoverAccount, resendVerificationEmail, TelegramWidgetUser } from "@/lib/api";
+import { telegramWidgetAuth, recoverAccount, TelegramWidgetUser } from "@/lib/api";
 import { login as oidcLogin } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
 import { LanguageSelector } from "@/components/LanguageSelector";
@@ -91,13 +91,13 @@ export const sheets: Record<string, { title: string; emoji: string; body: React.
     emoji: "📣",
     body: (
       <div className="space-y-3">
-        <p className="text-xs font-bold uppercase tracking-widest text-gradient">Like X — but ours</p>
+        <p className="text-xs font-bold uppercase tracking-widest text-gradient">Your feed, your rules</p>
         <p className="text-pnp-textSecondary text-sm leading-relaxed">
           Post text, photos, or videos. Like, reply, repost. Follow people you vibe with and get a feed
           that's actually relevant — <span className="text-white font-medium">no shadow banning, no ads, no content cops.</span>
         </p>
         <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          Creators can lock exclusive posts for subscribers only. Cross-post to X in one tap if you want.
+          Creators can lock exclusive posts for subscribers only.
         </p>
       </div>
     ),
@@ -251,7 +251,7 @@ export function LandingPage() {
   const { refreshUser } = useAuth();
 
   const [loginOpen, setLoginOpen] = useState(false);
-  const [loginView, setLoginView] = useState<"options" | "telegram" | "email" | "recover">("options");
+  const [loginView, setLoginView] = useState<"options" | "telegram">("options");
 
   // Surface OIDC errors from backend redirect (?oidc_error=...) and open login panel
   const [oidcError, setOidcError] = useState<string | null>(() => {
@@ -267,13 +267,6 @@ export function LandingPage() {
   const [widgetStatus, setWidgetStatus] = useState<"idle" | "verifying" | "error">("idle");
   const [widgetBlocked, setWidgetBlocked] = useState(false);
   const [widgetError, setWidgetError] = useState<string | null>(null);
-  const [emailVal, setEmailVal] = useState("");
-  const [passVal, setPassVal] = useState("");
-  const [emailLoading, setEmailLoading] = useState(false);
-  const [emailError, setEmailError] = useState<string | null>(null);
-  const [emailNotVerified, setEmailNotVerified] = useState(false);
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendSent, setResendSent] = useState(false);
 
   // Signup / email-capture (primary CTA)
   const [signupEmail, setSignupEmail] = useState("");
@@ -351,52 +344,6 @@ export function LandingPage() {
         } catch { /* keep polling */ }
       }, 5000);
     } catch { /* silent */ }
-  };
-
-  const handleEmail = async () => {
-    if (!emailVal.trim() || !passVal) { setEmailError("Email and password are required"); return; }
-    setEmailLoading(true);
-    setEmailError(null);
-    setEmailNotVerified(false);
-    setResendSent(false);
-    try {
-      const res = await fetch(`${API_BASE}/api/webapp/auth/email/login`, {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailVal.trim().toLowerCase(), password: passVal }),
-      });
-      const data = await res.json();
-      if (res.ok && data.authenticated) {
-        localStorage.setItem("pnptv_last_auth", "email");
-        window.location.href = "/";
-      } else if (res.status === 403 && data.error === "email_not_verified") {
-        setEmailNotVerified(true);
-        setEmailError(null);
-      } else {
-        const raw = data.error || data.message || "Login failed";
-        setEmailError(
-          raw === "email_not_verified"
-            ? "Please verify your email before logging in."
-            : raw === "authentik_required" || raw === "AUTHENTIK_REQUIRED"
-            ? "Email/password login is disabled. Please sign in with PNPtv ID (Authentik) or Telegram."
-            : raw
-        );
-      }
-    } catch { setEmailError("Connection error. Try again."); }
-    finally { setEmailLoading(false); }
-  };
-
-  const handleResendVerification = async () => {
-    if (!emailVal.trim()) return;
-    setResendLoading(true);
-    try {
-      await resendVerificationEmail(emailVal.trim().toLowerCase());
-      setResendSent(true);
-    } catch {
-      // Non-fatal — user can try again
-    } finally {
-      setResendLoading(false);
-    }
   };
 
   const handleCreateAccount = (e: React.FormEvent) => {
@@ -569,13 +516,6 @@ export function LandingPage() {
                       Continue with Telegram
                     </button>
 
-                    <button onClick={() => setLoginView("email")} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-pnp-textSecondary border border-pnp-border hover:border-white/30 hover:text-white hover:bg-pnp-surface transition-colors">
-                      <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
-                      </svg>
-                      Continue with Email
-                    </button>
-
                     <p className="text-center text-xs text-pnp-textSecondary pt-1">
                       New here?{" "}
                       <a href={ENROLLMENT_FLOW_URL} className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all">
@@ -589,44 +529,7 @@ export function LandingPage() {
                     >
                       Forgot password?
                     </a>
-
-                    <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1">
-                      Had an X (Twitter) account? Recover it here
-                    </button>
                   </>
-                )}
-
-                {loginView === "recover" && (
-                  <div className="space-y-3">
-                    <button onClick={() => setLoginView("options")} className="flex items-center gap-1 text-xs text-pnp-textSecondary hover:text-white transition-colors">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-                      Back
-                    </button>
-                    <div className="text-center space-y-1 pb-2">
-                      <p className="text-sm font-semibold text-white">Account Recovery</p>
-                      <p className="text-xs text-pnp-textSecondary">Enter the email linked to your old X or PNPtv account. We'll send a recovery link to set a new password.</p>
-                    </div>
-                    {recoverSent ? (
-                      <div className="text-center py-4 space-y-2">
-                        <svg className="w-10 h-10 mx-auto text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <p className="text-sm text-green-400 font-medium">Recovery link sent!</p>
-                        <p className="text-xs text-pnp-textSecondary">Check your email inbox (and spam folder) for a link to set your password. Then come back and log in with Email.</p>
-                      </div>
-                    ) : (
-                      <>
-                        <input type="email" placeholder="Your email address" value={recoverEmail} onChange={e => setRecoverEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRecover()}
-                          className="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50 transition-colors" />
-                        {recoverError && <p className="text-pnp-error text-xs">{recoverError}</p>}
-                        <button onClick={handleRecover} disabled={recoverLoading || !recoverEmail.includes("@")}
-                          className="btn-gradient w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 flex items-center justify-center gap-2">
-                          {recoverLoading && <Spinner />}
-                          {recoverLoading ? "Sending…" : "Send Recovery Link"}
-                        </button>
-                      </>
-                    )}
-                  </div>
                 )}
 
                 {loginView === "telegram" && (
@@ -661,50 +564,6 @@ export function LandingPage() {
                         </div>
                       )
                     )}
-                  </div>
-                )}
-
-                {loginView === "email" && (
-                  <div className="space-y-2">
-                    <button onClick={() => setLoginView("options")} className="flex items-center gap-1 text-xs text-pnp-textSecondary hover:text-white transition-colors">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-                      Back
-                    </button>
-                    <input type="email" placeholder="Email" value={emailVal} onChange={e => setEmailVal(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50 transition-colors" />
-                    <input type="password" placeholder="Password" value={passVal} onChange={e => setPassVal(e.target.value)} onKeyDown={e => e.key === "Enter" && handleEmail()}
-                      className="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50 transition-colors" />
-                    {emailError && <p className="text-pnp-error text-xs">{emailError}</p>}
-                    {emailNotVerified && (
-                      <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(230,145,56,0.1)", border: "1px solid rgba(230,145,56,0.3)" }}>
-                        <p className="text-xs text-white">
-                          <strong>Almost there!</strong> Please verify your email before logging in. Check your inbox for the link we sent.
-                        </p>
-                        {resendSent ? (
-                          <p className="text-xs text-green-400">✓ Verification email resent. Check your inbox.</p>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={handleResendVerification}
-                            disabled={resendLoading}
-                            className="w-full text-xs font-semibold underline text-pnp-accent hover:brightness-125 transition-all disabled:opacity-60"
-                          >
-                            {resendLoading ? "Sending…" : "Resend verification email"}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    <button onClick={handleEmail} disabled={emailLoading}
-                      className="btn-gradient w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 flex items-center justify-center gap-2">
-                      {emailLoading && <Spinner />}
-                      {emailLoading ? "Logging in…" : "Log in"}
-                    </button>
-                    <a
-                      href={RECOVERY_FLOW_URL}
-                      className="block text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1 underline"
-                    >
-                      Forgot password?
-                    </a>
                   </div>
                 )}
 
