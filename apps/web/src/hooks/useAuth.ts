@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, createContext, useContext } from "rea
 import { isTelegramContext, getTelegramWebApp, waitForTelegramSdk } from "@/lib/telegram";
 import { telegramAuth, checkAuthStatus, apiLogout, oidcLogout, ApiError, NetworkError, type TelegramAuthResponse } from "@/lib/api";
 import { disconnectSocket } from "@/lib/socket";
+import { userManager } from "@/lib/auth";
 import React from "react";
 
 interface PnptvUser {
@@ -158,8 +159,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (user?.lastLoginMethod === "oidc") {
       await oidcLogout().catch(() => {});
     }
-    await apiLogout();
+    await apiLogout().catch(() => {});
     setUser(null);
+
+    // Stop silent renew and clear oidc-client-ts localStorage state so it
+    // can't silently re-authenticate using the still-active Authentik SSO.
+    userManager.stopSilentRenew();
+    await userManager.removeUser().catch(() => {});
+
+    // Redirect to Authentik's end_session endpoint to kill the SSO session.
+    // For non-OIDC users (Telegram-only) there's no SSO session — just go home.
+    if (user?.lastLoginMethod === "oidc") {
+      try {
+        await userManager.signoutRedirect();
+        return; // page navigates away
+      } catch { /* fall through */ }
+    }
+    window.location.href = "/";
   }, [user]);
 
   const refreshUser = useCallback(async () => {
