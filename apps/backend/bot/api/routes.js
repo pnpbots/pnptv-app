@@ -2416,7 +2416,8 @@ app.post('/api/webapp/auth/reset-password', authLimiter, asyncHandler(webAppCont
 // Rate limiter — 10 OIDC login initiations per 15 min per IP
 const oidcLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 30,
+  skipSuccessfulRequests: true,
   handler: (req, res) => res.status(429).json({ error: 'Too many login attempts. Try again later.' }),
   standardHeaders: true,
   legacyHeaders: false,
