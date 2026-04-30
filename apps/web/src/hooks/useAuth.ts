@@ -155,26 +155,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const handleLogout = useCallback(async () => {
     disconnectSocket();
-    // Revoke OIDC session on the backend before clearing local state
     if (user?.lastLoginMethod === "oidc") {
       await oidcLogout().catch(() => {});
     }
     await apiLogout().catch(() => {});
     setUser(null);
-
-    // Stop silent renew and clear oidc-client-ts localStorage state so it
-    // can't silently re-authenticate using the still-active Authentik SSO.
     userManager.stopSilentRenew();
-    await userManager.removeUser().catch(() => {});
 
-    // Redirect to Authentik's end_session endpoint to kill the SSO session.
-    // For non-OIDC users (Telegram-only) there's no SSO session — just go home.
+    // signoutRedirect() reads the stored id_token_hint from localStorage to
+    // tell Authentik which session to end — removeUser() must NOT be called
+    // first or the hint is gone and Authentik won't kill the SSO session.
     if (user?.lastLoginMethod === "oidc") {
       try {
         await userManager.signoutRedirect();
-        return; // page navigates away
+        return; // page navigates away to Authentik end_session → back to "/"
       } catch { /* fall through */ }
     }
+
+    // Non-OIDC (Telegram-only) or signoutRedirect failed: clear state and go home.
+    await userManager.removeUser().catch(() => {});
     window.location.href = "/";
   }, [user]);
 
