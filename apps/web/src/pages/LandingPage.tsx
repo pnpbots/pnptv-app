@@ -253,6 +253,22 @@ export function LandingPage() {
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginView, setLoginView] = useState<"options" | "telegram">("options");
 
+  const returningUsername = (() => {
+    try { return localStorage.getItem("pnptv_last_username") || null; } catch { return null; }
+  })();
+  const returningMethod = (() => {
+    try { return localStorage.getItem("pnptv_last_auth") || null; } catch { return null; }
+  })();
+
+  const handleContinueAs = () => {
+    if (returningMethod === "telegram") {
+      setLoginOpen(true);
+      setLoginView("telegram");
+    } else {
+      window.location.href = "/api/webapp/auth/oidc/login";
+    }
+  };
+
   // Surface OIDC errors from backend redirect (?oidc_error=...) and open login panel
   const [oidcError, setOidcError] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -456,15 +472,35 @@ export function LandingPage() {
 
           {/* Join existing — accordion */}
           <div className="w-full">
-            <button
-              onClick={() => { setLoginOpen(v => !v); setLoginView("options"); }}
-              className="w-full py-3.5 rounded-xl text-sm font-semibold text-pnp-textSecondary border border-pnp-border hover:border-white/30 hover:text-white flex items-center justify-center gap-2 transition-colors"
-            >
-              Already a member? Log in
-              <svg className={`w-4 h-4 transition-transform duration-200 ${loginOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
+            {returningUsername ? (
+              <div className="space-y-1.5">
+                <button
+                  onClick={handleContinueAs}
+                  className="w-full py-3.5 rounded-xl text-sm font-semibold text-white border border-white/20 hover:border-white/40 hover:bg-white/5 flex items-center justify-center gap-2 transition-colors"
+                >
+                  Continue as @{returningUsername}
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => { setLoginOpen(v => !v); setLoginView("options"); }}
+                  className="w-full text-center text-[11px] text-pnp-textSecondary hover:text-white transition-colors py-1"
+                >
+                  Not you? Sign in differently {loginOpen ? "▲" : "▼"}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setLoginOpen(v => !v); setLoginView("options"); }}
+                className="w-full py-3.5 rounded-xl text-sm font-semibold text-pnp-textSecondary border border-pnp-border hover:border-white/30 hover:text-white flex items-center justify-center gap-2 transition-colors"
+              >
+                Already a member? Log in
+                <svg className={`w-4 h-4 transition-transform duration-200 ${loginOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            )}
 
             {/* Accordion body */}
             <div

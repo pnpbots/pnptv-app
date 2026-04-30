@@ -498,32 +498,45 @@ export function LoginPage() {
 
         {/* ── SECONDARY: already a member? ──────────────────────────────── */}
         <div className="mt-6 pt-5 border-t border-white/10">
-          <p className="text-center text-xs text-pnp-textSecondary mb-3">
-            {t.alreadyMember}
-          </p>
-          {returningUser && (
-            <p className="text-center text-[11px] mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-              {t.lastLoginedWith}{" "}
-              <span className="font-semibold text-white">{label}</span>
-              {lastUsername ? ` (@${lastUsername})` : ""}
-            </p>
+          {returningUser && lastUsername ? (
+            <>
+              <button
+                onClick={handleOidcLogin}
+                disabled={oidcLoading}
+                className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-70 mb-2"
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.18)", color: "#FFFFFF" }}
+              >
+                {oidcLoading ? <Spinner className="h-4 w-4" /> : <ShieldIcon />}
+                <span>Continue as @{lastUsername}</span>
+                {!oidcLoading && (
+                  <svg className="w-4 h-4 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                  </svg>
+                )}
+              </button>
+              <p className="text-center text-[10px] mb-3" style={{ color: "#636366" }}>
+                {t.signInSubLabel}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-center text-xs text-pnp-textSecondary mb-3">
+                {t.alreadyMember}
+              </p>
+              <button
+                onClick={handleOidcLogin}
+                disabled={oidcLoading}
+                className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all hover:bg-white/10 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "#FFFFFF" }}
+              >
+                {oidcLoading ? <Spinner className="h-4 w-4" /> : <ShieldIcon />}
+                <span>{t.signInWithEmail}</span>
+              </button>
+              <p className="text-center text-[10px] mt-1.5" style={{ color: "#636366" }}>
+                {t.signInSubLabel}
+              </p>
+            </>
           )}
-          <button
-            onClick={handleOidcLogin}
-            disabled={oidcLoading}
-            className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all hover:bg-white/10 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
-            style={{
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              color: "#FFFFFF",
-            }}
-          >
-            {oidcLoading ? <Spinner className="h-4 w-4" /> : <ShieldIcon />}
-            <span>{t.signInWithEmail}</span>
-          </button>
-          <p className="text-center text-[10px] mt-1.5" style={{ color: "#636366" }}>
-            {t.signInSubLabel}
-          </p>
           <ForgotPasswordPanel t={t} />
         </div>
 
