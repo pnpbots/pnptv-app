@@ -373,11 +373,12 @@ export function LandingPage() {
         setEmailNotVerified(true);
         setEmailError(null);
       } else {
-        // Normalize Spanish-only backend messages to friendly English
         const raw = data.error || data.message || "Login failed";
         setEmailError(
           raw === "email_not_verified"
             ? "Please verify your email before logging in."
+            : raw === "authentik_required" || raw === "AUTHENTIK_REQUIRED"
+            ? "Email/password login is disabled. Please sign in with PNPtv ID (Authentik) or Telegram."
             : raw
         );
       }

@@ -3,7 +3,7 @@
 # ===========================================================
 
 # Stage 1: Install dependencies
-FROM node:18-slim AS deps
+FROM node:20-slim AS deps
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ WORKDIR /app
 RUN npm ci --omit=dev --ignore-scripts
 
 # Stage 2: Production runtime
-FROM node:18-slim
+FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \

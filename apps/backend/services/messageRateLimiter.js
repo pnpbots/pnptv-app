@@ -24,6 +24,12 @@ class MessageRateLimiter {
    */
   static async _ensureTableExists() {
     try {
+      // Fast path: skip the DDL round-trip when the table already exists.
+      const { rows } = await query(
+        `SELECT to_regclass('public.message_rate_limits') IS NOT NULL AS exists`
+      );
+      if (rows?.[0]?.exists) return;
+
       await query(`
         CREATE TABLE IF NOT EXISTS message_rate_limits (
           date DATE PRIMARY KEY,
@@ -32,8 +38,8 @@ class MessageRateLimiter {
           created_at TIMESTAMP DEFAULT NOW()
         )
       `);
-      
-      logger.info('Message rate limit table ensured');
+
+      logger.info('Message rate limit table created');
     } catch (error) {
       logger.error(`Error ensuring message rate limit table: ${error.message}`);
     }

@@ -2659,6 +2659,28 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     });
   }
 
+  let effectiveRole = userRow.role || 'user';
+  try {
+    effectiveRole = await AuthentikService.resolveEffectiveRole({
+      authentikSub: sub,
+      dbRole: userRow.role,
+      groups: userInfo.groups,
+    });
+    if (effectiveRole !== (userRow.role || 'user') && userRow.role !== 'superadmin') {
+      await pool.query(
+        `UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2`,
+        [effectiveRole, userRow.id]
+      );
+      userRow.role = effectiveRole;
+    }
+  } catch (err) {
+    logger.warn('[OIDC] Failed to resolve Authentik-backed role, falling back to DB role', {
+      userId: userRow.id,
+      sub,
+      error: err.message,
+    });
+  }
+
   // ── 5. Regenerate session to prevent session fixation ────────────────────────
   await new Promise((resolve, reject) => {
     req.session.regenerate((err) => (err ? reject(err) : resolve()));
@@ -2678,7 +2700,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     photoUrl: userRow.photo_file_id,
     bio: userRow.bio,
     language: userRow.language,
-    role: userRow.role || 'user',
+    role: effectiveRole,
     creator_status: userRow.creator_status || 'none',
     contentDisclaimer: userRow.content_disclaimer || false,
     // X identity
@@ -2706,7 +2728,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
   setImmediate(async () => {
     try {
       await AuthentikService.syncUserGroups(sub, {
-        role: userRow.role,
+        role: effectiveRole,
         tier: userRow.tier,
         creatorStatus: userRow.creator_status,
       });

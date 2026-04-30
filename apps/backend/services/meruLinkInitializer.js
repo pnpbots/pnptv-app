@@ -12,6 +12,14 @@ const paymentHistoryService = require('./paymentHistoryService');
 class MeruLinkInitializer {
   async initialize() {
     try {
+      // Fast path: tables + seed already bootstrapped on a prior boot.
+      // Skips ~13 redundant DDL/INSERT round-trips per startup.
+      const alreadyBootstrapped = await this.isAlreadyBootstrapped();
+      if (alreadyBootstrapped) {
+        logger.info('✓ Meru Link tracking system already bootstrapped (skipping init)');
+        return true;
+      }
+
       logger.info('Initializing Meru Link tracking system...');
 
       // Create tables with timeout to prevent hanging
@@ -27,6 +35,18 @@ class MeruLinkInitializer {
       return true;
     } catch (error) {
       logger.error('Error initializing Meru Link system:', error);
+      return false;
+    }
+  }
+
+  async isAlreadyBootstrapped() {
+    try {
+      const { rows } = await query(
+        `SELECT COUNT(*)::int AS n FROM meru_payment_links`
+      );
+      return Number(rows?.[0]?.n || 0) > 0;
+    } catch {
+      // Table doesn't exist yet → must bootstrap
       return false;
     }
   }

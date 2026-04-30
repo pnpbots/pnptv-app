@@ -33,6 +33,8 @@ const WELLNESS_PATH_ALLOWLIST = [
 
   // Wellness hangouts only — the controller filters by is_wellness=true
   /^\/api\/webapp\/hangouts\/wellness$/,
+  /^\/api\/webapp\/hangouts\/groups\/[^/]+$/, // group detail — shell only shows wellness groups
+  /^\/api\/webapp\/hangouts\/groups\/[^/]+\/join$/, // joining a wellness hangout
   /^\/api\/webapp\/hangouts\/groups\/[^/]+\/messages$/, // controller will check is_wellness
   /^\/api\/webapp\/hangouts\/groups\/[^/]+\/members$/,
 

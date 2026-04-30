@@ -28,6 +28,27 @@ const OIDC_JWKS_ENDPOINT = `${OIDC_ISSUER}jwks/`;
 // Scopes requested — openid + profile (name, preferred_username) + email
 const OIDC_SCOPE = 'openid profile email';
 
+function normalizeRole(role) {
+  return String(role || 'user').toLowerCase();
+}
+
+function normalizeGroups(groups) {
+  if (!Array.isArray(groups)) return [];
+  return groups
+    .map((group) => {
+      if (typeof group === 'string') return group;
+      if (group && typeof group.name === 'string') return group.name;
+      return null;
+    })
+    .filter(Boolean);
+}
+
+function getAdminGroupNames() {
+  const configured = String(process.env.AUTHENTIK_ADMINS_GROUP_NAME || '').trim();
+  if (configured) return [configured];
+  return ['Admins', 'authentik Admins'];
+}
+
 /**
  * Derive a PKCE code_challenge from a code_verifier using SHA-256 / S256.
  * Both code_verifier and code_challenge are base64url-encoded (no padding).
@@ -274,7 +295,7 @@ class AuthentikService {
       if (!userPk) return;
 
       const groupMappings = [
-        { name: 'Admins', condition: role === 'admin' || role === 'superadmin' },
+        { names: getAdminGroupNames(), condition: role === 'admin' || role === 'superadmin' },
         { name: 'Moderators', condition: role === 'moderator' },
         { name: 'Creators', condition: creatorStatus === 'approved' },
         { name: 'Prime Members', condition: (tier || '').toLowerCase() === 'prime' },
@@ -282,12 +303,17 @@ class AuthentikService {
 
       for (const mapping of groupMappings) {
         try {
-          const groupRes = await axios.get(`${AUTHENTIK_URL}/api/v3/core/groups/`, {
-            params: { name: mapping.name },
-            headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` },
-            timeout: 10000,
-          });
-          const group = groupRes.data.results.find(g => g.name === mapping.name);
+          const candidateNames = mapping.names || [mapping.name];
+          let group = null;
+          for (const candidateName of candidateNames) {
+            const groupRes = await axios.get(`${AUTHENTIK_URL}/api/v3/core/groups/`, {
+              params: { name: candidateName },
+              headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` },
+              timeout: 10000,
+            });
+            group = groupRes.data.results.find(g => g.name === candidateName);
+            if (group) break;
+          }
           if (!group) continue;
 
           if (mapping.condition) {
@@ -713,7 +739,7 @@ class AuthentikService {
     if (!AUTHENTIK_TOKEN || !authentikSub) return false;
 
     try {
-      const groupName = process.env.AUTHENTIK_ADMINS_GROUP_NAME || 'Admins';
+      const groupNames = getAdminGroupNames();
 
       const res = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
         params: { uuid: authentikSub },
@@ -727,8 +753,8 @@ class AuthentikService {
         return false;
       }
 
-      const inGroup = (user.groups_obj || []).some(g => g.name === groupName);
-      logger.debug('[Authentik] isUserInAdminsGroup result', { authentikSub, inGroup, groupName });
+      const inGroup = (user.groups_obj || []).some(g => groupNames.includes(g.name));
+      logger.debug('[Authentik] isUserInAdminsGroup result', { authentikSub, inGroup, groupNames });
       return inGroup;
     } catch (err) {
       const status = err.response?.status;
@@ -736,6 +762,44 @@ class AuthentikService {
       logger.error('[Authentik] isUserInAdminsGroup failed', { authentikSub, status, detail });
       return false;
     }
+  }
+
+  /**
+   * Resolve the app role with Authentik as the source of truth for admin access.
+   * Superadmin remains a local emergency/root role. Regular admin is granted only
+   * when the Authentik identity is currently in the configured Admins group.
+   *
+   * @param {object} opts
+   * @param {string} [opts.authentikSub]
+   * @param {string} [opts.dbRole]
+   * @param {Array<string|{name:string}>} [opts.groups]
+   * @returns {Promise<string>}
+   */
+  static async resolveEffectiveRole({ authentikSub, dbRole, groups } = {}) {
+    const normalizedDbRole = normalizeRole(dbRole);
+    if (normalizedDbRole === 'superadmin') {
+      return 'superadmin';
+    }
+
+    const adminGroupNames = getAdminGroupNames();
+    let isAuthentikAdmin = null;
+    const normalizedGroups = normalizeGroups(groups);
+
+    if (normalizedGroups.length > 0) {
+      isAuthentikAdmin = normalizedGroups.some((groupName) => adminGroupNames.includes(groupName));
+    } else if (authentikSub) {
+      isAuthentikAdmin = await AuthentikService.isUserInAdminsGroup(authentikSub);
+    }
+
+    if (isAuthentikAdmin === true) {
+      return 'admin';
+    }
+
+    if (normalizedDbRole === 'admin') {
+      return 'user';
+    }
+
+    return normalizedDbRole || 'user';
   }
 
   /**

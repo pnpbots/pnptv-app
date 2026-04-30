@@ -51,26 +51,17 @@ function redirectToCanonicalAuthError(res) {
   return res.redirect('https://pnptv.app/?error=auth_failed');
 }
 
+function localAuthDisabled(res) {
+  return res.status(403).json({
+    error: 'authentik_required',
+    message: 'Local email/password authentication is disabled. Sign in with Authentik.',
+  });
+}
+
 function generatePnptvId() {
   return uuidv4();
 }
 
-async function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = await new Promise((resolve, reject) =>
-    crypto.scrypt(password, salt, 64, (err, key) => (err ? reject(err) : resolve(key.toString('hex'))))
-  );
-  return `${salt}:${hash}`;
-}
-
-async function verifyPassword(password, stored) {
-  const [salt, hash] = stored.split(':');
-  const hashBuf = Buffer.from(hash, 'hex');
-  const derivedBuf = await new Promise((resolve, reject) =>
-    crypto.scrypt(password, salt, 64, (err, key) => (err ? reject(err) : resolve(key)))
-  );
-  return crypto.timingSafeEqual(hashBuf, derivedBuf);
-}
 
 async function createWebUser({ id, firstName, lastName, username, email, passwordHash, telegramId, twitterHandle, xId, photoFileId } = {}) {
   const userId = id || uuidv4();
@@ -708,82 +699,7 @@ const telegramLogin = async (req, res) => {
  * Sends verification email and returns requiresVerification: true
  */
 const emailRegister = async (req, res) => {
-  try {
-    const { email, password, firstName, lastName } = req.body;
-
-    if (!email || !password || !firstName) {
-      return res.status(400).json({ error: 'Email, password and first name are required' });
-    }
-    if (password.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    }
-    const emailLower = email.toLowerCase().trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLower)) {
-      return res.status(400).json({ error: 'Invalid email address' });
-    }
-
-    // Check if email already exists
-    const existing = await query('SELECT id FROM users WHERE email = $1', [emailLower]);
-    if (existing.rows.length > 0) {
-      return res.status(409).json({ error: 'An account with this email already exists. Please log in.' });
-    }
-
-    const passwordHash = await hashPassword(password);
-    const user = await createWebUser({
-      firstName: firstName.trim(),
-      lastName: lastName ? lastName.trim() : null,
-      email: emailLower,
-      passwordHash,
-    });
-
-    // Create email verification table if not exists
-    await query(`
-      CREATE TABLE IF NOT EXISTS email_verification_tokens (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        token TEXT NOT NULL UNIQUE,
-        expires_at TIMESTAMP NOT NULL,
-        used BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // Generate verification token
-    const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-    await query(
-      'INSERT INTO email_verification_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
-      [user.id, token, expiresAt.toISOString()]
-    );
-
-    // Send verification email
-    const verifyUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/verify-email.html?token=${token}`;
-    await emailService.send({
-      to: emailLower,
-      subject: 'PNPtv – Verifica tu correo electrónico',
-      html: `
-        <p>Hola ${user.first_name || 'usuario'},</p>
-        <p>¡Bienvenido a PNPtv! Para completar tu registro, verifica tu correo electrónico.</p>
-        <p><a href="${verifyUrl}" style="background:#FF00CC;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block;margin:16px 0;">Verificar correo</a></p>
-        <p>Este enlace expira en 24 horas. Si no realizaste este registro, ignora este correo.</p>
-      `,
-    });
-
-    logger.info(`New user registered via email: ${user.id} (${emailLower}), verification email sent`);
-
-    return res.json({
-      authenticated: false,
-      requiresVerification: true,
-      message: 'Account created. Check your email to verify.',
-      user: {
-        id: user.id,
-        email: emailLower,
-      },
-    });
-  } catch (error) {
-    logger.error('Email register error:', error);
-    return res.status(500).json({ error: 'Registration failed. Please try again.' });
-  }
+  return localAuthDisabled(res);
 };
 
 /**
@@ -791,75 +707,7 @@ const emailRegister = async (req, res) => {
  * Login with email + password.
  */
 const emailLogin = async (req, res) => {
-  try {
-    const { email, password, rememberMe } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
-    }
-
-    const emailLower = email.toLowerCase().trim();
-    const result = await query(
-      `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
-              terms_accepted, photo_file_id, bio, language, password_hash, email, role, email_verified
-       FROM users WHERE email = $1 AND is_deleted = false`,
-      [emailLower]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'No account found with this email. Please register first.' });
-    }
-
-    const user = result.rows[0];
-    if (!user.password_hash) {
-      return res.status(401).json({ error: 'This account uses Telegram or X to sign in. Please use those options.' });
-    }
-
-    const valid = await verifyPassword(password, user.password_hash);
-    if (!valid) {
-      return res.status(401).json({ error: 'Incorrect password.' });
-    }
-
-    // Check if email is verified
-    logger.info(`Email login check: user=${user.id}, email_verified=${user.email_verified}, type=${typeof user.email_verified}, truthy=${!!user.email_verified}`);
-    if (!user.email_verified) {
-      return res.status(403).json({
-        error: 'email_not_verified',
-        message: 'Por favor verifica tu email antes de iniciar sesión.'
-      });
-    }
-
-    query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'email', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
-    const emailLoginSessionData = buildSession(user, { last_login_method: 'email' });
-    enforceDefaultFollows(user.id).catch(() => {});
-    const rememberMeFlag = rememberMe === true || rememberMe === 'true';
-    await new Promise((resolve, reject) =>
-      req.session.regenerate(err => (err ? reject(err) : resolve()))
-    );
-    req.session.user = emailLoginSessionData;
-    setSessionCookieDuration(req.session, rememberMeFlag);
-    await new Promise((resolve, reject) =>
-      req.session.save(err => (err ? reject(err) : resolve()))
-    );
-    logger.info(`Web app email login: user ${user.id} (${emailLower})`);
-
-    return res.json({
-      authenticated: true,
-      pnptvId: user.pnptv_id,
-      user: {
-        id: user.id,
-        pnptvId: user.pnptv_id,
-        username: user.username,
-        firstName: user.first_name,
-        lastName: user.last_name,
-        email: user.email,
-        subscriptionStatus: user.subscription_status,
-        role: user.role || 'user',
-      },
-    });
-  } catch (error) {
-    logger.error('Email login error:', error);
-    return res.status(500).json({ error: 'Login failed. Please try again.' });
-  }
+  return localAuthDisabled(res);
 };
 
 /**
@@ -945,17 +793,18 @@ const oidcTokenExchange = async (req, res) => {
       [user.id]
     ).catch(() => {});
 
-    // 6. Check Authentik Admins group to determine effective role
+    // 6. Resolve effective role with Authentik as the authority for admin access
     let effectiveRole = user.role || 'user';
     try {
       const AuthentikService = require('../../../services/authentikService');
-      const isAuthentikAdmin = await AuthentikService.isUserInAdminsGroup(profile.sub);
-      if (isAuthentikAdmin && effectiveRole !== 'superadmin') {
-        effectiveRole = 'admin';
-        // Sync DB role if Authentik says admin but DB doesn't
-        if (user.role !== 'admin' && user.role !== 'superadmin') {
-          query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', ['admin', user.id]).catch(() => {});
-        }
+      effectiveRole = await AuthentikService.resolveEffectiveRole({
+        authentikSub: profile.sub,
+        dbRole: user.role,
+        groups: profile.groups,
+      });
+      if (effectiveRole !== (user.role || 'user') && user.role !== 'superadmin') {
+        query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', [effectiveRole, user.id]).catch(() => {});
+        user.role = effectiveRole;
       }
     } catch (err) {
       logger.warn('Authentik admin group check failed, falling back to DB role', { error: err.message });
@@ -1711,58 +1560,7 @@ const getProfile = async (req, res) => {
  * Send password reset email.
  */
 const forgotPassword = async (req, res) => {
-  try {
-    const email = (req.body.email || '').toLowerCase().trim();
-    if (!email) return res.status(400).json({ error: 'Email is required' });
-
-    const result = await query('SELECT id, first_name, email FROM users WHERE email = $1', [email]);
-    // Always return 200 to avoid email enumeration
-    if (result.rows.length === 0) return res.json({ success: true });
-
-    const user = result.rows[0];
-    // Ensure token table exists (idempotent)
-    await query(`
-      CREATE TABLE IF NOT EXISTS password_reset_tokens (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        token TEXT NOT NULL UNIQUE,
-        expires_at TIMESTAMP NOT NULL,
-        used BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    // Invalidate old tokens for this user
-    await query('UPDATE password_reset_tokens SET used = TRUE WHERE user_id = $1 AND used = FALSE', [user.id]);
-
-    const token = crypto.randomBytes(32).toString('hex');
-    // Hash the token before persisting so a DB dump / backup leak doesn't
-    // expose usable reset links. Raw token only travels in the email URL;
-    // resetPassword compares the SHA256 of what the user submits.
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-    await query(
-      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
-      [user.id, tokenHash, expiresAt.toISOString()]
-    );
-
-    const resetUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/reset-password?token=${token}`;
-    await emailService.send({
-      to: email,
-      subject: 'PNPtv – Restablecer contraseña',
-      html: `
-        <p>Hola ${user.first_name || 'usuario'},</p>
-        <p>Recibimos una solicitud para restablecer tu contraseña en PNPtv.</p>
-        <p><a href="${resetUrl}" style="background:#FF00CC;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block;margin:16px 0;">Restablecer contraseña</a></p>
-        <p>Este enlace expira en 1 hora. Si no solicitaste esto, ignora este correo.</p>
-      `,
-    });
-
-    logger.info(`Password reset email sent to ${email}`);
-    return res.json({ success: true });
-  } catch (error) {
-    logger.error('Forgot password error:', error);
-    return res.status(500).json({ error: 'Failed to send reset email' });
-  }
+  return localAuthDisabled(res);
 };
 
 /**
@@ -1770,39 +1568,7 @@ const forgotPassword = async (req, res) => {
  * Set new password using a reset token.
  */
 const resetPassword = async (req, res) => {
-  try {
-    const { token, password } = req.body;
-    if (!token || !password) return res.status(400).json({ error: 'Token and password are required' });
-    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-
-    // Compare the SHA256 hash of the submitted token against the stored hash.
-    // Tokens issued before this change were stored plaintext — they will fail
-    // to match here, but those have a 1-hour expiry so the window closes
-    // automatically. No backfill needed.
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    const result = await query(
-      `SELECT t.id, t.user_id, t.expires_at, u.email, u.first_name
-       FROM password_reset_tokens t JOIN users u ON u.id = t.user_id
-       WHERE t.token = $1 AND t.used = FALSE`,
-      [tokenHash]
-    );
-    if (result.rows.length === 0) return res.status(400).json({ error: 'Invalid or expired reset link.' });
-
-    const row = result.rows[0];
-    if (new Date() > new Date(row.expires_at)) {
-      return res.status(400).json({ error: 'This reset link has expired. Please request a new one.' });
-    }
-
-    const passwordHash = await hashPassword(password);
-    await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [passwordHash, row.user_id]);
-    await query('UPDATE password_reset_tokens SET used = TRUE WHERE id = $1', [row.id]);
-
-    logger.info(`Password reset successful for user ${row.user_id}`);
-    return res.json({ success: true, message: 'Password updated successfully. You can now log in.' });
-  } catch (error) {
-    logger.error('Reset password error:', error);
-    return res.status(500).json({ error: 'Failed to reset password' });
-  }
+  return localAuthDisabled(res);
 };
 
 /**

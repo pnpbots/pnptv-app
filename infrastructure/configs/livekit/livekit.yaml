@@ -1,6 +1,9 @@
 port: 7880
 bind_addresses:
   - ""
+redis:
+  address: redis-pnptv:6379
+  password: __REDIS_PNPTV_PASSWORD__
 rtc:
   port_range_start: 50000
   port_range_end: 50060

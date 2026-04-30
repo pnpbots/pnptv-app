@@ -13,9 +13,9 @@ export interface IdentityConnectionsProps {
 }
 
 function getBotUsername(): string {
-  return (
-    (import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string) || "PNPLatinoTV_Bot"
-  );
+  const raw =
+    (import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string) || "PNPLatinoTV_bot";
+  return raw.replace(/^@/, "").trim();
 }
 
 interface TelegramLinkWidgetProps {

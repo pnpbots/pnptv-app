@@ -4,6 +4,15 @@ const performanceMonitor = require('../utils/performanceMonitor');
 
 let pool = null;
 
+// Startup grace period: during the first N seconds of process life the DB
+// pool is warming, migrations/index DDL replays, schedulers fire concurrently,
+// so >100ms latencies are expected contention noise rather than real
+// regressions. Demote slow-query warns to debug during this window.
+const PROCESS_START_TIME = Date.now();
+const SLOW_QUERY_BOOT_GRACE_MS = parseInt(
+  process.env.POSTGRES_SLOW_QUERY_BOOT_GRACE_MS || '60000'
+);
+
 /**
  * Initialize PostgreSQL connection pool
  * @returns {Pool} PostgreSQL pool instance
@@ -303,11 +312,14 @@ const query = async (text, params, { cache = queryCache.enabled, ttl = queryCach
     });
 
     if (duration > 100) { // Log slow queries
-      logger.warn('Slow query detected', {
+      const inBootGrace = (Date.now() - PROCESS_START_TIME) < SLOW_QUERY_BOOT_GRACE_MS;
+      const log = inBootGrace ? logger.debug.bind(logger) : logger.warn.bind(logger);
+      log('Slow query detected', {
         duration,
         rows: result.rowCount,
         query: text.length > 200 ? `${text.substring(0, 200)}...` : text,
-        params: params ? params.length : 0
+        params: params ? params.length : 0,
+        ...(inBootGrace ? { phase: 'boot' } : {})
       });
     }
 

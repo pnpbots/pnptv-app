@@ -177,6 +177,7 @@ function WellnessModeCard() {
   if (!status) return null;
 
   const inCoolingOff = status.active && status.disableRequestedAt && (status.hoursLeftUntilDisableAllowed ?? 0) > 0;
+  const coolingOffComplete = status.active && status.disableRequestedAt && (status.hoursLeftUntilDisableAllowed ?? 1) <= 0;
   const hoursLeft = Math.ceil(status.hoursLeftUntilDisableAllowed ?? 0);
 
   return (
@@ -229,7 +230,7 @@ function WellnessModeCard() {
         </>
       )}
 
-      {status.active && !inCoolingOff && (
+      {status.active && !inCoolingOff && !coolingOffComplete && (
         <>
           <p className="text-sm text-white/70 mb-3 leading-relaxed">
             You're in Wellness Break Mode {status.indefinite ? "indefinitely" : `until ${fmtUntil(status.until, false)}`}.
@@ -248,6 +249,32 @@ function WellnessModeCard() {
           >
             {busy ? "…" : `Request to disable (24h cooling-off)`}
           </button>
+        </>
+      )}
+
+      {coolingOffComplete && (
+        <>
+          <p className="text-sm text-green-300/80 mb-3 leading-relaxed">
+            <strong>Cooling-off complete.</strong> Your 24-hour wait has passed. You can now disable Wellness Mode — or stay in it if you've changed your mind.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={onDisableClick}
+              disabled={busy}
+              className="flex-1 rounded-lg py-2.5 text-sm font-semibold transition-all"
+              style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.35)", color: "rgba(252,165,165,0.9)" }}
+            >
+              {busy ? "…" : "Disable now"}
+            </button>
+            <button
+              onClick={onCancelDisable}
+              disabled={busy}
+              className="flex-1 rounded-lg py-2.5 text-sm font-semibold transition-all"
+              style={{ background: "rgba(94,209,196,0.2)", border: "1px solid rgba(94,209,196,0.4)", color: "#5ED1C4" }}
+            >
+              {busy ? "…" : "Stay in mode"}
+            </button>
+          </div>
         </>
       )}
 

@@ -1,5 +1,6 @@
 const { getPool } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
+const AuthentikService = require('../../../services/authentikService');
 
 /**
  * Role Guard Middleware
@@ -23,7 +24,7 @@ const roleGuard = (...allowedRoles) => {
 
     try {
       const result = await getPool().query(
-        'SELECT role FROM users WHERE id = $1',
+        'SELECT role, pnptv_id FROM users WHERE id = $1',
         [sessionUser.id]
       );
 
@@ -37,7 +38,29 @@ const roleGuard = (...allowedRoles) => {
         });
       }
 
-      const userRole = result.rows[0].role || 'user';
+      let userRole = result.rows[0].role || 'user';
+      const pnptvId = result.rows[0].pnptv_id || sessionUser.pnptvId || sessionUser.pnptv_id || null;
+
+      if (pnptvId && userRole !== 'superadmin' && (userRole === 'admin' || allowedRoles.includes('admin'))) {
+        try {
+          const resolvedRole = await AuthentikService.resolveEffectiveRole({
+            authentikSub: pnptvId,
+            dbRole: userRole,
+          });
+          if (resolvedRole !== userRole) {
+            await getPool().query(
+              'UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2',
+              [resolvedRole, sessionUser.id]
+            );
+            userRole = resolvedRole;
+          }
+        } catch (authentikErr) {
+          logger.warn('roleGuard Authentik role check failed, falling back to DB role', {
+            userId: sessionUser.id,
+            error: authentikErr.message,
+          });
+        }
+      }
 
       if (!allowedRoles.includes(userRole)) {
         logger.warn('Forbidden access attempt', {

@@ -195,7 +195,7 @@ const releaseProcessLock = () => {
 
 const startApiServer = (modeLabel) => {
   if (apiServer) {
-    logger.warn('API server already started; skipping additional listen.');
+    logger.debug('API server already started; skipping additional listen (idempotent).');
     return apiServer;
   }
 
@@ -317,6 +317,10 @@ const startBot = async () => {
         }
         // Initialize Meru Link tracking in background (fire and forget)
         meruLinkInitializer.initialize();
+        // Bootstrap Meilisearch indexes + initial backfill (fire and forget)
+        require('../../services/meilisearchService').reindexAll().catch((e) =>
+          logger.warn('[Meilisearch] Boot reindex failed (non-fatal)', { error: e.message })
+        );
       } else {
         logger.warn('⚠️ PostgreSQL connection test failed, but will retry on first query');
       }

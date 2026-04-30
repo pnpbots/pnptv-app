@@ -56,6 +56,11 @@ jest.mock('../utils/logger', () => ({
   debug: jest.fn(),
 }));
 
+const mockResolveEffectiveRole = jest.fn(async ({ dbRole }) => dbRole || 'user');
+jest.mock('../services/authentikService', () => ({
+  resolveEffectiveRole: mockResolveEffectiveRole,
+}));
+
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 // auth.js uses this value when NODE_ENV === 'test' and no JWT_SECRET env var is set.
@@ -85,6 +90,17 @@ function configureSecurityMocks(sessionData) {
   mockQuery.mockImplementation(async (sql) => {
     if (sql.includes('SELECT is_active, is_deleted FROM users')) {
       return { rows: [{ is_active: true, is_deleted: false }] };
+    }
+    if (sql.includes('SELECT role, pnptv_id FROM users')) {
+      return {
+        rows: [{
+          role: sessionData?.user?.role ?? 'user',
+          pnptv_id: sessionData?.user?.pnptvId ?? sessionData?.user?.pnptv_id ?? null,
+        }],
+      };
+    }
+    if (sql.includes('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2')) {
+      return { rows: [] };
     }
     if (sql.includes('SELECT role FROM users')) {
       return { rows: [{ role: sessionData?.user?.role ?? 'user' }] };
@@ -125,6 +141,13 @@ beforeAll(() => {
 
 beforeEach(() => {
   mockQuery.mockReset();
+  mockResolveEffectiveRole.mockReset();
+  mockResolveEffectiveRole.mockImplementation(async ({ dbRole }) => dbRole || 'user');
+  const logger = require('../utils/logger');
+  logger.info.mockClear();
+  logger.warn.mockClear();
+  logger.error.mockClear();
+  logger.debug.mockClear();
   const { getRedis } = require('../config/redis');
   getRedis()._reset();
 });
@@ -303,6 +326,29 @@ describe('roleGuard', () => {
         requiredRoles: ['admin'],
         userRole:      'user',
       })
+    );
+  });
+
+  it('demotes DB-backed admin access when Authentik no longer grants admin', async () => {
+    mockResolveEffectiveRole.mockResolvedValueOnce('user');
+    const app = buildRoleApp({
+      user: {
+        id: USER_ID,
+        role: 'admin',
+        pnptvId: 'authentik-sub-1',
+      },
+    }, 'admin', 'superadmin');
+
+    const res = await request(app).get('/admin');
+
+    expect(res.status).toBe(403);
+    expect(mockResolveEffectiveRole).toHaveBeenCalledWith({
+      authentikSub: 'authentik-sub-1',
+      dbRole: 'admin',
+    });
+    expect(mockQuery).toHaveBeenCalledWith(
+      'UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2',
+      ['user', USER_ID]
     );
   });
 });

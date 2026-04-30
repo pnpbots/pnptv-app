@@ -93,12 +93,16 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
         }
         // Wellness Mode gate: user has self-imposed restriction. Redirect to
         // the wellness shell which surfaces only allowed resources. Skip when
-        // already on the shell or settings (where they can manage the mode).
+        // already on allowed pages (shell, settings, cristina, hangouts — the
+        // last two are reachable from the shell and have their API paths in the
+        // backend allowlist; redirecting from them creates a bounce loop).
         if (
           errorCode === "WELLNESS_MODE" &&
           typeof window !== "undefined" &&
           !window.location.pathname.startsWith("/wellness") &&
-          !window.location.pathname.startsWith("/settings")
+          !window.location.pathname.startsWith("/settings") &&
+          !window.location.pathname.startsWith("/hangouts") &&
+          !window.location.pathname.startsWith("/cristina")
         ) {
           window.location.replace("/wellness");
         }
