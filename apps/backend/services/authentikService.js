@@ -399,7 +399,7 @@ class AuthentikService {
    * @param {string} codeVerifier — high-entropy random string (43–128 URL-safe chars)
    * @returns {string} full authorization URL to redirect the user to
    */
-  static generateAuthUrl(state, codeVerifier) {
+  static generateAuthUrl(state, codeVerifier, options = {}) {
     if (!OIDC_CLIENT_ID) {
       throw new Error('AUTHENTIK_OIDC_CLIENT_ID is not configured');
     }
@@ -415,6 +415,18 @@ class AuthentikService {
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
     });
+
+    // Method hint — Authentik can read this via a flow policy (expression
+    // policy that inspects request.context["acr"]) and route the user to a
+    // passkey-only or email-only stage. If the operator hasn't wired the
+    // policy, Authentik silently ignores the param and serves the default flow.
+    if (options.method === 'passkey') {
+      params.set('acr_values', 'urn:authentik:passkey');
+      params.set('prompt', 'login');
+    } else if (options.method === 'magic_link') {
+      params.set('acr_values', 'urn:authentik:email');
+      params.set('prompt', 'login');
+    }
 
     return `${OIDC_AUTH_ENDPOINT}?${params.toString()}`;
   }

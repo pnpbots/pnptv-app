@@ -480,12 +480,150 @@ const telegramConfirmLogin = async (telegramUser, token) => {
       logger.warn('Telegram login token not found or expired:', token);
       return false;
     }
-    await redis.set(key, JSON.stringify(telegramUser), 'EX', 60); // 1 min to poll
+    await redis.set(key, JSON.stringify(telegramUser), 'EX', 300); // 5 min to poll — matches webapp deadline so PWA users have time to switch back from Telegram
     logger.info(`Telegram login confirmed for token ${token.substring(0, 8)}...`);
     return true;
   } catch (error) {
     logger.error('Telegram confirm login error:', error);
     return false;
+  }
+};
+
+// ── Magic-link sign-in ────────────────────────────────────────────────────────
+// Passwordless email flow: user enters email → backend mints a token → sends
+// link → user clicks → backend creates session. No user enumeration: the
+// /start endpoint always returns success regardless of whether the email
+// exists. Tokens are single-use, 15 min TTL, scoped to the specific user_id.
+
+const MAGIC_LINK_PREFIX = 'magic_link:';
+const MAGIC_LINK_TTL = 900; // 15 minutes
+
+const APP_ORIGIN = () => getCanonicalWebOrigin();
+
+const magicLinkStart = async (req, res) => {
+  try {
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    if (!rawEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
+      return res.status(400).json({ success: false, error: 'Invalid email address' });
+    }
+
+    // Look up user — but do NOT reveal whether the address exists.
+    const result = await query(
+      `SELECT id, first_name, language FROM users WHERE email = $1 AND is_deleted = false LIMIT 1`,
+      [rawEmail]
+    );
+
+    if (result.rows.length > 0) {
+      const user = result.rows[0];
+      const token = crypto.randomBytes(32).toString('base64url');
+      const redis = getRedis();
+      await redis.set(
+        `${MAGIC_LINK_PREFIX}${token}`,
+        JSON.stringify({ userId: user.id, email: rawEmail }),
+        'EX',
+        MAGIC_LINK_TTL
+      );
+
+      const link = `${APP_ORIGIN()}/api/webapp/auth/magic/verify?token=${encodeURIComponent(token)}`;
+      const lang = (user.language || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
+      const subject = lang === 'es' ? 'Tu enlace de inicio de sesión PNPtv!' : 'Your PNPtv! sign-in link';
+      const greeting = lang === 'es'
+        ? `Hola ${user.first_name || ''},`
+        : `Hi ${user.first_name || 'there'},`;
+      const intro = lang === 'es'
+        ? 'Toca el botón para iniciar sesión. El enlace expira en 15 minutos y solo se puede usar una vez.'
+        : 'Tap the button to sign in. The link expires in 15 minutes and can only be used once.';
+      const cta = lang === 'es' ? 'Iniciar sesión' : 'Sign in';
+      const ignore = lang === 'es'
+        ? 'Si no solicitaste este enlace, puedes ignorar este mensaje.'
+        : "If you didn't request this link, you can safely ignore this email.";
+
+      const html = `<!doctype html>
+<html><body style="margin:0;padding:0;background:#0a0a14;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#fff">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a14;padding:40px 20px">
+    <tr><td align="center">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;background:#121220;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:32px">
+        <tr><td>
+          <p style="margin:0 0 16px;font-size:14px;color:rgba(255,255,255,0.85)">${greeting}</p>
+          <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:rgba(255,255,255,0.7)">${intro}</p>
+          <p style="margin:0 0 24px;text-align:center">
+            <a href="${link}" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#D4007A,#E69138);color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:14px">${cta}</a>
+          </p>
+          <p style="margin:24px 0 0;font-size:12px;color:rgba(255,255,255,0.45);line-height:1.5">${ignore}</p>
+          <p style="margin:16px 0 0;font-size:11px;color:rgba(255,255,255,0.3);word-break:break-all">${link}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+
+      try {
+        await emailService.send({ to: rawEmail, subject, html });
+        logger.info(`[magic-link] sent to user ${user.id} (${rawEmail.split('@')[1]})`);
+      } catch (err) {
+        logger.error('[magic-link] email send failed', { error: err.message });
+        // Still respond success to avoid leaking existence; log for ops.
+      }
+    } else {
+      logger.info(`[magic-link] start for unknown email — returning success anyway`);
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    logger.error('[magic-link] start error', error);
+    return res.status(500).json({ success: false, error: 'Could not send sign-in link' });
+  }
+};
+
+const magicLinkVerify = async (req, res) => {
+  const APP_URL = APP_ORIGIN();
+  const fail = (code) => res.redirect(`${APP_URL}/login?magic_error=${code}`);
+  try {
+    const token = typeof req.query?.token === 'string' ? req.query.token : '';
+    if (!token) return fail('missing');
+
+    const redis = getRedis();
+    const key = `${MAGIC_LINK_PREFIX}${token}`;
+    const raw = await redis.get(key);
+    if (!raw) return fail('expired');
+    // Single-use: delete immediately.
+    await redis.del(key);
+
+    let payload;
+    try { payload = JSON.parse(raw); } catch { return fail('invalid'); }
+    if (!payload?.userId) return fail('invalid');
+
+    const result = await query(
+      `SELECT id, pnptv_id, telegram, username, first_name, last_name, subscription_status,
+              tier, terms_accepted, photo_file_id, bio, language, role, email_verified,
+              email, creator_status, content_disclaimer, x_user_id, x_id, twitter
+       FROM users WHERE id = $1 AND is_deleted = false`,
+      [payload.userId]
+    );
+    if (result.rows.length === 0) return fail('user_gone');
+    const user = result.rows[0];
+
+    query(
+      `UPDATE users SET last_login_at = NOW(), last_login_method = 'magic_link', email_verified = true, updated_at = NOW() WHERE id = $1`,
+      [user.id]
+    ).catch(() => {});
+    user.email_verified = true;
+
+    const sessionData = buildSession(user, { last_login_method: 'magic_link' });
+    await new Promise((resolve, reject) =>
+      req.session.regenerate((err) => (err ? reject(err) : resolve()))
+    );
+    req.session.user = sessionData;
+    await new Promise((resolve, reject) =>
+      req.session.save((err) => (err ? reject(err) : resolve()))
+    );
+
+    enforceDefaultFollows(user.id).catch(() => {});
+    logger.info(`[magic-link] sign-in: user ${user.id}`);
+    return res.redirect(`${APP_URL}/`);
+  } catch (error) {
+    logger.error('[magic-link] verify error', error);
+    return fail('server_error');
   }
 };
 
@@ -2423,6 +2561,8 @@ module.exports = {
   telegramGenerateToken,
   telegramCheckToken,
   telegramConfirmLogin,
+  magicLinkStart,
+  magicLinkVerify,
   telegramWidgetAuth,
   emailRegister,
   emailLogin,

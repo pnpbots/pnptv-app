@@ -4,6 +4,7 @@ import {
   recoverAccount,
   telegramGenerateLoginToken,
   telegramCheckLoginToken,
+  magicLinkStart,
   type TelegramWidgetUser,
 } from "@/lib/api";
 import { login as oidcLogin, rememberReturnTo, sanitizeReturnTo } from "@/lib/auth";
@@ -297,6 +298,15 @@ function TelegramDeepLinkPanel({
     }
   }, []);
 
+  // PWA standalone mode (esp. iOS) suspends + reloads tabs when the user
+  // switches to Telegram. Persist the in-flight token so we can resume
+  // polling on remount instead of resetting to idle and forcing the user
+  // to start over.
+  const PERSIST_KEY = "pnptv_tg_login";
+  const clearPersisted = useCallback(() => {
+    try { localStorage.removeItem(PERSIST_KEY); } catch { /* ignore */ }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -322,6 +332,7 @@ function TelegramDeepLinkPanel({
 
         if (result.authenticated && result.user) {
           stopPolling();
+          clearPersisted();
           localStorage.setItem("pnptv_last_auth", "telegram");
           if (result.user.username) {
             localStorage.setItem("pnptv_last_username", result.user.username);
@@ -335,6 +346,7 @@ function TelegramDeepLinkPanel({
         } else {
           // Not yet — check deadline then schedule next poll
           if (Date.now() > deadlineRef.current) {
+            clearPersisted();
             setTgFlowStatus("expired");
           } else {
             schedulePoll(2000);
@@ -344,13 +356,14 @@ function TelegramDeepLinkPanel({
         // Network/transient error — back off and keep trying until deadline
         if (statusRef.current !== "waiting") return;
         if (Date.now() > deadlineRef.current) {
+          clearPersisted();
           setTgFlowStatus("expired");
         } else {
           schedulePoll(4000);
         }
       }
     }, delayMs);
-  }, [stopPolling, refreshUser, returnTo]);
+  }, [stopPolling, refreshUser, returnTo, clearPersisted]);
 
   const handleStart = useCallback(async () => {
     if (tgFlowStatus === "starting") return;
@@ -367,6 +380,13 @@ function TelegramDeepLinkPanel({
       deepLinkRef.current = result.deepLink;
       deadlineRef.current = Date.now() + 300_000; // 5 min TTL matches backend
 
+      try {
+        localStorage.setItem(PERSIST_KEY, JSON.stringify({
+          token: result.token,
+          deadline: deadlineRef.current,
+        }));
+      } catch { /* ignore quota errors */ }
+
       // Open Telegram — works regardless of browser extension restrictions
       // because it's a direct user-gesture initiated window.open call.
       window.open(result.deepLink, "_blank", "noopener,noreferrer");
@@ -382,13 +402,39 @@ function TelegramDeepLinkPanel({
 
   const handleCancel = useCallback(() => {
     stopPolling();
+    clearPersisted();
     setTgFlowStatus("idle");
     setTgError(null);
-  }, [stopPolling]);
+  }, [stopPolling, clearPersisted]);
 
   const handleRetry = useCallback(() => {
+    clearPersisted();
     setTgFlowStatus("idle");
     setTgError(null);
+  }, [clearPersisted]);
+
+  // Resume an in-flight login if the PWA was reloaded while the user was in
+  // Telegram. Reads the persisted token + deadline; if still valid, jumps
+  // straight into "waiting" and polls immediately.
+  useEffect(() => {
+    let raw: string | null = null;
+    try { raw = localStorage.getItem(PERSIST_KEY); } catch { /* ignore */ }
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { token?: string; deadline?: number };
+      if (!parsed.token || !parsed.deadline || Date.now() >= parsed.deadline) {
+        clearPersisted();
+        return;
+      }
+      tokenRef.current = parsed.token;
+      deadlineRef.current = parsed.deadline;
+      setTgFlowStatus("waiting");
+      schedulePoll(0);
+    } catch {
+      clearPersisted();
+    }
+    // Run once on mount; schedulePoll/clearPersisted are stable enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Countdown display derived from deadline ref — recalculated each second
@@ -597,6 +643,8 @@ export function LoginPage() {
       deep_link: "Telegram",
       oidc: "PNPtv ID",
       pnptv_id: "PNPtv ID",
+      passkey: "Passkey",
+      magic_link: "Email link",
     };
     return map[method] ?? null;
   };
@@ -630,6 +678,59 @@ export function LoginPage() {
   };
 
   const [oidcLoading, setOidcLoading] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+
+  // Magic-link state — minimal inline panel (idle → sending → sent / error).
+  type MagicStatus = "idle" | "sending" | "sent" | "error";
+  const [magicEmail, setMagicEmail] = useState("");
+  const [magicStatus, setMagicStatus] = useState<MagicStatus>("idle");
+  const [magicError, setMagicError] = useState<string | null>(null);
+
+  // Surface verify failures redirected back from /api/webapp/auth/magic/verify
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("magic_error");
+    if (!code) return;
+    setMagicStatus("error");
+    setMagicError(
+      code === "expired" ? "This sign-in link expired. Request a new one below."
+      : code === "invalid" ? "Invalid sign-in link."
+      : code === "user_gone" ? "Account not found. Please sign up."
+      : "Sign-in failed. Try requesting a new link."
+    );
+    params.delete("magic_error");
+    const cleaned = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (cleaned ? `?${cleaned}` : ""));
+  }, []);
+
+  const handleMagicSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = magicEmail.trim();
+    if (!isValidEmail(email)) {
+      setMagicStatus("error");
+      setMagicError(t.emailInvalid);
+      return;
+    }
+    setMagicStatus("sending");
+    setMagicError(null);
+    try {
+      await magicLinkStart(email);
+      setMagicStatus("sent");
+      try { localStorage.setItem("pnptv_last_auth", "magic_link"); } catch { /* ignore */ }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not send link. Please try again.";
+      setMagicStatus("error");
+      setMagicError(message);
+    }
+  };
+
+  const handlePasskeyLogin = () => {
+    setPasskeyLoading(true);
+    try { localStorage.setItem("pnptv_last_auth", "passkey"); } catch { /* ignore */ }
+    const rt = new URLSearchParams(window.location.search).get("returnTo");
+    const url = "/api/webapp/auth/oidc/login?method=passkey" + (rt ? `&return_to=${encodeURIComponent(rt)}` : "");
+    window.location.href = url;
+  };
 
   type WidgetStatus = "idle" | "verifying" | "error";
   const [widgetStatus, setWidgetStatus] = useState<WidgetStatus>("idle");
@@ -836,6 +937,90 @@ export function LoginPage() {
           </p>
           {widgetStatus === "error" && widgetError && (
             <p className="text-center text-xs text-red-400 mt-2">{widgetError}</p>
+          )}
+        </div>
+
+        {/* ── Passkey + Magic-link (passwordless) ─────────────────────────── */}
+        <div className="mt-5 space-y-3">
+          <button
+            type="button"
+            onClick={handlePasskeyLogin}
+            disabled={passkeyLoading}
+            className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-70"
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.14)",
+            }}
+            aria-label="Sign in with Passkey"
+          >
+            {passkeyLoading ? <Spinner className="h-4 w-4" /> : (
+              <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c1.66 0 3-1.34 3-3S13.66 5 12 5s-3 1.34-3 3 1.34 3 3 3z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 13c-3.5 0-6 2-6 4.5V19h12v-1.5c0-2.5-2.5-4.5-6-4.5z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 9c0-3.5 3-6 7-6m7 6c0-1.5-.5-3-1.5-4" opacity="0.5" />
+              </svg>
+            )}
+            <span>Sign in with Passkey</span>
+          </button>
+
+          {/* Magic-link inline form */}
+          {magicStatus === "sent" ? (
+            <div
+              className="rounded-xl p-3 text-center"
+              style={{
+                background: "rgba(52,199,89,0.08)",
+                border: "1px solid rgba(52,199,89,0.25)",
+              }}
+            >
+              <p className="text-xs font-semibold" style={{ color: "#34C759" }}>
+                Check your inbox
+              </p>
+              <p className="text-[11px] mt-1" style={{ color: "rgba(255,255,255,0.6)" }}>
+                We sent a sign-in link to <span className="font-mono">{magicEmail}</span>. It expires in 15 minutes.
+              </p>
+              <button
+                type="button"
+                onClick={() => { setMagicStatus("idle"); setMagicError(null); }}
+                className="text-[11px] underline mt-2"
+                style={{ color: "rgba(255,255,255,0.5)" }}
+              >
+                Use a different email
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleMagicSubmit} className="flex gap-2">
+              <input
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={magicEmail}
+                onChange={(e) => { setMagicEmail(e.target.value); if (magicStatus === "error") { setMagicStatus("idle"); setMagicError(null); } }}
+                disabled={magicStatus === "sending"}
+                className="flex-1 py-3 px-4 rounded-xl text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 disabled:opacity-60"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: magicStatus === "error" ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.1)",
+                }}
+                aria-label="Email for magic-link sign-in"
+              />
+              <button
+                type="submit"
+                disabled={magicStatus === "sending" || !magicEmail.trim()}
+                className="px-4 py-3 rounded-xl font-bold text-sm text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 whitespace-nowrap"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                {magicStatus === "sending" ? <Spinner className="h-4 w-4" /> : (
+                  <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                )}
+                <span>{magicStatus === "sending" ? "Sending" : "Email link"}</span>
+              </button>
+            </form>
+          )}
+          {magicError && magicStatus === "error" && (
+            <p className="text-[11px] text-red-400 text-center">{magicError}</p>
           )}
         </div>
 

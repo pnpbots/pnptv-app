@@ -282,6 +282,10 @@ export function telegramCheckLoginToken(token: string): Promise<{ authenticated:
   return request(`/api/webapp/auth/telegram/check?token=${encodeURIComponent(token)}`);
 }
 
+export function magicLinkStart(email: string): Promise<{ success: boolean; error?: string }> {
+  return request("/api/webapp/auth/magic/start", { method: "POST", body: { email } });
+}
+
 
 
 // Age verification (self-declaration)
