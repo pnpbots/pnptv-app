@@ -892,7 +892,7 @@ export function Layout() {
   // Show loading state briefly to avoid flash
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-pnp-background">
+      <div className="min-h-dvh flex items-center justify-center bg-pnp-background">
         <div className="w-8 h-8 rounded-full border-2 border-[#D4007A] border-t-transparent animate-spin" />
       </div>
     );

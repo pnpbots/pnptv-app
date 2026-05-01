@@ -203,7 +203,7 @@ function PreviewModal({ preview, candidate, onClose, onMerge, onRename, merging,
               {tableEntries.length === 0 ? (
                 <p className="text-sm text-zinc-500 italic">{t.previewEmpty}</p>
               ) : (
-                <div className="rounded-lg border border-zinc-700 overflow-hidden">
+                <div className="rounded-lg border border-zinc-700 overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-zinc-800">
                       <tr>

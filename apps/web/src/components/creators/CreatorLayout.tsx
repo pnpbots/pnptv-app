@@ -93,7 +93,7 @@ export default function CreatorLayout() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-pnp-background flex items-center justify-center">
+      <div className="min-h-dvh bg-pnp-background flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#D4007A", borderTopColor: "transparent" }} />
       </div>
     );
@@ -109,7 +109,7 @@ export default function CreatorLayout() {
     }
     if (!isAuthenticated) {
       return (
-        <div className="min-h-screen bg-pnp-background flex items-center justify-center">
+        <div className="min-h-dvh bg-pnp-background flex items-center justify-center">
           <div className="text-center">
             <h1 className="text-xl font-bold text-pnp-textPrimary mb-2">Sign in required</h1>
             <p className="text-sm text-pnp-textSecondary mb-4">Please sign in to access Creator Studio.</p>
@@ -126,7 +126,7 @@ export default function CreatorLayout() {
   const subscriberCount = (user as (typeof user & { creator_subscriber_count?: number }) | null)?.creator_subscriber_count ?? 0;
 
   const sidebar = (
-    <nav className="flex flex-col h-screen">
+    <nav className="flex flex-col h-dvh">
       <div className="flex items-center gap-3 px-4 h-16 border-b border-pnp-border">
         <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
         <span
@@ -199,7 +199,7 @@ export default function CreatorLayout() {
   );
 
   return (
-    <div className="min-h-screen bg-pnp-background">
+    <div className="min-h-dvh bg-pnp-background">
       {/* Desktop sidebar */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-56 lg:flex-col border-r border-pnp-border glass-nav">
         {sidebar}

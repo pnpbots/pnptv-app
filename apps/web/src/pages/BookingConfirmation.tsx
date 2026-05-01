@@ -152,7 +152,7 @@ export default function BookingConfirmation() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--pnp-background, #121212)" }}>
+      <div className="min-h-dvh flex items-center justify-center" style={{ background: "var(--pnp-background, #121212)" }}>
         <div className="space-y-4 w-full max-w-md px-4">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: "var(--pnp-surface, #1C1C1E)" }} />
@@ -164,7 +164,7 @@ export default function BookingConfirmation() {
 
   if (error || !booking) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-4" style={{ background: "var(--pnp-background, #121212)" }}>
+      <div className="min-h-dvh flex flex-col items-center justify-center gap-4 px-4" style={{ background: "var(--pnp-background, #121212)" }}>
         <p className="text-sm" style={{ color: "#FF6B6B" }}>{error || s.bookingNotFound}</p>
         <button
           onClick={() => navigate(-1)}
@@ -178,7 +178,7 @@ export default function BookingConfirmation() {
   }
 
   return (
-    <div className="min-h-screen py-8 px-4" style={{ background: "var(--pnp-background, #121212)" }}>
+    <div className="min-h-dvh py-8 px-4" style={{ background: "var(--pnp-background, #121212)" }}>
       <div className="max-w-md mx-auto space-y-5">
         {/* Header */}
         <div className="flex flex-col items-center gap-3 pt-4 pb-2">

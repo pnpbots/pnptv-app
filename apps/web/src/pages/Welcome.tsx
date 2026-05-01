@@ -23,7 +23,7 @@ export default function Welcome() {
   const displayName = user?.firstName || user?.username || "member";
 
   return (
-    <div className="min-h-screen pb-24 lg:pb-8">
+    <div className="min-h-dvh pb-24 lg:pb-8">
       <Helmet>
         <title>{t.pageTitle}</title>
         <meta name="description" content={t.metaDescription} />

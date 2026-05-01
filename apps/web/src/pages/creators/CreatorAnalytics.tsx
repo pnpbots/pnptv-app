@@ -240,6 +240,7 @@ function RevenueSection() {
               <p className="text-sm font-semibold text-white">Revenue by Source</p>
               <p className="text-[11px] mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>All-time totals</p>
             </div>
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[10px] uppercase" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
@@ -281,6 +282,7 @@ function RevenueSection() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       ) : null}

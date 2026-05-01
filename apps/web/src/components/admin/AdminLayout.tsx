@@ -67,7 +67,7 @@ export function AdminLayout() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-pnp-background flex items-center justify-center">
+      <div className="min-h-dvh bg-pnp-background flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -81,7 +81,7 @@ export function AdminLayout() {
       await oidcLogin();
     };
     return (
-      <div className="min-h-screen bg-pnp-background flex items-center justify-center">
+      <div className="min-h-dvh bg-pnp-background flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-xl font-bold text-pnp-textPrimary mb-2">{t.adminPanel}</h1>
           <p className="text-sm text-pnp-textSecondary mb-4">{t.signInPrompt}</p>
@@ -95,7 +95,7 @@ export function AdminLayout() {
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-pnp-background flex items-center justify-center">
+      <div className="min-h-dvh bg-pnp-background flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-xl font-bold text-pnp-textPrimary mb-2">{t.accessDenied}</h1>
           <p className="text-sm text-pnp-textSecondary mb-4">{t.noPrivileges}</p>
@@ -115,7 +115,7 @@ export function AdminLayout() {
     : allNavItems;
 
   const sidebar = (
-    <nav className="flex flex-col h-screen">
+    <nav className="flex flex-col h-dvh">
       <div className="flex items-center gap-3 px-4 h-16 border-b border-pnp-border">
         <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
         <span className="text-sm font-bold text-pnp-accent">Admin</span>
@@ -187,7 +187,7 @@ export function AdminLayout() {
   );
 
   return (
-    <div className="min-h-screen bg-pnp-background">
+    <div className="min-h-dvh bg-pnp-background">
       {/* Desktop sidebar */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-56 lg:flex-col border-r border-pnp-border glass-nav">
         {sidebar}

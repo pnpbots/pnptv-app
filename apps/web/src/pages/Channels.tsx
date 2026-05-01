@@ -1245,7 +1245,7 @@ export default function Channels() {
         <meta name="description" content="Browse PNPtv creator channels" />
       </Helmet>
 
-      <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+      <div className="max-w-6xl xl:max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>

@@ -68,7 +68,7 @@ export default function Appeal() {
   };
 
   return (
-    <div className="min-h-screen bg-pnp-background flex items-center justify-center px-4 py-12">
+    <div className="min-h-dvh bg-pnp-background flex items-center justify-center px-4 py-12">
       <Helmet>
         <title>{p.appealPageTitle} — PNPtv!</title>
         <meta name="robots" content="noindex, nofollow" />

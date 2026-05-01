@@ -159,7 +159,7 @@ export default function DashBankPage() {
         <meta property="og:type" content="website" />
       </Helmet>
 
-      <div className="min-h-screen" style={{ background: "var(--pnp-background, #0A0A0B)", color: "#fff" }}>
+      <div className="min-h-dvh" style={{ background: "var(--pnp-background, #0A0A0B)", color: "#fff" }}>
         {/* Top bar */}
         <div
           className="sticky top-0 z-50 flex items-center justify-between gap-3 px-4 py-3"

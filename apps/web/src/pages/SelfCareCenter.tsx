@@ -205,7 +205,7 @@ export default function SelfCareCenter() {
       )}
 
       <div
-        className="min-h-screen"
+        className="min-h-dvh"
         style={{
           background: `
             radial-gradient(ellipse at top right, rgba(94,209,196,0.10), transparent 55%),

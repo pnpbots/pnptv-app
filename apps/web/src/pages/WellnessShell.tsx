@@ -75,7 +75,7 @@ export default function WellnessShell() {
       <Helmet>
         <title>{t.wellness.shellPageTitle}</title>
       </Helmet>
-      <div className="min-h-screen bg-pnp-bg" style={{
+      <div className="min-h-dvh bg-pnp-bg" style={{
         backgroundImage: "radial-gradient(circle at top right, rgba(94,209,196,0.08), transparent 50%)",
       }}>
         <div className="max-w-2xl mx-auto px-4 py-10">

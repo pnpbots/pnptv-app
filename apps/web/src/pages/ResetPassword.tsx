@@ -85,7 +85,7 @@ export default function ResetPassword() {
 
   if (!token) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-pnp-background px-4">
+      <div className="min-h-dvh flex items-center justify-center bg-pnp-background px-4">
         <div className="glass-card-sm p-6 max-w-sm w-full text-center">
           <p className="text-white text-sm">{s.invalidLink}</p>
           <button onClick={() => navigate("/login")} className="mt-4 text-xs text-pink-400 hover:text-pink-300">
@@ -97,7 +97,7 @@ export default function ResetPassword() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-pnp-background px-4">
+    <div className="min-h-dvh flex items-center justify-center bg-pnp-background px-4">
       <div className="glass-card-sm p-6 max-w-sm w-full space-y-4">
         <div className="text-center">
           <h1 className="text-lg font-bold text-white">{s.title}</h1>

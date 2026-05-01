@@ -81,7 +81,7 @@ export default function AuthCallback() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-pnp-background p-4">
+      <div className="min-h-dvh flex items-center justify-center bg-pnp-background p-4">
         <div className="text-center">
           <div className="w-16 h-16 rounded-full bg-pnp-error/20 flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 text-pnp-error" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -102,7 +102,7 @@ export default function AuthCallback() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-pnp-background">
+    <div className="min-h-dvh flex items-center justify-center bg-pnp-background">
       <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
     </div>
   );

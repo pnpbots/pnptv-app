@@ -41,7 +41,7 @@ function HangoutInviteRedirect() {
 
   if (!target) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-black text-white">
+      <div className="flex min-h-dvh items-center justify-center bg-black text-white">
         <div className="text-sm opacity-70">Joining hangout…</div>
       </div>
     );

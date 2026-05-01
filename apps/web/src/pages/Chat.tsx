@@ -2571,7 +2571,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               {showGroupMenu && (
                 <>
                   <div className="fixed inset-0 z-[70]" onClick={() => setShowGroupMenu(false)} />
-                  <div className="fixed z-[71] rounded-xl overflow-hidden shadow-xl min-w-[200px]" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)", top: groupMenuPos.top, right: groupMenuPos.right }}>
+                  <div className="fixed z-[71] rounded-xl overflow-hidden shadow-xl min-w-[200px] max-w-[calc(100vw-16px)]" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)", top: groupMenuPos.top, right: groupMenuPos.right }}>
                     <button
                       onClick={() => { setShowGroupMenu(false); setShowOnline(true); }}
                       className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
@@ -4283,7 +4283,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       {groupCardMenuId === group.id && createPortal(
                         <>
                           <div className="fixed inset-0 z-[150]" onClick={() => setGroupCardMenuId(null)} />
-                          <div className="fixed z-[151] rounded-xl overflow-hidden shadow-xl min-w-[150px]" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)", top: groupCardMenuPos.top, right: groupCardMenuPos.right }}>
+                          <div className="fixed z-[151] rounded-xl overflow-hidden shadow-xl min-w-[150px] max-w-[calc(100vw-16px)]" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)", top: groupCardMenuPos.top, right: groupCardMenuPos.right }}>
                             <button
                               onClick={() => {
                                 setGroupCardMenuId(null);

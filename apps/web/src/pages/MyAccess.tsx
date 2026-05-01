@@ -127,7 +127,7 @@ export default function MyAccess() {
   const badge = data ? tierBadge(data.tier, t) : tierBadge("FREE", t);
 
   return (
-    <div className="min-h-screen bg-pnp-background text-pnp-textPrimary">
+    <div className="min-h-dvh bg-pnp-background text-pnp-textPrimary">
       <Helmet>
         <title>{t.myAccess.pageTitle}</title>
       </Helmet>

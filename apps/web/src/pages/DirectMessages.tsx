@@ -2020,7 +2020,7 @@ function VoiceBubble({ src, id, isMe }: { src: string; id: number; isMe: boolean
   };
 
   return (
-    <div className="flex items-center gap-2 mb-1 min-w-[200px]">
+    <div className="flex items-center gap-2 mb-1 min-w-[160px] max-w-full">
       <button
         type="button"
         onClick={toggle}

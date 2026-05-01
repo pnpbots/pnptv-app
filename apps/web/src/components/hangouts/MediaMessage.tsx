@@ -145,7 +145,7 @@ function AudioPlayer({ src, knownDuration, isMe }: AudioPlayerProps) {
   }
 
   return (
-    <div className="flex items-center gap-2 w-[200px] py-1">
+    <div className="flex items-center gap-2 w-full max-w-[200px] py-1">
       <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
 
       {/* Play/Pause */}
