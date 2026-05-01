@@ -2298,6 +2298,8 @@ app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppControl
 app.post('/api/webapp/auth/oidc/token-exchange', authLimiter, asyncHandler(webAppController.oidcTokenExchange));
 app.post('/api/webapp/auth/magic/start', magicLinkLimiter, asyncHandler(webAppController.magicLinkStart));
 app.get('/api/webapp/auth/magic/verify', asyncHandler(webAppController.magicLinkVerify));
+app.get('/api/webapp/auth/passkey/begin', authLimiter, asyncHandler(webAppController.passkeyBegin));
+app.post('/api/webapp/auth/passkey/finish', authLimiter, asyncHandler(webAppController.passkeyFinish));
 
 // Request account recovery — Authentik-based password reset.
 // Why this path exists: most users (especially Telegram-shadow accounts) have a

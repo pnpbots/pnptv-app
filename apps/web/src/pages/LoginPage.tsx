@@ -5,6 +5,8 @@ import {
   telegramGenerateLoginToken,
   telegramCheckLoginToken,
   magicLinkStart,
+  passkeyBegin,
+  passkeyFinish,
   type TelegramWidgetUser,
 } from "@/lib/api";
 import { login as oidcLogin, rememberReturnTo, sanitizeReturnTo } from "@/lib/auth";
@@ -724,12 +726,91 @@ export function LoginPage() {
     }
   };
 
-  const handlePasskeyLogin = () => {
+  const handlePasskeyLogin = async () => {
+    if (!window.PublicKeyCredential) {
+      setMagicStatus("error");
+      setMagicError("Passkeys aren't supported on this browser.");
+      return;
+    }
     setPasskeyLoading(true);
-    try { localStorage.setItem("pnptv_last_auth", "passkey"); } catch { /* ignore */ }
-    const rt = new URLSearchParams(window.location.search).get("returnTo");
-    const url = "/api/webapp/auth/oidc/login?method=passkey" + (rt ? `&return_to=${encodeURIComponent(rt)}` : "");
-    window.location.href = url;
+    try {
+      const begin = await passkeyBegin();
+      if (!begin.success || !begin.publicKey || !begin.stateToken) {
+        throw new Error(
+          begin.error === "passkey_unavailable"
+            ? "Passkey sign-in isn't configured yet."
+            : "Could not start passkey sign-in."
+        );
+      }
+
+      const decode = (s: string): ArrayBuffer => {
+        const b64 = s.replace(/-/g, "+").replace(/_/g, "/").padEnd(
+          s.length + (4 - (s.length % 4)) % 4,
+          "="
+        );
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes.buffer;
+      };
+
+      const pk = begin.publicKey;
+      const publicKey: PublicKeyCredentialRequestOptions = {
+        challenge: decode(pk.challenge),
+        rpId: pk.rpId,
+        allowCredentials: pk.allowCredentials?.map((c) => ({
+          id: decode(c.id),
+          type: "public-key" as const,
+          transports: c.transports as AuthenticatorTransport[] | undefined,
+        })),
+        userVerification: (pk.userVerification as UserVerificationRequirement) || "preferred",
+        timeout: pk.timeout || 60000,
+      };
+
+      const cred = (await navigator.credentials.get({
+        publicKey,
+        mediation: "optional" as CredentialMediationRequirement,
+      })) as PublicKeyCredential | null;
+      if (!cred) throw new Error("Passkey selection cancelled.");
+
+      const encode = (buf: ArrayBuffer): string => {
+        const bytes = new Uint8Array(buf);
+        let bin = "";
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      };
+
+      const r = cred.response as AuthenticatorAssertionResponse;
+      const assertion = {
+        id: cred.id,
+        rawId: encode(cred.rawId),
+        type: cred.type,
+        response: {
+          authenticatorData: encode(r.authenticatorData),
+          clientDataJSON: encode(r.clientDataJSON),
+          signature: encode(r.signature),
+          userHandle: r.userHandle ? encode(r.userHandle) : null,
+        },
+        clientExtensionResults: cred.getClientExtensionResults(),
+      };
+
+      const finish = await passkeyFinish({ stateToken: begin.stateToken, assertion });
+      if (!finish.authenticated) {
+        throw new Error(finish.error || "Passkey sign-in failed.");
+      }
+
+      try { localStorage.setItem("pnptv_last_auth", "passkey"); } catch { /* ignore */ }
+      if (finish.user?.username) {
+        try { localStorage.setItem("pnptv_last_username", finish.user.username); } catch { /* ignore */ }
+      }
+      const rt = new URLSearchParams(window.location.search).get("returnTo");
+      window.location.href = rt && /^\/[a-z0-9/_-]*/i.test(rt) ? rt : "/";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Passkey sign-in failed.";
+      setPasskeyLoading(false);
+      setMagicStatus("error");
+      setMagicError(msg);
+    }
   };
 
   type WidgetStatus = "idle" | "verifying" | "error";

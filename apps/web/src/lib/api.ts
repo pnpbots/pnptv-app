@@ -286,6 +286,32 @@ export function magicLinkStart(email: string): Promise<{ success: boolean; error
   return request("/api/webapp/auth/magic/start", { method: "POST", body: { email } });
 }
 
+export interface PublicKeyCredentialRequestOptionsJSON {
+  challenge: string;
+  rpId?: string;
+  allowCredentials?: Array<{ id: string; type: "public-key"; transports?: string[] }>;
+  userVerification?: string;
+  timeout?: number;
+}
+
+export interface PasskeyChallenge {
+  success: boolean;
+  stateToken?: string;
+  publicKey?: PublicKeyCredentialRequestOptionsJSON;
+  error?: string;
+}
+
+export function passkeyBegin(): Promise<PasskeyChallenge> {
+  return request("/api/webapp/auth/passkey/begin");
+}
+
+export function passkeyFinish(payload: {
+  stateToken: string;
+  assertion: unknown;
+}): Promise<{ authenticated: boolean; user?: { id: string; username?: string; pnptvId?: string }; error?: string }> {
+  return request("/api/webapp/auth/passkey/finish", { method: "POST", body: payload });
+}
+
 
 
 // Age verification (self-declaration)

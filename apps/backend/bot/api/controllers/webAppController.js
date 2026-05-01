@@ -627,6 +627,77 @@ const magicLinkVerify = async (req, res) => {
   }
 };
 
+// ── Passkey / WebAuthn inline ceremony ───────────────────────────────────────
+
+const passkeyBegin = async (req, res) => {
+  try {
+    const result = await AuthentikService.beginPasskeyFlow();
+    if (!result.success) {
+      logger.info('[Passkey] beginPasskeyFlow returned unavailable:', result.error);
+      return res.status(503).json({ success: false, error: result.error || 'passkey_unavailable' });
+    }
+    return res.json(result);
+  } catch (err) {
+    logger.error('[Passkey] passkeyBegin unexpected error:', err);
+    return res.status(503).json({ success: false, error: 'passkey_unavailable' });
+  }
+};
+
+const passkeyFinish = async (req, res) => {
+  try {
+    const stateToken = typeof req.body?.stateToken === 'string' ? req.body.stateToken.trim() : '';
+    const assertion = req.body?.assertion;
+
+    if (!stateToken || !assertion || typeof assertion !== 'object') {
+      return res.status(400).json({ authenticated: false, error: 'invalid_request' });
+    }
+
+    const flowResult = await AuthentikService.finishPasskeyFlow(stateToken, assertion);
+    if (!flowResult.success) {
+      logger.warn('[Passkey] finishPasskeyFlow failed:', flowResult.error);
+      return res.status(401).json({ authenticated: false, error: flowResult.error || 'auth_failed' });
+    }
+
+    const { authentikUser } = flowResult;
+    // Map Authentik identity to PNPtv user via email or username.
+    const { user } = await findOrLinkUser({
+      email: authentikUser.email && !authentikUser.email.endsWith('@telegram.pnptv.app') && !authentikUser.email.endsWith('@x.pnptv.app')
+        ? authentikUser.email.toLowerCase().trim()
+        : undefined,
+      username: authentikUser.username,
+      firstName: authentikUser.name || authentikUser.username,
+    });
+
+    if (!user) {
+      logger.error('[Passkey] passkeyFinish: findOrLinkUser returned null for', authentikUser.username);
+      return res.status(401).json({ authenticated: false, error: 'user_not_found' });
+    }
+
+    query(
+      `UPDATE users SET last_login_at = NOW(), last_login_method = 'passkey', updated_at = NOW() WHERE id = $1`,
+      [user.id]
+    ).catch(() => {});
+
+    const sessionData = buildSession(user, { last_login_method: 'passkey' });
+    await new Promise((resolve, reject) =>
+      req.session.regenerate((err) => (err ? reject(err) : resolve()))
+    );
+    req.session.user = sessionData;
+    await new Promise((resolve, reject) =>
+      req.session.save((err) => (err ? reject(err) : resolve()))
+    );
+
+    logger.info('[Passkey] sign-in: user', user.id);
+    return res.json({
+      authenticated: true,
+      user: { id: user.id, username: user.username, pnptvId: user.pnptv_id },
+    });
+  } catch (err) {
+    logger.error('[Passkey] passkeyFinish unexpected error:', err);
+    return res.status(500).json({ authenticated: false, error: 'server_error' });
+  }
+};
+
 // ── Controllers ───────────────────────────────────────────────────────────────
 
 /**
@@ -2563,6 +2634,8 @@ module.exports = {
   telegramConfirmLogin,
   magicLinkStart,
   magicLinkVerify,
+  passkeyBegin,
+  passkeyFinish,
   telegramWidgetAuth,
   emailRegister,
   emailLogin,

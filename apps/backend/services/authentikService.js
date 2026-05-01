@@ -6,6 +6,18 @@ const { query } = require('../config/postgres');
 const AUTHENTIK_URL = process.env.AUTHENTIK_URL || 'https://auth.pnptv.app';
 const AUTHENTIK_TOKEN = process.env.AUTHENTIK_API_TOKEN;
 
+// ── Passkey / WebAuthn flow env vars ─────────────────────────────────────────
+// AUTHENTIK_PASSKEY_FLOW_SLUG — slug of the Authentik flow configured for
+//   passwordless WebAuthn authentication.  Create it in Authentik Admin →
+//   Flows & Stages → Flows, type "Authentication", with stages:
+//     1. User Login Stage (identification)
+//     2. Authenticator Validate Stage (webauthn device class, user_settings enabled)
+//   Default slug: pnptv-passkey
+// AUTHENTIK_URL — internal Docker network URL (default: https://auth.pnptv.app)
+//   For flow executor calls we always use AUTHENTIK_URL (internal), not the
+//   public auth.pnptv.app hostname.
+const PASSKEY_FLOW_SLUG = process.env.AUTHENTIK_PASSKEY_FLOW_SLUG || 'pnptv-passkey';
+
 // ── OIDC Configuration ────────────────────────────────────────────────────────
 // AUTHENTIK_OIDC_CLIENT_ID     — OAuth2 application Client ID registered in Authentik
 // AUTHENTIK_OIDC_CLIENT_SECRET — Client secret (used server-side only, never sent to browser)
@@ -989,6 +1001,282 @@ class AuthentikService {
       logger.error('Error requesting Authentik password reset:', error.response?.data || error.message);
       return { success: false, error: 'Failed to trigger recovery flow' };
     }
+  }
+
+  // ── Passkey / WebAuthn inline ceremony ───────────────────────────────────────
+
+  /**
+   * Initiate a passwordless WebAuthn flow via Authentik's flow executor.
+   *
+   * Authentik's executor is a stateful cookie-based state machine.  We drive
+   * it server-side: start the flow, auto-advance any identification stage that
+   * doesn't require a username, then return the WebAuthn publicKey options
+   * (base64url-encoded, browser-ready) plus an opaque stateToken that ties
+   * this session to the Redis-stored executor cookies.
+   *
+   * @returns {{ success: boolean, stateToken?: string, publicKey?: object, error?: string }}
+   */
+  static async beginPasskeyFlow() {
+    let redis;
+    try {
+      // Lazy-require to avoid circular deps — redis config is only needed here.
+      redis = require('../config/redis').getRedis();
+    } catch (err) {
+      logger.error('[Passkey] Redis unavailable:', err.message);
+      return { success: false, error: 'passkey_unavailable' };
+    }
+
+    // Dedicated axios instance so cookies stay isolated to this flow session.
+    const flowClient = axios.create({
+      baseURL: AUTHENTIK_URL,
+      timeout: 15000,
+      maxRedirects: 0,
+      validateStatus: (s) => s < 500,
+      withCredentials: false,
+    });
+
+    const executorUrl = `/api/v3/flows/executor/${PASSKEY_FLOW_SLUG}/?query=`;
+
+    let cookieJar = '';
+    let currentData = null;
+
+    const captureSetCookie = (headers) => {
+      const setCookieHeader = headers['set-cookie'];
+      if (!setCookieHeader) return;
+      const cookies = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+      const parsed = cookies.map((c) => c.split(';')[0].trim()).filter(Boolean);
+      if (parsed.length > 0) cookieJar = parsed.join('; ');
+    };
+
+    try {
+      const initRes = await flowClient.get(executorUrl, {
+        headers: { Accept: 'application/json' },
+      });
+      captureSetCookie(initRes.headers);
+      currentData = initRes.data;
+    } catch (err) {
+      logger.error('[Passkey] beginPasskeyFlow init GET failed:', err.message);
+      return { success: false, error: 'passkey_unavailable' };
+    }
+
+    if (!currentData) {
+      logger.warn('[Passkey] beginPasskeyFlow: empty response from executor init');
+      return { success: false, error: 'passkey_unavailable' };
+    }
+
+    // Auto-advance ak-stage-identification when present before the webauthn stage.
+    // Authentik returns this stage when the flow starts with an identification
+    // step.  A POST with an empty body (or { uid_field: '' }) advances it when
+    // the flow is configured for passwordless (no username required).
+    const MAX_STEPS = 5;
+    let step = 0;
+    while (
+      step < MAX_STEPS &&
+      currentData?.component === 'ak-stage-identification'
+    ) {
+      step++;
+      logger.debug('[Passkey] Auto-advancing ak-stage-identification, step', step);
+      try {
+        const advRes = await flowClient.post(
+          executorUrl,
+          {},
+          {
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+              ...(cookieJar ? { Cookie: cookieJar } : {}),
+            },
+          }
+        );
+        captureSetCookie(advRes.headers);
+        currentData = advRes.data;
+      } catch (err) {
+        logger.error('[Passkey] Auto-advance POST failed:', err.message);
+        return { success: false, error: 'passkey_unavailable' };
+      }
+    }
+
+    // We expect ak-stage-authenticator-validate with a webauthn device_challenge.
+    if (currentData?.component !== 'ak-stage-authenticator-validate') {
+      logger.warn('[Passkey] beginPasskeyFlow: unexpected component after init:', currentData?.component, JSON.stringify(currentData)?.slice(0, 400));
+      return { success: false, error: 'passkey_unavailable' };
+    }
+
+    const challenges = currentData?.device_challenges;
+    if (!Array.isArray(challenges)) {
+      logger.warn('[Passkey] beginPasskeyFlow: no device_challenges in response');
+      return { success: false, error: 'passkey_unavailable' };
+    }
+
+    const webauthnChallenge = challenges.find((c) => c.device_class === 'webauthn');
+    if (!webauthnChallenge) {
+      logger.warn('[Passkey] beginPasskeyFlow: no webauthn device_challenge found');
+      return { success: false, error: 'passkey_unavailable' };
+    }
+
+    const publicKey = webauthnChallenge.challenge;
+    if (!publicKey || typeof publicKey !== 'object') {
+      logger.warn('[Passkey] beginPasskeyFlow: challenge field is not an object');
+      return { success: false, error: 'passkey_unavailable' };
+    }
+
+    const stateToken = crypto.randomBytes(32).toString('base64url');
+    try {
+      await redis.set(
+        `passkey:flow:${stateToken}`,
+        JSON.stringify({ cookieJar, flowSlug: PASSKEY_FLOW_SLUG }),
+        'EX',
+        300
+      );
+    } catch (err) {
+      logger.error('[Passkey] Redis set failed:', err.message);
+      return { success: false, error: 'passkey_unavailable' };
+    }
+
+    logger.info('[Passkey] beginPasskeyFlow: challenge ready, stateToken issued');
+    return { success: true, stateToken, publicKey };
+  }
+
+  /**
+   * Submit the WebAuthn assertion to Authentik and resolve the PNPtv user.
+   *
+   * On success returns the full Authentik user record fetched via the admin API
+   * so the caller can upsert into the PNPtv DB via findOrLinkUser.
+   *
+   * @param {string} stateToken — token issued by beginPasskeyFlow
+   * @param {object} assertion  — serialized PublicKeyCredential assertion (base64url fields)
+   * @returns {{ success: boolean, authentikUser?: object, error?: string }}
+   */
+  static async finishPasskeyFlow(stateToken, assertion) {
+    let redis;
+    try {
+      redis = require('../config/redis').getRedis();
+    } catch (err) {
+      logger.error('[Passkey] Redis unavailable:', err.message);
+      return { success: false, error: 'server_error' };
+    }
+
+    const redisKey = `passkey:flow:${stateToken}`;
+    let raw;
+    try {
+      raw = await redis.get(redisKey);
+    } catch (err) {
+      logger.error('[Passkey] Redis get failed:', err.message);
+      return { success: false, error: 'server_error' };
+    }
+
+    if (!raw) {
+      return { success: false, error: 'expired' };
+    }
+
+    // Single-use: delete immediately before any async work.
+    try {
+      await redis.del(redisKey);
+    } catch {
+      // Non-fatal — already past the guard above.
+    }
+
+    let flowState;
+    try {
+      flowState = JSON.parse(raw);
+    } catch {
+      return { success: false, error: 'expired' };
+    }
+
+    const { cookieJar, flowSlug } = flowState;
+    const executorUrl = `${AUTHENTIK_URL}/api/v3/flows/executor/${flowSlug}/?query=`;
+
+    // Authentik's ak-stage-authenticator-validate expects the assertion under
+    // the `webauthn` key.  The `selected_challenge` field tells Authentik which
+    // device class is being responded to.
+    const body = {
+      component: 'ak-stage-authenticator-validate',
+      webauthn: assertion,
+      selected_challenge: { device_class: 'webauthn' },
+    };
+
+    let assertRes;
+    try {
+      assertRes = await axios.post(executorUrl, body, {
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...(cookieJar ? { Cookie: cookieJar } : {}),
+        },
+        timeout: 20000,
+        maxRedirects: 0,
+        validateStatus: (s) => s < 500,
+      });
+    } catch (err) {
+      logger.error('[Passkey] finishPasskeyFlow POST failed:', err.message);
+      return { success: false, error: 'server_error' };
+    }
+
+    const resData = assertRes.data;
+    logger.debug('[Passkey] finishPasskeyFlow executor response component:', resData?.component, 'status:', assertRes.status);
+
+    // Authentik signals success with component === 'xak-flow-redirect' or
+    // type === 'redirect' or by embedding pending_user / pending_user_identifier.
+    const isSuccess =
+      resData?.type === 'redirect' ||
+      resData?.component === 'xak-flow-redirect' ||
+      resData?.component === 'ak-flow-redirect' ||
+      typeof resData?.pending_user_identifier === 'string';
+
+    if (!isSuccess) {
+      // Log full response for operator debugging — truncated to avoid log spam.
+      logger.warn('[Passkey] finishPasskeyFlow: authentication not successful. Response:', JSON.stringify(resData)?.slice(0, 600));
+      const errCode = resData?.response_errors?.webauthn?.[0]?.string || resData?.error || 'auth_failed';
+      return { success: false, error: errCode };
+    }
+
+    // Resolve the Authentik user identity.  We prefer pending_user_identifier
+    // (username or email) from the executor response.  If absent, we follow the
+    // redirect URL which typically contains a uid in the query string — but
+    // username lookup is simpler and more reliable.
+    if (!AUTHENTIK_TOKEN) {
+      logger.error('[Passkey] AUTHENTIK_API_TOKEN not set — cannot resolve user identity');
+      return { success: false, error: 'server_error' };
+    }
+
+    const identifier = resData?.pending_user_identifier || resData?.pending_user?.username || null;
+    if (!identifier) {
+      logger.error('[Passkey] finishPasskeyFlow: success but no pending_user_identifier in response. Full data:', JSON.stringify(resData)?.slice(0, 600));
+      return { success: false, error: 'identity_missing' };
+    }
+
+    // Fetch full user record from admin API.
+    let authentikUser = null;
+    try {
+      // Try username first, then email.
+      const searches = [
+        { username: identifier },
+        { email: identifier },
+        { search: identifier },
+      ];
+      for (const params of searches) {
+        const res = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
+          params,
+          headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+          timeout: 10000,
+        });
+        const match = (res.data?.results || []).find(
+          (u) => u.username === identifier || (u.email || '').toLowerCase() === identifier.toLowerCase()
+        );
+        if (match) { authentikUser = match; break; }
+      }
+    } catch (err) {
+      logger.error('[Passkey] admin user lookup failed:', err.message);
+      return { success: false, error: 'server_error' };
+    }
+
+    if (!authentikUser) {
+      logger.error('[Passkey] finishPasskeyFlow: could not find Authentik user for identifier:', identifier);
+      return { success: false, error: 'user_not_found' };
+    }
+
+    logger.info('[Passkey] finishPasskeyFlow: resolved user', { username: authentikUser.username, uuid: authentikUser.uuid });
+    return { success: true, authentikUser };
   }
 }
 
