@@ -305,6 +305,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
   const jumpToParam = searchParams.get("jumpTo");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -546,6 +547,16 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     lastTypingEmit.current = now;
     connectSocket().emit("dm:typing", { recipientId: userId });
   };
+
+  // Auto-grow the message textarea so multi-line drafts expand naturally
+  // (matches WhatsApp/Telegram/iMessage). Capped at ~4 lines via max-height
+  // in the className; beyond that the textarea scrolls internally.
+  useEffect(() => {
+    const el = messageInputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [messageInput]);
 
   const beginJoinCall = useCallback((roomName: string, callerId?: string | null, calleeId?: string | null) => {
     setPendingCallRoom(roomName);
@@ -1766,28 +1777,23 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
         </div>
       ) : (
       /* Input bar */
-      <div className="flex items-end gap-2 px-3 py-2.5 border-t border-pnp-border flex-shrink-0 bg-pnp-background pb-safe">
+      <div className="flex items-end gap-2 px-3 py-2 border-t border-pnp-border flex-shrink-0 bg-pnp-background pb-safe">
         <input ref={mediaInputRef} type="file" accept="image/*,video/*,audio/*" className="hidden" onChange={handleMediaSelect} />
         <input ref={cameraInputRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handleMediaSelect} />
-        <button type="button" onClick={() => mediaInputRef.current?.click()} className="p-2 rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0" aria-label="Attach media">
+        <button type="button" onClick={() => mediaInputRef.current?.click()} className="p-2.5 rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0" aria-label="Attach media">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
           </svg>
         </button>
-        <button type="button" onClick={() => cameraInputRef.current?.click()} className="p-2 rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0 sm:hidden" aria-label="Take photo or video">
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
-          </svg>
-        </button>
         <textarea
+          ref={messageInputRef}
           value={messageInput}
           onChange={(e) => { setMessageInput(e.target.value); emitTyping(); }}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
           placeholder="Type a message..."
-          className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2.5 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-24"
+          className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-32 leading-6"
           rows={1}
-          style={{ minHeight: "40px", fontSize: "16px" }}
+          style={{ fontSize: "16px" }}
         />
         {/* Mic button — shown only when input is empty and no media attached */}
         {!messageInput.trim() && !mediaFile && (
