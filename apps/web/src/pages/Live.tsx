@@ -39,6 +39,7 @@ import {
   type CreatorMediaItem,
 } from "@/lib/api";
 import { PerformerDrawer } from "@/components/live/PerformerDrawer";
+import { MainStageLiveBanner } from "@/components/mainstage/MainStageLiveBanner";
 
 const ALLOWED_IMAGE_HOSTS = ["cms.pnptv.app", "app.pnptv.app", "pnptv.app"];
 function isValidPhotoUrl(photo: string | null | undefined): photo is string {
@@ -518,6 +519,9 @@ export default function Live() {
         <meta name="description" content={t.live.pageDescription} />
       </Helmet>
       {showTutorial && <TutorialOverlay section="live" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
+
+      {/* Main Stage live banner — only when broadcasting, hidden on /main-stage itself */}
+      <MainStageLiveBanner />
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between mb-6">
