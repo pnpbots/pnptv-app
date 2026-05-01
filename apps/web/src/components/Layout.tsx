@@ -907,7 +907,6 @@ export function Layout() {
   }
 
   return (
-    <MainStageProvider>
     <div className="app-shell bg-pnp-background">
       {/* ── Desktop sidebar ─────────────────────────────────────────────────── */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-72 lg:flex-col border-r border-pnp-border glass-nav">
@@ -1601,7 +1600,6 @@ export function Layout() {
           message survives the redirect to /login. */}
       <FlashBanner />
     </div>
-    </MainStageProvider>
   );
 }
 
