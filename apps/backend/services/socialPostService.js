@@ -77,6 +77,7 @@ class SocialPostService {
        LEFT JOIN hangout_groups hg ON sp.hangout_group_id = hg.id
        WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL
          AND (sp.hangout_group_id IS NULL OR hg.feed_visibility = 'public')
+         AND sp.channel_id IS NULL
          ${cursorClause}
          AND sp.user_id != ALL($${blockedParamIdx}::text[])
        ORDER BY sp.id DESC
@@ -115,6 +116,7 @@ class SocialPostService {
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id
          WHERE sp.is_promoted = true AND sp.is_deleted = false
+           AND sp.channel_id IS NULL
            AND sp.user_id != ALL($2::text[])
          ORDER BY sp.id DESC
          LIMIT 1`,
@@ -299,7 +301,18 @@ class SocialPostService {
        JOIN users u ON sp.user_id = u.id
        LEFT JOIN social_posts rp ON sp.repost_of_id = rp.id
        LEFT JOIN users ru ON rp.user_id = ru.id
-       WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL AND sp.is_exclusive = false
+       WHERE sp.is_deleted = false
+         AND sp.reply_to_id IS NULL
+         AND sp.is_exclusive = false
+         -- Defensive: home dashboard preview is unauthenticated and applies
+         -- no per-viewer tier blur, so we hard-filter any post whose
+         -- content_tier is gated. is_exclusive should already cover this on
+         -- properly-authored posts, but a missing/forgotten is_exclusive flag
+         -- on a PRIME-tier post would otherwise leak unblurred to free
+         -- viewers. See 2026-05-01 backfill.
+         AND COALESCE(sp.content_tier, 'free') = 'free'
+         -- Channel videos live in their channel only, not the public feed.
+         AND sp.channel_id IS NULL
        ORDER BY sp.id DESC
        LIMIT $1`,
       [lim]
@@ -343,6 +356,7 @@ class SocialPostService {
        FROM social_posts sp
        JOIN users u ON sp.user_id = u.id
        WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL AND sp.is_wof = true AND sp.is_exclusive = false
+         AND sp.channel_id IS NULL
          ${cursorClause}
          AND sp.user_id != ALL($${blockedParamIdx}::text[])
        ORDER BY sp.id DESC
@@ -516,6 +530,7 @@ class SocialPostService {
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id
          WHERE sp.is_deleted = false AND sp.user_id = $2 AND sp.reply_to_id IS NULL
+           AND sp.channel_id IS NULL
            ${cursorClause}
            AND sp.user_id != ALL($${blockedParamIdx}::text[])
          ORDER BY sp.id DESC LIMIT $3`,
@@ -803,6 +818,7 @@ class SocialPostService {
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id
          WHERE sp.is_deleted = false AND sp.user_id = $1 AND sp.reply_to_id IS NULL
+           AND sp.channel_id IS NULL
            ${cursorClause}
          ORDER BY sp.id DESC LIMIT $2`,
         params
@@ -810,12 +826,13 @@ class SocialPostService {
       query(
         `SELECT id, username, first_name, last_name, bio, photo_file_id, pnptv_id,
                 created_at, privacy, date_of_birth, city, country,
-                creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_subscriber_count
+                creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_subscriber_count,
+                wellness_days_accumulated
          FROM users WHERE id = $1`,
         [userId]
       ),
       query(
-        'SELECT COUNT(*)::int as count FROM social_posts WHERE user_id = $1 AND is_deleted = false AND reply_to_id IS NULL',
+        'SELECT COUNT(*)::int as count FROM social_posts WHERE user_id = $1 AND is_deleted = false AND reply_to_id IS NULL AND channel_id IS NULL',
         [userId]
       ),
       query(

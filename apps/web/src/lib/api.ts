@@ -805,6 +805,23 @@ export interface UserProfile {
     totalCalls: number;
     availabilityMessage: string | null;
   } | null;
+  // Wellness: cumulative days of self-care breaks across all sessions
+  wellnessDaysAccumulated?: number;
+}
+
+/** Sidecar metadata stored on social_posts.metadata for channel-promo rows. */
+export interface ChannelPromoMetadata {
+  kind: "channel_promo";
+  channel_id: number;
+  channel_slug: string;
+  channel_name: string;
+  creator_id: string;
+  creator_username: string | null;
+  access_type: "free" | "subscription" | "prime" | "paid";
+  price_usd: number | null;
+  video_id: number;
+  video_directus_id: string;
+  has_animated_gif: boolean;
 }
 
 export interface SocialPostItem {
@@ -862,6 +879,9 @@ export interface SocialPostItem {
   promoted_thumbnail?: string | null;
   promoted_link2?: string | null;
   promoted_link2_label?: string | null;
+  // Per-post sidecar metadata. Used today by channel_promo posts; viewer's
+  // CTA is computed client-side from metadata.access_type.
+  metadata?: ChannelPromoMetadata | Record<string, unknown> | null;
   // Synthetic "New on PRIME" carousel — backend injects at top of feed page 1
   is_carousel?: boolean;
   carousel_total?: number;
@@ -4004,6 +4024,12 @@ export function startXOAuth1(app?: string): Promise<{ success: boolean; url: str
 
 export interface AdminStats {
   totalUsers: number;
+  appUsers: number;
+  activeAppUsers: number;
+  linkedAppUsers: number;
+  authentikUsers: number;
+  orphanAuthentikIdentities: number;
+  appUsersMissingAuthentikIdentity: number;
   activeSubscribers: number;
   monthlyRevenue: number;
   totalRevenue: number;
@@ -4130,6 +4156,31 @@ export function getAdminStats(): Promise<{ success: boolean; stats: AdminStats }
   return request("/api/webapp/admin/stats");
 }
 
+// Use Tracker — private harm-reduction log
+export interface UseTypeStats {
+  lastAt: string | null;
+  today: number;
+  week: number;
+  month: number;
+  recentDays: boolean[]; // 30 entries, index 0 = today, index 29 = 29 days ago
+}
+
+export interface UseTrackerData {
+  slam: UseTypeStats;
+  smoke: UseTypeStats;
+}
+
+export function getUseStats(): Promise<{ success: boolean } & UseTrackerData> {
+  return request("/api/webapp/use-tracker");
+}
+
+export function logUse(type: "slam" | "smoke"): Promise<{ success: boolean } & UseTrackerData> {
+  return request("/api/webapp/use-tracker/log", {
+    method: "POST",
+    body: JSON.stringify({ type }),
+  });
+}
+
 // Wellness Mode — self-imposed access restriction
 export interface WellnessModeStatus {
   active: boolean;
@@ -4138,6 +4189,7 @@ export interface WellnessModeStatus {
   disableRequestedAt: string | null;
   hoursLeftUntilDisableAllowed: number | null;
   coolingOffHours?: number;
+  wellnessDaysAccumulated?: number;
 }
 
 export interface WellnessHangout {
@@ -6568,6 +6620,113 @@ export function uploadAdminPrimeVideo(
     xhr.onerror = () => reject(new Error("Network error during upload"));
     xhr.send(fd);
   });
+}
+
+// ── Channel video upload (universal — every creator's channel) ──────────────
+
+export interface ChannelVideo {
+  id: number;
+  channel_id: number;
+  title: string;
+  description: string | null;
+  tags: string[];
+  duration_sec: number | null;
+  filesize_bytes: number | null;
+  thumbnail_url: string | null;
+  gif_url: string | null;
+  video_url: string;
+  status: "processing" | "published" | "draft" | "failed" | "removed";
+  promo_post_id: number | null;
+  ai_generated_meta: Record<string, "ai" | "human" | "mixed">;
+  created_at: string;
+  channel?: {
+    id: number;
+    slug: string;
+    name: string;
+    access_type: "free" | "subscription" | "prime" | "paid";
+    price_usd: number | null;
+  };
+}
+
+export function uploadChannelVideoV2(
+  channelId: number,
+  file: File,
+  options: { title?: string; onProgress?: (pct: number) => void } = {},
+): Promise<{ success: boolean; video: ChannelVideo }> {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (options.title) fd.append("title", options.title);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/webapp/channels/${channelId}/videos`, true);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && options.onProgress) {
+        options.onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      try {
+        const body = JSON.parse(xhr.responseText || "{}");
+        if (xhr.status >= 200 && xhr.status < 300 && body.success) resolve(body);
+        else reject(new Error(body.error || `Upload failed (${xhr.status})`));
+      } catch {
+        reject(new Error(`Upload failed (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.send(fd);
+  });
+}
+
+export async function aiTitleChannelVideo(channelId: number, videoId: number) {
+  return request<{ success: boolean; title: string }>(
+    `/api/webapp/channels/${channelId}/videos/${videoId}/ai/title`,
+    { method: "POST" },
+  );
+}
+export async function aiDescriptionChannelVideo(channelId: number, videoId: number) {
+  return request<{ success: boolean; description: string; en: string; es: string }>(
+    `/api/webapp/channels/${channelId}/videos/${videoId}/ai/description`,
+    { method: "POST" },
+  );
+}
+export async function aiTagsChannelVideo(channelId: number, videoId: number) {
+  return request<{ success: boolean; tags: string[] }>(
+    `/api/webapp/channels/${channelId}/videos/${videoId}/ai/tags`,
+    { method: "POST" },
+  );
+}
+export async function updateChannelVideo(
+  channelId: number, videoId: number,
+  fields: { title?: string; description?: string | null; tags?: string[] },
+) {
+  return request<{ success: boolean; video: ChannelVideo }>(
+    `/api/webapp/channels/${channelId}/videos/${videoId}`,
+    { method: "PATCH", body: fields },
+  );
+}
+export async function publishChannelVideo(channelId: number, videoId: number) {
+  return request<{ success: boolean; video: ChannelVideo }>(
+    `/api/webapp/channels/${channelId}/videos/${videoId}/publish`,
+    { method: "POST" },
+  );
+}
+export async function deleteChannelVideo(channelId: number, videoId: number) {
+  return request<{ success: boolean; ok?: boolean }>(
+    `/api/webapp/channels/${channelId}/videos/${videoId}`,
+    { method: "DELETE" },
+  );
+}
+export async function listChannelVideos(channelId: number) {
+  return request<{ success: boolean; videos: ChannelVideo[] }>(
+    `/api/webapp/channels/${channelId}/videos`,
+  );
+}
+export async function getChannelTagTaxonomy(channelId: number) {
+  return request<{ success: boolean; tags: string[] }>(
+    `/api/webapp/channels/${channelId}/videos/tag-taxonomy`,
+  );
 }
 
 export const PRIME_TAG_TAXONOMY: { key: string; label: string }[] = [

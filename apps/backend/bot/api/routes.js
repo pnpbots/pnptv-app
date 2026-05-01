@@ -360,6 +360,12 @@ const GEO_BLOCK_BYPASS_PATHS = [
   // shouldn't be blocked even if their IP geolocates oddly.
   /^\/webhook\b/,
   /^\/api\/webhooks?\b/,
+  // /lifetime100 must be reachable globally — operator decision 2026-04-30:
+  // the public landing page is served by pnptv-web (so it already isn't
+  // geo-blocked), but the availability counter and reservation form call
+  // these public endpoints. Without this exemption the page loads with a
+  // broken counter in UK / TX / TN / FL.
+  /^\/api\/public\/lifetime100\b/,
 ];
 function classifyGeo(ip) {
   if (!ip) return null;
@@ -739,16 +745,16 @@ app.get('/subscription', (req, res) => {
 });
 
 // Shorthand alias → lifetime100
-app.get('/lifetime', (req, res) => res.redirect(302, 'https://app.pnptv.app/lifetime100'));
+app.get('/lifetime', (req, res) => res.redirect(302, 'https://pnptv.app/lifetime100'));
 
-// LIFETIME100 — redirect to the React SPA, preserving any query string
+// LIFETIME100 — redirect to the public React SPA route, preserving any query string
 app.get('/lifetime100', (req, res) => {
   const host = req.get('host') || '';
   if (host.includes('easybots.store') || host.includes('easybots')) {
     return res.status(404).send('Not found');
   }
   const qs = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
-  return res.redirect(302, 'https://app.pnptv.app/lifetime100' + qs);
+  return res.redirect(302, 'https://pnptv.app/lifetime100' + qs);
 });
 
 // ── CMS asset proxy ──────────────────────────────────────────────────────────
@@ -1011,19 +1017,38 @@ app.get('/nearby', pageLimiter, (req, res) => {
   res.sendFile(path.join(__dirname, '../../../public/nearby.html'));
 });
 
-// Landing page routes
-// Home page — serve login page directly; if already authenticated send to React SPA
-app.get('/', (req, res) => {
+// Login entry routes
+// The Telegram login widget uses a cross-origin popup to oauth.telegram.org
+// that posts auth data back via window.opener.postMessage. helmet's default
+// Cross-Origin-Opener-Policy: same-origin severs that opener relationship and
+// the widget silently fails. Relax COOP to unsafe-none on the login pages
+// only — every other route keeps the strict default.
+function relaxCoopForTelegramWidget(_req, res, next) {
+  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+  res.removeHeader('Cross-Origin-Embedder-Policy');
+  next();
+}
+
+// Home page — serve classic login page directly; if already authenticated send to React SPA
+app.get('/', relaxCoopForTelegramWidget, (req, res) => {
   // Authenticated → go to the React SPA
   if (req.session?.user) {
     return res.redirect(302, 'https://pnptv.app');
   }
-  // Not authenticated → show login
+  // Not authenticated → show the classic login
   return res.sendFile(path.join(__dirname, '../../../public/login.html'));
 });
 
-// /login → same behaviour as /
-app.get('/login', (req, res) => {
+// /classic-login → canonical classic login route
+app.get('/classic-login', relaxCoopForTelegramWidget, (req, res) => {
+  if (req.session?.user) {
+    return res.redirect(302, 'https://pnptv.app');
+  }
+  return res.sendFile(path.join(__dirname, '../../../public/login.html'));
+});
+
+// /login → keep as alias to the classic login
+app.get('/login', relaxCoopForTelegramWidget, (req, res) => {
   if (req.session?.user) {
     return res.redirect(302, 'https://pnptv.app');
   }
@@ -2612,6 +2637,40 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     }
   }
 
+  if (!userRow && preferred_username) {
+    const usernameLookup = await pool.query(
+      `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
+              tier, terms_accepted, photo_file_id, bio, language, role,
+              creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
+              email, last_login_method
+       FROM users
+       WHERE UPPER(username) = UPPER($1) AND is_deleted = false
+       LIMIT 1`,
+      [preferred_username]
+    );
+
+    if (usernameLookup.rows.length > 0) {
+      userRow = usernameLookup.rows[0];
+      const displayName = name || preferred_username || userRow.first_name || null;
+      await pool.query(
+        `UPDATE users
+         SET last_login_method = 'oidc',
+             last_login_at = NOW(),
+             first_name = COALESCE(NULLIF($1, ''), first_name),
+             photo_file_id = COALESCE(NULLIF($2, ''), photo_file_id)
+         WHERE id = $3`,
+        [displayName, picture || null, userRow.id]
+      );
+      userRow.first_name = displayName || userRow.first_name;
+      userRow.last_login_method = 'oidc';
+      logger.info('[OIDC] Reused existing username-matched account', {
+        userId: userRow.id,
+        username: userRow.username,
+        sub,
+      });
+    }
+  }
+
   if (!userRow) {
     // No existing user — create a new PNPtv account linked to this Authentik identity
     const baseUsername = (preferred_username || (email ? email.split('@')[0] : null) || `user_${crypto.randomBytes(4).toString('hex')}`)
@@ -2621,16 +2680,16 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
 
     // Ensure username uniqueness by appending a random hex suffix if needed
     let finalUsername = baseUsername || `user_${crypto.randomBytes(4).toString('hex')}`;
-    const usernameCheck = await pool.query(
-      'SELECT 1 FROM users WHERE username = $1 LIMIT 1',
-      [finalUsername]
-    );
-    if (usernameCheck.rows.length > 0) {
-      finalUsername = `${finalUsername}_${crypto.randomBytes(3).toString('hex')}`;
+    while (true) {
+      const usernameCheck = await pool.query(
+        'SELECT 1 FROM users WHERE UPPER(username) = UPPER($1) LIMIT 1',
+        [finalUsername]
+      );
+      if (usernameCheck.rows.length === 0) break;
+      finalUsername = `${baseUsername || 'user'}_${crypto.randomBytes(3).toString('hex')}`.slice(0, 30);
     }
 
     const newUserId = crypto.randomUUID();
-    const newPnptvId = crypto.randomUUID();
     const insertResult = await pool.query(
       `INSERT INTO users
          (id, pnptv_id, username, first_name, email, email_verified,
@@ -4103,7 +4162,7 @@ app.post('/api/public/lifetime100/reserve', lifetime100ReserveLimiter, asyncHand
   }
 
   // 4) Send combined welcome + code email
-  const activationUrl = `https://app.pnptv.app/lifetime100/activate?code=${encodeURIComponent(reservation.code)}`;
+  const activationUrl = `https://pnptv.app/lifetime100/activate?code=${encodeURIComponent(reservation.code)}`;
   try {
     await EmailService.sendFounderLifetimeEmail({
       to: email,
@@ -5356,6 +5415,63 @@ app.post('/api/webapp/wellness-mode/cancel-disable', requireSessionAuth, asyncHa
   try { await wellnessGuardCache.del(`wellnessActive:${req.session.user.id}`); } catch {}
   return res.json({ success: true, ...status });
 }));
+
+// ── Use Tracker — private harm-reduction log ──────────────────────────────
+// Shared helper to build stats for both types from the DB.
+async function buildUseTrackerStats(userId) {
+  const pool = getPool();
+  const types = ['slam', 'smoke'];
+  const stats = {};
+  await Promise.all(types.map(async (type) => {
+    const { rows: [agg] } = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE logged_at >= CURRENT_DATE)::int AS today,
+         COUNT(*) FILTER (WHERE logged_at >= NOW() - INTERVAL '7 days')::int AS week,
+         COUNT(*) FILTER (WHERE logged_at >= NOW() - INTERVAL '30 days')::int AS month,
+         MAX(logged_at) AS last_at
+       FROM use_tracker_logs WHERE user_id = $1 AND type = $2`,
+      [userId, type]
+    );
+    const { rows: dayRows } = await pool.query(
+      `SELECT DISTINCT (NOW()::date - logged_at::date)::int AS days_ago
+       FROM use_tracker_logs
+       WHERE user_id = $1 AND type = $2 AND logged_at >= NOW() - INTERVAL '30 days'`,
+      [userId, type]
+    );
+    const usedDays = new Set(dayRows.map(r => r.days_ago));
+    stats[type] = {
+      lastAt: agg?.last_at ? new Date(agg.last_at).toISOString() : null,
+      today: agg?.today || 0,
+      week: agg?.week || 0,
+      month: agg?.month || 0,
+      recentDays: Array.from({ length: 30 }, (_, i) => usedDays.has(i)),
+    };
+  }));
+  return stats;
+}
+
+// GET /api/webapp/use-tracker — stats for both types
+app.get('/api/webapp/use-tracker', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.session.user.id;
+  const stats = await buildUseTrackerStats(userId);
+  return res.json({ success: true, ...stats });
+}));
+
+// POST /api/webapp/use-tracker/log — log one event, return updated stats
+app.post('/api/webapp/use-tracker/log', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.session.user.id;
+  const { type } = req.body;
+  if (!['slam', 'smoke'].includes(type)) {
+    return res.status(400).json({ error: 'type must be slam or smoke' });
+  }
+  await getPool().query(
+    'INSERT INTO use_tracker_logs (user_id, type) VALUES ($1, $2)',
+    [userId, type]
+  );
+  const stats = await buildUseTrackerStats(userId);
+  return res.json({ success: true, ...stats });
+}));
+
 app.post('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.createGroup));
 
 
@@ -8172,6 +8288,220 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
   return res.json({ success: true, coverImageUrl: coverUrl });
 }));
 
+// ── Channel video upload + AI assist + publish (universal — replaces the
+//    admin-only /admin/prime-videos flow for non-admin creators) ─────────────
+{
+  const channelVideoService = require('../../services/channelVideoService');
+  const channelVideoUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 4 * 1024 * 1024 * 1024 }, // 4 GB matches PRIME upload
+    fileFilter: (req, file, cb) => {
+      if (/^video\//i.test(file.mimetype || '')) return cb(null, true);
+      cb(new Error('Only video files are allowed'));
+    },
+  });
+  // 5 uploads / hour / user — back-pressure on storage abuse without
+  // blocking legitimate creators uploading a small batch.
+  const channelVideoLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Upload rate limit reached — try again in an hour' },
+  });
+  // 20 publishes / day / user — guards against feed spam from rapid republish.
+  const channelVideoPublishLimiter = rateLimit({
+    windowMs: 24 * 60 * 60 * 1000,
+    max: 20,
+    keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Publish rate limit reached — try again tomorrow' },
+  });
+
+  function userCtx(req) {
+    return {
+      userId: req.session?.user?.id,
+      isAdmin: ['admin', 'superadmin'].includes(req.session?.user?.role || ''),
+    };
+  }
+  function handleSvcError(res, err) {
+    const status = err.status || 500;
+    return res.status(status).json({
+      success: false,
+      error: err.message || 'Internal error',
+      code: err.code,
+    });
+  }
+
+  // POST /api/webapp/channels/:channelId/videos — multipart upload
+  app.post(
+    '/api/webapp/channels/:channelId/videos',
+    requireSessionAuth,
+    channelVideoLimiter,
+    channelVideoUpload.single('file'),
+    asyncHandler(async (req, res) => {
+      if (!req.file) return res.status(400).json({ success: false, error: 'file required' });
+      const channelId = parseInt(req.params.channelId, 10);
+      if (!Number.isFinite(channelId)) return res.status(400).json({ success: false, error: 'Invalid channel id' });
+      const { userId, isAdmin } = userCtx(req);
+      try {
+        const video = await channelVideoService.uploadVideo({
+          channelId, uploaderId: userId, isAdmin,
+          file: req.file, title: req.body?.title,
+        });
+        res.json({ success: true, video });
+      } catch (err) {
+        handleSvcError(res, err);
+      }
+    })
+  );
+
+  // POST /api/webapp/channels/:channelId/videos/:videoId/ai/title
+  app.post(
+    '/api/webapp/channels/:channelId/videos/:videoId/ai/title',
+    requireSessionAuth,
+    asyncHandler(async (req, res) => {
+      const videoId = parseInt(req.params.videoId, 10);
+      if (!Number.isFinite(videoId)) return res.status(400).json({ success: false, error: 'Invalid video id' });
+      const { userId, isAdmin } = userCtx(req);
+      try {
+        const out = await channelVideoService.aiTitle({ videoId, userId, isAdmin });
+        res.json({ success: true, ...out });
+      } catch (err) {
+        handleSvcError(res, err);
+      }
+    })
+  );
+
+  // POST /api/webapp/channels/:channelId/videos/:videoId/ai/description
+  app.post(
+    '/api/webapp/channels/:channelId/videos/:videoId/ai/description',
+    requireSessionAuth,
+    asyncHandler(async (req, res) => {
+      const videoId = parseInt(req.params.videoId, 10);
+      if (!Number.isFinite(videoId)) return res.status(400).json({ success: false, error: 'Invalid video id' });
+      const { userId, isAdmin } = userCtx(req);
+      try {
+        const out = await channelVideoService.aiDescription({ videoId, userId, isAdmin });
+        res.json({ success: true, ...out });
+      } catch (err) {
+        handleSvcError(res, err);
+      }
+    })
+  );
+
+  // POST /api/webapp/channels/:channelId/videos/:videoId/ai/tags
+  app.post(
+    '/api/webapp/channels/:channelId/videos/:videoId/ai/tags',
+    requireSessionAuth,
+    asyncHandler(async (req, res) => {
+      const videoId = parseInt(req.params.videoId, 10);
+      if (!Number.isFinite(videoId)) return res.status(400).json({ success: false, error: 'Invalid video id' });
+      const { userId, isAdmin } = userCtx(req);
+      try {
+        const out = await channelVideoService.aiTags({ videoId, userId, isAdmin });
+        res.json({ success: true, ...out });
+      } catch (err) {
+        handleSvcError(res, err);
+      }
+    })
+  );
+
+  // PATCH /api/webapp/channels/:channelId/videos/:videoId — edit title/desc/tags
+  app.patch(
+    '/api/webapp/channels/:channelId/videos/:videoId',
+    requireSessionAuth,
+    asyncHandler(async (req, res) => {
+      const videoId = parseInt(req.params.videoId, 10);
+      if (!Number.isFinite(videoId)) return res.status(400).json({ success: false, error: 'Invalid video id' });
+      const { userId, isAdmin } = userCtx(req);
+      try {
+        const video = await channelVideoService.updateVideo({
+          videoId, userId, isAdmin, fields: req.body || {},
+        });
+        res.json({ success: true, video });
+      } catch (err) {
+        handleSvcError(res, err);
+      }
+    })
+  );
+
+  // POST /api/webapp/channels/:channelId/videos/:videoId/publish — generate
+  // GIF + create promo social_posts row + flip status to published.
+  app.post(
+    '/api/webapp/channels/:channelId/videos/:videoId/publish',
+    requireSessionAuth,
+    channelVideoPublishLimiter,
+    asyncHandler(async (req, res) => {
+      const videoId = parseInt(req.params.videoId, 10);
+      if (!Number.isFinite(videoId)) return res.status(400).json({ success: false, error: 'Invalid video id' });
+      const { userId, isAdmin } = userCtx(req);
+      try {
+        const video = await channelVideoService.publishVideo({ videoId, userId, isAdmin });
+        res.json({ success: true, video });
+      } catch (err) {
+        handleSvcError(res, err);
+      }
+    })
+  );
+
+  // DELETE /api/webapp/channels/:channelId/videos/:videoId — soft-delete +
+  // tombstone the promo social_posts row.
+  app.delete(
+    '/api/webapp/channels/:channelId/videos/:videoId',
+    requireSessionAuth,
+    asyncHandler(async (req, res) => {
+      const videoId = parseInt(req.params.videoId, 10);
+      if (!Number.isFinite(videoId)) return res.status(400).json({ success: false, error: 'Invalid video id' });
+      const { userId, isAdmin } = userCtx(req);
+      try {
+        const out = await channelVideoService.deleteVideo({ videoId, userId, isAdmin });
+        res.json({ success: true, ...out });
+      } catch (err) {
+        handleSvcError(res, err);
+      }
+    })
+  );
+
+  // GET /api/webapp/channels/:channelId/videos — list videos for the channel.
+  // Drafts visible only to owner / collaborators / admins.
+  app.get(
+    '/api/webapp/channels/:channelId/videos',
+    softAuth,
+    asyncHandler(async (req, res) => {
+      const channelId = parseInt(req.params.channelId, 10);
+      if (!Number.isFinite(channelId)) return res.status(400).json({ success: false, error: 'Invalid channel id' });
+      const viewerId = req.session?.user?.id;
+      const isAdmin = ['admin', 'superadmin'].includes(req.session?.user?.role || '');
+      const includeDrafts = !!viewerId && (await getPool().query(
+        `SELECT 1 FROM creator_channels WHERE id = $1
+            AND (creator_id = $2 OR $2 = ANY(collaborators) OR $3)`,
+        [channelId, String(viewerId), isAdmin]
+      )).rows.length > 0;
+      try {
+        const videos = await channelVideoService.listChannelVideos({
+          channelId, viewerId, includeDrafts,
+        });
+        res.json({ success: true, videos });
+      } catch (err) {
+        handleSvcError(res, err);
+      }
+    })
+  );
+
+  // GET /api/webapp/channels/:channelId/videos/tag-taxonomy — surface the
+  // bounded tag list to the frontend so the chip picker is in sync with what
+  // Grok is allowed to suggest.
+  app.get(
+    '/api/webapp/channels/:channelId/videos/tag-taxonomy',
+    asyncHandler(async (_req, res) => {
+      res.json({ success: true, tags: channelVideoService.TAG_TAXONOMY });
+    })
+  );
+}
+
 // Gamification routes
 app.use('/api/webapp/gamification', gamificationRoutes);
 
@@ -8909,12 +9239,19 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
           const mediaUrl = `https://cms.pnptv.app/assets/${fileId}`;
           const thumbUrl = `https://cms.pnptv.app/video-thumb/${fileId}.jpg`;
           const content = description && description.trim() ? description : titleInput;
+          // is_exclusive=true is critical: the home_feed query filters
+          // `WHERE is_exclusive = false`, so PRIME-channel uploads must set
+          // this flag or they leak unblurred to free-tier viewers on the
+          // home dashboard preview. The main social feed gates by
+          // is_exclusive (filterFeedExclusivePosts) AND content_tier
+          // (_applyContentTierBlur); the home feed only checks is_exclusive,
+          // so this flag is the load-bearing one. See backfill on 2026-05-01.
           await getPool().query(
             `INSERT INTO social_posts
               (user_id, channel_id, directus_id, content, video_title, video_description,
                media_url, media_type, content_tier, video_thumbnail_url, video_thumbnails,
-               is_shareable, source_channel, created_at, updated_at)
-             VALUES ($1, 5, $2, $3, $4, $5, $6, 'video', 'PRIME', $7, '[]'::jsonb, true, 'prime', NOW(), NOW())`,
+               is_shareable, is_exclusive, source_channel, created_at, updated_at)
+             VALUES ($1, 5, $2, $3, $4, $5, $6, 'video', 'PRIME', $7, '[]'::jsonb, true, true, 'prime', NOW(), NOW())`,
             ['8599671840', primeRow.id, content, titleInput, description, mediaUrl, thumbUrl]
           );
         } catch (syncErr) {

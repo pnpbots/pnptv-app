@@ -19,6 +19,7 @@ import {
 } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import { AnimatedVideoThumbnail } from "@/components/AnimatedVideoThumbnail";
+import { UploadVideoButton } from "@/components/channels/UploadVideoButton";
 
 // ── Tier badge colors ────────────────────────────────────────────────────────
 const TIER_COLORS: Record<string, { bg: string; text: string; label: string }> = {
@@ -410,6 +411,17 @@ function ChannelDetailView({
               </span>
               {channel.isOwner && (
                 <>
+                  {/* New universal upload flow with AI assist + smart promo
+                       — recommended for all channels going forward. */}
+                  <UploadVideoButton
+                    variant="compact"
+                    channelId={channel.id}
+                    channelName={channel.name}
+                    channelSlug={channel.slug}
+                    accessType={(channel.accessType as "free" | "subscription" | "prime" | "paid") || "free"}
+                    pricePerMonth={channel.priceUsd ?? null}
+                    creatorUsername={channel.creator?.username ?? null}
+                  />
                   <input
                     ref={videoInputRef}
                     type="file"
@@ -421,7 +433,7 @@ function ChannelDetailView({
                     onClick={() => videoInputRef.current?.click()}
                     disabled={videoUploading}
                     className="p-1.5 rounded-lg text-pnp-accent hover:text-white hover:bg-pnp-accent/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={videoUploading ? "Uploading video…" : "Upload video via CMS"}
+                    title={videoUploading ? "Uploading video…" : "Legacy upload (no AI assist)"}
                   >
                     {videoUploading ? (
                       <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">

@@ -17,6 +17,64 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { translateText } from "@/lib/feedI18n";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
+
+/**
+ * Channel-promo CTA resolver. Reads the post's `metadata` and the viewer's
+ * tier and produces the right call-to-action label + click target.
+ *
+ * Today we only know "is the viewer PRIME" with zero extra DB roundtrips.
+ * For subscription / paid channels we always upsell (worst-case the user gets
+ * the paywall on the channel page, which already handles "you already have
+ * access" correctly). Future: subscribe to a per-creator entitlement context
+ * so we can show "Watch now" pre-emptively to existing subscribers.
+ */
+function resolveChannelPromoCta(
+  metadata: Record<string, unknown> | undefined | null,
+  isPrime: boolean,
+  lang: string,
+): { label: string; href: string } | null {
+  if (!metadata || (metadata as { kind?: string }).kind !== "channel_promo") return null;
+  const m = metadata as {
+    channel_slug?: string;
+    channel_name?: string;
+    creator_username?: string | null;
+    access_type?: "free" | "prime" | "subscription" | "paid";
+    price_usd?: number | null;
+  };
+  const slug = m.channel_slug || "";
+  const isEs = lang === "es";
+  const watchNow = isEs ? "Ver ahora →" : "Watch now →";
+  switch (m.access_type) {
+    case "free":
+      return { label: watchNow, href: `/channels/${slug}` };
+    case "prime":
+      return isPrime
+        ? { label: watchNow, href: `/channels/${slug}` }
+        : {
+            label: isEs ? "Suscríbete a PRIME →" : "Subscribe to PRIME →",
+            href: `/subscribe?plan=prime&return=${encodeURIComponent(`/channels/${slug}`)}`,
+          };
+    case "subscription": {
+      const creator = m.creator_username || m.channel_name || "creator";
+      return {
+        label: isEs
+          ? `Suscríbete a @${creator} →`
+          : `Subscribe to @${creator} →`,
+        href: `/profile/${creator}?action=subscribe`,
+      };
+    }
+    case "paid":
+      return {
+        label: isEs
+          ? `Pase mensual — $${m.price_usd ?? "?"}/mes →`
+          : `Get pass — $${m.price_usd ?? "?"}/mo →`,
+        href: `/channels/${slug}?action=purchase`,
+      };
+    default:
+      return { label: watchNow, href: `/channels/${slug}` };
+  }
+}
 
 export interface SocialPostCardProps {
   post: SocialPostItem;
@@ -91,6 +149,12 @@ export default function SocialPostCard({
   const isOwn = String(post.author_id) === currentUserId;
   const canDelete = isOwn || isAdmin;
   const { user } = useAuth();
+  const { isPrime } = useTier();
+  const channelPromoCta = resolveChannelPromoCta(
+    post.metadata as Record<string, unknown> | undefined,
+    !!isPrime,
+    t.lang,
+  );
   // For own posts/replies, always use the live auth-context photo so avatar
   // updates cascade instantly without a full feed refetch.
   const effectiveAuthorPhoto = isOwn && user?.photoUrl ? user.photoUrl : post.author_photo;
@@ -664,6 +728,24 @@ export default function SocialPostCard({
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Channel-promo CTA — produced by the per-channel video upload flow.
+                   Computed client-side per viewer (PRIME-aware), so a single
+                   social_posts row serves all viewer states. */}
+              {channelPromoCta && !post.promoted_link && (
+                <div className="mt-3">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNavigate(channelPromoCta.href);
+                    }}
+                    className="w-full text-sm font-semibold py-2.5 rounded-lg transition-opacity hover:opacity-90"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                  >
+                    {channelPromoCta.label}
+                  </button>
                 </div>
               )}
 

@@ -301,6 +301,65 @@ export const tutorialContent: Record<string, TutorialSection> = {
     ],
   },
 
+  selfCare: {
+    slides: [
+      {
+        titleEn: "Your Self-Care Center",
+        titleEs: "Tu Centro de Autocuidado",
+        descEn: "It's Cristina. This space is yours — optional, private, and always here when you want to take stock or take a break. Nothing leaves your account.",
+        descEs: "Soy Cristina. Este espacio es tuyo — opcional, privado y siempre aquí cuando quieras hacer balance o tomar un descanso. Nada sale de tu cuenta.",
+        illustration: "welcome",
+      },
+      {
+        titleEn: "Use Tracker — Awareness, Not Judgment",
+        titleEs: "Use Tracker — Consciencia, no juicio",
+        descEn: "Log slams or smokes if you want to. Patterns surface gently over time. PNPtv staff cannot see your logs — they're encrypted to your account only.",
+        descEs: "Registra slams o smokes si quieres. Los patrones aparecen suavemente con el tiempo. El equipo de PNPtv no puede ver tus registros — están cifrados solo para tu cuenta.",
+        illustration: "privacy",
+      },
+      {
+        titleEn: "Wellness Mode — Take a Break",
+        titleEs: "Modo Bienestar — Toma un descanso",
+        descEn: "When you need a sober break or just want to step away, flip Wellness Mode on. Only the wellness hangouts, Cristina, and your settings stay reachable. Once on, it can't be turned off for 24 hours — that's the point.",
+        descEs: "Cuando necesites un descanso sobrio o solo quieras alejarte, activa Modo Bienestar. Solo los hangouts de bienestar, Cristina y tus ajustes quedan accesibles. Una vez activo, no se puede desactivar por 24 horas — ese es el punto.",
+        illustration: "primeContent",
+      },
+      {
+        titleEn: "Cristina — Your PNP Sister",
+        titleEs: "Cristina — Tu hermana PNP",
+        descEn: "Vent, ask for resources, find a sponsor, or just talk. No logs, no judgment, no scoring. What you tell her stays between you two.",
+        descEs: "Desahógate, pide recursos, encuentra un padrino, o solo platica. Sin registros, sin juicios, sin puntuaciones. Lo que le cuentes queda entre ustedes dos.",
+        illustration: "directMessage",
+      },
+    ],
+  },
+
+  channelUpload: {
+    slides: [
+      {
+        titleEn: "Upload to Your Channel",
+        titleEs: "Sube a tu Canal",
+        descEn: "Drop a video file or tap to choose. Up to 4 GB. The video stays inside your channel — it doesn't auto-post to the social feed.",
+        descEs: "Suelta un video o toca para elegir. Hasta 4 GB. El video se queda en tu canal — no se publica automáticamente al feed social.",
+        illustration: "shareMedia",
+      },
+      {
+        titleEn: "✨ AI Assist — Cristina Helps",
+        titleEs: "✨ Asistente IA — Cristina te ayuda",
+        descEn: "Tap Generate next to title, description, or tags. Cristina/Grok suggests bilingual copy and tags from your video's context. Always editable — accept, tweak, or rewrite.",
+        descEs: "Toca Generar junto al título, descripción o tags. Cristina/Grok sugiere texto bilingüe y tags según el contexto del video. Siempre editable — acepta, ajusta o reescribe.",
+        illustration: "engage",
+      },
+      {
+        titleEn: "Smart Promo — One Card, Right CTA",
+        titleEs: "Promo inteligente — Una tarjeta, el CTA correcto",
+        descEn: "On publish, a teaser GIF lands in the social feed with the right call-to-action: free channels show Watch now, prime/paid channels show the upsell, and existing subscribers see Watch now too.",
+        descEs: "Al publicar, un GIF teaser aparece en el feed social con el CTA correcto: canales gratis muestran Ver ahora, los canales prime/pagos muestran el upsell, y los suscriptores existentes también ven Ver ahora.",
+        illustration: "subscribePlans",
+      },
+    ],
+  },
+
   profile: {
     slides: [
       {
