@@ -2276,6 +2276,16 @@ const verifyEmailLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Rate limiter for magic-link start — 3 per 5 min per IP. Verify is GET and
+// idempotent (single-use Redis token), no limiter needed.
+const magicLinkLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 3,
+  handler: (req, res) => res.status(429).json({ success: false, error: 'Too many magic-link requests. Try again in a few minutes.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Web App Authentication
 app.get('/api/webapp/auth/telegram/start', asyncHandler(webAppController.telegramStart));
 app.get('/api/webapp/auth/telegram/callback', asyncHandler(webAppController.telegramCallback));
@@ -2286,6 +2296,8 @@ app.post('/api/webapp/auth/telegram/widget', telegramWidgetLimiter, asyncHandler
 app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppController.emailRegister));
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
 app.post('/api/webapp/auth/oidc/token-exchange', authLimiter, asyncHandler(webAppController.oidcTokenExchange));
+app.post('/api/webapp/auth/magic/start', magicLinkLimiter, asyncHandler(webAppController.magicLinkStart));
+app.get('/api/webapp/auth/magic/verify', asyncHandler(webAppController.magicLinkVerify));
 
 // Request account recovery — Authentik-based password reset.
 // Why this path exists: most users (especially Telegram-shadow accounts) have a
@@ -2502,10 +2514,15 @@ app.get('/api/webapp/auth/oidc/login', oidcLoginLimiter, asyncHandler(async (req
   const pkceKey = `oidc:pkce:${state}`;
   await redis.set(pkceKey, JSON.stringify({ codeVerifier, returnTo }), 'EX', 600);
 
+  // Optional method hint — "passkey" or "magic_link". Mapped to Authentik
+  // acr_values so a flow policy (operator-side config) can route the user to
+  // the matching auth stage. Unrecognized values are dropped silently.
+  const methodHint = ['passkey', 'magic_link'].includes(req.query.method) ? req.query.method : undefined;
+
   // Build Authentik authorization URL (PKCE S256, no client_secret in URL)
   let authUrl;
   try {
-    authUrl = AuthentikService.generateAuthUrl(state, codeVerifier);
+    authUrl = AuthentikService.generateAuthUrl(state, codeVerifier, methodHint ? { method: methodHint } : {});
   } catch (err) {
     logger.error('[OIDC] Failed to generate auth URL:', err.message);
     await redis.del(pkceKey);
@@ -3496,6 +3513,17 @@ app.get('/api/webapp/live/schedule/notify/:slotId', requireSessionAuth, asyncHan
 app.get('/api/webapp/admin/live/channels', adminGuard, asyncHandler(webappLiveController.listChannels));
 app.post('/api/webapp/admin/live/assign-channel', adminGuard, asyncHandler(webappLiveController.assignChannel));
 
+// Rate limiter for stream health polling — 30 req/min per user (5s poll × 30 = 2.5 min headroom)
+// Declared inline here (not in the rate-limiter block below) so it exists before the route registration.
+const streamHealthLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => `user:${req.session?.user?.id || req.ip}`,
+  message: { success: false, error: 'Too many stream health requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Stream health — owner-only, polls Restreamer process state + Redis viewer count
 app.get('/api/webapp/streams/:streamId/health', requireSessionAuth, streamHealthLimiter, asyncHandler(webappLiveController.getStreamHealth));
 
@@ -3815,16 +3843,6 @@ const grokStreamChatLimiter = rateLimit({
   max: 5,
   keyGenerator: (req) => String(req.session?.user?.id || req.ip),
   message: { success: false, error: 'Too many generation requests. Wait before regenerating.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Rate limiter for stream health polling — 30 req/min per user (5s poll × 30 = 2.5 min headroom)
-const streamHealthLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
-  keyGenerator: (req) => `user:${req.session?.user?.id || req.ip}`,
-  message: { success: false, error: 'Too many stream health requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
