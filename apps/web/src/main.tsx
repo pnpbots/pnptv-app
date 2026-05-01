@@ -100,32 +100,35 @@ if (!resetInProgress) {
   });
 }
 
-// ── Service Worker update detection ────────────────────────────────────────
+// ── Service Worker update detection (silent auto-update) ──────────────────
+// New SW finishes installing → wait a 5s grace period for any in-flight user
+// action, then SKIP_WAITING so the new SW activates. controllerchange below
+// catches that event and reloads the page automatically. No user click needed.
 if (!resetInProgress && "serviceWorker" in navigator) {
+  const GRACE_MS = 5_000;
+  const activateSoon = (sw: ServiceWorker) => {
+    setTimeout(() => sw.postMessage({ type: "SKIP_WAITING" }), GRACE_MS);
+  };
+
   navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((reg) => {
-    // Check for updates every 60s
+    // Poll for updates every 60s while the tab is open
     setInterval(() => reg.update(), 60_000);
 
-    const onNewSW = (sw: ServiceWorker) => {
+    const watchInstalling = (sw: ServiceWorker) => {
       sw.addEventListener("statechange", () => {
         if (sw.state === "installed" && navigator.serviceWorker.controller) {
-          // New SW waiting → notify app
-          window.dispatchEvent(new CustomEvent("sw-update-available", { detail: sw }));
+          activateSoon(sw);
         }
       });
     };
 
-    if (reg.waiting) {
-      // Already a waiting SW on page load
-      window.dispatchEvent(new CustomEvent("sw-update-available", { detail: reg.waiting }));
-    }
-    if (reg.installing) onNewSW(reg.installing);
+    if (reg.waiting) activateSoon(reg.waiting);
+    if (reg.installing) watchInstalling(reg.installing);
     reg.addEventListener("updatefound", () => {
-      if (reg.installing) onNewSW(reg.installing);
+      if (reg.installing) watchInstalling(reg.installing);
     });
   });
 
-  // When the new SW takes over, reload the page
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (!refreshing) {

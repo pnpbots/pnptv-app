@@ -1,6 +1,9 @@
 // PNPtv! Service Worker — Push Notifications + Offline App Shell Cache
 
-const CACHE_NAME = 'pnptv-v62';
+// CACHE_NAME is auto-bumped on every build by scripts/build-web.sh — never
+// edit by hand. Contains a git short SHA so each deploy invalidates every
+// previously-cached asset (image, font, app shell).
+const CACHE_NAME = 'pnptv-__BUILD_ID__';
 const APP_SHELL = [
   '/Logo2-50.png',
   '/logo-login.png',
@@ -59,14 +62,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Other static assets (images, fonts): cache-first
+  // Other static assets (images, fonts): stale-while-revalidate. Return the
+  // cached copy immediately for speed, then fetch in the background to
+  // refresh the cache for the next request. A logo/theme PNG that changes
+  // server-side reaches the user on the next page load — never pinned forever.
   if (url.pathname.match(/\.(png|jpg|jpeg|svg|webp|woff2?)$/)) {
     event.respondWith(
-      caches.match(request).then((cached) => cached || fetch(request).then((resp) => {
-        const clone = resp.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-        return resp;
-      }))
+      caches.match(request).then((cached) => {
+        const networkFetch = fetch(request).then((resp) => {
+          if (resp && resp.ok) {
+            const clone = resp.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          }
+          return resp;
+        }).catch(() => cached);
+        return cached || networkFetch;
+      })
     );
     return;
   }
