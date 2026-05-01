@@ -78,6 +78,7 @@ import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
 import { NearbyBadge } from "@/components/NearbyBadge";
 import { SpotlightStrip } from "@/components/SpotlightStrip";
 import { getUpcomingEvents, getMainStageState, type MainStageState } from "@/lib/api";
+import { getLocalizedTips, type MainStageTip } from "@/lib/i18n/mainStageTips";
 import { MainStageLiveBanner } from "@/components/mainstage/MainStageLiveBanner";
 import type { EventItem } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
@@ -4822,10 +4823,110 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
  * 30s so the cammer/viewer counts and now-playing title stay reasonably
  * fresh without hammering the API.
  */
+// ── MainStageStrip ticker data ────────────────────────────────────────────────
+
+type TickerCategory = "UPDATE" | "WELLNESS" | "TIP";
+
+interface TickerMessage {
+  category: TickerCategory;
+  en: string;
+  es: string;
+}
+
+const TICKER_UPDATE_MESSAGES: TickerMessage[] = [
+  { category: "UPDATE", en: "✨ Self-Care Center launched — Cristina is now your PNP buddy.", es: "✨ Centro de Autocuidado activo — Cristina es tu acompañante PNP." },
+  { category: "UPDATE", en: "🎬 Channel video upload is live with AI title + tags.", es: "🎬 Sube videos a tu canal con título e tags generados por IA." },
+  { category: "UPDATE", en: "🔴 Stream health panel for creators — see if you're on air.", es: "🔴 Panel de salud del stream para creadores — ve si estás al aire." },
+  { category: "UPDATE", en: "🎟️ Invite anyone to Main Stage with a shareable link.", es: "🎟️ Invita a quien quieras al Main Stage con un enlace compartible." },
+  { category: "UPDATE", en: "📅 Schedule hangout events and invite the room you want.", es: "📅 Programa eventos en tu hangout e invita a quien quieras." },
+];
+
+const TICKER_TIP_MESSAGES: TickerMessage[] = [
+  { category: "TIP", en: "Try the Self-Care Center — Cristina has tools just for you.", es: "Prueba el Centro de Autocuidado — Cristina tiene herramientas para ti." },
+  { category: "TIP", en: "Voice notes work in DMs. Hold the mic, speak, send.", es: "Las notas de voz funcionan en los DMs. Mantén el mic, habla, envía." },
+  { category: "TIP", en: "Apply for creator and turn your cam into income.", es: "Solicita ser creador y convierte tu cámara en ingresos." },
+  { category: "TIP", en: "Book a 1-on-1 call with a creator from their profile.", es: "Reserva una llamada 1-a-1 con un creador desde su perfil." },
+  { category: "TIP", en: "Schedule a hangout — invite the room you want.", es: "Programa un hangout — invita a la sala que quieras." },
+  { category: "TIP", en: "PRIME videos load faster than ever. Open one now.", es: "Los videos PRIME cargan más rápido que nunca. Abre uno ahora." },
+];
+
+const TICKER_CATEGORY_STYLES: Record<TickerCategory, { label: { en: string; es: string }; color: string; bg: string }> = {
+  UPDATE:  { label: { en: "UPDATE",  es: "NOVEDAD"  }, color: "#E5C54A", bg: "rgba(229,197,74,0.15)" },
+  WELLNESS:{ label: { en: "WELLNESS",es: "BIENESTAR"}, color: "#5ED1C4", bg: "rgba(94,209,196,0.15)" },
+  TIP:     { label: { en: "TIP",     es: "TIP"      }, color: "#A990FF", bg: "rgba(123,97,255,0.15)" },
+};
+
+function buildTickerPool(lang: "en" | "es"): Array<{ category: TickerCategory; text: string }> {
+  const wellnessTips = getLocalizedTips();
+  const wellnessMessages = wellnessTips.map((tip) => ({
+    category: "WELLNESS" as TickerCategory,
+    text: `${tip.emoji} ${tip.body}`,
+  }));
+  const updateMessages = TICKER_UPDATE_MESSAGES.map((m) => ({
+    category: m.category,
+    text: m[lang],
+  }));
+  const tipMessages = TICKER_TIP_MESSAGES.map((m) => ({
+    category: m.category,
+    text: m[lang],
+  }));
+  return [...updateMessages, ...wellnessMessages, ...tipMessages];
+}
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+const TICKER_SHOW_MS = 6000;
+const TICKER_FADE_MS = 400;
+
 function MainStageStrip() {
   const navigate = useNavigate();
   const t = useI18n();
   const [state, setState] = useState<MainStageState | null>(null);
+
+  // Determine language once on mount
+  const lang: "en" | "es" =
+    typeof navigator !== "undefined" && navigator.language?.startsWith("es") ? "es" : "en";
+
+  // Shuffled pool; rebuilt if it empties
+  const poolRef = useRef<Array<{ category: TickerCategory; text: string }>>([]);
+  const lastIndexRef = useRef<number>(-1);
+
+  function getNext(): { category: TickerCategory; text: string } {
+    if (poolRef.current.length === 0) {
+      poolRef.current = shuffleArray(buildTickerPool(lang));
+    }
+    const item = poolRef.current.shift()!;
+    return item;
+  }
+
+  const [current, setCurrent] = useState<{ category: TickerCategory; text: string } | null>(null);
+  const [visible, setVisible] = useState(true);
+
+  // Initialize pool and first message
+  useEffect(() => {
+    poolRef.current = shuffleArray(buildTickerPool(lang));
+    setCurrent(getNext());
+    setVisible(true);
+
+    const interval = setInterval(() => {
+      // Fade out
+      setVisible(false);
+      setTimeout(() => {
+        setCurrent(getNext());
+        setVisible(true);
+      }, TICKER_FADE_MS);
+    }, TICKER_SHOW_MS);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -4841,10 +4942,12 @@ function MainStageStrip() {
 
   const cammers = state?.counts?.cammers ?? 0;
   const viewers = state?.counts?.viewers ?? 0;
-  const title = state?.media?.title ?? null;
 
   // 22 bulbs renders nicely across the strip width at mobile → desktop
   const bulbs = Array.from({ length: 22 });
+
+  const categoryStyle = current ? TICKER_CATEGORY_STYLES[current.category] : null;
+  const categoryLabel = categoryStyle ? categoryStyle.label[lang] : "";
 
   return (
     <button
@@ -4916,8 +5019,9 @@ function MainStageStrip() {
         }}
       />
 
-      {/* Center stage content */}
-      <div className="relative h-full flex flex-col items-center justify-center gap-1.5 px-6 text-center">
+      {/* Center stage content — MAIN STAGE title + cammer counts */}
+      <div className="relative h-full flex flex-col items-center justify-center gap-1 px-16 sm:px-20 text-center">
+        {/* LIVE dot + title */}
         <div className="flex items-center gap-2">
           <span
             className="relative inline-flex w-2 h-2 rounded-full"
@@ -4948,13 +5052,38 @@ function MainStageStrip() {
           MAIN STAGE
         </h2>
 
-        <p
-          className="text-[10px] sm:text-[11px] text-white/70 max-w-[90%] leading-snug"
-          style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}
+        {/* Ticker message with category pill — fades in/out */}
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          className="flex items-center gap-2 max-w-full px-2"
+          style={{
+            opacity: visible ? 1 : 0,
+            transform: visible ? "translateY(0)" : "translateY(4px)",
+            transition: `opacity ${TICKER_FADE_MS}ms ease, transform ${TICKER_FADE_MS}ms ease`,
+          }}
         >
-          {t.chat.mainStageStripDescription}
-        </p>
+          {categoryStyle && (
+            <span
+              className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+              style={{
+                color: categoryStyle.color,
+                background: categoryStyle.bg,
+                border: `1px solid ${categoryStyle.color}40`,
+              }}
+            >
+              {categoryLabel}
+            </span>
+          )}
+          <p
+            className="text-[10px] sm:text-[11px] text-white/80 leading-snug line-clamp-1 text-left"
+            style={{ textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}
+          >
+            {current?.text ?? t.chat.mainStageStripDescription}
+          </p>
+        </div>
 
+        {/* Cammer / viewer counts */}
         <div className="flex items-center gap-2 text-[11px] sm:text-xs text-white/80">
           <span className="font-semibold tabular-nums">{cammers}</span>
           <span className="text-white/50">cammers</span>
@@ -4962,15 +5091,6 @@ function MainStageStrip() {
           <span className="font-semibold tabular-nums">{viewers}</span>
           <span className="text-white/50">watching</span>
         </div>
-
-        {title && (
-          <p
-            className="text-[10px] sm:text-[11px] text-white/55 max-w-full truncate px-4"
-            title={title}
-          >
-            Now playing · {title}
-          </p>
-        )}
       </div>
     </button>
   );

@@ -16,11 +16,12 @@ import { SpotlightGrid } from "@/components/mainstage/SpotlightGrid";
 import { CinemaGrid } from "@/components/mainstage/CinemaGrid";
 import { EqualGrid } from "@/components/mainstage/EqualGrid";
 import InvitePanel from "@/components/mainstage/InvitePanel";
-import { communityResources } from "@/lib/i18n/communityResources";
 import { getFeaturedPrimeVideos, getAssetUrl, type PrimeVideo } from "@/lib/directus";
 import { MEDIA_IDENTITY } from "@/components/mainstage/CinemaGrid";
 import { useI18n } from "@/lib/i18n";
 import { GUEST_SESSION_KEY } from "@/pages/MainStageGuestJoin";
+import { getLocalizedTips, type MainStageTip } from "@/lib/i18n/mainStageTips";
+import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
 
 // ── Guest credential shape (written by MainStageGuestJoin, consumed once here) ─
 
@@ -367,6 +368,7 @@ interface MainStageInnerProps {
   onCammersChange: (cammers: CammerInfo[]) => void;
   onLeave: () => void;
   spotlight?: MainStageState["spotlight"];
+  showTips: boolean;
 }
 
 function MainStageInner({
@@ -387,6 +389,7 @@ function MainStageInner({
   onCammersChange,
   onLeave,
   spotlight,
+  showTips,
 }: MainStageInnerProps) {
   return (
     <>
@@ -437,6 +440,10 @@ function MainStageInner({
         )}
         {mode === "equal" && <EqualGrid />}
       </div>
+
+      {/* Slim positive-tips ribbon — sits between cam grid and bottom bar
+          so it is never in front of cammer video tiles. */}
+      {showTips && <WellnessTipsOverlay />}
 
       <BottomBarInner
         canBeCammer={canBeCammer}
@@ -495,6 +502,17 @@ export default function MainStage() {
   useEffect(() => {
     if (!isCammer) setCamError(null);
   }, [isCammer]);
+
+  // Sync cammer status into the shared MainStageProvider so SelfCamFloater
+  // knows when to render the persistent floating tile.
+  const { setIsCammerActive } = useMainStageRoom();
+  useEffect(() => {
+    setIsCammerActive(isCammer);
+    return () => {
+      // When the page unmounts (user navigated away), leave isCammerActive true
+      // so the floater appears — only clear it when the user explicitly leaves.
+    };
+  }, [isCammer, setIsCammerActive]);
   // Ref to the MainStage root container, used by FullscreenToggle so we
   // fullscreen just the stage (not the whole document, which fails on iOS).
   const stageRootRef = useRef<HTMLDivElement>(null);
@@ -979,6 +997,7 @@ export default function MainStage() {
           onCammersChange={handleCammersChange}
           onLeave={handleLeave}
           spotlight={state?.spotlight}
+          showTips={!adminOpen}
         />
       </LiveKitRoom>
 
@@ -987,8 +1006,6 @@ export default function MainStage() {
       {state?.media?.kind === "video" && state.media.title && !adminOpen && (
         <NowPlayingChip title={state.media.title} />
       )}
-
-      {!adminOpen && <WellnessTipsOverlay />}
 
       {adminOpen && (
         <AdminDrawer
@@ -1761,13 +1778,10 @@ const TIP_FIRST_DELAY_MS = 10 * 1000;
 const TIP_INTERVAL_MS = 5 * 60 * 1000;
 const TIP_VISIBLE_MS = 15 * 1000;
 
-type TipItem = { title: string; body: string };
+type TipItem = MainStageTip;
 
 function getWellnessTips(): TipItem[] {
-  const lang = typeof navigator !== "undefined" && navigator.language?.startsWith("es") ? "es" : "en";
-  const bundle = communityResources[lang];
-  const items = [...bundle.harmReductionItems, ...bundle.mentalHealthItems];
-  return items.map((it) => ({ title: it.title, body: it.body }));
+  return getLocalizedTips();
 }
 
 function WellnessTipsOverlay() {
@@ -1808,63 +1822,40 @@ function WellnessTipsOverlay() {
 
   if (!tip) return null;
 
+  // Slim non-blocking ribbon anchored BELOW the cam grid, ABOVE the bottom bar.
+  // Uses absolute positioning within the page's flex column so it never
+  // overlaps cammer video tiles regardless of screen size.
   return (
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed left-1/2 lg:left-[calc(50%+9rem)] -translate-x-1/2 z-40 w-full max-w-[480px] px-4"
+      aria-atomic="true"
+      className="flex-shrink-0 overflow-hidden"
       style={{
-        bottom: "calc(84px + env(safe-area-inset-bottom, 0px))",
-        transform: `translate(-50%, ${visible ? "0" : "24px"})`,
+        maxHeight: visible ? "56px" : "0px",
         opacity: visible ? 1 : 0,
-        transition: "transform 0.35s cubic-bezier(0.2,0.9,0.3,1), opacity 0.35s",
+        transition: "max-height 0.35s cubic-bezier(0.2,0.9,0.3,1), opacity 0.30s",
+        background: "rgba(10,10,15,0.88)",
+        borderTop: "1px solid rgba(255,255,255,0.06)",
       }}
     >
-      <div
-        className="pointer-events-auto relative rounded-2xl p-4 pr-10 border border-pnp-accent/[0.35]"
-        style={{
-          background: "linear-gradient(135deg, rgba(15,15,22,0.92), rgba(25,15,35,0.92))",
-          backdropFilter: "blur(20px)",
-          boxShadow: "0 16px 48px rgba(0,0,0,0.45), 0 0 0 1px rgba(123,97,255,0.08) inset",
-        }}
-      >
-        <div className="flex items-start gap-3">
-          <div
-            className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center mt-0.5 border border-pnp-accent/[0.35]"
-            style={{ background: "linear-gradient(135deg,rgba(212,0,122,0.25),rgba(123,97,255,0.25))" }}
-          >
-            <svg className="w-4 h-4 text-[#FF4FB0]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-widest mb-1 text-[#FF4FB0]">
-              {wellnessT.mainStageWellnessTipLabel}
-            </p>
-            <p className="text-white text-[13px] font-semibold leading-snug mb-1">
-              {tip.title}
-            </p>
-            <p className="text-white/70 text-[12px] leading-snug line-clamp-3">
-              {tip.body}
-            </p>
-            <a
-              href="/community-resources"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 mt-2 text-[11px] font-bold text-pnp-purple"
-            >
-              {wellnessT.mainStageWellnessMoreResources}
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </a>
-          </div>
-        </div>
+      <div className="flex items-center gap-2.5 px-3 h-14">
+        {/* Emoji icon */}
+        <span className="text-xl flex-shrink-0" aria-hidden>
+          {tip.emoji}
+        </span>
+
+        {/* Tip text */}
+        <p className="flex-1 text-[12px] text-white/80 leading-snug line-clamp-2 min-w-0">
+          {tip.body}
+        </p>
+
+        {/* Dismiss */}
         <button
           type="button"
           aria-label={wellnessT.mainStageWellnessAriaDismiss}
           onClick={handleClose}
-          className="absolute top-2.5 right-2.5 w-7 h-7 flex items-center justify-center rounded-full transition-all active:scale-[0.92] bg-white/[0.06] border border-white/[0.08]"
+          className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full transition-all active:scale-[0.92] bg-white/[0.06] border border-white/[0.08]"
         >
           <svg className="w-3 h-3 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

@@ -7,8 +7,8 @@ const strings = {
 
     // Header
     hangoutsTitle: "PNP Hangouts",
-    hangoutsSubtitle: "Chat groups with video rooms, a 24/7 Main Stage, and community events",
-    mainStageStripDescription: "Online cinema — watch PRIME videos with the room while camming with other guys",
+    hangoutsSubtitle: "Main Stage is your spotlight — go live, expose yourself, be seen. Plus group chats and community events.",
+    mainStageStripDescription: "Your spotlight is on. Go live on Main Stage and own the moment.",
 
     // Group creation
     newGroup: "+ New Group",
@@ -134,8 +134,8 @@ const strings = {
 
     // Header
     hangoutsTitle: "PNP Hangouts",
-    hangoutsSubtitle: "Grupos de chat con video, un Main Stage 24/7 y eventos comunitarios",
-    mainStageStripDescription: "Cine online — mira videos PRIME con la sala mientras cameas con otros chicos",
+    hangoutsSubtitle: "Main Stage es tu reflector — préndete, exhíbete, déjate ver. Más grupos de chat y eventos comunitarios.",
+    mainStageStripDescription: "Tu reflector está prendido. Sal al aire en Main Stage y es tu momento.",
 
     // Group creation
     newGroup: "+ Nuevo grupo",

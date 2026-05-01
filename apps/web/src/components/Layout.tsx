@@ -16,6 +16,8 @@ import { useI18n } from "@/lib/i18n";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import { MainStageFAB } from "@/components/mainstage/MainStageFAB";
+import { MainStageProvider } from "@/components/mainstage/MainStageProvider";
+import { SelfCamFloater } from "@/components/mainstage/SelfCamFloater";
 
 const SIDEBAR_DM_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -906,6 +908,7 @@ export function Layout() {
   }
 
   return (
+    <MainStageProvider>
     <div className="app-shell bg-pnp-background">
       {/* ── Desktop sidebar ─────────────────────────────────────────────────── */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-72 lg:flex-col border-r border-pnp-border glass-nav">
@@ -1599,17 +1602,19 @@ export function Layout() {
           message survives the redirect to /login. */}
       <FlashBanner />
     </div>
+    </MainStageProvider>
   );
 }
 
 /**
- * Floating widgets layer — FAB + CristinaWidget.
+ * Floating widgets layer — FAB + CristinaWidget + SelfCamFloater.
  * The PiP mini-player was removed 2026-05-01; see MainStageLiveBanner for replacement.
  */
 function FloatingWidgets({ showCompact }: { showCompact: boolean }) {
   return (
     <>
       <MainStageFAB />
+      <SelfCamFloater />
       <Suspense fallback={null}>
         <CristinaWidget compact={showCompact} />
       </Suspense>

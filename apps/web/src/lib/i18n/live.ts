@@ -336,10 +336,14 @@ const strings = {
     // Main Stage — standby / empty states
     mainStageStandby: "Standby",
     mainStageNoMediaPlaying: "No media playing · Admin controls playback",
-    mainStageStageQuiet: "Stage is quiet",
-    mainStageStageQuietHint: "Tap Go live to hop on cam — everyone's welcome",
+    mainStageStageQuiet: "The stage is yours",
+    mainStageStageQuietHint: "Drop in. Turn the cam on. Own the moment.",
     mainStageNobodyOnCam: "Nobody on cam yet",
-    mainStageNobodyOnCamHint: "Main Stage is open to everyone — tap Go live to be first on",
+    mainStageNobodyOnCamHint: "Expose yourself. The room is here for you — tap Go live to be first on.",
+    // Main Stage — hero copy (cam-first framing)
+    mainStageHeroTitle: "Main Stage — your spotlight.",
+    mainStageHeroSubtitle: "Go live and be seen.",
+    mainStageHeroCta: "Expose yourself.",
 
     // Main Stage — media player
     mainStageNowPlaying: "Now Playing",
@@ -714,10 +718,14 @@ const strings = {
     // Main Stage — standby / empty states
     mainStageStandby: "En espera",
     mainStageNoMediaPlaying: "Sin contenido · El admin controla la reproducción",
-    mainStageStageQuiet: "El escenario está en silencio",
-    mainStageStageQuietHint: "Tocá Salir al aire para prenderte la cámara — todes son bienvenides",
+    mainStageStageQuiet: "El escenario es tuyo",
+    mainStageStageQuietHint: "Métete. Préndela. Es tu momento.",
     mainStageNobodyOnCam: "Nadie en cámara todavía",
-    mainStageNobodyOnCamHint: "El Escenario está abierto a todes — tocá Salir al aire para ser el primero",
+    mainStageNobodyOnCamHint: "Exhíbete. La sala está aquí por ti — tocá Salir al aire para ser el primero.",
+    // Main Stage — hero copy (cam-first framing)
+    mainStageHeroTitle: "Escenario Principal — tu reflector.",
+    mainStageHeroSubtitle: "Préndete y déjate ver.",
+    mainStageHeroCta: "Exhíbete.",
 
     // Main Stage — media player
     mainStageNowPlaying: "Reproduciendo",
