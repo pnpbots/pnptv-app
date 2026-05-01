@@ -312,9 +312,6 @@ const strings = {
 
     // ── Settings page section titles ──────────────────────────────────────────
     settingsTitle: "Settings",
-    settingsSubtitle: 'Tap a section to expand it.',
-    selfCarePromoTitle: 'Self-Care Center',
-    selfCarePromoBody: 'Wellness Mode, Use Tracker, crisis resources, and Cristina — moved to its own space.',
     settingsSubtitle: "Tap a section to expand it.",
     selfCarePromoTitle: "Self-Care Center",
     selfCarePromoBody: "Wellness Mode, Use Tracker, crisis resources, and Cristina — moved to its own space.",
@@ -736,9 +733,6 @@ const strings = {
 
     // ── Settings page section titles ──────────────────────────────────────────
     settingsTitle: "Configuración",
-    settingsSubtitle: 'Tap a section to expand it.',
-    selfCarePromoTitle: 'Self-Care Center',
-    selfCarePromoBody: 'Wellness Mode, Use Tracker, crisis resources, and Cristina — moved to its own space.',
     settingsSubtitle: "Toca una sección para expandirla.",
     selfCarePromoTitle: "Centro de Autocuidado",
     selfCarePromoBody: "Modo Bienestar, registro de uso, recursos de crisis y Cristina — ahora tienen su propio espacio.",
