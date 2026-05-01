@@ -1,6 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
+const { query } = require('../config/postgres');
 
 const AUTHENTIK_URL = process.env.AUTHENTIK_URL || 'https://auth.pnptv.app';
 const AUTHENTIK_TOKEN = process.env.AUTHENTIK_API_TOKEN;
@@ -197,19 +198,74 @@ class AuthentikService {
       const telegramId = String(telegramUser.id);
       const username = telegramUser.username || `tg_${telegramId}`;
       const email = opts.realEmail || `${telegramId}@telegram.pnptv.app`;
+      let dbLinkedPnptvId = null;
+      try {
+        const dbUser = await query(
+          `SELECT pnptv_id
+             FROM users
+            WHERE telegram = $1
+            ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+            LIMIT 1`,
+          [telegramId]
+        );
+        dbLinkedPnptvId = dbUser.rows[0]?.pnptv_id || null;
+      } catch (dbErr) {
+        logger.warn('[Authentik] DB lookup for existing Telegram link failed (non-fatal):', dbErr.message);
+      }
 
-      // 1. Check if user exists in Authentik
-      const searchRes = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
-        params: { username: username },
-        headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` }
-      });
+      const seenUserPks = new Set();
+      const candidateUsers = [];
+      const collectCandidates = async (params) => {
+        if (!params || Object.values(params).every((v) => !v)) return;
+        const res = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
+          params,
+          headers: { 'Authorization': `Bearer ${AUTHENTIK_TOKEN}` },
+          timeout: 10000,
+        });
+        for (const user of res.data?.results || []) {
+          if (!user?.pk || seenUserPks.has(user.pk)) continue;
+          seenUserPks.add(user.pk);
+          candidateUsers.push(user);
+        }
+      };
 
-      let authentikUser = searchRes.data.results.find(u => u.username === username);
+      // 1. Reuse the canonical Authentik identity if PNPtv already linked one.
+      if (dbLinkedPnptvId) {
+        await collectCandidates({ uuid: dbLinkedPnptvId });
+      }
+      // 2. Username-only lookup keeps current behavior for stable usernames.
+      await collectCandidates({ username });
+      // 3. Deterministic Telegram placeholder email catches renamed Telegram handles.
+      await collectCandidates({ email });
+      // 4. Broad search by Telegram ID helps recover accounts that now have a real email.
+      await collectCandidates({ search: telegramId });
+
+      const scoreCandidate = (user) => {
+        let score = 0;
+        if (dbLinkedPnptvId && user.uuid === dbLinkedPnptvId) score += 1000;
+        if ((user.attributes?.telegram_id || '') === telegramId) score += 500;
+        if ((user.email || '').toLowerCase() === email.toLowerCase()) score += 200;
+        if (opts.realEmail && (user.email || '').toLowerCase() === opts.realEmail.toLowerCase()) score += 150;
+        if (user.username === username) score += 100;
+        if ((user.username || '').toLowerCase() === username.toLowerCase()) score += 50;
+        if (user.path === 'users/telegram') score += 25;
+        if (user.type === 'internal') score += 10;
+        return score;
+      };
+
+      let authentikUser = candidateUsers
+        .map((user) => ({ user, score: scoreCandidate(user) }))
+        .sort((a, b) => (b.score - a.score) || (a.user.pk - b.user.pk))[0]?.user || null;
       let isNew = false;
       let password = null;
 
       if (authentikUser) {
-        logger.debug(`Found existing Authentik user: ${username}`);
+        logger.debug(`[Authentik] Reusing existing user for Telegram ${telegramId}`, {
+          requestedUsername: username,
+          authentikPk: authentikUser.pk,
+          authentikUsername: authentikUser.username,
+          authentikUuid: authentikUser.uuid,
+        });
         // Update name if changed
         if (authentikUser.name !== telegramUser.first_name) {
           await axios.patch(`${AUTHENTIK_URL}/api/v3/core/users/${authentikUser.pk}/`, {

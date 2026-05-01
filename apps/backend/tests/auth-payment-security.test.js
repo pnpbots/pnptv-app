@@ -24,6 +24,13 @@ jest.mock('../config/redis', () => {
     get: jest.fn(async (key) => store.get(key) ?? null),
     set: jest.fn(async (key, value, ...args) => { store.set(key, value); return 'OK'; }),
     del: jest.fn(async (key) => { store.delete(key); return 1; }),
+    eval: jest.fn(async (script, numKeys, key) => {
+      const value = store.get(key);
+      if (value == null) return null;
+      if (value === 'pending') return value;
+      store.delete(key);
+      return value;
+    }),
     incr: jest.fn(async (key) => {
       const v = (store.get(key) ?? 0) + 1;
       store.set(key, v);
@@ -100,6 +107,7 @@ jest.mock('../services/authentikService', () => ({
 }));
 jest.mock('../services/platformBanService', () => ({
   isBanned: jest.fn(async () => null),
+  isIpBanned: jest.fn(async () => null),
 }));
 jest.mock('../bot/utils/helpers', () => ({
   isAdminUser: jest.fn(() => false),
@@ -768,11 +776,12 @@ describe('Telegram Token Check — /api/webapp/auth/telegram/check', () => {
   it('should return authenticated:false while token is still pending', async () => {
     const { getRedis } = require('../config/redis');
     const redis = getRedis();
-    redis.get.mockResolvedValueOnce('pending');
+    const agent = request.agent(testApp);
+    const issue = await agent.post('/api/webapp/auth/telegram/token').send({});
+    const token = issue.body.token;
+    redis._store.set(`tg_login:${token}`, 'pending');
 
-    const res = await request(testApp)
-      .get('/api/webapp/auth/telegram/check')
-      .query({ token: 'some-uuid-token' });
+    const res = await agent.get('/api/webapp/auth/telegram/check').query({ token });
 
     expect(res.body.authenticated).toBe(false);
   });
@@ -785,9 +794,11 @@ describe('Telegram Token Check — /api/webapp/auth/telegram/check', () => {
   it('should consume the token (delete from Redis) after successful authentication', async () => {
     const { getRedis } = require('../config/redis');
     const redis = getRedis();
+    const agent = request.agent(testApp);
+    const issue = await agent.post('/api/webapp/auth/telegram/token').send({});
+    const token = issue.body.token;
     const userData = JSON.stringify({ id: 99887, first_name: 'Loop', username: 'loop' });
-    redis.get.mockResolvedValueOnce(userData);
-    redis.del.mockResolvedValueOnce(1);
+    redis._store.set(`tg_login:${token}`, userData);
 
     mockQueryFn.mockImplementation(async (sql) => {
       if (sql.includes('WHERE telegram =')) return { rows: [] };
@@ -809,12 +820,24 @@ describe('Telegram Token Check — /api/webapp/auth/telegram/check', () => {
       return { rows: [] };
     });
 
-    const res = await request(testApp)
-      .get('/api/webapp/auth/telegram/check')
-      .query({ token: 'valid-uuid-token' });
+    const res = await agent.get('/api/webapp/auth/telegram/check').query({ token });
 
-    // Regardless of auth state, the DEL must have been called exactly once
-    expect(redis.del).toHaveBeenCalledWith(expect.stringContaining('valid-uuid-token'));
+    expect(res.body.authenticated).toBe(true);
+    expect(redis.eval).toHaveBeenCalled();
+    expect(redis._store.has(`tg_login:${token}`)).toBe(false);
+  });
+
+  it('should reject token polling from a different browser session', async () => {
+    const issuer = request.agent(testApp);
+    const attacker = request.agent(testApp);
+
+    const issue = await issuer.post('/api/webapp/auth/telegram/token').send({});
+    const token = issue.body.token;
+
+    const res = await attacker.get('/api/webapp/auth/telegram/check').query({ token });
+
+    expect(res.status).toBe(401);
+    expect(res.body.authenticated).toBe(false);
   });
 });
 
@@ -854,6 +877,34 @@ describe('Auth Rate Limiter — authLimiter', () => {
 
     const rateLimited = responses.filter(s => s === 429);
     expect(rateLimited.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Telegram Widget Auth — /api/webapp/auth/telegram/widget', () => {
+  it('should block banned users with 403', async () => {
+    const telegramUser = buildValidTelegramWidgetData('12345678');
+
+    mockQueryFn.mockImplementation(async (sql) => {
+      if (sql.includes('WHERE telegram =')) {
+        return { rows: [{
+          id: 'banned-user', pnptv_id: 'pnptv-2', telegram: '12345678',
+          username: 'banned', email: null, subscription_status: 'banned',
+          tier: 'banned', terms_accepted: false, first_name: 'Banned',
+          last_name: null, photo_file_id: null, bio: null, language: 'en',
+          twitter: null, x_id: null, role: 'user',
+        }] };
+      }
+      if (sql.includes('UPDATE users SET pnptv_id =')) return { rows: [] };
+      return { rows: [] };
+    });
+
+    const res = await request(testApp)
+      .post('/api/webapp/auth/telegram/widget')
+      .send(telegramUser);
+
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toBe('Account suspended');
   });
 });
 

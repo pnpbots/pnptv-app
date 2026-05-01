@@ -16,6 +16,7 @@ const path = require('path');
 const fs = require('fs').promises;
 // getBotInstance is lazy-required inside getVideoChatStatus to avoid circular dependency
 const { invalidateLinkedCache } = require('../../core/middleware/groupSecurityEnforcement');
+const wellnessModeService = require('../../../services/wellnessModeService');
 
 // In-memory cache for Telegram video chat status (30s TTL)
 const _videoChatCache = new Map();
@@ -1009,6 +1010,14 @@ const getMessages = async (req, res) => {
     // Check membership
     if (!(await isMember(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
+    }
+
+    // In wellness mode, only permit messages from wellness-flagged hangouts
+    if (await wellnessModeService.isActive(user.id)) {
+      const { rows: [grp] } = await query('SELECT is_wellness FROM hangout_groups WHERE id = $1', [groupId]);
+      if (!grp?.is_wellness) {
+        return res.status(403).json({ error: 'Wellness Mode active — only wellness hangouts accessible', code: 'WELLNESS_MODE' });
+      }
     }
 
     const room = `hangout:${groupId}`;

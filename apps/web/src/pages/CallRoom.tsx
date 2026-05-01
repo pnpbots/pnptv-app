@@ -19,6 +19,42 @@ import type { TrackReferenceOrPlaceholder } from "@livekit/components-react";
 import { Track, VideoQuality } from "livekit-client";
 import type { RemoteTrackPublication } from "livekit-client";
 import { getCallBooking } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
+
+const CALL_STRINGS = {
+  en: {
+    couldNotJoin: "Could not join call",
+    couldNotLoad: "Could not load call",
+    bookingNotFound: "This call booking was not found or has already ended.",
+    goBack: "Go Back",
+    leaveCall: "Leave call",
+    modeGrid: "Grid",
+    modeGridTitle: "Everyone equally",
+    modeSpotlight: "Spotlight",
+    modeSpotlightTitle: "One large + thumbnails",
+    modeCinema: "Cinema",
+    modeCinemaTitle: "Focus one cam, full screen",
+    fullScreen: "Full screen",
+    exitFullScreen: "Exit full screen",
+    enterFullScreen: "Enter full screen",
+  },
+  es: {
+    couldNotJoin: "No se pudo unir a la llamada",
+    couldNotLoad: "No se pudo cargar la llamada",
+    bookingNotFound: "No se encontró la reserva o ya terminó.",
+    goBack: "Atrás",
+    leaveCall: "Salir de la llamada",
+    modeGrid: "Cuadrícula",
+    modeGridTitle: "Todos por igual",
+    modeSpotlight: "Destacado",
+    modeSpotlightTitle: "Uno grande + miniaturas",
+    modeCinema: "Cine",
+    modeCinemaTitle: "Enfoca una cámara, pantalla completa",
+    fullScreen: "Pantalla completa",
+    exitFullScreen: "Salir de pantalla completa",
+    enterFullScreen: "Entrar a pantalla completa",
+  },
+};
 
 // ── View modes ───────────────────────────────────────────────────────────────
 
@@ -206,6 +242,8 @@ interface JoinData {
 export default function CallRoom() {
   const { bookingId } = useParams<{ bookingId: string }>();
   const navigate = useNavigate();
+  const i18n = useI18n();
+  const cs = CALL_STRINGS[i18n.lang === "es" ? "es" : "en"];
 
   const [loading, setLoading] = useState(true);
   const [joinData, setJoinData] = useState<JoinData | null>(null);
@@ -294,7 +332,7 @@ export default function CallRoom() {
                   "message" in body &&
                   typeof (body as Record<string, unknown>).message === "string"
                     ? (body as Record<string, string>).message
-                    : "Could not join call";
+                    : cs.couldNotJoin;
                 throw new Error(msg);
               });
             }
@@ -321,10 +359,10 @@ export default function CallRoom() {
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
-        const msg = err instanceof Error ? err.message : "Could not load call";
+        const msg = err instanceof Error ? err.message : cs.couldNotLoad;
         // 404 — booking not found or not belonging to this user
         if (msg.toLowerCase().includes("not found") || msg.includes("404")) {
-          setError("This call booking was not found or has already ended.");
+          setError(cs.bookingNotFound);
         } else {
           setError(msg);
         }
@@ -355,7 +393,7 @@ export default function CallRoom() {
             border: "1px solid rgba(255,255,255,0.10)",
           }}
         >
-          Go Back
+          {cs.goBack}
         </button>
       </div>
     );
@@ -378,7 +416,7 @@ export default function CallRoom() {
       <button
         type="button"
         onClick={() => navigate(-1)}
-        aria-label="Leave call"
+        aria-label={cs.leaveCall}
         className="absolute top-4 right-4 z-50 w-10 h-10 flex items-center justify-center rounded-xl transition-opacity hover:opacity-80"
         style={{
           background: "rgba(255,69,58,0.15)",
@@ -523,49 +561,36 @@ export function CallStage() {
 
 // ── ViewModeToggle ───────────────────────────────────────────────────────────
 
-const MODES: Array<{ id: ViewMode; label: string; icon: JSX.Element; title: string }> = [
-  {
-    id: "grid",
-    label: "Grid",
-    title: "Everyone equally",
-    icon: (
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-        <rect x="3" y="3" width="7" height="7" rx="1.5" />
-        <rect x="14" y="3" width="7" height="7" rx="1.5" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" />
-        <rect x="14" y="14" width="7" height="7" rx="1.5" />
-      </svg>
-    ),
-  },
-  {
-    id: "spotlight",
-    label: "Spotlight",
-    title: "One large + thumbnails",
-    icon: (
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-        <rect x="3" y="3" width="18" height="13" rx="1.8" />
-        <rect x="3" y="18" width="5" height="3" rx="0.8" />
-        <rect x="10" y="18" width="5" height="3" rx="0.8" />
-        <rect x="17" y="18" width="4" height="3" rx="0.8" />
-      </svg>
-    ),
-  },
-  {
-    id: "cinema",
-    label: "Cinema",
-    title: "Focus one cam, full screen",
-    icon: (
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-        <rect x="3" y="5" width="18" height="14" rx="2" />
-        <path strokeLinecap="round" d="M8 10l4 2.5L8 15z" fill="currentColor" />
-      </svg>
-    ),
-  },
-];
+const MODE_ICONS: Record<ViewMode, JSX.Element> = {
+  grid: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  ),
+  spotlight: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <rect x="3" y="3" width="18" height="13" rx="1.8" />
+      <rect x="3" y="18" width="5" height="3" rx="0.8" />
+      <rect x="10" y="18" width="5" height="3" rx="0.8" />
+      <rect x="17" y="18" width="4" height="3" rx="0.8" />
+    </svg>
+  ),
+  cinema: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path strokeLinecap="round" d="M8 10l4 2.5L8 15z" fill="currentColor" />
+    </svg>
+  ),
+};
 
 // ── FullscreenButton ─────────────────────────────────────────────────────────
 
 function FullscreenButton() {
+  const i18n = useI18n();
+  const cs = CALL_STRINGS[i18n.lang === "es" ? "es" : "en"];
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const [isFs, setIsFs] = useState(() =>
     typeof document !== "undefined" && document.fullscreenElement !== null,
@@ -592,8 +617,8 @@ function FullscreenButton() {
       ref={btnRef}
       type="button"
       onClick={toggle}
-      aria-label={isFs ? "Exit full screen" : "Enter full screen"}
-      title={isFs ? "Exit full screen" : "Full screen"}
+      aria-label={isFs ? cs.exitFullScreen : cs.enterFullScreen}
+      title={isFs ? cs.exitFullScreen : cs.fullScreen}
       className="absolute top-4 z-50 w-9 h-9 rounded-xl flex items-center justify-center transition-opacity hover:opacity-80"
       style={{
         right: "calc(3.25rem + env(safe-area-inset-right, 0px))",
@@ -618,6 +643,13 @@ function FullscreenButton() {
 }
 
 function ViewModeToggle({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
+  const i18n = useI18n();
+  const cs = CALL_STRINGS[i18n.lang === "es" ? "es" : "en"];
+  const modes: Array<{ id: ViewMode; label: string; title: string }> = [
+    { id: "grid", label: cs.modeGrid, title: cs.modeGridTitle },
+    { id: "spotlight", label: cs.modeSpotlight, title: cs.modeSpotlightTitle },
+    { id: "cinema", label: cs.modeCinema, title: cs.modeCinemaTitle },
+  ];
   return (
     <div
       className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1 rounded-2xl"
@@ -628,9 +660,9 @@ function ViewModeToggle({ value, onChange }: { value: ViewMode; onChange: (v: Vi
         border: "1px solid rgba(255,255,255,0.10)",
       }}
       role="tablist"
-      aria-label="Call view mode"
+      aria-label={i18n.lang === "es" ? "Modo de vista de llamada" : "Call view mode"}
     >
-      {MODES.map((m) => {
+      {modes.map((m) => {
         const active = m.id === value;
         return (
           <button
@@ -647,7 +679,7 @@ function ViewModeToggle({ value, onChange }: { value: ViewMode; onChange: (v: Vi
               opacity: active ? 1 : 0.75,
             }}
           >
-            {m.icon}
+            {MODE_ICONS[m.id]}
             <span className="hidden sm:inline">{m.label}</span>
           </button>
         );

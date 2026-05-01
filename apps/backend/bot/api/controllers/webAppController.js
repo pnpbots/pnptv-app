@@ -13,6 +13,7 @@ const FileType = require('file-type');
 // ── Enforced follows (shared service) ────────────────────────────────────────
 const { enforceDefaultFollows } = require('../../../services/followService');
 const AuthentikService = require('../../../services/authentikService');
+const PlatformBanService = require('../../../services/platformBanService');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,62 @@ function localAuthDisabled(res) {
 
 function generatePnptvId() {
   return uuidv4();
+}
+
+function constantTimeHexEqual(left, right) {
+  const leftHex = String(left || '');
+  const rightHex = String(right || '');
+  if (!/^[0-9a-f]+$/i.test(leftHex) || !/^[0-9a-f]+$/i.test(rightHex) || leftHex.length !== rightHex.length) {
+    return false;
+  }
+
+  const leftBuf = Buffer.from(leftHex, 'hex');
+  const rightBuf = Buffer.from(rightHex, 'hex');
+  if (leftBuf.length !== rightBuf.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(leftBuf, rightBuf);
+}
+
+async function getLoginBan(user, identity = {}) {
+  if (!user) return { blocked: true, status: 401, error: 'Authentication failed' };
+
+  if (user.tier === 'banned') {
+    return { blocked: true, status: 403, error: 'Account suspended' };
+  }
+
+  const ban = await PlatformBanService.isBanned({
+    userId: String(user.id),
+    telegramId: identity.telegramId || user.telegram || undefined,
+    pnptvId: user.pnptv_id || identity.pnptvId || undefined,
+    email: user.email || undefined,
+    xId: user.x_id || undefined,
+  });
+
+  if (ban) {
+    return { blocked: true, status: 403, error: 'Account suspended', ban };
+  }
+
+  return { blocked: false };
+}
+
+async function consumeTelegramLoginState(redis, key) {
+  return redis.eval(
+    `
+      local value = redis.call('GET', KEYS[1])
+      if not value then
+        return nil
+      end
+      if value == 'pending' then
+        return value
+      end
+      redis.call('DEL', KEYS[1])
+      return value
+    `,
+    1,
+    key
+  );
 }
 
 
@@ -299,27 +356,14 @@ function verifyTelegramAuth(data) {
     .map(k => `${k}=${rest[k]}`)
     .join('\n');
 
-  logger.info('Telegram auth verification debug:', {
-    botToken: botToken.substring(0, 10) + '...***',
-    dataKeys,
-    checkStringPreview: checkString.substring(0, 150) + (checkString.length > 150 ? '...' : ''),
-    receivedHash: hash.substring(0, 20) + '...',
-  });
-
   // Create secret key from bot token SHA256 hash
   const secretKey = crypto.createHash('sha256').update(botToken).digest();
 
   // Calculate HMAC-SHA256
   const calculatedHash = crypto.createHmac('sha256', secretKey).update(checkString).digest('hex');
 
-  logger.info('Hash comparison:', {
-    calculated: calculatedHash.substring(0, 20) + '...',
-    received: hash.substring(0, 20) + '...',
-    match: calculatedHash === hash,
-  });
-
-  if (calculatedHash !== hash) {
-    logger.warn('Hash mismatch in Telegram auth - possible domain not set in BotFather', {
+  if (!constantTimeHexEqual(calculatedHash, hash)) {
+    logger.warn('Hash mismatch in Telegram auth', {
       userId: rest.id,
       hashLength: hash.length,
       calculatedLength: calculatedHash.length,
@@ -363,11 +407,22 @@ const TELEGRAM_LOGIN_TTL = 300; // 5 minutes
  */
 const telegramGenerateToken = async (req, res) => {
   try {
+    const redis = getRedis();
+    const previousToken = req.session?.telegramLoginToken;
+    if (previousToken) {
+      await redis.del(`${TELEGRAM_LOGIN_PREFIX}${previousToken}`).catch(() => {});
+    }
+
     // Generate UUID v4 token for Telegram login session
     const token = uuidv4();
-    const redis = getRedis();
     // Store token with expiry (default 10 minutes)
     await redis.set(`${TELEGRAM_LOGIN_PREFIX}${token}`, 'pending', 'EX', TELEGRAM_LOGIN_TTL);
+
+    req.session.telegramLoginToken = token;
+    req.session.telegramLoginIssuedAt = Date.now();
+    await new Promise((resolve, reject) =>
+      req.session.save(err => (err ? reject(err) : resolve()))
+    );
 
     const botUsername = process.env.BOT_USERNAME || 'PNPLatinoTV_Bot';
     // Create deep link for Telegram authentication
@@ -394,9 +449,13 @@ const telegramCheckToken = async (req, res) => {
   try {
     const { token } = req.query;
     if (!token) return res.status(400).json({ authenticated: false, error: 'Missing token' });
+    if (!req.session?.telegramLoginToken || req.session.telegramLoginToken !== token) {
+      return res.status(401).json({ authenticated: false, error: 'Invalid login session' });
+    }
 
     const redis = getRedis();
-    const data = await redis.get(`${TELEGRAM_LOGIN_PREFIX}${token}`);
+    const redisKey = `${TELEGRAM_LOGIN_PREFIX}${token}`;
+    const data = await consumeTelegramLoginState(redis, redisKey);
 
     if (!data || data === 'pending') {
       return res.json({ authenticated: false });
@@ -404,7 +463,6 @@ const telegramCheckToken = async (req, res) => {
 
     // data contains the user JSON set by the bot handler
     const telegramUser = JSON.parse(data);
-    await redis.del(`${TELEGRAM_LOGIN_PREFIX}${token}`);
 
     const telegramId = String(telegramUser.id);
 
@@ -435,6 +493,16 @@ const telegramCheckToken = async (req, res) => {
       logger.info(`Created new user via Telegram deep link: ${user.id} (@${user.username})`);
     } else {
       logger.info(`Existing user login via Telegram deep link: ${user.id} (@${user.username})`);
+    }
+
+    const loginBan = await getLoginBan(user, { telegramId, pnptvId });
+    if (loginBan.blocked) {
+      delete req.session.telegramLoginToken;
+      delete req.session.telegramLoginIssuedAt;
+      await new Promise((resolve, reject) =>
+        req.session.save(err => (err ? reject(err) : resolve()))
+      );
+      return res.status(loginBan.status).json({ authenticated: false, error: loginBan.error });
     }
 
     query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'deep_link', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
@@ -576,6 +644,12 @@ const telegramCallback = async (req, res) => {
       photoFileId: telegramUser.photo_url || null,
     });
 
+    const loginBan = await getLoginBan(user, { telegramId });
+    if (loginBan.blocked) {
+      logger.warn('Blocked banned user from Telegram callback login', { userId: user.id, telegramId });
+      return redirectToCanonicalAuthError(res);
+    }
+
     if (isNew) {
       logger.info(`Created new user via Telegram callback: ${user.id} (@${user.username})`);
     } else {
@@ -658,6 +732,11 @@ const telegramLogin = async (req, res) => {
 
     if (isNew) {
       logger.info(`Created new user via Telegram widget login: ${user.id} (@${user.username})`);
+    }
+
+    const loginBan = await getLoginBan(user, { telegramId });
+    if (loginBan.blocked) {
+      return res.status(loginBan.status).json({ error: loginBan.error });
     }
 
     query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'telegram', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});
@@ -1479,6 +1558,7 @@ const getProfile = async (req, res) => {
               u.date_of_birth, u.city, u.country, u.privacy,
               u.creator_status, u.creator_type, u.creator_price_usd,
               u.creator_verified, u.creator_featured, u.creator_subscriber_count,
+              u.wellness_days_accumulated,
               perf.id as perf_id, perf.is_available as perf_is_available,
               perf.base_price as perf_base_price, perf.total_calls as perf_total_calls,
               perf.total_rating as perf_total_rating, perf.rating_count as perf_rating_count,
@@ -1547,6 +1627,7 @@ const getProfile = async (req, res) => {
         creatorSubscriberCount: p.creator_subscriber_count || 0,
         hasTelegram: !!p.telegram,
         performerData,
+        wellnessDaysAccumulated: p.wellness_days_accumulated || 0,
       },
     });
   } catch (error) {
@@ -2136,6 +2217,11 @@ const telegramWidgetAuth = async (req, res) => {
       logger.info(`[TelegramWidget] New user created: ${user.id} (@${user.username})`);
     } else {
       logger.info(`[TelegramWidget] Existing user login: ${user.id} (@${user.username})`);
+    }
+
+    const loginBan = await getLoginBan(user, { telegramId, pnptvId });
+    if (loginBan.blocked) {
+      return res.status(loginBan.status).json({ success: false, error: loginBan.error });
     }
 
     query(`UPDATE users SET last_login_at = NOW(), last_login_method = 'telegram', updated_at = NOW() WHERE id = $1`, [user.id]).catch(() => {});

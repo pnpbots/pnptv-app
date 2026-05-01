@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSearchParams, useLocation, useNavigate, Link } from "react-router-dom";
 import { useLifetime100Strings, type Lifetime100Strings } from "@/lib/i18n/lifetime100";
-import { sheets } from "@/pages/LandingPage";
+import { makeSheets } from "@/pages/LandingPage";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -1306,11 +1306,12 @@ export default function Lifetime100() {
     document.body.style.overflow = activeSheet ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
   }, [activeSheet]);
-  const sheetData = activeSheet ? sheets[activeSheet] : null;
 
   // Language
   const [lang, setLang] = useState(getInitialLang);
   const s = useLifetime100Strings(lang);
+  const localizedSheets = useMemo(() => makeSheets(lang), [lang]);
+  const sheetData = activeSheet ? localizedSheets[activeSheet] : null;
 
   const handleLangChange = (next: string) => {
     setLang(next);

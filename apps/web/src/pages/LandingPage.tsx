@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { telegramWidgetAuth, recoverAccount, TelegramWidgetUser } from "@/lib/api";
 import { login as oidcLogin } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { useI18n } from "@/lib/i18n";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 const AUTHENTIK_URL = import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app";
@@ -57,23 +58,274 @@ function TelegramLoginWidget({ onAuth, onLoadError }: { onAuth: (u: TelegramWidg
 }
 
 // ── Sheet content ─────────────────────────────────────────────────────────────
+// Translations for each sheet — keyed strings consumed by `makeSheets(lang)`.
+// Only EN + ES are localized; other languages fall back to EN.
 
-export const sheets: Record<string, { title: string; emoji: string; body: React.ReactNode }> = {
-  about: {
-    title: "What is PNPtv?",
-    emoji: "👋",
-    body: (
-      <div className="space-y-3">
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          A private social network built for the queer PNP community. Post, chat, stream, meet people nearby —
-          without judgment, algorithms, or bans. <span className="text-white font-medium">Your data stays with us.</span>
-        </p>
+type SheetLang = "en" | "es";
+const SHEET_STRINGS: Record<SheetLang, {
+  about: { title: string; lead: string; leadEmphasis: string; cards: Array<{ e: string; t: string; b: string }> };
+  feed: { title: string; eyebrow: string; p1: string; p1Emphasis: string; p2: string };
+  hangouts: { title: string; eyebrow: string; p1: string; p2Emphasis: string };
+  live: { title: string; eyebrow: string; p1: string; p2Emphasis: string };
+  nearby: { title: string; eyebrow: string; p1: string; p1Emphasis: string; p2: string; p2Emphasis: string };
+  creators: { title: string; lead: string; leadEmphasis: string; stats: Array<{ v: string; l: string }>; cta: string };
+  payments: { title: string; lead: string; cards: Array<{ e: string; t: string; b: string }>; fineprint: string };
+  safety: { title: string; lead: string; checks: string[]; cta: string };
+}> = {
+  en: {
+    about: {
+      title: "What is PNPtv?",
+      lead: "A private social network built for the queer PNP community. Post, chat, stream, meet people nearby — without judgment, algorithms, or bans.",
+      leadEmphasis: "Your data stays with us.",
+      cards: [
+        { e: "🔒", t: "Private by default", b: "Nothing you post leaves our walls unless you share it yourself." },
+        { e: "🌈", t: "Built for you", b: "Every feature designed with the queer PNP community in mind." },
+        { e: "📱", t: "Works in your browser", b: "No app store. Open pnptv.app on any phone. Install it for push notifications." },
+      ],
+    },
+    feed: {
+      title: "Feed",
+      eyebrow: "Your feed, your rules",
+      p1: "Post text, photos, or videos. Like, reply, repost. Follow people you vibe with and get a feed that's actually relevant —",
+      p1Emphasis: "no shadow banning, no ads, no content cops.",
+      p2: "Creators can lock exclusive posts for subscribers only.",
+    },
+    hangouts: {
+      title: "Hangouts",
+      eyebrow: "Like Discord — but simpler",
+      p1: "Create a Hangout, invite your people, jump into group video or voice. Public rooms or private ones with a password.",
+      p2Emphasis: "No bots. No server setup. No 47 channels you'll never use.",
+    },
+    live: {
+      title: "Live",
+      eyebrow: "Like Chaturbate — but cloudy ☁️",
+      p1: "Stream directly from your browser or use OBS with a streaming key. Followers get notified instantly, chat in real-time, and tip you directly.",
+      p2Emphasis: "No strikes. No suspensions. No content police.",
+    },
+    nearby: {
+      title: "Connect",
+      eyebrow: "Like Grindr — but for real PNP stans",
+      p1: "See community members and PNP-friendly venues near you on a map.",
+      p1Emphasis: "No bots, no escorts, no judgment.",
+      p2: "Way more private than Grindr. You control your location.",
+      p2Emphasis: "Nothing is ever sold to data brokers.",
+    },
+    creators: {
+      title: "Creators",
+      lead: "Subscriptions, exclusive content, tips, live streaming —",
+      leadEmphasis: "you keep 80% of everything.",
+      stats: [{ v: "80%", l: "Revenue yours" }, { v: "0", l: "Middlemen" }, { v: "Fast", l: "Payouts" }],
+      cta: "Apply as a Creator →",
+    },
+    payments: {
+      title: "Payments",
+      lead: "Multiple ways to pay — pick what works for you.",
+      cards: [
+        { e: "💳", t: "Credit & Debit Card", b: "Visa, Mastercard via ePayco. Fast and familiar." },
+        { e: "⚡", t: "Crypto (USDC)", b: "Pay with USDC on Base via Daimo. Near-instant, low fees." },
+        { e: "🪙", t: "PNP Tokens", b: "Buy tokens inside the app for tips, subscriptions & exclusive content." },
+      ],
+      fineprint: "🔒 Encrypted · Discreet billing · We never store your card",
+    },
+    safety: {
+      title: "Safety First",
+      lead: "We take safety seriously. This is your space and we protect it.",
+      checks: [
+        "Age & identity verification for all members",
+        "Human moderation — real people reviewing reports",
+        "Encrypted direct messages",
+        "Block, mute, and report tools on every post",
+        "Harm reduction resources & community guidelines",
+      ],
+      cta: "Learn more →",
+    },
+  },
+  es: {
+    about: {
+      title: "¿Qué es PNPtv?",
+      lead: "Una red social privada hecha para la comunidad queer PNP. Publica, chatea, transmite, conoce gente cerca — sin juicios, sin algoritmos, sin baneos.",
+      leadEmphasis: "Tus datos se quedan con nosotros.",
+      cards: [
+        { e: "🔒", t: "Privado por defecto", b: "Nada de lo que publiques sale de nuestras paredes a menos que tú mismo lo compartas." },
+        { e: "🌈", t: "Hecho para ti", b: "Cada función diseñada pensando en la comunidad queer PNP." },
+        { e: "📱", t: "Funciona en tu navegador", b: "Sin app store. Abre pnptv.app en cualquier teléfono. Instálala para recibir notificaciones push." },
+      ],
+    },
+    feed: {
+      title: "Feed",
+      eyebrow: "Tu feed, tus reglas",
+      p1: "Publica texto, fotos o videos. Da like, responde, repostea. Sigue a quien vibres y recibe un feed que sí es relevante —",
+      p1Emphasis: "sin shadow banning, sin anuncios, sin policías de contenido.",
+      p2: "Los creadores pueden bloquear publicaciones exclusivas solo para suscriptores.",
+    },
+    hangouts: {
+      title: "Hangouts",
+      eyebrow: "Como Discord — pero más simple",
+      p1: "Crea un Hangout, invita a los tuyos, entra a video o voz grupal. Salas públicas o privadas con contraseña.",
+      p2Emphasis: "Sin bots. Sin configurar servidor. Sin 47 canales que nunca usarás.",
+    },
+    live: {
+      title: "En Vivo",
+      eyebrow: "Como Chaturbate — pero en la nube ☁️",
+      p1: "Transmite directo desde tu navegador o usa OBS con una clave de stream. Tus seguidores reciben aviso al instante, chatean en tiempo real y te dan propinas directo.",
+      p2Emphasis: "Sin strikes. Sin suspensiones. Sin policías de contenido.",
+    },
+    nearby: {
+      title: "Conectar",
+      eyebrow: "Como Grindr — pero para PNP de verdad",
+      p1: "Ve miembros de la comunidad y lugares PNP-friendly cerca de ti en un mapa.",
+      p1Emphasis: "Sin bots, sin escorts, sin juicios.",
+      p2: "Mucho más privado que Grindr. Tú controlas tu ubicación.",
+      p2Emphasis: "Nada se vende nunca a data brokers.",
+    },
+    creators: {
+      title: "Creadores",
+      lead: "Suscripciones, contenido exclusivo, propinas, transmisión en vivo —",
+      leadEmphasis: "te quedas con el 80% de todo.",
+      stats: [{ v: "80%", l: "Ingresos tuyos" }, { v: "0", l: "Intermediarios" }, { v: "Rápido", l: "Pagos" }],
+      cta: "Aplica como Creador →",
+    },
+    payments: {
+      title: "Pagos",
+      lead: "Varias formas de pagar — elige la que te funcione.",
+      cards: [
+        { e: "💳", t: "Tarjeta crédito y débito", b: "Visa, Mastercard vía ePayco. Rápido y familiar." },
+        { e: "⚡", t: "Cripto (USDC)", b: "Paga con USDC en Base vía Daimo. Casi instantáneo, comisiones bajas." },
+        { e: "🪙", t: "PNP Tokens", b: "Compra tokens dentro de la app para propinas, suscripciones y contenido exclusivo." },
+      ],
+      fineprint: "🔒 Encriptado · Cobro discreto · Nunca guardamos tu tarjeta",
+    },
+    safety: {
+      title: "Seguridad primero",
+      lead: "Nos tomamos la seguridad en serio. Este es tu espacio y lo protegemos.",
+      checks: [
+        "Verificación de edad e identidad para todos los miembros",
+        "Moderación humana — personas reales revisando los reportes",
+        "Mensajes directos encriptados",
+        "Herramientas para bloquear, silenciar y reportar en cada publicación",
+        "Recursos de reducción de daños y reglas de comunidad",
+      ],
+      cta: "Aprende más →",
+    },
+  },
+};
+
+export function makeSheets(lang: string): Record<string, { title: string; emoji: string; body: React.ReactNode }> {
+  const ss = SHEET_STRINGS[lang === "es" ? "es" : "en"];
+  return {
+    about: {
+      title: ss.about.title,
+      emoji: "👋",
+      body: (
+        <div className="space-y-3">
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">
+            {ss.about.lead} <span className="text-white font-medium">{ss.about.leadEmphasis}</span>
+          </p>
+          <div className="space-y-2">
+            {ss.about.cards.map(c => (
+              <div key={c.t} className="flex gap-3 p-3 rounded-xl bg-pnp-surface border border-pnp-border">
+                <span className="text-lg flex-shrink-0">{c.e}</span>
+                <div>
+                  <p className="text-white text-xs font-semibold">{c.t}</p>
+                  <p className="text-pnp-textSecondary text-xs mt-0.5">{c.b}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ),
+    },
+    feed: {
+      title: ss.feed.title,
+      emoji: "📣",
+      body: (
+        <div className="space-y-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-gradient">{ss.feed.eyebrow}</p>
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">
+            {ss.feed.p1} <span className="text-white font-medium">{ss.feed.p1Emphasis}</span>
+          </p>
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">
+            {ss.feed.p2}
+          </p>
+        </div>
+      ),
+    },
+    hangouts: {
+      title: ss.hangouts.title,
+      emoji: "🎙️",
+      body: (
+        <div className="space-y-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-gradient">{ss.hangouts.eyebrow}</p>
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">
+            {ss.hangouts.p1}
+          </p>
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">
+            <span className="text-white font-medium">{ss.hangouts.p2Emphasis}</span>
+          </p>
+        </div>
+      ),
+    },
+    live: {
+      title: ss.live.title,
+      emoji: "🔴",
+      body: (
+        <div className="space-y-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-gradient">{ss.live.eyebrow}</p>
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">
+            {ss.live.p1}
+          </p>
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">
+            <span className="text-white font-medium">{ss.live.p2Emphasis}</span>
+          </p>
+        </div>
+      ),
+    },
+    nearby: {
+      title: ss.nearby.title,
+      emoji: "📍",
+      body: (
+        <div className="space-y-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-gradient">{ss.nearby.eyebrow}</p>
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">
+            {ss.nearby.p1}
+            <span className="text-white font-medium"> {ss.nearby.p1Emphasis}</span>
+          </p>
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">
+            {ss.nearby.p2} <span className="text-white font-medium">{ss.nearby.p2Emphasis}</span>
+          </p>
+        </div>
+      ),
+    },
+    creators: {
+      title: ss.creators.title,
+      emoji: "💰",
+      body: (
+        <div className="space-y-3">
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">
+            {ss.creators.lead}
+            <span className="text-white font-medium"> {ss.creators.leadEmphasis}</span>
+          </p>
+          <div className="flex gap-2">
+            {ss.creators.stats.map(s => (
+              <div key={s.l} className="flex-1 text-center p-3 rounded-xl bg-pnp-surface border border-pnp-border">
+                <div className="text-base font-bold text-gradient">{s.v}</div>
+                <div className="text-pnp-textSecondary text-[10px] mt-0.5">{s.l}</div>
+              </div>
+            ))}
+          </div>
+          <Link to="/become-a-model" className="block w-full text-center py-3 rounded-xl text-sm font-semibold border border-pnp-border text-pnp-textSecondary hover:text-white hover:border-white/30 transition-colors">
+            {ss.creators.cta}
+          </Link>
+        </div>
+      ),
+    },
+    payments: {
+      title: ss.payments.title,
+      emoji: "💳",
+      body: (
         <div className="space-y-2">
-          {[
-            { e: "🔒", t: "Private by default", b: "Nothing you post leaves our walls unless you share it yourself." },
-            { e: "🌈", t: "Built for you", b: "Every feature designed with the queer PNP community in mind." },
-            { e: "📱", t: "Works in your browser", b: "No app store. Open pnptv.app on any phone. Install it for push notifications." },
-          ].map(c => (
+          <p className="text-pnp-textSecondary text-sm mb-3">{ss.payments.lead}</p>
+          {ss.payments.cards.map(c => (
             <div key={c.t} className="flex gap-3 p-3 rounded-xl bg-pnp-surface border border-pnp-border">
               <span className="text-lg flex-shrink-0">{c.e}</span>
               <div>
@@ -82,147 +334,36 @@ export const sheets: Record<string, { title: string; emoji: string; body: React.
               </div>
             </div>
           ))}
+          <p className="text-pnp-textSecondary/50 text-[10px] text-center pt-1">{ss.payments.fineprint}</p>
         </div>
-      </div>
-    ),
-  },
-  feed: {
-    title: "Feed",
-    emoji: "📣",
-    body: (
-      <div className="space-y-3">
-        <p className="text-xs font-bold uppercase tracking-widest text-gradient">Your feed, your rules</p>
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          Post text, photos, or videos. Like, reply, repost. Follow people you vibe with and get a feed
-          that's actually relevant — <span className="text-white font-medium">no shadow banning, no ads, no content cops.</span>
-        </p>
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          Creators can lock exclusive posts for subscribers only.
-        </p>
-      </div>
-    ),
-  },
-  hangouts: {
-    title: "Hangouts",
-    emoji: "🎙️",
-    body: (
-      <div className="space-y-3">
-        <p className="text-xs font-bold uppercase tracking-widest text-gradient">Like Discord — but simpler</p>
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          Create a Hangout, invite your people, jump into group video or voice.
-          Public rooms or private ones with a password.
-        </p>
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          <span className="text-white font-medium">No bots. No server setup. No 47 channels you'll never use.</span>
-        </p>
-      </div>
-    ),
-  },
-  live: {
-    title: "Live",
-    emoji: "🔴",
-    body: (
-      <div className="space-y-3">
-        <p className="text-xs font-bold uppercase tracking-widest text-gradient">Like Chaturbate — but cloudy ☁️</p>
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          Stream directly from your browser or use OBS with a streaming key.
-          Followers get notified instantly, chat in real-time, and tip you directly.
-        </p>
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          <span className="text-white font-medium">No strikes. No suspensions. No content police.</span>
-        </p>
-      </div>
-    ),
-  },
-  nearby: {
-    title: "Connect",
-    emoji: "📍",
-    body: (
-      <div className="space-y-3">
-        <p className="text-xs font-bold uppercase tracking-widest text-gradient">Like Grindr — but for real PNP stans</p>
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          See community members and PNP-friendly venues near you on a map.
-          <span className="text-white font-medium"> No bots, no escorts, no judgment.</span>
-        </p>
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          Way more private than Grindr. You control your location. <span className="text-white font-medium">Nothing is ever sold to data brokers.</span>
-        </p>
-      </div>
-    ),
-  },
-  creators: {
-    title: "Creators",
-    emoji: "💰",
-    body: (
-      <div className="space-y-3">
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">
-          Subscriptions, exclusive content, tips, live streaming —
-          <span className="text-white font-medium"> you keep 80% of everything.</span>
-        </p>
-        <div className="flex gap-2">
-          {[{ v: "80%", l: "Revenue yours" }, { v: "0", l: "Middlemen" }, { v: "Fast", l: "Payouts" }].map(s => (
-            <div key={s.l} className="flex-1 text-center p-3 rounded-xl bg-pnp-surface border border-pnp-border">
-              <div className="text-base font-bold text-gradient">{s.v}</div>
-              <div className="text-pnp-textSecondary text-[10px] mt-0.5">{s.l}</div>
-            </div>
-          ))}
-        </div>
-        <Link to="/become-a-model" className="block w-full text-center py-3 rounded-xl text-sm font-semibold border border-pnp-border text-pnp-textSecondary hover:text-white hover:border-white/30 transition-colors">
-          Apply as a Creator →
-        </Link>
-      </div>
-    ),
-  },
-  payments: {
-    title: "Payments",
-    emoji: "💳",
-    body: (
-      <div className="space-y-2">
-        <p className="text-pnp-textSecondary text-sm mb-3">Multiple ways to pay — pick what works for you.</p>
-        {[
-          { e: "💳", t: "Credit & Debit Card", b: "Visa, Mastercard via ePayco. Fast and familiar." },
-          { e: "⚡", t: "Crypto (USDC)", b: "Pay with USDC on Base via Daimo. Near-instant, low fees." },
-          { e: "🪙", t: "PNP Tokens", b: "Buy tokens inside the app for tips, subscriptions & exclusive content." },
-        ].map(c => (
-          <div key={c.t} className="flex gap-3 p-3 rounded-xl bg-pnp-surface border border-pnp-border">
-            <span className="text-lg flex-shrink-0">{c.e}</span>
-            <div>
-              <p className="text-white text-xs font-semibold">{c.t}</p>
-              <p className="text-pnp-textSecondary text-xs mt-0.5">{c.b}</p>
-            </div>
+      ),
+    },
+    safety: {
+      title: ss.safety.title,
+      emoji: "🛡️",
+      body: (
+        <div className="space-y-3">
+          <p className="text-pnp-textSecondary text-sm leading-relaxed">{ss.safety.lead}</p>
+          <div className="space-y-2">
+            {ss.safety.checks.map(item => (
+              <div key={item} className="flex gap-2.5 items-start">
+                <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+                <p className="text-pnp-textSecondary text-sm">{item}</p>
+              </div>
+            ))}
           </div>
-        ))}
-        <p className="text-pnp-textSecondary/50 text-[10px] text-center pt-1">🔒 Encrypted · Discreet billing · We never store your card</p>
-      </div>
-    ),
-  },
-  safety: {
-    title: "Safety First",
-    emoji: "🛡️",
-    body: (
-      <div className="space-y-3">
-        <p className="text-pnp-textSecondary text-sm leading-relaxed">We take safety seriously. This is your space and we protect it.</p>
-        <div className="space-y-2">
-          {[
-            "Age & identity verification for all members",
-            "Human moderation — real people reviewing reports",
-            "Encrypted direct messages",
-            "Block, mute, and report tools on every post",
-            "Harm reduction resources & community guidelines",
-          ].map(item => (
-            <div key={item} className="flex gap-2.5 items-start">
-              <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-              </svg>
-              <p className="text-pnp-textSecondary text-sm">{item}</p>
-            </div>
-          ))}
+          <a href="/safety" className="block text-center text-sm font-semibold text-gradient mt-2">{ss.safety.cta}</a>
         </div>
-        <a href="/safety" className="block text-center text-sm font-semibold text-gradient mt-2">Learn more →</a>
-      </div>
-    ),
-  },
-};
+      ),
+    },
+  };
+}
+
+// Back-compat: existing import sites keep working with default English. New
+// callers should use `makeSheets(lang)` to honor language switching.
+export const sheets = makeSheets("en");
 
 const navItems = [
   { id: "about",    emoji: "👋", label: "About" },
@@ -387,7 +528,9 @@ export function LandingPage() {
     finally { setRecoverLoading(false); }
   };
 
-  const sheet = activeSheet ? sheets[activeSheet] : null;
+  const i18n = useI18n();
+  const localizedSheets = useMemo(() => makeSheets(i18n.lang), [i18n.lang]);
+  const sheet = activeSheet ? localizedSheets[activeSheet] : null;
 
   return (
     <div className="app-shell bg-pnp-background">

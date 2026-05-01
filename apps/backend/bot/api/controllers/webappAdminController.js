@@ -41,6 +41,12 @@ const getStats = async (req, res) => {
       totalRevenue: toNum(raw.payments?.total_revenue),
       activeSubscribers: toInt(raw.membership?.totals?.active_subscribers),
       totalUsers: toInt(raw.membership?.totals?.total_active_users),
+      appUsers: toInt(raw.identity?.app_users),
+      activeAppUsers: toInt(raw.identity?.active_app_users),
+      linkedAppUsers: toInt(raw.identity?.linked_app_users),
+      authentikUsers: toInt(raw.identity?.authentik_users),
+      orphanAuthentikIdentities: toInt(raw.identity?.orphan_authentik_identities),
+      appUsersMissingAuthentikIdentity: toInt(raw.identity?.app_users_missing_authentik_identity),
       churnedUsers: toInt(raw.membership?.totals?.churned_users),
       monthlyRevenue: toNum(raw.revenue?.monthly?.monthly_revenue),
       dailyRevenue: (raw.revenue?.daily || []).map(d => ({

@@ -1,10 +1,45 @@
 const logger = require('../utils/logger');
 const { query } = require('../config/postgres');
+const { Pool } = require('pg');
 
 const MembershipCleanupService = require('./membershipCleanupService');
 
 // Normalize all amounts to USD — COP payments are stored in COP and need conversion
 const AMOUNT_USD = `CASE WHEN currency = 'COP' THEN amount / 4250.0 ELSE amount END`;
+let authentikPool = null;
+
+function getAuthentikPool() {
+  if (authentikPool) return authentikPool;
+
+  const host = process.env.PG_AUTH_HOST;
+  const database = process.env.PG_AUTH_DB;
+  const user = process.env.PG_AUTH_USER;
+  const password = process.env.PG_AUTH_PASSWORD;
+  const port = parseInt(process.env.PG_AUTH_PORT || '5432', 10);
+
+  if (!host || !database || !user) {
+    throw new Error('Authentik Postgres credentials are not configured');
+  }
+
+  authentikPool = new Pool({
+    host,
+    port,
+    database,
+    user,
+    password,
+    max: 2,
+    min: 0,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 5000,
+    statement_timeout: 10000,
+  });
+
+  authentikPool.on('error', (error) => {
+    logger.error('Authentik PostgreSQL pool error:', error);
+  });
+
+  return authentikPool;
+}
 
 /**
  * AdminDashboardService
@@ -25,14 +60,16 @@ class AdminDashboardService {
         membershipStats,
         churnAnalysis,
         topPaymentMethods,
-        recentPayments
+        recentPayments,
+        identityStats,
       ] = await Promise.all([
         this.getPaymentOverview(),
         this.getRevenueOverview(),
         this.getMembershipOverview(),
         MembershipCleanupService.getChurnAnalysis(),
         this.getTopPaymentMethods(),
-        this.getRecentTransactions()
+        this.getRecentTransactions(),
+        this.getIdentityOverview(),
       ]);
 
       return {
@@ -43,6 +80,7 @@ class AdminDashboardService {
         churn: churnAnalysis,
         topMethods: topPaymentMethods,
         recentTransactions: recentPayments.slice(0, 10),
+        identity: identityStats,
       };
     } catch (error) {
       logger.error('Error getting dashboard overview:', error);
@@ -210,6 +248,68 @@ class AdminDashboardService {
       logger.error('Error getting recent transactions:', error);
       return [];
     }
+  }
+
+  /**
+   * Get identity overview comparing app users vs Authentik identities.
+   * Authentik count is fetched from the Admin API count endpoint.
+   * @returns {Promise<Object>}
+   */
+  static async getIdentityOverview() {
+    try {
+      const [appUsersRes, activeUsersRes, linkedIdsRes, authentikIdsRes] = await Promise.all([
+        query('SELECT COUNT(*) AS count FROM users'),
+        query('SELECT COUNT(*) AS count FROM users WHERE is_active = true'),
+        query(`
+          SELECT LOWER(pnptv_id) AS pnptv_id
+          FROM users
+          WHERE pnptv_id ~* '^[0-9a-f-]{36}$'
+        `),
+        this.getAuthentikUserIds(),
+      ]);
+
+      const appUsers = parseInt(appUsersRes.rows[0]?.count || '0', 10);
+      const activeAppUsers = parseInt(activeUsersRes.rows[0]?.count || '0', 10);
+      const appIdentityIds = new Set(linkedIdsRes.rows.map((row) => row.pnptv_id).filter(Boolean));
+      const authentikIdentityIds = new Set(authentikIdsRes);
+      const linkedAppUsers = appIdentityIds.size;
+      const authentikUsers = authentikIdentityIds.size;
+
+      let missingAuthentik = 0;
+      for (const pnptvId of appIdentityIds) {
+        if (!authentikIdentityIds.has(pnptvId)) missingAuthentik += 1;
+      }
+
+      let orphanAuthentik = 0;
+      for (const uuid of authentikIdentityIds) {
+        if (!appIdentityIds.has(uuid)) orphanAuthentik += 1;
+      }
+
+      return {
+        app_users: appUsers,
+        active_app_users: activeAppUsers,
+        linked_app_users: linkedAppUsers,
+        authentik_users: authentikUsers,
+        orphan_authentik_identities: orphanAuthentik,
+        app_users_missing_authentik_identity: missingAuthentik,
+      };
+    } catch (error) {
+      logger.error('Error getting identity overview:', error);
+      return {
+        app_users: 0,
+        active_app_users: 0,
+        linked_app_users: 0,
+        authentik_users: 0,
+        orphan_authentik_identities: 0,
+        app_users_missing_authentik_identity: 0,
+      };
+    }
+  }
+
+  static async getAuthentikUserIds() {
+    const pool = getAuthentikPool();
+    const result = await pool.query('SELECT LOWER(uuid::text) AS uuid FROM authentik_core_user');
+    return result.rows.map((row) => row.uuid).filter(Boolean);
   }
 
   /**

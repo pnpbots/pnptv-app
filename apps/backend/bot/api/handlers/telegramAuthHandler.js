@@ -96,15 +96,23 @@ const handleTelegramAuth = async (req, res) => {
     // Ensure user has a persistent UUID (pnptv_id) in Authentik SSO.
     // On first login, Authentik provisions the user with a generated password
     // and returns it so we can send credentials via Telegram DM + email.
-    const authentikResult = await AuthentikService.syncTelegramUser(telegramUser);
-    if (!authentikResult) {
-      logger.error('Failed to sync user with Authentik SSO, aborting login');
-      return res.status(500).json({
-        error: 'Authentication sync failed',
-        message: 'No pudimos sincronizar tu cuenta con el sistema de identidad centralizado.'
+    let authentikResult = null;
+    try {
+      authentikResult = await AuthentikService.syncTelegramUser(telegramUser);
+    } catch (authentikError) {
+      logger.error('Telegram auth: Authentik sync threw unexpectedly', {
+        telegramId: telegramUser.id,
+        error: authentikError.message,
       });
     }
-    const pnptvId = authentikResult.uuid;
+
+    if (!authentikResult) {
+      logger.warn('Telegram auth: continuing without Authentik sync', {
+        telegramId: telegramUser.id,
+      });
+    }
+
+    const pnptvId = authentikResult?.uuid || null;
 
     // Check if user exists in our database
     let userQuery = await query(
@@ -114,7 +122,7 @@ const handleTelegramAuth = async (req, res) => {
               COALESCE(onboarding_complete, false) as onboarding_complete,
               COALESCE(role, 'user') as role
        FROM users
-       WHERE telegram = $1 OR pnptv_id = $2`,
+       WHERE telegram = $1 OR ($2 IS NOT NULL AND pnptv_id = $2)`,
       [telegramUser.id, pnptvId]
     );
 
@@ -133,7 +141,8 @@ const handleTelegramAuth = async (req, res) => {
       }
 
       // Create new user record with Authentik UUID
-      logger.info(`User ${telegramUser.id} / ${pnptvId} not in database, creating new user record`);
+      const localPnptvId = pnptvId || crypto.randomUUID();
+      logger.info(`User ${telegramUser.id} / ${localPnptvId} not in database, creating new user record`);
 
       try {
         await query(
@@ -145,7 +154,7 @@ const handleTelegramAuth = async (req, res) => {
              updated_at = NOW()`,
           [
             String(telegramUser.id),
-            pnptvId,
+            localPnptvId,
             telegramUser.username ? telegramUser.username.toUpperCase() : null,
             telegramUser.first_name || '',
             telegramUser.language_code || 'en'
@@ -161,7 +170,7 @@ const handleTelegramAuth = async (req, res) => {
                   COALESCE(role, 'user') as role
            FROM users
            WHERE telegram = $1 OR pnptv_id = $2`,
-          [telegramUser.id, pnptvId]
+          [telegramUser.id, localPnptvId]
         );
       } catch (createError) {
         logger.error('Error creating user record:', createError);
@@ -184,7 +193,7 @@ const handleTelegramAuth = async (req, res) => {
         ).catch(err => logger.warn('Username sync on login failed (non-blocking)', { userId: dbUser.id, error: err.message }));
       }
 
-      if (!dbUser.pnptv_id || dbUser.pnptv_id !== pnptvId) {
+      if (pnptvId && (!dbUser.pnptv_id || dbUser.pnptv_id !== pnptvId)) {
         logger.info(`Updating pnptv_id for user ${dbUser.id} to Authentik UUID ${pnptvId}`);
         try {
           await query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [pnptvId, dbUser.id]);
@@ -304,7 +313,7 @@ const handleTelegramAuth = async (req, res) => {
     // ASYNC: Provision all services in background (don't block login)
     setImmediate(async () => {
       // 0. Authentik credential delivery — send login credentials to new users
-      if (authentikResult.isNew && authentikResult.password) {
+      if (authentikResult?.isNew && authentikResult.password) {
         try {
           const emailService = require('../../../services/emailservice');
           const loginUrl = 'https://pnptv.app';

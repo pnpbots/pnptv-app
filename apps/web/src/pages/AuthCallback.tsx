@@ -3,12 +3,19 @@ import { useNavigate } from "react-router-dom";
 import { handleCallback, consumeReturnTo } from "@/lib/auth";
 import { redeemReferralCode } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { useI18n } from "@/lib/i18n";
 
 const API_BASE = window.location.origin;
+const AUTH_STRINGS = {
+  en: { error: "Authentication failed. Please try again.", title: "Authentication Error", returnHome: "Return Home" },
+  es: { error: "Error de autenticación. Por favor intenta de nuevo.", title: "Error de autenticación", returnHome: "Volver al inicio" },
+};
 
 export default function AuthCallback() {
   const navigate = useNavigate();
   const { refreshUser } = useAuth();
+  const i18n = useI18n();
+  const s = AUTH_STRINGS[i18n.lang === "es" ? "es" : "en"];
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -68,7 +75,7 @@ export default function AuthCallback() {
       })
       .catch((err) => {
         console.error("[AuthCallback] OIDC callback error:", err);
-        setError(err?.message || "Authentication failed. Please try again.");
+        setError(err?.message || s.error);
       });
   }, [navigate, refreshUser]);
 
@@ -81,13 +88,13 @@ export default function AuthCallback() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </div>
-          <h2 className="text-lg font-semibold text-pnp-textPrimary mb-2">Authentication Error</h2>
+          <h2 className="text-lg font-semibold text-pnp-textPrimary mb-2">{s.title}</h2>
           <p className="text-sm text-pnp-textSecondary mb-4">{error}</p>
           <button
             onClick={() => navigate("/", { replace: true })}
             className="text-pnp-accent hover:underline text-sm"
           >
-            Return Home
+            {s.returnHome}
           </button>
         </div>
       </div>

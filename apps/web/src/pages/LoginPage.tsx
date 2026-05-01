@@ -1,580 +1,377 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { telegramWidgetAuth, recoverAccount, type TelegramWidgetUser } from "@/lib/api";
-import { login as oidcLogin, rememberReturnTo, sanitizeReturnTo } from "@/lib/auth";
-import { getI18n, getLang } from "@/lib/i18n";
+import { telegramWidgetAuth, type TelegramWidgetUser } from "@/lib/api";
+import { rememberReturnTo, sanitizeReturnTo } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
 
 const AUTHENTIK_URL = import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app";
 const ENROLLMENT_FLOW_URL = `${AUTHENTIK_URL}/if/flow/pnptv-enrollment/`;
 
-// Strip leading '@' if present (BotFather usernames may be stored with it)
 function getBotUsername(): string {
-  const raw =
-    import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "PNPLatinoTV_Bot";
+  const raw = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "PNPLatinoTV_Bot";
   return raw.startsWith("@") ? raw.slice(1) : raw;
 }
 
+// ── i18n ──────────────────────────────────────────────────────────────────────
+
+const T = {
+  en: {
+    tagline:   "The Queer PNP Community",
+    oidc:      "Continue with PNPtv ID",
+    or:        "or",
+    telegram:  "Login with Telegram",
+    noAcc:     "No account?",
+    create:    " Create one",
+    lastWith:  "Last signed in with",
+    verifying: "Verifying…",
+    blocked:   "Telegram widget unavailable. Try PNPtv ID instead.",
+    error:     "Authentication failed. Try again.",
+  },
+  es: {
+    tagline:   "La Comunidad Queer PNP",
+    oidc:      "Continuar con PNPtv ID",
+    or:        "o",
+    telegram:  "Iniciar con Telegram",
+    noAcc:     "¿Sin cuenta?",
+    create:    " Créala aquí",
+    lastWith:  "Último acceso con",
+    verifying: "Verificando…",
+    blocked:   "Widget de Telegram no disponible. Usa PNPtv ID.",
+    error:     "Error de autenticación. Intenta de nuevo.",
+  },
+};
+
 // ── Spinner ───────────────────────────────────────────────────────────────────
 
-function Spinner({ className = "h-5 w-5" }: { className?: string }) {
+function Spinner() {
   return (
-    <svg
-      className={`animate-spin ${className}`}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-      />
+    <svg className="animate-spin" style={{ width: 18, height: 18, flexShrink: 0 }}
+      viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
     </svg>
   );
 }
 
-// ── ShieldIcon ────────────────────────────────────────────────────────────────
+// ── LangToggle ────────────────────────────────────────────────────────────────
 
-function ShieldIcon() {
+function LangToggle({ lang, onChange }: { lang: "en" | "es"; onChange: (l: "en" | "es") => void }) {
+  const pill: React.CSSProperties = {
+    background: "none", border: "none", padding: "5px 12px",
+    fontFamily: "'Roboto Mono', monospace", fontSize: 11, fontWeight: 600,
+    cursor: "pointer", borderRadius: 18, transition: "all 0.2s",
+    minHeight: 32,
+  };
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className="w-5 h-5 flex-shrink-0"
-      aria-hidden="true"
-    >
-      <path
-        fillRule="evenodd"
-        d="M12 1.5a.75.75 0 0 1 .75.75V4.5a.75.75 0 0 1-1.5 0V2.25A.75.75 0 0 1 12 1.5ZM5.636 4.136a.75.75 0 0 1 1.06 0l1.592 1.591a.75.75 0 0 1-1.061 1.06L5.636 5.197a.75.75 0 0 1 0-1.06Zm12.728 0a.75.75 0 0 1 0 1.06l-1.591 1.592a.75.75 0 0 1-1.061-1.061l1.591-1.591a.75.75 0 0 1 1.061 0Zm-6.816 4.496a.75.75 0 0 1 .82.311l5.228 7.917a.75.75 0 0 1-.777 1.148l-2.097-.43 1.045 3.9a.75.75 0 0 1-1.45.388l-1.044-3.899-1.601 1.42a.75.75 0 0 1-1.247-.606l.569-9.47a.75.75 0 0 1 .554-.678ZM3 10.5a.75.75 0 0 1 .75-.75H6a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 10.5Zm14.25 0a.75.75 0 0 1 .75-.75h2.25a.75.75 0 0 1 0 1.5H18a.75.75 0 0 1-.75-.75Zm-8.962 3.712a.75.75 0 0 1 0 1.061l-1.591 1.591a.75.75 0 1 1-1.061-1.06l1.591-1.592a.75.75 0 0 1 1.06 0Z"
-        clipRule="evenodd"
-      />
-    </svg>
-  );
-}
-
-// ── ForgotPasswordPanel ───────────────────────────────────────────────────────
-// Click "Forgot password?" → reveals an inline email input → submits to our
-// /api/webapp/auth/recover-account endpoint, which resolves the email against
-// our DB and triggers Authentik's recovery flow (bypassing the placeholder
-// @telegram.pnptv.app emails that broke the direct Authentik flow). Always
-// shows a success message regardless of whether the email is on file.
-
-interface ForgotPasswordPanelProps {
-  t: ReturnType<typeof getI18n>["login"];
-}
-
-function ForgotPasswordPanel({ t }: ForgotPasswordPanelProps) {
-  const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (open && !sent) {
-      const id = setTimeout(() => inputRef.current?.focus(), 60);
-      return () => clearTimeout(id);
-    }
-  }, [open, sent]);
-
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = email.trim();
-    if (!trimmed || sending) return;
-    setSending(true);
-    try {
-      await recoverAccount(trimmed);
-    } catch {
-      // Backend always returns 200 to avoid email enumeration. Swallow
-      // network errors so the user still sees the neutral success message.
-    }
-    setSent(true);
-    setSending(false);
-  }, [email, sending]);
-
-  if (!open) {
-    return (
-      <p className="text-center text-xs mt-3">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="underline text-pnp-accent hover:brightness-125 transition-all"
-        >
-          {t.forgotPassword}
-        </button>
-      </p>
-    );
-  }
-
-  if (sent) {
-    return (
-      <p className="text-center text-xs mt-3 px-2 leading-snug" style={{ color: "#9ce19c" }}>
-        ✓ {t.forgotPasswordSent}
-      </p>
-    );
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="mt-3 space-y-2 px-2">
-      <p className="text-center text-[11px] leading-snug" style={{ color: "#8E8E93" }}>
-        {t.forgotPasswordPrompt}
-      </p>
-      <input
-        ref={inputRef}
-        type="email"
-        autoComplete="email"
-        inputMode="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="you@example.com"
-        disabled={sending}
-        required
-        className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-pnp-accent transition-all"
-        style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.15)" }}
-      />
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => { setOpen(false); setEmail(""); }}
-          disabled={sending}
-          className="flex-1 min-h-[40px] rounded-lg text-xs font-semibold transition-all active:scale-[0.97] bg-white/[0.06] border border-white/10 text-white/70 disabled:opacity-50"
-        >
-          {t.forgotPasswordCancel}
-        </button>
-        <button
-          type="submit"
-          disabled={sending || !email.trim()}
-          className="flex-1 min-h-[40px] rounded-lg text-xs font-bold text-white transition-all active:scale-[0.97] disabled:opacity-50"
-          style={{ background: "linear-gradient(90deg, #D4007A, #E69138)" }}
-        >
-          {sending ? t.forgotPasswordSending : t.forgotPasswordSubmit}
-        </button>
-      </div>
-    </form>
+    <div style={{ position: "fixed", top: 18, right: 18, display: "flex",
+      background: "rgba(255,255,255,0.10)", borderRadius: 20, padding: 2, zIndex: 50 }}
+      role="group" aria-label="Language">
+      <button onClick={() => onChange("en")} aria-pressed={lang === "en"}
+        style={{ ...pill, background: lang === "en" ? "#fff" : "transparent",
+          color: lang === "en" ? "#120d14" : "rgba(207,207,212,0.55)" }}>
+        EN
+      </button>
+      <button onClick={() => onChange("es")} aria-pressed={lang === "es"}
+        style={{ ...pill, background: lang === "es" ? "#fff" : "transparent",
+          color: lang === "es" ? "#120d14" : "rgba(207,207,212,0.55)" }}>
+        ES
+      </button>
+    </div>
   );
 }
 
 // ── TelegramLoginWidget ────────────────────────────────────────────────────────
 
-interface TelegramWidgetProps {
-  onAuth: (user: TelegramWidgetUser) => void;
+function TelegramLoginWidget({
+  onAuth, onLoadError,
+}: {
+  onAuth: (u: TelegramWidgetUser) => void;
   onLoadError: () => void;
-}
-
-function TelegramLoginWidget({ onAuth, onLoadError }: TelegramWidgetProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const scriptRef = useRef<HTMLScriptElement | null>(null);
-  const onAuthRef = useRef(onAuth);
-  const onLoadErrorRef = useRef(onLoadError);
-
-  useEffect(() => {
-    onAuthRef.current = onAuth;
-  }, [onAuth]);
-  useEffect(() => {
-    onLoadErrorRef.current = onLoadError;
-  }, [onLoadError]);
+}) {
+  const containerRef  = useRef<HTMLDivElement>(null);
+  const onAuthRef     = useRef(onAuth);
+  const onErrorRef    = useRef(onLoadError);
+  useEffect(() => { onAuthRef.current = onAuth; }, [onAuth]);
+  useEffect(() => { onErrorRef.current = onLoadError; }, [onLoadError]);
 
   useEffect(() => {
-    const botUsername = getBotUsername();
-
-    (window as unknown as Record<string, unknown>)["onTelegramAuth"] = (
-      user: TelegramWidgetUser,
-    ) => {
-      onAuthRef.current(user);
-    };
-
+    (window as Record<string, unknown>)["onTelegramAuth"] = (u: TelegramWidgetUser) => onAuthRef.current(u);
     const script = document.createElement("script");
-    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.src   = "https://telegram.org/js/telegram-widget.js?22";
     script.async = true;
-    script.setAttribute("data-telegram-login", botUsername);
+    script.setAttribute("data-telegram-login", getBotUsername());
     script.setAttribute("data-size", "large");
     script.setAttribute("data-radius", "12");
     script.setAttribute("data-onauth", "onTelegramAuth(user)");
     script.setAttribute("data-request-access", "write");
-
-    const LOAD_TIMEOUT_MS = 8000;
-    const timer = setTimeout(() => {
-      onLoadErrorRef.current();
-    }, LOAD_TIMEOUT_MS);
-
-    script.onload = () => clearTimeout(timer);
-    script.onerror = () => {
-      clearTimeout(timer);
-      onLoadErrorRef.current();
-    };
-
-    scriptRef.current = script;
+    const timer = setTimeout(() => onErrorRef.current(), 8000);
+    script.onload  = () => clearTimeout(timer);
+    script.onerror = () => { clearTimeout(timer); onErrorRef.current(); };
     containerRef.current?.appendChild(script);
-
     return () => {
       clearTimeout(timer);
-      delete (window as unknown as Record<string, unknown>)["onTelegramAuth"];
-      if (
-        scriptRef.current &&
-        containerRef.current?.contains(scriptRef.current)
-      ) {
-        containerRef.current.removeChild(scriptRef.current);
-      }
+      delete (window as Record<string, unknown>)["onTelegramAuth"];
     };
   }, []);
 
-  return <div ref={containerRef} className="flex justify-center" />;
+  return <div ref={containerRef} style={{ display: "flex", justifyContent: "center" }} />;
 }
 
 // ── LoginPage ─────────────────────────────────────────────────────────────────
 
 export function LoginPage() {
-  const lang = getLang(
-    navigator.language?.startsWith("es") ? "es" : undefined,
-  );
-  const t = getI18n(lang).login;
+  const isEs = navigator.language?.startsWith("es");
+  const [lang, setLang] = useState<"en" | "es">(isEs ? "es" : "en");
+  const t = T[lang];
   const { refreshUser } = useAuth();
 
+  const [returnTo, setReturnTo] = useState<string | null>(null);
   const [lastMethod, setLastMethod] = useState<string | null>(null);
   const [lastUsername, setLastUsername] = useState<string | null>(null);
-  const [returnTo, setReturnTo] = useState<string | null>(null);
+
   useEffect(() => {
-    const storedMethod = localStorage.getItem("pnptv_last_auth");
-    const storedUser = localStorage.getItem("pnptv_last_username");
-    if (storedMethod) setLastMethod(storedMethod);
-    if (storedUser) setLastUsername(storedUser);
-    const raw = new URLSearchParams(window.location.search).get("returnTo");
+    setLastMethod(localStorage.getItem("pnptv_last_auth"));
+    setLastUsername(localStorage.getItem("pnptv_last_username"));
+    const raw  = new URLSearchParams(window.location.search).get("returnTo");
     const safe = sanitizeReturnTo(raw);
-    if (safe) {
-      setReturnTo(safe);
-      rememberReturnTo(safe);
-    }
+    if (safe) { setReturnTo(safe); rememberReturnTo(safe); }
   }, []);
 
-  const methodLabel = (method: string | null): string | null => {
-    if (!method) return null;
-    const map: Record<string, string> = {
-      telegram: "Telegram",
-      deep_link: "Telegram",
-      oidc: "PNPtv ID",
-      pnptv_id: "PNPtv ID",
-    };
-    return map[method] ?? null;
+  const methodLabel = (m: string | null) => {
+    const map: Record<string, string> = { telegram: "Telegram", deep_link: "Telegram", oidc: "PNPtv ID", pnptv_id: "PNPtv ID" };
+    return m ? (map[m] ?? null) : null;
   };
 
-  // Email capture for signup
-  const [signupEmail, setSignupEmail] = useState("");
-  const [signupEmailError, setSignupEmailError] = useState<string | null>(null);
-  const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
-
-  const handleCreateAccount = (e: React.FormEvent) => {
-    e.preventDefault();
-    const email = signupEmail.trim();
-    if (!email) {
-      setSignupEmailError(t.emailRequiredForSignup);
-      return;
-    }
-    if (!isValidEmail(email)) {
-      setSignupEmailError(t.emailInvalid);
-      return;
-    }
-    setSignupEmailError(null);
-    // Persist so Settings / downstream can pick it up, and pre-fill Authentik
-    try { localStorage.setItem("pnptv_signup_email", email); } catch { /* ignore */ }
-    const url = `${ENROLLMENT_FLOW_URL}?email=${encodeURIComponent(email)}`;
-    window.location.href = url;
-  };
-
-  const handleCreateAccountNoEmail = () => {
-    // Fallback: user clicks CTA without filling email
-    window.location.href = ENROLLMENT_FLOW_URL;
-  };
+  // ── OIDC ─────────────────────────────────────────────────────────────────────
 
   const [oidcLoading, setOidcLoading] = useState(false);
 
-  type WidgetStatus = "idle" | "verifying" | "error";
-  const [widgetStatus, setWidgetStatus] = useState<WidgetStatus>("idle");
-  const [widgetBlocked, setWidgetBlocked] = useState(false);
-  const [widgetError, setWidgetError] = useState<string | null>(null);
-
-  const handleOidcLogin = async () => {
+  const handleOidcLogin = useCallback(async () => {
     setOidcLoading(true);
     try {
       localStorage.setItem("pnptv_last_auth", "pnptv_id");
-      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      const loginUrl = "/api/webapp/auth/oidc/login" + (returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : "");
-      window.location.href = loginUrl;
-    } catch {
-      setOidcLoading(false);
-    }
-  };
-
-  const handleWidgetAuth = useCallback(
-    async (userData: TelegramWidgetUser) => {
-      setWidgetStatus("verifying");
-      setWidgetError(null);
-      try {
-        const result = await telegramWidgetAuth(userData);
-        if (result.success) {
-          localStorage.setItem("pnptv_last_auth", "telegram");
-          if (result.user?.username)
-            localStorage.setItem("pnptv_last_username", result.user.username);
-          await refreshUser();
-          window.location.href = returnTo || "/";
-        } else {
-          setWidgetStatus("error");
-          setWidgetError(result.error || t.telegramWidgetError);
-        }
-      } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : t.telegramWidgetError;
-        setWidgetStatus("error");
-        setWidgetError(message);
-      }
-    },
-    [refreshUser, returnTo, t],
-  );
-
-  const handleWidgetLoadError = useCallback(() => {
-    setWidgetBlocked(true);
+      const rt = new URLSearchParams(window.location.search).get("returnTo");
+      window.location.href = "/api/webapp/auth/oidc/login" + (rt ? `?return_to=${encodeURIComponent(rt)}` : "");
+    } catch { setOidcLoading(false); }
   }, []);
 
+  // ── Telegram widget ───────────────────────────────────────────────────────────
+
+  const [widgetStatus, setWidgetStatus] = useState<"idle" | "verifying" | "error">("idle");
+  const [widgetBlocked, setWidgetBlocked] = useState(false);
+  const [widgetError, setWidgetError]   = useState<string | null>(null);
+
+  const handleWidgetAuth = useCallback(async (u: TelegramWidgetUser) => {
+    setWidgetStatus("verifying");
+    try {
+      const result = await telegramWidgetAuth(u);
+      if (result.success) {
+        localStorage.setItem("pnptv_last_auth", "telegram");
+        if (result.user?.username) localStorage.setItem("pnptv_last_username", result.user.username);
+        await refreshUser();
+        window.location.href = returnTo || "/";
+      } else {
+        setWidgetStatus("error");
+        setWidgetError(result.error || t.error);
+      }
+    } catch (err) {
+      setWidgetStatus("error");
+      setWidgetError(err instanceof Error ? err.message : t.error);
+    }
+  }, [refreshUser, returnTo, t]);
+
   const label = methodLabel(lastMethod);
-  const returningUser = !!label;
+
+  // ── Shared card styles (mirrors Lifetime100) ──────────────────────────────────
+
+  const s = {
+    page: {
+      minHeight: "100vh",
+      background: "#121212",
+      display: "flex",
+      flexDirection: "column" as const,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "24px 16px 80px",
+      overflowX: "hidden" as const,
+      position: "relative" as const,
+    },
+    glow: {
+      position: "fixed" as const, top: "-25%", left: "50%",
+      transform: "translateX(-50%)", width: "100vw", height: "100vw",
+      background: "radial-gradient(circle, rgba(255,0,204,0.10) 0%, transparent 70%)",
+      pointerEvents: "none" as const, zIndex: 0,
+    },
+    card: {
+      position: "relative" as const, zIndex: 1,
+      width: "100%", maxWidth: 400,
+      background: "rgba(44,44,46,0.72)",
+      backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+      border: "1px solid rgba(255,180,84,0.28)",
+      borderRadius: 24, overflow: "hidden",
+      boxShadow: "0 20px 48px rgba(0,0,0,0.55)",
+    },
+    rope: {
+      position: "absolute" as const, top: 0, left: 0, right: 0,
+      height: 4, background: "linear-gradient(90deg, #ff3377, #ff9933)",
+    },
+    inner: { padding: "40px 28px 32px" } as React.CSSProperties,
+    tagline: {
+      textAlign: "center" as const, fontSize: 10, fontWeight: 700,
+      letterSpacing: "0.18em", textTransform: "uppercase" as const,
+      color: "#ff9933", marginBottom: 28,
+    },
+    diamonds: {
+      display: "flex", justifyContent: "center", gap: 5,
+      marginBottom: 28, opacity: 0.5, fontSize: 14,
+    },
+    hint: {
+      textAlign: "center" as const, fontSize: 11,
+      color: "rgba(207,207,212,0.55)", marginBottom: 18,
+    },
+    btnPrimary: {
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+      width: "100%", minHeight: 52, border: "none", borderRadius: 14,
+      fontFamily: "'Roboto Mono', monospace", fontSize: 14, fontWeight: 800,
+      letterSpacing: "0.06em", textTransform: "uppercase" as const,
+      color: "#fff", cursor: "pointer",
+      background: "linear-gradient(90deg, #ff3377, #ff9933)",
+      boxShadow: "0 8px 28px rgba(255,51,119,0.38)",
+      transition: "opacity 0.15s, transform 0.12s",
+    },
+    btnGlass: {
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+      width: "100%", minHeight: 52,
+      background: "rgba(255,255,255,0.07)",
+      border: "1px solid rgba(255,255,255,0.14)",
+      borderRadius: 14, fontFamily: "'Roboto Mono', monospace",
+      fontSize: 14, fontWeight: 800, letterSpacing: "0.06em",
+      textTransform: "uppercase" as const, color: "#fff", cursor: "pointer",
+      transition: "opacity 0.15s, transform 0.12s",
+    },
+    divider: { display: "flex", alignItems: "center", gap: 10, margin: "14px 0" },
+    divLine: { flex: 1, height: 1, background: "rgba(255,255,255,0.08)" },
+    divText: { fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase" as const, color: "rgba(207,207,212,0.55)" },
+    create: { textAlign: "center" as const, fontSize: 12, color: "rgba(207,207,212,0.55)", marginTop: 18 },
+    errText: { textAlign: "center" as const, fontSize: 12, color: "#ff6363", marginTop: 10 },
+    footer: {
+      position: "fixed" as const, bottom: 0, left: 0, right: 0, zIndex: 50,
+      background: "linear-gradient(to top, rgba(18,13,20,0.98) 50%, transparent)",
+      padding: "12px 16px", display: "flex", flexWrap: "wrap" as const,
+      justifyContent: "center", gap: "4px 10px",
+    },
+    footLink: { fontSize: 10, color: "rgba(207,207,212,0.5)", textDecoration: "none", whiteSpace: "nowrap" as const },
+  };
+
+  const LEGAL = lang === "es"
+    ? [["Términos","/terms"],["Privacidad","/privacy"],["Cookies","/cookies"],["Seguridad","/safety"],["Contacto","/contact"]]
+    : [["Terms","/terms"],["Privacy","/privacy"],["Cookies","/cookies"],["Safety","/safety"],["Contact","/contact"]];
+
+  const ShieldIcon = () => (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 3L4 7V12C4 17 7.4 21.4 12 22C16.6 21.4 20 17 20 12V7L12 3Z"
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M9 12L11 14L15 10" stroke="currentColor" strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+
+  const TgIcon = () => (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.492-1.302.48-.428-.013-1.252-.242-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+    </svg>
+  );
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center px-4 py-8 relative overflow-hidden"
-      style={{ background: "var(--pnp-background, #121212)" }}
-    >
-      {/* Background glows */}
-      <div
-        className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full opacity-20 blur-3xl pointer-events-none"
-        style={{ background: "radial-gradient(circle, #D4007A, transparent 70%)" }}
-      />
-      <div
-        className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full opacity-20 blur-3xl pointer-events-none"
-        style={{ background: "radial-gradient(circle, #E69138, transparent 70%)" }}
-      />
+    <div style={s.page}>
+      <div style={s.glow} aria-hidden="true" />
+      <LangToggle lang={lang} onChange={setLang} />
 
-      <div className="glass-card neon-glow animate-subtle-glow w-full max-w-md p-6 sm:p-8 relative z-10 animate-fade-in-up">
-        {/* Logo + tagline */}
-        <div className="text-center mb-5">
-          <img
-            src="/logo-login.png"
-            alt="PNPtv!"
-            className="w-48 sm:w-56 h-auto mx-auto"
-          />
-          <p
-            className="text-xs mt-2 font-medium"
-            style={{ color: "#E69138" }}
-          >
-            {t.tagline}
-          </p>
-        </div>
+      <div style={s.card}>
+        <div style={s.rope} aria-hidden="true" />
+        <div style={s.inner}>
 
-        {/* Lifetime deal banner */}
-        <a
-          href="/subscribe?plan=lifetime"
-          className="block rounded-xl p-3 mb-4 text-center transition-all hover:brightness-110 active:scale-[0.98]"
-          style={{
-            background: "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(230,145,56,0.15))",
-            border: "1px solid rgba(230,145,56,0.35)",
-          }}
-        >
-          <div className="flex items-center justify-center gap-2">
-            <span
-              className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
-              style={{ background: "#E69138", color: "#121212" }}
-            >
-              {t.lifetimeDealLabel}
-            </span>
+          {/* Logo */}
+          <div style={{ textAlign: "center", marginBottom: 8 }}>
+            <img src="/logo-login.png" alt="PNPtv!" style={{ height: 48, width: "auto" }} />
           </div>
-          <p className="text-sm font-bold text-white mt-1.5">
-            {t.lifetimeDealTitle}
-          </p>
-          <p className="text-[11px] mt-0.5" style={{ color: "#E69138" }}>
-            {t.lifetimeDealSub} <span className="font-semibold">{t.lifetimeDealCta}</span>
-          </p>
-        </a>
 
-        {/* Feature badges — 3-up */}
-        <div className="grid grid-cols-3 gap-2 mb-5">
-          {t.featureBadges.map((b) => (
-            <div
-              key={b.title}
-              className="rounded-lg px-2 py-2 text-center"
-              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
-            >
-              <p className="text-[11px] font-bold text-white leading-tight">{b.title}</p>
-              <p className="text-[9px] mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{b.sub}</p>
-            </div>
-          ))}
-        </div>
+          {/* Tagline */}
+          <p style={s.tagline}>{t.tagline}</p>
 
-        {/* ── PRIMARY: Join + email capture ─────────────────────────────── */}
-        <form onSubmit={handleCreateAccount} noValidate className="space-y-3">
-          <div>
-            <h2 className="text-base font-bold text-white mb-2 text-center">
-              {t.joinHeadline}
-            </h2>
-            <input
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              value={signupEmail}
-              onChange={(e) => { setSignupEmail(e.target.value); setSignupEmailError(null); }}
-              placeholder={t.emailPlaceholder}
-              aria-label={t.emailPlaceholder}
-              aria-invalid={!!signupEmailError}
-              aria-describedby={signupEmailError ? "signup-email-error" : undefined}
-              className="w-full py-3 px-4 rounded-xl text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 transition-all"
-              style={{
-                background: "rgba(255,255,255,0.06)",
-                border: signupEmailError ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.1)",
-              }}
-            />
-            {signupEmailError && (
-              <p id="signup-email-error" className="text-xs text-red-400 mt-1 px-1">
-                {signupEmailError}
-              </p>
-            )}
+          {/* Diamond separator */}
+          <div style={s.diamonds} aria-hidden="true">
+            <span style={{ color: "#ff3377" }}>⬥</span>
+            <span style={{ color: "rgba(207,207,212,0.5)" }}>⬥</span>
+            <span style={{ color: "#ff9933" }}>⬥</span>
           </div>
-          <button
-            type="submit"
-            className="w-full py-3.5 px-6 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white transition-all hover:brightness-110 active:scale-[0.98]"
-            style={{
-              background: "linear-gradient(135deg, #D4007A, #E69138)",
-              boxShadow: "0 0 24px rgba(212, 0, 122, 0.4)",
-            }}
-          >
-            <span>{t.createMyAccount}</span>
-            <span aria-hidden="true">→</span>
-          </button>
-          <p className="text-center text-[11px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-            {t.freeTakes30s}
-          </p>
-        </form>
 
-        {/* Divider */}
-        <div className="flex items-center gap-3 my-5">
-          <div className="flex-1 h-px bg-white/10" />
-          <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">
-            {t.orContinueWith}
-          </span>
-          <div className="flex-1 h-px bg-white/10" />
-        </div>
-
-        {/* Telegram widget — great for returning Telegram users */}
-        <div>
-          {widgetStatus === "verifying" && (
-            <div className="flex items-center justify-center gap-3 py-4 text-white text-sm font-medium">
-              <Spinner />
-              <span>{t.telegramWidgetVerifying}</span>
-            </div>
-          )}
-          <div className={widgetStatus === "verifying" ? "hidden" : ""}>
-            <TelegramLoginWidget
-              onAuth={handleWidgetAuth}
-              onLoadError={handleWidgetLoadError}
-            />
-          </div>
-          <p className="text-center text-[11px] mt-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-            {t.recommendedForBot}
-          </p>
-          {widgetStatus === "error" && widgetError && (
-            <p className="text-center text-xs text-red-400 mt-2">{widgetError}</p>
-          )}
-          {widgetBlocked && (
-            <p className="text-center text-xs mt-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-              {t.telegramWidgetBlocked}
+          {/* Returning-user hint */}
+          {label && (
+            <p style={s.hint}>
+              {t.lastWith} <strong style={{ color: "#fff" }}>{label}</strong>
+              {lastUsername ? ` (@${lastUsername})` : ""}
             </p>
           )}
-        </div>
 
-        {/* ── SECONDARY: already a member? ──────────────────────────────── */}
-        <div className="mt-6 pt-5 border-t border-white/10">
-          {returningUser && lastUsername ? (
-            <>
-              <button
-                onClick={handleOidcLogin}
-                disabled={oidcLoading}
-                className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-70 mb-2"
-                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.18)", color: "#FFFFFF" }}
-              >
-                {oidcLoading ? <Spinner className="h-4 w-4" /> : <ShieldIcon />}
-                <span>Continue as @{lastUsername}</span>
-                {!oidcLoading && (
-                  <svg className="w-4 h-4 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                  </svg>
-                )}
-              </button>
-              <p className="text-center text-[10px] mb-3" style={{ color: "#636366" }}>
-                {t.signInSubLabel}
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-center text-xs text-pnp-textSecondary mb-3">
-                {t.alreadyMember}
-              </p>
-              <button
-                onClick={handleOidcLogin}
-                disabled={oidcLoading}
-                className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all hover:bg-white/10 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "#FFFFFF" }}
-              >
-                {oidcLoading ? <Spinner className="h-4 w-4" /> : <ShieldIcon />}
-                <span>{t.signInWithEmail}</span>
-              </button>
-              <p className="text-center text-[10px] mt-1.5" style={{ color: "#636366" }}>
-                {t.signInSubLabel}
-              </p>
-            </>
-          )}
-          <ForgotPasswordPanel t={t} />
-        </div>
-
-        {/* Signup fallback if they click without typing email — edge case kept accessible */}
-        <p className="sr-only">
-          <button type="button" onClick={handleCreateAccountNoEmail}>
-            {t.createAccount}
+          {/* PRIMARY — PNPtv ID */}
+          <button onClick={handleOidcLogin} disabled={oidcLoading} style={s.btnPrimary}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.88"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
+            onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.975)"; }}
+            onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}>
+            {oidcLoading ? <Spinner /> : <ShieldIcon />}
+            {t.oidc}
           </button>
-        </p>
 
-        {/* Legal footer */}
-        <div className="mt-6 pt-5 border-t border-white/5">
-          <p className="text-center text-[10px] text-pnp-textSecondary mb-3">
-            {t.legalPrefix}{" "}
-            <a href="/terms" className="underline text-pnp-accent">
-              {t.legalTerms}
-            </a>{" "}
-            {t.legalAnd}{" "}
-            <a href="/privacy" className="underline text-pnp-accent">
-              {t.legalPrivacyPolicy}
+          {/* Divider */}
+          <div style={s.divider}>
+            <div style={s.divLine} />
+            <span style={s.divText}>{t.or}</span>
+            <div style={s.divLine} />
+          </div>
+
+          {/* SECONDARY — Telegram widget */}
+          {widgetStatus === "verifying" ? (
+            <div style={{ ...s.btnGlass, cursor: "default" }}>
+              <Spinner />
+              {t.verifying}
+            </div>
+          ) : (
+            <TelegramLoginWidget
+              onAuth={handleWidgetAuth}
+              onLoadError={() => setWidgetBlocked(true)}
+            />
+          )}
+
+          {widgetStatus === "error" && widgetError && (
+            <p style={s.errText}>{widgetError}</p>
+          )}
+          {widgetBlocked && (
+            <p style={{ ...s.hint, marginTop: 8 }}>{t.blocked}</p>
+          )}
+
+          {/* Create account */}
+          <p style={s.create}>
+            {t.noAcc}
+            <a href={ENROLLMENT_FLOW_URL}
+              style={{ color: "#ff9933", fontWeight: 700, textDecoration: "underline" }}>
+              {t.create}
             </a>
           </p>
-          <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
-            {["cookies", "safety", "contact"].map((key) => (
-              <a
-                key={key}
-                href={`/${key}`}
-                className="text-[10px] text-pnp-textSecondary hover:underline capitalize"
-              >
-                {key}
-              </a>
-            ))}
-          </div>
-          <p className="text-center text-[9px] text-pnp-textSecondary/50 mt-3">
-            {t.copyright}
-          </p>
+
         </div>
       </div>
+
+      {/* Fixed legal footer */}
+      <footer style={s.footer}>
+        {LEGAL.map(([label, href]) => (
+          <a key={href} href={href} style={s.footLink}
+            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = "#fff"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = "rgba(207,207,212,0.5)"; }}>
+            {label}
+          </a>
+        ))}
+      </footer>
     </div>
   );
 }

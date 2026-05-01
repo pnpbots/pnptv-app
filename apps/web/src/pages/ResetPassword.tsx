@@ -1,11 +1,50 @@
 import React, { useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import { useI18n } from "@/lib/i18n";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
+const RP = {
+  en: {
+    pwdMin: "Password must be at least 8 characters",
+    pwdMismatch: "Passwords don't match",
+    failGeneric: "Failed to reset password",
+    failConn: "Connection error. Try again.",
+    invalidLink: "Invalid reset link. Please request a new one.",
+    backToLogin: "Back to login",
+    title: "Reset Password",
+    subtitle: "Choose a new password for your PNPtv account",
+    pwdUpdated: "Password updated!",
+    pwdUpdatedBody: "You can now log in with your email and new password.",
+    goToLogin: "Go to Login",
+    placeholderNew: "New password (min 8 characters)",
+    placeholderConfirm: "Confirm password",
+    cta: "Set New Password",
+    resetting: "Resetting…",
+  },
+  es: {
+    pwdMin: "La contraseña debe tener al menos 8 caracteres",
+    pwdMismatch: "Las contraseñas no coinciden",
+    failGeneric: "No se pudo restablecer la contraseña",
+    failConn: "Error de conexión. Intenta de nuevo.",
+    invalidLink: "Enlace de restablecimiento inválido. Solicita uno nuevo.",
+    backToLogin: "Volver al login",
+    title: "Restablecer contraseña",
+    subtitle: "Elige una nueva contraseña para tu cuenta PNPtv",
+    pwdUpdated: "¡Contraseña actualizada!",
+    pwdUpdatedBody: "Ya puedes iniciar sesión con tu email y la nueva contraseña.",
+    goToLogin: "Ir al login",
+    placeholderNew: "Nueva contraseña (mín. 8 caracteres)",
+    placeholderConfirm: "Confirma la contraseña",
+    cta: "Establecer nueva contraseña",
+    resetting: "Restableciendo…",
+  },
+};
 
 export default function ResetPassword() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const i18n = useI18n();
+  const s = RP[i18n.lang === "es" ? "es" : "en"];
   const token = params.get("token") || "";
 
   const [password, setPassword] = useState("");
@@ -16,11 +55,11 @@ export default function ResetPassword() {
 
   const handleSubmit = async () => {
     if (!password || password.length < 8) {
-      setError("Password must be at least 8 characters");
+      setError(s.pwdMin);
       return;
     }
     if (password !== confirm) {
-      setError("Passwords don't match");
+      setError(s.pwdMismatch);
       return;
     }
     setLoading(true);
@@ -35,10 +74,10 @@ export default function ResetPassword() {
       if (res.ok && data.success) {
         setSuccess(true);
       } else {
-        setError(data.error || "Failed to reset password");
+        setError(data.error || s.failGeneric);
       }
     } catch {
-      setError("Connection error. Try again.");
+      setError(s.failConn);
     } finally {
       setLoading(false);
     }
@@ -48,9 +87,9 @@ export default function ResetPassword() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-pnp-background px-4">
         <div className="glass-card-sm p-6 max-w-sm w-full text-center">
-          <p className="text-white text-sm">Invalid reset link. Please request a new one.</p>
+          <p className="text-white text-sm">{s.invalidLink}</p>
           <button onClick={() => navigate("/login")} className="mt-4 text-xs text-pink-400 hover:text-pink-300">
-            Back to login
+            {s.backToLogin}
           </button>
         </div>
       </div>
@@ -61,8 +100,8 @@ export default function ResetPassword() {
     <div className="min-h-screen flex items-center justify-center bg-pnp-background px-4">
       <div className="glass-card-sm p-6 max-w-sm w-full space-y-4">
         <div className="text-center">
-          <h1 className="text-lg font-bold text-white">Reset Password</h1>
-          <p className="text-xs text-white/50 mt-1">Choose a new password for your PNPtv account</p>
+          <h1 className="text-lg font-bold text-white">{s.title}</h1>
+          <p className="text-xs text-white/50 mt-1">{s.subtitle}</p>
         </div>
 
         {success ? (
@@ -70,20 +109,20 @@ export default function ResetPassword() {
             <svg className="w-12 h-12 mx-auto text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p className="text-sm text-green-400 font-medium">Password updated!</p>
-            <p className="text-xs text-white/50">You can now log in with your email and new password.</p>
+            <p className="text-sm text-green-400 font-medium">{s.pwdUpdated}</p>
+            <p className="text-xs text-white/50">{s.pwdUpdatedBody}</p>
             <button
               onClick={() => navigate("/login")}
               className="btn-gradient w-full py-2.5 rounded-xl text-sm font-bold text-white mt-2"
             >
-              Go to Login
+              {s.goToLogin}
             </button>
           </div>
         ) : (
           <>
             <input
               type="password"
-              placeholder="New password (min 8 characters)"
+              placeholder={s.placeholderNew}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               style={{ fontSize: "16px" }}
@@ -91,7 +130,7 @@ export default function ResetPassword() {
             />
             <input
               type="password"
-              placeholder="Confirm password"
+              placeholder={s.placeholderConfirm}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
@@ -104,7 +143,7 @@ export default function ResetPassword() {
               disabled={loading}
               className="btn-gradient w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50"
             >
-              {loading ? "Resetting..." : "Set New Password"}
+              {loading ? s.resetting : s.cta}
             </button>
           </>
         )}
