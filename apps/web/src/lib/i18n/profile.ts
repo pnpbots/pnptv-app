@@ -320,6 +320,21 @@ const strings = {
     dataPrivacySection: "Data & Privacy",
     dangerZoneSection: "Danger Zone",
 
+    // ── Settings 2-level navigation ───────────────────────────────────────────
+    settingsMenuSubtitle: "Choose a category to manage.",
+    catAccountTitle: "Account",
+    catAccountDesc: "Profile info, identity, upcoming calls, referrals",
+    catPreferencesTitle: "Preferences",
+    catPreferencesDesc: "Language, theme, cross-posting defaults",
+    catNotificationsTitle: "Notifications",
+    catNotificationsDesc: "Push alerts, quiet hours, email & bot toggles",
+    catPrivacyTitle: "Privacy",
+    catPrivacyDesc: "Blocked users, data policy, consents",
+    catPaymentsTitle: "Payments",
+    catPaymentsDesc: "Token balance, Dash identity, transaction history",
+    catDangerZoneTitle: "Danger Zone",
+    catDangerZoneDesc: "Delete or erase your account permanently",
+
     // ── Data & Privacy text ───────────────────────────────────────────────────
     dataPrivacyTitle: "Your PNPtv! Identity is Sovereign",
     dataPrivacyBody: "Your PNPtv! ID is your primary identity. All your data — posts, messages, connections — lives exclusively on our servers. Nothing is shared externally unless you explicitly choose to cross-post (e.g., Share to X). Your content, your control.",
@@ -740,6 +755,21 @@ const strings = {
     notificationsSection: "Notificaciones",
     dataPrivacySection: "Datos y Privacidad",
     dangerZoneSection: "Zona de Peligro",
+
+    // ── Settings 2-level navigation ───────────────────────────────────────────
+    settingsMenuSubtitle: "Elige una categoría para administrarla.",
+    catAccountTitle: "Cuenta",
+    catAccountDesc: "Información de perfil, identidad, llamadas, referidos",
+    catPreferencesTitle: "Preferencias",
+    catPreferencesDesc: "Idioma, tema, valores predeterminados de publicación",
+    catNotificationsTitle: "Notificaciones",
+    catNotificationsDesc: "Alertas push, horas de silencio, correo y bot",
+    catPrivacyTitle: "Privacidad",
+    catPrivacyDesc: "Usuarios bloqueados, política de datos, consentimientos",
+    catPaymentsTitle: "Pagos",
+    catPaymentsDesc: "Saldo de tokens, identidad Dash, historial de transacciones",
+    catDangerZoneTitle: "Zona de Peligro",
+    catDangerZoneDesc: "Eliminar o borrar tu cuenta permanentemente",
 
     // ── Data & Privacy text ───────────────────────────────────────────────────
     dataPrivacyTitle: "Tu identidad en PNPtv! es soberana",
