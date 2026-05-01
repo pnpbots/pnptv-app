@@ -16,6 +16,7 @@ import { useI18n } from "@/lib/i18n";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import { MainStageFAB } from "@/components/mainstage/MainStageFAB";
+import { SelfCamFloater } from "@/components/mainstage/SelfCamFloater";
 
 const SIDEBAR_DM_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -1610,6 +1611,8 @@ function FloatingWidgets({ showCompact }: { showCompact: boolean }) {
   const [isPipVisible, setIsPipVisible] = useState(false);
   return (
     <>
+      {/* Persistent self-cam preview for cammers navigating off /main-stage */}
+      <SelfCamFloater />
       <MainStageFAB isPipVisible={isPipVisible} />
       <FloatingMainStagePlayer onVisibilityChange={setIsPipVisible} />
       <Suspense fallback={null}>

@@ -9,6 +9,7 @@ import {
 } from "@livekit/components-react";
 import { ConnectionState, RoomEvent, Track } from "livekit-client";
 import { useMainStage, type MainStageState } from "@/hooks/useMainStage";
+import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -426,16 +427,21 @@ export default function MainStage() {
     state,
     isAdmin,
     canBeCammer,
-    token,
-    livekitUrl,
     role,
     loading,
     error,
     joinAsCammer,
     leaveCammer,
+    leave,
     shuffle,
     admin,
   } = useMainStage();
+
+  // Pull the shared Room instance from the provider so <LiveKitRoom> gets
+  // the externally-managed Room object. We also read the current connection
+  // state so MainStage can render the connecting overlay without owning the
+  // Room itself.
+  const { room } = useMainStageRoom();
 
   const [adminOpen, setAdminOpen] = useState(false);
   const [connState, setConnState] = useState<ConnectionState>(ConnectionState.Connecting);
@@ -589,7 +595,7 @@ export default function MainStage() {
     );
   }
 
-  if (!token || !state) {
+  if (!state) {
     return (
       <div className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center bg-pnp-background">
         <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-pnp-purple/[0.12] border border-pnp-purple/25">
@@ -840,20 +846,17 @@ export default function MainStage() {
         </div>
       )}
 
+      {/*
+        The Room is created once in MainStageProvider and stays connected
+        across route changes. We pass the external Room instance here so
+        LiveKitRoom acts only as a React context bridge — it does NOT call
+        room.connect() or room.disconnect() when this component mounts/unmounts.
+        connect={false} is required to prevent LiveKitRoom from taking over
+        the connection lifecycle on unmount.
+      */}
       <LiveKitRoom
-        key="main-stage-prime"
-        token={token}
-        serverUrl={livekitUrl}
-        connect={true}
-        // Mic device is acquired when user becomes a cammer (matches video
-        // behaviour). Viewers stay at audio=false so no device prompt fires.
-        audio={isCammer}
-        video={isCammer}
-        options={{
-          adaptiveStream: true,
-          dynacast: true,
-          publishDefaults: { simulcast: true },
-        }}
+        room={room}
+        connect={false}
         className="contents"
         onMediaDeviceFailure={(failure) => {
           // Surface the specific reason so users know why their cam didn't

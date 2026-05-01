@@ -4,6 +4,7 @@ import { HelmetProvider } from "react-helmet-async";
 import { AuthProvider } from "@/hooks/useAuth";
 import { NotificationProvider } from "@/hooks/useNotifications";
 import { MusicPlayerProvider } from "@/hooks/useMusicPlayer";
+import { MainStageProvider } from "@/components/mainstage/MainStageProvider";
 import { router } from "@/router";
 import { useI18n } from "@/lib/i18n";
 import ErrorBoundary from "@/components/ErrorBoundary";
@@ -210,8 +211,17 @@ export default function App() {
         <AuthProvider>
           <NotificationProvider>
             <MusicPlayerProvider>
-              <RouterProvider router={router} />
-              <AppOverlays />
+              {/*
+                MainStageProvider must sit INSIDE AuthProvider (needs
+                isAuthenticated) and OUTSIDE RouterProvider (must survive
+                route changes). It creates the single LiveKit Room instance
+                and owns the connection lifecycle for persistent cam-across-
+                navigation (Phase 2 of cam-first redesign).
+              */}
+              <MainStageProvider>
+                <RouterProvider router={router} />
+                <AppOverlays />
+              </MainStageProvider>
             </MusicPlayerProvider>
           </NotificationProvider>
         </AuthProvider>
