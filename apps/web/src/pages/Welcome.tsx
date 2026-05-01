@@ -6,7 +6,7 @@ import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 
 const featureRoutes = [
-  { icon: "\ud83d\udcfa", route: "/media", color: "from-pink-600 to-purple-600" },
+  { icon: "\ud83d\udcfa", route: "/channels", color: "from-pink-600 to-purple-600" },
   { icon: "\ud83d\udcf9", route: "/chat", color: "from-orange-500 to-pink-600" },
   { icon: "\ud83d\udd34", route: "/live", color: "from-red-600 to-orange-500" },
   { icon: "\ud83d\udcac", route: "/social", color: "from-blue-500 to-purple-600" },

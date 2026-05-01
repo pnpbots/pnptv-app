@@ -360,12 +360,6 @@ const GEO_BLOCK_BYPASS_PATHS = [
   // shouldn't be blocked even if their IP geolocates oddly.
   /^\/webhook\b/,
   /^\/api\/webhooks?\b/,
-  // /lifetime100 must be reachable globally — operator decision 2026-04-30:
-  // the public landing page is served by pnptv-web (so it already isn't
-  // geo-blocked), but the availability counter and reservation form call
-  // these public endpoints. Without this exemption the page loads with a
-  // broken counter in UK / TX / TN / FL.
-  /^\/api\/public\/lifetime100\b/,
 ];
 function classifyGeo(ip) {
   if (!ip) return null;
@@ -745,16 +739,16 @@ app.get('/subscription', (req, res) => {
 });
 
 // Shorthand alias → lifetime100
-app.get('/lifetime', (req, res) => res.redirect(302, 'https://pnptv.app/lifetime100'));
+app.get('/lifetime', (req, res) => res.redirect(302, 'https://app.pnptv.app/lifetime100'));
 
-// LIFETIME100 — redirect to the public React SPA route, preserving any query string
+// LIFETIME100 — redirect to the React SPA, preserving any query string
 app.get('/lifetime100', (req, res) => {
   const host = req.get('host') || '';
   if (host.includes('easybots.store') || host.includes('easybots')) {
     return res.status(404).send('Not found');
   }
   const qs = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
-  return res.redirect(302, 'https://pnptv.app/lifetime100' + qs);
+  return res.redirect(302, 'https://app.pnptv.app/lifetime100' + qs);
 });
 
 // ── CMS asset proxy ──────────────────────────────────────────────────────────
@@ -1017,38 +1011,19 @@ app.get('/nearby', pageLimiter, (req, res) => {
   res.sendFile(path.join(__dirname, '../../../public/nearby.html'));
 });
 
-// Login entry routes
-// The Telegram login widget uses a cross-origin popup to oauth.telegram.org
-// that posts auth data back via window.opener.postMessage. helmet's default
-// Cross-Origin-Opener-Policy: same-origin severs that opener relationship and
-// the widget silently fails. Relax COOP to unsafe-none on the login pages
-// only — every other route keeps the strict default.
-function relaxCoopForTelegramWidget(_req, res, next) {
-  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
-  res.removeHeader('Cross-Origin-Embedder-Policy');
-  next();
-}
-
-// Home page — serve classic login page directly; if already authenticated send to React SPA
-app.get('/', relaxCoopForTelegramWidget, (req, res) => {
+// Landing page routes
+// Home page — serve login page directly; if already authenticated send to React SPA
+app.get('/', (req, res) => {
   // Authenticated → go to the React SPA
   if (req.session?.user) {
     return res.redirect(302, 'https://pnptv.app');
   }
-  // Not authenticated → show the classic login
+  // Not authenticated → show login
   return res.sendFile(path.join(__dirname, '../../../public/login.html'));
 });
 
-// /classic-login → canonical classic login route
-app.get('/classic-login', relaxCoopForTelegramWidget, (req, res) => {
-  if (req.session?.user) {
-    return res.redirect(302, 'https://pnptv.app');
-  }
-  return res.sendFile(path.join(__dirname, '../../../public/login.html'));
-});
-
-// /login → keep as alias to the classic login
-app.get('/login', relaxCoopForTelegramWidget, (req, res) => {
+// /login → same behaviour as /
+app.get('/login', (req, res) => {
   if (req.session?.user) {
     return res.redirect(302, 'https://pnptv.app');
   }
@@ -2337,15 +2312,71 @@ app.post('/api/webapp/auth/recover-account', authLimiter, asyncHandler(async (re
   }
   try {
     const { rows } = await getPool().query(
-      `SELECT id, pnptv_id, first_name, language FROM users
+      `SELECT id, pnptv_id, first_name, language, password_hash FROM users
         WHERE LOWER(email) = $1 AND is_deleted = false LIMIT 1`,
       [email]
     );
-    if (rows.length === 0 || !rows[0].pnptv_id) {
+    if (rows.length === 0) {
       logger.info('[recover-account] no match', { email });
       return res.json({ success: true });
     }
     const u = rows[0];
+
+    // Email/password users: reset the local password_hash so that emailLogin works
+    // after the reset. Authentik recovery only changes Authentik's copy, leaving
+    // users.password_hash stale and login broken.
+    if (u.password_hash) {
+      await getPool().query(`
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token TEXT NOT NULL UNIQUE,
+          expires_at TIMESTAMP NOT NULL,
+          used BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await getPool().query('UPDATE password_reset_tokens SET used = TRUE WHERE user_id = $1 AND used = FALSE', [u.id]);
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      await getPool().query(
+        'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+        [u.id, tokenHash, expiresAt.toISOString()]
+      );
+      const resetUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/reset-password?token=${rawToken}`;
+      const lang = (u.language || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
+      const displayName = u.first_name || (lang === 'es' ? 'usuario' : 'there');
+      const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+      const subject = lang === 'es' ? 'Restablecer contraseña — PNPtv' : 'Reset your PNPtv password';
+      const html = lang === 'es'
+        ? `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111;">
+              <h2 style="color:#D4007A;margin:0 0 16px;">Restablecer contraseña</h2>
+              <p>Hola ${escape(displayName)},</p>
+              <p>Recibimos una solicitud para restablecer tu contraseña en PNPtv. Haz clic en el botón para crear una contraseña nueva. El enlace expira en 1 hora y solo se puede usar una vez.</p>
+              <p style="margin:24px 0;"><a href="${resetUrl}" style="background:#D4007A;color:#fff;padding:14px 24px;border-radius:10px;text-decoration:none;display:inline-block;font-weight:700;">Restablecer contraseña</a></p>
+              <p style="color:#636366;font-size:13px;">Si no solicitaste esto, ignora este correo.</p>
+              <p style="margin-top:24px;color:#636366;font-size:13px;">— Equipo PNPtv</p>
+            </div>`
+        : `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111;">
+              <h2 style="color:#D4007A;margin:0 0 16px;">Reset your password</h2>
+              <p>Hey ${escape(displayName)},</p>
+              <p>We got a request to reset your PNPtv password. Click below to set a new one. The link expires in 1 hour and can only be used once.</p>
+              <p style="margin:24px 0;"><a href="${resetUrl}" style="background:#D4007A;color:#fff;padding:14px 24px;border-radius:10px;text-decoration:none;display:inline-block;font-weight:700;">Reset password</a></p>
+              <p style="color:#636366;font-size:13px;">If you didn't request this, ignore this email.</p>
+              <p style="margin-top:24px;color:#636366;font-size:13px;">— The PNPtv Team</p>
+            </div>`;
+      const EmailService = require('../../services/emailService');
+      await EmailService.send({ to: email, subject, html });
+      logger.info('[recover-account] local token reset email sent', { userId: u.id });
+      return res.json({ success: true });
+    }
+
+    // Telegram/OIDC-only accounts (no password_hash): use Authentik recovery.
+    if (!u.pnptv_id) {
+      logger.info('[recover-account] no pnptv_id, nothing to recover', { userId: u.id });
+      return res.json({ success: true });
+    }
     let authentikPk = await AuthentikService._getUserPkBySub(u.pnptv_id);
 
     // Fallback: if PK not found by sub, try to find by email in Authentik and heal the pnptv_id
@@ -2441,8 +2472,7 @@ app.post('/api/webapp/auth/reset-password', authLimiter, asyncHandler(webAppCont
 // Rate limiter — 10 OIDC login initiations per 15 min per IP
 const oidcLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
-  skipSuccessfulRequests: true,
+  max: 10,
   handler: (req, res) => res.status(429).json({ error: 'Too many login attempts. Try again later.' }),
   standardHeaders: true,
   legacyHeaders: false,
@@ -2637,6 +2667,11 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     }
   }
 
+  // Fallback #3 — username match. Telegram-widget users have placeholder
+  // @telegram.pnptv.app emails in Authentik that don't match their real email
+  // in our users table, so the email lookup misses. Match by preferred_username
+  // before falling through to INSERT (otherwise the unique-username constraint
+  // throws 500 on every login attempt).
   if (!userRow && preferred_username) {
     const usernameLookup = await pool.query(
       `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
@@ -2644,30 +2679,28 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
               creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
               email, last_login_method
        FROM users
-       WHERE UPPER(username) = UPPER($1) AND is_deleted = false
+       WHERE LOWER(username) = LOWER($1) AND is_deleted = false
        LIMIT 1`,
       [preferred_username]
     );
-
     if (usernameLookup.rows.length > 0) {
       userRow = usernameLookup.rows[0];
       const displayName = name || preferred_username || userRow.first_name || null;
       await pool.query(
         `UPDATE users
-         SET last_login_method = 'oidc',
+         SET pnptv_id = $1,
+             last_login_method = 'oidc',
              last_login_at = NOW(),
-             first_name = COALESCE(NULLIF($1, ''), first_name),
-             photo_file_id = COALESCE(NULLIF($2, ''), photo_file_id)
-         WHERE id = $3`,
-        [displayName, picture || null, userRow.id]
+             first_name = COALESCE(NULLIF($2, ''), first_name),
+             photo_file_id = COALESCE(NULLIF($3, ''), photo_file_id),
+             email = COALESCE(NULLIF($4, ''), email)
+         WHERE id = $5`,
+        [sub, displayName, picture || null, email || null, userRow.id]
       );
+      userRow.pnptv_id = sub;
       userRow.first_name = displayName || userRow.first_name;
       userRow.last_login_method = 'oidc';
-      logger.info('[OIDC] Reused existing username-matched account', {
-        userId: userRow.id,
-        username: userRow.username,
-        sub,
-      });
+      logger.info('[OIDC] Linked pnptv_id to existing username account', { userId: userRow.id, sub, username: preferred_username });
     }
   }
 
@@ -2680,64 +2713,79 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
 
     // Ensure username uniqueness by appending a random hex suffix if needed
     let finalUsername = baseUsername || `user_${crypto.randomBytes(4).toString('hex')}`;
-    while (true) {
-      const usernameCheck = await pool.query(
-        'SELECT 1 FROM users WHERE UPPER(username) = UPPER($1) LIMIT 1',
-        [finalUsername]
-      );
-      if (usernameCheck.rows.length === 0) break;
-      finalUsername = `${baseUsername || 'user'}_${crypto.randomBytes(3).toString('hex')}`.slice(0, 30);
+    // Probe for collisions (active OR soft-deleted rows). The unique index
+    // covers ALL rows, not just active ones, so we must include soft-deleted.
+    const usernameCheck = await pool.query(
+      'SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1',
+      [finalUsername]
+    );
+    if (usernameCheck.rows.length > 0) {
+      finalUsername = `${finalUsername}_${crypto.randomBytes(3).toString('hex')}`;
     }
 
     const newUserId = crypto.randomUUID();
-    const insertResult = await pool.query(
-      `INSERT INTO users
-         (id, pnptv_id, username, first_name, email, email_verified,
-          photo_file_id, tier, subscription_status, terms_accepted,
-          role, last_login_method, last_login_at, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'free', 'free', false,
-               'user', 'oidc', NOW(), NOW(), NOW())
-       RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
-                 tier, terms_accepted, photo_file_id, bio, language, role,
-                 creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
-                 email, last_login_method`,
-      [
-        newUserId,
-        sub,  // pnptv_id = Authentik sub (source of truth)
-        finalUsername,
-        name || preferred_username || finalUsername,
-        email ? email.toLowerCase() : null,
-        email_verified === true,
-        picture || null,
-      ]
-    );
+    let insertResult;
+    try {
+      insertResult = await pool.query(
+        `INSERT INTO users
+           (id, pnptv_id, username, first_name, email, email_verified,
+            photo_file_id, tier, subscription_status, terms_accepted,
+            role, last_login_method, last_login_at, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'free', 'free', false,
+                 'user', 'oidc', NOW(), NOW(), NOW())
+         RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
+                   tier, terms_accepted, photo_file_id, bio, language, role,
+                   creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
+                   email, last_login_method`,
+        [
+          newUserId,
+          sub,
+          finalUsername,
+          name || preferred_username || finalUsername,
+          email ? email.toLowerCase() : null,
+          email_verified === true,
+          picture || null,
+        ]
+      );
+    } catch (err) {
+      // Race or soft-deleted-row collision survived the precheck. Last-resort
+      // recovery: append entropy and retry once. If that also fails, abort
+      // gracefully instead of 500-bouncing the user.
+      if (err.code === '23505' && /username/i.test(err.constraint || '')) {
+        const recoverUsername = `${finalUsername}_${crypto.randomBytes(4).toString('hex')}`;
+        logger.warn('[OIDC] Username collision survived precheck, retrying with entropy suffix', {
+          original: finalUsername, retry: recoverUsername, sub,
+        });
+        insertResult = await pool.query(
+          `INSERT INTO users
+             (id, pnptv_id, username, first_name, email, email_verified,
+              photo_file_id, tier, subscription_status, terms_accepted,
+              role, last_login_method, last_login_at, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'free', 'free', false,
+                   'user', 'oidc', NOW(), NOW(), NOW())
+           RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
+                     tier, terms_accepted, photo_file_id, bio, language, role,
+                     creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
+                     email, last_login_method`,
+          [
+            newUserId,
+            sub,
+            recoverUsername,
+            name || preferred_username || recoverUsername,
+            email ? email.toLowerCase() : null,
+            email_verified === true,
+            picture || null,
+          ]
+        );
+      } else {
+        throw err;
+      }
+    }
     userRow = insertResult.rows[0];
     logger.info('[OIDC] Created new PNPtv user via Authentik OIDC', {
       userId: userRow.id,
       username: userRow.username,
       sub,
-    });
-  }
-
-  let effectiveRole = userRow.role || 'user';
-  try {
-    effectiveRole = await AuthentikService.resolveEffectiveRole({
-      authentikSub: sub,
-      dbRole: userRow.role,
-      groups: userInfo.groups,
-    });
-    if (effectiveRole !== (userRow.role || 'user') && userRow.role !== 'superadmin') {
-      await pool.query(
-        `UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2`,
-        [effectiveRole, userRow.id]
-      );
-      userRow.role = effectiveRole;
-    }
-  } catch (err) {
-    logger.warn('[OIDC] Failed to resolve Authentik-backed role, falling back to DB role', {
-      userId: userRow.id,
-      sub,
-      error: err.message,
     });
   }
 
@@ -2760,7 +2808,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     photoUrl: userRow.photo_file_id,
     bio: userRow.bio,
     language: userRow.language,
-    role: effectiveRole,
+    role: userRow.role || 'user',
     creator_status: userRow.creator_status || 'none',
     contentDisclaimer: userRow.content_disclaimer || false,
     // X identity
@@ -2788,7 +2836,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
   setImmediate(async () => {
     try {
       await AuthentikService.syncUserGroups(sub, {
-        role: effectiveRole,
+        role: userRow.role,
         tier: userRow.tier,
         creatorStatus: userRow.creator_status,
       });
@@ -3729,15 +3777,15 @@ app.get('/api/webapp/live/analytics/sessions', requireSessionAuth, creatorGuard,
 app.get('/api/webapp/live/analytics/summary', requireSessionAuth, creatorGuard, asyncHandler(webappLiveController.getAnalyticsSummary));
 
 // Creator revenue aggregation (tips + tickets + subs + calls)
-app.get('/api/webapp/creator/revenue', requireSessionAuth, asyncHandler(webappLiveController.getCreatorRevenue));
+app.get('/api/webapp/creator/revenue', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.getCreatorRevenue));
 
 // Manual going-live broadcast to followers
-app.post('/api/webapp/live/broadcast-live-now', requireSessionAuth, asyncHandler(webappLiveController.broadcastLiveNow));
+app.post('/api/webapp/live/broadcast-live-now', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.broadcastLiveNow));
 
 // VOD replay recordings
 app.get('/api/webapp/creators/:creatorId/recordings', softAuth, asyncHandler(webappLiveController.listCreatorRecordings));
-app.delete('/api/webapp/recordings/:id', requireSessionAuth, asyncHandler(webappLiveController.deleteRecordingEndpoint));
-app.patch('/api/webapp/recordings/:id', requireSessionAuth, asyncHandler(webappLiveController.updateRecordingEndpoint));
+app.delete('/api/webapp/recordings/:id', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.deleteRecordingEndpoint));
+app.patch('/api/webapp/recordings/:id', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.updateRecordingEndpoint));
 
 // Streamer Settings: persistent encoder + filter preferences
 const streamerSettingsController = require('./controllers/streamerSettingsController');
@@ -3745,10 +3793,11 @@ app.get('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSe
 app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.updateSettings));
 // Gap 2: Persistent thumbnail upload
 app.post('/api/webapp/live/thumbnail', requireSessionAuth, asyncHandler(streamerSettingsController.uploadThumbnail));
-app.post('/api/webapp/live/snapshot', requireSessionAuth, asyncHandler(webappLiveController.uploadSnapshot));
+// MED-02: 6 MB body limit for snapshot uploads (base64-encoded frame); role guard restricts to creators only
+app.post('/api/webapp/live/snapshot', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), express.json({ limit: '6mb' }), asyncHandler(webappLiveController.uploadSnapshot));
 
 // Gap 1: Past-session earnings history for studio panel
-app.get('/api/webapp/live/earnings', requireSessionAuth, asyncHandler(webappLiveController.getEarningsHistory));
+app.get('/api/webapp/live/earnings', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.getEarningsHistory));
 
 // Gap 4: User-uploaded local recording blob
 app.post('/api/webapp/live/recording', requireSessionAuth, webappLiveController.uploadLocalRecording);
@@ -4162,7 +4211,7 @@ app.post('/api/public/lifetime100/reserve', lifetime100ReserveLimiter, asyncHand
   }
 
   // 4) Send combined welcome + code email
-  const activationUrl = `https://pnptv.app/lifetime100/activate?code=${encodeURIComponent(reservation.code)}`;
+  const activationUrl = `https://app.pnptv.app/lifetime100/activate?code=${encodeURIComponent(reservation.code)}`;
   try {
     await EmailService.sendFounderLifetimeEmail({
       to: email,
@@ -5415,63 +5464,6 @@ app.post('/api/webapp/wellness-mode/cancel-disable', requireSessionAuth, asyncHa
   try { await wellnessGuardCache.del(`wellnessActive:${req.session.user.id}`); } catch {}
   return res.json({ success: true, ...status });
 }));
-
-// ── Use Tracker — private harm-reduction log ──────────────────────────────
-// Shared helper to build stats for both types from the DB.
-async function buildUseTrackerStats(userId) {
-  const pool = getPool();
-  const types = ['slam', 'smoke'];
-  const stats = {};
-  await Promise.all(types.map(async (type) => {
-    const { rows: [agg] } = await pool.query(
-      `SELECT
-         COUNT(*) FILTER (WHERE logged_at >= CURRENT_DATE)::int AS today,
-         COUNT(*) FILTER (WHERE logged_at >= NOW() - INTERVAL '7 days')::int AS week,
-         COUNT(*) FILTER (WHERE logged_at >= NOW() - INTERVAL '30 days')::int AS month,
-         MAX(logged_at) AS last_at
-       FROM use_tracker_logs WHERE user_id = $1 AND type = $2`,
-      [userId, type]
-    );
-    const { rows: dayRows } = await pool.query(
-      `SELECT DISTINCT (NOW()::date - logged_at::date)::int AS days_ago
-       FROM use_tracker_logs
-       WHERE user_id = $1 AND type = $2 AND logged_at >= NOW() - INTERVAL '30 days'`,
-      [userId, type]
-    );
-    const usedDays = new Set(dayRows.map(r => r.days_ago));
-    stats[type] = {
-      lastAt: agg?.last_at ? new Date(agg.last_at).toISOString() : null,
-      today: agg?.today || 0,
-      week: agg?.week || 0,
-      month: agg?.month || 0,
-      recentDays: Array.from({ length: 30 }, (_, i) => usedDays.has(i)),
-    };
-  }));
-  return stats;
-}
-
-// GET /api/webapp/use-tracker — stats for both types
-app.get('/api/webapp/use-tracker', requireSessionAuth, asyncHandler(async (req, res) => {
-  const userId = req.session.user.id;
-  const stats = await buildUseTrackerStats(userId);
-  return res.json({ success: true, ...stats });
-}));
-
-// POST /api/webapp/use-tracker/log — log one event, return updated stats
-app.post('/api/webapp/use-tracker/log', requireSessionAuth, asyncHandler(async (req, res) => {
-  const userId = req.session.user.id;
-  const { type } = req.body;
-  if (!['slam', 'smoke'].includes(type)) {
-    return res.status(400).json({ error: 'type must be slam or smoke' });
-  }
-  await getPool().query(
-    'INSERT INTO use_tracker_logs (user_id, type) VALUES ($1, $2)',
-    [userId, type]
-  );
-  const stats = await buildUseTrackerStats(userId);
-  return res.json({ success: true, ...stats });
-}));
-
 app.post('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.createGroup));
 
 
@@ -7514,6 +7506,22 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
       return res.status(404).json({ success: false, error: 'Performer not found' });
     }
 
+    // CRIT-03: Self-tip prevention (route-level gate).
+    // Look up the user_id that owns this performer record and reject if it matches
+    // the authenticated tipper. This blocks a creator from tipping themselves to
+    // farm platform earnings or inflate token stats.
+    try {
+      const selfCheck = await getPool().query(
+        'SELECT user_id FROM performers WHERE id::text = $1 OR user_id = $1 LIMIT 1',
+        [resolvedPerformerId]
+      );
+      if (selfCheck.rows.length > 0 && String(selfCheck.rows[0].user_id) === String(userId)) {
+        return res.status(400).json({ success: false, error: 'self_tip_forbidden' });
+      }
+    } catch (selfErr) {
+      logger.warn(`Tips: self-tip check failed (non-fatal): ${selfErr.message}`);
+    }
+
     // Look up performer name for payment description
     let performerName = resolvedPerformerId;
     try {
@@ -7534,7 +7542,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
                AND performer_id = $2
                AND amount = $3
                AND payment_method = 'tokens'
-               AND created_at > NOW() - INTERVAL '5 seconds'
+               AND created_at > NOW() - INTERVAL '60 seconds'
              ORDER BY created_at DESC
              LIMIT 1`,
             [userId, String(resolvedPerformerId), numAmount]
@@ -8287,6 +8295,7 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
   await getPool().query('UPDATE creator_channels SET cover_image_url = $1, updated_at = NOW() WHERE id = $2', [coverUrl, channelId]);
   return res.json({ success: true, coverImageUrl: coverUrl });
 }));
+
 
 // ── Channel video upload + AI assist + publish (universal — replaces the
 //    admin-only /admin/prime-videos flow for non-admin creators) ─────────────
@@ -9239,19 +9248,12 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
           const mediaUrl = `https://cms.pnptv.app/assets/${fileId}`;
           const thumbUrl = `https://cms.pnptv.app/video-thumb/${fileId}.jpg`;
           const content = description && description.trim() ? description : titleInput;
-          // is_exclusive=true is critical: the home_feed query filters
-          // `WHERE is_exclusive = false`, so PRIME-channel uploads must set
-          // this flag or they leak unblurred to free-tier viewers on the
-          // home dashboard preview. The main social feed gates by
-          // is_exclusive (filterFeedExclusivePosts) AND content_tier
-          // (_applyContentTierBlur); the home feed only checks is_exclusive,
-          // so this flag is the load-bearing one. See backfill on 2026-05-01.
           await getPool().query(
             `INSERT INTO social_posts
               (user_id, channel_id, directus_id, content, video_title, video_description,
                media_url, media_type, content_tier, video_thumbnail_url, video_thumbnails,
-               is_shareable, is_exclusive, source_channel, created_at, updated_at)
-             VALUES ($1, 5, $2, $3, $4, $5, $6, 'video', 'PRIME', $7, '[]'::jsonb, true, true, 'prime', NOW(), NOW())`,
+               is_shareable, source_channel, created_at, updated_at)
+             VALUES ($1, 5, $2, $3, $4, $5, $6, 'video', 'PRIME', $7, '[]'::jsonb, true, 'prime', NOW(), NOW())`,
             ['8599671840', primeRow.id, content, titleInput, description, mediaUrl, thumbUrl]
           );
         } catch (syncErr) {

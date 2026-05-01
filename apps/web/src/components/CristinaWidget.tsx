@@ -313,7 +313,7 @@ const PAGE_CONTEXT: { match: (p: string) => boolean; ctx: PageContext }[] = [
     },
   },
   {
-    match: (p) => p.startsWith("/media") || p.startsWith("/channels"),
+    match: (p) => p.startsWith("/channels"),
     ctx: {
       titleEn: "Media & Content",
       titleEs: "Media y Contenido",

@@ -274,6 +274,14 @@ export function recoverAccount(email: string): Promise<{ success: boolean; messa
   });
 }
 
+export function telegramGenerateLoginToken(): Promise<{ success: boolean; token: string; deepLink: string; error?: string }> {
+  return request("/api/webapp/auth/telegram/token", { method: "POST" });
+}
+
+export function telegramCheckLoginToken(token: string): Promise<{ authenticated: boolean; user?: { id: string; username: string }; error?: string }> {
+  return request(`/api/webapp/auth/telegram/check?token=${encodeURIComponent(token)}`);
+}
+
 
 
 // Age verification (self-declaration)

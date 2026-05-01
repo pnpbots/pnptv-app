@@ -279,6 +279,47 @@ function getMainStageService() {
 
 // ── Socket.IO initialisation ──────────────────────────────────────────────────
 
+// HIGH-03: Ban-event subscriber — disconnect sockets immediately when a user is banned.
+// Initialised once at module load (not per-connection). Uses a dedicated Redis connection
+// because pub/sub mode locks a client to subscribe-only commands.
+// The `io` reference is injected by initSocketIO; the subscriber is shared across all
+// socket connections on this process.
+let _banSubscriberReady = false;
+function _initBanSubscriber(io) {
+  if (_banSubscriberReady) return;
+  _banSubscriberReady = true;
+  try {
+    const redisSub = getRedis().duplicate();
+    redisSub.subscribe('user:banned', (err) => {
+      if (err) {
+        logger.error('socketHandlers: failed to subscribe to user:banned channel', { error: err.message });
+      } else {
+        logger.info('socketHandlers: subscribed to user:banned Redis channel');
+      }
+    });
+    redisSub.on('message', (channel, message) => {
+      if (channel !== 'user:banned') return;
+      try {
+        const { userId } = JSON.parse(message);
+        if (!userId) return;
+        // Iterate all connected sockets on this process and disconnect banned user.
+        // Users are stored as socket.data.user (set in initSocketIO auth middleware).
+        io.sockets.sockets.forEach((sock) => {
+          if (sock.data && sock.data.user && String(sock.data.user.id) === String(userId)) {
+            logger.info('socketHandlers: disconnecting banned user socket', { userId, socketId: sock.id });
+            sock.emit('force:disconnect', { reason: 'banned' });
+            sock.disconnect(true);
+          }
+        });
+      } catch (parseErr) {
+        logger.warn('socketHandlers: malformed user:banned message', { error: parseErr.message });
+      }
+    });
+  } catch (subErr) {
+    logger.error('socketHandlers: ban subscriber init failed', { error: subErr.message });
+  }
+}
+
 function initSocketIO(io) {
   // Wire up the Main Stage service io reference so it can emit state broadcasts.
   // Called once at boot; safe to call even if mainStageService fails to load.
@@ -287,6 +328,9 @@ function initSocketIO(io) {
     ms.setIo(io);
     logger.info('socketHandlers: mainStageService.setIo wired');
   }
+
+  // HIGH-03: Start the ban-event subscriber once, passing the io instance
+  _initBanSubscriber(io);
   // Auth middleware: reject connections with no valid session
   io.use(async (socket, next) => {
     const user = await getUserFromSocket(socket);
@@ -1800,6 +1844,12 @@ function initSocketIO(io) {
         // must hold the pnp-prime entitlement (creator-gated / subscribers-only stream).
         // Restreamer slug streams and Directus performer streams without a live_streams
         // row are treated as public (platform-level RTMP channels).
+        //
+        // NOTE (HIGH-04): Subscription/ticket enforcement below applies ONLY to streams
+        // that have a corresponding live_streams DB row (dbStream !== null). Streams
+        // identified by a Restreamer channel slug or a Directus performer ID that have
+        // no live_streams row are not covered by this gate. All monetized shows should
+        // have a live_streams row created before going live.
         if (dbStream && dbStream.is_public === false) {
           const userRole = (user.role || '').toLowerCase();
           const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
@@ -1814,6 +1864,31 @@ function initSocketIO(io) {
             } catch (accessErr) {
               logger.error('live:join access check failed', { streamId, userId: user.id, error: accessErr.message });
               socket.emit('live:error', { message: 'Access check unavailable. Please try again.', code: 'ACCESS_CHECK_FAILED' });
+              return;
+            }
+          }
+        }
+
+        // CRIT-01: Ticket gate — if the stream is ticketed, the viewer must hold
+        // a live_show_tickets row for this slot. Hosts and admins bypass the check.
+        // Streams without a live_streams row (Restreamer/Directus-only) are not
+        // covered here — see HIGH-04 note above.
+        if (dbStream && dbStream.is_ticketed) {
+          const userRole = (user.role || '').toLowerCase();
+          const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
+          if (!isAdminUser && String(user.id) !== String(dbStream.host_id)) {
+            try {
+              const { rows: ticketRows } = await query(
+                'SELECT 1 FROM live_show_tickets WHERE slot_id = $1 AND user_id = $2 LIMIT 1',
+                [streamId, String(user.id)]
+              );
+              if (ticketRows.length === 0) {
+                socket.emit('live:error', { message: 'A ticket is required to view this stream', code: 'ACCESS_DENIED', reason: 'ticket_required' });
+                return;
+              }
+            } catch (ticketErr) {
+              logger.error('live:join ticket check failed', { streamId, userId: user.id, error: ticketErr.message });
+              socket.emit('live:error', { message: 'Ticket check unavailable. Please try again.', code: 'ACCESS_CHECK_FAILED' });
               return;
             }
           }
@@ -1948,8 +2023,12 @@ function initSocketIO(io) {
           return;
         }
       } catch (rateErr) {
-        // Non-fatal: if Redis is unavailable, allow the message through rather
-        // than silently dropping legitimate chat during an outage.
+        // LOW-01: Deliberate fail-open on Redis outage.
+        // Tradeoff: during a Redis failure, rate-limiting is bypassed and spam
+        // is possible. The alternative — dropping all chat messages — is a worse
+        // user experience for the majority of legitimate users. Redis outages are
+        // rare and short-lived on this stack. Acceptable risk: prefer availability
+        // over throttling enforcement during infrastructure incidents.
         logger.warn('live:message rate-limit check failed (Redis error)', { streamId, userId: user.id, error: rateErr.message });
       }
 

@@ -100,6 +100,21 @@ class PNPLiveTipsService {
         err.status = 403;
         throw err;
       }
+
+      // CRIT-03: Defense-in-depth self-tip prevention.
+      // The route handler checks this first, but we re-check here because
+      // processTipWithTokens can be called from any context (tests, admin tools,
+      // future routes). A creator tipping themselves produces phantom earnings.
+      const { rows: selfRows } = await q(
+        'SELECT user_id FROM performers WHERE id::text = $1 OR user_id = $1 LIMIT 1',
+        [String(performerId)]
+      );
+      if (selfRows.length > 0 && String(selfRows[0].user_id) === String(userId)) {
+        const err = new Error('self_tip_forbidden');
+        err.name = 'SelfTipError';
+        err.status = 400;
+        throw err;
+      }
     }
 
     let client;
@@ -132,8 +147,8 @@ class PNPLiveTipsService {
       const txId = `TOKEN-${require('crypto').randomUUID()}`;
       const tipResult = await client.query(
         `INSERT INTO pnp_tips
-         (user_id, model_id, performer_id, booking_id, amount, message, payment_status, transaction_id, created_at, completed_at)
-         VALUES ($1, NULL, $2, NULL, $3, $4, 'completed', $5, NOW(), NOW())
+         (user_id, model_id, performer_id, booking_id, amount, message, payment_status, payment_method, transaction_id, created_at, completed_at)
+         VALUES ($1, NULL, $2, NULL, $3, $4, 'completed', 'tokens', $5, NOW(), NOW())
          RETURNING *`,
         [userId, String(performerId), amount, (message || '').slice(0, 200), txId]
       );

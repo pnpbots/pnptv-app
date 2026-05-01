@@ -243,6 +243,10 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
     if (!creatorId) return;
     setSubLoading(true);
     try {
+      // MED-04: Payment enforcement is done server-side in CreatorService.subscribeToCreator,
+      // which verifies the caller holds a pnp-prime entitlement before inserting a
+      // creator_subscriptions row. This call is the trigger only — no client-side
+      // payment collection happens here.
       await subscribeToCreator(creatorId);
       setSubscribed(true);
       setShowSubscribePrompt(false);

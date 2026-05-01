@@ -16,7 +16,6 @@ import { myAccess, type MyAccessStrings } from "./myAccess";
 import { booking, type BookingStrings } from "./booking";
 import { chat, type ChatStrings } from "./chat";
 import { live, type LiveStrings } from "./live";
-import { media, type MediaStrings } from "./media";
 import { dm, type DmStrings } from "./dm";
 import { apply, type ApplyStrings } from "./apply";
 import { creator, type CreatorStrings } from "./creator";
@@ -60,7 +59,6 @@ export interface I18n {
   booking: Widen<BookingStrings>;
   chat: Widen<ChatStrings>;
   live: Widen<LiveStrings>;
-  media: Widen<MediaStrings>;
   dm: Widen<DmStrings>;
   apply: Widen<ApplyStrings>;
   creator: Widen<CreatorStrings>;
@@ -101,7 +99,6 @@ function resolve(lang: Lang): I18n {
     booking: pick(booking, lang),
     chat: pick(chat, lang),
     live: pick(live, lang),
-    media: pick(media, lang),
     dm: pick(dm, lang),
     apply: pick(apply, lang),
     creator: pick(creator, lang),
