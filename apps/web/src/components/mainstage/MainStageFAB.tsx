@@ -3,13 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { getMainStageState } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
-interface MainStageFABProps {
-  /** When the FloatingMainStagePlayer PiP widget is also visible, push the
-   *  FAB up so they don't overlap in the bottom-right corner. */
-  isPipVisible?: boolean;
-}
-
-export function MainStageFAB({ isPipVisible = false }: MainStageFABProps) {
+export function MainStageFAB() {
   const navigate = useNavigate();
   const location = useLocation();
   const t = useI18n();
@@ -47,7 +41,7 @@ export function MainStageFAB({ isPipVisible = false }: MainStageFABProps) {
 
   return (
     <div
-      className={`fixed right-4 z-[40] animate-in fade-in slide-in-from-bottom-4 duration-500 transition-[bottom] ${isPipVisible ? "bottom-56" : "bottom-32"}`}
+      className="fixed right-4 z-[40] bottom-32 animate-in fade-in slide-in-from-bottom-4 duration-500"
     >
       <div className="main-stage-cristina-float">
         <button

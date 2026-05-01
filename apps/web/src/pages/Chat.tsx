@@ -78,6 +78,7 @@ import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
 import { NearbyBadge } from "@/components/NearbyBadge";
 import { SpotlightStrip } from "@/components/SpotlightStrip";
 import { getUpcomingEvents, getMainStageState, type MainStageState } from "@/lib/api";
+import { MainStageLiveBanner } from "@/components/mainstage/MainStageLiveBanner";
 import type { EventItem } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
 import { EventDetailModal } from "@/components/events";
@@ -3540,6 +3541,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         </div>
         {/* Actions handled by SpotlightStrip + icon */}
       </div>
+
+      {/* Main Stage live banner — slim row, only when broadcasting */}
+      <MainStageLiveBanner />
 
       {/* Main Stage entry — horizontal stage-themed strip */}
       <MainStageStrip />
