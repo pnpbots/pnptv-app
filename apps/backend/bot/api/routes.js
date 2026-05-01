@@ -3505,6 +3505,9 @@ app.get('/api/webapp/live/schedule/notify/:slotId', requireSessionAuth, asyncHan
 app.get('/api/webapp/admin/live/channels', adminGuard, asyncHandler(webappLiveController.listChannels));
 app.post('/api/webapp/admin/live/assign-channel', adminGuard, asyncHandler(webappLiveController.assignChannel));
 
+// Stream health — owner-only, polls Restreamer process state + Redis viewer count
+app.get('/api/webapp/streams/:streamId/health', requireSessionAuth, streamHealthLimiter, asyncHandler(webappLiveController.getStreamHealth));
+
 // ────────────────────────────────────────────────────────────────────────
 // Admin: payment operations (replaces SSH-only backfill scripts)
 // ────────────────────────────────────────────────────────────────────────
@@ -3821,6 +3824,16 @@ const grokStreamChatLimiter = rateLimit({
   max: 5,
   keyGenerator: (req) => String(req.session?.user?.id || req.ip),
   message: { success: false, error: 'Too many generation requests. Wait before regenerating.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Rate limiter for stream health polling — 30 req/min per user (5s poll × 30 = 2.5 min headroom)
+const streamHealthLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => `user:${req.session?.user?.id || req.ip}`,
+  message: { success: false, error: 'Too many stream health requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -9461,6 +9474,82 @@ app.post(
   roleGuard('admin', 'superadmin'),
   mainStageAdminLimiter,
   mainStageController.moderate
+);
+
+// ── Main Stage Guest Invites ──────────────────────────────────────────────────
+
+const mainStageInvitesController = require('./controllers/mainStageInvitesController');
+
+// 30 invite creations / admin / min — burst-generous since admins may generate
+// several during an event setup.
+const mainStageInviteCreateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many invite requests. Slow down.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// 5 guest-token mints / IP / min — guards against scrapers burning invite slots.
+const mainStageGuestTokenLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many join attempts. Please wait a minute.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// 30 preview lookups / IP / min
+const mainStagePreviewLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many preview requests.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Admin CRUD — auth + role guard
+app.post(
+  '/api/main-stage/invites',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageInviteCreateLimiter,
+  mainStageInvitesController.createInvite
+);
+
+app.get(
+  '/api/main-stage/invites',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageAdminLimiter,
+  mainStageInvitesController.listInvites
+);
+
+app.delete(
+  '/api/main-stage/invites/:id',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageAdminLimiter,
+  mainStageInvitesController.revokeInvite
+);
+
+// Public — no auth required; geo-block applies (not in exemption list)
+app.get(
+  '/api/main-stage/invites/preview/:code',
+  mainStagePreviewLimiter,
+  mainStageInvitesController.previewInvite
+);
+
+app.post(
+  '/api/main-stage/guest-token',
+  mainStageGuestTokenLimiter,
+  mainStageInvitesController.guestToken
 );
 
 // ── End Main Stage ────────────────────────────────────────────────────────────

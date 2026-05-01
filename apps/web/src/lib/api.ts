@@ -6384,6 +6384,72 @@ export function shuffleMainStageCammers(): Promise<{ success: boolean }> {
   return request("/api/main-stage/shuffle", { method: "POST" });
 }
 
+// ── Main Stage Guest Invites ──────────────────────────────────────────────────
+
+export interface MainStageInvite {
+  id: number;
+  code: string;
+  url: string;
+  label: string | null;
+  expiresAt: string;
+  maxUses: number;
+  usedCount?: number;
+  isExpired?: boolean;
+  isRevoked?: boolean;
+  createdAt?: string;
+}
+
+export interface MainStageInvitePreview {
+  valid: boolean;
+  hostName?: string | null;
+  expiresAt?: string;
+}
+
+export interface MainStageGuestTokenResponse {
+  token: string;
+  livekitUrl: string;
+  roomName: string;
+  role: "guest";
+  identity: string;
+}
+
+export function createMainStageInvite(opts: {
+  label?: string;
+  expiresInHours?: number;
+  maxUses?: number;
+}): Promise<MainStageInvite> {
+  return request<{ success: boolean; invite: MainStageInvite }>(
+    "/api/main-stage/invites",
+    { method: "POST", body: opts }
+  ).then((res) => res.invite);
+}
+
+export function listMainStageInvites(): Promise<MainStageInvite[]> {
+  return request<{ success: boolean; invites: MainStageInvite[] }>(
+    "/api/main-stage/invites"
+  ).then((res) => res.invites);
+}
+
+export function revokeMainStageInvite(id: number): Promise<void> {
+  return request(`/api/main-stage/invites/${id}`, { method: "DELETE" }).then(() => undefined);
+}
+
+export function previewMainStageInvite(code: string): Promise<MainStageInvitePreview> {
+  return request<{ success: boolean } & MainStageInvitePreview>(
+    `/api/main-stage/invites/preview/${encodeURIComponent(code)}`
+  ).then(({ valid, hostName, expiresAt }) => ({ valid, hostName, expiresAt }));
+}
+
+export function redeemMainStageInvite(
+  code: string,
+  displayName: string
+): Promise<MainStageGuestTokenResponse> {
+  return request<{ success: boolean } & MainStageGuestTokenResponse>(
+    "/api/main-stage/guest-token",
+    { method: "POST", body: { code, displayName } }
+  );
+}
+
 // ── Cash-out / USDT off-ramp ──────────────────────────────────────────────────
 
 export interface CashoutBalance {
@@ -6734,6 +6800,24 @@ export async function listChannelVideos(channelId: number) {
 export async function getChannelTagTaxonomy(channelId: number) {
   return request<{ success: boolean; tags: string[] }>(
     `/api/webapp/channels/${channelId}/videos/tag-taxonomy`,
+  );
+}
+
+// ── Stream Health ──────────────────────────────────────────────────────────
+export interface StreamHealth {
+  inputState: "connected" | "idle" | "failed" | "unknown";
+  bitrateKbps: number;
+  fps: number;
+  viewerCount: number;
+  lastInputAt: string | null;
+  uptimeSeconds: number;
+  errorMessage?: string;
+  error?: string;
+}
+
+export async function getStreamHealth(streamId: string): Promise<StreamHealth> {
+  return request<StreamHealth>(
+    `/api/webapp/streams/${encodeURIComponent(streamId)}/health`,
   );
 }
 

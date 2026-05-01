@@ -2237,6 +2237,161 @@ const saveMixerPreset = async (req, res) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// GET /api/webapp/streams/:streamId/health
+// Owner-only stream health endpoint. Returns RTMP input signal state, bitrate,
+// fps, viewer count, and uptime derived from the Restreamer process record plus
+// the live:viewers Redis key.
+//
+// Auth: requireSessionAuth (session cookie). Owner or admin/superadmin only.
+// Redis cache key: stream:health:{channelRef} — 4-second TTL to absorb polling.
+// ---------------------------------------------------------------------------
+const getStreamHealth = async (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  const user = req.session.user;
+  const { streamId } = req.params;
+
+  // Sanitize the incoming streamId (channel ref)
+  const channelRef = sanitizeRefId(streamId);
+  if (!channelRef) {
+    return res.status(400).json({ success: false, error: 'Invalid stream ID' });
+  }
+
+  const redis = getRedis();
+
+  // ── Redis cache (4s TTL) to absorb 5s frontend polling ──────────────────
+  const cacheKey = `stream:health:${channelRef}`;
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      try {
+        return res.json(JSON.parse(cached));
+      } catch {
+        // corrupt cache — fall through to fresh fetch
+      }
+    }
+  } catch {
+    // Redis unavailable — fall through
+  }
+
+  // ── Ownership check ───────────────────────────────────────────────────────
+  // Admins / superadmins bypass the ownership check.
+  const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+  if (!isAdmin) {
+    try {
+      const { rows } = await getPool().query(
+        'SELECT live_channel FROM users WHERE id = $1',
+        [user.id]
+      );
+      const ownerChannelRef = rows[0]?.live_channel;
+      if (!ownerChannelRef || ownerChannelRef !== channelRef) {
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+    } catch (dbErr) {
+      logger.error('getStreamHealth: DB ownership check failed', { userId: user.id, channelRef, err: dbErr.message });
+      return res.status(500).json({ success: false, error: 'Internal error' });
+    }
+  }
+
+  // ── Fetch Restreamer process + viewer count in parallel ───────────────────
+  let proc = null;
+  let viewerCount = 0;
+
+  try {
+    const [procResult, viewerRaw] = await Promise.allSettled([
+      restreamerService.getProcess(channelRef),
+      redis.get(`live:viewers:${channelRef}`).catch(() => null),
+    ]);
+
+    if (procResult.status === 'fulfilled') {
+      proc = procResult.value;
+    } else if (procResult.reason?.restreamerUnavailable) {
+      // Restreamer unreachable — return graceful unknown state (HTTP 200)
+      const body = { inputState: 'unknown', bitrateKbps: 0, fps: 0, viewerCount: 0, lastInputAt: null, uptimeSeconds: 0, error: 'restreamer_unreachable' };
+      try { await redis.set(cacheKey, JSON.stringify(body), 'EX', 4); } catch { /* ignore */ }
+      return res.json(body);
+    } else {
+      throw procResult.reason;
+    }
+
+    if (viewerRaw.status === 'fulfilled') {
+      viewerCount = Math.max(0, parseInt(viewerRaw.value, 10) || 0);
+    }
+  } catch (err) {
+    if (err?.restreamerUnavailable) {
+      const body = { inputState: 'unknown', bitrateKbps: 0, fps: 0, viewerCount: 0, lastInputAt: null, uptimeSeconds: 0, error: 'restreamer_unreachable' };
+      try { await redis.set(cacheKey, JSON.stringify(body), 'EX', 4); } catch { /* ignore */ }
+      return res.json(body);
+    }
+    logger.error('getStreamHealth: unexpected error', { channelRef, err: err.message });
+    return res.status(500).json({ success: false, error: 'Internal error' });
+  }
+
+  // ── Build health payload from process data ────────────────────────────────
+  // Restreamer v3 process state structure:
+  //   proc.state.exec          — 'running' | 'idle' | 'failed' | 'killed' | 'starting'
+  //   proc.state.runtime       — FFmpeg progress object (populated when running)
+  //     .speed                 — playback speed multiplier (string like "1x")
+  //     .fps                   — current frames per second (number)
+  //     .bitrate               — input bitrate string (e.g. "2500.0kbits/s")
+  //     .time                  — duration processed in seconds
+  //   proc.state.last_logline  — last FFmpeg log line (error info when failed)
+
+  const execState = proc?.state?.exec || 'idle';
+  const runtime = proc?.state?.runtime || {};
+
+  // Derive inputState
+  let inputState;
+  if (execState === 'running') {
+    inputState = 'connected';
+  } else if (execState === 'failed' || execState === 'killed') {
+    inputState = 'failed';
+  } else {
+    inputState = 'idle';
+  }
+
+  // Parse bitrate string: "2500.0kbits/s" → 2500
+  let bitrateKbps = 0;
+  if (runtime.bitrate) {
+    const bitrateStr = String(runtime.bitrate);
+    const match = bitrateStr.match(/([\d.]+)\s*kbits/i);
+    if (match) {
+      bitrateKbps = Math.round(parseFloat(match[1]));
+    }
+  }
+
+  // Parse fps
+  const fps = typeof runtime.fps === 'number' ? Math.round(runtime.fps) : 0;
+
+  // Uptime: proc.state.runtime.time is seconds elapsed in the current process run
+  const uptimeSeconds = typeof runtime.time === 'number' ? Math.floor(runtime.time) : 0;
+
+  // lastInputAt: if process is running we set it to now; otherwise null
+  const lastInputAt = execState === 'running' ? new Date().toISOString() : null;
+
+  // Error message from last log line (failed state)
+  const errorMessage = execState === 'failed' || execState === 'killed'
+    ? (proc?.state?.last_logline || 'Stream process terminated unexpectedly')
+    : undefined;
+
+  const body = {
+    inputState,
+    bitrateKbps,
+    fps,
+    viewerCount,
+    lastInputAt,
+    uptimeSeconds,
+    ...(errorMessage !== undefined ? { errorMessage } : {}),
+  };
+
+  // Cache for 4 seconds
+  try { await redis.set(cacheKey, JSON.stringify(body), 'EX', 4); } catch { /* ignore */ }
+
+  return res.json(body);
+};
+
 module.exports = {
   listStreams,
   getRtmpKey,
@@ -2271,4 +2426,5 @@ module.exports = {
   saveScenePreset,
   getMixerPresets,
   saveMixerPreset,
+  getStreamHealth,
 };

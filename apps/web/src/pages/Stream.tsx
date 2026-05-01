@@ -34,6 +34,7 @@ import {
   getSlotTicketStatus,
   buySlotTicket,
 } from "@/lib/api";
+import { StreamHealthPanel } from "@/components/stream/StreamHealthPanel";
 import { type LivePlayerStats } from "@/components/LivePlayer";
 
 function extractChannelRef(streamId: string): string | null {
@@ -1591,6 +1592,11 @@ export default function Stream() {
       </div>
 
       <div className={`space-y-3 ${isTheaterMode ? "max-w-7xl mx-auto px-4 sm:px-6 pb-8" : ""}`}>
+        {/* ── Stream health panel — owner-only, shows RTMP signal status ─── */}
+        {isStreamOwner && streamId && (
+          <StreamHealthPanel streamId={streamId} />
+        )}
+
         {/* ── Host mode banner — shown when offline but hosting another channel ── */}
       {!stream.isLive && hostedStream && (
         <div className="rounded-xl border border-pnp-accent/30 bg-pnp-accent/5 px-4 py-3 flex items-center justify-between gap-3">
