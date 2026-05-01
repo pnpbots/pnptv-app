@@ -90,9 +90,16 @@ class PushNotificationService {
     };
 
     try {
-      await webpush.sendNotification(pushSubscription, payloadJson, {
-        TTL: 86400, // 24 hours
-      });
+      // 8s wall-clock cap per push. Without this, a slow FCM/Apple gateway
+      // response can hang the surrounding Promise.all batch indefinitely
+      // (web-push has no internal timeout). One stuck endpoint should not
+      // block delivery to the rest of the audience.
+      await Promise.race([
+        webpush.sendNotification(pushSubscription, payloadJson, { TTL: 86400 }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(Object.assign(new Error('push send timeout'), { statusCode: 408 })), 8_000)
+        ),
+      ]);
       return true;
     } catch (err) {
       if (err.statusCode === 410 || err.statusCode === 404) {
