@@ -35,12 +35,15 @@ const WELLNESS_PATH_ALLOWLIST = [
   /^\/api\/webapp\/hangouts\/wellness$/,
   /^\/api\/webapp\/hangouts\/groups\/[^/]+$/, // group detail — shell only shows wellness groups
   /^\/api\/webapp\/hangouts\/groups\/[^/]+\/join$/, // joining a wellness hangout
-  /^\/api\/webapp\/hangouts\/groups\/[^/]+\/messages$/, // controller will check is_wellness
+  /^\/api\/webapp\/hangouts\/groups\/[^/]+\/messages$/, // getMessages enforces is_wellness when wellness mode is active
   /^\/api\/webapp\/hangouts\/groups\/[^/]+\/members$/,
 
   // Cristina AI — wellness/support assistant
   /^\/api\/webapp\/cristina(\/|$)/,
   /^\/api\/cristina(\/|$)/,
+
+  // Harm-reduction use tracker — always accessible so users can log even on break
+  /^\/api\/webapp\/use-tracker(\/|$)/,
 
   // Educational / harm-reduction surfaces
   /^\/api\/webapp\/wellness\/library(\/|$)/,
@@ -66,10 +69,12 @@ function isPathAllowed(path) {
  */
 async function getStatus(userId) {
   const { rows } = await query(
-    `SELECT wellness_mode_until, wellness_mode_disable_requested_at FROM users WHERE id = $1`,
+    `SELECT wellness_mode_until, wellness_mode_disable_requested_at,
+            wellness_days_accumulated
+     FROM users WHERE id = $1`,
     [userId]
   );
-  if (!rows[0]) return { active: false, until: null, indefinite: false, disableRequestedAt: null, hoursLeftUntilDisableAllowed: null };
+  if (!rows[0]) return { active: false, until: null, indefinite: false, disableRequestedAt: null, hoursLeftUntilDisableAllowed: null, wellnessDaysAccumulated: 0 };
 
   const until = rows[0].wellness_mode_until;
   const disableRequested = rows[0].wellness_mode_disable_requested_at;
@@ -92,6 +97,7 @@ async function getStatus(userId) {
     indefinite,
     disableRequestedAt: disableRequested ? new Date(disableRequested).toISOString() : null,
     hoursLeftUntilDisableAllowed: hoursLeft,
+    wellnessDaysAccumulated: rows[0].wellness_days_accumulated || 0,
   };
 }
 
@@ -107,10 +113,13 @@ async function enable(userId, durationDays) {
   }
 
   // Clear any pending disable — re-enabling cancels a cooling-off countdown.
+  // Stamp started_at only when beginning a fresh session (COALESCE keeps the
+  // original start time if the user is just extending an active session).
   if (durationDays === null) {
     await query(
       `UPDATE users SET wellness_mode_until = 'infinity'::timestamptz,
                         wellness_mode_disable_requested_at = NULL,
+                        wellness_mode_started_at = COALESCE(wellness_mode_started_at, NOW()),
                         updated_at = NOW()
        WHERE id = $1`,
       [userId]
@@ -122,6 +131,7 @@ async function enable(userId, durationDays) {
                           COALESCE(wellness_mode_until, NOW()),
                           NOW() + ($2 || ' days')::interval),
                         wellness_mode_disable_requested_at = NULL,
+                        wellness_mode_started_at = COALESCE(wellness_mode_started_at, NOW()),
                         updated_at = NOW()
        WHERE id = $1`,
       [userId, durationDays]
@@ -161,10 +171,13 @@ async function disable(userId) {
     return status;
   }
 
-  // Cooling-off elapsed — actually disable
+  // Cooling-off elapsed — actually disable. Accumulate days from this session.
   await query(
     `UPDATE users SET wellness_mode_until = NULL,
                       wellness_mode_disable_requested_at = NULL,
+                      wellness_days_accumulated = wellness_days_accumulated +
+                        GREATEST(1, CEIL(EXTRACT(EPOCH FROM NOW() - COALESCE(wellness_mode_started_at, NOW())) / 86400)::int),
+                      wellness_mode_started_at = NULL,
                       updated_at = NOW()
      WHERE id = $1`,
     [userId]

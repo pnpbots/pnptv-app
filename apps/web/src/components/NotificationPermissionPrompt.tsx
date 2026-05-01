@@ -8,6 +8,20 @@ const DISMISS_DAYS = 3;
 const IOS_DISMISS_DAYS = 7;
 const SHOW_DELAY_MS = 4000;
 
+// BeforeInstallPromptEvent isn't in the standard lib types; define a minimal shape.
+type DeferredInstallPrompt = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
+function isStandalonePWA(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia?.("(display-mode: standalone)").matches ||
+    (window.navigator as unknown as { standalone?: boolean }).standalone === true
+  );
+}
+
 function isDismissed(key: string): boolean {
   const until = localStorage.getItem(key);
   if (!until) return false;
@@ -42,10 +56,28 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
   const [mode, setMode] = useState<"browser" | "ios">("browser");
   const [requesting, setRequesting] = useState(false);
   const [granted, setGranted] = useState(false);
+  const [installEvent, setInstallEvent] = useState<DeferredInstallPrompt | null>(null);
+  const [installing, setInstalling] = useState(false);
 
   // Store the setTimeout handle so it can be cleared on unmount
   const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Capture the native install prompt as soon as the browser fires it.
+  // Stash the event so the user can trigger it later from inside the modal.
+  useEffect(() => {
+    const onBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallEvent(e as DeferredInstallPrompt);
+    };
+    const onAppInstalled = () => setInstallEvent(null);
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener("appinstalled", onAppInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", onAppInstalled);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -63,10 +95,14 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
       };
     }
 
-    // Standard browser path
-    if (!("Notification" in window)) return;
-    if (Notification.permission === "granted") return;
-    if (Notification.permission === "denied") return;
+    // Standard browser path. Show if either:
+    //   (a) we can still ask for push permission (default state), OR
+    //   (b) we have a captured install prompt and the app isn't installed
+    //       (Android/Chromium not yet added to home screen).
+    const canAskPush =
+      "Notification" in window && Notification.permission === "default";
+    const canOfferInstall = !!installEvent && !isStandalonePWA();
+    if (!canAskPush && !canOfferInstall) return;
     if (isDismissed(DISMISS_KEY)) return;
 
     setMode("browser");
@@ -76,7 +112,24 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
       if (showTimerRef.current) clearTimeout(showTimerRef.current);
       if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, installEvent]);
+
+  const handleInstall = useCallback(async () => {
+    if (!installEvent) return;
+    setInstalling(true);
+    try {
+      await installEvent.prompt();
+      const choice = await installEvent.userChoice;
+      if (choice.outcome === "accepted") {
+        setInstallEvent(null);
+        // Stay on the modal so we can chain into the push opt-in next.
+      }
+    } catch {
+      // User cancelled or browser threw — silently fall through to push opt-in.
+    } finally {
+      setInstalling(false);
+    }
+  }, [installEvent]);
 
   const handleAllow = useCallback(async () => {
     setRequesting(true);
@@ -152,10 +205,10 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
           {/* Title + description */}
           <div className="text-center">
             <h2 id="notif-prompt-title" className="text-lg font-bold text-pnp-textPrimary">
-              Install PNPtv for notifications
+              {t.notifications.iosTitle}
             </h2>
             <p className="text-sm mt-2 text-pnp-textSecondary">
-              On iPhone and iPad, push notifications only work when PNPtv is added to your Home Screen.
+              {t.notifications.iosDescription}
             </p>
           </div>
 
@@ -164,27 +217,26 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
             <li className="flex items-start gap-3">
               <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/80 text-xs font-bold flex items-center justify-center">1</span>
               <span className="flex items-center gap-1.5 pt-0.5">
-                Tap the Share button
+                {t.notifications.iosStep1Text}
                 <svg className="w-4 h-4 inline-block" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-label="Share">
                   <path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" />
                   <polyline points="16 6 12 2 8 6" />
                   <line x1="12" y1="2" x2="12" y2="15" />
                 </svg>
-                at the bottom of Safari
               </span>
             </li>
             <li className="flex items-start gap-3">
               <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/80 text-xs font-bold flex items-center justify-center">2</span>
-              <span className="pt-0.5">Scroll and tap <strong className="text-white">Add to Home Screen</strong></span>
+              <span className="pt-0.5">{t.notifications.iosStep2Pre} <strong className="text-white">{t.notifications.iosStep2Bold}</strong></span>
             </li>
             <li className="flex items-start gap-3">
               <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/80 text-xs font-bold flex items-center justify-center">3</span>
-              <span className="pt-0.5">Open PNPtv from your Home Screen and allow notifications when prompted</span>
+              <span className="pt-0.5">{t.notifications.iosStep3Text}</span>
             </li>
           </ol>
 
           <p className="text-[11px] text-pnp-textSecondary/70 text-center">
-            Requires iOS 16.4 or later.
+            {t.notifications.iosVersion}
           </p>
 
           {/* Dismiss only — there's no Allow button here, the user has to install */}
@@ -192,7 +244,7 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
             onClick={handleDismiss}
             className="w-full py-2.5 rounded-xl text-sm font-medium transition-colors hover:bg-white/5 active:bg-white/10 text-pnp-textSecondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-surface"
           >
-            Got it
+            {t.notifications.iosGotIt}
           </button>
         </div>
       </div>
@@ -292,10 +344,27 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
         {/* Buttons */}
         {!granted && (
           <div className="space-y-2">
+            {installEvent && !isStandalonePWA() && (
+              <button
+                onClick={handleInstall}
+                disabled={installing}
+                className="w-full py-3 rounded-xl text-white font-semibold text-sm disabled:opacity-50 transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-surface btn-gradient flex items-center justify-center gap-2"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="5" y="2" width="14" height="20" rx="3" />
+                  <path d="M9 18h6" />
+                </svg>
+                {installing ? t.notifications.installing : t.notifications.installApp}
+              </button>
+            )}
             <button
               onClick={handleAllow}
               disabled={requesting}
-              className="w-full py-3 rounded-xl text-white font-semibold text-sm disabled:opacity-50 transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-surface btn-gradient"
+              className={`w-full py-3 rounded-xl font-semibold text-sm disabled:opacity-50 transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-surface ${
+                installEvent && !isStandalonePWA()
+                  ? "bg-white/8 border border-white/15 text-white hover:bg-white/12"
+                  : "btn-gradient text-white"
+              }`}
             >
               {requesting ? t.notifications.enabling : t.notifications.enableButton}
             </button>

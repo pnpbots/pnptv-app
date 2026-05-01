@@ -27,12 +27,16 @@ import {
   enableWellnessMode,
   disableWellnessMode,
   cancelDisableWellnessMode,
+  getUseStats,
+  logUse,
   type ReferralStats,
   type BlockedUser,
   type EraseAccountReceipt,
   type TokenPurchase,
   type UpcomingBooking,
   type WellnessModeStatus,
+  type UseTrackerData,
+  type UseTypeStats,
 } from "@/lib/api";
 import IdentityConnections from "@/components/profile/IdentityConnections";
 
@@ -76,21 +80,44 @@ function Toggle({
 }
 
 // ── Section wrapper ───────────────────────────────────────────────────────────
+//
+// Collapsible-by-default. Built on the native <details> element so it gets
+// keyboard / screen-reader behavior + reduced-motion compliance for free.
+// Pass `defaultOpen` to override (used for "Account" so the page still has
+// something visible when first opened).
 
 function Section({
   title,
   children,
+  defaultOpen = false,
 }: {
   title: string;
   children: React.ReactNode;
+  defaultOpen?: boolean;
 }) {
   return (
-    <div className="glass-card-sm p-5 mt-4">
-      <h2 className="text-sm font-semibold text-white mb-4 tracking-wide uppercase opacity-60">
-        {title}
-      </h2>
-      {children}
-    </div>
+    <details className="glass-card-sm mt-4 group" open={defaultOpen}>
+      <summary
+        className="flex items-center justify-between p-5 cursor-pointer list-none select-none"
+      >
+        <h2 className="text-sm font-semibold text-white tracking-wide uppercase opacity-60">
+          {title}
+        </h2>
+        <svg
+          className="w-4 h-4 text-white/50 transition-transform group-open:rotate-180 flex-shrink-0"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2.2}
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
+      </summary>
+      <div className="px-5 pb-5">
+        {children}
+      </div>
+    </details>
   );
 }
 
@@ -109,7 +136,7 @@ function fmtUntil(iso: string | null, indefinite: boolean): string {
   });
 }
 
-function WellnessModeCard() {
+export function WellnessModeCard() {
   const [status, setStatus] = useState<WellnessModeStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -120,8 +147,8 @@ function WellnessModeCard() {
     try {
       const r = await getWellnessMode();
       setStatus(r);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
+    } catch {
+      setError("Couldn't reach the server — try refreshing.");
     } finally {
       setLoading(false);
     }
@@ -135,8 +162,8 @@ function WellnessModeCard() {
       const days = duration === "indefinite" ? null : duration;
       const r = await enableWellnessMode(days);
       setStatus(r);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to enable");
+    } catch {
+      setError("Something got in the way — give it a moment and try again. You've got this.");
     } finally {
       setBusy(false);
     }
@@ -147,8 +174,8 @@ function WellnessModeCard() {
     try {
       const r = await disableWellnessMode();
       setStatus(r);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to disable");
+    } catch {
+      setError("Couldn't reach the server — your Wellness Mode is still protecting you. Try again in a moment.");
     } finally {
       setBusy(false);
     }
@@ -159,8 +186,8 @@ function WellnessModeCard() {
     try {
       const r = await cancelDisableWellnessMode();
       setStatus(r);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to cancel");
+    } catch {
+      setError("Couldn't reach the server — your cooling-off period is still running. Try again in a moment.");
     } finally {
       setBusy(false);
     }
@@ -182,7 +209,7 @@ function WellnessModeCard() {
 
   return (
     <div className="glass-card-sm p-5 mt-4" style={{ borderColor: status.active ? "rgba(94,209,196,0.4)" : undefined }}>
-      <h2 className="text-sm font-semibold text-white mb-4 tracking-wide uppercase opacity-60 flex items-center gap-2">
+      <h2 className="text-sm font-semibold text-white mb-1 tracking-wide uppercase opacity-60 flex items-center gap-2">
         <span>🧘 Wellness Break Mode</span>
         {status.active && (
           <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded" style={{ background: "rgba(94,209,196,0.2)", color: "#5ED1C4" }}>
@@ -190,6 +217,12 @@ function WellnessModeCard() {
           </span>
         )}
       </h2>
+      {(status.wellnessDaysAccumulated ?? 0) > 0 && (
+        <p className="text-xs mb-4" style={{ color: "#5ED1C4" }}>
+          {status.wellnessDaysAccumulated} day{status.wellnessDaysAccumulated === 1 ? "" : "s"} of self-care, total. That's real.
+        </p>
+      )}
+      {(status.wellnessDaysAccumulated ?? 0) === 0 && <div className="mb-4" />}
 
       {!status.active && (
         <>
@@ -295,7 +328,263 @@ function WellnessModeCard() {
       )}
 
       {error && (
-        <p className="text-xs text-red-400 mt-3">{error}</p>
+        <p className="text-xs mt-3 leading-relaxed" style={{ color: "rgba(94,209,196,0.8)" }}>{error}</p>
+      )}
+    </div>
+  );
+}
+
+// ── Use Tracker Card ──────────────────────────────────────────────────────────
+//
+// Private harm-reduction log. Two tap-to-log buttons (slam / smoke) with
+// today / 7d / 30d counts and a 30-day usage grid. Data is per-user only —
+// never surfaced on a public profile, never shared, never aggregated.
+
+function relTime(iso: string | null): string {
+  if (!iso) return "never";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  const m = Math.floor(ms / 60_000);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// Days elapsed since the most recent log of either type. Returns null if the
+// user has never logged anything. Used to drive the encouragement phrase.
+export function daysSinceLastParty(data: UseTrackerData | null): number | null {
+  if (!data) return null;
+  const candidates = [data.slam.lastAt, data.smoke.lastAt].filter(Boolean) as string[];
+  if (candidates.length === 0) return null;
+  const latest = Math.max(...candidates.map(s => new Date(s).getTime()));
+  const elapsedMs = Date.now() - latest;
+  return Math.max(0, Math.floor(elapsedMs / 86_400_000));
+}
+
+// Self-control encouragement copy, calibrated to days-since-last-log. The
+// tone shifts as time goes on — supportive at the start, affirming further
+// out, and never shaming. Never "punishes" a relapse.
+export function encouragementPhrase(days: number | null): { headline: string; body: string; accent: string } {
+  if (days === null) {
+    return {
+      headline: "Track your first session whenever you're ready.",
+      body: "No streaks to chase, just awareness.",
+      accent: "rgba(255,255,255,0.5)",
+    };
+  }
+  if (days === 0) {
+    return {
+      headline: "Logged today.",
+      body: "Be gentle with yourself — rest is part of the play. Your body needs time to be ready for the next one.",
+      accent: "#FBBF24",
+    };
+  }
+  if (days <= 2) {
+    return {
+      headline: `It's been ${days} day${days === 1 ? "" : "s"} since you last partied.`,
+      body: "Your body's still recovering — keep listening to it. Sleep, water, food. The next one will hit better when you're rested.",
+      accent: "#A78BFA",
+    };
+  }
+  if (days <= 6) {
+    return {
+      headline: `${days} days since your last party.`,
+      body: "Your body's getting strong again — that's worth something. Whatever you choose next, you've given yourself the runway.",
+      accent: "#5ED1C4",
+    };
+  }
+  if (days <= 29) {
+    return {
+      headline: `${days} days clear.`,
+      body: "Real progress. Whatever comes next, you've earned the rest. You're proving to yourself you've got control over this.",
+      accent: "#5ED1C4",
+    };
+  }
+  return {
+    headline: `${days} days. That's huge.`,
+    body: "Whether this is a long break or a permanent shift, you're doing something most people never even attempt. Keep going.",
+    accent: "#5ED1C4",
+  };
+}
+
+const TRACKER_KINDS = [
+  { key: "slam" as const, label: "Slam", icon: "💉", accent: "#A78BFA" }, // violet
+  { key: "smoke" as const, label: "Smoke", icon: "💨", accent: "#FBBF24" }, // amber
+];
+
+function StatCell({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="flex flex-col items-center">
+      <div className="text-base font-bold text-white tabular-nums leading-tight">{value}</div>
+      <div className="text-[10px] uppercase tracking-wider text-white/40">{label}</div>
+    </div>
+  );
+}
+
+function UsageGrid({ recentDays, accent }: { recentDays: boolean[]; accent: string }) {
+  // recentDays[0] = today, recentDays[29] = 29 days ago.
+  // Render right-to-left so today sits on the right edge — most recent at the
+  // user's glance line, 30d-ago anchored at the start.
+  const days = recentDays.slice(0, 30);
+  while (days.length < 30) days.push(false);
+  const ordered = [...days].reverse(); // index 0 = 29d ago, index 29 = today
+  return (
+    <div className="flex gap-[3px] flex-wrap" aria-label="30-day usage history">
+      {ordered.map((used, i) => (
+        <div
+          key={i}
+          className="h-2 w-2 rounded-sm"
+          style={{
+            background: used ? accent : "rgba(255,255,255,0.07)",
+            boxShadow: used ? `0 0 4px ${accent}80` : undefined,
+          }}
+          title={i === 29 ? "today" : `${29 - i} day${29 - i === 1 ? "" : "s"} ago`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function TrackerKindRow({
+  kind,
+  stats,
+  busy,
+  onLog,
+}: {
+  kind: typeof TRACKER_KINDS[number];
+  stats: UseTypeStats | undefined;
+  busy: boolean;
+  onLog: () => void;
+}) {
+  const safe: UseTypeStats = stats ?? { lastAt: null, today: 0, week: 0, month: 0, recentDays: [] };
+  return (
+    <div
+      className="rounded-xl p-3"
+      style={{
+        background: "rgba(255,255,255,0.03)",
+        border: `1px solid ${kind.accent}30`,
+      }}
+    >
+      <div className="flex items-center gap-3 mb-3">
+        <button
+          onClick={onLog}
+          disabled={busy}
+          className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-all disabled:opacity-50"
+          style={{
+            background: `${kind.accent}20`,
+            border: `1px solid ${kind.accent}50`,
+            color: kind.accent,
+          }}
+          aria-label={`Log a ${kind.label.toLowerCase()}`}
+        >
+          <span className="text-lg">{kind.icon}</span>
+          <span>Log {kind.label}</span>
+        </button>
+        <div className="flex-1 grid grid-cols-4 gap-2 ml-auto">
+          <StatCell label="today" value={safe.today} />
+          <StatCell label="7d" value={safe.week} />
+          <StatCell label="30d" value={safe.month} />
+          <StatCell label="last" value={relTime(safe.lastAt)} />
+        </div>
+      </div>
+      <UsageGrid recentDays={safe.recentDays} accent={kind.accent} />
+    </div>
+  );
+}
+
+export function UseTrackerCard() {
+  const [data, setData] = useState<UseTrackerData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<"slam" | "smoke" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await getUseStats();
+      setData({ slam: r.slam, smoke: r.smoke });
+    } catch {
+      setError("Couldn't load your tracker — try refreshing.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const onLog = async (type: "slam" | "smoke") => {
+    setBusy(type); setError(null);
+    try {
+      const r = await logUse(type);
+      setData({ slam: r.slam, smoke: r.smoke });
+    } catch {
+      setError("Couldn't save that — your last tap didn't go through. Try again.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="glass-card-sm p-5 mt-4">
+        <h2 className="text-sm font-semibold text-white mb-4 tracking-wide uppercase opacity-60">Use Tracker</h2>
+        <div className="h-24 rounded bg-white/5 animate-pulse" />
+      </div>
+    );
+  }
+
+  const total = (data?.slam.month ?? 0) + (data?.smoke.month ?? 0);
+
+  return (
+    <div className="glass-card-sm p-5 mt-4">
+      <div className="flex items-baseline justify-between mb-1">
+        <h2 className="text-sm font-semibold text-white tracking-wide uppercase opacity-60">Use Tracker</h2>
+        <span className="text-[10px] uppercase tracking-wider text-white/30">Private</span>
+      </div>
+      <p className="text-xs text-white/50 mb-4 leading-relaxed">
+        A private space to track your use — no one else sees this. Awareness is the first step in harm reduction.
+      </p>
+
+      {/* Self-control encouragement — adapts to days since last log */}
+      {(() => {
+        const days = daysSinceLastParty(data);
+        const phrase = encouragementPhrase(days);
+        return (
+          <div
+            className="rounded-xl px-3 py-2.5 mb-3 leading-relaxed"
+            style={{
+              background: `linear-gradient(135deg, ${phrase.accent}18, ${phrase.accent}08)`,
+              border: `1px solid ${phrase.accent}30`,
+            }}
+          >
+            <p className="text-sm font-semibold" style={{ color: phrase.accent }}>{phrase.headline}</p>
+            <p className="text-xs text-white/70 mt-0.5">{phrase.body}</p>
+          </div>
+        );
+      })()}
+
+      <div className="space-y-3">
+        {TRACKER_KINDS.map((k) => (
+          <TrackerKindRow
+            key={k.key}
+            kind={k}
+            stats={data?.[k.key]}
+            busy={busy !== null}
+            onLog={() => onLog(k.key)}
+          />
+        ))}
+      </div>
+
+      {total === 0 && (
+        <p className="text-xs text-white/40 mt-3 italic leading-relaxed">
+          Nothing logged in the last 30 days. Tap a button when you want to log — no judgment, no streaks to break.
+        </p>
+      )}
+
+      {error && (
+        <p className="text-xs mt-3 leading-relaxed" style={{ color: "rgba(251,191,36,0.85)" }}>{error}</p>
       )}
     </div>
   );
@@ -856,9 +1145,40 @@ export default function Settings() {
 
       {/* ── Page title ── */}
       <h1 className="text-xl font-bold text-white mb-2">{p.settingsTitle}</h1>
+      <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary)" }}>
+        {p.settingsSubtitle || "Tap a section to expand it."}
+      </p>
 
-      {/* ── Account ─────────────────────────────────────────────────────── */}
-      <Section title={p.accountSection}>
+      {/* ── Self-Care Center promo (extracted from Settings) ───────────── */}
+      <button
+        type="button"
+        onClick={() => navigate("/self-care")}
+        className="w-full text-left rounded-2xl p-4 mb-4 transition-all hover:scale-[1.005] active:scale-[0.99]"
+        style={{
+          background: "linear-gradient(135deg, rgba(94,209,196,0.10), rgba(167,139,250,0.06))",
+          border: "1px solid rgba(94,209,196,0.25)",
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl"
+            style={{ background: "rgba(94,209,196,0.15)", border: "1px solid rgba(94,209,196,0.35)" }}
+            aria-hidden
+          >
+            🧘
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-white">{p.selfCarePromoTitle || "Self-Care Center"}</p>
+            <p className="text-xs leading-relaxed" style={{ color: "rgba(255,255,255,0.65)" }}>
+              {p.selfCarePromoBody || "Wellness Mode, Use Tracker, crisis resources, and Cristina — moved to its own space."}
+            </p>
+          </div>
+          <span className="text-white/30 text-lg leading-none" aria-hidden>›</span>
+        </div>
+      </button>
+
+      {/* ── Account (default-open so the page has something visible) ───── */}
+      <Section title={p.accountSection} defaultOpen>
         {profileLoading ? (
           <div className="space-y-3">
             <div className="h-4 rounded bg-white/10 animate-pulse w-40" />
@@ -1971,8 +2291,8 @@ export default function Settings() {
         )}
       </Section>
 
-      {/* ── Wellness Mode ─────────────────────────────────────────────────── */}
-      <WellnessModeCard />
+      {/* Wellness Mode + Use Tracker were here — now live exclusively in
+          /self-care. The promo card at the top of Settings links there. */}
 
       {/* ── Data & Privacy ───────────────────────────────────────────────── */}
       <Section title={p.dataPrivacySection}>

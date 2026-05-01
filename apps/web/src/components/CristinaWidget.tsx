@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { RadioPanel, EqualizerBars } from "@/components/RadioWidget";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useAuth } from "@/hooks/useAuth";
@@ -15,6 +15,7 @@ import {
   addTicketMessage,
   verifyPaymentWithCristina,
   activateMeruCode,
+  logUse,
   type SupportTicket,
   type TicketMessage,
   type TicketCategory,
@@ -350,7 +351,49 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   const { support: t } = useI18n();
   const { isPlaying: musicIsPlaying } = useMusicPlayer();
   const location = useLocation();
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(mode === "page");
+
+  // Self-Care satellite FAB — sits below Cristina, expands into a 3-button
+  // radial fan: auto-log slam, auto-log smoke, jump to /self-care. The
+  // satellite is always rendered when the parent FAB is rendered (i.e. when
+  // the widget is in widget mode and not currently open). Expansion state and
+  // toast confirmation are local to this widget.
+  const [selfCareFanOpen, setSelfCareFanOpen] = useState(false);
+  const [selfCareToast, setSelfCareToast] = useState<{ kind: "slam" | "smoke"; until: number } | null>(null);
+  const selfCareBusyRef = useRef<"slam" | "smoke" | null>(null);
+  const handleSelfCareLog = useCallback(async (kind: "slam" | "smoke") => {
+    if (selfCareBusyRef.current) return;
+    selfCareBusyRef.current = kind;
+    try {
+      await logUse(kind);
+      setSelfCareToast({ kind, until: Date.now() + 1800 });
+    } catch {
+      // Silent — failures here would be jarring. The Settings card surfaces
+      // load/save problems; this FAB is fire-and-forget on purpose.
+    } finally {
+      selfCareBusyRef.current = null;
+      setSelfCareFanOpen(false);
+    }
+  }, []);
+  // Auto-clear toast after its lifetime.
+  useEffect(() => {
+    if (!selfCareToast) return;
+    const remaining = selfCareToast.until - Date.now();
+    const t = window.setTimeout(() => setSelfCareToast(null), Math.max(0, remaining));
+    return () => window.clearTimeout(t);
+  }, [selfCareToast]);
+  // Close the fan when clicking outside it.
+  useEffect(() => {
+    if (!selfCareFanOpen) return;
+    const onDocClick = () => setSelfCareFanOpen(false);
+    // Defer one tick so the open-click doesn't immediately close.
+    const t = window.setTimeout(() => document.addEventListener("click", onDocClick), 0);
+    return () => {
+      window.clearTimeout(t);
+      document.removeEventListener("click", onDocClick);
+    };
+  }, [selfCareFanOpen]);
   const [activeTab, setActiveTab] = useState<CristinaTab>("ai");
 
   // FAB auto-cycles through tab colors when closed
@@ -853,6 +896,25 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
             <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-500 ring-2 ring-[rgba(20,20,30,0.98)] animate-pulse" />
           )}
         </button>
+
+        {/* Self-Care satellite FAB — always visible below Cristina. Tap to fan
+            out three quick actions: log slam, log smoke, open Self-Care
+            Center. Stays out of the way (smaller, calmer color) so it never
+            competes with Cristina's primary FAB visually. */}
+        <SelfCareSatellite
+          isLeftCorner={isLeftCorner}
+          fanOpen={selfCareFanOpen}
+          toast={selfCareToast}
+          onToggle={() => {
+            if (dragState.current.moved) return;
+            setSelfCareFanOpen((v) => !v);
+          }}
+          onLog={handleSelfCareLog}
+          onOpenCenter={() => {
+            setSelfCareFanOpen(false);
+            navigate("/self-care");
+          }}
+        />
       </div>
     );
   }
@@ -1999,3 +2061,138 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
 }
 
 export default CristinaWidget;
+
+// ── Self-Care Satellite FAB ──────────────────────────────────────────────────
+//
+// Always-visible mini circle below Cristina. Tap to expand into three radial
+// action buttons:
+//  · Slam     — auto-logs one event (no confirmation; one-tap by design)
+//  · Smoke    — auto-logs one event
+//  · Center   — navigates to /self-care
+//
+// Lives in this file (no new file) because it's only used inside Cristina's
+// FAB stack and never reused elsewhere. Respects prefers-reduced-motion.
+
+interface SelfCareSatelliteProps {
+  isLeftCorner: boolean;
+  fanOpen: boolean;
+  toast: { kind: "slam" | "smoke"; until: number } | null;
+  onToggle: () => void;
+  onLog: (kind: "slam" | "smoke") => void;
+  onOpenCenter: () => void;
+}
+
+function SelfCareSatellite({
+  isLeftCorner,
+  fanOpen,
+  toast,
+  onToggle,
+  onLog,
+  onOpenCenter,
+}: SelfCareSatelliteProps) {
+  const reducedMotion = typeof window !== "undefined"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Three actions arranged in a vertical column above the satellite when
+  // open. Vertical (not radial) keeps everything inside the corner safe-area
+  // on mobile and avoids overlap with Cristina above.
+  const actions = [
+    { key: "slam" as const, icon: "💉", label: "Slam", color: "#A78BFA", onClick: () => onLog("slam") },
+    { key: "smoke" as const, icon: "💨", label: "Smoke", color: "#FBBF24", onClick: () => onLog("smoke") },
+    { key: "center" as const, icon: "🧭", label: "Self-Care Center", color: "#5ED1C4", onClick: onOpenCenter },
+  ];
+
+  return (
+    <div
+      className={`relative flex flex-col ${isLeftCorner ? "items-start" : "items-end"} gap-2`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Toast confirmation — appears briefly after a successful auto-log */}
+      {toast && (
+        <div
+          className={`absolute ${isLeftCorner ? "left-12" : "right-12"} -top-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap shadow-lg`}
+          style={{
+            background: "rgba(20,20,30,0.95)",
+            border: "1px solid rgba(94,209,196,0.35)",
+            color: "#5ED1C4",
+            animation: reducedMotion ? undefined : "fadeInUp 180ms ease-out",
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          ✓ Logged · {toast.kind}
+        </div>
+      )}
+
+      {/* Action fan — three vertically stacked buttons. Animated in/out. */}
+      {fanOpen && (
+        <div className={`flex flex-col gap-1.5 ${isLeftCorner ? "items-start" : "items-end"}`}>
+          {actions.map((a, i) => (
+            <button
+              key={a.key}
+              onClick={a.onClick}
+              className={`flex items-center gap-2 rounded-full pl-2 pr-3 py-1.5 shadow-lg transition-transform active:scale-95 ${isLeftCorner ? "flex-row" : "flex-row-reverse"}`}
+              style={{
+                background: "rgba(20,20,30,0.95)",
+                border: `1px solid ${a.color}80`,
+                color: a.color,
+                animation: reducedMotion
+                  ? undefined
+                  : `selfCareFanIn 200ms ease-out ${i * 40}ms backwards`,
+              }}
+              aria-label={a.label}
+            >
+              <span
+                className="w-7 h-7 rounded-full flex items-center justify-center text-base"
+                style={{ background: `${a.color}25`, border: `1px solid ${a.color}50` }}
+              >
+                {a.icon}
+              </span>
+              <span className="text-xs font-semibold">{a.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Satellite circle — always visible. Smaller than Cristina (36 vs 48). */}
+      <button
+        onClick={onToggle}
+        className="relative w-9 h-9 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-90"
+        style={{
+          background: fanOpen
+            ? "linear-gradient(135deg, #5ED1C4, #4FB3A8)"
+            : "rgba(20,20,30,0.92)",
+          border: "1px solid rgba(94,209,196,0.55)",
+          transform: fanOpen ? "rotate(45deg)" : "none",
+          transitionProperty: "transform, background",
+          transitionDuration: reducedMotion ? "0ms" : "200ms",
+        }}
+        aria-label={fanOpen ? "Close Self-Care actions" : "Open Self-Care actions"}
+        aria-expanded={fanOpen}
+      >
+        <span
+          className="text-base"
+          style={{
+            transform: fanOpen ? "rotate(-45deg)" : "none",
+            transitionProperty: "transform",
+            transitionDuration: reducedMotion ? "0ms" : "200ms",
+          }}
+        >
+          {fanOpen ? "✕" : "🧘"}
+        </span>
+      </button>
+
+      {/* Animation keyframes */}
+      <style>{`
+        @keyframes selfCareFanIn {
+          from { opacity: 0; transform: translateY(8px) scale(0.92); }
+          to   { opacity: 1; transform: translateY(0)   scale(1); }
+        }
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}

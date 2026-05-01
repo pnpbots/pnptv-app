@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
-import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
+import { Outlet, NavLink, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
@@ -13,7 +13,6 @@ import { useNearbyToggle } from "@/components/NearbyBadge";
 import { getMessageThreads, getHangoutGroups, markThreadAsRead, getProfile, getMainStageState, type MessageThread, type HangoutGroup, type MainStageState } from "@/lib/api";
 import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
-import { LandingPage } from "@/pages/LandingPage";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import { MainStageFAB } from "@/components/mainstage/MainStageFAB";
@@ -748,18 +747,26 @@ export function Layout() {
 
   const navSections = [
     {
-      label: "SOCIAL",
+      label: t.nav.sectionSocial || "SOCIAL",
       links: [
-        { to: "/?view=feed", label: "PNP Feed" },
-        { to: "/channels", label: "PNP Channels" },
+        { to: "/?view=feed", label: t.nav.feed || "PNP Feed" },
+        { to: "/channels", label: t.nav.channels || "PNP Channels" },
         { to: "/main-stage", label: "Main Stage" },
       ],
     },
     {
-      label: "CONNECT",
+      label: t.nav.sectionConnect || "CONNECT",
       links: [
-        { to: "/?view=hangouts", label: "PNP Hangouts" },
-        { to: "/dm", label: "Inbox" },
+        { to: "/?view=hangouts", label: t.nav.hangouts || "PNP Hangouts" },
+        { to: "/nearby", label: t.nav.nearby || "PNP Connect" },
+        { to: "/dm", label: t.nav.inbox || "Inbox" },
+      ],
+    },
+    {
+      label: t.nav.sectionYou || "YOU",
+      links: [
+        { to: "/self-care", label: t.nav.selfCare || "Self-Care Center" },
+        { to: "/my-access", label: t.nav.myAccess || "My Access" },
       ],
     },
   ];
@@ -891,9 +898,11 @@ export function Layout() {
     );
   }
 
-  // Unauthenticated: render the marketing landing page without any app chrome
+  // Unauthenticated: send users to the real login screen, preserving where
+  // they were trying to go so post-login return still works.
   if (!isAuthenticated) {
-    return <LandingPage />;
+    const returnTo = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to={`/login?returnTo=${encodeURIComponent(returnTo)}`} replace />;
   }
 
   return (
@@ -1196,98 +1205,127 @@ export function Layout() {
               </button>
             </div>
 
-            {/* Scrollable link menu */}
+            {/* Scrollable link menu — native <details> for collapsibles
+                 (built-in a11y, prefers-reduced-motion-respecting, no JS state). */}
             <nav className="flex-1 overflow-y-auto" aria-label="Mobile navigation">
-              <div className="px-3 py-3 space-y-4">
+              <div className="px-3 py-3 space-y-2">
 
-                {/* ── Navigation ──────────────────────────────────────────── */}
-                <div>
-                  <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Navigation</p>
-                  {[
-                    { to: "/?view=feed", label: "PNP Feed" },
-                    { to: "/main-stage", label: "Main Stage", isLive: true },
-                    { to: "/channels", label: "PNP Channels" },
-                    { to: "/?view=hangouts", label: "PNP Hangouts" },
-                    { to: "/nearby", label: "PNP Connect" },
-                  ].map((link) => (
-                    <NavLink
-                      key={link.to}
-                      to={link.to}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className={({ isActive }: { isActive: boolean }) =>
-                        `flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                        }`
-                      }
-                    >
-                      <span>{link.label}</span>
-                      {link.isLive && (
-                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
-                          <span className="w-1 h-1 rounded-full bg-white animate-pulse" />
-                          LIVE
-                        </span>
-                      )}
-                    </NavLink>
-                  ))}
-                </div>
-
-                {/* ── Account ──────────────────────────────────────────── */}
-                <div>
-                  <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Account</p>
-                  {[
-                    { to: "/my-access", label: t.nav.myAccess || "My Access" },
-                    { to: "/settings", label: t.nav.settings || "Settings" },
-                    { to: "/support", label: t.nav.help || "Help & Support" },
-                  ].map((link) => (
-                    <NavLink
-                      key={link.to}
-                      to={link.to}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className={({ isActive }: { isActive: boolean }) =>
-                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                        }`
-                      }
-                    >
-                      {link.label}
-                    </NavLink>
-                  ))}
-                </div>
-
-                {/* ── Community ────────────────────────────────────────── */}
-                <div>
-                  <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Community</p>
-                  {[
-                    { to: "/community-resources", label: "Community Resources" },
-                    { to: "/about", label: "About PNPtv!" },
-                    { to: "/blog", label: "Blog" },
-                  ].map((link) => (
-                    <NavLink
-                      key={link.to}
-                      to={link.to}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className={({ isActive }: { isActive: boolean }) =>
-                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                        }`
-                      }
-                    >
-                      {link.label}
-                    </NavLink>
-                  ))}
-                </div>
-
-                {/* ── Legal ────────────────────────────────────────────── */}
-                <div>
-                  <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Legal</p>
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 px-2">
+                {/* ── Navigation (open by default) ────────────────────────── */}
+                <details open className="group">
+                  <summary className="flex items-center justify-between px-2 py-1.5 cursor-pointer list-none select-none">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">{t.nav.navigation || "Navigation"}</span>
+                    <svg className="w-3.5 h-3.5 text-pnp-textSecondary/50 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+                  </summary>
+                  <div className="mt-1 space-y-0.5">
                     {[
-                      { to: "/terms", label: "Terms" },
-                      { to: "/privacy", label: "Privacy" },
-                      { to: "/community-guidelines", label: "Guidelines" },
-                      { to: "/content-policy", label: "Content Policy" },
+                      { to: "/?view=feed", label: t.nav.feed || "PNP Feed" },
+                      { to: "/main-stage", label: "Main Stage", isLive: true },
+                      { to: "/channels", label: t.nav.channels || "PNP Channels" },
+                      { to: "/?view=hangouts", label: t.nav.hangouts || "PNP Hangouts" },
+                      { to: "/nearby", label: t.nav.nearby || "PNP Connect" },
+                    ].map((link) => (
+                      <NavLink
+                        key={link.to}
+                        to={link.to}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={({ isActive }: { isActive: boolean }) =>
+                          `flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                          }`
+                        }
+                      >
+                        <span>{link.label}</span>
+                        {link.isLive && (
+                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
+                            <span className="w-1 h-1 rounded-full bg-white animate-pulse" />
+                            LIVE
+                          </span>
+                        )}
+                      </NavLink>
+                    ))}
+                  </div>
+                </details>
+
+                {/* ── You (Inbox, Self-Care, Access, Settings) — collapsed ── */}
+                <details className="group">
+                  <summary className="flex items-center justify-between px-2 py-1.5 cursor-pointer list-none select-none">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">{t.nav.you || "You"}</span>
+                    <svg className="w-3.5 h-3.5 text-pnp-textSecondary/50 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+                  </summary>
+                  <div className="mt-1 space-y-0.5">
+                    {[
+                      { to: "/dm", label: t.nav.inbox || "Inbox", badge: dmUnread > 0 ? (dmUnread > 9 ? "9+" : String(dmUnread)) : null },
+                      { to: "/self-care", label: t.nav.selfCare || "Self-Care Center", emoji: "🧘" },
+                      { to: "/my-access", label: t.nav.myAccess || "My Access" },
+                      { to: "/settings", label: t.nav.settings || "Settings" },
+                    ].map((link) => (
+                      <NavLink
+                        key={link.to}
+                        to={link.to}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={({ isActive }: { isActive: boolean }) =>
+                          `flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                          }`
+                        }
+                      >
+                        <span className="flex items-center gap-2">
+                          {link.emoji && <span aria-hidden="true">{link.emoji}</span>}
+                          {link.label}
+                        </span>
+                        {link.badge && (
+                          <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#D4007A] text-white text-[10px] font-bold flex items-center justify-center">
+                            {link.badge}
+                          </span>
+                        )}
+                      </NavLink>
+                    ))}
+                  </div>
+                </details>
+
+                {/* ── Help & Community — collapsed ─────────────────────── */}
+                <details className="group">
+                  <summary className="flex items-center justify-between px-2 py-1.5 cursor-pointer list-none select-none">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">{t.nav.helpCommunity || "Help & Community"}</span>
+                    <svg className="w-3.5 h-3.5 text-pnp-textSecondary/50 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+                  </summary>
+                  <div className="mt-1 space-y-0.5">
+                    {[
+                      { to: "/support", label: t.nav.help || "Help & Support" },
+                      { to: "/community-resources", label: t.nav.communityResources || "Community Resources" },
+                      { to: "/about", label: t.nav.about || "About PNPtv!" },
+                      { to: "/blog", label: t.nav.blog || "Blog" },
+                    ].map((link) => (
+                      <NavLink
+                        key={link.to}
+                        to={link.to}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={({ isActive }: { isActive: boolean }) =>
+                          `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                          }`
+                        }
+                      >
+                        {link.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                </details>
+
+                {/* ── Legal — collapsed ────────────────────────────────── */}
+                <details className="group">
+                  <summary className="flex items-center justify-between px-2 py-1.5 cursor-pointer list-none select-none">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">{t.nav.legal || "Legal"}</span>
+                    <svg className="w-3.5 h-3.5 text-pnp-textSecondary/50 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+                  </summary>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 px-2">
+                    {[
+                      { to: "/terms", label: t.nav.terms || "Terms" },
+                      { to: "/privacy", label: t.nav.privacy || "Privacy" },
+                      { to: "/community-guidelines", label: t.nav.guidelines || "Guidelines" },
+                      { to: "/content-policy", label: t.nav.contentPolicy || "Content Policy" },
                       { to: "/dmca", label: "DMCA" },
-                      { to: "/refunds", label: "Refunds" },
+                      { to: "/refunds", label: t.nav.refunds || "Refunds" },
                     ].map((link) => (
                       <NavLink
                         key={link.to}
@@ -1303,41 +1341,51 @@ export function Layout() {
                       </NavLink>
                     ))}
                   </div>
-                </div>
+                </details>
 
-                {/* ── Admin (conditional) ───────────────────────────────── */}
+                {/* ── Admin (conditional, collapsed) ─────────────────────── */}
                 {isAdmin && (
-                  <div>
-                    <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Admin</p>
-                    <NavLink
-                      to="/admin"
-                      onClick={() => setMobileMenuOpen(false)}
-                      className={({ isActive }: { isActive: boolean }) =>
-                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                        }`
-                      }
-                    >
-                      {t.nav.admin}
-                    </NavLink>
-                  </div>
+                  <details className="group">
+                    <summary className="flex items-center justify-between px-2 py-1.5 cursor-pointer list-none select-none">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">{t.nav.admin}</span>
+                      <svg className="w-3.5 h-3.5 text-pnp-textSecondary/50 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+                    </summary>
+                    <div className="mt-1 space-y-0.5">
+                      <NavLink
+                        to="/admin"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={({ isActive }: { isActive: boolean }) =>
+                          `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                          }`
+                        }
+                      >
+                        {t.nav.adminDashboard || "Admin Dashboard"}
+                      </NavLink>
+                    </div>
+                  </details>
                 )}
 
                 {user?.creator_status === "active" && (
-                  <div>
-                    <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Creator</p>
-                    <NavLink
-                      to="/creators"
-                      onClick={() => setMobileMenuOpen(false)}
-                      className={({ isActive }: { isActive: boolean }) =>
-                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                        }`
-                      }
-                    >
-                      {t.nav.creatorStudio || "Creator Studio"}
-                    </NavLink>
-                  </div>
+                  <details className="group">
+                    <summary className="flex items-center justify-between px-2 py-1.5 cursor-pointer list-none select-none">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">{t.nav.creatorStudio || "Creator"}</span>
+                      <svg className="w-3.5 h-3.5 text-pnp-textSecondary/50 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+                    </summary>
+                    <div className="mt-1 space-y-0.5">
+                      <NavLink
+                        to="/creators"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={({ isActive }: { isActive: boolean }) =>
+                          `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            isActive ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                          }`
+                        }
+                      >
+                        {t.nav.creatorStudio || "Creator Studio"}
+                      </NavLink>
+                    </div>
+                  </details>
                 )}
 
                 {/* ── Sign out ──────────────────────────────────────────── */}
@@ -1349,7 +1397,7 @@ export function Layout() {
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
                     </svg>
-                    Sign out
+                    {t.nav.signOut || "Sign out"}
                   </button>
                 </div>
 

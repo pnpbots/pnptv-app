@@ -48,6 +48,7 @@ function HangoutInviteRedirect() {
   }
   return <Navigate to={target} replace />;
 }
+
 import { Layout } from "@/components/Layout";
 import { AdminLayout } from "@/components/admin/AdminLayout";
 import { ModuleLoader } from "@/components/ModuleLoader";
@@ -118,6 +119,8 @@ const MeruLinks = lazy(() => import("@/pages/admin/MeruLinks"));
 const DuplicateAccounts = lazy(() => import("@/pages/admin/DuplicateAccounts"));
 const PaymentHealth = lazy(() => import("@/pages/admin/PaymentHealth"));
 const WellnessShell = lazy(() => import("@/pages/WellnessShell"));
+const SelfCareCenter = lazy(() => import("@/pages/SelfCareCenter"));
+const CristinaPage = lazy(() => import("@/components/CristinaWidget").then((m) => ({ default: m.CristinaWidget })));
 const PrimeChannel = lazy(() => import("@/pages/admin/PrimeChannel"));
 const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
 
@@ -364,6 +367,27 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <WellnessShell />
+          </ModuleLoader>
+        ),
+      },
+      {
+        // Self-Care Center — dedicated home for harm-reduction & wellness
+        // tools. Hosts the Use Tracker, Wellness Break Mode, Cristina link,
+        // crisis resources, and future tools (sleep, mood, accountability).
+        path: "self-care",
+        element: (
+          <ModuleLoader>
+            <SelfCareCenter />
+          </ModuleLoader>
+        ),
+      },
+      {
+        // Cristina AI page — full-screen mode. Also accessible in wellness mode
+        // (the API guard allowlist covers /api/webapp/cristina/*).
+        path: "cristina",
+        element: (
+          <ModuleLoader>
+            <CristinaPage mode="page" />
           </ModuleLoader>
         ),
       },
@@ -679,25 +703,15 @@ export const router = createBrowserRouter([
   },
   {
     path: "/login",
-    element: <Layout />,
-    children: [
-      {
-        index: true,
-        element: (
-          <ModuleLoader>
-            <Home />
-          </ModuleLoader>
-        ),
-      },
-    ],
-  },
-  {
-    path: "/auth",
     element: (
       <ModuleLoader>
         <LoginPage />
       </ModuleLoader>
     ),
+  },
+  {
+    path: "/auth",
+    element: <Navigate to="/login" replace />,
   },
   {
     path: "/join",
@@ -819,6 +833,9 @@ export const router = createBrowserRouter([
       </ModuleLoader>
     ),
   },
+  // Public alias — /lifetime → /lifetime100. Lives OUTSIDE of <Layout /> so
+  // the auth-gate redirect (Layout.tsx:895) never fires for unauthenticated users.
+  { path: "/lifetime", element: <Navigate to="/lifetime100" replace /> },
   {
     path: "/page/:slug",
     element: (

@@ -243,6 +243,61 @@ export default function StatsOverview() {
         )}
       </div>
 
+      <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4 space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">
+            Identity Health
+          </h2>
+          <p className="text-xs text-pnp-textSecondary mt-1">
+            Live comparison between PNPtv app accounts and Authentik identities.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+          <StatCard
+            label="App Users"
+            value={stats?.appUsers ?? 0}
+            icon={<UsersIcon />}
+            variant="default"
+            subtitle="All rows in app users table"
+          />
+          <StatCard
+            label="Active App Users"
+            value={stats?.activeAppUsers ?? 0}
+            icon={<UsersIcon />}
+            variant="success"
+            subtitle="Active app accounts"
+          />
+          <StatCard
+            label="Linked App Users"
+            value={stats?.linkedAppUsers ?? 0}
+            icon={<UsersIcon />}
+            variant="warning"
+            subtitle="App users with valid UUID pnptv_id"
+          />
+          <StatCard
+            label="Authentik Users"
+            value={stats?.authentikUsers ?? 0}
+            icon={<UsersIcon />}
+            variant="default"
+            subtitle="Live Authentik identities"
+          />
+          <StatCard
+            label="Authentik Orphans"
+            value={stats?.orphanAuthentikIdentities ?? 0}
+            icon={<TrendDownIcon />}
+            variant={(stats?.orphanAuthentikIdentities ?? 0) > 0 ? "danger" : "success"}
+            subtitle={(stats?.orphanAuthentikIdentities ?? 0) > 0 ? "Needs cleanup" : "No orphan identities"}
+          />
+          <StatCard
+            label="Missing Authentik"
+            value={stats?.appUsersMissingAuthentikIdentity ?? 0}
+            icon={<TrendDownIcon />}
+            variant={(stats?.appUsersMissingAuthentikIdentity ?? 0) > 0 ? "warning" : "success"}
+            subtitle={(stats?.appUsersMissingAuthentikIdentity ?? 0) > 0 ? "App users without identity" : "Fully linked"}
+          />
+        </div>
+      </div>
+
       {/* Revenue Chart */}
       {dailyRevenue.length > 0 && (
         <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">

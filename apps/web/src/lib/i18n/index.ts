@@ -34,6 +34,8 @@ import { communityResources, type CommunityResourcesStrings } from "./communityR
 import { shop, type ShopStrings } from "./shop";
 import { notifications, type NotificationsStrings } from "./notifications";
 import { admin, type AdminStrings } from "./admin";
+import { wellness, type WellnessStrings } from "./wellness";
+import { home, type HomeStrings } from "./home";
 
 export type Lang = "en" | "es" | "pt" | "zh" | "zhTW" | "fr" | "de" | "th" | "it" | "tr" | "ru" | "nl" | "vi" | "ja" | "id" | "ar";
 
@@ -75,6 +77,8 @@ export interface I18n {
   shop: Widen<ShopStrings>;
   notifications: Widen<NotificationsStrings>;
   admin: Widen<AdminStrings>;
+  wellness: Widen<WellnessStrings>;
+  home: Widen<HomeStrings>;
 }
 
 /** Safely index an i18n module, falling back to "en" for unsupported languages. */
@@ -114,6 +118,8 @@ function resolve(lang: Lang): I18n {
     shop: pick(shop, lang),
     notifications: pick(notifications, lang),
     admin: pick(admin, lang),
+    wellness: pick(wellness, lang),
+    home: pick(home, lang),
   } as I18n;
 }
 
