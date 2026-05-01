@@ -225,12 +225,12 @@ fi
 info "Verifying routing ..."
 FAILURES=0
 
-# pnptv.app — bare-domain redirect to app.pnptv.app (catch-all is a 301).
+# pnptv.app — SPA catch-all
 SPA_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "https://pnptv.app/subscribe" 2>/dev/null || echo "000")
-if [ "$SPA_CODE" = "301" ] || [ "$SPA_CODE" = "302" ]; then
-    info "  pnptv.app/subscribe → $SPA_CODE (redirect to app.pnptv.app — expected)"
+if [ "$SPA_CODE" = "200" ]; then
+    info "  pnptv.app/subscribe → $SPA_CODE (SPA)"
 else
-    error "  pnptv.app/subscribe → $SPA_CODE (expected 301/302 redirect)"
+    error "  pnptv.app/subscribe → $SPA_CODE (expected 200)"
     FAILURES=$((FAILURES + 1))
 fi
 

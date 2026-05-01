@@ -575,6 +575,11 @@ services:
       PORT: 3001
       POSTGRES_HOST: pg-pnptv
       REDIS_HOST: redis-pnptv
+      PG_AUTH_HOST: pg-authentik
+      PG_AUTH_PORT: 5432
+      PG_AUTH_DB: ${PG_AUTH_DB}
+      PG_AUTH_USER: ${PG_AUTH_USER}
+      PG_AUTH_PASSWORD: ${PG_AUTH_PASSWORD}
       DIRECTUS_UPLOADS_DIR: /directus-uploads
       BOT_LOCK_ENABLED: "false"
       BTCPAY_URL: http://btcpay-server:23000
@@ -908,4 +913,3 @@ services:
           cpus: '1.0'
           memory: 1g
     # No healthcheck — BTCPay .NET runtime image has no curl/wget
-
