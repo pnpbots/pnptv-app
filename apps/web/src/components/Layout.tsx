@@ -16,7 +16,6 @@ import { useI18n } from "@/lib/i18n";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import { MainStageFAB } from "@/components/mainstage/MainStageFAB";
-import { MainStageProvider } from "@/components/mainstage/MainStageProvider";
 import { SelfCamFloater } from "@/components/mainstage/SelfCamFloater";
 
 const SIDEBAR_DM_BASE = import.meta.env.VITE_API_URL || "";
@@ -1613,8 +1612,9 @@ export function Layout() {
 function FloatingWidgets({ showCompact }: { showCompact: boolean }) {
   return (
     <>
-      <MainStageFAB />
+      {/* Persistent self-cam preview for cammers navigating off /main-stage */}
       <SelfCamFloater />
+      <MainStageFAB />
       <Suspense fallback={null}>
         <CristinaWidget compact={showCompact} />
       </Suspense>

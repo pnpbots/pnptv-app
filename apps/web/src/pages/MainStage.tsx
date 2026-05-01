@@ -9,6 +9,7 @@ import {
 } from "@livekit/components-react";
 import { ConnectionState, RoomEvent, Track } from "livekit-client";
 import { useMainStage, type MainStageState } from "@/hooks/useMainStage";
+import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -21,7 +22,6 @@ import { MEDIA_IDENTITY } from "@/components/mainstage/CinemaGrid";
 import { useI18n } from "@/lib/i18n";
 import { GUEST_SESSION_KEY } from "@/pages/MainStageGuestJoin";
 import { getLocalizedTips, type MainStageTip } from "@/lib/i18n/mainStageTips";
-import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
 
 // ── Guest credential shape (written by MainStageGuestJoin, consumed once here) ─
 
@@ -473,25 +473,28 @@ export default function MainStage() {
     state:       hookedState,
     isAdmin,
     canBeCammer: hookedCanBeCammer,
-    token:       hookedToken,
-    livekitUrl:  hookedLivekitUrl,
     role:        hookedRole,
     loading:     hookedLoading,
     error:       hookedError,
     joinAsCammer,
     leaveCammer,
+    leave,
     shuffle,
     admin,
   } = useMainStage();
 
-  // Resolve effective values: guest path wins if present
+  // Pull the shared Room instance from the provider. Members use the
+  // provider-managed connection (persistent across route changes). Guests
+  // bypass the provider entirely and use their own short-lived <LiveKitRoom>
+  // with the guest token.
+  const { room } = useMainStageRoom();
+
+  // Resolve effective values: guest path overrides everything from the hook.
   const state       = hookedState;
-  const token       = isGuestMode ? guestCredsRef.current!.token       : hookedToken;
-  const livekitUrl  = isGuestMode ? guestCredsRef.current!.livekitUrl  : hookedLivekitUrl;
-  const role        = isGuestMode ? ("guest" as const)                  : hookedRole;
-  const loading     = isGuestMode ? false                               : hookedLoading;
-  const error       = isGuestMode ? null                                : hookedError;
-  const canBeCammer = isGuestMode ? false : hookedCanBeCammer;
+  const role        = isGuestMode ? ("guest" as const) : hookedRole;
+  const loading     = isGuestMode ? false              : hookedLoading;
+  const error       = isGuestMode ? null               : hookedError;
+  const canBeCammer = isGuestMode ? false              : hookedCanBeCammer;
 
   const [adminOpen, setAdminOpen] = useState(false);
   const [connState, setConnState] = useState<ConnectionState>(ConnectionState.Connecting);
@@ -656,9 +659,9 @@ export default function MainStage() {
     );
   }
 
-  // Guests have a token but state arrives async via socket; show a connecting
-  // spinner rather than the "unavailable" error until state hydrates.
-  if (isGuestMode && token && !state) {
+  // Guests need a connecting spinner while state arrives async via socket;
+  // showing the "unavailable" error before state hydrates would be wrong.
+  if (isGuestMode && guestCredsRef.current && !state) {
     return (
       <div
         className="fixed inset-0 flex flex-col bg-pnp-background"
@@ -680,7 +683,7 @@ export default function MainStage() {
     );
   }
 
-  if (!token || !state) {
+  if (!state) {
     return (
       <div className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center bg-pnp-background">
         <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-pnp-purple/[0.12] border border-pnp-purple/25">
@@ -948,20 +951,36 @@ export default function MainStage() {
         </div>
       )}
 
+      {/*
+        The Room is created once in MainStageProvider and stays connected
+        across route changes. We pass the external Room instance here so
+        LiveKitRoom acts only as a React context bridge — it does NOT call
+        room.connect() or room.disconnect() when this component mounts/unmounts.
+        connect={false} is required to prevent LiveKitRoom from taking over
+        the connection lifecycle on unmount.
+      */}
       <LiveKitRoom
-        key="main-stage-prime"
-        token={token}
-        serverUrl={livekitUrl}
-        connect={true}
-        // Mic device is acquired when user becomes a cammer (matches video
-        // behaviour). Viewers stay at audio=false so no device prompt fires.
-        audio={isCammer || isGuestMode}
-        video={isCammer || isGuestMode}
-        options={{
-          adaptiveStream: true,
-          dynacast: true,
-          publishDefaults: { simulcast: true },
-        }}
+        key={isGuestMode ? "main-stage-guest" : "main-stage-prime"}
+        // Guests bypass the persistent provider — they connect a fresh Room
+        // with their short-lived guest token. Members use the provider's
+        // shared Room so the connection survives route changes.
+        {...(isGuestMode
+          ? {
+              token: guestCredsRef.current!.token,
+              serverUrl: guestCredsRef.current!.livekitUrl,
+              connect: true,
+              audio: true,
+              video: true,
+              options: {
+                adaptiveStream: true,
+                dynacast: true,
+                publishDefaults: { simulcast: true },
+              },
+            }
+          : {
+              room,
+              connect: false,
+            })}
         className="contents"
         onMediaDeviceFailure={(failure) => {
           // Surface the specific reason so users know why their cam didn't
