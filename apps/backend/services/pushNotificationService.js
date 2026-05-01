@@ -46,6 +46,7 @@ class PushNotificationService {
     }
 
     webpush.setVapidDetails(subject, publicKey, privateKey);
+    PushNotificationService._initialized = true;
     logger.info('[PushNotificationService] VAPID details configured successfully.');
   }
 
@@ -58,6 +59,28 @@ class PushNotificationService {
    * @param {{ title: string, body: string, url?: string, icon?: string, tag?: string }} opts
    * @returns {string} JSON string
    */
+  /**
+   * Has VAPID been configured on the web-push singleton?
+   * One-off broadcast scripts that don't go through the full bot startup
+   * must call initialize() themselves; without it every send returns false
+   * silently. Internal helper used by sendToUsers/sendToTier/sendToAll to
+   * fail loudly instead of swallowing 0 deliveries.
+   */
+  static _ensureInitialized() {
+    if (!webpush) return;
+    // web-push exposes the configured details internally — read them via
+    // the same code path setVapidDetails uses. We can't introspect directly,
+    // but we cache a flag on the class.
+    if (!PushNotificationService._initialized) {
+      logger.warn(
+        '[PushNotificationService] sendNotification called before initialize() — auto-initializing now. ' +
+        'Long-lived processes should call PushNotificationService.initialize() at startup.'
+      );
+      PushNotificationService.initialize();
+      PushNotificationService._initialized = true;
+    }
+  }
+
   static _buildPayload({ title, body, url, icon, tag }) {
     const payload = {
       title: title || 'PNPtv!',
@@ -130,6 +153,7 @@ class PushNotificationService {
    */
   static async sendToUser(userId, opts) {
     if (!webpush) return 0;
+    PushNotificationService._ensureInitialized();
 
     try {
       const result = await query(
@@ -159,6 +183,7 @@ class PushNotificationService {
    */
   static async sendToAll(opts) {
     if (!webpush) return 0;
+    PushNotificationService._ensureInitialized();
 
     try {
       const result = await query(
@@ -201,6 +226,7 @@ class PushNotificationService {
    */
   static async sendToTier(tier, opts) {
     if (!webpush) return 0;
+    PushNotificationService._ensureInitialized();
 
     try {
       const result = await query(
@@ -242,6 +268,7 @@ class PushNotificationService {
    */
   static async sendToUsers(userIds, opts) {
     if (!webpush || !Array.isArray(userIds) || userIds.length === 0) return 0;
+    PushNotificationService._ensureInitialized();
 
     try {
       // Use ANY($1::text[]) for safe parameterized array query
