@@ -86,6 +86,7 @@ const DownloadPage = lazy(() => import("@/pages/DownloadPage"));
 const DashBankPage = lazy(() => import("@/pages/DashBankPage"));
 const MainStage = lazy(() => import("@/pages/MainStage"));
 const MainStageAdmin = lazy(() => import("@/pages/MainStageAdmin"));
+const MainStageGuestJoin = lazy(() => import("@/pages/MainStageGuestJoin"));
 
 const PostDetail = lazy(() => import("@/pages/PostDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
@@ -677,6 +678,15 @@ export const router = createBrowserRouter([
       { path: "consents", element: <ModuleLoader><CreatorConsents /></ModuleLoader> },
       { path: "x-campaigns", element: <ModuleLoader><CreatorXCampaignsPage /></ModuleLoader> },
     ],
+  },
+  // Main Stage guest join — public, no auth, no Layout shell
+  {
+    path: "/main-stage/join/:code",
+    element: (
+      <ModuleLoader>
+        <MainStageGuestJoin />
+      </ModuleLoader>
+    ),
   },
   {
     path: "/reset-password",

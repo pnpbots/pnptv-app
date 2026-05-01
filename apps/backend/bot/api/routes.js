@@ -9463,6 +9463,80 @@ app.post(
   mainStageController.moderate
 );
 
+
+// ── Main Stage Guest Invites ─────────────────────────────────────────────
+
+const mainStageInvitesController = require('./controllers/mainStageInvitesController');
+
+// 30 invite creations / admin / min
+const mainStageInviteCreateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many invite requests. Slow down.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// 5 guest-token mints / IP / min
+const mainStageGuestTokenLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many join attempts. Please wait a minute.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// 30 preview lookups / IP / min
+const mainStagePreviewLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many preview requests.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.post(
+  '/api/main-stage/invites',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageInviteCreateLimiter,
+  mainStageInvitesController.createInvite
+);
+
+app.get(
+  '/api/main-stage/invites',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageAdminLimiter,
+  mainStageInvitesController.listInvites
+);
+
+app.delete(
+  '/api/main-stage/invites/:id',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageAdminLimiter,
+  mainStageInvitesController.revokeInvite
+);
+
+app.get(
+  '/api/main-stage/invites/preview/:code',
+  mainStagePreviewLimiter,
+  mainStageInvitesController.previewInvite
+);
+
+app.post(
+  '/api/main-stage/guest-token',
+  mainStageGuestTokenLimiter,
+  mainStageInvitesController.guestToken
+);
+
 // ── End Main Stage ────────────────────────────────────────────────────────────
 
 // Sentry error handler - must be last

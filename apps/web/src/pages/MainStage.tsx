@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   LiveKitRoom,
   ParticipantTile,
@@ -15,10 +15,42 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { SpotlightGrid } from "@/components/mainstage/SpotlightGrid";
 import { CinemaGrid } from "@/components/mainstage/CinemaGrid";
 import { EqualGrid } from "@/components/mainstage/EqualGrid";
+import InvitePanel from "@/components/mainstage/InvitePanel";
 import { communityResources } from "@/lib/i18n/communityResources";
 import { getFeaturedPrimeVideos, getAssetUrl, type PrimeVideo } from "@/lib/directus";
 import { MEDIA_IDENTITY } from "@/components/mainstage/CinemaGrid";
 import { useI18n } from "@/lib/i18n";
+import { GUEST_SESSION_KEY } from "@/pages/MainStageGuestJoin";
+
+// ── Guest credential shape (written by MainStageGuestJoin, consumed once here) ─
+
+interface GuestCredentials {
+  token:       string;
+  livekitUrl:  string;
+  roomName:    string;
+  displayName: string;
+  identity:    string;
+}
+
+function readAndClearGuestCredentials(): GuestCredentials | null {
+  try {
+    const raw = sessionStorage.getItem(GUEST_SESSION_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(GUEST_SESSION_KEY);
+    const parsed = JSON.parse(raw) as Partial<GuestCredentials>;
+    if (
+      typeof parsed.token       === "string" &&
+      typeof parsed.livekitUrl  === "string" &&
+      typeof parsed.roomName    === "string" &&
+      typeof parsed.displayName === "string"
+    ) {
+      return parsed as GuestCredentials;
+    }
+  } catch {
+    // sessionStorage blocked or JSON corrupt
+  }
+  return null;
+}
 
 interface CammerInfo {
   identity: string;
@@ -420,22 +452,39 @@ function MainStageInner({
 
 export default function MainStage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const t = useI18n();
   const { showTutorial, dismissTutorial, dismissForever, openTutorial } = useTutorial("mainstage");
+
+  // Read guest credentials exactly once on mount (before useMainStage runs).
+  const guestCredsRef = useRef<GuestCredentials | null>(
+    searchParams.get("guest") === "1" ? readAndClearGuestCredentials() : null
+  );
+  const isGuestMode = guestCredsRef.current !== null;
+
   const {
-    state,
+    state:       hookedState,
     isAdmin,
-    canBeCammer,
-    token,
-    livekitUrl,
-    role,
-    loading,
-    error,
+    canBeCammer: hookedCanBeCammer,
+    token:       hookedToken,
+    livekitUrl:  hookedLivekitUrl,
+    role:        hookedRole,
+    loading:     hookedLoading,
+    error:       hookedError,
     joinAsCammer,
     leaveCammer,
     shuffle,
     admin,
   } = useMainStage();
+
+  // Resolve effective values: guest path wins if present
+  const state       = hookedState;
+  const token       = isGuestMode ? guestCredsRef.current!.token       : hookedToken;
+  const livekitUrl  = isGuestMode ? guestCredsRef.current!.livekitUrl  : hookedLivekitUrl;
+  const role        = isGuestMode ? ("guest" as const)                  : hookedRole;
+  const loading     = isGuestMode ? false                               : hookedLoading;
+  const error       = isGuestMode ? null                                : hookedError;
+  const canBeCammer = isGuestMode ? false : hookedCanBeCammer;
 
   const [adminOpen, setAdminOpen] = useState(false);
   const [connState, setConnState] = useState<ConnectionState>(ConnectionState.Connecting);
@@ -589,6 +638,30 @@ export default function MainStage() {
     );
   }
 
+  // Guests have a token but state arrives async via socket; show a connecting
+  // spinner rather than the "unavailable" error until state hydrates.
+  if (isGuestMode && token && !state) {
+    return (
+      <div
+        className="fixed inset-0 flex flex-col bg-pnp-background"
+        role="status"
+        aria-label="Connecting to Main Stage"
+      >
+        <div className="flex-1 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <div
+              className="w-10 h-10 rounded-full border-2 animate-spin"
+              style={{ borderColor: "rgba(212,0,122,0.2)", borderTopColor: "#D4007A" }}
+            />
+            <p className="text-white/50 text-sm">
+              Connecting… / Conectando…
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!token || !state) {
     return (
       <div className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center bg-pnp-background">
@@ -680,16 +753,33 @@ export default function MainStage() {
           )}
         </div>
 
-        <button
-          type="button"
-          aria-label={t.live.mainStageAriaLeave}
-          onClick={() => navigate(-1)}
-          className="min-h-[36px] min-w-[36px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:opacity-70 active:scale-[0.92] bg-white/[0.06] border border-white/10"
-        >
-          <svg className="w-3.5 h-3.5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {isGuestMode && (
+            <span
+              className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+              style={{
+                background: "rgba(123,97,255,0.18)",
+                border:     "1px solid rgba(123,97,255,0.40)",
+                color:      "#A990FF",
+              }}
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+              </svg>
+              Guest
+            </span>
+          )}
+          <button
+            type="button"
+            aria-label={t.live.mainStageAriaLeave}
+            onClick={() => navigate(-1)}
+            className="min-h-[36px] min-w-[36px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:opacity-70 active:scale-[0.92] bg-white/[0.06] border border-white/10"
+          >
+            <svg className="w-3.5 h-3.5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </header>
 
       {/* Floating vertical toolbar — fixed-positioned on the right edge,
@@ -847,8 +937,8 @@ export default function MainStage() {
         connect={true}
         // Mic device is acquired when user becomes a cammer (matches video
         // behaviour). Viewers stay at audio=false so no device prompt fires.
-        audio={isCammer}
-        video={isCammer}
+        audio={isCammer || isGuestMode}
+        video={isCammer || isGuestMode}
         options={{
           adaptiveStream: true,
           dynacast: true,
@@ -1479,6 +1569,14 @@ export function AdminPanelContent({
           )}
         </section>
         </div>
+
+        {/* Invite Panel — admin-only, always visible (outside the aria-hidden block) */}
+        {isAdmin && (
+          <section>
+            <div className="h-px bg-white/[0.06] mb-4" />
+            <InvitePanel />
+          </section>
+        )}
       </div>
     </div>
   );
