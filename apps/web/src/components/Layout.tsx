@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { Outlet, NavLink, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
+import { AnnouncementStrip } from "./AnnouncementStrip";
 import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
@@ -15,8 +16,6 @@ import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
-import { MainStageFAB } from "@/components/mainstage/MainStageFAB";
-import { SelfCamFloater } from "@/components/mainstage/SelfCamFloater";
 
 const SIDEBAR_DM_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -1409,9 +1408,23 @@ export function Layout() {
       )}
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto overscroll-contain lg:pl-72 lg:overflow-visible lg:pb-0 pb-16">
+      {/* pb-28 mobile = 64px BottomNav + ~44px AnnouncementStrip; pb-12 desktop
+           = ~44px AnnouncementStrip (no bottom nav on lg). Without this, the
+           strip overlays the bottom of any video <controls> bar in the feed. */}
+      <main className="flex-1 overflow-y-auto overscroll-contain lg:pl-72 lg:overflow-visible lg:pb-12 pb-28">
         <Outlet />
       </main>
+
+      {/* Global announcement strip — pinned above the bottom nav (mobile)
+          and at the bottom of the viewport offset by the side rail (desktop).
+          Self-hides on /main-stage and when there's no content to show. */}
+      {isAuthenticated && (
+        <div className="fixed left-0 right-0 bottom-16 z-40 lg:bottom-0 lg:left-72 pointer-events-none">
+          <div className="pointer-events-auto">
+            <AnnouncementStrip />
+          </div>
+        </div>
+      )}
 
       {/* Bottom nav */}
       <div className="flex-shrink-0 lg:hidden">
@@ -1604,19 +1617,15 @@ export function Layout() {
 }
 
 /**
- * Floating widgets layer — FAB + CristinaWidget + SelfCamFloater.
- * The PiP mini-player was removed 2026-05-01; see MainStageLiveBanner for replacement.
+ * Floating widgets layer — only CristinaWidget remains.
+ * Main Stage floaters (SelfCamFloater + MainStageFAB) removed 2026-05-02 —
+ * the Main Stage page and the Crystal Hangout card are the only entry points.
  */
 function FloatingWidgets({ showCompact }: { showCompact: boolean }) {
   return (
-    <>
-      {/* Persistent self-cam preview for cammers navigating off /main-stage */}
-      <SelfCamFloater />
-      <MainStageFAB />
-      <Suspense fallback={null}>
-        <CristinaWidget compact={showCompact} />
-      </Suspense>
-    </>
+    <Suspense fallback={null}>
+      <CristinaWidget compact={showCompact} />
+    </Suspense>
   );
 }
 
