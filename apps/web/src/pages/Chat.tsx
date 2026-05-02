@@ -4159,10 +4159,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 group.isMain
                   ? {
                       background:
-                        "linear-gradient(135deg, rgba(212,0,122,0.18), rgba(123,97,255,0.15) 55%, rgba(94,209,196,0.14)) padding-box, linear-gradient(135deg,#D4007A,#7B61FF 55%,#5ED1C4) border-box",
+                        "linear-gradient(135deg, rgba(212,0,122,0.16), rgba(123,97,255,0.14)) padding-box, linear-gradient(135deg,#D4007A,#7B61FF) border-box",
                       border: "1.5px solid transparent",
                       boxShadow:
-                        "0 8px 32px rgba(212,0,122,0.18), 0 0 0 1px rgba(212,0,122,0.10), inset 0 1px 0 rgba(255,255,255,0.06)",
+                        "0 8px 28px rgba(212,0,122,0.20), 0 0 0 1px rgba(212,0,122,0.10), inset 0 1px 0 rgba(255,255,255,0.06)",
                     }
                   : undefined
               }
@@ -4188,7 +4188,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     style={{
                       display: group.avatarUrl && !group.isMain && !group.isWallOfFame ? "none" : undefined,
                       background: group.isMain
-                        ? "linear-gradient(135deg, #D4007A, #E69138)"
+                        ? "linear-gradient(135deg, #D4007A, #7B61FF)"
                         : group.isWallOfFame
                           ? "linear-gradient(135deg, #FFD700, #E69138)"
                           : "linear-gradient(135deg, rgba(212,0,122,0.3), rgba(123,97,255,0.3))",
@@ -4285,9 +4285,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     <div
                       className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide"
                       style={{
-                        background: "rgba(94,209,196,0.12)",
-                        border: "1px solid rgba(94,209,196,0.35)",
-                        color: "#5ED1C4",
+                        background: "rgba(212,0,122,0.14)",
+                        border: "1px solid rgba(212,0,122,0.35)",
+                        color: "#D4007A",
                       }}
                       title="Crystal Hangout — Main Stage video call enabled"
                     >
