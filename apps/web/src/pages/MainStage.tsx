@@ -326,38 +326,40 @@ function ConnectionOverlay({ connState }: { connState: ConnectionState }) {
 }
 
 /**
- * ForceCamMicEnforcer — keeps every non-admin participant pinned to
- * camera-on / microphone-muted. Mounted inside <LiveKitRoom> so it has
- * the local participant in context. Covers both the guest LiveKitRoom
- * (guests are never admin) and any non-admin viewer of the shared room
- * while they are on /main-stage. The provider has a parallel enforcer
- * that holds the same invariant for the shared room across route changes.
+ * ForceCamMicEnforcer — guest-only stage-rule enforcer.
+ * Authenticated users are covered by MainStageProvider's listener that
+ * runs across route changes. Guests bypass the provider, so we keep a
+ * lightweight listener here while they are on /main-stage. We only act
+ * once the room is fully Connected to avoid disrupting publish during
+ * the connect/reconnect window.
  */
 function ForceCamMicEnforcer({ active }: { active: boolean }) {
+  const room = useRoomContext();
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
 
   useEffect(() => {
     if (!active || !localParticipant) return;
+    if (room.state !== ConnectionState.Connected) return;
     let disposed = false;
 
     const enforce = async () => {
       if (disposed) return;
       try {
-        if (!isCameraEnabled) {
-          await localParticipant.setCameraEnabled(true);
-        }
         if (isMicrophoneEnabled) {
           await localParticipant.setMicrophoneEnabled(false);
         }
+        if (!isCameraEnabled) {
+          await localParticipant.setCameraEnabled(true);
+        }
       } catch {
-        // Permission denied / no device — ConnectionOverlay or onMediaDeviceFailure surfaces it.
+        // Permission denied / no device — onMediaDeviceFailure surfaces it.
       }
     };
 
     void enforce();
 
     return () => { disposed = true; };
-  }, [active, localParticipant, isMicrophoneEnabled, isCameraEnabled]);
+  }, [active, localParticipant, isMicrophoneEnabled, isCameraEnabled, room]);
 
   return null;
 }
@@ -1152,7 +1154,7 @@ export default function MainStage() {
           }
         }}
       >
-        <ForceCamMicEnforcer active={isParticipant && !isAdmin} />
+        <ForceCamMicEnforcer active={isGuestMode} />
         <MainStageInner
           mode={mode as ModeId}
           spotlightCammer={state?.spotlight?.cammer}

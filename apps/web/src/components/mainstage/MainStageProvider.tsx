@@ -199,8 +199,11 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
 
   // ── Force cam-on / mic-muted enforcement (non-admin only) ───────────────
   // Stage rules: every non-admin participant must have camera ON and
-  // microphone MUTED at all times. We re-assert on any local-track event
-  // so a user (or a permission flicker) cannot defeat the rule.
+  // microphone MUTED at all times. join() already sets the initial state;
+  // this listener only re-asserts if the user (or a permission flicker)
+  // tries to defeat the rule afterwards. It deliberately runs only on
+  // post-connect track events — never an initial sweep — so we never
+  // race the connect/publish pipeline.
   useEffect(() => {
     if (!isJoined) return;
     if (role !== "participant") return; // admins keep manual control
@@ -210,6 +213,9 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
 
     const enforce = async () => {
       if (cancelled || enforcing) return;
+      // Only act on a fully-connected room. Acting during connect or
+      // reconnect can cancel the LiveKit publish pipeline.
+      if (sharedRoom.state !== "connected") return;
       enforcing = true;
       try {
         const lp: LocalParticipant = sharedRoom.localParticipant;
@@ -230,20 +236,14 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
 
     const onMuted = (_pub: LocalTrackPublication) => { void enforce(); };
     const onUnmuted = (_pub: LocalTrackPublication) => { void enforce(); };
-    const onPublished = () => { void enforce(); };
     const onUnpublished = () => { void enforce(); };
 
-    sharedRoom.on(RoomEvent.LocalTrackPublished, onPublished);
     sharedRoom.on(RoomEvent.LocalTrackUnpublished, onUnpublished);
     sharedRoom.on(RoomEvent.TrackMuted, onMuted);
     sharedRoom.on(RoomEvent.TrackUnmuted, onUnmuted);
 
-    // Initial sweep to cover the case where state drifts before listeners attach.
-    void enforce();
-
     return () => {
       cancelled = true;
-      sharedRoom.off(RoomEvent.LocalTrackPublished, onPublished);
       sharedRoom.off(RoomEvent.LocalTrackUnpublished, onUnpublished);
       sharedRoom.off(RoomEvent.TrackMuted, onMuted);
       sharedRoom.off(RoomEvent.TrackUnmuted, onUnmuted);
