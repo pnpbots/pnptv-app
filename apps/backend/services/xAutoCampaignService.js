@@ -364,9 +364,13 @@ class XAutoCampaignService {
       ({ text: normalizedText } = XPostService.ensureRequiredLinks(postText, [socialPostLink]));
     }
 
-    // Queue into existing x_post_jobs pipeline
-    // When a source post has a thumbnail, pass it as mediaUrl so postToX uploads it
-    const jobMediaUrl = resolvedThumbnailUrl || mediaUrl;
+    // Queue into existing x_post_jobs pipeline.
+    // Prefer the actual video URL from the campaign's media folder so X
+    // uploads the video. The thumbnail is only a fallback for cases where
+    // no real video URL exists (e.g., a source post linked but the file
+    // itself isn't reachable). Reversing this once shipped a Lifetime100
+    // promo with a static cover image instead of the video — bug fix.
+    const jobMediaUrl = mediaUrl || resolvedThumbnailUrl;
     const postId = await XPostService.createPostJob({
       accountId: campaign.account_id,
       adminId: campaign.created_by,
@@ -423,7 +427,8 @@ class XAutoCampaignService {
   static async _generateAndQueueABTest(campaign, grokResponse, media, sourceContext = {}) {
     const mediaUrl = media ? media.url : null;
     const { sourceTitle = null, sourceDescription: _srcDesc = null, sourcePostId = null, resolvedThumbnailUrl = null } = sourceContext;
-    const jobMediaUrl = resolvedThumbnailUrl || mediaUrl;
+    // Prefer real video URL; thumbnail is only a fallback. See generateAndQueue() comment.
+    const jobMediaUrl = mediaUrl || resolvedThumbnailUrl;
     const optionRegex = /(?:OPCI[OÓ]N|OPTION)\s+[ABC][\s:.\-—]*([\s\S]*?)(?=(?:OPCI[OÓ]N|OPTION)\s+[ABC]|$)/gi;
     const options = [];
     let match;
