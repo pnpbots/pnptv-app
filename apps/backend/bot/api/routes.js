@@ -334,17 +334,19 @@ app.use(ipTracker); // Log every authenticated request IP for security
 
 // Geo-block for jurisdictions with hostile age-verification regimes.
 //
-// Blocks: US states TX/TN/FL (state laws with $50k/violation penalties and/or
-// onerous retention requirements like Tennessee's hourly re-verification +
-// 7-year retention) and the UK (Online Safety Act / Ofcom HEAA enforcement
-// from April 2026 — fines up to 10% global revenue or £18M).
+// 2026-05-02 — operator decision: BLOCKLISTS EMPTIED. US states TX/TN/FL and
+// UK (Online Safety Act) were previously blocked due to state laws with
+// $50k/violation penalties and Ofcom HEAA fines up to 10% global revenue.
+// Lifted at operator request; mobile-carrier IPs were misclassifying many
+// real users (esp. Texas exit nodes) and blocking auth across the board.
+// Re-add entries below to restore enforcement.
 //
 // Returns 451 (Unavailable For Legal Reasons) on API; redirects to a static
 // /blocked-jurisdiction page on browser navigation. Admins bypass for debug.
 // Cached per-IP in Redis 1h to avoid the geoip lookup on every request.
 // (geoip module is already required at the top of the file — reuse it.)
-const BLOCKED_US_REGIONS = new Set(['TX', 'TN', 'FL']);
-const BLOCKED_COUNTRIES = new Set(['GB']);
+const BLOCKED_US_REGIONS = new Set();
+const BLOCKED_COUNTRIES = new Set();
 const GEO_BLOCK_BYPASS_PATHS = [
   /^\/blocked-jurisdiction$/,
   /^\/health$/,
@@ -419,40 +421,10 @@ app.use(async (req, res, next) => {
   return next();
 });
 
-// Wellness Mode access guard. When a user has active wellness mode (set
-// themselves for self-imposed sober break / recovery), block access to any
-// route NOT in the wellness allowlist. Public routes and unauthenticated
-// requests pass through. The check is Redis-cached for 60s so it doesn't
-// hammer Postgres on every API call.
-const wellnessModeService = require('../../services/wellnessModeService');
-const { cache: wellnessGuardCache } = require('../../config/redis');
-app.use(async (req, res, next) => {
-  const userId = req.session?.user?.id;
-  if (!userId) return next();
-  // Fast path: every endpoint runs through this middleware. Skip the
-  // wellness check for whitelisted paths immediately to avoid the cache
-  // lookup entirely.
-  if (wellnessModeService.isPathAllowed(req.path)) return next();
-  try {
-    const cacheKey = `wellnessActive:${userId}`;
-    let active = await wellnessGuardCache.get(cacheKey);
-    if (active === null || active === undefined) {
-      active = await wellnessModeService.isActive(userId);
-      await wellnessGuardCache.set(cacheKey, active ? '1' : '0', 60);
-    } else {
-      active = active === '1' || active === true;
-    }
-    if (active) {
-      return res.status(403).json({
-        error: 'Wellness Mode active — only wellness resources accessible',
-        code: 'WELLNESS_MODE',
-      });
-    }
-  } catch (err) {
-    logger.warn('Wellness guard failed open', { error: err.message, path: req.path });
-  }
-  return next();
-});
+// Wellness Mode is now an opt-in surface only. The /wellness page and the
+// /api/webapp/wellness-mode/* enable/disable endpoints stay, but no hard
+// gate forces wellness-mode users off other routes — users only see the
+// wellness shell when they navigate to it themselves.
 
 // express-session handles Set-Cookie automatically — no custom middleware needed
 
@@ -2520,11 +2492,19 @@ app.get('/api/webapp/auth/oidc/login', oidcLoginLimiter, asyncHandler(async (req
   // acr_values so a flow policy (operator-side config) can route the user to
   // the matching auth stage. Unrecognized values are dropped silently.
   const methodHint = ['passkey', 'magic_link'].includes(req.query.method) ? req.query.method : undefined;
+  const loginHint = typeof req.query.login_hint === 'string' ? req.query.login_hint.trim() : '';
 
   // Build Authentik authorization URL (PKCE S256, no client_secret in URL)
   let authUrl;
   try {
-    authUrl = AuthentikService.generateAuthUrl(state, codeVerifier, methodHint ? { method: methodHint } : {});
+    authUrl = AuthentikService.generateAuthUrl(
+      state,
+      codeVerifier,
+      {
+        ...(methodHint ? { method: methodHint } : {}),
+        ...(loginHint ? { loginHint } : {}),
+      }
+    );
   } catch (err) {
     logger.error('[OIDC] Failed to generate auth URL:', err.message);
     await redis.del(pkceKey);
@@ -2543,6 +2523,13 @@ app.get('/api/webapp/auth/oidc/login', oidcLoginLimiter, asyncHandler(async (req
  */
 app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(async (req, res) => {
   const APP_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
+  const loginRedirect = (code, returnTo) => {
+    const qs = new URLSearchParams({ oidc_error: code });
+    if (typeof returnTo === 'string' && /^\/[a-z0-9/_-]*/i.test(returnTo)) {
+      qs.set('returnTo', returnTo);
+    }
+    return `${APP_URL}/login?${qs.toString()}`;
+  };
 
   // ── 1. Guard: error from Authentik ──────────────────────────────────────────
   if (req.query.error) {
@@ -2553,13 +2540,13 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     });
     const safeErrors = new Set(['access_denied', 'server_error', 'temporarily_unavailable']);
     const safeCode = safeErrors.has(req.query.error) ? req.query.error : 'login_failed';
-    return res.redirect(`${APP_URL}?oidc_error=${safeCode}`);
+    return res.redirect(loginRedirect(safeCode));
   }
 
   const { code, state } = req.query;
   if (!code || !state || typeof code !== 'string' || typeof state !== 'string') {
     logger.warn('[OIDC] Callback missing code or state params');
-    return res.redirect(`${APP_URL}?oidc_error=invalid_callback`);
+    return res.redirect(loginRedirect('invalid_callback'));
   }
 
   // ── 2. Consume PKCE state from Redis (single-use) ───────────────────────────
@@ -2569,7 +2556,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
 
   if (!pkceRaw) {
     logger.warn('[OIDC] PKCE state not found or expired', { state: state.slice(0, 8) + '...' });
-    return res.redirect(`${APP_URL}?oidc_error=state_mismatch`);
+    return res.redirect(loginRedirect('state_mismatch'));
   }
 
   // Delete immediately — single-use token prevents replay attacks
@@ -2580,7 +2567,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     pkceData = JSON.parse(pkceRaw);
   } catch {
     logger.error('[OIDC] PKCE Redis value is not valid JSON');
-    return res.redirect(`${APP_URL}?oidc_error=state_mismatch`);
+    return res.redirect(loginRedirect('state_mismatch'));
   }
 
   const { codeVerifier, returnTo } = pkceData;
@@ -2594,7 +2581,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     const errorCode = err.message.includes('expired') ? 'session_expired'
       : err.message.includes('issuer') ? 'invalid_issuer'
       : 'token_exchange_failed';
-    return res.redirect(`${APP_URL}?oidc_error=${errorCode}`);
+    return res.redirect(loginRedirect(errorCode, returnTo));
   }
 
   const { refreshToken, userInfo } = tokens;
@@ -2602,7 +2589,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
 
   if (!sub) {
     logger.error('[OIDC] userInfo missing sub claim — cannot link account');
-    return res.redirect(`${APP_URL}?oidc_error=invalid_userinfo`);
+    return res.redirect(loginRedirect('invalid_userinfo', returnTo));
   }
 
   logger.info('[OIDC] Callback successful', {
@@ -2612,11 +2599,17 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
   });
 
   // ── 4. Upsert PNPtv user — link via pnptv_id (stable across renames) ───
+  // Anything that throws inside this block (DB FK violations, session
+  // regenerate failures, transient pool errors) must redirect the browser
+  // back to /login with a safe error code instead of bubbling to the global
+  // 500 handler — otherwise the user sees a blank error page and the login
+  // button looks broken.
   const pool = getPool();
+  let userRow;
+  try {
 
   // Try to find existing user by pnptv_id first (most reliable identity anchor)
   // Fall back to email match so existing email-registered users get linked on first OIDC login
-  let userRow;
 
   const subLookup = await pool.query(
     `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
@@ -2841,6 +2834,17 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
   });
 
   logger.info('[OIDC] Session established', { userId: userRow.id, sub });
+
+  } catch (err) {
+    logger.error('[OIDC] Upsert/session step failed:', {
+      message: err.message,
+      code: err.code,
+      constraint: err.constraint,
+      detail: err.detail,
+      sub,
+    });
+    return res.redirect(loginRedirect('login_failed', returnTo));
+  }
 
   // Sync Authentik groups based on PNPtv role/tier (fire-and-forget)
   setImmediate(async () => {
@@ -5472,20 +5476,16 @@ app.post('/api/webapp/wellness-mode/enable', requireSessionAuth, asyncHandler(as
     }
   }
   const status = await WellnessModeService.enable(req.session.user.id, durationDays);
-  // Bust the wellness-active cache so the next request picks up the new state.
-  try { await wellnessGuardCache.del(`wellnessActive:${req.session.user.id}`); } catch {}
   return res.json({ success: true, ...status });
 }));
 
 app.post('/api/webapp/wellness-mode/disable', requireSessionAuth, asyncHandler(async (req, res) => {
   const status = await WellnessModeService.disable(req.session.user.id);
-  try { await wellnessGuardCache.del(`wellnessActive:${req.session.user.id}`); } catch {}
   return res.json({ success: true, ...status });
 }));
 
 app.post('/api/webapp/wellness-mode/cancel-disable', requireSessionAuth, asyncHandler(async (req, res) => {
   const status = await WellnessModeService.cancelDisable(req.session.user.id);
-  try { await wellnessGuardCache.del(`wellnessActive:${req.session.user.id}`); } catch {}
   return res.json({ success: true, ...status });
 }));
 app.post('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.createGroup));
@@ -9428,6 +9428,20 @@ const mainStageStateLimiter = rateLimit({
   legacyHeaders: false,
 });
 app.get('/api/main-stage/state', mainStageStateLimiter, mainStageController.getState);
+
+app.get(
+  '/api/main-stage/join-check',
+  authenticateUser,
+  mainStageStateLimiter,
+  mainStageController.getJoinCheck
+);
+
+app.post(
+  '/api/main-stage/accept-consents',
+  authenticateUser,
+  mainStageMutatorLimiter,
+  mainStageController.acceptConsents
+);
 
 // Auth required — issue a LiveKit token
 app.post(
