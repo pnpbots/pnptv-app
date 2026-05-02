@@ -4135,11 +4135,22 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           {groups.map((group) => (
             <div
               key={group.id}
-              onClick={() => openChat(group)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openChat(group); } }}
-              className={`w-full p-3 sm:p-4 text-left active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent cursor-pointer ${
+              {...(group.isMain
+                ? {}
+                : {
+                    onClick: () => openChat(group),
+                    role: "button" as const,
+                    tabIndex: 0,
+                    onKeyDown: (e: React.KeyboardEvent) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openChat(group);
+                      }
+                    },
+                  })}
+              className={`w-full p-3 sm:p-4 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent ${
+                group.isMain ? "" : "active:scale-[0.97] cursor-pointer"
+              } ${
                 group.isMain
                   ? "rounded-2xl relative overflow-hidden hover:brightness-110"
                   : "glass-card-sm hover:border-white/20"
@@ -4300,30 +4311,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 </div>
 
                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                  {/* Main Stage entry — squares grid icon, only on the official PNPtv hangout.
-                      Implies Main Stage is THE official video-call surface for this room. */}
-                  {group.isMain && (
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); navigate("/main-stage"); }}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") e.stopPropagation(); }}
-                      aria-label="Open Main Stage video call"
-                      title="Main Stage — official video call"
-                      className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-full transition-all hover:brightness-110 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
-                      style={{
-                        background: "linear-gradient(135deg,#D4007A,#7B61FF)",
-                        border: "1px solid rgba(255,255,255,0.18)",
-                        boxShadow: "0 4px 14px rgba(212,0,122,0.45)",
-                      }}
-                    >
-                      <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                        <rect x="3"  y="3"  width="8" height="8" rx="1.5" />
-                        <rect x="13" y="3"  width="8" height="8" rx="1.5" />
-                        <rect x="3"  y="13" width="8" height="8" rx="1.5" />
-                        <rect x="13" y="13" width="8" height="8" rx="1.5" />
-                      </svg>
-                    </button>
-                  )}
                   {/* Telegram linked indicator */}
                   {group.telegramChatId && (
                     <span title="Telegram group linked">
@@ -4392,11 +4379,54 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       )}
                     </div>
                   )}
-                  <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
+                  {!group.isMain && (
+                    <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  )}
                 </div>
               </div>
+              {/* Crystal Hangout — explicit dual-action row instead of whole-card tap.
+                  Open Chat opens the regular thread; Join Main Stage enters the
+                  official platform-wide video room. Equal weight, no ambiguity. */}
+              {group.isMain && (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openChat(group)}
+                    aria-label="Open chat"
+                    className="min-h-[44px] flex items-center justify-center gap-2 rounded-xl text-xs font-bold text-white transition-all hover:bg-white/[0.10] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                    style={{
+                      background: "rgba(255,255,255,0.06)",
+                      border: "1px solid rgba(255,255,255,0.14)",
+                    }}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.068.157 2.148.279 3.238.364.466.037.893.281 1.153.671L12 21l2.652-3.978c.26-.39.687-.634 1.153-.67 1.09-.086 2.17-.208 3.238-.365 1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                    </svg>
+                    <span>Open Chat</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/main-stage")}
+                    aria-label="Join Main Stage"
+                    className="min-h-[44px] flex items-center justify-center gap-2 rounded-xl text-xs font-bold text-white transition-all hover:brightness-110 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                    style={{
+                      background: "linear-gradient(135deg,#D4007A,#7B61FF)",
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      boxShadow: "0 4px 14px rgba(212,0,122,0.45)",
+                    }}
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <rect x="3"  y="3"  width="8" height="8" rx="1.5" />
+                      <rect x="13" y="3"  width="8" height="8" rx="1.5" />
+                      <rect x="3"  y="13" width="8" height="8" rx="1.5" />
+                      <rect x="13" y="13" width="8" height="8" rx="1.5" />
+                    </svg>
+                    <span>Join Main Stage</span>
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
