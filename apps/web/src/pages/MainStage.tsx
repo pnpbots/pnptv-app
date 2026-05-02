@@ -305,21 +305,48 @@ function BottomBarInner({
 
 function ConnectionOverlay({ connState }: { connState: ConnectionState }) {
   const t = useI18n();
+  const [dismissed, setDismissed] = useState(false);
+  const [showEscape, setShowEscape] = useState(false);
+
+  // Reset escape hatch every time the state actually changes.
+  useEffect(() => {
+    setShowEscape(false);
+    setDismissed(false);
+    if (connState === ConnectionState.Connected) return;
+    const t = setTimeout(() => setShowEscape(true), 6000);
+    return () => clearTimeout(t);
+  }, [connState]);
+
   if (connState === ConnectionState.Connected) return null;
+  if (dismissed) return null;
 
   return (
     <div
       className="absolute inset-0 z-30 flex items-center justify-center"
       style={{ background: "rgba(10,10,15,0.92)", backdropFilter: "blur(12px)" }}
     >
-      <div className="flex flex-col items-center gap-4">
+      <div className="flex flex-col items-center gap-3 px-6 text-center max-w-xs">
         <div
           className="w-10 h-10 rounded-full border-2 animate-spin"
           style={{ borderColor: "rgba(212,0,122,0.3)", borderTopColor: "#D4007A" }}
         />
-        <p className="text-white/70 text-sm">
+        <p className="text-white/80 text-sm font-semibold">
           {connState === ConnectionState.Reconnecting ? t.live.mainStageReconnecting : t.live.mainStageConnecting}
         </p>
+        <p className="text-white/40 text-[11px] font-mono">state: {String(connState)}</p>
+        {showEscape && (
+          <button
+            type="button"
+            onClick={() => setDismissed(true)}
+            className="mt-2 min-h-[40px] px-5 rounded-full text-xs font-bold text-white transition-all active:scale-[0.97]"
+            style={{
+              background: "linear-gradient(135deg,#D4007A,#7B61FF)",
+              border: "1px solid rgba(212,0,122,0.55)",
+            }}
+          >
+            Continuar de todos modos / Continue anyway
+          </button>
+        )}
       </div>
     </div>
   );
