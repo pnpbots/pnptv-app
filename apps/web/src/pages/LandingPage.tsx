@@ -1,19 +1,34 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { telegramWidgetAuth, recoverAccount, resendVerificationEmail, TelegramWidgetUser } from "@/lib/api";
-import { login as oidcLogin } from "@/lib/auth";
-import { useAuth } from "@/hooks/useAuth";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { magicLinkStart, passkeyBegin, passkeyFinish } from "@/lib/api";
+
+// ── WebAuthn helpers ──────────────────────────────────────────────────────────
+// Authentik's flow executor returns binary fields as base64url strings; the
+// browser's PublicKeyCredential API speaks ArrayBuffers.  Convert in both
+// directions so we can drive the ceremony inline without redirects.
+
+function b64urlToBuffer(s: string): ArrayBuffer {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const b64 = (s + pad).replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64);
+  const buf = new ArrayBuffer(bin.length);
+  const view = new Uint8Array(buf);
+  for (let i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
+  return buf;
+}
+
+function bufferToB64url(buf: ArrayBuffer | null | undefined): string | undefined {
+  if (!buf) return undefined;
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
 const AUTHENTIK_URL = import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app";
 const ENROLLMENT_FLOW_URL = `${AUTHENTIK_URL}/if/flow/pnptv-enrollment/`;
-const RECOVERY_FLOW_URL = `${AUTHENTIK_URL}/if/flow/pnptv-recovery/`;
-
-function getBotUsername(): string {
-  const raw = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "PNPLatinoTV_Bot";
-  return raw.startsWith("@") ? raw.slice(1) : raw;
-}
 
 // ── Spinner ───────────────────────────────────────────────────────────────────
 
@@ -24,36 +39,6 @@ function Spinner() {
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
     </svg>
   );
-}
-
-// ── Telegram Widget ───────────────────────────────────────────────────────────
-
-function TelegramLoginWidget({ onAuth, onLoadError }: { onAuth: (u: TelegramWidgetUser) => void; onLoadError: () => void }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const onAuthRef = useRef(onAuth);
-  const onLoadErrorRef = useRef(onLoadError);
-  useEffect(() => { onAuthRef.current = onAuth; }, [onAuth]);
-  useEffect(() => { onLoadErrorRef.current = onLoadError; }, [onLoadError]);
-  useEffect(() => {
-    (window as unknown as Record<string, unknown>)["onTelegramAuth"] = (user: TelegramWidgetUser) => { onAuthRef.current(user); };
-    const script = document.createElement("script");
-    script.src = "https://telegram.org/js/telegram-widget.js?22";
-    script.async = true;
-    script.setAttribute("data-telegram-login", getBotUsername());
-    script.setAttribute("data-size", "large");
-    script.setAttribute("data-radius", "12");
-    script.setAttribute("data-onauth", "onTelegramAuth(user)");
-    script.setAttribute("data-request-access", "write");
-    const timer = setTimeout(() => onLoadErrorRef.current(), 8000);
-    script.onload = () => clearTimeout(timer);
-    script.onerror = () => { clearTimeout(timer); onLoadErrorRef.current(); };
-    containerRef.current?.appendChild(script);
-    return () => {
-      clearTimeout(timer);
-      delete (window as unknown as Record<string, unknown>)["onTelegramAuth"];
-    };
-  }, []);
-  return <div ref={containerRef} className="flex justify-center" />;
 }
 
 // ── Sheet content ─────────────────────────────────────────────────────────────
@@ -248,61 +233,62 @@ const legalLinks = [
 // ── LandingPage ───────────────────────────────────────────────────────────────
 
 export function LandingPage() {
-  const { refreshUser } = useAuth();
-
-  const [loginOpen, setLoginOpen] = useState(false);
-  const [loginView, setLoginView] = useState<"options" | "telegram" | "email" | "recover">("options");
-
-  // Surface OIDC errors from backend redirect (?oidc_error=...) and open login panel
+  // Surface OIDC errors from backend redirect (?oidc_error=...)
   const [oidcError, setOidcError] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get("oidc_error");
   });
-  useEffect(() => {
-    if (oidcError) {
-      setLoginOpen(true);
-    }
-  }, [oidcError]);
 
-  const [widgetStatus, setWidgetStatus] = useState<"idle" | "verifying" | "error">("idle");
-  const [widgetBlocked, setWidgetBlocked] = useState(false);
-  const [widgetError, setWidgetError] = useState<string | null>(null);
-  const [emailVal, setEmailVal] = useState("");
-  const [passVal, setPassVal] = useState("");
-  const [emailLoading, setEmailLoading] = useState(false);
-  const [emailError, setEmailError] = useState<string | null>(null);
-  const [emailNotVerified, setEmailNotVerified] = useState(false);
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendSent, setResendSent] = useState(false);
+  // Surface magic-link verify errors from backend redirect (?magic_error=...)
+  const [magicError, setMagicError] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("magic_error");
+  });
 
-  // Signup / email-capture (primary CTA)
-  const [signupEmail, setSignupEmail] = useState("");
-  const [signupEmailError, setSignupEmailError] = useState<string | null>(null);
+  // Magic-link send flow state
+  type MagicState = "hidden" | "form" | "sending" | "sent";
+  const [magicState, setMagicState] = useState<MagicState>("hidden");
+  const [magicEmail, setMagicEmail] = useState("");
+  const [magicSendError, setMagicSendError] = useState<string | null>(null);
+  const [magicSentTo, setMagicSentTo] = useState<string | null>(null);
 
-  const [recoverEmail, setRecoverEmail] = useState("");
-  const [recoverLoading, setRecoverLoading] = useState(false);
-  const [recoverSent, setRecoverSent] = useState(false);
-  const [recoverError, setRecoverError] = useState<string | null>(null);
+  // Passkey ceremony state. The primary "Continue with PNPtv ID" button
+  // attempts WebAuthn inline; on failure the magic-link form is auto-opened.
+  const [passkeyState, setPasskeyState] = useState<"idle" | "trying">("idle");
+  const [passkeyHint, setPasskeyHint] = useState<string | null>(null);
 
+  // Telegram deep-link flow state
+  type TgState = "idle" | "waiting" | "error";
+  const [tgState, setTgState] = useState<TgState>("idle");
+  const [tgError, setTgError] = useState<string | null>(null);
+  const [tgFallbackUrl, setTgFallbackUrl] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Returning-user personalization. `pnptv_last_auth` reflects the most recent
+  // method; `pnptv_last_telegram_*` persist across other logins so the Telegram
+  // button stays personalized even after the user later signs in via PNPtv ID.
+  const lastAuth = (() => {
+    try { return localStorage.getItem("pnptv_last_auth"); } catch { return null; }
+  })();
+  const lastTgUsername = (() => {
+    try { return localStorage.getItem("pnptv_last_telegram_username") || localStorage.getItem("pnptv_last_username"); } catch { return null; }
+  })();
+  const lastTgPhoto = (() => {
+    try { return localStorage.getItem("pnptv_last_telegram_photo"); } catch { return null; }
+  })();
+
+  // Active bottom sheet (carousel pills)
   const [activeSheet, setActiveSheet] = useState<string | null>(() => {
-    // Deep-link support: /landing?sheet=feed opens the Feed sheet on mount
     const params = new URLSearchParams(window.location.search);
     const requested = params.get("sheet");
     const valid = new Set(["about", "feed", "hangouts", "live", "nearby", "creators", "payments", "safety"]);
     return requested && valid.has(requested) ? requested : null;
   });
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // LATAM performer-focus mode — backend redirects non-grandfathered LATAM
-  // visitors here with ?focus=performer and surfaces the performer CTA banner.
-  const performerFocus = (() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("focus") === "performer";
-  })();
-  const performerCountry = (() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("country") || null;
-  })();
+  // LATAM performer-focus mode (backend redirect with ?focus=performer)
+  const params = new URLSearchParams(window.location.search);
+  const performerFocus = params.get("focus") === "performer";
+  const performerCountry = params.get("country") || null;
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
@@ -311,124 +297,210 @@ export function LandingPage() {
     return () => { document.body.style.overflow = ""; };
   }, [activeSheet]);
 
-  const handleWidgetAuth = useCallback(async (userData: TelegramWidgetUser) => {
-    setWidgetStatus("verifying");
-    try {
-      const result = await telegramWidgetAuth(userData);
-      if (result.success) {
-        localStorage.setItem("pnptv_last_auth", "telegram");
-        if (result.user?.username) localStorage.setItem("pnptv_last_username", result.user.username);
-        await refreshUser();
-        window.location.href = "/";
-      } else {
-        setWidgetStatus("error");
-        setWidgetError(result.error || "Authentication failed");
-      }
-    } catch {
-      setWidgetStatus("error");
-      setWidgetError("Something went wrong. Try again.");
+  // ── PNPtv ID — inline passkey first, magic-link as fallback ─────────────
+  // The primary button drives a WebAuthn ceremony directly (passkeyBegin →
+  // navigator.credentials.get → passkeyFinish). On any failure (no passkey
+  // enrolled, user cancels, transport error, backend 503) we silently swap to
+  // the magic-link form below so the user never lands on a password screen.
+  // No redirect to Authentik is involved.
+  const openMagicForm = (hint?: string) => {
+    setPasskeyHint(hint || null);
+    setMagicState("form");
+    setMagicSendError(null);
+  };
+
+  const handleOidcLogin = async () => {
+    try { localStorage.setItem("pnptv_last_auth", "pnptv_id"); } catch { /* ignore */ }
+
+    const supportsPasskey = typeof window !== "undefined" && !!window.PublicKeyCredential;
+    if (!supportsPasskey) {
+      openMagicForm("Your browser doesn't support passkeys — sign in with email instead.");
+      return;
     }
-  }, [refreshUser]);
 
-  const handleWidgetLoadError = useCallback(() => setWidgetBlocked(true), []);
-
-  const handleDeepLink = async () => {
+    setPasskeyState("trying");
+    setPasskeyHint(null);
     try {
-      const win = window.open("about:blank", "_blank");
-      const res = await fetch(`${API_BASE}/api/webapp/auth/telegram/token`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" } });
+      const challenge = await passkeyBegin();
+      if (!challenge.success || !challenge.publicKey || !challenge.stateToken) {
+        openMagicForm("Passkey login isn't ready right now. Sign in with email instead.");
+        return;
+      }
+
+      // Convert base64url → ArrayBuffer for the WebAuthn API.
+      const pk = challenge.publicKey;
+      const publicKey: PublicKeyCredentialRequestOptions = {
+        challenge: b64urlToBuffer(pk.challenge),
+        rpId: pk.rpId,
+        timeout: pk.timeout,
+        userVerification: (pk.userVerification as UserVerificationRequirement | undefined) || "preferred",
+        allowCredentials: pk.allowCredentials?.map((c) => ({
+          id: b64urlToBuffer(c.id),
+          type: "public-key" as const,
+          transports: c.transports as AuthenticatorTransport[] | undefined,
+        })),
+      };
+
+      let credential: PublicKeyCredential | null;
+      try {
+        credential = (await navigator.credentials.get({ publicKey })) as PublicKeyCredential | null;
+      } catch (err) {
+        // NotAllowedError = user cancelled or no matching credential. Other
+        // errors (network, TimeoutError) are also non-actionable here — fall
+        // back to magic-link in every case.
+        const name = (err as { name?: string })?.name || "";
+        const hint = name === "NotAllowedError"
+          ? "No passkey on this device — sign in with email instead."
+          : "Passkey couldn't be used. Sign in with email instead.";
+        openMagicForm(hint);
+        return;
+      }
+      if (!credential) {
+        openMagicForm("No passkey on this device — sign in with email instead.");
+        return;
+      }
+
+      const response = credential.response as AuthenticatorAssertionResponse;
+      const assertion = {
+        id: credential.id,
+        rawId: bufferToB64url(credential.rawId),
+        type: credential.type,
+        response: {
+          clientDataJSON: bufferToB64url(response.clientDataJSON),
+          authenticatorData: bufferToB64url(response.authenticatorData),
+          signature: bufferToB64url(response.signature),
+          userHandle: bufferToB64url(response.userHandle ?? null),
+        },
+        clientExtensionResults: credential.getClientExtensionResults?.() || {},
+      };
+
+      const finish = await passkeyFinish({ stateToken: challenge.stateToken, assertion });
+      if (!finish.authenticated) {
+        openMagicForm("Passkey didn't verify. Sign in with email instead.");
+        return;
+      }
+
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+      window.location.href = returnTo && /^\/[a-z0-9/_-]*/i.test(returnTo) ? returnTo : "/";
+    } catch {
+      openMagicForm("Couldn't sign in with passkey. Sign in with email instead.");
+    } finally {
+      setPasskeyState("idle");
+    }
+  };
+
+  // Magic-link send. Calls the PNPtv-native endpoint that mints a single-use
+  // 15-min token, emails the link, and (on click) regenerates the session.
+  // No user enumeration: the API always reports success, so the UI also shows
+  // the same confirmation regardless of whether the address exists.
+  const handleSendMagicLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = magicEmail.trim();
+    setMagicSendError(null);
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setMagicSendError("Please enter a valid email address.");
+      return;
+    }
+    setMagicState("sending");
+    try {
+      await magicLinkStart(email);
+      try { localStorage.setItem("pnptv_last_auth", "pnptv_id"); } catch { /* ignore */ }
+      setMagicSentTo(email);
+      setMagicState("sent");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "";
+      if (message.toLowerCase().includes("too many")) {
+        setMagicSendError("Too many requests — wait a few minutes and try again.");
+      } else {
+        setMagicSendError("Couldn't send the link. Please try again.");
+      }
+      setMagicState("form");
+    }
+  };
+
+  // ── Telegram deep-link ──────────────────────────────────────────────────
+  // Set "waiting" state immediately so the button changes the moment it's
+  // tapped, then fetch a one-shot token, open the bot in a new tab. If the
+  // popup gets blocked we surface a tap-to-open fallback link so the user
+  // can continue manually instead of being stuck on a button that "did
+  // nothing." Polling is independent of how the bot was opened.
+  const handleTelegramLogin = async () => {
+    if (tgState === "waiting") return;
+    setTgError(null);
+    setTgFallbackUrl(null);
+    setTgState("waiting");
+    try {
+      const res = await fetch(`${API_BASE}/api/webapp/auth/telegram/token`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
       const data = await res.json();
-      if (!data.success || !data.token || !data.deepLink) { win?.close(); return; }
-      const isValidDeepLink = (url: string) => url.startsWith('/') || url.startsWith('https://');
-      if (!isValidDeepLink(data.deepLink)) { win?.close(); return; }
-      if (win) win.location.href = data.deepLink; else window.location.href = data.deepLink;
+      if (!data.success || !data.token || !data.deepLink) {
+        setTgState("error");
+        setTgError("Couldn't start Telegram sign-in. Try again.");
+        return;
+      }
+      const isValid = (url: string) => url.startsWith("https://t.me/");
+      if (!isValid(data.deepLink)) {
+        setTgState("error");
+        setTgError("Invalid Telegram link.");
+        return;
+      }
+
+      // Always surface the deep-link as a tap-to-open button. On mobile
+      // Safari window.open() after an awaited fetch often returns a non-null
+      // Window that is never actually shown (popup-blocker false negative),
+      // leaving users with a spinner that never resolves. Showing the link
+      // unconditionally guarantees a working manual path while we still
+      // attempt the popup as a convenience.
+      setTgFallbackUrl(data.deepLink);
+      try {
+        window.open(data.deepLink, "_blank", "noopener,noreferrer");
+      } catch {
+        // Popup blocked or sandboxed — fallback link still works.
+      }
+
+      // Poll for completion regardless of how the bot was opened
       let attempts = 0;
       pollRef.current = setInterval(async () => {
-        if (++attempts > 60) { clearInterval(pollRef.current!); return; }
+        if (++attempts > 60) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          setTgState("idle");
+          return;
+        }
         try {
           const check = await fetch(`${API_BASE}/api/webapp/auth/telegram/check?token=${data.token}`, { credentials: "include" });
           const result = await check.json();
-          if (result.authenticated) { clearInterval(pollRef.current!); localStorage.setItem("pnptv_last_auth", "telegram"); window.location.href = "/"; }
+          if (result.authenticated) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            try {
+              localStorage.setItem("pnptv_last_auth", "telegram");
+              if (result.user?.username) {
+                localStorage.setItem("pnptv_last_username", result.user.username);
+                localStorage.setItem("pnptv_last_telegram_username", result.user.username);
+              }
+              if (result.user?.photoUrl) {
+                localStorage.setItem("pnptv_last_telegram_photo", result.user.photoUrl);
+              }
+            } catch { /* ignore quota */ }
+            const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+            window.location.href = returnTo && /^\/[a-z0-9/_-]*/i.test(returnTo) ? returnTo : "/";
+          }
         } catch { /* keep polling */ }
-      }, 5000);
-    } catch { /* silent */ }
-  };
-
-  const handleEmail = async () => {
-    if (!emailVal.trim() || !passVal) { setEmailError("Email and password are required"); return; }
-    setEmailLoading(true);
-    setEmailError(null);
-    setEmailNotVerified(false);
-    setResendSent(false);
-    try {
-      const res = await fetch(`${API_BASE}/api/webapp/auth/email/login`, {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailVal.trim().toLowerCase(), password: passVal }),
-      });
-      const data = await res.json();
-      if (res.ok && data.authenticated) {
-        localStorage.setItem("pnptv_last_auth", "email");
-        window.location.href = "/";
-      } else if (res.status === 403 && data.error === "email_not_verified") {
-        setEmailNotVerified(true);
-        setEmailError(null);
-      } else if (res.status === 401 && data.error === "pnptv_id_login") {
-        // Authentik-registered account — no local password; redirect to OIDC
-        setLoginView("options");
-        setEmailError(null);
-        window.location.href = "/api/webapp/auth/oidc/login";
-      } else {
-        // Normalize Spanish-only backend messages to friendly English
-        const raw = data.error || data.message || "Login failed";
-        setEmailError(
-          raw === "email_not_verified"
-            ? "Please verify your email before logging in."
-            : raw
-        );
-      }
-    } catch { setEmailError("Connection error. Try again."); }
-    finally { setEmailLoading(false); }
-  };
-
-  const handleResendVerification = async () => {
-    if (!emailVal.trim()) return;
-    setResendLoading(true);
-    try {
-      await resendVerificationEmail(emailVal.trim().toLowerCase());
-      setResendSent(true);
+      }, 3000);
     } catch {
-      // Non-fatal — user can try again
-    } finally {
-      setResendLoading(false);
+      setTgState("error");
+      setTgError("Connection error. Try again.");
     }
   };
 
-  const handleCreateAccount = (e: React.FormEvent) => {
-    e.preventDefault();
-    const email = signupEmail.trim();
-    if (!email) { setSignupEmailError("Please enter your email to continue"); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setSignupEmailError("That doesn't look like a valid email"); return; }
-    setSignupEmailError(null);
-    try { localStorage.setItem("pnptv_signup_email", email); } catch { /* ignore */ }
-    window.location.href = `${ENROLLMENT_FLOW_URL}?email=${encodeURIComponent(email)}`;
-  };
-
-  const handleRecover = async () => {
-    if (!recoverEmail.trim() || !recoverEmail.includes("@")) return;
-    setRecoverLoading(true);
-    setRecoverError(null);
-    try {
-      const res = await recoverAccount(recoverEmail.trim().toLowerCase());
-      if (res.success) {
-        setRecoverSent(true);
-      } else {
-        setRecoverError(res.message || "Recovery failed");
-      }
-    } catch { setRecoverError("Connection error. Try again."); }
-    finally { setRecoverLoading(false); }
-  };
-
   const sheet = activeSheet ? sheets[activeSheet] : null;
+  const showLastAuth = lastAuth === "pnptv_id" || lastAuth === "telegram";
+  const lastAuthLabel = lastAuth === "pnptv_id" ? "Last signed in with PNPtv ID"
+    : lastAuth === "telegram" ? "Last signed in with Telegram"
+    : null;
+  const tgButtonLabel = lastTgUsername ? `Log in as ${lastTgUsername}` : "Continue with Telegram";
 
   return (
     <div className="app-shell bg-pnp-background">
@@ -439,20 +511,18 @@ export function LandingPage() {
       </header>
 
       {/* ── HERO ────────────────────────────────────────────────────────────── */}
-      <main className="flex-1 flex flex-col items-center justify-center text-center px-4 overflow-y-auto">
+      <main className="flex-1 min-h-0 flex flex-col items-center justify-center text-center px-4 overflow-y-auto py-4">
         <div className="w-full max-w-xs flex flex-col items-center gap-4">
 
-          {/* Logo — hero centerpiece */}
+          {/* Logo */}
           <img src="/logo-login.png" alt="PNPtv!" className="w-56 h-auto" />
 
           {/* Tagline */}
-          <div>
-            <p className="text-gradient text-xs font-bold uppercase tracking-widest mb-1">The Clouds &amp; Rush Network</p>
-            <p className="text-pnp-textSecondary text-xs">The #1 queer PNP community</p>
-          </div>
+          <p className="text-xs font-bold uppercase tracking-[0.25em] text-pnp-accent">
+            The Queer PNP Community
+          </p>
 
-          {/* Performer focus banner — shown to LATAM visitors redirected by the
-             backend geo gate. Puts the "Become a Performer" flow front-and-center. */}
+          {/* Performer focus banner — LATAM redirect with ?focus=performer */}
           {performerFocus && (
             <div className="w-full rounded-2xl border border-pnp-accent/30 bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-orange-500/10 p-4 space-y-3 text-left">
               <div className="flex items-center gap-2">
@@ -464,247 +534,234 @@ export function LandingPage() {
               <p className="text-[13px] leading-relaxed text-white font-medium">
                 The full PNPtv app isn't available here yet — but you can apply to become a performer.
               </p>
-              <p className="text-xs text-pnp-textSecondary leading-relaxed">
-                Stream, post exclusive content, and keep <span className="text-white font-semibold">80%</span> of everything you earn. Verified performers get full access.
-              </p>
               <Link
                 to="/become-a-model"
                 className="btn-gradient block w-full text-center py-3 rounded-xl text-sm font-bold text-white hover:opacity-90 active:scale-[0.98] transition-all"
               >
                 Become a Performer →
               </Link>
-              <Link
-                to="/apply"
-                className="block w-full text-center text-xs text-pnp-textSecondary/80 hover:text-white transition-colors"
-              >
-                Already have an account? Apply now
-              </Link>
             </div>
           )}
 
-          {/* ── PRIMARY CTA: Join PNPtv (email capture → Authentik enrollment) ── */}
-          <form onSubmit={handleCreateAccount} noValidate className="w-full space-y-2">
-            <div className="glass-card-sm p-4 space-y-3">
-              <p className="text-sm font-bold text-white text-center">Join PNPtv today</p>
+          {/* OIDC error banner */}
+          {oidcError && (
+            <div className="w-full flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-left">
+              <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              <p className="text-xs text-red-300 flex-1">
+                {oidcError === "access_denied" ? "Access was denied. Please try again." :
+                 oidcError === "session_expired" ? "Session expired. Please try again." :
+                 "Sign-in failed. Please try again."}
+              </p>
+              <button onClick={() => setOidcError(null)} className="text-red-400 hover:text-red-300" aria-label="Dismiss error">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {/* Magic-link verify error banner (?magic_error=...) */}
+          {magicError && (
+            <div className="w-full flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-left">
+              <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              <p className="text-xs text-red-300 flex-1">
+                {magicError === "expired" ? "That sign-in link expired. Send yourself a new one." :
+                 magicError === "user_gone" ? "That account no longer exists." :
+                 magicError === "invalid" || magicError === "missing" ? "That link is invalid. Send yourself a new one." :
+                 "Sign-in failed. Try again."}
+              </p>
+              <button onClick={() => setMagicError(null)} className="text-red-400 hover:text-red-300" aria-label="Dismiss error">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {/* Last sign-in hint (returning users only) */}
+          {showLastAuth && (
+            <p className="text-xs text-pnp-textSecondary -mb-2">{lastAuthLabel}</p>
+          )}
+
+          {/* PRIMARY: Continue with PNPtv ID — inline passkey ceremony, falls
+              back to the magic-link form below on any failure */}
+          <button
+            onClick={handleOidcLogin}
+            disabled={passkeyState === "trying"}
+            className="w-full flex items-center justify-center gap-2.5 px-4 py-3.5 rounded-xl text-sm font-bold uppercase tracking-wide text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-80"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", boxShadow: "0 0 24px rgba(212, 0, 122, 0.35)" }}
+          >
+            {passkeyState === "trying" ? <Spinner /> : (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0" aria-hidden="true">
+                <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
+              </svg>
+            )}
+            {passkeyState === "trying" ? "Verifying passkey…" : "Continue with PNPtv ID"}
+          </button>
+
+          {/* Magic-link fallback (always — useful when WebAuthn isn't set up
+              for the account, or the user is on a device without a passkey) */}
+          {magicState === "hidden" && (
+            <button
+              type="button"
+              onClick={() => { setMagicState("form"); setMagicSendError(null); }}
+              className="text-xs text-pnp-textSecondary hover:text-white underline transition-colors -mt-2"
+            >
+              Email me a sign-in link instead
+            </button>
+          )}
+
+          {(magicState === "form" || magicState === "sending") && passkeyHint && (
+            <div
+              className="w-full rounded-xl px-3 py-2 text-[11px] text-left -mt-1"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                color: "var(--pnp-text-secondary)",
+              }}
+            >
+              {passkeyHint}
+            </div>
+          )}
+
+          {(magicState === "form" || magicState === "sending") && (
+            <form onSubmit={handleSendMagicLink} className="w-full space-y-2 -mt-1" noValidate>
               <input
                 type="email"
                 inputMode="email"
                 autoComplete="email"
-                value={signupEmail}
-                onChange={(e) => { setSignupEmail(e.target.value); setSignupEmailError(null); }}
+                value={magicEmail}
+                onChange={(e) => { setMagicEmail(e.target.value); setMagicSendError(null); }}
                 placeholder="your@email.com"
                 aria-label="Email address"
-                aria-invalid={!!signupEmailError}
-                className="w-full px-3 py-3 rounded-xl text-sm text-white bg-pnp-surface placeholder-pnp-textSecondary/50 focus:outline-none focus:border-pnp-accent transition-colors"
-                style={{ border: signupEmailError ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.1)" }}
+                aria-invalid={!!magicSendError}
+                disabled={magicState === "sending"}
+                autoFocus
+                className="w-full py-3 px-4 rounded-xl text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 transition-all disabled:opacity-60"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: magicSendError ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.1)",
+                  fontSize: "16px",
+                }}
               />
-              {signupEmailError && (
-                <p className="text-xs text-red-400">{signupEmailError}</p>
+              {magicSendError && (
+                <p className="text-xs text-red-400 px-1 text-left">{magicSendError}</p>
               )}
-              <button
-                type="submit"
-                className="btn-gradient w-full py-3 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 hover:brightness-110 active:scale-[0.98] transition-all"
-              >
-                Create my account →
-              </button>
-              <p className="text-center text-[11px] text-pnp-textSecondary">Free. Takes 30 seconds.</p>
-            </div>
-          </form>
-
-          {/* Join existing — accordion */}
-          <div className="w-full">
-            <button
-              onClick={() => { setLoginOpen(v => !v); setLoginView("options"); }}
-              className="w-full py-3.5 rounded-xl text-sm font-semibold text-pnp-textSecondary border border-pnp-border hover:border-white/30 hover:text-white flex items-center justify-center gap-2 transition-colors"
-            >
-              Already a member? Log in
-              <svg className={`w-4 h-4 transition-transform duration-200 ${loginOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {/* Accordion body */}
-            <div
-              className="overflow-hidden transition-all duration-300"
-              style={{ maxHeight: loginOpen ? "420px" : "0px", opacity: loginOpen ? 1 : 0 }}
-            >
-              <div className="glass-card-sm mt-2 p-3 space-y-2">
-
-                {loginView === "options" && (
-                  <>
-                    {oidcError && (
-                      <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
-                        <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                        </svg>
-                        <p className="text-xs text-red-300">
-                          {oidcError === "access_denied" ? "Access was denied. Please try again." :
-                           oidcError === "session_expired" ? "Session expired. Please try again." :
-                           "Sign-in failed. Please try again."}
-                        </p>
-                        <button onClick={() => setOidcError(null)} className="ml-auto text-red-400 hover:text-red-300">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    )}
-                    <button
-                      onClick={() => { window.location.href = "/api/webapp/auth/oidc/login"; }}
-                      className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold text-white transition-all hover:brightness-110 active:scale-[0.98]"
-                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0" aria-hidden="true">
-                        <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
-                      </svg>
-                      Sign in with PNPtv ID
-                    </button>
-
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 h-px bg-white/10" />
-                      <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">or</span>
-                      <div className="flex-1 h-px bg-white/10" />
-                    </div>
-
-                    <button onClick={() => setLoginView("telegram")} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white border border-pnp-border hover:border-white/30 hover:bg-pnp-surface transition-colors">
-                      <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor" style={{ color: "#29B6F6" }}>
-                        <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.062 13.85l-2.946-.924c-.64-.203-.654-.64.136-.953l11.5-4.431c.534-.194 1.001.13.81.706z" />
-                      </svg>
-                      Continue with Telegram
-                    </button>
-
-                    <button onClick={() => setLoginView("email")} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-pnp-textSecondary border border-pnp-border hover:border-white/30 hover:text-white hover:bg-pnp-surface transition-colors">
-                      <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
-                      </svg>
-                      Continue with Email
-                    </button>
-
-                    <p className="text-center text-xs text-pnp-textSecondary pt-1">
-                      New here?{" "}
-                      <a href={ENROLLMENT_FLOW_URL} className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all">
-                        Create a PNPtv ID
-                      </a>
-                    </p>
-
-                    <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1 underline">
-                      Forgot password?
-                    </button>
-                  </>
-                )}
-
-                {loginView === "recover" && (
-                  <div className="space-y-3">
-                    <button onClick={() => setLoginView("options")} className="flex items-center gap-1 text-xs text-pnp-textSecondary hover:text-white transition-colors">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-                      Back
-                    </button>
-                    <div className="text-center space-y-1 pb-2">
-                      <p className="text-sm font-semibold text-white">Reset Password</p>
-                      <p className="text-xs text-pnp-textSecondary">Enter your email address and we'll send a link to set a new password.</p>
-                    </div>
-                    {recoverSent ? (
-                      <div className="text-center py-4 space-y-2">
-                        <svg className="w-10 h-10 mx-auto text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <p className="text-sm text-green-400 font-medium">Recovery link sent!</p>
-                        <p className="text-xs text-pnp-textSecondary">Check your email inbox (and spam folder) for a link to set your password. Then come back and log in with Email.</p>
-                      </div>
-                    ) : (
-                      <>
-                        <input type="email" placeholder="Your email address" value={recoverEmail} onChange={e => setRecoverEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRecover()}
-                          className="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50 transition-colors" />
-                        {recoverError && <p className="text-pnp-error text-xs">{recoverError}</p>}
-                        <button onClick={handleRecover} disabled={recoverLoading || !recoverEmail.includes("@")}
-                          className="btn-gradient w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 flex items-center justify-center gap-2">
-                          {recoverLoading && <Spinner />}
-                          {recoverLoading ? "Sending…" : "Send Recovery Link"}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {loginView === "telegram" && (
-                  <div className="space-y-3">
-                    <button onClick={() => setLoginView("options")} className="flex items-center gap-1 text-xs text-pnp-textSecondary hover:text-white transition-colors">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-                      Back
-                    </button>
-                    {widgetStatus === "verifying" && (
-                      <div className="flex items-center justify-center gap-2 py-3 text-pnp-textSecondary text-sm"><Spinner /> Verifying…</div>
-                    )}
-                    {widgetStatus === "error" && (
-                      <div className="text-center space-y-2">
-                        <p className="text-pnp-error text-sm">{widgetError}</p>
-                        <button onClick={() => setWidgetStatus("idle")} className="text-xs text-pnp-textSecondary underline">Try again</button>
-                      </div>
-                    )}
-                    {widgetStatus === "idle" && (
-                      widgetBlocked ? (
-                        <div className="space-y-2">
-                          <p className="text-pnp-textSecondary text-xs text-center">Widget blocked — ad blocker?</p>
-                          <button onClick={handleDeepLink} className="btn-gradient w-full py-3 rounded-xl text-sm font-bold text-white">
-                            Open Telegram App
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <TelegramLoginWidget onAuth={handleWidgetAuth} onLoadError={handleWidgetLoadError} />
-                          <button onClick={handleDeepLink} className="w-full text-xs text-pnp-textSecondary hover:text-white transition-colors py-1">
-                            Use Telegram app instead →
-                          </button>
-                        </div>
-                      )
-                    )}
-                  </div>
-                )}
-
-                {loginView === "email" && (
-                  <div className="space-y-2">
-                    <button onClick={() => setLoginView("options")} className="flex items-center gap-1 text-xs text-pnp-textSecondary hover:text-white transition-colors">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-                      Back
-                    </button>
-                    <input type="email" placeholder="Email" value={emailVal} onChange={e => setEmailVal(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50 transition-colors" />
-                    <input type="password" placeholder="Password" value={passVal} onChange={e => setPassVal(e.target.value)} onKeyDown={e => e.key === "Enter" && handleEmail()}
-                      className="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-pnp-surface border border-pnp-border focus:border-pnp-accent focus:outline-none placeholder-pnp-textSecondary/50 transition-colors" />
-                    {emailError && <p className="text-pnp-error text-xs">{emailError}</p>}
-                    {emailNotVerified && (
-                      <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(230,145,56,0.1)", border: "1px solid rgba(230,145,56,0.3)" }}>
-                        <p className="text-xs text-white">
-                          <strong>Almost there!</strong> Please verify your email before logging in. Check your inbox for the link we sent.
-                        </p>
-                        {resendSent ? (
-                          <p className="text-xs text-green-400">✓ Verification email resent. Check your inbox.</p>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={handleResendVerification}
-                            disabled={resendLoading}
-                            className="w-full text-xs font-semibold underline text-pnp-accent hover:brightness-125 transition-all disabled:opacity-60"
-                          >
-                            {resendLoading ? "Sending…" : "Resend verification email"}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    <button onClick={handleEmail} disabled={emailLoading}
-                      className="btn-gradient w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 flex items-center justify-center gap-2">
-                      {emailLoading && <Spinner />}
-                      {emailLoading ? "Logging in…" : "Log in"}
-                    </button>
-                    <button onClick={() => { setLoginView("recover"); setRecoverSent(false); setRecoverError(null); setRecoverEmail(""); }} className="w-full text-center text-xs text-pnp-textSecondary/70 hover:text-white transition-colors pt-1 underline">
-                      Forgot password?
-                    </button>
-                  </div>
-                )}
-
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setMagicState("hidden"); setMagicEmail(""); setMagicSendError(null); setPasskeyHint(null); }}
+                  disabled={magicState === "sending"}
+                  className="px-4 py-3 rounded-xl text-xs font-semibold text-pnp-textSecondary hover:text-white transition-colors disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={magicState === "sending" || !magicEmail.trim()}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-semibold text-sm text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {magicState === "sending" ? <Spinner /> : "Send sign-in link"}
+                </button>
               </div>
+            </form>
+          )}
+
+          {magicState === "sent" && magicSentTo && (
+            <div
+              className="w-full rounded-xl p-3 text-xs text-left -mt-1"
+              style={{
+                background: "rgba(34,197,94,0.1)",
+                border: "1px solid rgba(34,197,94,0.3)",
+                color: "#86efac",
+              }}
+            >
+              <p className="font-semibold mb-1">Check your email.</p>
+              <p className="text-[11px] leading-relaxed" style={{ color: "rgba(134,239,172,0.85)" }}>
+                We sent a sign-in link to <strong>{magicSentTo}</strong>. It expires
+                in 15 minutes and can only be used once.
+              </p>
+              <button
+                type="button"
+                onClick={() => { setMagicState("hidden"); setMagicEmail(""); setMagicSentTo(null); setPasskeyHint(null); }}
+                className="text-[11px] underline mt-2 hover:opacity-80"
+              >
+                Use a different email
+              </button>
             </div>
+          )}
+
+          {/* OR divider */}
+          <div className="w-full flex items-center gap-3">
+            <div className="flex-1 h-px bg-white/10" />
+            <span className="text-[10px] text-pnp-textSecondary uppercase tracking-widest">or</span>
+            <div className="flex-1 h-px bg-white/10" />
           </div>
+
+          {/* SECONDARY: Telegram (deep-link, no widget — works with ad blockers) */}
+          <div className="w-full flex items-center gap-2">
+            <button
+              onClick={handleTelegramLogin}
+              disabled={tgState === "waiting"}
+              className="flex-1 min-w-0 flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-70"
+              style={{ background: "#229ED9", boxShadow: "0 0 16px rgba(34, 158, 217, 0.35)" }}
+            >
+              {tgState === "waiting" ? <Spinner /> : (
+                <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+                </svg>
+              )}
+              <span className="truncate">{tgState === "waiting" ? "Waiting for Telegram…" : tgButtonLabel}</span>
+            </button>
+            {lastTgPhoto && (
+              <img
+                src={lastTgPhoto}
+                alt={lastTgUsername || "Telegram avatar"}
+                className="w-12 h-12 rounded-full border border-white/15 flex-shrink-0 object-cover"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                referrerPolicy="no-referrer"
+              />
+            )}
+          </div>
+
+          {tgState === "error" && tgError && (
+            <p className="text-xs text-red-400 text-center -mt-2">{tgError}</p>
+          )}
+
+          {/* Always-visible deep-link fallback while we wait. Mobile Safari
+              and many in-app browsers silently swallow window.open() — a
+              tappable link/button is the only reliable path. */}
+          {tgState === "waiting" && tgFallbackUrl && (
+            <a
+              href={tgFallbackUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-white transition-all hover:brightness-110 active:scale-[0.98]"
+              style={{
+                background: "rgba(34,158,217,0.18)",
+                border: "1px solid rgba(34,158,217,0.50)",
+              }}
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+              </svg>
+              <span>Open Telegram to finish sign-in →</span>
+            </a>
+          )}
+
+          {/* No account → Authentik enrollment flow */}
+          <p className="text-xs text-pnp-textSecondary">
+            No account?{" "}
+            <a href={ENROLLMENT_FLOW_URL} className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all">
+              Create one
+            </a>
+          </p>
+
         </div>
       </main>
 
