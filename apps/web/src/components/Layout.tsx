@@ -16,6 +16,7 @@ import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
+import { SelfCamFloater } from "@/components/mainstage/SelfCamFloater";
 
 const SIDEBAR_DM_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -1617,15 +1618,19 @@ export function Layout() {
 }
 
 /**
- * Floating widgets layer — only CristinaWidget remains.
- * Main Stage floaters (SelfCamFloater + MainStageFAB) removed 2026-05-02 —
- * the Main Stage page and the Crystal Hangout card are the only entry points.
+ * Floating widgets layer — SelfCamFloater + CristinaWidget.
+ * MainStageFAB removed 2026-05-02 (entry is centralized on the Crystal
+ * Hangout card and /main-stage). SelfCamFloater stays so users who joined
+ * the stage and navigated away still see their live cam preview.
  */
 function FloatingWidgets({ showCompact }: { showCompact: boolean }) {
   return (
-    <Suspense fallback={null}>
-      <CristinaWidget compact={showCompact} />
-    </Suspense>
+    <>
+      <SelfCamFloater />
+      <Suspense fallback={null}>
+        <CristinaWidget compact={showCompact} />
+      </Suspense>
+    </>
   );
 }
 
