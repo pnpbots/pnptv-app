@@ -10,6 +10,7 @@ import {
 import { ConnectionState, RoomEvent, Track } from "livekit-client";
 import { useMainStage, type MainStageState } from "@/hooks/useMainStage";
 import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
+import { getMainStageJoinCheck, acceptMainStageConsents, type MainStageJoinCheck } from "@/lib/api";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -124,19 +125,15 @@ const NEXT_MODE: Record<ModeId, ModeId> = {
 };
 
 interface BottomBarProps {
-  canBeCammer: boolean;
-  isCammer: boolean;
-  onJoinCam: () => void;
-  onLeaveCam: () => void;
+  isParticipant: boolean;
+  isAdmin: boolean;
   onLeave: () => void;
   spotlight?: MainStageState["spotlight"];
 }
 
 function BottomBarInner({
-  canBeCammer,
-  isCammer,
-  onJoinCam,
-  onLeaveCam,
+  isParticipant,
+  isAdmin,
   onLeave,
   spotlight,
 }: BottomBarProps) {
@@ -147,13 +144,13 @@ function BottomBarInner({
   // Re-renders every second when nextAt is set so the countdown stays current.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    if (!isCammer || !spotlight?.nextAt) return;
+    if (!isParticipant || !spotlight?.nextAt) return;
     const iv = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(iv);
-  }, [isCammer, spotlight?.nextAt]);
+  }, [isParticipant, spotlight?.nextAt]);
 
   const queueChip = (() => {
-    if (!isCammer || !spotlight) return null;
+    if (!isParticipant || !spotlight) return null;
     const myIdentity = localParticipant?.identity || "";
     const queue = spotlight.queue || [];
     const myPos = queue.indexOf(myIdentity);
@@ -184,20 +181,18 @@ function BottomBarInner({
     );
   })();
 
-  // The cam button is now the single entry/exit point for being a cammer.
-  // Off+gray (not cammer) → tap → joinAsCammer() promotes + LiveKit auto-
-  // enables video via `video={isCammer}` on LiveKitRoom.
-  // On+pink (cammer)       → tap → leaveCammer() demotes back to viewer.
-  const handleCamToggle = useCallback(() => {
-    if (!canBeCammer) return;
-    if (isCammer) onLeaveCam();
-    else onJoinCam();
-  }, [canBeCammer, isCammer, onJoinCam, onLeaveCam]);
-
+  // Cam/mic toggles are admin-only. Non-admin participants are subject to
+  // forced-camera-on + forced-mic-mute rules enforced by MainStageProvider
+  // (and the guest-room enforcer below).
   const handleMicToggle = useCallback(() => {
-    if (!isCammer) return; // grayed-out state — no-op
+    if (!isAdmin) return;
     localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
-  }, [isCammer, localParticipant, isMicrophoneEnabled]);
+  }, [isAdmin, localParticipant, isMicrophoneEnabled]);
+
+  const handleCamToggle = useCallback(() => {
+    if (!isAdmin) return;
+    localParticipant.setCameraEnabled(!isCameraEnabled);
+  }, [isAdmin, isCameraEnabled, localParticipant]);
 
   return (
     <div
@@ -225,30 +220,28 @@ function BottomBarInner({
 
       {queueChip}
 
-      {/* CAMERA / GO LIVE — prominent CTA. Always labeled so users
-          understand it's the control to start streaming. */}
-      {canBeCammer && (
+      {isParticipant && isAdmin && (
         <button
           type="button"
           onClick={handleCamToggle}
-          aria-label={isCammer ? t.live.mainStageAriaStopCam : t.live.mainStageAriaStartCam}
-          title={isCammer ? "Tap to stop streaming" : "Tap to go live"}
-          aria-pressed={isCammer}
+          aria-label={isCameraEnabled ? "Turn camera off" : "Turn camera on"}
+          title={isCameraEnabled ? "Turn camera off" : "Turn camera on"}
+          aria-pressed={isCameraEnabled}
           className="min-h-[40px] flex-shrink-0 flex items-center gap-1.5 px-3 rounded-full text-xs font-bold text-white transition-all hover:bg-white/10 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
-            background: isCammer
+            background: isCameraEnabled
               ? "rgba(255,69,58,0.18)"
               : "linear-gradient(135deg,#D4007A,#7B61FF)",
-            border: isCammer
+            border: isCameraEnabled
               ? "1px solid rgba(255,69,58,0.45)"
               : "1px solid rgba(212,0,122,0.60)",
-            boxShadow: isCammer
+            boxShadow: isCameraEnabled
               ? "0 2px 10px rgba(255,69,58,0.25)"
               : "0 4px 16px rgba(212,0,122,0.45)",
-            color: isCammer ? "#FF453A" : "#FFFFFF",
+            color: isCameraEnabled ? "#FF453A" : "#FFFFFF",
           }}
         >
-          {isCammer ? (
+          {isCameraEnabled ? (
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75zM3 3l18 18" />
             </svg>
@@ -257,39 +250,28 @@ function BottomBarInner({
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
             </svg>
           )}
-          <span>{isCammer ? t.live.mainStageStop : t.live.mainStageGoLive}</span>
+          <span>Camera</span>
         </button>
       )}
 
-      {/* MIC — grayed until user is a cammer; tap toggles mute. */}
-      {canBeCammer && (
+      {isParticipant && isAdmin && (
         <button
           type="button"
           onClick={handleMicToggle}
-          disabled={!isCammer}
-          aria-label={
-            !isCammer
-              ? t.live.mainStageAriaMicDisabled
-              : isMicrophoneEnabled ? t.live.mainStageAriaMicMute : t.live.mainStageAriaMicUnmute
-          }
-          title={!isCammer ? "Turn on camera to enable mic" : isMicrophoneEnabled ? "Mute" : "Unmute"}
+          aria-label={isMicrophoneEnabled ? t.live.mainStageAriaMicMute : t.live.mainStageAriaMicUnmute}
+          title={isMicrophoneEnabled ? "Mute" : "Unmute"}
           aria-pressed={isMicrophoneEnabled}
-          className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+          className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
-            background: !isCammer
-              ? "rgba(255,255,255,0.03)"
-              : isMicrophoneEnabled
-                ? "rgba(212,0,122,0.18)"
-                : "rgba(255,255,255,0.05)",
-            border: !isCammer
-              ? "1px solid rgba(255,255,255,0.08)"
-              : isMicrophoneEnabled
-                ? "1px solid rgba(212,0,122,0.40)"
-                : "1px solid rgba(255,255,255,0.12)",
-            opacity: !isCammer ? 0.4 : 1,
+            background: isMicrophoneEnabled
+              ? "rgba(212,0,122,0.18)"
+              : "rgba(255,255,255,0.05)",
+            border: isMicrophoneEnabled
+              ? "1px solid rgba(212,0,122,0.40)"
+              : "1px solid rgba(255,255,255,0.12)",
           }}
         >
-          {isMicrophoneEnabled && isCammer ? (
+          {isMicrophoneEnabled ? (
             <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
             </svg>
@@ -299,6 +281,22 @@ function BottomBarInner({
             </svg>
           )}
         </button>
+      )}
+
+      {isParticipant && !isAdmin && (
+        <span
+          className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold text-white/70"
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.10)",
+          }}
+          title="Camera is required and your microphone is muted by the stage."
+        >
+          <svg className="w-3 h-3 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
+          </svg>
+          <span>Cam on · Mic muted</span>
+        </span>
       )}
 
     </div>
@@ -325,6 +323,43 @@ function ConnectionOverlay({ connState }: { connState: ConnectionState }) {
       </div>
     </div>
   );
+}
+
+/**
+ * ForceCamMicEnforcer — keeps every non-admin participant pinned to
+ * camera-on / microphone-muted. Mounted inside <LiveKitRoom> so it has
+ * the local participant in context. Covers both the guest LiveKitRoom
+ * (guests are never admin) and any non-admin viewer of the shared room
+ * while they are on /main-stage. The provider has a parallel enforcer
+ * that holds the same invariant for the shared room across route changes.
+ */
+function ForceCamMicEnforcer({ active }: { active: boolean }) {
+  const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
+
+  useEffect(() => {
+    if (!active || !localParticipant) return;
+    let disposed = false;
+
+    const enforce = async () => {
+      if (disposed) return;
+      try {
+        if (!isCameraEnabled) {
+          await localParticipant.setCameraEnabled(true);
+        }
+        if (isMicrophoneEnabled) {
+          await localParticipant.setMicrophoneEnabled(false);
+        }
+      } catch {
+        // Permission denied / no device — ConnectionOverlay or onMediaDeviceFailure surfaces it.
+      }
+    };
+
+    void enforce();
+
+    return () => { disposed = true; };
+  }, [active, localParticipant, isMicrophoneEnabled, isCameraEnabled]);
+
+  return null;
 }
 
 interface RoomListenerProps {
@@ -358,11 +393,8 @@ interface MainStageInnerProps {
   mediaSrc: string | null;
   mediaPlaying: boolean;
   mediaVolume: number;
-  canBeCammer: boolean;
+  isParticipant: boolean;
   isAdmin: boolean;
-  isCammer: boolean;
-  onJoinCam: () => void;
-  onLeaveCam: () => void;
   onSpotlightPick: (identity: string) => void;
   onConnectionStateChange: (state: ConnectionState) => void;
   onCammersChange: (cammers: CammerInfo[]) => void;
@@ -379,11 +411,8 @@ function MainStageInner({
   mediaSrc,
   mediaPlaying,
   mediaVolume,
-  canBeCammer,
+  isParticipant,
   isAdmin,
-  isCammer,
-  onJoinCam,
-  onLeaveCam,
   onSpotlightPick,
   onConnectionStateChange,
   onCammersChange,
@@ -446,10 +475,8 @@ function MainStageInner({
       {showTips && <WellnessTipsOverlay />}
 
       <BottomBarInner
-        canBeCammer={canBeCammer}
-        isCammer={isCammer}
-        onJoinCam={onJoinCam}
-        onLeaveCam={onLeaveCam}
+        isParticipant={isParticipant}
+        isAdmin={isAdmin}
         onLeave={onLeave}
         spotlight={spotlight}
       />
@@ -472,12 +499,11 @@ export default function MainStage() {
   const {
     state:       hookedState,
     isAdmin,
-    canBeCammer: hookedCanBeCammer,
     role:        hookedRole,
     loading:     hookedLoading,
     error:       hookedError,
-    joinAsCammer,
-    leaveCammer,
+    isJoined,
+    join,
     leave,
     shuffle,
     admin,
@@ -494,28 +520,62 @@ export default function MainStage() {
   const role        = isGuestMode ? ("guest" as const) : hookedRole;
   const loading     = isGuestMode ? false              : hookedLoading;
   const error       = isGuestMode ? null               : hookedError;
-  const canBeCammer = isGuestMode ? false              : hookedCanBeCammer;
 
   const [adminOpen, setAdminOpen] = useState(false);
   const [connState, setConnState] = useState<ConnectionState>(ConnectionState.Connecting);
   const [cammerInfos, setCammerInfos] = useState<CammerInfo[]>([]);
   const [camError, setCamError] = useState<string | null>(null);
-  const isCammer = role === "cammer" || role === "admin";
-  // Clear stale camera-permission banners whenever user flips back to viewer.
+  const [joining, setJoining] = useState(!isGuestMode);
+  const [joinCheck, setJoinCheck] = useState<MainStageJoinCheck | null>(null);
+  const [consentError, setConsentError] = useState<string | null>(null);
+  const [acceptingConsents, setAcceptingConsents] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [acceptPrivacy, setAcceptPrivacy] = useState(false);
+  const [confirmAge, setConfirmAge] = useState(false);
+  const isParticipant = isGuestMode || role === "participant" || role === "admin";
+  // Clear stale camera-permission banners whenever the user leaves the room.
   useEffect(() => {
-    if (!isCammer) setCamError(null);
-  }, [isCammer]);
+    if (!isParticipant) setCamError(null);
+  }, [isParticipant]);
 
-  // Sync cammer status into the shared MainStageProvider so SelfCamFloater
-  // knows when to render the persistent floating tile.
-  const { setIsCammerActive } = useMainStageRoom();
   useEffect(() => {
-    setIsCammerActive(isCammer);
+    if (isGuestMode) return;
+    let cancelled = false;
+    getMainStageJoinCheck()
+      .then((check) => {
+        if (!cancelled) {
+          setJoinCheck(check);
+          if (!check.requiresAgeVerification) setConfirmAge(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setConsentError("We couldn't verify Main Stage access requirements. Please try again.");
+        }
+      });
     return () => {
-      // When the page unmounts (user navigated away), leave isCammerActive true
-      // so the floater appears — only clear it when the user explicitly leaves.
+      cancelled = true;
     };
-  }, [isCammer, setIsCammerActive]);
+  }, [isGuestMode]);
+
+  useEffect(() => {
+    if (isGuestMode) return;
+    if (!joinCheck?.canJoin) {
+      setJoining(false);
+      return;
+    }
+    let cancelled = false;
+    setJoining(true);
+    join()
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setJoining(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuestMode, join, joinCheck?.canJoin]);
+
   // Ref to the MainStage root container, used by FullscreenToggle so we
   // fullscreen just the stage (not the whole document, which fails on iOS).
   const stageRootRef = useRef<HTMLDivElement>(null);
@@ -558,21 +618,35 @@ export default function MainStage() {
     playMusic();
   }, [musicTracks, musicIsPlaying, playMusic, state?.media?.kind, state?.media?.playing]);
 
-  const handleJoinCam = useCallback(async () => {
-    await joinAsCammer();
-  }, [joinAsCammer]);
-
-  const handleLeaveCam = useCallback(async () => {
-    await leaveCammer();
-  }, [leaveCammer]);
-
   const handleCammersChange = useCallback((infos: CammerInfo[]) => {
     setCammerInfos(infos);
   }, []);
 
   const handleLeave = useCallback(() => {
+    if (!isGuestMode) leave();
     navigate(-1);
-  }, [navigate]);
+  }, [isGuestMode, leave, navigate]);
+
+  const handleAcceptConsents = useCallback(async () => {
+    setConsentError(null);
+    if (!acceptTerms || !acceptPrivacy || !confirmAge) {
+      setConsentError("You must accept the Terms, Privacy Policy, and confirm you are 18+ to join Main Stage.");
+      return;
+    }
+    try {
+      setAcceptingConsents(true);
+      const check = await acceptMainStageConsents({
+        acceptTerms: true,
+        acceptPrivacy: true,
+        ageConfirmed: true,
+      });
+      setJoinCheck(check);
+    } catch (err) {
+      setConsentError(err instanceof Error ? err.message : "Failed to save Main Stage consents");
+    } finally {
+      setAcceptingConsents(false);
+    }
+  }, [acceptPrivacy, acceptTerms, confirmAge]);
 
   // Cycle the *local* view mode — each user's personal preference. The
   // server's mode remains the default for anyone who hasn't overridden.
@@ -591,7 +665,16 @@ export default function MainStage() {
     shuffle();
   }, [shuffle]);
 
-  if (loading) {
+  if (
+    !isGuestMode &&
+    !error &&
+    (
+      loading ||
+      joining ||
+      (joinCheck?.canJoin === true && !isJoined) ||
+      (!joinCheck && !consentError)
+    )
+  ) {
     return (
       <div
         className="fixed inset-0 flex flex-col bg-pnp-background"
@@ -654,6 +737,77 @@ export default function MainStage() {
           >
             {t.live.mainStageGoBack}
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isGuestMode && consentError && !joinCheck) {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center bg-pnp-background">
+        <div>
+          <p className="text-pnp-text-primary font-semibold text-sm mb-1">Main Stage Access Check Failed</p>
+          <p className="text-white/50 text-xs">{consentError}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="min-h-[44px] px-5 rounded-2xl text-sm font-semibold text-white"
+          style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
+  if (!isGuestMode && joinCheck && !joinCheck.canJoin) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-pnp-background px-6 py-10">
+        <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-white shadow-2xl">
+          <h1 className="text-xl font-bold mb-2">Before You Join Main Stage</h1>
+          <p className="text-sm text-white/70 mb-5">
+            Main Stage requires current consent to the Terms and Conditions, Privacy Policy, and confirmation that you are 18 or older.
+          </p>
+          <div className="space-y-3 text-sm">
+            <label className="flex items-start gap-3">
+              <input type="checkbox" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} className="mt-1" />
+              <span>
+                I accept the <a href="/terms" target="_blank" rel="noreferrer" className="text-pnp-accent underline">Terms and Conditions</a>.
+              </span>
+            </label>
+            <label className="flex items-start gap-3">
+              <input type="checkbox" checked={acceptPrivacy} onChange={(e) => setAcceptPrivacy(e.target.checked)} className="mt-1" />
+              <span>
+                I accept the <a href="/privacy" target="_blank" rel="noreferrer" className="text-pnp-accent underline">Privacy Policy</a>.
+              </span>
+            </label>
+            <label className="flex items-start gap-3">
+              <input type="checkbox" checked={confirmAge} onChange={(e) => setConfirmAge(e.target.checked)} className="mt-1" />
+              <span>I confirm that I am 18 years of age or older.</span>
+            </label>
+          </div>
+          {consentError && (
+            <p className="mt-4 text-sm text-red-400">{consentError}</p>
+          )}
+          <div className="mt-6 flex gap-3">
+            <button
+              type="button"
+              onClick={handleAcceptConsents}
+              disabled={acceptingConsents}
+              className="min-h-[44px] flex-1 rounded-2xl px-5 text-sm font-semibold text-white"
+              style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+            >
+              {acceptingConsents ? "Saving..." : "Accept and Join"}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="min-h-[44px] rounded-2xl border border-white/10 bg-white/[0.06] px-5 text-sm font-semibold text-white/70"
+            >
+              Back
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -793,7 +947,7 @@ export default function MainStage() {
           <button
             type="button"
             aria-label={t.live.mainStageAriaLeave}
-            onClick={() => navigate(-1)}
+            onClick={handleLeave}
             className="min-h-[36px] min-w-[36px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:opacity-70 active:scale-[0.92] bg-white/[0.06] border border-white/10"
           >
             <svg className="w-3.5 h-3.5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -969,7 +1123,7 @@ export default function MainStage() {
               token: guestCredsRef.current!.token,
               serverUrl: guestCredsRef.current!.livekitUrl,
               connect: true,
-              audio: true,
+              audio: false,
               video: true,
               options: {
                 adaptiveStream: true,
@@ -998,6 +1152,7 @@ export default function MainStage() {
           }
         }}
       >
+        <ForceCamMicEnforcer active={isParticipant && !isAdmin} />
         <MainStageInner
           mode={mode as ModeId}
           spotlightCammer={state?.spotlight?.cammer}
@@ -1006,11 +1161,8 @@ export default function MainStage() {
           mediaSrc={state?.media?.src}
           mediaPlaying={state?.media?.playing ?? true}
           mediaVolume={state?.media?.volume ?? 70}
-          canBeCammer={canBeCammer}
+          isParticipant={isParticipant}
           isAdmin={isAdmin}
-          isCammer={isCammer}
-          onJoinCam={handleJoinCam}
-          onLeaveCam={handleLeaveCam}
           onSpotlightPick={(identity) => admin.setSpotlight(identity)}
           onConnectionStateChange={setConnState}
           onCammersChange={handleCammersChange}
@@ -1328,7 +1480,7 @@ export function AdminPanelContent({
         <div className="pr-12">
           <h2 className="text-pnp-text-primary font-bold text-sm">{isAdmin ? t.live.mainStageAdminTitle : t.live.mainStageSettingsTitle}</h2>
           <p className="text-white/40 text-xs mt-0.5">
-            {state?.counts?.cammers || 0} {t.live.mainStageCammers} · {state?.counts?.viewers || 0} {t.live.mainStageWatching}
+            {state?.counts?.cammers || 0} participants in rotation
           </p>
         </div>
         {/* Close button moved to a fixed-positioned overlay in AdminDrawer

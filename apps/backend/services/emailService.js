@@ -234,6 +234,45 @@ class EmailService {
     }
 
     /**
+     * Send Main Stage guest welcome + lifetime100 promo.
+     * Triggered when an unauthenticated user redeems a Main Stage invite.
+     * @param {Object} data - { to, displayName, language? }
+     */
+    async sendMainStageGuestPromoEmail(data) {
+        const { to, displayName, language } = data || {};
+        const isEs = language === 'es';
+        const safeName = this.escapeHtml(displayName || (isEs ? 'invitado' : 'guest'));
+        const subject = isEs
+            ? '🎬 Gracias por unirte al Main Stage — bono Lifetime100 dentro'
+            : '🎬 Thanks for joining Main Stage — Lifetime100 offer inside';
+        const ctaUrl = 'https://pnptv.app/lifetime100';
+        const joinUrl = 'https://pnptv.app/join';
+
+        const intro = isEs
+            ? `¡Hola ${safeName}! Gracias por unirte al Main Stage como invitado. Esperamos que la pasaras increíble en cámara.`
+            : `Hi ${safeName}! Thanks for jumping into Main Stage as a guest. We hope you had a great time on cam.`;
+        const pitch = isEs
+            ? 'Crea tu cuenta gratis para guardar tu perfil, seguir creadores, recibir invitaciones y mucho más. Y si te enganchó la vibra, mira esto:'
+            : 'Create a free account to keep your profile, follow creators, receive invites and unlock everything. And if you’re hooked, check this out:';
+        const offerTitle = isEs
+            ? 'Lifetime100 — paga una vez, accede para siempre'
+            : 'Lifetime100 — pay once, access forever';
+        const offerBody = isEs
+            ? 'Una sola cuota y obtienes acceso PRIME de por vida: video VOD exclusivo, salas premium, descuentos para reservas y los próximos lanzamientos. Cupos muy limitados.'
+            : 'One single payment unlocks lifetime PRIME access: exclusive VOD, premium rooms, booking discounts and every upcoming launch. Very limited spots.'
+        ;
+        const ctaLabel = isEs ? 'Reservar Lifetime100' : 'Claim Lifetime100';
+        const joinLabel = isEs ? 'Crear cuenta gratis' : 'Create free account';
+        const footer = isEs
+            ? 'Si no quieres más correos, ignora este mensaje. — El equipo de PNPtv!'
+            : 'If you’d rather not hear from us, just ignore this email. — The PNPtv! Team';
+
+        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head><body style="margin:0;padding:0;background:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"><table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0f;padding:40px 20px;"><tr><td align="center"><table width="600" cellpadding="0" cellspacing="0" style="background:#13131a;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);"><tr><td style="background:linear-gradient(135deg,#1a0a1a,#13131a);padding:32px;text-align:center;"><p style="margin:0;font-size:28px;font-weight:800;background:linear-gradient(135deg,#5ED1C4,#D4007A);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">PNPtv!</p></td></tr><tr><td style="padding:32px;"><h1 style="color:#fff;font-size:22px;font-weight:700;margin:0 0 16px;">${isEs ? '¡Bienvenido al Main Stage!' : 'Welcome to the Main Stage!'}</h1><p style="color:rgba(255,255,255,0.78);font-size:14px;line-height:1.6;margin:0 0 16px;">${intro}</p><p style="color:rgba(255,255,255,0.78);font-size:14px;line-height:1.6;margin:0 0 24px;">${pitch}</p><table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;"><tr><td style="background:linear-gradient(135deg,rgba(212,0,122,0.15),rgba(123,97,255,0.15));border:1px solid rgba(212,0,122,0.45);border-radius:14px;padding:20px;"><p style="margin:0 0 8px;font-size:16px;font-weight:800;color:#FFFFFF;">${offerTitle}</p><p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:rgba(255,255,255,0.78);">${offerBody}</p><a href="${ctaUrl}" style="display:inline-block;background:linear-gradient(135deg,#D4007A,#7B61FF);color:#FFFFFF;text-decoration:none;padding:12px 22px;border-radius:999px;font-size:14px;font-weight:800;letter-spacing:0.2px;">${ctaLabel} →</a></td></tr></table><p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:rgba(255,255,255,0.6);">${isEs ? '¿No estás listo todavía? Crea una cuenta gratis primero:' : 'Not ready yet? Create a free account first:'}</p><a href="${joinUrl}" style="display:inline-block;color:#5ED1C4;text-decoration:none;font-size:13px;font-weight:700;border:1px solid rgba(94,209,196,0.45);padding:9px 18px;border-radius:999px;">${joinLabel}</a><p style="color:rgba(255,255,255,0.4);font-size:12px;margin:28px 0 0;">${footer}</p></td></tr><tr><td style="padding:16px 32px;border-top:1px solid rgba(255,255,255,0.06);text-align:center;"><p style="color:rgba(255,255,255,0.3);font-size:11px;margin:0;">&copy; ${new Date().getFullYear()} PNPtv! &middot; support@pnptv.app</p></td></tr></table></td></tr></table></body></html>`;
+
+        return await this.send({ to, subject, html });
+    }
+
+    /**
      * Send broadcast email to user
      * @param {Object} data - Broadcast data
      * @returns {Promise<Object>} Send result

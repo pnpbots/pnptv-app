@@ -26,7 +26,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { Room, RoomOptions } from "livekit-client";
+import {
+  Room,
+  RoomOptions,
+  RoomEvent,
+  Track,
+  type LocalParticipant,
+  type LocalTrackPublication,
+} from "livekit-client";
 import {
   getMainStageState,
   getMainStageToken,
@@ -62,19 +69,14 @@ export interface MainStageProviderValue {
   /** Non-null when the token mint or room connect fails */
   error: string | null;
 
-  /**
-   * Mint a cammer token (atomically reserves a slot via Redis Lua) and
-   * connect the Room as a publisher. Calling this is idempotent — if the
-   * Room is already connected as cammer, it re-mints so the token timer
-   * resets but does NOT disconnect+reconnect.
-   */
-  joinAsCammer: () => Promise<void>;
+  /** True once the shared Room is connected for this user */
+  isJoined: boolean;
 
   /**
-   * Demote back to viewer: tells the server to remove us from the spotlight
-   * queue, re-mints a viewer token, and reconnects the Room with that token.
+   * Join the Main Stage room as a participant. Entry forces camera on and
+   * microphone muted.
    */
-  leaveCammer: () => Promise<void>;
+  join: () => Promise<void>;
 
   /**
    * Disconnect the Room completely and clear role/token. Called by the
@@ -84,6 +86,10 @@ export interface MainStageProviderValue {
 
   /** Clear the error banner */
   clearError: () => void;
+
+  /** UI flag for whether the local camera tile should be active/visible */
+  isCammerActive: boolean;
+  setIsCammerActive: (active: boolean) => void;
 }
 
 // ─── Room singleton ────────────────────────────────────────────────────────
@@ -124,14 +130,13 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<MainStageState | null>(null);
   const [livekitUrl, setLivekitUrl] = useState(DEFAULT_LIVEKIT_URL);
   const [roomName, setRoomName] = useState("main-stage-prime");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isJoined, setIsJoined] = useState(false);
+  const [isCammerActive, setIsCammerActive] = useState(false);
 
   // The current live LiveKit token — needed to reconnect after a role change.
   const tokenRef = useRef<string | null>(null);
-  // Track whether the current slot was reserved as cammer so token refresh
-  // uses the right grant.
-  const tokenAsCammerRef = useRef(false);
   // Whether the Room is intentionally connected (provider owns this state).
   const intentConnectedRef = useRef(false);
   // Prevents state updates after unmount.
@@ -153,7 +158,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     refreshTimerRef.current = setTimeout(async () => {
       if (!mountedRef.current) return;
       try {
-        const res = await getMainStageToken({ asCammer: tokenAsCammerRef.current });
+        const res = await getMainStageToken();
         if (!mountedRef.current) return;
         tokenRef.current = res.token;
         setLivekitUrl(res.livekitUrl);
@@ -184,52 +189,66 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     try {
       intentConnectedRef.current = true;
       await sharedRoom.connect(url, token);
+      if (mountedRef.current) setIsJoined(true);
     } catch (err) {
       intentConnectedRef.current = false;
+      if (mountedRef.current) setIsJoined(false);
       throw err;
     }
   }, []);
 
-  // ── Initial token + state fetch ─────────────────────────────────────────
-
+  // ── Force cam-on / mic-muted enforcement (non-admin only) ───────────────
+  // Stage rules: every non-admin participant must have camera ON and
+  // microphone MUTED at all times. We re-assert on any local-track event
+  // so a user (or a permission flicker) cannot defeat the rule.
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isJoined) return;
+    if (role !== "participant") return; // admins keep manual control
 
     let cancelled = false;
+    let enforcing = false;
 
-    async function init() {
-      setLoading(true);
-      setError(null);
+    const enforce = async () => {
+      if (cancelled || enforcing) return;
+      enforcing = true;
       try {
-        const [stateRes, tokenRes] = await Promise.all([
-          getMainStageState(),
-          getMainStageToken({ asCammer: false }),
-        ]);
-        if (cancelled) return;
-        tokenRef.current = tokenRes.token;
-        setLivekitUrl(tokenRes.livekitUrl);
-        setRoomName(tokenRes.roomName);
-        setRole(tokenRes.role);
-        setState(stateRes);
-        tokenAsCammerRef.current = false;
-
-        // Connect the room as viewer immediately so the socket is live
-        // and remote participants are visible without clicking anything.
-        await connectRoom(tokenRes.livekitUrl, tokenRes.token);
-        if (!cancelled) scheduleTokenRefresh();
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to connect to Main Stage");
+        const lp: LocalParticipant = sharedRoom.localParticipant;
+        const camPub = lp.getTrackPublication(Track.Source.Camera);
+        const micPub = lp.getTrackPublication(Track.Source.Microphone);
+        const camOn = !!camPub && !camPub.isMuted;
+        const micOn = !!micPub && !micPub.isMuted;
+        if (!camOn) {
+          try { await lp.setCameraEnabled(true); } catch { /* no permission, etc. */ }
+        }
+        if (micOn) {
+          try { await lp.setMicrophoneEnabled(false); } catch { /* noop */ }
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        enforcing = false;
       }
-    }
+    };
 
-    init();
+    const onMuted = (_pub: LocalTrackPublication) => { void enforce(); };
+    const onUnmuted = (_pub: LocalTrackPublication) => { void enforce(); };
+    const onPublished = () => { void enforce(); };
+    const onUnpublished = () => { void enforce(); };
+
+    sharedRoom.on(RoomEvent.LocalTrackPublished, onPublished);
+    sharedRoom.on(RoomEvent.LocalTrackUnpublished, onUnpublished);
+    sharedRoom.on(RoomEvent.TrackMuted, onMuted);
+    sharedRoom.on(RoomEvent.TrackUnmuted, onUnmuted);
+
+    // Initial sweep to cover the case where state drifts before listeners attach.
+    void enforce();
+
     return () => {
       cancelled = true;
+      sharedRoom.off(RoomEvent.LocalTrackPublished, onPublished);
+      sharedRoom.off(RoomEvent.LocalTrackUnpublished, onUnpublished);
+      sharedRoom.off(RoomEvent.TrackMuted, onMuted);
+      sharedRoom.off(RoomEvent.TrackUnmuted, onUnmuted);
     };
-  }, [isAuthenticated, connectRoom, scheduleTokenRefresh]);
+  }, [isJoined, role]);
 
   // ── Logout cleanup ──────────────────────────────────────────────────────
 
@@ -239,8 +258,9 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     if (intentConnectedRef.current) {
       intentConnectedRef.current = false;
       tokenRef.current = null;
-      tokenAsCammerRef.current = false;
       setRole(null);
+      setIsJoined(false);
+      setIsCammerActive(false);
       sharedRoom.disconnect();
     }
   }, [isAuthenticated]);
@@ -288,90 +308,54 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
 
   // ── Public API ───────────────────────────────────────────────────────────
 
-  const joinAsCammer = useCallback(async () => {
+  const join = useCallback(async () => {
+    if (!isAuthenticated) {
+      if (mountedRef.current) setError("You must be logged in to join Main Stage");
+      return;
+    }
     try {
+      setLoading(true);
       setError(null);
-      const res = await getMainStageToken({ asCammer: true });
+      if (intentConnectedRef.current && sharedRoom.state !== "disconnected") {
+        const stateRes = await getMainStageState();
+        if (mountedRef.current) setState(stateRes);
+        setIsJoined(true);
+        return;
+      }
+      const [stateRes, res] = await Promise.all([getMainStageState(), getMainStageToken()]);
       if (!mountedRef.current) return;
 
       tokenRef.current = res.token;
       setLivekitUrl(res.livekitUrl);
       setRoomName(res.roomName);
       setRole(res.role);
-      tokenAsCammerRef.current = true;
+      setState(stateRes);
 
-      // Reconnect with the cammer token so LiveKit grants publish permissions.
+      // Join the room, then force camera on and mic muted for entry.
       await connectRoom(res.livekitUrl, res.token);
-
-      // Enable cam + mic after the Room is connected.
       await sharedRoom.localParticipant.setCameraEnabled(true);
-      await sharedRoom.localParticipant.setMicrophoneEnabled(true);
-
-      scheduleTokenRefresh();
-
-      // Best-effort socket notification for queue broadcast.
-      try {
-        const socket = getSocket();
-        if (!socket.connected) socket.connect();
-        socket.emit("mainstage:join-cammer");
-      } catch {
-        // non-fatal
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err.message : "Failed to join as cammer");
-      }
-    }
-  }, [connectRoom, scheduleTokenRefresh]);
-
-  const leaveCammer = useCallback(async () => {
-    tokenAsCammerRef.current = false;
-
-    // Turn off cam + mic before demoting.
-    try {
-      await sharedRoom.localParticipant.setCameraEnabled(false);
       await sharedRoom.localParticipant.setMicrophoneEnabled(false);
-    } catch {
-      // non-fatal — the token demotion below is the authoritative step
-    }
+      if (mountedRef.current) setIsCammerActive(true);
 
-    // Notify server to remove us from the spotlight queue.
-    try {
-      const socket = getSocket();
-      if (socket.connected) socket.emit("mainstage:leave-cammer");
-    } catch {
-      // non-fatal
-    }
-
-    // Re-mint as viewer and reconnect so server revokes publish permissions.
-    try {
-      setError(null);
-      const res = await getMainStageToken({ asCammer: false });
-      if (!mountedRef.current) return;
-      tokenRef.current = res.token;
-      setLivekitUrl(res.livekitUrl);
-      setRoomName(res.roomName);
-      setRole(res.role);
-      await connectRoom(res.livekitUrl, res.token);
       scheduleTokenRefresh();
     } catch (err) {
       if (mountedRef.current) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to leave cammer — please reload if the issue persists"
-        );
+        setError(err instanceof Error ? err.message : "Failed to join Main Stage");
       }
+    } finally {
+      if (mountedRef.current) setLoading(false);
     }
-  }, [connectRoom, scheduleTokenRefresh]);
+  }, [connectRoom, isAuthenticated, scheduleTokenRefresh]);
 
   const leave = useCallback(() => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     intentConnectedRef.current = false;
     tokenRef.current = null;
-    tokenAsCammerRef.current = false;
     setRole(null);
     setError(null);
+    setLoading(false);
+    setIsJoined(false);
+    setIsCammerActive(false);
 
     // Notify server before disconnecting.
     try {
@@ -395,12 +379,26 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       roomName,
       loading,
       error,
-      joinAsCammer,
-      leaveCammer,
+      isJoined,
+      join,
       leave,
       clearError,
+      isCammerActive,
+      setIsCammerActive,
     }),
-    [role, state, livekitUrl, roomName, loading, error, joinAsCammer, leaveCammer, leave, clearError]
+    [
+      role,
+      state,
+      livekitUrl,
+      roomName,
+      loading,
+      error,
+      isJoined,
+      join,
+      leave,
+      clearError,
+      isCammerActive,
+    ]
   );
 
   return (

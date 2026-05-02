@@ -91,21 +91,6 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
         ) {
           window.location.replace("/subscribe?plan=pnp_col");
         }
-        // Wellness Mode gate: user has self-imposed restriction. Redirect to
-        // the wellness shell which surfaces only allowed resources. Skip when
-        // already on allowed pages (shell, settings, cristina, hangouts — the
-        // last two are reachable from the shell and have their API paths in the
-        // backend allowlist; redirecting from them creates a bounce loop).
-        if (
-          errorCode === "WELLNESS_MODE" &&
-          typeof window !== "undefined" &&
-          !window.location.pathname.startsWith("/wellness") &&
-          !window.location.pathname.startsWith("/settings") &&
-          !window.location.pathname.startsWith("/hangouts") &&
-          !window.location.pathname.startsWith("/cristina")
-        ) {
-          window.location.replace("/wellness");
-        }
         // Extract structured access details for scoped-resource 403 responses so
         // callers can render the right in-context purchase modal instead of
         // bouncing to /subscribe.
@@ -6366,7 +6351,19 @@ export interface MainStageTokenResponse {
   token: string;
   livekitUrl: string;
   roomName: string;
-  role: "admin" | "cammer" | "viewer";
+  role: "admin" | "participant";
+}
+
+export interface MainStageJoinCheck {
+  termsVersion: string;
+  privacyVersion: string;
+  ageConfirmed: boolean;
+  termsAccepted: boolean;
+  privacyAccepted: boolean;
+  requiresAgeVerification: boolean;
+  requiresTermsAcceptance: boolean;
+  requiresPrivacyAcceptance: boolean;
+  canJoin: boolean;
 }
 
 export function getMainStageState(): Promise<MainStageState> {
@@ -6375,8 +6372,55 @@ export function getMainStageState(): Promise<MainStageState> {
   );
 }
 
-export function getMainStageToken(body: { asCammer?: boolean }): Promise<MainStageTokenResponse> {
-  return request("/api/main-stage/token", { method: "POST", body });
+export function getMainStageToken(): Promise<MainStageTokenResponse> {
+  return request("/api/main-stage/token", { method: "POST" });
+}
+
+export function getMainStageJoinCheck(): Promise<MainStageJoinCheck> {
+  return request<{ success: boolean } & MainStageJoinCheck>("/api/main-stage/join-check");
+}
+
+export function acceptMainStageConsents(body: {
+  acceptTerms: boolean;
+  acceptPrivacy: boolean;
+  ageConfirmed: boolean;
+}): Promise<MainStageJoinCheck> {
+  return request<{ success: boolean } & MainStageJoinCheck>("/api/main-stage/accept-consents", {
+    method: "POST",
+    body,
+  });
+}
+
+export function redeemMainStageInviteWithConsents(
+  code: string,
+  displayName: string,
+  email: string,
+  consents: {
+    acceptTerms: boolean;
+    acceptPrivacy: boolean;
+    ageConfirmed: boolean;
+  },
+  language?: "en" | "es"
+): Promise<{
+  success: boolean;
+  token: string;
+  livekitUrl: string;
+  roomName: string;
+  role: "guest";
+  identity: string;
+}> {
+  return request('/api/main-stage/guest-token', {
+    method: 'POST',
+    body: {
+      code,
+      displayName,
+      email,
+      language: language || "en",
+      acceptTerms: consents.acceptTerms,
+      acceptPrivacy: consents.acceptPrivacy,
+      ageConfirmed: consents.ageConfirmed,
+    },
+  });
 }
 
 export function setMainStageMode(mode: MainStageState["mode"]): Promise<{ success: boolean }> {

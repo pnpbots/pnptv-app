@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { previewMainStageInvite, redeemMainStageInvite, ApiError } from "@/lib/api";
+import { previewMainStageInvite, redeemMainStageInviteWithConsents, ApiError } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -60,6 +60,9 @@ function formatExpiry(expiresAt: string): string {
 
 const SESSION_KEY = "pnptv:ms:guest";
 
+// Same regex as backend so we don't roundtrip a guaranteed-400.
+const EMAIL_RE = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}$/;
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function MainStageGuestJoin() {
@@ -69,7 +72,10 @@ export default function MainStageGuestJoin() {
   const [phase,        setPhase]        = useState<Phase>("loading");
   const [preview,      setPreview]      = useState<InvitePreview | null>(null);
   const [displayName,  setDisplayName]  = useState("");
+  const [email,        setEmail]        = useState("");
   const [terms,        setTerms]        = useState(false);
+  const [privacy,      setPrivacy]      = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [errorInfo,    setErrorInfo]    = useState<InviteError | null>(null);
   const [fieldError,   setFieldError]   = useState<string | null>(null);
 
@@ -117,8 +123,13 @@ export default function MainStageGuestJoin() {
       setFieldError("Display name must be 2–30 characters. / El nombre debe tener 2–30 caracteres.");
       return;
     }
-    if (!terms) {
-      setFieldError("You must accept the terms to continue. / Debes aceptar los términos para continuar.");
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || cleanEmail.length > 254 || !EMAIL_RE.test(cleanEmail)) {
+      setFieldError("A valid email is required so we can send you your invite to PNPtv. / Necesitamos un email válido para enviarte tu invitación a PNPtv.");
+      return;
+    }
+    if (!terms || !privacy || !ageConfirmed) {
+      setFieldError("You must accept the Terms, Privacy Policy, and confirm you are 18+ to continue. / Debes aceptar Términos, Privacidad y confirmar que tienes 18+ para continuar.");
       return;
     }
 
@@ -126,8 +137,23 @@ export default function MainStageGuestJoin() {
 
     setPhase("joining");
 
+    const detectedLang: "en" | "es" =
+      typeof navigator !== "undefined" && navigator.language?.toLowerCase().startsWith("es")
+        ? "es"
+        : "en";
+
     try {
-      const result = await redeemMainStageInvite(code, name);
+      const result = await redeemMainStageInviteWithConsents(
+        code,
+        name,
+        cleanEmail,
+        {
+          acceptTerms: true,
+          acceptPrivacy: true,
+          ageConfirmed: true,
+        },
+        detectedLang
+      );
 
       // Store guest credentials in sessionStorage so MainStage can pick them up.
       // sessionStorage is cleared by MainStage immediately after reading.
@@ -154,7 +180,7 @@ export default function MainStageGuestJoin() {
       setErrorInfo(info);
       setPhase("error");
     }
-  }, [code, displayName, terms, navigate]);
+  }, [ageConfirmed, code, displayName, email, navigate, privacy, terms]);
 
   // ── Render: loading ──
   if (phase === "loading") {
@@ -253,7 +279,7 @@ export default function MainStageGuestJoin() {
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && terms) handleJoin(); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && terms && privacy && ageConfirmed) handleJoin(); }}
               placeholder="Your name / Tu nombre"
               maxLength={30}
               minLength={2}
@@ -267,13 +293,41 @@ export default function MainStageGuestJoin() {
             />
           </div>
 
+          <div>
+            <label htmlFor="guest-email" className="block text-xs font-semibold text-white/70 mb-1.5">
+              Email / Correo electrónico
+            </label>
+            <input
+              id="guest-email"
+              type="email"
+              autoComplete="email"
+              inputMode="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && terms && privacy && ageConfirmed) handleJoin(); }}
+              placeholder="you@example.com"
+              maxLength={254}
+              className="w-full px-4 py-3 rounded-2xl text-sm text-white placeholder-white/30 focus:outline-none transition-colors"
+              style={{
+                background: "rgba(255,255,255,0.07)",
+                border: "1px solid rgba(255,255,255,0.15)",
+              }}
+              aria-describedby={fieldError ? "guest-field-error" : "guest-email-help"}
+            />
+            <p id="guest-email-help" className="mt-1 text-[11px] text-white/40 leading-snug">
+              We'll email you a free PNPtv account invite. No spam.
+              {" / "}
+              Te enviaremos una invitación gratis a PNPtv. Sin spam.
+            </p>
+          </div>
+
           {fieldError && (
             <p id="guest-field-error" className="text-xs text-pnp-error" role="alert">
               {fieldError}
             </p>
           )}
 
-          {/* Terms */}
+          {/* Legal */}
           <label className="flex items-start gap-3 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -284,22 +338,64 @@ export default function MainStageGuestJoin() {
             <span className="text-xs text-white/60 leading-snug">
               I agree to PNPtv's{" "}
               <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-pnp-accent underline">
-                Terms of Service
+                Terms and Conditions
               </a>{" "}
-              and understand this is a live adult platform.
+              .
               {" / "}
               Acepto los{" "}
               <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-pnp-accent underline">
-                Términos de Servicio
+                Términos y Condiciones
               </a>{" "}
-              y entiendo que esta es una plataforma adulta en vivo.
+              .
+            </span>
+          </label>
+
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={privacy}
+              onChange={(e) => setPrivacy(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded accent-pnp-accent flex-shrink-0"
+            />
+            <span className="text-xs text-white/60 leading-snug">
+              I agree to PNPtv's{" "}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-pnp-accent underline">
+                Privacy Policy
+              </a>
+              .
+              {" / "}
+              Acepto la{" "}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-pnp-accent underline">
+                Política de Privacidad
+              </a>
+              .
+            </span>
+          </label>
+
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={ageConfirmed}
+              onChange={(e) => setAgeConfirmed(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded accent-pnp-accent flex-shrink-0"
+            />
+            <span className="text-xs text-white/60 leading-snug">
+              I confirm that I am 18 or older and understand this is a live adult platform.
+              {" / "}
+              Confirmo que tengo 18 años o más y entiendo que esta es una plataforma adulta en vivo.
             </span>
           </label>
 
           <button
             type="button"
             onClick={handleJoin}
-            disabled={!terms || displayName.trim().length < 2}
+            disabled={
+              !terms ||
+              !privacy ||
+              !ageConfirmed ||
+              displayName.trim().length < 2 ||
+              !EMAIL_RE.test(email.trim().toLowerCase())
+            }
             className="w-full min-h-[52px] flex items-center justify-center gap-2 rounded-2xl text-sm font-bold text-white transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
           >

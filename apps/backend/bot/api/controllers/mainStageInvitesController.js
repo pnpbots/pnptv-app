@@ -13,6 +13,11 @@ const { asyncHandler }   = require('../middleware/errorHandler');
 const mainStageService   = require('../../../services/mainStageService');
 const livekitService     = require('../../../services/livekitService');
 const mainStageInviteService = require('../../../services/mainStageInviteService');
+const emailService       = require('../../../services/emailService');
+
+// RFC 5322-leaning practical email regex — keeps quoted local-parts out
+// (nodemailer-parser CVE class) but accepts every realistic address.
+const EMAIL_RE = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}$/;
 
 const ROOM_NAME = mainStageService.ROOM_NAME;
 
@@ -116,7 +121,8 @@ const previewInvite = asyncHandler(async (req, res) => {
  * Rate-limited to 5/min/IP at the route layer.
  */
 const guestToken = asyncHandler(async (req, res) => {
-  const { code, displayName } = req.body || {};
+  const { code, displayName, email, language, acceptTerms, acceptPrivacy, ageConfirmed } = req.body || {};
+  const mainStageConsentService = require('../../../services/mainStageConsentService');
 
   // ── Input validation ──
   if (!code || typeof code !== 'string' || !/^[A-Za-z0-9_-]{8,32}$/.test(code)) {
@@ -136,6 +142,24 @@ const guestToken = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, error: 'Display name contains disallowed characters' });
   }
 
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!normalizedEmail || normalizedEmail.length > 254 || !EMAIL_RE.test(normalizedEmail)) {
+    return res.status(400).json({
+      success: false,
+      error: 'A valid email address is required',
+      code: 'MAIN_STAGE_EMAIL_REQUIRED',
+    });
+  }
+
+  if (acceptTerms !== true || acceptPrivacy !== true || ageConfirmed !== true) {
+    return res.status(400).json({
+      success: false,
+      error: 'terms, privacy, and age confirmation are required',
+      code: 'MAIN_STAGE_CONSENT_REQUIRED',
+    });
+  }
+
+  const guestLanguage = language === 'es' ? 'es' : 'en';
   const fingerprint = buildFingerprint(req);
 
   // ── Redeem invite (atomic) ──
@@ -155,11 +179,28 @@ const guestToken = asyncHandler(async (req, res) => {
     });
   }
 
-  // ── Mint LiveKit token ──
-  // Guests get the same publish grants as cammers but are tracked as a
-  // separate role ('guest') so cammer cap counting is independent.
-  // We intentionally do NOT call mainStageService.addCammer() so guests
-  // never consume a cammer slot.
+  // ── Reserve a stage slot + mint LiveKit token ──
+  // Guest entrants join the same room model as authenticated participants,
+  // so they also consume a rotation/visibility slot.
+  const addResult = await mainStageService.addCammer(String(redeem.lkIdentity));
+  if (addResult === 'full') {
+    return res.status(429).json({
+      success: false,
+      error: 'Main Stage is full',
+      code: 'CAMMER_CAP_REACHED',
+    });
+  }
+
+  await mainStageConsentService.recordGuestConsent({
+    guestIdentity: redeem.lkIdentity,
+    guestDisplayName: name,
+    guestEmail: normalizedEmail,
+    inviteId: redeem.inviteId,
+    ageConfirmed: true,
+    ip: req.ip || req.headers['x-forwarded-for'] || null,
+    userAgent: req.get('user-agent') || null,
+  });
+
   const lkToken = await livekitService.generateToken(
     ROOM_NAME,
     redeem.lkIdentity,
@@ -177,6 +218,24 @@ const guestToken = asyncHandler(async (req, res) => {
     lkIdentity: redeem.lkIdentity,
     displayName: name,
   });
+
+  // Fire-and-forget welcome + lifetime100 promo. Never blocks the join.
+  if (typeof emailService.sendMainStageGuestPromoEmail === 'function') {
+    setImmediate(() => {
+      emailService
+        .sendMainStageGuestPromoEmail({
+          to: normalizedEmail,
+          displayName: name,
+          language: guestLanguage,
+        })
+        .catch((err) => {
+          logger.warn('[MainStage] guest promo email failed', {
+            email: normalizedEmail,
+            err: err?.message || String(err),
+          });
+        });
+    });
+  }
 
   return res.json({
     success:    true,
