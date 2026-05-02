@@ -78,8 +78,6 @@ import { HangoutEventReminder } from "@/components/events/HangoutEventReminder";
 import { NearbyBadge } from "@/components/NearbyBadge";
 import { SpotlightStrip } from "@/components/SpotlightStrip";
 import { getUpcomingEvents, getMainStageState, type MainStageState } from "@/lib/api";
-import { getLocalizedTips, type MainStageTip } from "@/lib/i18n/mainStageTips";
-import { MainStageLiveBanner } from "@/components/mainstage/MainStageLiveBanner";
 import type { EventItem } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
 import { EventDetailModal } from "@/components/events";
@@ -3543,12 +3541,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         {/* Actions handled by SpotlightStrip + icon */}
       </div>
 
-      {/* Main Stage live banner — slim row, only when broadcasting */}
-      <MainStageLiveBanner />
-
-      {/* Main Stage entry — horizontal stage-themed strip */}
-      <MainStageStrip />
-
       {/* SpotlightStrip — hangout events */}
       <SpotlightStrip
         items={[
@@ -4120,7 +4112,22 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               role="button"
               tabIndex={0}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openChat(group); } }}
-              className="w-full glass-card-sm p-3 sm:p-4 text-left hover:border-white/20 active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent cursor-pointer"
+              className={`w-full p-3 sm:p-4 text-left active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent cursor-pointer ${
+                group.isMain
+                  ? "rounded-2xl relative overflow-hidden hover:brightness-110"
+                  : "glass-card-sm hover:border-white/20"
+              }`}
+              style={
+                group.isMain
+                  ? {
+                      background:
+                        "linear-gradient(135deg, rgba(212,0,122,0.18), rgba(123,97,255,0.15) 55%, rgba(94,209,196,0.14)) padding-box, linear-gradient(135deg,#D4007A,#7B61FF 55%,#5ED1C4) border-box",
+                      border: "1.5px solid transparent",
+                      boxShadow:
+                        "0 8px 32px rgba(212,0,122,0.18), 0 0 0 1px rgba(212,0,122,0.10), inset 0 1px 0 rgba(255,255,255,0.06)",
+                    }
+                  : undefined
+              }
             >
               <div className="flex gap-3 items-center">
                 {/* Group avatar */}
@@ -4235,6 +4242,23 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       </span>
                     )}
                   </div>
+                  {/* Crystal-tier marker for the official PNPtv hangout */}
+                  {group.isMain && (
+                    <div
+                      className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide"
+                      style={{
+                        background: "rgba(94,209,196,0.12)",
+                        border: "1px solid rgba(94,209,196,0.35)",
+                        color: "#5ED1C4",
+                      }}
+                      title="Crystal Hangout — Main Stage video call enabled"
+                    >
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                      </svg>
+                      <span>Crystal Hangout · Main Stage</span>
+                    </div>
+                  )}
                   {/* Description */}
                   {!group.isWallOfFame && group.description && (
                     <p className="text-xs text-pnp-textSecondary truncate mt-0.5">{group.description}</p>
@@ -4249,6 +4273,30 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 </div>
 
                 <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {/* Main Stage entry — squares grid icon, only on the official PNPtv hangout.
+                      Implies Main Stage is THE official video-call surface for this room. */}
+                  {group.isMain && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); navigate("/main-stage"); }}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") e.stopPropagation(); }}
+                      aria-label="Open Main Stage video call"
+                      title="Main Stage — official video call"
+                      className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-full transition-all hover:brightness-110 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                      style={{
+                        background: "linear-gradient(135deg,#D4007A,#7B61FF)",
+                        border: "1px solid rgba(255,255,255,0.18)",
+                        boxShadow: "0 4px 14px rgba(212,0,122,0.45)",
+                      }}
+                    >
+                      <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <rect x="3"  y="3"  width="8" height="8" rx="1.5" />
+                        <rect x="13" y="3"  width="8" height="8" rx="1.5" />
+                        <rect x="3"  y="13" width="8" height="8" rx="1.5" />
+                        <rect x="13" y="13" width="8" height="8" rx="1.5" />
+                      </svg>
+                    </button>
+                  )}
                   {/* Telegram linked indicator */}
                   {group.telegramChatId && (
                     <span title="Telegram group linked">
@@ -4813,285 +4861,5 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       )}
 
     </div>
-  );
-}
-
-/**
- * Horizontal stage-themed entry strip for Main Stage.
- * Red velvet curtains on the sides, marquee bulbs along the top, warm
- * spotlight glow on a dark "stage floor" in the middle. Polls state every
- * 30s so the cammer/viewer counts and now-playing title stay reasonably
- * fresh without hammering the API.
- */
-// ── MainStageStrip ticker data ────────────────────────────────────────────────
-
-type TickerCategory = "UPDATE" | "WELLNESS" | "TIP";
-
-interface TickerMessage {
-  category: TickerCategory;
-  en: string;
-  es: string;
-}
-
-const TICKER_UPDATE_MESSAGES: TickerMessage[] = [
-  { category: "UPDATE", en: "✨ Self-Care Center launched — Cristina is now your PNP buddy.", es: "✨ Centro de Autocuidado activo — Cristina es tu acompañante PNP." },
-  { category: "UPDATE", en: "🎬 Channel video upload is live with AI title + tags.", es: "🎬 Sube videos a tu canal con título e tags generados por IA." },
-  { category: "UPDATE", en: "🔴 Stream health panel for creators — see if you're on air.", es: "🔴 Panel de salud del stream para creadores — ve si estás al aire." },
-  { category: "UPDATE", en: "🎟️ Invite anyone to Main Stage with a shareable link.", es: "🎟️ Invita a quien quieras al Main Stage con un enlace compartible." },
-  { category: "UPDATE", en: "📅 Schedule hangout events and invite the room you want.", es: "📅 Programa eventos en tu hangout e invita a quien quieras." },
-];
-
-const TICKER_TIP_MESSAGES: TickerMessage[] = [
-  { category: "TIP", en: "Try the Self-Care Center — Cristina has tools just for you.", es: "Prueba el Centro de Autocuidado — Cristina tiene herramientas para ti." },
-  { category: "TIP", en: "Voice notes work in DMs. Hold the mic, speak, send.", es: "Las notas de voz funcionan en los DMs. Mantén el mic, habla, envía." },
-  { category: "TIP", en: "Apply for creator and turn your cam into income.", es: "Solicita ser creador y convierte tu cámara en ingresos." },
-  { category: "TIP", en: "Book a 1-on-1 call with a creator from their profile.", es: "Reserva una llamada 1-a-1 con un creador desde su perfil." },
-  { category: "TIP", en: "Schedule a hangout — invite the room you want.", es: "Programa un hangout — invita a la sala que quieras." },
-  { category: "TIP", en: "PRIME videos load faster than ever. Open one now.", es: "Los videos PRIME cargan más rápido que nunca. Abre uno ahora." },
-];
-
-const TICKER_CATEGORY_STYLES: Record<TickerCategory, { label: { en: string; es: string }; color: string; bg: string }> = {
-  UPDATE:  { label: { en: "UPDATE",  es: "NOVEDAD"  }, color: "#E5C54A", bg: "rgba(229,197,74,0.15)" },
-  WELLNESS:{ label: { en: "WELLNESS",es: "BIENESTAR"}, color: "#5ED1C4", bg: "rgba(94,209,196,0.15)" },
-  TIP:     { label: { en: "TIP",     es: "TIP"      }, color: "#A990FF", bg: "rgba(123,97,255,0.15)" },
-};
-
-function buildTickerPool(lang: "en" | "es"): Array<{ category: TickerCategory; text: string }> {
-  const wellnessTips = getLocalizedTips();
-  const wellnessMessages = wellnessTips.map((tip) => ({
-    category: "WELLNESS" as TickerCategory,
-    text: `${tip.emoji} ${tip.body}`,
-  }));
-  const updateMessages = TICKER_UPDATE_MESSAGES.map((m) => ({
-    category: m.category,
-    text: m[lang],
-  }));
-  const tipMessages = TICKER_TIP_MESSAGES.map((m) => ({
-    category: m.category,
-    text: m[lang],
-  }));
-  return [...updateMessages, ...wellnessMessages, ...tipMessages];
-}
-
-function shuffleArray<T>(arr: T[]): T[] {
-  const out = [...arr];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
-}
-
-const TICKER_SHOW_MS = 6000;
-const TICKER_FADE_MS = 400;
-
-function MainStageStrip() {
-  const navigate = useNavigate();
-  const t = useI18n();
-  const [state, setState] = useState<MainStageState | null>(null);
-
-  // Determine language once on mount
-  const lang: "en" | "es" =
-    typeof navigator !== "undefined" && navigator.language?.startsWith("es") ? "es" : "en";
-
-  // Shuffled pool; rebuilt if it empties
-  const poolRef = useRef<Array<{ category: TickerCategory; text: string }>>([]);
-  const lastIndexRef = useRef<number>(-1);
-
-  function getNext(): { category: TickerCategory; text: string } {
-    if (poolRef.current.length === 0) {
-      poolRef.current = shuffleArray(buildTickerPool(lang));
-    }
-    const item = poolRef.current.shift()!;
-    return item;
-  }
-
-  const [current, setCurrent] = useState<{ category: TickerCategory; text: string } | null>(null);
-  const [visible, setVisible] = useState(true);
-
-  // Initialize pool and first message
-  useEffect(() => {
-    poolRef.current = shuffleArray(buildTickerPool(lang));
-    setCurrent(getNext());
-    setVisible(true);
-
-    const interval = setInterval(() => {
-      // Fade out
-      setVisible(false);
-      setTimeout(() => {
-        setCurrent(getNext());
-        setVisible(true);
-      }, TICKER_FADE_MS);
-    }, TICKER_SHOW_MS);
-
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = () => {
-      getMainStageState()
-        .then((s) => { if (!cancelled) setState(s); })
-        .catch(() => {});
-    };
-    refresh();
-    const id = setInterval(refresh, 30_000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, []);
-
-  const cammers = state?.counts?.cammers ?? 0;
-  const viewers = state?.counts?.viewers ?? 0;
-
-  // 22 bulbs renders nicely across the strip width at mobile → desktop
-  const bulbs = Array.from({ length: 22 });
-
-  const categoryStyle = current ? TICKER_CATEGORY_STYLES[current.category] : null;
-  const categoryLabel = categoryStyle ? categoryStyle.label[lang] : "";
-
-  return (
-    <button
-      type="button"
-      onClick={() => navigate("/main-stage")}
-      aria-label="Enter Main Stage"
-      className="relative w-full h-32 sm:h-36 mb-6 rounded-2xl overflow-hidden transition-transform active:scale-[0.99]"
-      style={{
-        background:
-          "radial-gradient(ellipse at 50% 85%, rgba(255,180,80,0.35) 0%, rgba(180,30,50,0.55) 35%, rgba(60,10,20,0.95) 75%)",
-        border: "1px solid rgba(212,0,122,0.35)",
-        boxShadow:
-          "0 8px 28px rgba(0,0,0,0.45), inset 0 0 80px rgba(0,0,0,0.35)",
-      }}
-    >
-      {/* Marquee bulbs along the top edge */}
-      <div
-        className="absolute inset-x-3 top-1.5 flex justify-between pointer-events-none"
-        aria-hidden
-      >
-        {bulbs.map((_, i) => (
-          <span
-            key={i}
-            className="block rounded-full"
-            style={{
-              width: 4,
-              height: 4,
-              background: i % 2 === 0 ? "#FFE27A" : "rgba(255,226,122,0.35)",
-              boxShadow:
-                i % 2 === 0
-                  ? "0 0 6px rgba(255,226,122,0.9), 0 0 2px rgba(255,255,255,0.9)"
-                  : "none",
-            }}
-          />
-        ))}
-      </div>
-
-      {/* Left velvet curtain — vertical pleats + dark outer edge */}
-      <div
-        className="absolute left-0 top-0 bottom-0 pointer-events-none"
-        aria-hidden
-        style={{
-          width: "14%",
-          background:
-            "linear-gradient(90deg, rgba(40,5,10,0.95) 0%, rgba(150,15,35,0.55) 70%, rgba(180,30,55,0.0) 100%), " +
-            "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 2px, transparent 2px 10px)",
-        }}
-      />
-      {/* Right velvet curtain — mirror */}
-      <div
-        className="absolute right-0 top-0 bottom-0 pointer-events-none"
-        aria-hidden
-        style={{
-          width: "14%",
-          background:
-            "linear-gradient(270deg, rgba(40,5,10,0.95) 0%, rgba(150,15,35,0.55) 70%, rgba(180,30,55,0.0) 100%), " +
-            "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 2px, transparent 2px 10px)",
-        }}
-      />
-
-      {/* Stage floor — a subtle warm band at the bottom */}
-      <div
-        className="absolute inset-x-0 bottom-0 h-3 pointer-events-none"
-        aria-hidden
-        style={{
-          background:
-            "linear-gradient(180deg, transparent 0%, rgba(90,30,10,0.9) 100%)",
-          borderTop: "1px solid rgba(255,180,80,0.25)",
-        }}
-      />
-
-      {/* Center stage content — MAIN STAGE title + cammer counts */}
-      <div className="relative h-full flex flex-col items-center justify-center gap-1 px-16 sm:px-20 text-center">
-        {/* LIVE dot + title */}
-        <div className="flex items-center gap-2">
-          <span
-            className="relative inline-flex w-2 h-2 rounded-full"
-            aria-hidden
-            style={{ background: "#FF2D55", boxShadow: "0 0 10px rgba(255,45,85,0.9)" }}
-          >
-            <span
-              className="absolute inset-0 rounded-full animate-ping"
-              style={{ background: "#FF2D55", opacity: 0.6 }}
-            />
-          </span>
-          <span
-            className="text-[10px] font-bold uppercase tracking-[0.2em]"
-            style={{ color: "#FF2D55" }}
-          >
-            Live
-          </span>
-        </div>
-
-        <h2
-          className="font-extrabold text-xl sm:text-2xl tracking-widest"
-          style={{
-            color: "#FFF6D5",
-            textShadow: "0 2px 10px rgba(255,180,80,0.55), 0 0 2px rgba(0,0,0,0.6)",
-            letterSpacing: "0.12em",
-          }}
-        >
-          MAIN STAGE
-        </h2>
-
-        {/* Ticker message with category pill — fades in/out */}
-        <div
-          aria-live="polite"
-          aria-atomic="true"
-          className="flex items-center gap-2 max-w-full px-2"
-          style={{
-            opacity: visible ? 1 : 0,
-            transform: visible ? "translateY(0)" : "translateY(4px)",
-            transition: `opacity ${TICKER_FADE_MS}ms ease, transform ${TICKER_FADE_MS}ms ease`,
-          }}
-        >
-          {categoryStyle && (
-            <span
-              className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
-              style={{
-                color: categoryStyle.color,
-                background: categoryStyle.bg,
-                border: `1px solid ${categoryStyle.color}40`,
-              }}
-            >
-              {categoryLabel}
-            </span>
-          )}
-          <p
-            className="text-[10px] sm:text-[11px] text-white/80 leading-snug line-clamp-1 text-left"
-            style={{ textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}
-          >
-            {current?.text ?? t.chat.mainStageStripDescription}
-          </p>
-        </div>
-
-        {/* Cammer / viewer counts */}
-        <div className="flex items-center gap-2 text-[11px] sm:text-xs text-white/80">
-          <span className="font-semibold tabular-nums">{cammers}</span>
-          <span className="text-white/50">cammers</span>
-          <span className="text-white/30">·</span>
-          <span className="font-semibold tabular-nums">{viewers}</span>
-          <span className="text-white/50">watching</span>
-        </div>
-      </div>
-    </button>
   );
 }
