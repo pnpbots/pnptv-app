@@ -2525,13 +2525,40 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               </button>
             )}
 
-            {/* Video call button — opens LiveKit call panel */}
-            <VideoCallButton
-              hasActiveCall={showTelegramDock || !!activeGroup?.hasActiveCall}
-              participantCount={callParticipantCount}
-              onStartCall={handleStartCall}
-              isLoading={false}
-            />
+            {/* Video call button — opens LiveKit call panel.
+                For the official PNPtv hangout (isMain), the in-thread call is
+                replaced with a one-tap entry into Main Stage so the room has
+                a single, official video surface. */}
+            {activeGroup.isMain ? (
+              <button
+                type="button"
+                onClick={() => navigate("/main-stage")}
+                aria-label="Join Main Stage"
+                title="Join Main Stage — official video call"
+                className="flex items-center gap-2 h-11 px-3.5 rounded-full font-bold text-white text-xs sm:text-sm transition-all hover:brightness-110 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                style={{
+                  background: "linear-gradient(135deg,#D4007A,#7B61FF)",
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  boxShadow: "0 4px 14px rgba(212,0,122,0.45)",
+                }}
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <rect x="3"  y="3"  width="8" height="8" rx="1.5" />
+                  <rect x="13" y="3"  width="8" height="8" rx="1.5" />
+                  <rect x="3"  y="13" width="8" height="8" rx="1.5" />
+                  <rect x="13" y="13" width="8" height="8" rx="1.5" />
+                </svg>
+                <span className="hidden sm:inline">Join Main Stage</span>
+                <span className="sm:hidden">Stage</span>
+              </button>
+            ) : (
+              <VideoCallButton
+                hasActiveCall={showTelegramDock || !!activeGroup?.hasActiveCall}
+                participantCount={callParticipantCount}
+                onStartCall={handleStartCall}
+                isLoading={false}
+              />
+            )}
 
             {/* Telegram quick-link — merged into menu on mobile, shown on sm+ */}
             {activeGroup.telegramInviteLink && (
