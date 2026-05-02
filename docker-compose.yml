@@ -334,7 +334,13 @@ services:
       CORS_ORIGIN: "true"
       FILES_MAX_SIZE: "2147483648"
       MAX_PAYLOAD_SIZE: "2gb"
-      STORAGE_LOCATIONS: "cloud"
+      # Both storage backends configured. "local" first so it is the default
+      # for new uploads AND so the 388 existing files (storage='local' in
+      # directus_files) continue to resolve. Restored 2026-05-02 — a prior
+      # change to "cloud"-only had silently 500'd every legacy file.
+      STORAGE_LOCATIONS: "local,cloud"
+      STORAGE_LOCAL_DRIVER: "local"
+      STORAGE_LOCAL_ROOT: "/directus/uploads"
       STORAGE_CLOUD_DRIVER: "s3"
       STORAGE_CLOUD_KEY: ${S3_ACCESS_KEY_ID}
       STORAGE_CLOUD_SECRET: ${S3_SECRET_ACCESS_KEY}
