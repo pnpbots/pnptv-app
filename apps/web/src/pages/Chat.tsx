@@ -4271,11 +4271,17 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs flex-shrink-0 text-pnp-textSecondary">
+                    <span
+                      className={`text-xs flex-shrink-0 ${group.isMain ? "" : "text-pnp-textSecondary"}`}
+                      style={group.isMain ? { color: "rgba(255,255,255,0.85)" } : undefined}
+                    >
                       {group.memberCount} {group.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
                     </span>
                     {group.lastMessage && (
-                      <span className="text-xs truncate min-w-0 text-pnp-textSecondary">
+                      <span
+                        className={`text-xs truncate min-w-0 ${group.isMain ? "" : "text-pnp-textSecondary"}`}
+                        style={group.isMain ? { color: "rgba(255,255,255,0.75)" } : undefined}
+                      >
                         &middot; {group.lastMessage}
                       </span>
                     )}
@@ -4283,11 +4289,11 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   {/* Crystal-tier marker for the official PNPtv hangout */}
                   {group.isMain && (
                     <div
-                      className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide"
+                      className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide text-white"
                       style={{
-                        background: "rgba(212,0,122,0.14)",
-                        border: "1px solid rgba(212,0,122,0.35)",
-                        color: "#D4007A",
+                        background: "linear-gradient(135deg,#D4007A,#7B61FF)",
+                        border: "1px solid rgba(255,255,255,0.20)",
+                        textShadow: "0 1px 2px rgba(0,0,0,0.35)",
                       }}
                       title="Crystal Hangout — Main Stage video call enabled"
                     >
@@ -4299,7 +4305,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   )}
                   {/* Description */}
                   {!group.isWallOfFame && group.description && (
-                    <p className="text-xs text-pnp-textSecondary truncate mt-0.5">{group.description}</p>
+                    <p
+                      className={`text-xs truncate mt-0.5 ${group.isMain ? "" : "text-pnp-textSecondary"}`}
+                      style={group.isMain ? { color: "rgba(255,255,255,0.78)" } : undefined}
+                    >
+                      {group.description}
+                    </p>
                   )}
                   {!group.isMain && !group.isWallOfFame && (group.tags || []).length > 0 && (
                     <div className="flex flex-wrap gap-0.5 mt-0.5">
