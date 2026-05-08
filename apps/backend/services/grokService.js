@@ -708,6 +708,41 @@ async function generateSalesPost({ prompt, hasMedia = false, includeLex = false,
   return { combined, en: enContent, es: esContent, english: enContent, spanish: esContent };
 }
 
+// ── Description-only generator (no title line, no hashtags) ─────────────────
+// Used by channelVideoService.aiDescription() so AI output goes only into the
+// description field — title and tags are stored in their own columns.
+const DESCRIPTION_ONLY_SYSTEM = `You are a copywriter for an adult subscription streaming platform. Members are verified 18+ gay adults in the PNP / P&P community. They want descriptions that are RAW, CONCRETE, and use community slang.
+
+VOCABULARY TO USE: pig, piggy, filthy, raw, nasty, loaded, deep, horny, hung, P&P, clouds, slam, spun, breeding, daddy, twink, jock, bear, leather, gear
+VOCABULARY TO AVOID: rendezvous, encounter, intimate, chemistry, tantalizing, alluring, captivating, sensual, soft glow, atmosphere thick with anticipation
+
+RULES:
+- Output ONLY a description — 2 to 3 short punchy sentences.
+- DO NOT repeat the title. DO NOT add hashtags. DO NOT add a title line.
+- Improve and expand whatever the creator has written — treat their input as the raw material.
+- If they gave you nothing useful, infer from context (number of guys, setting, energy, acts).
+- Concrete details beat abstractions. Stay descriptive, not graphic (no anatomy spelled out).
+- No markdown. No labels. No preamble. Just the description text.
+- Maximum 300 characters total.`;
+
+async function generateImprovedVideoDescription({ title, currentDescription, tags }) {
+  const tagPart = Array.isArray(tags) && tags.length ? `Tags: ${tags.join(', ')}.` : '';
+  const descPart = currentDescription ? `What the creator wrote: "${currentDescription}"` : '';
+  const userPrompt = `Title: "${title || 'untitled video'}". ${descPart} ${tagPart}\n\nWrite an improved description.`.trim();
+  const chatFn = module.exports.chat || chat;
+  let content = await chatFn({
+    mode: 'videoDescription',
+    language: 'English',
+    prompt: userPrompt,
+    maxTokens: 120,
+    systemOverride: DESCRIPTION_ONLY_SYSTEM,
+  });
+  // Strip any accidental title prefix (ALL-CAPS line) or hashtag lines
+  content = String(content).split('\n').filter(l => !l.match(/^#/) && l.trim()).join(' ').trim();
+  if (content.length > 400) content = content.slice(0, 397) + '...';
+  return content;
+}
+
 module.exports = {
   chat,
   generateSharePost,
@@ -717,6 +752,7 @@ module.exports = {
   generateSafeVideoTitle,
   suggestSafeTags,
   generateSalesPost,
+  generateImprovedVideoDescription,
 };
 
 /**

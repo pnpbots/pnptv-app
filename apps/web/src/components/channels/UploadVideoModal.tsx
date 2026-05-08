@@ -212,6 +212,7 @@ export function UploadVideoModal({
     if (!video) return;
     setAiBusy("title"); setAiError(null);
     try {
+      await persistEdits();
       const r = await aiTitleChannelVideo(channelId, video.id);
       setTitle(r.title);
     } catch (err) {
@@ -222,6 +223,7 @@ export function UploadVideoModal({
     if (!video) return;
     setAiBusy("description"); setAiError(null);
     try {
+      await persistEdits();
       const r = await aiDescriptionChannelVideo(channelId, video.id);
       setDescription(r.description);
     } catch (err) {
@@ -232,6 +234,7 @@ export function UploadVideoModal({
     if (!video) return;
     setAiBusy("tags"); setAiError(null);
     try {
+      await persistEdits();
       const r = await aiTagsChannelVideo(channelId, video.id);
       setTags(r.tags);
     } catch (err) {

@@ -62,14 +62,24 @@ function directusThumbUrl(fileId) {
 // (and reload the bot) without DB migrations.
 
 const TAG_TAXONOMY = [
-  'solo', 'duo', 'group',
+  // cast size
+  'solo', 'duo', 'group', 'orgy',
+  // experience level
   'amateur', 'professional',
-  'twink', 'bear', 'daddy', 'jock', 'otter', 'muscle',
+  // body type / age
+  'twink', 'bear', 'daddy', 'jock', 'otter', 'muscle', 'chub',
+  // ethnicity
   'latino', 'black', 'asian', 'white', 'mixed',
+  // substance play
   'clouds', 'parTy', 'sober',
-  'breeding', 'raw', 'condom',
-  'oral', 'rim', 'kink', 'fetish', 'leather', 'gear',
-  'roleplay', 'voyeur', 'exhibition',
+  // sex type
+  'breeding', 'raw', 'condom', 'oral', 'rim',
+  // kink & fetish
+  'leather', 'gear', 'bdsm', 's&m', 'bondage', 'sex-slave', 'golden-shower',
+  'fisting', 'spanking', 'foot', 'spit', 'watersports', 'pig-play',
+  // style
+  'roleplay', 'voyeur', 'exhibition', 'outdoor', 'public',
+  // format
   'live', 'recorded', 'show', 'private',
 ];
 
@@ -219,19 +229,19 @@ async function aiTitle({ videoId, userId, isAdmin }) {
 
 async function aiDescription({ videoId, userId, isAdmin }) {
   const v = await loadOwnedVideo(videoId, userId, isAdmin);
-  const prompt =
-    (v.title || 'a new video on a creator channel') +
-    (v.description ? '. Existing description: ' + v.description : '') +
-    (v.tags?.length ? '. Tags: ' + v.tags.join(', ') : '');
-  const { combined, en, es } = await grokService.generateBilingualSafeVideoDescription({ prompt });
+  const text = await grokService.generateImprovedVideoDescription({
+    title: v.title || '',
+    currentDescription: v.description || '',
+    tags: v.tags || [],
+  });
   await query(
     `UPDATE channel_videos
         SET description = $2,
             ai_generated_meta = ai_generated_meta || '{"description": "ai"}'::jsonb
       WHERE id = $1`,
-    [videoId, combined]
+    [videoId, text]
   );
-  return { description: combined, en, es };
+  return { description: text };
 }
 
 async function aiTags({ videoId, userId, isAdmin }) {
@@ -349,7 +359,31 @@ async function publishVideo({ videoId, userId, isAdmin }) {
     [videoId, gifUrl]
   );
 
-  const final = (await query(`SELECT * FROM channel_videos WHERE id = $1`, [videoId])).rows[0];
+  let final = (await query(`SELECT * FROM channel_videos WHERE id = $1`, [videoId])).rows[0];
+
+  // Create promo post on the official PNPtv! account (channel_id=NULL — appears in general feed)
+  const OFFICIAL_USER_ID = '8552451957';
+  try {
+    const directusBase = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
+    const videoUrl = final.video_url || (final.directus_file_id ? `${directusBase}/assets/${final.directus_file_id}` : null);
+    if (videoUrl && !final.promo_post_id) {
+      const promoContent = [final.title, final.description].filter(Boolean).join('\n\n').slice(0, 1000);
+      const promoInsert = await query(
+        `INSERT INTO social_posts (user_id, content, media_url, media_type, channel_id, created_at)
+         VALUES ($1, $2, $3, 'video', NULL, NOW())
+         RETURNING id`,
+        [OFFICIAL_USER_ID, promoContent, videoUrl]
+      );
+      const promoPostId = promoInsert.rows[0]?.id ?? null;
+      if (promoPostId) {
+        await query(`UPDATE channel_videos SET promo_post_id = $2 WHERE id = $1`, [videoId, promoPostId]);
+        final = { ...final, promo_post_id: promoPostId };
+      }
+    }
+  } catch (err) {
+    logger.warn('channel_videos: promo post creation failed (non-fatal)', { videoId, error: err.message });
+  }
+
   return shapeForApi(final, ch);
 }
 

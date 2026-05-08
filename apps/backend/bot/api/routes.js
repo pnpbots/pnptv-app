@@ -350,8 +350,8 @@ app.use(ipTracker); // Log every authenticated request IP for security
 // /blocked-jurisdiction page on browser navigation. Admins bypass for debug.
 // Cached per-IP in Redis 1h to avoid the geoip lookup on every request.
 // (geoip module is already required at the top of the file — reuse it.)
-const BLOCKED_US_REGIONS = new Set(['TX', 'TN', 'FL', 'LA', 'UT', 'VA', 'IN', 'AR', 'MS', 'NC']);
-const BLOCKED_COUNTRIES = new Set(['GB']);
+const BLOCKED_US_REGIONS = new Set();
+const BLOCKED_COUNTRIES = new Set();
 const GEO_BLOCK_BYPASS_PATHS = [
   /^\/blocked-jurisdiction$/,
   /^\/health$/,
@@ -7220,35 +7220,18 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       }
     }
 
-    // Fetch posts + channel videos in parallel (if not locked)
-    let posts = [];
+    // Fetch channel videos (if not locked)
     let videos = [];
     if (!locked) {
-      const [postsRes, videosRes] = await Promise.all([
-        getPool().query(
-          `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls,
-                  sp.video_thumbnail_url, sp.video_thumbnails, sp.video_title, sp.video_description,
-                  sp.likes_count, sp.replies_count, sp.view_count, sp.created_at,
-                  sp.user_id AS author_id,
-                  u.username AS author_username, u.first_name AS author_first_name, u.photo_file_id AS author_photo
-           FROM social_posts sp
-           JOIN users u ON sp.user_id = u.id
-           WHERE sp.channel_id = $1 AND sp.is_deleted = false
-           ORDER BY sp.id DESC
-           LIMIT 50`,
-          [channelId]
-        ),
-        getPool().query(
-          `SELECT id, title, description, tags, duration_sec, thumbnail_url, gif_url,
-                  status, created_at, directus_file_id
-           FROM channel_videos
-           WHERE channel_id = $1 AND status = 'published'
-           ORDER BY created_at DESC
-           LIMIT 100`,
-          [channelId]
-        ),
-      ]);
-      posts = postsRes.rows;
+      const videosRes = await getPool().query(
+        `SELECT id, title, description, tags, duration_sec, thumbnail_url, gif_url, video_url,
+                status, created_at, directus_file_id
+         FROM channel_videos
+         WHERE channel_id = $1 AND status = 'published'
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [channelId]
+      );
       const directusBase = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
       videos = videosRes.rows.map((cv) => ({
         id: cv.id,
@@ -7258,13 +7241,13 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
         duration_sec: cv.duration_sec,
         thumbnail_url: cv.thumbnail_url,
         gif_url: cv.gif_url,
-        video_url: `${directusBase}/assets/${cv.directus_file_id}`,
+        video_url: cv.video_url || `${directusBase}/assets/${cv.directus_file_id}`,
         status: cv.status,
         created_at: cv.created_at,
       }));
     }
 
-    res.json({ success: true, channel, posts, videos, locked, lockReason });
+    res.json({ success: true, channel, videos, locked, lockReason });
   } catch (err) {
     logger.error('Channel detail error:', err);
     res.status(500).json({ error: 'Failed to load channel' });

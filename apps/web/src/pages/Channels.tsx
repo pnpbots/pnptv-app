@@ -12,14 +12,11 @@ import {
   deleteCreatorChannel,
   uploadChannelCover,
   uploadChannelVideo,
-  recordPostView,
   type Channel,
   type ChannelVideo,
   type CreatorChannel,
-  type SocialPostItem,
 } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
-import { AnimatedVideoThumbnail } from "@/components/AnimatedVideoThumbnail";
 import { UploadVideoButton } from "@/components/channels/UploadVideoButton";
 
 // ── Tier badge colors ────────────────────────────────────────────────────────
@@ -176,7 +173,6 @@ function ChannelDetailView({
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [channel, setChannel] = useState<CreatorChannel | null>(null);
-  const [posts, setPosts] = useState<SocialPostItem[]>([]);
   const [videos, setVideos] = useState<ChannelVideo[]>([]);
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -209,8 +205,7 @@ function ChannelDetailView({
     setVideoUploading(true);
     try {
       const res = await uploadChannelVideo(channel.id, file);
-      if (res?.success && res.post) {
-        setPosts((prev) => [res.post, ...prev]);
+      if (res?.success) {
         setChannel((prev) =>
           prev ? { ...prev, postCount: (prev.postCount || 0) + 1 } : prev,
         );
@@ -299,7 +294,6 @@ function ChannelDetailView({
       .then((res) => {
         if (res.success) {
           setChannel(res.channel);
-          setPosts(res.posts);
           setVideos(res.videos ?? []);
           setLocked(res.locked);
         }
@@ -770,25 +764,6 @@ function ChannelDetailView({
       {/* Locked overlay */}
       {locked ? (
         <div className="relative rounded-2xl border border-pnp-border bg-pnp-surface overflow-hidden">
-          {/* Blurred post preview grid */}
-          {posts.length > 0 && (
-            <div className="grid grid-cols-3 gap-0.5 blur-sm pointer-events-none select-none" aria-hidden="true">
-              {posts.slice(0, 6).map((p) => (
-                <div
-                  key={p.id}
-                  className="aspect-square bg-pnp-surfaceHover flex items-center justify-center"
-                >
-                  {isValidPhotoUrl(p.media_url) ? (
-                    <img src={p.media_url!} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center p-2">
-                      <p className="text-[10px] text-pnp-textSecondary line-clamp-3 text-center">{p.content}</p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
           {/* Lock overlay */}
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6"
             style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(2px)" }}>
@@ -813,154 +788,45 @@ function ChannelDetailView({
             </button>
           </div>
         </div>
-      ) : posts.length === 0 && videos.length === 0 ? (
+      ) : videos.length === 0 ? (
         <div className="py-12 text-center text-pnp-textSecondary text-sm">
-          No posts in this channel yet
+          No videos in this channel yet
         </div>
       ) : (
-        <div className="space-y-3">
-          {videos.length > 0 && (
-            <>
-              <h3 className="text-sm font-semibold text-pnp-textPrimary">Videos</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {videos.map((v) => {
-                  const previewSrc = v.gif_url || v.thumbnail_url;
-                  return (
-                    <div
-                      key={`cv-${v.id}`}
-                      className="aspect-video bg-pnp-surfaceHover relative overflow-hidden group cursor-pointer rounded-lg"
-                      onClick={() => setPlayingVideo({ url: v.video_url, title: v.title })}
-                    >
-                      {previewSrc ? (
-                        <img
-                          src={previewSrc}
-                          alt={v.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-pnp-surfaceHover" />
-                      )}
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors pointer-events-none">
-                        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "rgba(255,255,255,0.15)", backdropFilter: "blur(4px)" }}>
-                          <svg className="w-5 h-5 text-white drop-shadow ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M8 5v14l11-7z" />
-                          </svg>
-                        </div>
-                      </div>
-                      {v.title && (
-                        <div className="absolute bottom-0 left-0 right-0 p-2 pointer-events-none" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.8), transparent)" }}>
-                          <p className="text-xs text-white font-medium line-clamp-1">{v.title}</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-          {posts.length > 0 && <h3 className="text-sm font-semibold text-pnp-textPrimary">Posts</h3>}
-          {/* Mixed media grid: images in 3-col, text posts full-width */}
-          {(() => {
-            const mediaPosts = posts.filter((p) => isValidPhotoUrl(p.media_url));
-            const textPosts = posts.filter((p) => !isValidPhotoUrl(p.media_url));
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {videos.map((v) => {
+            const previewSrc = v.gif_url || v.thumbnail_url;
             return (
-              <>
-                {mediaPosts.length > 0 && (
-                  <div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden">
-                    {mediaPosts.map((p) => {
-                      const isVideo = p.media_type === "video";
-                      const thumbSrc = isVideo
-                        ? (isValidPhotoUrl(p.video_thumbnail_url) ? p.video_thumbnail_url : null)
-                        : p.media_url;
-                      return (
-                        <div
-                          key={p.id}
-                          className="aspect-square bg-pnp-surfaceHover relative overflow-hidden group cursor-pointer"
-                          onClick={() => {
-                            if (isVideo && isValidPhotoUrl(p.media_url)) {
-                              setPlayingVideo({ url: p.media_url!, title: p.video_title || p.content?.slice(0, 60) });
-                              recordPostView(p.id).catch(() => { /* non-blocking */ });
-                            } else if (!isVideo && isValidPhotoUrl(p.media_url)) {
-                              navigate(`/social/post/${p.id}`);
-                            }
-                          }}
-                        >
-                          {isVideo ? (
-                            <AnimatedVideoThumbnail
-                              videoUrl={isValidPhotoUrl(p.media_url) ? p.media_url : null}
-                              posterUrl={thumbSrc}
-                              alt={p.video_title || p.content?.slice(0, 60) || "Video"}
-                              frames={Array.isArray(p.video_thumbnails) ? p.video_thumbnails : null}
-                            />
-                          ) : thumbSrc ? (
-                            <img
-                              src={thumbSrc!}
-                              alt=""
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                            />
-                          ) : null}
-                          {isVideo && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors pointer-events-none">
-                              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "rgba(255,255,255,0.15)", backdropFilter: "blur(4px)" }}>
-                                <svg className="w-5 h-5 text-white drop-shadow ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M8 5v14l11-7z" />
-                                </svg>
-                              </div>
-                            </div>
-                          )}
-                          {isVideo && (
-                            <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1 pointer-events-none">
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[10px] font-medium text-white">
-                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17a5 5 0 110-10 5 5 0 010 10zm0-8a3 3 0 100 6 3 3 0 000-6z" /></svg>
-                                {p.view_count ?? 0}
-                              </span>
-                              {(p.likes_count ?? 0) > 0 && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[10px] font-medium text-white">
-                                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg>
-                                  {p.likes_count}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+              <div
+                key={`cv-${v.id}`}
+                className="aspect-video bg-pnp-surfaceHover relative overflow-hidden group cursor-pointer rounded-lg"
+                onClick={() => setPlayingVideo({ url: v.video_url, title: v.title })}
+              >
+                {previewSrc ? (
+                  <img
+                    src={previewSrc}
+                    alt={v.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                ) : (
+                  <div className="w-full h-full bg-pnp-surfaceHover" />
+                )}
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors pointer-events-none">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "rgba(255,255,255,0.15)", backdropFilter: "blur(4px)" }}>
+                    <svg className="w-5 h-5 text-white drop-shadow ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  </div>
+                </div>
+                {v.title && (
+                  <div className="absolute bottom-0 left-0 right-0 p-2 pointer-events-none" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.8), transparent)" }}>
+                    <p className="text-xs text-white font-medium line-clamp-1">{v.title}</p>
                   </div>
                 )}
-                {textPosts.map((p) => (
-                  <div key={p.id} className="rounded-xl border border-pnp-border bg-pnp-surface p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <button onClick={(e) => { e.stopPropagation(); navigate(`/profile/${p.author_id}`); }} className="flex-shrink-0">
-                        {isValidPhotoUrl(p.author_photo) ? (
-                          <img src={p.author_photo!} alt="" className="w-7 h-7 rounded-full object-cover cursor-pointer"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                        ) : (
-                          <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer"
-                            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-                            {(p.author_first_name || "?").charAt(0).toUpperCase()}
-                          </div>
-                        )}
-                      </button>
-                      <span className="text-xs font-semibold text-pnp-textPrimary">
-                        {p.author_first_name || p.author_username}
-                      </span>
-                      <span className="text-[11px] text-pnp-textSecondary ml-auto">
-                        {new Date(p.created_at).toLocaleDateString()}
-                      </span>
-                    </div>
-                    <p className="text-sm text-pnp-textPrimary leading-relaxed line-clamp-4">{p.content}</p>
-                    <div className="flex items-center gap-4 mt-2 text-[11px] text-pnp-textSecondary">
-                      <span>{p.view_count ?? 0} views</span>
-                      <span>{p.likes_count} likes</span>
-                      <span>{p.replies_count} replies</span>
-                    </div>
-                  </div>
-                ))}
-              </>
+              </div>
             );
-          })()}
+          })}
         </div>
       )}
       {/* Video Player Modal */}
