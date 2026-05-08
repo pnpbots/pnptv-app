@@ -216,7 +216,7 @@ function ChannelDetailView({
       setVideos((prev) => prev.filter((v) => v.id !== deletingVideoId));
       setDeletingVideoId(null);
     } catch (err) {
-      void err;
+      setVideoEditError(err instanceof Error ? err.message : "Delete failed");
     } finally { setVideoDeleteLoading(false); }
   };
 

@@ -511,7 +511,7 @@ async function deleteVideo({ videoId, userId, isAdmin }) {
     );
     if (v.promo_post_id) {
       await client.query(
-        `UPDATE social_posts SET is_deleted = true, deleted_at = NOW() WHERE id = $1`,
+        `UPDATE social_posts SET is_deleted = true WHERE id = $1`,
         [v.promo_post_id]
       );
     }
