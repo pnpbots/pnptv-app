@@ -1,10 +1,10 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
 import { useCreatorData } from "@/hooks/useCreatorData";
-import { activateCreator } from "@/lib/api";
+import { activateCreator, get2257Status, submit2257Identity } from "@/lib/api";
 
 function CriterionBar({
   label,
@@ -23,7 +23,7 @@ function CriterionBar({
       <div className="flex items-center justify-between text-xs mb-1">
         <span className="text-white/80">{label}</span>
         <span style={{ color: met ? "#5ED1C4" : "#8E8E93" }}>
-          {current}/{required} {met ? "\u2713" : ""}
+          {current}/{required} {met ? "✓" : ""}
         </span>
       </div>
       <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
@@ -39,6 +39,24 @@ function CriterionBar({
   );
 }
 
+type IdentityStatus = {
+  identity_verified: boolean;
+  identity_verification_required_by: string | null;
+  record: {
+    verification_status: "pending" | "approved" | "rejected";
+    submitted_at: string;
+    admin_notes: string | null;
+  } | null;
+} | null;
+
+const ID_TYPES = [
+  { value: "passport", label: "Passport" },
+  { value: "drivers_license", label: "Driver's License" },
+  { value: "national_id", label: "National ID Card" },
+  { value: "state_id", label: "State / Province ID" },
+  { value: "other", label: "Other Government-Issued ID" },
+] as const;
+
 export default function CreatorApply() {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
@@ -49,6 +67,28 @@ export default function CreatorApply() {
   const [activateTerms, setActivateTerms] = useState(false);
   const [activating, setActivating] = useState(false);
   const [activateError, setActivateError] = useState<string | null>(null);
+
+  // 2257 identity verification state
+  const [identityStatus, setIdentityStatus] = useState<IdentityStatus>(null);
+  const [identityLoading, setIdentityLoading] = useState(false);
+  const [idLegalName, setIdLegalName] = useState("");
+  const [idDob, setIdDob] = useState("");
+  const [idType, setIdType] = useState("");
+  const [idFile, setIdFile] = useState<File | null>(null);
+  const [idSubmitting, setIdSubmitting] = useState(false);
+  const [idSubmitError, setIdSubmitError] = useState<string | null>(null);
+  const [idSubmitDone, setIdSubmitDone] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch 2257 status on mount when authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    setIdentityLoading(true);
+    get2257Status()
+      .then((res) => setIdentityStatus(res))
+      .catch(() => setIdentityStatus(null))
+      .finally(() => setIdentityLoading(false));
+  }, [isAuthenticated]);
 
   const handleConfirmActivate = useCallback(async () => {
     if (!activateTerms) {
@@ -69,9 +109,53 @@ export default function CreatorApply() {
     }
   }, [activateTerms, t, reload, navigate]);
 
+  const handleSubmitIdentity = useCallback(async () => {
+    setIdSubmitError(null);
+    if (!idLegalName.trim()) { setIdSubmitError("Legal full name is required."); return; }
+    if (!idDob) { setIdSubmitError("Date of birth is required."); return; }
+    if (!idType) { setIdSubmitError("Please select your ID type."); return; }
+    if (!idFile) { setIdSubmitError("Please attach a photo of your ID document."); return; }
+
+    const formData = new FormData();
+    formData.append("legalName", idLegalName.trim());
+    formData.append("dateOfBirth", idDob);
+    formData.append("idType", idType);
+    formData.append("idDocument", idFile);
+
+    setIdSubmitting(true);
+    try {
+      await submit2257Identity(formData);
+      setIdSubmitDone(true);
+      // Refresh status
+      const updated = await get2257Status();
+      setIdentityStatus(updated);
+    } catch (err) {
+      setIdSubmitError(err instanceof Error ? err.message : "Submission failed. Please try again.");
+    } finally {
+      setIdSubmitting(false);
+    }
+  }, [idLegalName, idDob, idType, idFile]);
+
   const isActive = dashboard?.creatorStatus === "active";
   const isEligible = dashboard?.creatorStatus === "eligible";
   const isPending = dashboard?.creatorStatus === "pending_review";
+
+  // Determine 2257 compliance state
+  const idVerified = identityStatus?.identity_verified === true;
+  const idRecord = identityStatus?.record;
+  const idPending = !idVerified && idRecord?.verification_status === "pending";
+  const idRejected = !idVerified && idRecord?.verification_status === "rejected";
+  const idApproved = idVerified || idRecord?.verification_status === "approved";
+  const graceDeadline = identityStatus?.identity_verification_required_by
+    ? new Date(identityStatus.identity_verification_required_by)
+    : null;
+  const inGrace = graceDeadline && graceDeadline > new Date();
+  // Compliant = verified, or approved record, or within grace period
+  const is2257Compliant = idApproved || inGrace;
+
+  // Buttons that trigger enrollment/activation are blocked if:
+  // - identity status loaded AND user is not 2257-compliant
+  const enrollBlocked = !identityLoading && identityStatus !== null && !is2257Compliant;
 
   return (
     <>
@@ -143,6 +227,212 @@ export default function CreatorApply() {
               </ul>
             </div>
 
+            {/* ── 2257 Identity Verification Section ── */}
+            {isAuthenticated && !identityLoading && (
+              <>
+                {/* Verified badge — shown when approved */}
+                {idApproved && (
+                  <div
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl mb-4 text-sm font-medium"
+                    style={{ background: "rgba(94,209,196,0.08)", border: "1px solid rgba(94,209,196,0.25)", color: "#5ED1C4" }}
+                  >
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Identity Verified (18 U.S.C. § 2257)
+                  </div>
+                )}
+
+                {/* Grace period notice — active creators with deadline upcoming */}
+                {!idApproved && inGrace && (
+                  <div
+                    className="rounded-xl p-4 mb-4 flex items-start gap-3"
+                    style={{ background: "rgba(255,180,84,0.08)", border: "1px solid rgba(255,180,84,0.3)" }}
+                  >
+                    <svg className="w-5 h-5 flex-shrink-0 mt-0.5 shrink-0" style={{ color: "#FFB454" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-semibold text-white mb-1">Identity Verification Required</p>
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                        All active creators must complete 18 U.S.C. § 2257 identity verification
+                        by <strong className="text-white">{graceDeadline!.toLocaleDateString()}</strong>.
+                        You can continue using your account until then.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pending review banner */}
+                {idPending && !idSubmitDone && (
+                  <div
+                    className="rounded-xl p-4 mb-4 flex items-start gap-3"
+                    style={{ background: "rgba(94,140,209,0.08)", border: "1px solid rgba(94,140,209,0.3)" }}
+                  >
+                    <svg className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: "#5E8CD1" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-semibold text-white mb-1">Identity Verification Under Review</p>
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                        Your identity documents have been submitted and are being reviewed by our team. This typically takes 24–48 hours.
+                        Enrollment and activation will be available once approved.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Identity verification form — shown when no record, rejected, or just submitted */}
+                {!idApproved && !idPending && !inGrace && (
+                  <div
+                    className="glass-card-sm p-5 mb-4"
+                    style={{ borderColor: "rgba(212,0,122,0.35)" }}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <svg className="w-5 h-5 flex-shrink-0" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z" />
+                      </svg>
+                      <p className="text-base font-bold text-white">
+                        Step 1: Identity Verification Required
+                      </p>
+                    </div>
+                    <p className="text-xs leading-relaxed mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                      Federal law (18 U.S.C. § 2257) requires platforms hosting adult content to verify that all performers are 18+
+                      and maintain records. Your information is stored securely and used only for legal compliance.{" "}
+                      <a href="/2257" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: "#D4007A" }}>
+                        Learn more
+                      </a>
+                    </p>
+
+                    {/* Rejection notice */}
+                    {idRejected && idRecord?.admin_notes && (
+                      <div
+                        className="rounded-lg px-4 py-3 mb-4 text-xs"
+                        style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "#FCA5A5" }}
+                      >
+                        <p className="font-semibold mb-1">Previous submission rejected</p>
+                        <p>{idRecord.admin_notes}</p>
+                        <p className="mt-1 opacity-70">Please correct the issue and resubmit below.</p>
+                      </div>
+                    )}
+
+                    {idSubmitDone ? (
+                      <div
+                        className="rounded-lg px-4 py-3 text-sm text-center"
+                        style={{ background: "rgba(94,209,196,0.07)", border: "1px solid rgba(94,209,196,0.2)", color: "#5ED1C4" }}
+                      >
+                        <p className="font-semibold mb-1">Submitted for Review</p>
+                        <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                          Our team will verify your identity within 24–48 hours. You'll be notified once approved.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-medium text-white/70 mb-1">
+                            Legal Full Name <span style={{ color: "#D4007A" }}>*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={idLegalName}
+                            onChange={(e) => setIdLegalName(e.target.value)}
+                            placeholder="As it appears on your ID"
+                            maxLength={255}
+                            className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:ring-1"
+                            style={{
+                              background: "rgba(255,255,255,0.05)",
+                              border: "1px solid rgba(255,255,255,0.12)",
+                              caretColor: "#D4007A",
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-white/70 mb-1">
+                            Date of Birth <span style={{ color: "#D4007A" }}>*</span>
+                          </label>
+                          <input
+                            type="date"
+                            value={idDob}
+                            onChange={(e) => setIdDob(e.target.value)}
+                            max={new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]}
+                            className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:ring-1"
+                            style={{
+                              background: "rgba(255,255,255,0.05)",
+                              border: "1px solid rgba(255,255,255,0.12)",
+                              colorScheme: "dark",
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-white/70 mb-1">
+                            ID Type <span style={{ color: "#D4007A" }}>*</span>
+                          </label>
+                          <select
+                            value={idType}
+                            onChange={(e) => setIdType(e.target.value)}
+                            className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:ring-1"
+                            style={{
+                              background: "rgba(255,255,255,0.05)",
+                              border: "1px solid rgba(255,255,255,0.12)",
+                              colorScheme: "dark",
+                            }}
+                          >
+                            <option value="">Select ID type…</option>
+                            {ID_TYPES.map((t) => (
+                              <option key={t.value} value={t.value}>{t.label}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-white/70 mb-1">
+                            ID Document Photo <span style={{ color: "#D4007A" }}>*</span>
+                          </label>
+                          <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                            Upload a clear photo of your ID (passport, driver's license, etc.). Max 10 MB. JPG, PNG, or WebP.
+                          </p>
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            onChange={(e) => setIdFile(e.target.files?.[0] || null)}
+                            className="hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="w-full rounded-lg py-2.5 text-sm font-medium transition-colors"
+                            style={{
+                              background: "rgba(255,255,255,0.05)",
+                              border: "1px dashed rgba(255,255,255,0.2)",
+                              color: idFile ? "#5ED1C4" : "var(--pnp-text-secondary, #8E8E93)",
+                            }}
+                          >
+                            {idFile ? idFile.name : "Tap to choose file"}
+                          </button>
+                        </div>
+
+                        {idSubmitError && (
+                          <p className="text-xs text-red-400 font-medium">{idSubmitError}</p>
+                        )}
+
+                        <button
+                          onClick={handleSubmitIdentity}
+                          disabled={idSubmitting}
+                          className="w-full py-3 rounded-xl text-sm font-bold text-white disabled:opacity-40"
+                          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                        >
+                          {idSubmitting ? "Submitting…" : "Submit for Verification"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
             {loading && (
               <div className="animate-pulse space-y-3">
                 <div className="h-32 bg-white/5 rounded-lg" />
@@ -156,6 +446,15 @@ export default function CreatorApply() {
                 <p className="text-lg font-bold text-white mb-2">{t.eligibleTitle}</p>
                 <p className="text-sm text-white/70 mb-4">{t.eligibleSubtitle}</p>
 
+                {enrollBlocked && (
+                  <div
+                    className="rounded-lg px-4 py-3 mb-4 text-xs"
+                    style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.25)", color: "#F9A8D4" }}
+                  >
+                    Complete identity verification above before activating your creator account.
+                  </div>
+                )}
+
                 <div className="space-y-3">
                   <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
                     <div className="flex items-center gap-2 mb-1">
@@ -164,8 +463,9 @@ export default function CreatorApply() {
                     </div>
                     <p className="text-xs mt-1 mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.iceDesc}</p>
                     <button
-                      onClick={() => { setActivateError(null); setActivateTerms(false); setShowActivateModal(true); }}
-                      className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
+                      onClick={() => { if (!enrollBlocked) { setActivateError(null); setActivateTerms(false); setShowActivateModal(true); } }}
+                      disabled={enrollBlocked || idPending}
+                      className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
                     >
                       {t.activateAsCreatorBtn}
@@ -176,8 +476,9 @@ export default function CreatorApply() {
                     <p className="text-sm font-semibold text-white">{t.fullTimeCreatorLabel}</p>
                     <p className="text-xs mt-1 mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.fullTimeDesc}</p>
                     <button
-                      onClick={() => navigate("/apply")}
-                      className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
+                      onClick={() => { if (!enrollBlocked) navigate("/apply"); }}
+                      disabled={enrollBlocked || idPending}
+                      className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{ background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" }}
                     >
                       {t.applyFullTimeBtn}

@@ -3314,6 +3314,95 @@ export function activateCreator(
   });
 }
 
+// ── 18 U.S.C. § 2257 identity verification ───────────────────────────────────
+
+export async function submit2257Identity(formData: FormData): Promise<{
+  success: boolean;
+  record: { verification_status: string; submitted_at: string };
+}> {
+  const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+  const res = await fetch(`${API_BASE}/api/webapp/creator/identity/submit`, {
+    method: "POST",
+    credentials: "include",
+    body: formData, // multipart/form-data with idDocument file
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as Record<string, string>;
+    throw new Error(err.message || err.error || "Identity submission failed");
+  }
+  return res.json();
+}
+
+export function get2257Status(): Promise<{
+  success: boolean;
+  identity_verified: boolean;
+  identity_verification_required_by: string | null;
+  record: {
+    verification_status: "pending" | "approved" | "rejected";
+    submitted_at: string;
+    admin_notes: string | null;
+  } | null;
+}> {
+  return request("/api/webapp/creator/identity/status");
+}
+
+// ── 18 U.S.C. § 2257 admin endpoints ─────────────────────────────────────────
+
+export interface Record2257 {
+  id: string;
+  user_id: string;
+  username: string;
+  first_name: string | null;
+  last_name: string | null;
+  legal_name: string;
+  date_of_birth: string;
+  id_type: string;
+  id_document_path: string | null;
+  verification_status: "pending" | "approved" | "rejected";
+  submitted_at: string;
+  admin_notes: string | null;
+  verified_at: string | null;
+  verified_by: string | null;
+  ip_address: string | null;
+  creator_status: string | null;
+}
+
+export function get2257Records(status?: "pending" | "approved" | "rejected"): Promise<{
+  success: boolean;
+  records: Record2257[];
+}> {
+  const qs = status ? `?status=${status}` : "";
+  return request(`/api/webapp/creator/2257/records${qs}`);
+}
+
+export function approve2257Record(userId: string, notes?: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/2257/records/${userId}/approve`, {
+    method: "POST",
+    body: { notes: notes || "" },
+  });
+}
+
+export function reject2257Record(userId: string, notes: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/2257/records/${userId}/reject`, {
+    method: "POST",
+    body: { notes },
+  });
+}
+
+export async function export2257Records(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/webapp/creator/2257/records/export`, {
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Export failed");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `2257-records-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // Full-time applications use /api/apply (existing model_applications flow)
 
 export function getCreatorDashboard(): Promise<{

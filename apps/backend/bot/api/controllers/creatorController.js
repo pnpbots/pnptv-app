@@ -1,5 +1,6 @@
 const logger = require('../../../utils/logger');
 const CreatorService = require('../../../services/creatorService');
+const IdentityVerificationService = require('../../../services/identityVerificationService');
 const { query, getPool } = require('../../../config/postgres');
 const { hasAccess } = require('../../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
@@ -263,6 +264,19 @@ const changeTier = async (req, res) => {
 // POST /api/webapp/creator/enroll
 const submitEnrollment = async (req, res) => {
   try {
+    // ── 2257 compliance gate ──────────────────────────────────────────────────
+    // A creator must have an approved identity record OR be within the grace
+    // period (existing active creators given 30 days) before they can enroll.
+    const idRecord = await IdentityVerificationService.get2257Record(req.user.id);
+    const graceCompliant = IdentityVerificationService.is2257Compliant(req.user);
+    if (!graceCompliant && (!idRecord || idRecord.verification_status !== 'approved')) {
+      return res.status(403).json({
+        error: 'identity_verification_required',
+        message: 'You must complete identity verification (18 U.S.C. § 2257) before enrolling as a creator.',
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const { tier, paymentMethod, paymentAddress, paymentNetwork, signatureData } = req.body || {};
     const idDocumentPath = req.file
       ? `/uploads/creator-enrollments/${req.file.filename}`
@@ -306,9 +320,42 @@ const listEnrollments = async (req, res) => {
 // POST /api/webapp/creator/enrollments/:id/approve (admin)
 const approveEnrollment = async (req, res) => {
   try {
+    // Fetch the enrollment's user_id BEFORE calling service so we can auto-approve
+    // the 2257 record after. CreatorService.approveEnrollment only returns { success: true }.
+    let creatorUserId = null;
+    try {
+      const { rows: enrollRows } = await query(
+        'SELECT user_id FROM creator_enrollments WHERE id = $1',
+        [req.params.id]
+      );
+      creatorUserId = enrollRows[0]?.user_id || null;
+    } catch (_) {}
+
     const result = await CreatorService.approveEnrollment(
       req.params.id, req.user.id, req.body.notes || null
     );
+
+    // Auto-approve the creator's 2257 record if it exists and is still pending.
+    if (creatorUserId) {
+      try {
+        const idRecord = await IdentityVerificationService.get2257Record(creatorUserId);
+        if (idRecord && idRecord.verification_status === 'pending') {
+          await IdentityVerificationService.approve2257Record(
+            creatorUserId,
+            req.user.id,
+            'Auto-approved via enrollment approval'
+          );
+        }
+      } catch (idErr) {
+        // Non-fatal — log but don't block the enrollment approval response
+        logger.warn('approveEnrollment: auto-approve 2257 record failed (non-fatal)', {
+          enrollmentId: req.params.id,
+          creatorUserId,
+          error: idErr.message,
+        });
+      }
+    }
+
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('approveEnrollment error', err);
@@ -328,6 +375,115 @@ const rejectEnrollment = async (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 };
+
+// ── 2257 identity verification handlers ──────────────────────────────────────
+
+// POST /api/webapp/creator/identity/submit
+const submit2257 = async (req, res) => {
+  try {
+    const { legalName, dateOfBirth, idType } = req.body || {};
+    if (!legalName || !dateOfBirth || !idType) {
+      return res.status(400).json({ error: 'legalName, dateOfBirth, and idType are required' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'ID document image is required' });
+    }
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || null;
+    const record = await IdentityVerificationService.submit2257Record(req.user.id, {
+      legalName,
+      dateOfBirth,
+      idType,
+      idDocumentPath: req.file.path,
+      ip,
+    });
+    return res.json({ success: true, record });
+  } catch (err) {
+    logger.error('submit2257 error', err);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// GET /api/webapp/creator/identity/status
+const get2257Status = async (req, res) => {
+  try {
+    const record = await IdentityVerificationService.get2257Record(req.user.id);
+    return res.json({
+      success: true,
+      identity_verified: req.user.identity_verified || false,
+      identity_verification_required_by: req.user.identity_verification_required_by || null,
+      record: record
+        ? {
+            verification_status: record.verification_status,
+            submitted_at: record.submitted_at,
+            admin_notes: record.admin_notes,
+          }
+        : null,
+    });
+  } catch (err) {
+    logger.error('get2257Status error', err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// GET /api/webapp/creator/2257/records (admin)
+const list2257Records = async (req, res) => {
+  try {
+    const { status } = req.query;
+    const records = await IdentityVerificationService.list2257Records(status || null);
+    return res.json({ success: true, records });
+  } catch (err) {
+    logger.error('list2257Records error', err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// POST /api/webapp/creator/2257/records/:userId/approve (admin)
+const approve2257 = async (req, res) => {
+  try {
+    const record = await IdentityVerificationService.approve2257Record(
+      req.params.userId,
+      req.user.id,
+      req.body.notes || null
+    );
+    return res.json({ success: true, record });
+  } catch (err) {
+    logger.error('approve2257 error', err);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// POST /api/webapp/creator/2257/records/:userId/reject (admin)
+const reject2257 = async (req, res) => {
+  try {
+    if (!req.body.notes) {
+      return res.status(400).json({ error: 'notes (reason) are required for rejection' });
+    }
+    const record = await IdentityVerificationService.reject2257Record(
+      req.params.userId,
+      req.user.id,
+      req.body.notes
+    );
+    return res.json({ success: true, record });
+  } catch (err) {
+    logger.error('reject2257 error', err);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// GET /api/webapp/creator/2257/records/export (admin)
+const export2257Records = async (req, res) => {
+  try {
+    const records = await IdentityVerificationService.export2257Records();
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="2257-records-${Date.now()}.json"`);
+    return res.json(records);
+  } catch (err) {
+    logger.error('export2257Records error', err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// ── Active creator listing ────────────────────────────────────────────────────
 
 // GET /api/webapp/creator/active
 // Protected at route level by roleGuard('admin', 'superadmin')
@@ -1016,6 +1172,21 @@ const uploadChannelVideo = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No video file provided' });
 
+    // ── 2257 compliance gate ──────────────────────────────────────────────────
+    // Load fresh columns from DB since session may not have them after migration
+    const { rows: compRows } = await query(
+      'SELECT identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const dbUserComp = compRows[0] || {};
+    if (!IdentityVerificationService.is2257Compliant(dbUserComp)) {
+      return res.status(403).json({
+        error: 'identity_verification_required',
+        message: 'Complete identity verification (18 U.S.C. § 2257) before uploading content.',
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const chRes = await query(
       'SELECT id, creator_id FROM creator_channels WHERE id = $1 AND is_active = true',
       [channelId]
@@ -1126,4 +1297,11 @@ module.exports = {
   resumeMyXCampaign,
   deleteMyXCampaign,
   getMyXCampaignHistory,
+  // 2257 identity verification
+  submit2257,
+  get2257Status,
+  list2257Records,
+  approve2257,
+  reject2257,
+  export2257Records,
 };

@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@pnptv/ui-kit";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/hooks/useAuth";
+import { get2257Status } from "@/lib/api";
 
 const STEPS = [
   { icon: "👤", key: "processStep1" },
@@ -21,6 +22,29 @@ export default function BecomeModel() {
 
   const isCreator = user?.role === "model" || user?.role === "admin" || user?.role === "superadmin";
   const isActiveTierCreator = user?.creator_status === "active" && ["ice", "crystal", "diamond"].includes(user?.creator_type || "");
+
+  const [idVerified, setIdVerified] = useState<boolean | null>(null);
+  const [idRecordStatus, setIdRecordStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    get2257Status()
+      .then((res) => {
+        setIdVerified(res.identity_verified);
+        setIdRecordStatus(res.record?.verification_status || null);
+      })
+      .catch(() => {
+        setIdVerified(null);
+        setIdRecordStatus(null);
+      });
+  }, [isAuthenticated]);
+
+  const needsIdentityVerification =
+    isAuthenticated &&
+    idVerified !== null &&
+    !idVerified &&
+    idRecordStatus !== "approved" &&
+    idRecordStatus !== "pending";
 
   return (
     <div className="page-container max-w-3xl mx-auto px-4 py-8 space-y-10">
@@ -40,6 +64,40 @@ export default function BecomeModel() {
         <h2 className="text-lg font-bold text-pnp-textPrimary mb-2">{t.introTitle}</h2>
         <p className="text-sm text-pnp-textSecondary leading-relaxed">{t.introBody}</p>
       </Card>
+
+      {/* Step 0: Identity Verification — shown only when needed */}
+      {needsIdentityVerification && (
+        <Card>
+          <div className="flex items-start gap-3">
+            <div
+              className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              🪪
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-bold text-pnp-accent">00</span>
+                <h3 className="text-sm font-bold text-pnp-textPrimary">Verify Your Identity First</h3>
+              </div>
+              <p className="text-xs text-pnp-textSecondary leading-relaxed mb-3">
+                Federal law (18 U.S.C. § 2257) requires all adult content platforms to verify creator age and identity.
+                This is a one-time step — your information is stored securely and used only for compliance.{" "}
+                <a href="/2257" target="_blank" rel="noopener noreferrer" className="underline text-pnp-accent">
+                  View our 2257 statement
+                </a>
+              </p>
+              <button
+                onClick={() => navigate("/creators/apply")}
+                className="text-xs font-semibold px-4 py-2 rounded-lg text-white"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                Start Identity Verification
+              </button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Process Steps */}
       <section className="space-y-4">

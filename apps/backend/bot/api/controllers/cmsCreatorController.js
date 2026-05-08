@@ -12,6 +12,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
+const IdentityVerificationService = require('../../../services/identityVerificationService');
 
 const DIRECTUS_URL = process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
 const DIRECTUS_TOKEN = process.env.DIRECTUS_ADMIN_TOKEN;
@@ -498,6 +499,21 @@ const uploadMedia = [
     try {
       const user = await requireActiveCreator(req, res);
       if (!user) return;
+
+      // ── 2257 compliance gate ──────────────────────────────────────────────
+      // Load fresh columns from DB since session may not have them yet
+      const { rows: complianceRows } = await query(
+        'SELECT identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+        [req.user.id]
+      );
+      const dbUser = complianceRows[0] || {};
+      if (!IdentityVerificationService.is2257Compliant(dbUser)) {
+        return res.status(403).json({
+          error: 'identity_verification_required',
+          message: 'Complete identity verification (18 U.S.C. § 2257) before uploading content.',
+        });
+      }
+      // ─────────────────────────────────────────────────────────────────────
 
       if (!req.file) return res.status(400).json({ error: 'No file provided' });
 

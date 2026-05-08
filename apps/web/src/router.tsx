@@ -80,6 +80,7 @@ const LandingPage = lazy(() => import("@/pages/LandingPage"));
 const BlogPage = lazy(() => import("@/pages/BlogPage"));
 const AboutPage = lazy(() => import("@/pages/AboutPage"));
 const CareersPage = lazy(() => import("@/pages/CareersPage"));
+const Legal2257Page = lazy(() => import("@/pages/Legal2257Page"));
 const CommunityResourcesPage = lazy(() => import("@/pages/CommunityResourcesPage"));
 const ShopPage = lazy(() => import("@/pages/ShopPage"));
 const DownloadPage = lazy(() => import("@/pages/DownloadPage"));
@@ -128,6 +129,7 @@ const WellnessShell = lazy(() => import("@/pages/WellnessShell"));
 const SelfCareCenter = lazy(() => import("@/pages/SelfCareCenter"));
 const CristinaPage = lazy(() => import("@/components/CristinaWidget").then((m) => ({ default: m.CristinaWidget })));
 const PrimeChannel = lazy(() => import("@/pages/admin/PrimeChannel"));
+const Compliance2257 = lazy(() => import("@/pages/admin/Compliance2257"));
 const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
 
 // Creator Studio pages
@@ -713,6 +715,14 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
+      {
+        path: "compliance-2257",
+        element: (
+          <ModuleLoader>
+            <Compliance2257 />
+          </ModuleLoader>
+        ),
+      },
     ],
   },
   // Creator Studio section
@@ -824,6 +834,14 @@ export const router = createBrowserRouter([
     element: (
       <ModuleLoader>
         <CareersPage />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/2257",
+    element: (
+      <ModuleLoader>
+        <Legal2257Page />
       </ModuleLoader>
     ),
   },

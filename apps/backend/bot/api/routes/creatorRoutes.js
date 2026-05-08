@@ -33,6 +33,27 @@ const enrollmentUpload = multer({
   },
 });
 
+// ── ID document upload for 2257 identity verification ────────────────────────
+const identity2257UploadDir = path.join(__dirname, '../../../../../public/uploads/creator-2257');
+if (!fs.existsSync(identity2257UploadDir)) {
+  fs.mkdirSync(identity2257UploadDir, { recursive: true });
+}
+const identity2257Upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, identity2257UploadDir),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+      cb(null, `id2257-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only image files are allowed for ID document'));
+  },
+});
+
 // ── User routes (auth required) ───────────────────────────────────────────────
 router.get('/eligibility', authGuard, creatorController.getEligibility);
 
@@ -117,6 +138,18 @@ router.get('/active', authGuard, roleGuard('admin', 'superadmin'), creatorContro
 router.get('/enrollments', authGuard, roleGuard('admin', 'superadmin'), creatorController.listEnrollments);
 router.post('/enrollments/:id/approve', authGuard, roleGuard('admin', 'superadmin'), creatorController.approveEnrollment);
 router.post('/enrollments/:id/reject', authGuard, roleGuard('admin', 'superadmin'), creatorController.rejectEnrollment);
+
+// ── Identity verification (2257) — user-facing ───────────────────────────────
+// IMPORTANT: must come BEFORE /:creatorId/* param routes
+router.post('/identity/submit', authGuard, identity2257Upload.single('idDocument'), creatorController.submit2257);
+router.get('/identity/status', authGuard, creatorController.get2257Status);
+
+// ── Identity verification (2257) — admin management ──────────────────────────
+// IMPORTANT: export route must come BEFORE /:userId param route
+router.get('/2257/records/export', adminGuard, creatorController.export2257Records);
+router.get('/2257/records', adminGuard, creatorController.list2257Records);
+router.post('/2257/records/:userId/approve', adminGuard, creatorController.approve2257);
+router.post('/2257/records/:userId/reject', adminGuard, creatorController.reject2257);
 
 // ── Param routes LAST ─────────────────────────────────────────────────────────
 router.get('/:creatorId/strikes', authGuard, roleGuard('admin', 'superadmin'), creatorController.getStrikes);

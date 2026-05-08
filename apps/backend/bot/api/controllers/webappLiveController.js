@@ -4,6 +4,7 @@ const { getRedis } = require('../../../config/redis');
 const axios = require('axios');
 const restreamerService = require('../../../services/restreamerService');
 const { getEpaycoCopRate } = require('../../../services/paymentService');
+const IdentityVerificationService = require('../../../services/identityVerificationService');
 
 /**
  * Module-level cache for the Restreamer auth token.
@@ -243,6 +244,22 @@ const getRtmpKey = async (req, res) => {
   const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
 
   try {
+    // ── 2257 compliance gate ──────────────────────────────────────────────────
+    // Load fresh columns from DB — session may not carry them after migration
+    const { rows: compRows } = await getPool().query(
+      'SELECT identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+      [user.id]
+    );
+    const dbUserComp = compRows[0] || {};
+    if (!IdentityVerificationService.is2257Compliant(dbUserComp)) {
+      return res.status(403).json({
+        success: false,
+        error: 'identity_verification_required',
+        message: 'Complete identity verification (18 U.S.C. § 2257) before going live.',
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Look up the user's assigned Restreamer channel slug from the database.
     const { rows } = await getPool().query(
       'SELECT live_channel FROM users WHERE id = $1',
@@ -346,6 +363,21 @@ const provisionChannel = async (req, res) => {
   const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
 
   try {
+    // ── 2257 compliance gate ──────────────────────────────────────────────────
+    const { rows: compRows } = await getPool().query(
+      'SELECT identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+      [user.id]
+    );
+    const dbUserComp = compRows[0] || {};
+    if (!IdentityVerificationService.is2257Compliant(dbUserComp)) {
+      return res.status(403).json({
+        success: false,
+        error: 'identity_verification_required',
+        message: 'Complete identity verification (18 U.S.C. § 2257) before going live.',
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Look up existing channel assignment first.
     const { rows } = await getPool().query(
       'SELECT live_channel, username, first_name, last_name FROM users WHERE id = $1',
