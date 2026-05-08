@@ -90,7 +90,43 @@ function ChatMessageList({
   );
 }
 
+// ── Free-user upgrade wall ────────────────────────────────────────────────────
+function StreamMembersOnlyWall() {
+  const navigate = useNavigate();
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] gap-5 px-6 text-center">
+      <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: "rgba(212,0,122,0.12)", border: "1px solid rgba(212,0,122,0.3)" }}>
+        <svg className="w-8 h-8" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+        </svg>
+      </div>
+      <div>
+        <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Members Only</h2>
+        <p className="text-sm text-pnp-textSecondary max-w-xs">Live streams require a PNPtv! membership.</p>
+      </div>
+      <button
+        onClick={() => navigate('/plans')}
+        className="px-6 py-3 rounded-xl text-sm font-bold text-white"
+        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+      >
+        See plans →
+      </button>
+      <button onClick={() => navigate(-1)} className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary">
+        ← Go back
+      </button>
+    </div>
+  );
+}
+
 export default function Stream() {
+  const { user } = useAuth();
+  if (!user || user.tier === 'free') {
+    return <StreamMembersOnlyWall />;
+  }
+  return <StreamInner />;
+}
+
+function StreamInner() {
   const { streamId } = useParams<{ streamId: string }>();
   const navigate = useNavigate();
   const t = useI18n();

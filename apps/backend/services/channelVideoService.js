@@ -29,6 +29,7 @@ const { spawn } = require('child_process');
 const axios = require('axios');
 const FormData = require('form-data');
 const { query, getPool } = require('../config/postgres');
+const { getRedis } = require('../config/redis');
 const grokService = require('./grokService');
 const logger = require('../utils/logger');
 
@@ -308,6 +309,98 @@ async function updateVideo({ videoId, userId, isAdmin, fields }) {
 
 // ── Publish ─────────────────────────────────────────────────────────────────
 
+// ── Broadcast fan-out (fire-and-forget) ─────────────────────────────────────
+
+async function broadcastNewVideo({ videoId, channelId, creatorId, title, description, thumbnailUrl, gifUrl }) {
+  const redis = getRedis();
+  const dedupKey = `pnp:video:notified:${videoId}`;
+  const alreadySent = await redis.set(dedupKey, '1', 'EX', 86400, 'NX');
+  if (alreadySent === null) return; // already broadcast
+
+  const appUrl = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
+  const watchUrl = `${appUrl}/channels`;
+  const previewUrl = gifUrl || thumbnailUrl;
+  const descSnippet = description ? description.slice(0, 100) + (description.length > 100 ? '…' : '') : '';
+
+  // Load followers of this creator (non-free, non-banned)
+  let followers = [];
+  try {
+    const { rows } = await query(
+      `SELECT u.id, u.telegram, u.email, u.first_name, u.username, u.language
+         FROM user_follows uf
+         JOIN users u ON u.id = uf.follower_id
+        WHERE uf.following_id = $1
+          AND u.tier NOT IN ('free', 'banned')
+        LIMIT 3000`,
+      [String(creatorId)]
+    );
+    followers = rows;
+  } catch (err) {
+    logger.warn('broadcastNewVideo: failed to load followers', { creatorId, error: err.message });
+    return;
+  }
+
+  // ── Telegram DMs ──────────────────────────────────────────────────────────
+  try {
+    const bot = require('../bot/core/bot');
+    const telegramFollowers = followers.filter((f) => f.telegram);
+    const escapeMd = (s) => String(s).replace(/[_*[\]()~`>#+=|{}.!\\-]/g, '\\$&');
+    const safeTitle = escapeMd(title);
+    const tgMessage = `🎬 *Nuevo video\\!* ${safeTitle}\n\n${descSnippet ? escapeMd(descSnippet) + '\n\n' : ''}👉 [Ver ahora](${watchUrl})`;
+    for (const f of telegramFollowers) {
+      try {
+        await bot.telegram.sendMessage(f.telegram, tgMessage, { parse_mode: 'MarkdownV2' });
+      } catch (err) {
+        if (err.code !== 403 && err.code !== 400) {
+          logger.warn('broadcastNewVideo: tg DM failed', { telegram: f.telegram, code: err.code });
+        }
+      }
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    logger.info('broadcastNewVideo: telegram DMs sent', { videoId, count: telegramFollowers.length });
+  } catch (err) {
+    logger.warn('broadcastNewVideo: telegram fan-out failed', { videoId, error: err.message });
+  }
+
+  // ── Push notifications ────────────────────────────────────────────────────
+  try {
+    const PushNotificationService = require('./pushNotificationService');
+    const pushUserIds = followers.map((f) => f.id);
+    if (pushUserIds.length > 0) {
+      await PushNotificationService.sendToUsers(pushUserIds, {
+        title: `🎬 Nuevo video: ${title}`,
+        body: descSnippet || 'Ver en PNP Channels →',
+        url: watchUrl,
+        icon: previewUrl || undefined,
+      });
+    }
+    logger.info('broadcastNewVideo: push notifications queued', { videoId, count: pushUserIds.length });
+  } catch (err) {
+    logger.warn('broadcastNewVideo: push notifications failed', { videoId, error: err.message });
+  }
+
+  // ── Email ─────────────────────────────────────────────────────────────────
+  try {
+    const emailService = require('./emailService');
+    const emailFollowers = followers.filter((f) => f.email);
+    if (emailFollowers.length > 0) {
+      await emailService.sendBroadcastEmails(emailFollowers, {
+        subjectEn: `🎬 New video: ${title}`,
+        subjectEs: `🎬 Nuevo video: ${title}`,
+        messageEn: `A new video has been published on PNP Channels!\n\n**${title}**\n\n${descSnippet}\n\n[Watch now →](${watchUrl})`,
+        messageEs: `¡Nuevo video en PNP Channels!\n\n**${title}**\n\n${descSnippet}\n\n[Ver ahora →](${watchUrl})`,
+        mediaUrl: previewUrl || null,
+        buttons: [{ labelEn: 'Watch now →', labelEs: 'Ver ahora →', url: watchUrl }],
+        preheaderEn: `New on PNP Channels: ${title}`,
+        preheaderEs: `Nuevo en PNP Channels: ${title}`,
+      });
+    }
+    logger.info('broadcastNewVideo: emails sent', { videoId, count: emailFollowers.length });
+  } catch (err) {
+    logger.warn('broadcastNewVideo: email broadcast failed', { videoId, error: err.message });
+  }
+}
+
 /**
  * Mark the video published. Channel videos live ONLY in the channel — we do
  * not create a social_posts promo row. The GIF is still generated as a
@@ -364,15 +457,20 @@ async function publishVideo({ videoId, userId, isAdmin }) {
   // Create promo post on the official PNPtv! account (channel_id=NULL — appears in general feed)
   const OFFICIAL_USER_ID = '8552451957';
   try {
-    const directusBase = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
-    const videoUrl = final.video_url || (final.directus_file_id ? `${directusBase}/assets/${final.directus_file_id}` : null);
-    if (videoUrl && !final.promo_post_id) {
-      const promoContent = [final.title, final.description].filter(Boolean).join('\n\n').slice(0, 1000);
+    const previewUrl = final.gif_url || final.thumbnail_url;
+    if (previewUrl && !final.promo_post_id) {
+      const appUrl = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
+      const descSnippet = final.description ? final.description.slice(0, 120) + (final.description.length > 120 ? '…' : '') : '';
+      const promoContent = [
+        `🎬 NEW on PNP Channels: ${final.title}`,
+        descSnippet,
+        `🔒 Subscribe to watch → ${appUrl}/channels`,
+      ].filter(Boolean).join('\n\n').slice(0, 1000);
       const promoInsert = await query(
         `INSERT INTO social_posts (user_id, content, media_url, media_type, channel_id, created_at)
-         VALUES ($1, $2, $3, 'video', NULL, NOW())
+         VALUES ($1, $2, $3, 'image', NULL, NOW())
          RETURNING id`,
-        [OFFICIAL_USER_ID, promoContent, videoUrl]
+        [OFFICIAL_USER_ID, promoContent, previewUrl]
       );
       const promoPostId = promoInsert.rows[0]?.id ?? null;
       if (promoPostId) {
@@ -383,6 +481,17 @@ async function publishVideo({ videoId, userId, isAdmin }) {
   } catch (err) {
     logger.warn('channel_videos: promo post creation failed (non-fatal)', { videoId, error: err.message });
   }
+
+  // Fire-and-forget broadcast — never blocks publish
+  void broadcastNewVideo({
+    videoId,
+    channelId: final.channel_id,
+    creatorId: ch.creator_id,
+    title: final.title,
+    description: final.description || '',
+    thumbnailUrl: final.thumbnail_url,
+    gifUrl: final.gif_url,
+  }).catch((err) => logger.warn('broadcastNewVideo: unexpected error', { videoId, error: err.message }));
 
   return shapeForApi(final, ch);
 }
