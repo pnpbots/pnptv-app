@@ -7189,6 +7189,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       coverImageUrl: ch.cover_image_url,
       tags: ch.tags || [],
       isPremium: ch.is_premium,
+      accessType: ch.access_type || (ch.is_premium ? 'subscription' : 'free'),
       postCount: ch.post_count,
       createdAt: ch.created_at,
       creatorName: [ch.first_name, ch.last_name].filter(Boolean).join(' ') || ch.username || 'Creator',
@@ -7219,26 +7220,51 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       }
     }
 
-    // Fetch posts (if not locked)
+    // Fetch posts + channel videos in parallel (if not locked)
     let posts = [];
+    let videos = [];
     if (!locked) {
-      const postsRes = await getPool().query(
-        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls,
-                sp.video_thumbnail_url, sp.video_thumbnails, sp.video_title, sp.video_description,
-                sp.likes_count, sp.replies_count, sp.view_count, sp.created_at,
-                sp.user_id AS author_id,
-                u.username AS author_username, u.first_name AS author_first_name, u.photo_file_id AS author_photo
-         FROM social_posts sp
-         JOIN users u ON sp.user_id = u.id
-         WHERE sp.channel_id = $1 AND sp.is_deleted = false
-         ORDER BY sp.id DESC
-         LIMIT 50`,
-        [channelId]
-      );
+      const [postsRes, videosRes] = await Promise.all([
+        getPool().query(
+          `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls,
+                  sp.video_thumbnail_url, sp.video_thumbnails, sp.video_title, sp.video_description,
+                  sp.likes_count, sp.replies_count, sp.view_count, sp.created_at,
+                  sp.user_id AS author_id,
+                  u.username AS author_username, u.first_name AS author_first_name, u.photo_file_id AS author_photo
+           FROM social_posts sp
+           JOIN users u ON sp.user_id = u.id
+           WHERE sp.channel_id = $1 AND sp.is_deleted = false
+           ORDER BY sp.id DESC
+           LIMIT 50`,
+          [channelId]
+        ),
+        getPool().query(
+          `SELECT id, title, description, tags, duration_sec, thumbnail_url, gif_url,
+                  status, created_at, directus_file_id
+           FROM channel_videos
+           WHERE channel_id = $1 AND status = 'published'
+           ORDER BY created_at DESC
+           LIMIT 100`,
+          [channelId]
+        ),
+      ]);
       posts = postsRes.rows;
+      const directusBase = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
+      videos = videosRes.rows.map((cv) => ({
+        id: cv.id,
+        title: cv.title,
+        description: cv.description,
+        tags: cv.tags || [],
+        duration_sec: cv.duration_sec,
+        thumbnail_url: cv.thumbnail_url,
+        gif_url: cv.gif_url,
+        video_url: `${directusBase}/assets/${cv.directus_file_id}`,
+        status: cv.status,
+        created_at: cv.created_at,
+      }));
     }
 
-    res.json({ success: true, channel, posts, locked, lockReason });
+    res.json({ success: true, channel, posts, videos, locked, lockReason });
   } catch (err) {
     logger.error('Channel detail error:', err);
     res.status(500).json({ error: 'Failed to load channel' });

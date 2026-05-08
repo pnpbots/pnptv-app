@@ -14,6 +14,7 @@ import {
   uploadChannelVideo,
   recordPostView,
   type Channel,
+  type ChannelVideo,
   type CreatorChannel,
   type SocialPostItem,
 } from "@/lib/api";
@@ -176,6 +177,7 @@ function ChannelDetailView({
   const [loading, setLoading] = useState(true);
   const [channel, setChannel] = useState<CreatorChannel | null>(null);
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
+  const [videos, setVideos] = useState<ChannelVideo[]>([]);
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -298,6 +300,7 @@ function ChannelDetailView({
         if (res.success) {
           setChannel(res.channel);
           setPosts(res.posts);
+          setVideos(res.videos ?? []);
           setLocked(res.locked);
         }
       })
@@ -810,13 +813,53 @@ function ChannelDetailView({
             </button>
           </div>
         </div>
-      ) : posts.length === 0 ? (
+      ) : posts.length === 0 && videos.length === 0 ? (
         <div className="py-12 text-center text-pnp-textSecondary text-sm">
           No posts in this channel yet
         </div>
       ) : (
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-pnp-textPrimary">Posts</h3>
+          {videos.length > 0 && (
+            <>
+              <h3 className="text-sm font-semibold text-pnp-textPrimary">Videos</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {videos.map((v) => {
+                  const previewSrc = v.gif_url || v.thumbnail_url;
+                  return (
+                    <div
+                      key={`cv-${v.id}`}
+                      className="aspect-video bg-pnp-surfaceHover relative overflow-hidden group cursor-pointer rounded-lg"
+                      onClick={() => setPlayingVideo({ url: v.video_url, title: v.title })}
+                    >
+                      {previewSrc ? (
+                        <img
+                          src={previewSrc}
+                          alt={v.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-pnp-surfaceHover" />
+                      )}
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors pointer-events-none">
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "rgba(255,255,255,0.15)", backdropFilter: "blur(4px)" }}>
+                          <svg className="w-5 h-5 text-white drop-shadow ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        </div>
+                      </div>
+                      {v.title && (
+                        <div className="absolute bottom-0 left-0 right-0 p-2 pointer-events-none" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.8), transparent)" }}>
+                          <p className="text-xs text-white font-medium line-clamp-1">{v.title}</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          {posts.length > 0 && <h3 className="text-sm font-semibold text-pnp-textPrimary">Posts</h3>}
           {/* Mixed media grid: images in 3-col, text posts full-width */}
           {(() => {
             const mediaPosts = posts.filter((p) => isValidPhotoUrl(p.media_url));

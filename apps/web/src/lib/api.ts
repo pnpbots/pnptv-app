@@ -3225,6 +3225,7 @@ export function getChannelDetail(channelId: number): Promise<{
   success: boolean;
   channel: CreatorChannel;
   posts: SocialPostItem[];
+  videos: ChannelVideo[];
   locked: boolean;
 }> {
   return request(`/api/webapp/channels/${channelId}`);
