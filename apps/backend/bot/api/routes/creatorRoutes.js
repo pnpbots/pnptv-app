@@ -144,6 +144,10 @@ router.post('/enrollments/:id/reject', authGuard, roleGuard('admin', 'superadmin
 router.post('/identity/submit', authGuard, identity2257Upload.single('idDocument'), creatorController.submit2257);
 router.get('/identity/status', authGuard, creatorController.get2257Status);
 
+// Persona hosted-flow (automated government-ID verification)
+router.post('/identity/persona/start', authGuard, creatorController.startPersonaInquiry);
+router.get('/identity/persona/status', authGuard, creatorController.getPersonaStatus);
+
 // ── Identity verification (2257) — admin management ──────────────────────────
 // IMPORTANT: export route must come BEFORE /:userId param route
 router.get('/2257/records/export', adminGuard, creatorController.export2257Records);

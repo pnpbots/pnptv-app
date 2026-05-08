@@ -1858,6 +1858,38 @@ app.use('/api/cashout', cashoutRoutes);
 app.post('/api/webhooks/bitrefill', cashoutRoutes.bitrefillWebhook);
 app.post('/api/webhooks/transak', cashoutRoutes.transakWebhook);
 
+// Persona identity verification webhook
+// Signature verified inside handlePersonaWebhook — no session auth needed.
+// rawBody is available on req.rawBody via the express.json verify callback (line ~286).
+// Geo-block bypass already covers /^\/api\/webhooks?\b/ so no extra path entry needed.
+app.post('/api/webhooks/persona', webhookLimiter, asyncHandler(async (req, res) => {
+  try {
+    const signatureHeader = req.headers['persona-signature'];
+    if (!signatureHeader) {
+      return res.status(400).json({ error: 'Missing Persona-Signature header' });
+    }
+    if (!req.rawBody) {
+      return res.status(400).json({ error: 'Raw body not available' });
+    }
+    const IdentityVerificationService = require('../../services/identityVerificationService');
+    const result = await IdentityVerificationService.handlePersonaWebhook(
+      req.rawBody.toString(),
+      signatureHeader
+    );
+    logger.info('Persona webhook processed', result);
+    return res.json({ received: true });
+  } catch (err) {
+    logger.error('Persona webhook error', { message: err.message });
+    // Signature errors → 400 so Persona knows not to retry (bad secret / tampering).
+    // All other errors → 200 to prevent Persona from retrying transient failures
+    // that may have already been partially applied (e.g. DB error after partial write).
+    if (err.message && err.message.includes('signature')) {
+      return res.status(400).json({ error: err.message });
+    }
+    return res.status(200).json({ error: err.message });
+  }
+}));
+
 // PNP Live API routes (formerly Meet & Greet, now consolidated)
 const PNPLiveService = require('../../services/pnpLiveService');
 const ModelService = require('../../services/modelService');

@@ -483,6 +483,40 @@ const export2257Records = async (req, res) => {
   }
 };
 
+// POST /api/webapp/creator/identity/persona/start
+const startPersonaInquiry = async (req, res) => {
+  try {
+    if (!IdentityVerificationService.isPersonaConfigured()) {
+      return res.status(503).json({
+        error: 'persona_not_configured',
+        message: 'Automated verification is not available. Use manual ID upload.',
+      });
+    }
+    const redirectUri = `${process.env.APP_URL || 'https://pnptv.app'}/creators/apply?persona_status=completed`;
+    const result = await IdentityVerificationService.startPersonaInquiry(req.user.id, redirectUri);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('startPersonaInquiry error', err);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// GET /api/webapp/creator/identity/persona/status
+const getPersonaStatus = async (req, res) => {
+  try {
+    const record = await IdentityVerificationService.get2257Record(req.user.id);
+    return res.json({
+      success: true,
+      configured: IdentityVerificationService.isPersonaConfigured(),
+      persona_inquiry_id: record?.persona_inquiry_id || null,
+      persona_status: record?.persona_status || null,
+    });
+  } catch (err) {
+    logger.error('getPersonaStatus error', err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
 // ── Active creator listing ────────────────────────────────────────────────────
 
 // GET /api/webapp/creator/active
@@ -1304,4 +1338,7 @@ module.exports = {
   approve2257,
   reject2257,
   export2257Records,
+  // Persona hosted-flow
+  startPersonaInquiry,
+  getPersonaStatus,
 };

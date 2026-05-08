@@ -3346,6 +3346,26 @@ export function get2257Status(): Promise<{
   return request("/api/webapp/creator/identity/status");
 }
 
+// ── Persona hosted-flow identity verification ─────────────────────────────────
+
+export function startPersonaInquiry(): Promise<{
+  success: boolean;
+  inquiryId: string;
+  sessionToken: string | null;
+  hostedFlowUrl: string;
+}> {
+  return request("/api/webapp/creator/identity/persona/start", { method: "POST" });
+}
+
+export function getPersonaStatus(): Promise<{
+  success: boolean;
+  configured: boolean;
+  persona_inquiry_id: string | null;
+  persona_status: string | null;
+}> {
+  return request("/api/webapp/creator/identity/persona/status");
+}
+
 // ── 18 U.S.C. § 2257 admin endpoints ─────────────────────────────────────────
 
 export interface Record2257 {

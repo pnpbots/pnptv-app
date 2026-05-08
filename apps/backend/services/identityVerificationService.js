@@ -4,10 +4,15 @@
  * Manages the creator_2257_records table and the identity_verified / grace-period
  * columns on users. Used as a hard gate before enrollment submission, content
  * uploads, and live-stream provisioning.
+ *
+ * Persona hosted-flow integration: startPersonaInquiry / handlePersonaWebhook
+ * provide automated government-ID verification as an alternative to manual upload.
  */
 
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
+const axios = require('axios');
+const crypto = require('crypto');
 
 class IdentityVerificationService {
   /**
@@ -251,6 +256,191 @@ class IdentityVerificationService {
        ORDER BY r.submitted_at DESC`
     );
     return rows;
+  }
+  /**
+   * Returns true when both PERSONA_API_KEY and PERSONA_TEMPLATE_ID env vars are set.
+   * Used by controllers to decide whether to surface the Persona path in the UI.
+   *
+   * @returns {boolean}
+   */
+  static isPersonaConfigured() {
+    return !!(process.env.PERSONA_API_KEY && process.env.PERSONA_TEMPLATE_ID);
+  }
+
+  /**
+   * Create a Persona hosted-flow inquiry for a user and upsert the inquiry ID
+   * into creator_2257_records (placeholder row — real data arrives via webhook).
+   *
+   * @param {string} userId
+   * @param {string} redirectUri  - Where Persona redirects after the user completes the flow
+   * @returns {Promise<{ inquiryId: string, sessionToken: string, hostedFlowUrl: string }>}
+   */
+  static async startPersonaInquiry(userId, redirectUri) {
+    if (!process.env.PERSONA_API_KEY) {
+      throw new Error('Persona not configured');
+    }
+    if (!userId) throw new Error('userId is required');
+
+    const response = await axios.post(
+      'https://withpersona.com/api/v1/inquiries',
+      {
+        data: {
+          attributes: {
+            inquiryTemplateId: process.env.PERSONA_TEMPLATE_ID,
+            referenceId: `pnptv_${userId}`,
+            redirectUri: redirectUri,
+          },
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PERSONA_API_KEY}`,
+          'Persona-Version': '2023-01-05',
+          'Content-Type': 'application/json',
+          'Key-Inflection': 'camel',
+        },
+        timeout: 15000,
+      }
+    );
+
+    const inquiryId = response.data?.data?.id;
+    const sessionToken = response.data?.data?.attributes?.sessionToken;
+
+    if (!inquiryId) {
+      throw new Error('Persona API returned no inquiry ID');
+    }
+
+    // Upsert a placeholder 2257 record so the inquiry_id is tracked immediately.
+    // Real legal_name / date_of_birth will be populated when the webhook fires.
+    await query(
+      `INSERT INTO creator_2257_records
+         (user_id, legal_name, date_of_birth, id_type, id_document_path,
+          persona_inquiry_id, persona_status, verification_status, submitted_at)
+       VALUES ($1, '', '1900-01-01', 'passport', '', $2, 'pending', 'pending', NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         persona_inquiry_id  = EXCLUDED.persona_inquiry_id,
+         persona_status      = 'pending',
+         verification_status = 'pending',
+         submitted_at        = NOW(),
+         verified_at         = NULL,
+         verified_by         = NULL,
+         admin_notes         = NULL`,
+      [userId, inquiryId]
+    );
+
+    logger.info(`2257: Persona inquiry created for user ${userId}`, { inquiryId });
+
+    return {
+      inquiryId,
+      sessionToken: sessionToken || null,
+      hostedFlowUrl: `https://withpersona.com/verify?inquiry-id=${inquiryId}${sessionToken ? `&session-token=${sessionToken}` : ''}`,
+    };
+  }
+
+  /**
+   * Process an incoming Persona webhook. Verifies the HMAC-SHA256 signature,
+   * then handles inquiry.approved / inquiry.declined / inquiry.failed events.
+   *
+   * @param {string} rawBody      - Raw request body string (before JSON.parse)
+   * @param {string} signatureHeader  - Value of the `persona-signature` HTTP header
+   * @returns {Promise<{ processed: boolean, event: string }>}
+   */
+  static async handlePersonaWebhook(rawBody, signatureHeader) {
+    if (!process.env.PERSONA_WEBHOOK_SECRET) {
+      throw new Error('PERSONA_WEBHOOK_SECRET is not configured');
+    }
+
+    // Persona signature format: "t=<timestamp>,v1=<hex-sig>"
+    // Signed payload: "<timestamp>.<rawBody>"
+    const parts = Object.fromEntries(
+      signatureHeader.split(',').map((p) => {
+        const idx = p.indexOf('=');
+        return [p.slice(0, idx), p.slice(idx + 1)];
+      })
+    );
+    const timestamp = parts.t;
+    const expectedSig = parts.v1;
+
+    if (!timestamp || !expectedSig) {
+      throw new Error('Invalid Persona-Signature format — missing t or v1');
+    }
+
+    const hmac = crypto
+      .createHmac('sha256', process.env.PERSONA_WEBHOOK_SECRET)
+      .update(`${timestamp}.${rawBody}`)
+      .digest('hex');
+
+    if (hmac !== expectedSig) {
+      throw new Error('Invalid Persona webhook signature');
+    }
+
+    const payload = JSON.parse(rawBody);
+    const eventType = payload?.data?.type;
+    const attributes = payload?.data?.attributes || {};
+    const referenceId = attributes.referenceId;
+    const userId = referenceId?.replace(/^pnptv_/, '') || null;
+
+    if (!userId) {
+      logger.warn('Persona webhook: no userId extracted from referenceId', { referenceId, eventType });
+      return { processed: true, event: eventType };
+    }
+
+    if (eventType === 'inquiry.approved') {
+      // Extract name + birthdate from Persona fields if present
+      const fields = attributes.fields || {};
+      const nameFirst = fields.nameFirst?.value || fields['name-first']?.value || '';
+      const nameLast = fields.nameLast?.value || fields['name-last']?.value || '';
+      const birthdate = fields.birthdate?.value || fields.dateOfBirth?.value || null;
+      const legalName = [nameFirst, nameLast].filter(Boolean).join(' ') || null;
+
+      // Approve the record in our system
+      await IdentityVerificationService.approve2257Record(
+        userId,
+        'persona-system',
+        'Auto-approved via Persona identity verification'
+      );
+
+      // Update persona_status and backfill legal_name / date_of_birth if available
+      await query(
+        `UPDATE creator_2257_records
+           SET persona_status  = 'approved',
+               legal_name      = COALESCE(NULLIF($2, ''), legal_name),
+               date_of_birth   = COALESCE($3::date, date_of_birth)
+         WHERE user_id = $1`,
+        [userId, legalName || '', birthdate || null]
+      );
+
+      logger.info(`2257: Persona inquiry approved for user ${userId}`);
+
+    } else if (eventType === 'inquiry.declined') {
+      await query(
+        `UPDATE creator_2257_records SET persona_status = 'declined' WHERE user_id = $1`,
+        [userId]
+      );
+
+      await IdentityVerificationService.reject2257Record(
+        userId,
+        'persona-system',
+        'Identity verification declined by Persona automated review'
+      );
+
+      logger.info(`2257: Persona inquiry declined for user ${userId}`);
+
+    } else if (eventType === 'inquiry.failed') {
+      // Technical failure — do NOT reject. User should retry.
+      await query(
+        `UPDATE creator_2257_records SET persona_status = 'failed' WHERE user_id = $1`,
+        [userId]
+      );
+
+      logger.warn(`2257: Persona inquiry failed (technical) for user ${userId}`, { eventType });
+
+    } else {
+      // Unhandled event type — no-op
+      logger.info(`2257: Persona webhook no-op for event type '${eventType}'`, { userId });
+    }
+
+    return { processed: true, event: eventType };
   }
 }
 

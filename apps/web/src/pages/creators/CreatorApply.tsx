@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
 import { useCreatorData } from "@/hooks/useCreatorData";
-import { activateCreator, get2257Status, submit2257Identity } from "@/lib/api";
+import { activateCreator, get2257Status, submit2257Identity, startPersonaInquiry, getPersonaStatus } from "@/lib/api";
 
 function CriterionBar({
   label,
@@ -80,15 +80,58 @@ export default function CreatorApply() {
   const [idSubmitDone, setIdSubmitDone] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch 2257 status on mount when authenticated
+  // Persona state
+  const [personaConfigured, setPersonaConfigured] = useState(false);
+  const [personaStatus, setPersonaStatus] = useState<string | null>(null);
+  const [personaStarting, setPersonaStarting] = useState(false);
+  const [personaStartError, setPersonaStartError] = useState<string | null>(null);
+  const [personaProcessing, setPersonaProcessing] = useState(false);
+  const [showManualUpload, setShowManualUpload] = useState(false);
+
+  // Fetch 2257 status and Persona config on mount when authenticated
   useEffect(() => {
     if (!isAuthenticated) return;
     setIdentityLoading(true);
-    get2257Status()
-      .then((res) => setIdentityStatus(res))
-      .catch(() => setIdentityStatus(null))
-      .finally(() => setIdentityLoading(false));
+    Promise.all([
+      get2257Status().catch(() => null),
+      getPersonaStatus().catch(() => null),
+    ]).then(([idRes, pRes]) => {
+      if (idRes) setIdentityStatus(idRes);
+      if (pRes) {
+        setPersonaConfigured(pRes.configured);
+        setPersonaStatus(pRes.persona_status);
+      }
+    }).finally(() => setIdentityLoading(false));
   }, [isAuthenticated]);
+
+  // Handle return from Persona hosted flow (?persona_status=completed in URL)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('persona_status') !== 'completed') return;
+    setPersonaProcessing(true);
+    let attempts = 0;
+    const maxAttempts = 10; // poll up to 30 s
+    const poll = setInterval(async () => {
+      attempts++;
+      try {
+        const updated = await get2257Status();
+        if (updated) setIdentityStatus(updated);
+        const pUpdated = await getPersonaStatus().catch(() => null);
+        if (pUpdated) setPersonaStatus(pUpdated.persona_status);
+        if (updated?.identity_verified || attempts >= maxAttempts) {
+          clearInterval(poll);
+          setPersonaProcessing(false);
+        }
+      } catch {
+        if (attempts >= maxAttempts) {
+          clearInterval(poll);
+          setPersonaProcessing(false);
+        }
+      }
+    }, 3000);
+    return () => clearInterval(poll);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleConfirmActivate = useCallback(async () => {
     if (!activateTerms) {
@@ -135,6 +178,18 @@ export default function CreatorApply() {
       setIdSubmitting(false);
     }
   }, [idLegalName, idDob, idType, idFile]);
+
+  const handlePersonaStart = useCallback(async () => {
+    setPersonaStartError(null);
+    setPersonaStarting(true);
+    try {
+      const result = await startPersonaInquiry();
+      window.location.href = result.hostedFlowUrl;
+    } catch (err) {
+      setPersonaStartError(err instanceof Error ? err.message : "Could not start verification. Please try again.");
+      setPersonaStarting(false);
+    }
+  }, []);
 
   const isActive = dashboard?.creatorStatus === "active";
   const isEligible = dashboard?.creatorStatus === "eligible";
@@ -282,8 +337,27 @@ export default function CreatorApply() {
                   </div>
                 )}
 
+                {/* Persona return — processing banner */}
+                {personaProcessing && (
+                  <div
+                    className="rounded-xl p-4 mb-4 flex items-start gap-3"
+                    style={{ background: "rgba(94,140,209,0.08)", border: "1px solid rgba(94,140,209,0.3)" }}
+                  >
+                    <svg className="w-5 h-5 flex-shrink-0 mt-0.5 animate-spin" style={{ color: "#5E8CD1" }} fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-semibold text-white mb-1">Verification Submitted — Confirming</p>
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                        Your identity verification was submitted. We're waiting for the result — this usually takes under a minute.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Identity verification form — shown when no record, rejected, or just submitted */}
-                {!idApproved && !idPending && !inGrace && (
+                {!idApproved && !idPending && !inGrace && !personaProcessing && (
                   <div
                     className="glass-card-sm p-5 mb-4"
                     style={{ borderColor: "rgba(212,0,122,0.35)" }}
@@ -328,104 +402,169 @@ export default function CreatorApply() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <div>
-                          <label className="block text-xs font-medium text-white/70 mb-1">
-                            Legal Full Name <span style={{ color: "#D4007A" }}>*</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={idLegalName}
-                            onChange={(e) => setIdLegalName(e.target.value)}
-                            placeholder="As it appears on your ID"
-                            maxLength={255}
-                            className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:ring-1"
-                            style={{
-                              background: "rgba(255,255,255,0.05)",
-                              border: "1px solid rgba(255,255,255,0.12)",
-                              caretColor: "#D4007A",
-                            }}
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-medium text-white/70 mb-1">
-                            Date of Birth <span style={{ color: "#D4007A" }}>*</span>
-                          </label>
-                          <input
-                            type="date"
-                            value={idDob}
-                            onChange={(e) => setIdDob(e.target.value)}
-                            max={new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]}
-                            className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:ring-1"
-                            style={{
-                              background: "rgba(255,255,255,0.05)",
-                              border: "1px solid rgba(255,255,255,0.12)",
-                              colorScheme: "dark",
-                            }}
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-medium text-white/70 mb-1">
-                            ID Type <span style={{ color: "#D4007A" }}>*</span>
-                          </label>
-                          <select
-                            value={idType}
-                            onChange={(e) => setIdType(e.target.value)}
-                            className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:ring-1"
-                            style={{
-                              background: "rgba(255,255,255,0.05)",
-                              border: "1px solid rgba(255,255,255,0.12)",
-                              colorScheme: "dark",
-                            }}
+                        {/* ── Persona instant verification (primary when configured) ── */}
+                        {personaConfigured && (
+                          <div
+                            className="rounded-xl p-4"
+                            style={{ background: "rgba(94,209,196,0.05)", border: "1px solid rgba(94,209,196,0.2)" }}
                           >
-                            <option value="">Select ID type…</option>
-                            {ID_TYPES.map((t) => (
-                              <option key={t.value} value={t.value}>{t.label}</option>
-                            ))}
-                          </select>
-                        </div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#5ED1C4" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                              </svg>
+                              <p className="text-sm font-bold text-white">Instant Verification (Recommended)</p>
+                            </div>
+                            <p className="text-xs leading-relaxed mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                              Verify your identity in 2–3 minutes using your government ID.
+                              Powered by Persona — no data stored on our servers.
+                            </p>
+                            {personaStartError && (
+                              <p className="text-xs text-red-400 font-medium mb-2">{personaStartError}</p>
+                            )}
+                            <button
+                              onClick={handlePersonaStart}
+                              disabled={personaStarting}
+                              className="w-full py-3 rounded-xl text-sm font-bold text-white disabled:opacity-40 flex items-center justify-center gap-2"
+                              style={{ background: "linear-gradient(135deg, #5ED1C4, #3BA89E)" }}
+                            >
+                              {personaStarting ? (
+                                <>
+                                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                  </svg>
+                                  Starting…
+                                </>
+                              ) : (
+                                <>
+                                  Verify with Persona
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                                  </svg>
+                                </>
+                              )}
+                            </button>
 
-                        <div>
-                          <label className="block text-xs font-medium text-white/70 mb-1">
-                            ID Document Photo <span style={{ color: "#D4007A" }}>*</span>
-                          </label>
-                          <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                            Upload a clear photo of your ID (passport, driver's license, etc.). Max 10 MB. JPG, PNG, or WebP.
-                          </p>
-                          <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp"
-                            onChange={(e) => setIdFile(e.target.files?.[0] || null)}
-                            className="hidden"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="w-full rounded-lg py-2.5 text-sm font-medium transition-colors"
-                            style={{
-                              background: "rgba(255,255,255,0.05)",
-                              border: "1px dashed rgba(255,255,255,0.2)",
-                              color: idFile ? "#5ED1C4" : "var(--pnp-text-secondary, #8E8E93)",
-                            }}
-                          >
-                            {idFile ? idFile.name : "Tap to choose file"}
-                          </button>
-                        </div>
-
-                        {idSubmitError && (
-                          <p className="text-xs text-red-400 font-medium">{idSubmitError}</p>
+                            {/* Toggle to show manual upload below */}
+                            <button
+                              type="button"
+                              onClick={() => setShowManualUpload((v) => !v)}
+                              className="w-full mt-2 text-xs text-center underline"
+                              style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
+                            >
+                              {showManualUpload ? "Hide manual upload" : "or verify manually — upload your ID document below"}
+                            </button>
+                          </div>
                         )}
 
-                        <button
-                          onClick={handleSubmitIdentity}
-                          disabled={idSubmitting}
-                          className="w-full py-3 rounded-xl text-sm font-bold text-white disabled:opacity-40"
-                          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-                        >
-                          {idSubmitting ? "Submitting…" : "Submit for Verification"}
-                        </button>
+                        {/* ── Manual upload — always shown when Persona not configured, collapsible otherwise ── */}
+                        {(!personaConfigured || showManualUpload) && (
+                          <div className={personaConfigured ? "mt-1" : ""}>
+                            {personaConfigured && (
+                              <p className="text-xs font-semibold text-white/60 mb-2 uppercase tracking-wide">Manual ID Upload</p>
+                            )}
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-medium text-white/70 mb-1">
+                                  Legal Full Name <span style={{ color: "#D4007A" }}>*</span>
+                                </label>
+                                <input
+                                  type="text"
+                                  value={idLegalName}
+                                  onChange={(e) => setIdLegalName(e.target.value)}
+                                  placeholder="As it appears on your ID"
+                                  maxLength={255}
+                                  className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:ring-1"
+                                  style={{
+                                    background: "rgba(255,255,255,0.05)",
+                                    border: "1px solid rgba(255,255,255,0.12)",
+                                    caretColor: "#D4007A",
+                                  }}
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-medium text-white/70 mb-1">
+                                  Date of Birth <span style={{ color: "#D4007A" }}>*</span>
+                                </label>
+                                <input
+                                  type="date"
+                                  value={idDob}
+                                  onChange={(e) => setIdDob(e.target.value)}
+                                  max={new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]}
+                                  className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:ring-1"
+                                  style={{
+                                    background: "rgba(255,255,255,0.05)",
+                                    border: "1px solid rgba(255,255,255,0.12)",
+                                    colorScheme: "dark",
+                                  }}
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-medium text-white/70 mb-1">
+                                  ID Type <span style={{ color: "#D4007A" }}>*</span>
+                                </label>
+                                <select
+                                  value={idType}
+                                  onChange={(e) => setIdType(e.target.value)}
+                                  className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:ring-1"
+                                  style={{
+                                    background: "rgba(255,255,255,0.05)",
+                                    border: "1px solid rgba(255,255,255,0.12)",
+                                    colorScheme: "dark",
+                                  }}
+                                >
+                                  <option value="">Select ID type…</option>
+                                  {ID_TYPES.map((t) => (
+                                    <option key={t.value} value={t.value}>{t.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-medium text-white/70 mb-1">
+                                  ID Document Photo <span style={{ color: "#D4007A" }}>*</span>
+                                </label>
+                                <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                                  Upload a clear photo of your ID (passport, driver's license, etc.). Max 10 MB. JPG, PNG, or WebP.
+                                </p>
+                                <input
+                                  ref={fileInputRef}
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp"
+                                  onChange={(e) => setIdFile(e.target.files?.[0] || null)}
+                                  className="hidden"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="w-full rounded-lg py-2.5 text-sm font-medium transition-colors"
+                                  style={{
+                                    background: "rgba(255,255,255,0.05)",
+                                    border: "1px dashed rgba(255,255,255,0.2)",
+                                    color: idFile ? "#5ED1C4" : "var(--pnp-text-secondary, #8E8E93)",
+                                  }}
+                                >
+                                  {idFile ? idFile.name : "Tap to choose file"}
+                                </button>
+                              </div>
+
+                              {idSubmitError && (
+                                <p className="text-xs text-red-400 font-medium">{idSubmitError}</p>
+                              )}
+
+                              <button
+                                onClick={handleSubmitIdentity}
+                                disabled={idSubmitting}
+                                className="w-full py-3 rounded-xl text-sm font-bold text-white disabled:opacity-40"
+                                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                              >
+                                {idSubmitting ? "Submitting…" : "Submit for Verification"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
