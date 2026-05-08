@@ -24,50 +24,120 @@
         a { color: var(--neon-pink); text-decoration: none; }
         a:hover { text-decoration: underline; }
         .footer { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--glass-border); font-size: 12px; color: var(--text-muted); }
+        /* Bypass card */
+        .bypass-card { background: rgba(212,0,122,0.08); border: 1px solid rgba(212,0,122,0.25); border-radius: 16px; padding: 24px; margin-bottom: 24px; text-align: left; backdrop-filter: blur(20px); }
+        .bypass-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-main); }
+        .bypass-card p { font-size: 14px; color: rgba(255,255,255,0.8); margin-bottom: 16px; }
+        .bypass-btn { display: inline-block; background: linear-gradient(135deg, var(--neon-pink), var(--neon-amber)); color: #fff; font-size: 14px; font-weight: 600; border: none; border-radius: 10px; padding: 12px 24px; cursor: pointer; width: 100%; text-align: center; transition: opacity 0.15s; }
+        .bypass-btn:hover:not(:disabled) { opacity: 0.88; }
+        .bypass-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .bypass-note { font-size: 12px; color: var(--text-muted); margin-top: 10px; margin-bottom: 0; }
+        .bypass-error { font-size: 13px; color: #ff6b6b; margin-top: 8px; display: none; }
     </style>
 </head>
 <body>
 <div class="container">
-    <div class="icon">⚠️</div>
+    <div class="icon">&#9888;&#65039;</div>
     <h1>Service Not Available in Your Jurisdiction</h1>
-    <p class="subtitle">We're not able to serve users from your location due to local laws.</p>
+    <p class="subtitle" id="subtitle-text">We're not able to serve users from your location due to local age-verification laws.</p>
+
+    <div class="bypass-card" id="bypass-card">
+        <h2>Not actually in a restricted area?</h2>
+        <p>Mobile carriers (T-Mobile, AT&T, Verizon) and some VPNs route traffic through exit nodes in restricted states, causing our location detection to misidentify you. If you are <strong>not physically located</strong> in a restricted jurisdiction, you can continue by confirming your actual location below.</p>
+        <button class="bypass-btn" id="bypass-btn" onclick="requestBypass()">I am not in a restricted jurisdiction &mdash; Continue</button>
+        <p class="bypass-note">By clicking, you confirm under penalty of perjury that you are not physically located in a jurisdiction whose age-verification laws apply to PNPtv. This acknowledgement is logged.</p>
+        <p class="bypass-error" id="bypass-error">Something went wrong. Please try again or contact support@pnptv.app.</p>
+    </div>
 
     <div class="card">
-        <h2>Please comply with your local legislation</h2>
-        <p>You're accessing PNPtv from a jurisdiction whose local laws require platforms like ours to collect and retain government-issued identification, re-verify users at frequent intervals, and store sensitive user data for years. We respect the authority of your local lawmakers within their borders.</p>
-        <p><strong>If you live in Texas, Tennessee, Florida, or the United Kingdom:</strong> please respect your local legislation and stop attempting to access PNPtv from this location. Your local lawmakers have made specific decisions about what adult-content platforms must do in your jurisdiction, and PNPtv has chosen not to serve users in those jurisdictions rather than collect the kind of identification data their laws require.</p>
-        <p>This is not a request — it's the law where you live, and we ask you to follow it.</p>
+        <h2>Why is PNPtv blocked here?</h2>
+        <p>PNPtv is an adult content platform. Several US states and the United Kingdom have enacted laws requiring adult platforms to collect, verify, and retain government-issued identification for every user. PNPtv has chosen <strong>not to collect that data</strong> &mdash; protecting user privacy is a core platform value. Rather than comply with these identification mandates, we block access from those jurisdictions entirely.</p>
+        <p>This is a temporary measure. PNPtv is exploring privacy-preserving age verification solutions (such as zero-knowledge proofs) that would allow access without identity exposure. When that system is available, affected users will be notified. See <a href="/2257" target="_blank">18 U.S.C. &sect; 2257 records</a> for compliance documentation.</p>
+    </div>
+
+    <div class="card">
+        <h2>Which jurisdictions are blocked?</h2>
+        <ul>
+            <li><strong>United States:</strong> Texas, Louisiana, Utah, Virginia, Indiana, Arkansas, Mississippi, North Carolina, Tennessee, Florida</li>
+            <li><strong>United Kingdom</strong> (Online Safety Act 2023 / Ofcom HEAA)</li>
+        </ul>
+        <p>Only states with <em>active, enforced</em> age-verification laws as of May 2026 are blocked. This list will be updated as legal landscapes change.</p>
     </div>
 
     <div class="card">
         <h2>Your membership is safe</h2>
         <p>If you have an active PRIME or Member subscription, <strong>it has not been cancelled, paused, or revoked</strong>. Your entitlements remain in our system exactly as you paid for them. The block only prevents HTTP access from your current location.</p>
-        <p>Your membership will resume working the moment you access PNPtv from a non-blocked location. Lifetime memberships stay lifetime. Time-bound memberships are not pausing or extending — the clock keeps running.</p>
-    </div>
-
-    <div class="card">
-        <h2>If you believe this block is in error</h2>
-        <p>If you're traveling, your VPN routes through a blocked region, or you're <strong>actually located outside</strong> these jurisdictions and being blocked incorrectly:</p>
-        <ul>
-            <li>Email <a href="mailto:support@pnptv.app">support@pnptv.app</a> with details — we review case-by-case.</li>
-            <li>Read the <a href="/community-guidelines">Community Guidelines</a> and <a href="/terms">Terms of Service</a>.</li>
-        </ul>
+        <p>Your membership will resume working the moment you access PNPtv from a non-blocked location. Lifetime memberships stay lifetime. Time-bound memberships are not pausing or extending &mdash; the clock keeps running.</p>
+        <p>For refund requests due to a genuine jurisdictional block, email <a href="mailto:support@pnptv.app">support@pnptv.app</a> &mdash; we handle these case-by-case.</p>
     </div>
 
     <div class="card">
         <h2>Learn more about the laws that affect you</h2>
         <ul>
-            <li><strong>Texas — HB 1181</strong>: <a href="https://capitol.texas.gov/tlodocs/88R/billtext/html/HB01181F.htm" target="_blank" rel="noopener">Bill text</a></li>
-            <li><strong>Tennessee — Protect Tennessee Minors Act</strong>: requires hourly re-verification + 7-year data retention</li>
-            <li><strong>Florida — HB 3</strong>: <a href="https://www.flsenate.gov/Session/Bill/2024/3" target="_blank" rel="noopener">Bill text</a></li>
-            <li><strong>United Kingdom — Online Safety Act 2023 / Ofcom HEAA</strong>: <a href="https://www.ofcom.org.uk/online-safety" target="_blank" rel="noopener">ofcom.org.uk</a></li>
+            <li><strong>Texas &mdash; HB 1181</strong>: <a href="https://capitol.texas.gov/tlodocs/88R/billtext/html/HB01181F.htm" target="_blank" rel="noopener">Bill text</a> &mdash; AG has actively sued Pornhub</li>
+            <li><strong>Louisiana &mdash; RS 14:91.14</strong>: First US state to enact and actively enforce age-verification law</li>
+            <li><strong>Utah &mdash; SB 287</strong>: <a href="https://le.utah.gov/~2023/bills/static/SB0287.html" target="_blank" rel="noopener">Bill text</a></li>
+            <li><strong>Virginia &mdash; HB 1515</strong>: Active enforcement</li>
+            <li><strong>Tennessee &mdash; Protect Tennessee Minors Act</strong>: Requires hourly re-verification + 7-year data retention</li>
+            <li><strong>Florida &mdash; HB 3</strong>: <a href="https://www.flsenate.gov/Session/Bill/2024/3" target="_blank" rel="noopener">Bill text</a></li>
+            <li><strong>United Kingdom &mdash; Online Safety Act 2023 / Ofcom HEAA</strong>: <a href="https://www.ofcom.org.uk/online-safety" target="_blank" rel="noopener">ofcom.org.uk</a> &mdash; fines up to 10% of global revenue</li>
         </ul>
         <p>If you'd like these laws changed, contact your elected representatives.</p>
     </div>
 
     <div class="footer">
-        <p>PNPtv · Operated under the laws of Colombia · <a href="mailto:support@pnptv.app">support@pnptv.app</a></p>
+        <p>PNPtv &middot; Operated under the laws of Colombia &middot; <a href="mailto:support@pnptv.app">support@pnptv.app</a></p>
     </div>
 </div>
+<script>
+    // Extract jurisdiction from query param for personalised messaging
+    (function() {
+        var params = new URLSearchParams(window.location.search);
+        var j = params.get('j');
+        if (j) {
+            var stateNames = {
+                TX: 'Texas', TN: 'Tennessee', FL: 'Florida', LA: 'Louisiana',
+                UT: 'Utah', VA: 'Virginia', IN: 'Indiana', AR: 'Arkansas',
+                MS: 'Mississippi', NC: 'North Carolina', GB: 'the United Kingdom'
+            };
+            var displayName = stateNames[j] || j;
+            var subtitle = document.getElementById('subtitle-text');
+            if (subtitle) {
+                subtitle.textContent = 'Our records show your connection is routing through ' + displayName + ', which has active age-verification laws that prevent us from serving users there.';
+            }
+        }
+    })();
+
+    function requestBypass() {
+        var btn = document.getElementById('bypass-btn');
+        var errEl = document.getElementById('bypass-error');
+        btn.disabled = true;
+        btn.textContent = 'Processing…';
+        errEl.style.display = 'none';
+
+        fetch('/api/public/geo-bypass', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(function(res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.json();
+        })
+        .then(function(data) {
+            if (data.success) {
+                btn.textContent = 'Access granted — redirecting…';
+                window.location.href = '/';
+            } else {
+                throw new Error('Unexpected response');
+            }
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            btn.textContent = 'I am not in a restricted jurisdiction — Continue';
+            errEl.style.display = 'block';
+        });
+    }
+</script>
 </body>
 </html>

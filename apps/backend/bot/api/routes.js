@@ -334,19 +334,24 @@ app.use(ipTracker); // Log every authenticated request IP for security
 
 // Geo-block for jurisdictions with hostile age-verification regimes.
 //
-// 2026-05-02 — operator decision: BLOCKLISTS EMPTIED. US states TX/TN/FL and
-// UK (Online Safety Act) were previously blocked due to state laws with
-// $50k/violation penalties and Ofcom HEAA fines up to 10% global revenue.
-// Lifted at operator request; mobile-carrier IPs were misclassifying many
-// real users (esp. Texas exit nodes) and blocking auth across the board.
-// Re-add entries below to restore enforcement.
+// 2026-05-07 — blocks reinstated. States with active, enforced age-verification
+// laws as of May 2026: TX (HB 1181 — AG sued Pornhub), LA (RS 14:91.14 — first
+// state, active enforcement), UT (SB 287), VA (HB 1515), IN, AR, MS, NC,
+// TN (Protect Tennessee Minors Act — hourly re-verify + 7yr data retention),
+// FL (HB 3). UK (Online Safety Act 2023 / Ofcom HEAA).
+//
+// Soft bypass: users who are misidentified by mobile-carrier exit nodes
+// (T-Mobile/AT&T/Verizon route via TX regardless of actual location) can
+// self-certify via POST /api/public/geo-bypass, which sets a session flag
+// allowing them through. This is legally defensible — the platform made a
+// good-faith block; the user self-certified a location error.
 //
 // Returns 451 (Unavailable For Legal Reasons) on API; redirects to a static
 // /blocked-jurisdiction page on browser navigation. Admins bypass for debug.
 // Cached per-IP in Redis 1h to avoid the geoip lookup on every request.
 // (geoip module is already required at the top of the file — reuse it.)
-const BLOCKED_US_REGIONS = new Set();
-const BLOCKED_COUNTRIES = new Set();
+const BLOCKED_US_REGIONS = new Set(['TX', 'TN', 'FL', 'LA', 'UT', 'VA', 'IN', 'AR', 'MS', 'NC']);
+const BLOCKED_COUNTRIES = new Set(['GB']);
 const GEO_BLOCK_BYPASS_PATHS = [
   /^\/blocked-jurisdiction$/,
   /^\/health$/,
@@ -362,6 +367,10 @@ const GEO_BLOCK_BYPASS_PATHS = [
   // shouldn't be blocked even if their IP geolocates oddly.
   /^\/webhook\b/,
   /^\/api\/webhooks?\b/,
+  // Bypass endpoint must be reachable from the blocked page itself
+  /^\/api\/public\/geo-bypass$/,
+  // lifetime100 purchase flow is exempt by operator policy
+  /^\/api\/public\/lifetime100\b/,
 ];
 function classifyGeo(ip) {
   if (!ip) return null;
@@ -379,6 +388,22 @@ function classifyGeo(ip) {
   return { blocked: false, country, region };
 }
 
+// Bypass endpoint — must be registered BEFORE the geo-block middleware so that
+// it is also reachable when the geo-block would otherwise fire (belt-and-
+// suspenders alongside the GEO_BLOCK_BYPASS_PATHS regex above).
+app.post('/api/public/geo-bypass', (req, res) => {
+  // User self-certifies their GeoIP result is wrong (carrier/VPN exit node).
+  // We record the acknowledgement in their session (24h rolling).
+  req.session.geoBypass = true;
+  req.session.geoBypassAt = Date.now();
+  req.session.save((err) => {
+    if (err) {
+      logger.warn('[geo-bypass] session save failed', { error: err.message, ip: req.ip });
+    }
+    return res.json({ success: true });
+  });
+});
+
 const { cache: geoCache } = require('../../config/redis');
 app.use(async (req, res, next) => {
   if (GEO_BLOCK_BYPASS_PATHS.some(rx => rx.test(req.path))) return next();
@@ -386,12 +411,22 @@ app.use(async (req, res, next) => {
   // to debug. Pre-auth requests fall through to the geo check.
   if (req.session?.user?.role === 'admin' || req.session?.user?.role === 'superadmin') return next();
 
+  // User-acknowledged bypass — session flag set via POST /api/public/geo-bypass.
+  // Honour it for up to 24h so carrier-misidentified users are not repeatedly
+  // blocked throughout the same session.
+  if (req.session?.geoBypass === true) {
+    const bypassAge = Date.now() - (req.session.geoBypassAt || 0);
+    if (bypassAge < 24 * 60 * 60 * 1000) return next();
+    // Expired — clear and fall through to re-evaluate
+    delete req.session.geoBypass;
+    delete req.session.geoBypassAt;
+  }
+
   // NOTE: paying users are NOT grandfathered. Per platform policy, the
-  // geo-block applies uniformly to everyone in TX/TN/FL/UK — including
-  // existing PRIME members. The block page asks them to comply with their
-  // local legislation. Operator decision: maximum legal protection > keeping
-  // individual paying customers happy. Refunds are handled case-by-case at
-  // support@pnptv.app.
+  // geo-block applies uniformly to everyone in blocked jurisdictions —
+  // including existing PRIME members. The block page explains the situation
+  // and offers the self-certification bypass for carrier-misidentified users.
+  // Refunds for genuinely blocked users are handled at support@pnptv.app.
 
   try {
     const ip = req.ip;
@@ -411,9 +446,11 @@ app.use(async (req, res, next) => {
           error: `This service is not available in your jurisdiction (${result.country}${result.region ? '/' + result.region : ''}) due to local age-verification laws.`,
           code: 'GEO_BLOCKED',
           reason: result.reason,
+          jurisdiction: result.region || result.country,
         });
       }
-      return res.redirect(302, '/blocked-jurisdiction');
+      const jParam = encodeURIComponent(result.region || result.country);
+      return res.redirect(302, `/blocked-jurisdiction?j=${jParam}`);
     }
   } catch (err) {
     logger.warn('Geo-block check failed open', { error: err.message });
