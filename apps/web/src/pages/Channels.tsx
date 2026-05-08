@@ -14,6 +14,9 @@ import {
   uploadChannelVideo,
   updateChannelVideo,
   deleteChannelVideo,
+  aiTitleChannelVideo,
+  aiDescriptionChannelVideo,
+  aiTagsChannelVideo,
   type Channel,
   type ChannelVideo,
   type CreatorChannel,
@@ -189,10 +192,40 @@ function ChannelDetailView({
   const [deletingVideoId, setDeletingVideoId] = useState<number | null>(null);
   const [videoDeleteLoading, setVideoDeleteLoading] = useState(false);
 
+  const [videoAiBusy, setVideoAiBusy] = useState<"title" | "description" | "tags" | null>(null);
+
   const openVideoEdit = (v: ChannelVideo) => {
     setEditingVideoId(v.id);
     setVideoEditForm({ title: v.title || "", description: v.description || "", tags: (v.tags || []).join(", ") });
     setVideoEditError(null);
+    setVideoAiBusy(null);
+  };
+
+  // Save current form state then call AI — same pattern as the upload wizard
+  const saveAndRunAi = async (field: "title" | "description" | "tags") => {
+    if (!channel || editingVideoId === null) return;
+    setVideoAiBusy(field); setVideoEditError(null);
+    try {
+      // Persist current text so the AI reads what the user typed
+      const tags = videoEditForm.tags.split(",").map((t) => t.trim()).filter(Boolean);
+      await updateChannelVideo(channel.id, editingVideoId, {
+        title: videoEditForm.title.trim(),
+        description: videoEditForm.description.trim() || null,
+        tags,
+      });
+      if (field === "title") {
+        const r = await aiTitleChannelVideo(channel.id, editingVideoId);
+        setVideoEditForm((p) => ({ ...p, title: r.title }));
+      } else if (field === "description") {
+        const r = await aiDescriptionChannelVideo(channel.id, editingVideoId);
+        setVideoEditForm((p) => ({ ...p, description: r.description }));
+      } else {
+        const r = await aiTagsChannelVideo(channel.id, editingVideoId);
+        setVideoEditForm((p) => ({ ...p, tags: (r.tags || []).join(", ") }));
+      }
+    } catch (err) {
+      setVideoEditError(err instanceof Error ? err.message : "AI unavailable");
+    } finally { setVideoAiBusy(null); }
   };
 
   const saveVideoEdit = async () => {
@@ -906,7 +939,13 @@ function ChannelDetailView({
                 {isEditing && (
                   <div className="px-3 pb-3 space-y-2 border-t border-white/8 pt-2">
                     <div>
-                      <label className="block text-[10px] text-white/40 mb-0.5">Title</label>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <label className="text-[10px] text-white/40">Title</label>
+                        <button type="button" onClick={() => saveAndRunAi("title")} disabled={videoAiBusy !== null}
+                          className="text-[10px] text-white/50 hover:text-white disabled:opacity-40 transition-colors">
+                          {videoAiBusy === "title" ? "…" : "✨ AI title"}
+                        </button>
+                      </div>
                       <input
                         value={videoEditForm.title}
                         onChange={(e) => setVideoEditForm((p) => ({ ...p, title: e.target.value }))}
@@ -915,7 +954,13 @@ function ChannelDetailView({
                       />
                     </div>
                     <div>
-                      <label className="block text-[10px] text-white/40 mb-0.5">Description</label>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <label className="text-[10px] text-white/40">Description</label>
+                        <button type="button" onClick={() => saveAndRunAi("description")} disabled={videoAiBusy !== null}
+                          className="text-[10px] text-white/50 hover:text-white disabled:opacity-40 transition-colors">
+                          {videoAiBusy === "description" ? "…" : "✨ AI description"}
+                        </button>
+                      </div>
                       <textarea
                         rows={2}
                         value={videoEditForm.description}
@@ -924,7 +969,13 @@ function ChannelDetailView({
                       />
                     </div>
                     <div>
-                      <label className="block text-[10px] text-white/40 mb-0.5">Tags (comma-separated)</label>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <label className="text-[10px] text-white/40">Tags (comma-separated)</label>
+                        <button type="button" onClick={() => saveAndRunAi("tags")} disabled={videoAiBusy !== null}
+                          className="text-[10px] text-white/50 hover:text-white disabled:opacity-40 transition-colors">
+                          {videoAiBusy === "tags" ? "…" : "✨ AI tags"}
+                        </button>
+                      </div>
                       <input
                         value={videoEditForm.tags}
                         onChange={(e) => setVideoEditForm((p) => ({ ...p, tags: e.target.value }))}
