@@ -307,8 +307,7 @@ export function CreatorAvailabilitySettings() {
           <button
             onClick={handleSaveNextShow}
             disabled={nextShowSaving || !nextShowDate}
-            className="flex-1 py-2 rounded-xl text-xs font-semibold text-white transition-opacity disabled:opacity-50"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            className="flex-1 py-2 rounded-xl text-xs font-semibold text-white transition-opacity disabled:opacity-50 btn-gradient"
           >
             {nextShowSaving ? "Saving..." : nextShowSaved ? "Saved!" : "Set Date"}
           </button>
@@ -409,8 +408,7 @@ export function CreatorAvailabilitySettings() {
       <button
         onClick={handleSave}
         disabled={saving}
-        className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-opacity disabled:opacity-50"
-        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+        className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-opacity disabled:opacity-50 btn-gradient"
       >
         {saving ? "Saving..." : saved ? "Saved!" : "Save Schedule"}
       </button>

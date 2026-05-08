@@ -80,8 +80,7 @@ function AvatarFallback({ username }: { username: string }) {
   const initials = username.slice(0, 2).toUpperCase();
   return (
     <div
-      className="w-full h-full flex items-center justify-center text-xl font-bold text-white"
-      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+      className="w-full h-full flex items-center justify-center text-xl font-bold text-white btn-gradient"
     >
       {initials}
     </div>

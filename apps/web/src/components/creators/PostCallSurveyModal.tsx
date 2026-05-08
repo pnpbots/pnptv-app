@@ -164,8 +164,7 @@ export function PostCallSurveyModal({ open, bookingId, creatorName, onClose }: P
             <button
               onClick={handleSubmit}
               disabled={rating < 1 || submitting}
-              className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-opacity disabled:opacity-40"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-opacity disabled:opacity-40 btn-gradient"
             >
               {submitting ? t.creator.surveySubmitting : t.creator.surveySubmit}
             </button>

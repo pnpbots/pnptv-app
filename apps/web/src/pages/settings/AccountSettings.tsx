@@ -230,8 +230,7 @@ export default function AccountSettings() {
               <button
                 type="submit"
                 disabled={enablePnptvIdSaving || !enablePnptvIdEmail.trim()}
-                className="w-full py-3 px-4 rounded-xl font-semibold text-sm text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                className="w-full py-3 px-4 rounded-xl font-semibold text-sm text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed btn-gradient"
               >
                 {enablePnptvIdSaving ? "Sending set-password link..." : "Send me a set-password link"}
               </button>
@@ -265,8 +264,7 @@ export default function AccountSettings() {
             <p className="text-sm font-medium" style={{ color: "#EBEBF5" }}>No upcoming calls</p>
             <a
               href="/creators"
-              className="text-xs font-semibold underline underline-offset-2 transition-opacity hover:opacity-70"
-              style={{ color: "#D4007A" }}
+              className="text-xs font-semibold underline underline-offset-2 transition-opacity hover:opacity-70 text-pnp-accent"
             >
               Browse creators
             </a>
@@ -303,8 +301,7 @@ export default function AccountSettings() {
                       <img src={booking.performer_photo} alt={booking.performer_name} className="w-full h-full object-cover" />
                     ) : (
                       <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold text-white"
-                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold text-white btn-gradient"
                       >
                         {booking.performer_name.slice(0, 2).toUpperCase()}
                       </div>

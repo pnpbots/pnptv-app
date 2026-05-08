@@ -48,7 +48,7 @@ export default function AboutPage() {
             </button>
             <Link to="/" className="flex items-center gap-1.5">
               <span className="text-sm font-black text-white">PNPtv</span>
-              <span className="text-sm font-black" style={{ color: "#D4007A" }}>!</span>
+              <span className="text-sm font-black text-pnp-accent">!</span>
             </Link>
           </div>
           {!isAuthenticated && (
@@ -61,8 +61,7 @@ export default function AboutPage() {
               </Link>
               <Link
                 to="/join"
-                className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg btn-gradient"
               >
                 Join Free
               </Link>
@@ -82,7 +81,7 @@ export default function AboutPage() {
           <div className="relative">
             <div className="inline-flex items-center gap-1 mb-4">
               <span className="text-4xl font-black text-white">PNPtv</span>
-              <span className="text-4xl font-black" style={{ color: "#D4007A" }}>!</span>
+              <span className="text-4xl font-black text-pnp-accent">!</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold text-white mb-3">{t.pageHeading}</h1>
             <p className="text-base text-white/60 max-w-lg mx-auto leading-relaxed">{t.pageSubtitle}</p>
@@ -137,9 +136,9 @@ export default function AboutPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {t.values.map((value, i) => {
                 const gradients = [
-                  "from-[#D4007A]/20 to-[#D4007A]/5",
+                  "from-pnp-accent/20 to-pnp-accent/5",
                   "from-green-500/20 to-green-500/5",
-                  "from-[#E69138]/20 to-[#E69138]/5",
+                  "from-pnp-amber/20 to-pnp-amber/5",
                   "from-purple-500/20 to-purple-500/5",
                 ];
                 const borderColors = [
@@ -175,15 +174,7 @@ export default function AboutPage() {
                     borderColor: "rgba(255,255,255,0.08)",
                   }}
                 >
-                  <div
-                    className="text-2xl font-black mb-1"
-                    style={{
-                      background: "linear-gradient(135deg, #D4007A, #E69138)",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      backgroundClip: "text",
-                    }}
-                  >
+                  <div className="text-2xl font-black mb-1 text-gradient">
                     {stat.value}
                   </div>
                   <div className="text-xs text-white/50">{stat.label}</div>
@@ -204,8 +195,7 @@ export default function AboutPage() {
             >
               <div className="flex items-center gap-3 mb-4">
                 <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0 btn-gradient"
                 >
                   🏳️‍🌈
                 </div>
@@ -232,8 +222,7 @@ export default function AboutPage() {
             <p className="text-sm text-white/60 mb-5 max-w-sm mx-auto">{t.contactBody}</p>
             <Link
               to="/contact"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 btn-gradient"
             >
               {t.contactCta}
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

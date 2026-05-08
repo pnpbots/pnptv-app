@@ -27,7 +27,7 @@ export default function CareersPage() {
         <meta property="og:type" content="website" />
       </Helmet>
 
-      <div className="min-h-dvh" style={{ background: "var(--pnp-background, #0A0A0B)", color: "#fff" }}>
+      <div className="min-h-dvh bg-pnp-background text-white">
         {/* Top bar */}
         <div
           className="sticky top-0 z-50 flex items-center justify-between gap-3 px-4 py-3"
@@ -49,7 +49,7 @@ export default function CareersPage() {
             </button>
             <Link to="/" className="flex items-center gap-1.5">
               <span className="text-sm font-black text-white">PNPtv</span>
-              <span className="text-sm font-black" style={{ color: "#D4007A" }}>!</span>
+              <span className="text-sm font-black text-pnp-accent">!</span>
             </Link>
           </div>
           {!isAuthenticated && (
@@ -62,8 +62,7 @@ export default function CareersPage() {
               </Link>
               <Link
                 to="/join"
-                className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg btn-gradient"
               >
                 Join Free
               </Link>
@@ -82,8 +81,8 @@ export default function CareersPage() {
           />
           <div className="relative">
             <div className="inline-flex items-center gap-2 mb-3 px-3 py-1.5 rounded-full border" style={{ background: "rgba(230,145,56,0.1)", borderColor: "rgba(230,145,56,0.3)" }}>
-              <span className="w-1.5 h-1.5 rounded-full bg-[#E69138] animate-pulse" />
-              <span className="text-[#E69138] text-xs font-semibold">Now Hiring</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-pnp-amber animate-pulse" />
+              <span className="text-pnp-amber text-xs font-semibold">Now Hiring</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-white mb-3">{t.pageHeading}</h1>
             <p className="text-sm text-white/60 max-w-md mx-auto leading-relaxed">{t.pageSubtitle}</p>
@@ -144,12 +143,7 @@ export default function CareersPage() {
                           <h3 className="text-base font-bold text-white mb-1">{role.title}</h3>
                           <div className="flex items-center gap-2">
                             <span
-                              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border"
-                              style={{
-                                background: "rgba(212,0,122,0.1)",
-                                borderColor: "rgba(212,0,122,0.3)",
-                                color: "#D4007A",
-                              }}
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border bg-pnp-accent/10 border-pnp-accent/30 text-pnp-accent"
                             >
                               {role.type}
                             </span>
@@ -194,8 +188,7 @@ export default function CareersPage() {
                             {role.requirements.map((req, ri) => (
                               <li key={ri} className="flex items-start gap-2.5">
                                 <span
-                                  className="flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center mt-0.5 text-[10px] font-bold"
-                                  style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}
+                                  className="flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center mt-0.5 text-[10px] font-bold bg-pnp-accent/20 text-pnp-accent"
                                 >
                                   ✓
                                 </span>
@@ -207,8 +200,7 @@ export default function CareersPage() {
 
                         <a
                           href={`mailto:${role.applyEmail}?subject=${encodeURIComponent(role.applySubject)}`}
-                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-                          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 btn-gradient"
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -241,8 +233,7 @@ export default function CareersPage() {
             <p className="text-sm text-white/60 mb-5 max-w-sm mx-auto leading-relaxed">{t.generalBody}</p>
             <a
               href={`mailto:${t.generalEmail}`}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white border transition-colors hover:bg-white/5"
-              style={{ borderColor: "rgba(230,145,56,0.4)", color: "#E69138" }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-pnp-amber border border-pnp-amber/40 transition-colors hover:bg-white/5"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />

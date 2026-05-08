@@ -113,7 +113,7 @@ export default function CreatorLayout() {
           <div className="text-center">
             <h1 className="text-xl font-bold text-pnp-textPrimary mb-2">Sign in required</h1>
             <p className="text-sm text-pnp-textSecondary mb-4">Please sign in to access Creator Studio.</p>
-            <button onClick={() => navigate("/")} className="px-4 py-2 rounded-lg text-white text-sm" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
+            <button onClick={() => navigate("/")} className="px-4 py-2 rounded-lg text-white text-sm btn-gradient">
               Go Home
             </button>
           </div>
@@ -130,8 +130,7 @@ export default function CreatorLayout() {
       <div className="flex items-center gap-3 px-4 h-16 border-b border-pnp-border">
         <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
         <span
-          className="text-sm font-bold"
-          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}
+          className="text-sm font-bold text-gradient"
         >
           Creator Studio
         </span>
@@ -181,10 +180,10 @@ export default function CreatorLayout() {
       {/* Sidebar footer: creator tier + subscriber count */}
       <div className="p-3 border-t border-pnp-border space-y-2">
         {tierInfo && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.15)" }}>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-pnp-accent/[0.08] border border-pnp-accent/[0.15]">
             <span className="text-sm">{tierInfo.emoji}</span>
             <div className="min-w-0">
-              <p className="text-xs font-semibold" style={{ color: "#D4007A" }}>{tierInfo.label} Creator</p>
+              <p className="text-xs font-semibold text-pnp-accent">{tierInfo.label} Creator</p>
               <p className="text-xs text-pnp-textSecondary truncate">
                 {subscriberCount} subscriber{subscriberCount !== 1 ? "s" : ""}
               </p>
@@ -225,8 +224,7 @@ export default function CreatorLayout() {
         <div className="flex items-center gap-2">
           <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
           <span
-            className="text-xs font-bold"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}
+            className="text-xs font-bold text-gradient"
           >
             Creator Studio
           </span>
@@ -488,8 +486,7 @@ function ConsentRowList({ rows }: { rows: ConsentRow[] }) {
               <div className="px-4 pb-3">
                 <button
                   onClick={item.onAction}
-                  className="w-full py-2 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  className="w-full py-2 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90 btn-gradient"
                 >
                   {item.actionLabel ?? "Complete"}
                 </button>
@@ -844,8 +841,7 @@ export function CreatorXCampaigns() {
             </p>
             <button
               onClick={handleConnectX}
-              className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98]"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98] btn-gradient"
             >
               Connect X Account
             </button>
@@ -872,8 +868,7 @@ export function CreatorXCampaigns() {
             {campaigns.length < campaignLimit && (
               <button
                 onClick={() => setShowCreate(true)}
-                className="w-full mb-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98]"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                className="w-full mb-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98] btn-gradient"
               >
                 + Create Campaign
               </button>
@@ -989,8 +984,7 @@ export function CreatorXCampaigns() {
                     <button
                       onClick={handleCreate}
                       disabled={creating || !formName.trim() || !formTopic.trim()}
-                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-all hover:opacity-90"
-                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-all hover:opacity-90 btn-gradient"
                     >
                       {creating ? "Creating..." : "Create"}
                     </button>

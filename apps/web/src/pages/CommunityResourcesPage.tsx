@@ -89,7 +89,7 @@ export default function CommunityResourcesPage() {
         <meta property="og:type" content="website" />
       </Helmet>
 
-      <div className="min-h-dvh" style={{ background: "var(--pnp-background, #0A0A0B)", color: "#fff" }}>
+      <div className="min-h-dvh bg-pnp-background text-white">
         {/* Top bar */}
         <div
           className="sticky top-0 z-50 flex items-center justify-between gap-3 px-4 py-3"
@@ -111,7 +111,7 @@ export default function CommunityResourcesPage() {
             </button>
             <Link to="/" className="flex items-center gap-1.5">
               <span className="text-sm font-black text-white">PNPtv</span>
-              <span className="text-sm font-black" style={{ color: "#D4007A" }}>!</span>
+              <span className="text-sm font-black text-pnp-accent">!</span>
             </Link>
           </div>
           {!isAuthenticated && (
@@ -124,8 +124,7 @@ export default function CommunityResourcesPage() {
               </Link>
               <Link
                 to="/join"
-                className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg btn-gradient"
               >
                 Join Free
               </Link>
@@ -247,8 +246,7 @@ export default function CommunityResourcesPage() {
             <p className="text-sm text-white/65 leading-relaxed mb-4">{t.communityGuidelinesBody}</p>
             <Link
               to="/community-guidelines"
-              className="inline-flex items-center gap-2 text-sm font-semibold transition-colors hover:opacity-80"
-              style={{ color: "#D4007A" }}
+              className="inline-flex items-center gap-2 text-sm font-semibold transition-colors hover:opacity-80 text-pnp-accent"
             >
               {t.communityGuidelinesCta}
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

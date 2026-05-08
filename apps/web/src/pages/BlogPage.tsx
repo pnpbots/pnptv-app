@@ -15,8 +15,8 @@ function CategoryBadge({ category, label }: { category: string; label: string })
   const colors: Record<string, string> = {
     community: "bg-purple-500/20 text-purple-300 border-purple-500/30",
     safety: "bg-green-500/20 text-green-300 border-green-500/30",
-    creators: "bg-[#E69138]/20 text-[#E69138] border-[#E69138]/30",
-    platform: "bg-[#D4007A]/20 text-[#D4007A] border-[#D4007A]/30",
+    creators: "bg-pnp-amber/20 text-pnp-amber border-pnp-amber/30",
+    platform: "bg-pnp-accent/20 text-pnp-accent border-pnp-accent/30",
   };
   return (
     <span
@@ -64,7 +64,7 @@ export default function BlogPage() {
         <meta property="og:type" content="website" />
       </Helmet>
 
-      <div className="min-h-dvh" style={{ background: "var(--pnp-background, #0A0A0B)", color: "#fff" }}>
+      <div className="min-h-dvh bg-pnp-background text-white">
         {/* Top bar */}
         <div
           className="sticky top-0 z-50 flex items-center justify-between gap-3 px-4 py-3"
@@ -86,7 +86,7 @@ export default function BlogPage() {
             </button>
             <Link to="/" className="flex items-center gap-1.5">
               <span className="text-sm font-black text-white">PNPtv</span>
-              <span className="text-sm font-black" style={{ color: "#D4007A" }}>!</span>
+              <span className="text-sm font-black text-pnp-accent">!</span>
             </Link>
           </div>
           {!isAuthenticated && (
@@ -99,8 +99,7 @@ export default function BlogPage() {
               </Link>
               <Link
                 to="/join"
-                className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg btn-gradient"
               >
                 Join Free
               </Link>
@@ -131,14 +130,9 @@ export default function BlogPage() {
               onClick={() => setActiveCategory(cat.key)}
               className={`px-4 py-1.5 rounded-full text-xs font-semibold border transition-all duration-200 ${
                 activeCategory === cat.key
-                  ? "border-[#D4007A] text-white"
-                  : "border-white/10 text-white/50 hover:border-white/20 hover:text-white/70"
+                  ? "border-pnp-accent text-white bg-pnp-accent/15"
+                  : "border-white/10 text-white/50 hover:border-white/20 hover:text-white/70 bg-white/[0.04]"
               }`}
-              style={
-                activeCategory === cat.key
-                  ? { background: "rgba(212,0,122,0.15)" }
-                  : { background: "rgba(255,255,255,0.04)" }
-              }
             >
               {cat.label}
             </button>
@@ -203,8 +197,7 @@ export default function BlogPage() {
 
                   <div className="mt-3">
                     <span
-                      className="text-xs font-semibold"
-                      style={{ color: "#D4007A" }}
+                      className="text-xs font-semibold text-pnp-accent"
                     >
                       {isExpanded ? t.readLess : t.readMore}
                     </span>
