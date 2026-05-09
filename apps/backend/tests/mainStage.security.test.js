@@ -164,6 +164,11 @@ jest.mock('../services/mainStageService', () => {
   };
 });
 
+// EntitlementAccessService — default: user has pnp-member access
+jest.mock('../services/entitlementAccessService', () => ({
+  hasEntitlement: jest.fn(async () => true),
+}));
+
 // Media broadcaster — not relevant to REST tests
 jest.mock('../../../workers/mainStageMediaBroadcaster', () => ({
   updateSource: jest.fn(),
@@ -695,5 +700,173 @@ describe('POST /api/main-stage/token — admin role', () => {
     const decoded = decodeToken(res.body.token);
     expect(decoded.grants.canPublishData).toBe(true);
     expect(decoded.grants.roomAdmin).toBe(true);
+  });
+});
+
+// ── 16. Kicked-set — token endpoint ──────────────────────────────────────────
+
+describe('Kicked-set — POST /api/main-stage/token', () => {
+  it('should return 403 MAIN_STAGE_KICKED when user is in kicked-set', async () => {
+    mockUserRow(VIEWER_USER);
+    redisMem[`mainstage:kicked:${VIEWER_USER.id}`] = '1';
+
+    const app = buildApp(VIEWER_USER);
+    const res = await supertest(app).post('/api/main-stage/token');
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('MAIN_STAGE_KICKED');
+  });
+
+  it('should not block user when kicked key is absent', async () => {
+    mockUserRow(VIEWER_USER);
+    // redisMem is clean from beforeEach; entitlement returns true by default
+
+    const app = buildApp(VIEWER_USER);
+    const res = await supertest(app).post('/api/main-stage/token');
+
+    expect(res.status).not.toBe(403);
+    expect(res.body.code).not.toBe('MAIN_STAGE_KICKED');
+  });
+
+  it('should allow admin to get token even when in kicked-set', async () => {
+    // Admins bypass the kicked-set check entirely
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: ADMIN_USER.id, first_name: 'Admin', username: 'admin', role: 'admin' }],
+    });
+    redisMem[`mainstage:kicked:${ADMIN_USER.id}`] = '1';
+
+    const app = buildApp(ADMIN_USER);
+    const res = await supertest(app).post('/api/main-stage/token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.code).not.toBe('MAIN_STAGE_KICKED');
+  });
+});
+
+// ── 17. Consent gate — token endpoint ────────────────────────────────────────
+
+describe('Consent gate — POST /api/main-stage/token', () => {
+  it('should return 403 MAIN_STAGE_CONSENT_REQUIRED when canJoin is false', async () => {
+    mockUserRow(VIEWER_USER);
+    const consentSvc = require('../services/mainStageConsentService');
+    consentSvc.buildJoinCheck.mockReturnValueOnce({ canJoin: false, reason: 'NO_CONSENT' });
+
+    const app = buildApp(VIEWER_USER);
+    const res = await supertest(app).post('/api/main-stage/token');
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('MAIN_STAGE_CONSENT_REQUIRED');
+  });
+
+  it('should proceed past consent gate when canJoin is true', async () => {
+    mockUserRow(VIEWER_USER);
+    // buildJoinCheck default returns canJoin:true; entitlement default returns true
+
+    const app = buildApp(VIEWER_USER);
+    const res = await supertest(app).post('/api/main-stage/token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+// ── 18. Entitlement gate — token endpoint ────────────────────────────────────
+
+describe('Entitlement gate — POST /api/main-stage/token', () => {
+  it('should return 403 MEMBERSHIP_REQUIRED when user lacks pnp-member entitlement', async () => {
+    mockUserRow(VIEWER_USER);
+    const entSvc = require('../services/entitlementAccessService');
+    entSvc.hasEntitlement.mockResolvedValueOnce(false);
+
+    const app = buildApp(VIEWER_USER);
+    const res = await supertest(app).post('/api/main-stage/token');
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('MEMBERSHIP_REQUIRED');
+  });
+
+  it('should call hasEntitlement with the pnp-member SKU', async () => {
+    mockUserRow(VIEWER_USER);
+    const entSvc = require('../services/entitlementAccessService');
+    entSvc.hasEntitlement.mockResolvedValueOnce(false);
+
+    const app = buildApp(VIEWER_USER);
+    await supertest(app).post('/api/main-stage/token');
+
+    expect(entSvc.hasEntitlement).toHaveBeenCalledWith(String(VIEWER_USER.id), 'pnp-member');
+  });
+
+  it('should skip entitlement check for admin users', async () => {
+    // Admin bypass: neither kicked-set nor entitlement checks run
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: ADMIN_USER.id, first_name: 'Admin', username: 'admin', role: 'admin' }],
+    });
+    const entSvc = require('../services/entitlementAccessService');
+    entSvc.hasEntitlement.mockRejectedValueOnce(new Error('should not be called for admin'));
+
+    const app = buildApp(ADMIN_USER);
+    const res = await supertest(app).post('/api/main-stage/token');
+
+    expect(res.status).toBe(200);
+    expect(entSvc.hasEntitlement).not.toHaveBeenCalled();
+  });
+});
+
+// ── 19. Redis failure → 503 ───────────────────────────────────────────────────
+
+describe('Redis failure — POST /api/main-stage/token', () => {
+  it('should return 503 SESSION_BACKEND_UNAVAILABLE when Redis throws on kicked-set check', async () => {
+    mockUserRow(VIEWER_USER);
+    // Consent check passes; then redis.get for the kicked-set key throws
+    mockRedis.get.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+    const app = buildApp(VIEWER_USER);
+    const res = await supertest(app).post('/api/main-stage/token');
+
+    expect(res.status).toBe(503);
+    expect(res.body.code).toBe('SESSION_BACKEND_UNAVAILABLE');
+  });
+});
+
+// ── 20. Identity length validation in moderate ───────────────────────────────
+
+describe('Identity validation — POST /api/main-stage/moderate', () => {
+  it('should return 400 for identity longer than 255 characters', async () => {
+    const app = buildApp(ADMIN_USER);
+    const res = await supertest(app)
+      .post('/api/main-stage/moderate')
+      .send({ action: 'kick', identity: 'x'.repeat(256) });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('should return 400 for identity at exactly 256 characters', async () => {
+    const app = buildApp(ADMIN_USER);
+    const res = await supertest(app)
+      .post('/api/main-stage/moderate')
+      .send({ action: 'kick', identity: 'a'.repeat(256) });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('should accept identity at exactly 255 characters', async () => {
+    const app = buildApp(ADMIN_USER);
+    const res = await supertest(app)
+      .post('/api/main-stage/moderate')
+      .send({ action: 'kick', identity: 'b'.repeat(255) });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('should return 200 for kick on identity not in queue (no existence check on kick)', async () => {
+    // Documents current behavior: moderate/kick does not verify queue membership
+    const app = buildApp(ADMIN_USER);
+    const res = await supertest(app)
+      .post('/api/main-stage/moderate')
+      .send({ action: 'kick', identity: 'not-in-any-queue' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
   });
 });
