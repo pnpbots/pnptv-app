@@ -365,13 +365,16 @@ function registerPrimeChannelMirrorHandler(bot) {
           '⚠️ No se encontró tu cuenta PNPtv. Usa /start para registrarte.').catch(() => {});
       }
 
-      // Verify 2257
-      const verified = await is2257Verified(user.id);
-      if (!verified) {
-        await redis.del(`channel_bridge:pending:${fromTelegramId}`).catch(() => {});
-        return ctx.telegram.sendMessage(fromTelegramId,
-          '⚠️ Debes completar la verificación de identidad (2257) antes de activar el puente.\n\nhttps://pnptv.app/settings/identity'
-        ).catch(() => {});
+      // Verify 2257 (admins/superadmins bypass)
+      const isAdminUser = user.role === 'admin' || user.role === 'superadmin';
+      if (!isAdminUser) {
+        const verified = await is2257Verified(user.id);
+        if (!verified) {
+          await redis.del(`channel_bridge:pending:${fromTelegramId}`).catch(() => {});
+          return ctx.telegram.sendMessage(fromTelegramId,
+            '⚠️ Debes completar la verificación de identidad (2257) antes de activar el puente. Contacta a un administrador de PNPtv.'
+          ).catch(() => {});
+        }
       }
 
       // Verify they own the pending channel
@@ -438,11 +441,14 @@ function registerPrimeChannelMirrorHandler(bot) {
         return ctx.reply('Primero conéctate a PNPtv en https://pnptv.app').catch(() => {});
       }
 
-      const verified = await is2257Verified(user.id);
-      if (!verified) {
-        return ctx.reply(
-          '⚠️ Para activar el puente de Telegram, primero completa la verificación de identidad (2257) en PNPtv.\n\nhttps://pnptv.app/settings/identity'
-        ).catch(() => {});
+      const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+      if (!isAdmin) {
+        const verified = await is2257Verified(user.id);
+        if (!verified) {
+          return ctx.reply(
+            '⚠️ Para activar el puente de Telegram, primero completa la verificación de identidad (2257).\n\nContacta a un administrador de PNPtv para que apruebe tu verificación.'
+          ).catch(() => {});
+        }
       }
 
       const { rows: channels } = await query(
@@ -495,10 +501,11 @@ function registerPrimeChannelMirrorHandler(bot) {
       await ctx.editMessageText(
         `📡 *Vincular "${rows[0].name}"*\n\n` +
         `Sigue estos pasos:\n\n` +
-        `1️⃣ Abre tu canal en Telegram\n` +
+        `1️⃣ Abre tu canal de Telegram\n` +
         `2️⃣ Ve a *Gestionar canal › Administradores › Agregar admin*\n` +
         `3️⃣ Busca @${botUsername} y agrégalo como administrador\n\n` +
-        `El bot confirmará automáticamente en cuanto sea agregado.\n` +
+        `⚠️ *Si el bot ya es admin del canal:* quítalo primero y luego agrégalo de nuevo para que el bot detecte la vinculación.\n\n` +
+        `El bot confirmará automáticamente cuando sea agregado.\n` +
         `_(Esta ventana expira en 15 minutos)_`,
         { parse_mode: 'Markdown' }
       ).catch(() => {});

@@ -689,7 +689,7 @@ const createChannel = async (req, res) => {
       }
       if (tgId) {
         const dupCheck = await query(
-          `SELECT id FROM creator_channels WHERE telegram_channel_id = $1 AND is_active = true`,
+          `SELECT id FROM creator_channels WHERE telegram_channel_id = $1`,
           [tgId]
         );
         if (dupCheck.rows.length) {
@@ -815,7 +815,7 @@ const updateChannel = async (req, res) => {
           return res.status(400).json({ error: 'Invalid Telegram channel ID. Use numeric ID (e.g. -1001234567890) or @username.' });
         }
         const dupCheck = await query(
-          `SELECT id FROM creator_channels WHERE telegram_channel_id = $1 AND is_active = true AND id != $2`,
+          `SELECT id FROM creator_channels WHERE telegram_channel_id = $1 AND id != $2`,
           [tgId, channelId]
         );
         if (dupCheck.rows.length) {

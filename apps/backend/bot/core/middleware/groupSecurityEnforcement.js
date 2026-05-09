@@ -65,7 +65,7 @@ function registerGroupSecurityHandlers(bot) {
 
       logger.info('Bot status changed in chat', { chatId: chatIdStr, chatTitle, chatType, newStatus });
 
-      if (['member', 'administrator'].includes(newStatus) && chatType !== 'private') {
+      if (['member', 'administrator'].includes(newStatus) && chatType !== 'private' && chatType !== 'channel') {
         // Don't send /link instructions in the main community group — it's already
         // set up and we don't want to encourage command usage there.
         const mainGroupId = process.env.GROUP_ID;
