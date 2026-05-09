@@ -1106,6 +1106,30 @@
         var rawReturn = params.get('returnTo');
         var returnTo  = rawReturn && rawReturn.startsWith('/') ? rawReturn : null;
 
+        // ── Telegram redirect-mode handler ────────────────────────────────────────
+        // When the Telegram popup is blocked, the widget falls back to redirect mode
+        // and appends auth fields as query params (?id=...&hash=...&auth_date=...).
+        // We detect this on page load and immediately call onTelegramAuth.
+        (function() {
+            var tgId   = params.get('id');
+            var tgHash = params.get('hash');
+            var tgDate = params.get('auth_date');
+            if (!tgId || !tgHash || !tgDate) return;
+            // Strip the Telegram auth params from the URL bar
+            var clean = new URLSearchParams();
+            if (returnTo) clean.set('returnTo', returnTo);
+            var cleanUrl = window.location.pathname + (clean.toString() ? '?' + clean.toString() : '');
+            window.history.replaceState({}, '', cleanUrl);
+            // Rebuild the user object Telegram would normally pass to onTelegramAuth
+            var user = { id: Number(tgId), hash: tgHash, auth_date: Number(tgDate) };
+            ['first_name','last_name','username','photo_url'].forEach(function(k) {
+                var v = params.get(k);
+                if (v) user[k] = v;
+            });
+            // onTelegramAuth is defined below — defer so the DOM is ready
+            setTimeout(function() { window.onTelegramAuth(user); }, 0);
+        })();
+
         // ── OIDC / PNPtv ID ───────────────────────────────────────────────────────
         function handleOidcLogin(event) {
             if (event) event.preventDefault();
@@ -1186,6 +1210,7 @@
             script.setAttribute('data-size', 'large');
             script.setAttribute('data-radius', '12');
             script.setAttribute('data-onauth', 'onTelegramAuth(user)');
+            script.setAttribute('data-auth-url', '/login' + (returnTo ? '?returnTo=' + encodeURIComponent(returnTo) : ''));
             script.setAttribute('data-request-access', 'write');
             container.appendChild(script);
         })();

@@ -208,6 +208,7 @@ function TelegramLoginWidget({ onAuth, onLoadError }: TelegramWidgetProps) {
     script.setAttribute("data-size", "large");
     script.setAttribute("data-radius", "12");
     script.setAttribute("data-onauth", "onTelegramAuth(user)");
+    script.setAttribute("data-auth-url", window.location.pathname + window.location.search);
     script.setAttribute("data-request-access", "write");
 
     const LOAD_TIMEOUT_MS = 8000;
@@ -636,6 +637,51 @@ export function LoginPage() {
       setReturnTo(safe);
       rememberReturnTo(safe);
     }
+
+  }, []);
+
+  // Handle Telegram widget redirect mode (popup blocked on mobile/some browsers).
+  // Telegram delivers auth data either as:
+  //   - query params: ?id=...&first_name=...&hash=...  (most common in redirect mode)
+  //   - hash fragment: #tgAuthResult=BASE64           (some Telegram versions)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("id");
+    const hash = params.get("hash");
+    const auth_date = params.get("auth_date");
+
+    if (id && hash && auth_date) {
+      // Query-param redirect mode — strip auth params from URL then submit
+      const userData: TelegramWidgetUser = {
+        id: Number(id),
+        hash,
+        auth_date: Number(auth_date),
+        first_name: params.get("first_name") ?? "",
+        last_name: params.get("last_name") ?? undefined,
+        username: params.get("username") ?? undefined,
+        photo_url: params.get("photo_url") ?? undefined,
+      };
+      const clean = new URLSearchParams(window.location.search);
+      ["id","hash","auth_date","first_name","last_name","username","photo_url"].forEach(k => clean.delete(k));
+      const qs = clean.toString();
+      window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
+      handleWidgetAuth(userData);
+      return;
+    }
+
+    // Hash fragment mode: #tgAuthResult=BASE64
+    const fragment = window.location.hash;
+    if (fragment.startsWith("#tgAuthResult=")) {
+      try {
+        const decoded = JSON.parse(atob(fragment.slice("#tgAuthResult=".length))) as TelegramWidgetUser;
+        if (decoded?.id && decoded?.hash) {
+          window.history.replaceState(null, "", window.location.pathname + window.location.search);
+          handleWidgetAuth(decoded);
+        }
+      } catch { /* malformed — ignore */ }
+    }
+  // handleWidgetAuth is stable after mount; run once.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const methodLabel = (method: string | null): string | null => {
