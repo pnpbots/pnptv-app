@@ -10,9 +10,11 @@
 const logger            = require('../../../utils/logger');
 const { asyncHandler }  = require('../middleware/errorHandler');
 const { getPool }       = require('../../../config/postgres');
+const { getRedis }      = require('../../../config/redis');
 const mainStageService  = require('../../../services/mainStageService');
 const livekitService    = require('../../../services/livekitService');
 const mainStageConsentService = require('../../../services/mainStageConsentService');
+const EntitlementAccessService = require('../../../services/entitlementAccessService');
 const { RoomServiceClient } = require('livekit-server-sdk');
 
 // ── Media source allowlist / SSRF guard ───────────────────────────────────────
@@ -183,12 +185,67 @@ const token = asyncHandler(async (req, res) => {
   }
 
   const displayName = userRow.first_name || userRow.username || `user_${userId}`;
-  const role = isAdminRole(userRow.role) ? 'admin' : 'member';
+  const adminUser = isAdminRole(userRow.role);
+  const role = adminUser ? 'admin' : 'member';
+
+  // Kicked-set check — admins bypass
+  if (!adminUser) {
+    try {
+      const redis = getRedis();
+      const isKicked = await redis.get(`mainstage:kicked:${String(userId)}`);
+      if (isKicked) {
+        return res.status(403).json({
+          success: false,
+          error: 'You have been removed from Main Stage.',
+          code: 'MAIN_STAGE_KICKED',
+        });
+      }
+    } catch (redisErr) {
+      logger.error('[MainStage] token: Redis unavailable (kicked-set check)', { error: redisErr.message });
+      return res.status(503).json({
+        success: false,
+        error: 'Service temporarily unavailable.',
+        code: 'SESSION_BACKEND_UNAVAILABLE',
+      });
+    }
+  }
+
+  // Entitlement gate — Main Stage requires pnp-member (admins bypass)
+  if (!adminUser) {
+    try {
+      const hasAccess = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
+      if (!hasAccess) {
+        return res.status(403).json({
+          success: false,
+          error: 'Main Stage requires an active membership.',
+          code: 'MEMBERSHIP_REQUIRED',
+        });
+      }
+    } catch (entErr) {
+      logger.error('[MainStage] token: entitlement check failed', { error: entErr.message });
+      return res.status(503).json({
+        success: false,
+        error: 'Service temporarily unavailable.',
+        code: 'SESSION_BACKEND_UNAVAILABLE',
+      });
+    }
+  }
 
   // Main Stage is a publish-first room: every authenticated entrant is added
   // to the stage rotation/visibility queue. Admins can still enter when the
   // queue is at cap so they can moderate a full room.
-  const addResult = await mainStageService.addCammer(String(userId));
+  let addResult;
+  try {
+    addResult = await mainStageService.addCammer(String(userId));
+  } catch (addErr) {
+    logger.error('[MainStage] token: addCammer failed', { error: addErr.message });
+    return res.status(503).json({
+      success: false,
+      error: 'Service temporarily unavailable.',
+      code: 'SESSION_BACKEND_UNAVAILABLE',
+    });
+  }
+
   if (addResult === 'full' && role !== 'admin') {
     return res.status(429).json({
       success: false,
@@ -207,7 +264,7 @@ const token = asyncHandler(async (req, res) => {
     {
       canPublishVideo: true,
       canPublishAudio: isModerator,
-      ttlSeconds: 6 * 3600,
+      ttlSeconds: isModerator ? 6 * 3600 : 30 * 60,
     }
   );
 

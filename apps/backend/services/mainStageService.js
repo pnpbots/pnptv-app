@@ -31,6 +31,26 @@ const MAX_CAMMERS          = 12;
 const VALID_MODES          = new Set(['spotlight', 'cinema', 'equal', 'theater', 'karaoke']);
 const VALID_MEDIA_KINDS    = new Set(['video', 'music', 'off']);
 
+// mainstage:media is stored as a Redis Hash (HSET/HGETALL) so individual fields
+// can be updated atomically without a read-modify-write race. String fields are
+// stored as their JSON-stringified form so booleans, nulls, and numbers round-trip
+// correctly when read back via HGETALL (which returns everything as strings).
+const MEDIA_KEY            = 'mainstage:media';
+const MODE_KEY             = 'mainstage:mode';
+
+// Default media state — merged with whatever is stored in the Hash.
+const MEDIA_DEFAULTS = {
+  kind:        'off',
+  src:         null,
+  title:       null,
+  playing:     false,
+  volume:      70,
+  startedAt:   null,
+  playbackRate: 1.25,
+  adminLocked: false,
+  modeLocked:  false,
+};
+
 // Directus endpoints for background Prime Video auto-rotation
 const DIRECTUS_INTERNAL_URL = (process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055').replace(/\/$/, '');
 const DIRECTUS_PUBLIC_URL   = (process.env.DIRECTUS_PUBLIC_URL   || 'https://cms.pnptv.app').replace(/\/$/, '');
