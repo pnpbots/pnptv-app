@@ -64,7 +64,7 @@ async function downloadMedia(ctx, mediaInfo, userId, ts) {
 
 async function getUserByTelegramId(telegramId) {
   const { rows } = await query(
-    'SELECT id, role FROM users WHERE telegram_id = $1 LIMIT 1',
+    'SELECT id, role FROM users WHERE telegram = $1 LIMIT 1',
     [String(telegramId)]
   );
   return rows[0] || null;
@@ -72,7 +72,7 @@ async function getUserByTelegramId(telegramId) {
 
 async function is2257Verified(userId) {
   const { rows } = await query(
-    `SELECT 1 FROM creator_2257_records WHERE creator_id = $1 AND status = 'verified' LIMIT 1`,
+    `SELECT 1 FROM creator_2257_records WHERE user_id = $1 AND verification_status = 'approved' LIMIT 1`,
     [userId]
   );
   return rows.length > 0;
