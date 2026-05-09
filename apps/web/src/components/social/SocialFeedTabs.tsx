@@ -195,10 +195,8 @@ export default function SocialFeedTabs({
   }, []);
 
   const handleDelete = useCallback(async (postId: number) => {
-    try {
-      await deleteSocialPost(postId);
-      setPosts((prev) => prev.filter((p) => p.id !== postId));
-    } catch { /* silent */ }
+    await deleteSocialPost(postId);
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
   }, []);
 
   const handleWofToggle = useCallback((postId: number, nowWof: boolean) => {

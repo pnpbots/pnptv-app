@@ -3,6 +3,7 @@ const { query, getClient } = require('../../../config/postgres');
 const { cache } = require('../../../config/redis');
 const AdminDashboardService = require('../../../services/adminDashboardService');
 const SocialPostService = require('../../../services/socialPostService');
+const { archivePromotedSourceForSocialPost } = require('../utils/promotedPostDeletion');
 
 // Escape LIKE/ILIKE metacharacters so user input cannot widen search patterns
 const escapeLike = (str) => str.replace(/[%_\\]/g, '\\$&');
@@ -542,6 +543,7 @@ const deletePost = async (req, res) => {
 
   try {
     const { id: postId } = req.params;
+    await archivePromotedSourceForSocialPost(postId);
     const deleted = await SocialPostService.deletePost(postId, null, true);
 
     if (!deleted) return res.status(404).json({ error: 'Post not found' });
@@ -550,7 +552,7 @@ const deletePost = async (req, res) => {
     return res.json({ success: true, message: 'Post deleted' });
   } catch (error) {
     logger.error('Error deleting post:', error);
-    return res.status(500).json({ error: error.message });
+    return res.status(error.statusCode || 500).json({ error: error.message });
   }
 };
 

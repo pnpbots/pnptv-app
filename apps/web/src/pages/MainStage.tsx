@@ -248,6 +248,7 @@ export default function MainStage() {
     state:       hookedState,
     isAdmin,
     role:        hookedRole,
+    livekitUrl,
     loading:     hookedLoading,
     error:       hookedError,
     leave,
@@ -269,6 +270,7 @@ export default function MainStage() {
 
   const [adminOpen, setAdminOpen] = useState(false);
   const [connState, setConnState] = useState<ConnectionState>(ConnectionState.Connecting);
+  const [hasEverConnected, setHasEverConnected] = useState(false);
   const [cammerInfos, setCammerInfos] = useState<CammerInfo[]>([]);
   const [camError, setCamError] = useState<string | null>(null);
   const [joining, setJoining] = useState(!isGuestMode);
@@ -278,7 +280,7 @@ export default function MainStage() {
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [acceptPrivacy, setAcceptPrivacy] = useState(false);
   const [confirmAge, setConfirmAge] = useState(false);
-  const isParticipant = isGuestMode || role === "participant" || role === "admin";
+  const isParticipant = isGuestMode || role === "member" || role === "admin";
   // Clear stale camera-permission banners whenever the user leaves the room.
   useEffect(() => {
     if (!isParticipant) setCamError(null);
@@ -311,16 +313,46 @@ export default function MainStage() {
       return;
     }
     let cancelled = false;
-    setJoining(true);
-    join()
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setJoining(false);
-      });
+    const attemptJoin = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        setJoining(false);
+        return;
+      }
+      setJoining(true);
+      join()
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setJoining(false);
+        });
+    };
+
+    attemptJoin();
+
+    const onVisibilityChange = () => {
+      if (cancelled) return;
+      if (document.visibilityState !== "visible") return;
+      attemptJoin();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [isGuestMode, join, joinCheck?.canJoin]);
+
+  useEffect(() => {
+    if (connState === ConnectionState.Connected) {
+      setHasEverConnected(true);
+    }
+  }, [connState]);
+
+  useEffect(() => {
+    if (!isParticipant) {
+      setHasEverConnected(false);
+      setConnState(ConnectionState.Connecting);
+    }
+  }, [isParticipant]);
 
   // Ref to the MainStage root container, used by FullscreenToggle so we
   // fullscreen just the stage (not the whole document, which fails on iOS).
@@ -620,7 +652,7 @@ export default function MainStage() {
   // shared mode. Everything downstream uses this.
   const mode: ModeId =
     (localViewMode ?? (state.mode as ModeId | undefined) ?? "spotlight");
-  const liveCammers = state?.counts?.cammers ?? 0;
+  const liveParticipants = state?.counts?.participants ?? state?.counts?.cammers ?? 0;
 
   // i18n mode label lookup — used in header and toolbar aria-labels.
   const modeLabels: Record<ModeId, string> = {
@@ -665,11 +697,11 @@ export default function MainStage() {
           <span>{t.live.mainStageTitle}</span>
           <span className="text-white/30 mx-0.5">·</span>
           <span className="text-white/55">{modeLabels[mode]}</span>
-          {liveCammers > 0 && (
+          {liveParticipants > 0 && (
             <>
               <span className="text-white/20 mx-0.5">·</span>
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-              <span className="tabular-nums text-white/70">{liveCammers}</span>
+              <span className="tabular-nums text-white/70">{liveParticipants}</span>
             </>
           )}
         </div>
@@ -762,23 +794,25 @@ export default function MainStage() {
             </svg>
           </button>
         )}
-        <button
-          type="button"
-          onClick={handleShuffle}
-          aria-label={t.live.mainStageAriaShuffle}
-          title={t.live.mainStageAriaShuffle}
-          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
-          style={{
-            background: "rgba(20,20,30,0.85)",
-            border: "1px solid rgba(229,255,0,0.35)",
-            backdropFilter: "blur(6px)",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
-          }}
-        >
-          <svg className="w-4 h-4 text-pnp-lemon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 4.5l3 3m0 0l-3 3m3-3H12M7.5 19.5l-3-3m0 0l3-3m-3 3H12M4.5 5.25L12 12.75M19.5 18.75L15 14.25" />
-          </svg>
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={handleShuffle}
+            aria-label={t.live.mainStageAriaShuffle}
+            title={t.live.mainStageAriaShuffle}
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+            style={{
+              background: "rgba(20,20,30,0.85)",
+              border: "1px solid rgba(229,255,0,0.35)",
+              backdropFilter: "blur(6px)",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+            }}
+          >
+            <svg className="w-4 h-4 text-pnp-lemon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 4.5l3 3m0 0l-3 3m3-3H12M7.5 19.5l-3-3m0 0l3-3m-3 3H12M4.5 5.25L12 12.75M19.5 18.75L15 14.25" />
+            </svg>
+          </button>
+        )}
         <FullscreenToggle targetRef={stageRootRef} />
         <button
           type="button"
@@ -859,66 +893,99 @@ export default function MainStage() {
         connect={false} is required to prevent LiveKitRoom from taking over
         the connection lifecycle on unmount.
       */}
-      <LiveKitRoom
-        key={isGuestMode ? "main-stage-guest" : "main-stage-prime"}
-        // Guests bypass the persistent provider — they connect a fresh Room
-        // with their short-lived guest token. Members use the provider's
-        // shared Room so the connection survives route changes.
-        {...(isGuestMode
-          ? {
-              token: guestCredsRef.current!.token,
-              serverUrl: guestCredsRef.current!.livekitUrl,
-              connect: true,
-              audio: false,
-              video: true,
-              options: {
-                adaptiveStream: true,
-                dynacast: true,
-                publishDefaults: { simulcast: true },
-              },
+      {isGuestMode ? (
+        <LiveKitRoom
+          key="main-stage-guest"
+          token={guestCredsRef.current!.token}
+          serverUrl={guestCredsRef.current!.livekitUrl}
+          connect
+          audio={false}
+          video
+          options={{
+            adaptiveStream: true,
+            dynacast: true,
+            publishDefaults: { simulcast: true },
+          }}
+          className="contents"
+          onMediaDeviceFailure={(failure) => {
+            const msg = failure?.toString() || "Camera failed";
+            if (/NotAllowed|Permission/i.test(msg)) {
+              setCamError(t.live.mainStageErrCameraPermission);
+            } else if (/NotFound|Device/i.test(msg)) {
+              setCamError(t.live.mainStageErrNoCamera);
+            } else if (/NotReadable|Overconstrained/i.test(msg)) {
+              setCamError(t.live.mainStageErrCameraInUse);
+            } else {
+              setCamError(`Camera error: ${msg}`);
             }
-          : {
-              room,
-              connect: false,
-            })}
-        className="contents"
-        onMediaDeviceFailure={(failure) => {
-          // Surface the specific reason so users know why their cam didn't
-          // turn on. Most common is NotAllowedError (permission denied)
-          // or NotFoundError (no camera attached).
-          const msg = failure?.toString() || "Camera failed";
-          if (/NotAllowed|Permission/i.test(msg)) {
-            setCamError(t.live.mainStageErrCameraPermission);
-          } else if (/NotFound|Device/i.test(msg)) {
-            setCamError(t.live.mainStageErrNoCamera);
-          } else if (/NotReadable|Overconstrained/i.test(msg)) {
-            setCamError(t.live.mainStageErrCameraInUse);
-          } else {
-            setCamError(`Camera error: ${msg}`);
-          }
-        }}
-      >
-        <ForceCamMicEnforcer active={isGuestMode} />
-        <MainStageInner
-          mode={mode as ModeId}
-          spotlightCammer={state?.spotlight?.cammer}
-          spotlightNextAt={state?.spotlight?.nextAt}
-          mediaKind={state?.media?.kind || "off"}
-          mediaSrc={state?.media?.src}
-          mediaPlaying={state?.media?.playing ?? true}
-          mediaVolume={state?.media?.volume ?? 70}
-          isParticipant={isParticipant}
-          isAdmin={isAdmin}
-          onSpotlightPick={(identity) => admin.setSpotlight(identity)}
-          onConnectionStateChange={setConnState}
-          onCammersChange={handleCammersChange}
-          onLeave={handleLeave}
-          spotlight={state?.spotlight}
-          showTips={!adminOpen}
-        />
-      </LiveKitRoom>
+          }}
+        >
+          <ForceCamMicEnforcer active />
+          <MainStageInner
+            mode={mode as ModeId}
+            spotlightCammer={state?.spotlight?.cammer}
+            spotlightNextAt={state?.spotlight?.nextAt}
+            mediaKind={state?.media?.kind || "off"}
+            mediaSrc={state?.media?.src}
+            mediaPlaying={state?.media?.playing ?? true}
+            mediaVolume={state?.media?.volume ?? 70}
+            isParticipant={isParticipant}
+            isAdmin={isAdmin}
+            onSpotlightPick={(identity) => admin.setSpotlight(identity)}
+            onConnectionStateChange={setConnState}
+            onCammersChange={handleCammersChange}
+            onLeave={handleLeave}
+            spotlight={state?.spotlight}
+            showTips={!adminOpen}
+          />
+        </LiveKitRoom>
+      ) : (
+        <LiveKitRoom
+          key="main-stage-prime"
+          room={room}
+          connect={false}
+          serverUrl={livekitUrl}
+          token=""
+          className="contents"
+          onMediaDeviceFailure={(failure) => {
+            const msg = failure?.toString() || "Camera failed";
+            if (/NotAllowed|Permission/i.test(msg)) {
+              setCamError(t.live.mainStageErrCameraPermission);
+            } else if (/NotFound|Device/i.test(msg)) {
+              setCamError(t.live.mainStageErrNoCamera);
+            } else if (/NotReadable|Overconstrained/i.test(msg)) {
+              setCamError(t.live.mainStageErrCameraInUse);
+            } else {
+              setCamError(`Camera error: ${msg}`);
+            }
+          }}
+        >
+          <ForceCamMicEnforcer active={false} />
+          <MainStageInner
+            mode={mode as ModeId}
+            spotlightCammer={state?.spotlight?.cammer}
+            spotlightNextAt={state?.spotlight?.nextAt}
+            mediaKind={state?.media?.kind || "off"}
+            mediaSrc={state?.media?.src}
+            mediaPlaying={state?.media?.playing ?? true}
+            mediaVolume={state?.media?.volume ?? 70}
+            isParticipant={isParticipant}
+            isAdmin={isAdmin}
+            onSpotlightPick={(identity) => admin.setSpotlight(identity)}
+            onConnectionStateChange={setConnState}
+            onCammersChange={handleCammersChange}
+            onLeave={handleLeave}
+            spotlight={state?.spotlight}
+            showTips={!adminOpen}
+          />
+        </LiveKitRoom>
+      )}
 
-      <ConnectionOverlay connState={connState} errorMessage={camError || error} />
+      <ConnectionOverlay
+        connState={connState}
+        errorMessage={camError || error}
+        hasEverConnected={hasEverConnected}
+      />
 
       {state?.media?.kind === "video" && state.media.title && !adminOpen && (
         <NowPlayingChip title={state.media.title} />

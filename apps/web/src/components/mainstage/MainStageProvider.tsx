@@ -32,7 +32,6 @@ import {
   RoomEvent,
   Track,
   type LocalParticipant,
-  type LocalTrackPublication,
 } from "livekit-client";
 import {
   getMainStageState,
@@ -122,9 +121,10 @@ const DEFAULT_LIVEKIT_URL =
   (typeof import.meta !== "undefined" &&
     (import.meta as { env?: Record<string, string> }).env?.VITE_LIVEKIT_URL) ||
   "wss://livekit.pnptv.app";
+const REALTIME_SESSION_KEY = "pnptv:active-realtime-session";
 
 export function MainStageProvider({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   const [role, setRole] = useState<MainStageRole>(null);
   const [state, setState] = useState<MainStageState | null>(null);
@@ -134,6 +134,15 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [isJoined, setIsJoined] = useState(false);
   const [isCammerActive, setIsCammerActive] = useState(false);
+  const roleRef = useRef<MainStageRole>(null);
+  const roomNameRef = useRef("main-stage-prime");
+  const userIdRef = useRef<string | null>(null);
+  const joinInFlightRef = useRef<Promise<void> | null>(null);
+  const diagnosticSessionIdRef = useRef(
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `ms-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  );
 
   // The current live LiveKit token — needed to reconnect after a role change.
   const tokenRef = useRef<string | null>(null);
@@ -147,6 +156,18 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    roleRef.current = role;
+  }, [role]);
+
+  useEffect(() => {
+    roomNameRef.current = roomName;
+  }, [roomName]);
+
+  useEffect(() => {
+    userIdRef.current = user?.id ?? null;
+  }, [user?.id]);
 
   // ── Token refresh timer ──────────────────────────────────────────────────
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -197,6 +218,26 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const emitDiagnostic = useCallback((event: string, extra: Record<string, unknown> = {}) => {
+    try {
+      const socket = getSocket();
+      if (!socket.connected) return;
+      socket.emit("mainstage:client-lifecycle", {
+        event,
+        role: roleRef.current,
+        roomName: roomNameRef.current,
+        livekitState: sharedRoom.state,
+        sessionId: diagnosticSessionIdRef.current,
+        pathname: typeof window !== "undefined" ? window.location.pathname : null,
+        visibilityState: typeof document !== "undefined" ? document.visibilityState : null,
+        userId: userIdRef.current,
+        ...extra,
+      });
+    } catch {
+      // Diagnostics must never affect the room lifecycle.
+    }
+  }, []);
+
   // ── Force cam-on / mic-muted enforcement (non-admin only) ───────────────
   // Stage rules: every non-admin participant must have camera ON and
   // microphone MUTED at all times. join() already sets the initial state;
@@ -206,7 +247,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   // race the connect/publish pipeline.
   useEffect(() => {
     if (!isJoined) return;
-    if (role !== "participant") return; // admins keep manual control
+    if (!role || role === "admin") return;
 
     let cancelled = false;
     let enforcing = false;
@@ -234,8 +275,8 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    const onMuted = (_pub: LocalTrackPublication) => { void enforce(); };
-    const onUnmuted = (_pub: LocalTrackPublication) => { void enforce(); };
+    const onMuted = () => { void enforce(); };
+    const onUnmuted = () => { void enforce(); };
     const onUnpublished = () => { void enforce(); };
 
     sharedRoom.on(RoomEvent.LocalTrackUnpublished, onUnpublished);
@@ -249,6 +290,17 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       sharedRoom.off(RoomEvent.TrackUnmuted, onUnmuted);
     };
   }, [isJoined, role]);
+
+  useEffect(() => {
+    const onConnectionStateChanged = (nextState: string) => {
+      emitDiagnostic("livekit-connection-state", { nextState });
+    };
+
+    sharedRoom.on(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
+    return () => {
+      sharedRoom.off(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
+    };
+  }, [emitDiagnostic]);
 
   // ── Logout cleanup ──────────────────────────────────────────────────────
 
@@ -264,6 +316,103 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       sharedRoom.disconnect();
     }
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    const notifyRealtimeSessionChange = () => {
+      window.dispatchEvent(new Event("pnptv:realtime-session-change"));
+    };
+
+    try {
+      if (isJoined) {
+        sessionStorage.setItem(REALTIME_SESSION_KEY, "main-stage");
+      } else if (sessionStorage.getItem(REALTIME_SESSION_KEY) === "main-stage") {
+        sessionStorage.removeItem(REALTIME_SESSION_KEY);
+      }
+    } catch {
+      // Storage failures should not affect room connectivity.
+    }
+
+    notifyRealtimeSessionChange();
+
+    return () => {
+      try {
+        if (sessionStorage.getItem(REALTIME_SESSION_KEY) === "main-stage") {
+          sessionStorage.removeItem(REALTIME_SESSION_KEY);
+        }
+      } catch {
+        // ignore cleanup failures
+      }
+      notifyRealtimeSessionChange();
+    };
+  }, [isJoined]);
+
+  useEffect(() => {
+    if (!isJoined) return;
+
+    const onVisibilityChange = () => {
+      emitDiagnostic("page-visibility", { reason: document.visibilityState });
+    };
+    const onPageHide = () => {
+      emitDiagnostic("pagehide");
+    };
+    const onBeforeUnload = () => {
+      emitDiagnostic("beforeunload");
+    };
+    const onPageShow = (evt: PageTransitionEvent) => {
+      emitDiagnostic("pageshow", { persisted: evt.persisted === true });
+    };
+    const onFreeze = () => {
+      emitDiagnostic("freeze");
+    };
+    const onResume = () => {
+      emitDiagnostic("resume");
+    };
+    const onOnline = () => {
+      emitDiagnostic("network-online");
+    };
+    const onOffline = () => {
+      emitDiagnostic("network-offline");
+    };
+    const onNavigation = (evt: Event) => {
+      const detail = evt instanceof CustomEvent ? evt.detail : undefined;
+      emitDiagnostic("navigation", {
+        reason: typeof detail?.kind === "string" ? detail.kind : "unknown",
+        href: typeof detail?.href === "string" ? detail.href : null,
+        prevPath: typeof detail?.prevPath === "string" ? detail.prevPath : null,
+        nextPath: typeof detail?.nextPath === "string" ? detail.nextPath : null,
+      });
+    };
+    const onSwUpdateStatus = (evt: Event) => {
+      const detail = evt instanceof CustomEvent ? evt.detail : undefined;
+      emitDiagnostic("sw-update-status", {
+        reason: typeof detail?.status === "string" ? detail.status : "unknown",
+      });
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("freeze", onFreeze as EventListener);
+    document.addEventListener("resume", onResume as EventListener);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("pnptv:navigation", onNavigation as EventListener);
+    window.addEventListener("pnptv:sw-update-status", onSwUpdateStatus as EventListener);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("freeze", onFreeze as EventListener);
+      document.removeEventListener("resume", onResume as EventListener);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("pnptv:navigation", onNavigation as EventListener);
+      window.removeEventListener("pnptv:sw-update-status", onSwUpdateStatus as EventListener);
+    };
+  }, [emitDiagnostic, isJoined]);
 
   // ── Socket state subscription ────────────────────────────────────────────
 
@@ -282,73 +431,111 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       const msg =
         payload?.message ||
         (payload?.code === "CAMMER_CAP_REACHED"
-          ? "Cammer slots are full right now. Try again in a moment."
+          ? "Main Stage is full right now. Try again in a moment."
           : "Main Stage error");
       setError(msg);
     };
 
     const onConnect = () => {
+      emitDiagnostic("socket-connect");
       getMainStageState()
         .then((s) => {
           if (mountedRef.current) setState(s);
         })
         .catch(() => {});
     };
+    const onDisconnect = (reason: string) => {
+      emitDiagnostic("socket-disconnect", { reason });
+    };
 
     socket.on("mainstage:state", onState);
     socket.on("mainstage:error", onError);
     socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
 
     return () => {
       socket.off("mainstage:state", onState);
       socket.off("mainstage:error", onError);
       socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
     };
-  }, [isAuthenticated]);
+  }, [emitDiagnostic, isAuthenticated]);
 
   // ── Public API ───────────────────────────────────────────────────────────
 
   const join = useCallback(async () => {
-    if (!isAuthenticated) {
-      if (mountedRef.current) setError("You must be logged in to join Main Stage");
-      return;
-    }
-    try {
-      setLoading(true);
-      setError(null);
-      if (intentConnectedRef.current && sharedRoom.state !== "disconnected") {
-        const stateRes = await getMainStageState();
-        if (mountedRef.current) setState(stateRes);
-        setIsJoined(true);
+    if (joinInFlightRef.current) return joinInFlightRef.current;
+
+    const joinPromise = (async () => {
+      if (!isAuthenticated) {
+        if (mountedRef.current) setError("You must be logged in to join Main Stage");
         return;
       }
-      const [stateRes, res] = await Promise.all([getMainStageState(), getMainStageToken()]);
-      if (!mountedRef.current) return;
+      try {
+        const visibility = typeof document !== "undefined" ? document.visibilityState : "visible";
+        if (visibility !== "visible") {
+          emitDiagnostic("join-deferred-hidden", { reason: visibility });
+          return;
+        }
 
-      tokenRef.current = res.token;
-      setLivekitUrl(res.livekitUrl);
-      setRoomName(res.roomName);
-      setRole(res.role);
-      setState(stateRes);
+        emitDiagnostic("join-start");
+        setLoading(true);
+        setError(null);
+        if (intentConnectedRef.current && sharedRoom.state !== "disconnected") {
+          const stateRes = await getMainStageState();
+          if (mountedRef.current) setState(stateRes);
+          setIsJoined(true);
+          emitDiagnostic("join-short-circuit", { reason: "already-connected" });
+          return;
+        }
+        const [stateRes, res] = await Promise.all([getMainStageState(), getMainStageToken()]);
+        if (!mountedRef.current) return;
 
-      // Join the room, then force camera on and mic muted for entry.
-      await connectRoom(res.livekitUrl, res.token);
-      await sharedRoom.localParticipant.setCameraEnabled(true);
-      await sharedRoom.localParticipant.setMicrophoneEnabled(false);
-      if (mountedRef.current) setIsCammerActive(true);
+        tokenRef.current = res.token;
+        setLivekitUrl(res.livekitUrl);
+        setRoomName(res.roomName);
+        setRole(res.role);
+        setState(stateRes);
+        emitDiagnostic("token-minted", { tokenRole: res.role });
 
-      scheduleTokenRefresh();
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err.message : "Failed to join Main Stage");
+        // Join the room, then force camera on and mic muted for entry.
+        await connectRoom(res.livekitUrl, res.token);
+        await sharedRoom.localParticipant.setCameraEnabled(true);
+        try {
+          await sharedRoom.localParticipant.setMicrophoneEnabled(false);
+        } catch {
+          // Member/guest tokens may not have audio publish permission.
+        }
+        if (mountedRef.current) setIsCammerActive(true);
+        emitDiagnostic("join-connected");
+
+        scheduleTokenRefresh();
+      } catch (err) {
+        if (mountedRef.current) {
+          setError(err instanceof Error ? err.message : "Failed to join Main Stage");
+        }
+        emitDiagnostic("join-error", {
+          reason: err instanceof Error ? err.message : "Failed to join Main Stage",
+        });
+      } finally {
+        if (mountedRef.current) setLoading(false);
       }
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, [connectRoom, isAuthenticated, scheduleTokenRefresh]);
+    })();
 
-  const leave = useCallback(() => {
+    joinInFlightRef.current = joinPromise;
+    try {
+      await joinPromise;
+    } finally {
+      if (joinInFlightRef.current === joinPromise) {
+        joinInFlightRef.current = null;
+      }
+    }
+  }, [connectRoom, emitDiagnostic, isAuthenticated, scheduleTokenRefresh]);
+
+  const leave = useCallback((reason = "explicit-leave") => {
+    emitDiagnostic("leave", { reason });
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    joinInFlightRef.current = null;
     intentConnectedRef.current = false;
     tokenRef.current = null;
     setRole(null);
@@ -366,7 +553,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     }
 
     sharedRoom.disconnect();
-  }, []);
+  }, [emitDiagnostic]);
 
   const clearError = useCallback(() => setError(null), []);
 

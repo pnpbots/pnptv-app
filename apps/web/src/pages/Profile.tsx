@@ -420,12 +420,8 @@ export default function Profile() {
   };
 
   const handleDelete = async (postId: number) => {
-    try {
-      await deleteSocialPost(postId);
-      setPosts((prev) => prev.filter((p) => p.id !== postId));
-    } catch {
-      // Silent fail
-    }
+    await deleteSocialPost(postId);
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
   };
 
   const [followError, setFollowError] = useState<string | null>(null);
@@ -1789,7 +1785,7 @@ export default function Profile() {
                     key={post.id}
                     post={post}
                     isOwn={String(user?.id) === post.author_id}
-                    isAdmin={user?.role === "admin"}
+                    isAdmin={user?.role === "admin" || user?.role === "superadmin"}
                     isOwnProfile={isOwnProfile}
                     isSubscribed={isSubscribed}
                     creatorPriceUsd={profile.creatorPriceUsd}

@@ -17,6 +17,7 @@ const NotificationEmitter = require('../../../services/notificationEmitter');
 const mentionService = require('../../../services/mentionService');
 const { validateTierFresh } = require('../../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
+const { archivePromotedSourceForSocialPost } = require('../utils/promotedPostDeletion');
 
 async function extractVideoThumbnail(videoPath, thumbPath) {
   try {
@@ -391,12 +392,15 @@ const deletePost = async (req, res) => {
   const postId = parsePostId(req, res); if (!postId) return;
   const isAdmin = user.role === 'admin' || user.role === 'superadmin';
   try {
+    if (isAdmin) {
+      await archivePromotedSourceForSocialPost(postId);
+    }
     const deleted = await SocialPostService.deletePost(postId, user.id, isAdmin);
     if (!deleted) return res.status(404).json({ error: 'Post not found or not yours' });
     return res.json({ success: true });
   } catch (err) {
     logger.error('deletePost error', err);
-    return res.status(500).json({ error: 'Failed to delete post' });
+    return res.status(err.statusCode || 500).json({ error: err.message || 'Failed to delete post' });
   }
 };
 

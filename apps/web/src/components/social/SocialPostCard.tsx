@@ -82,7 +82,7 @@ export interface SocialPostCardProps {
   isAdmin: boolean;
   userLang: string;
   onLike: (id: number) => void;
-  onDelete: (id: number) => void;
+  onDelete: (id: number) => void | Promise<void>;
   onWofToggle?: (id: number, nowWof: boolean) => void;
   onNavigate: (path: string) => void;
   contentDisclaimerAccepted?: boolean;
@@ -124,7 +124,7 @@ export default function SocialPostCard({
   viewerCountry,
   distanceKm,
 }: SocialPostCardProps) {
-  const { feed: t } = useI18n();
+  const { feed: t, lang } = useI18n();
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
   const [disclaimerAccepting, setDisclaimerAccepting] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -147,13 +147,14 @@ export default function SocialPostCard({
   const [localContent, setLocalContent] = useState<string | null>(null);
 
   const isOwn = String(post.author_id) === currentUserId;
-  const canDelete = isOwn || isAdmin;
+  const hasRealPostId = Number.isFinite(post.id) && post.id > 0;
+  const canDelete = hasRealPostId && (isOwn || isAdmin);
   const { user } = useAuth();
   const { isPrime } = useTier();
   const channelPromoCta = resolveChannelPromoCta(
     post.metadata as Record<string, unknown> | undefined,
     !!isPrime,
-    t.lang,
+    lang,
   );
   // For own posts/replies, always use the live auth-context photo so avatar
   // updates cascade instantly without a full feed refetch.
@@ -246,12 +247,18 @@ export default function SocialPostCard({
     onLike(post.id);
   }, [post.id, onLike]);
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = useCallback(async () => {
+    if (deleting) return;
     if (!confirm("Delete this post?")) return;
     setDeleting(true);
-    onDelete(post.id);
-    setTimeout(() => setDeleting(false), 5000);
-  }, [post.id, onDelete]);
+    try {
+      await onDelete(post.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete post");
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleting, onDelete, post.id]);
 
   const handleStartEdit = useCallback(() => {
     setEditContent(localContent ?? post.content ?? "");
@@ -477,7 +484,7 @@ export default function SocialPostCard({
             )}
 
             {/* Edit (own posts only) */}
-            {isOwn && !isEditing && !post.blurred && (
+            {hasRealPostId && isOwn && !isEditing && !post.blurred && (
               <button
                 onClick={(e) => { e.stopPropagation(); handleStartEdit(); }}
                 className="ml-auto text-xs hover:text-cyan-400 transition-colors"
@@ -504,7 +511,7 @@ export default function SocialPostCard({
             {/* Delete (own posts or admin) */}
             {canDelete && (
               <button
-                onClick={(e) => { e.stopPropagation(); handleDelete(); }}
+                onClick={(e) => { e.stopPropagation(); void handleDelete(); }}
                 disabled={deleting}
                 className={`${isOwn && !isEditing && !post.blurred ? "" : "ml-auto"} text-xs hover:text-red-400 transition-colors`}
                 style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}

@@ -3454,10 +3454,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       } catch {}
                     }}
                     onDelete={async (id) => {
-                      try {
-                        await deleteSocialPost(id);
-                        setHangoutFeedPosts((prev) => prev.filter((p) => p.id !== id));
-                      } catch {}
+                      await deleteSocialPost(id);
+                      setHangoutFeedPosts((prev) => prev.filter((p) => p.id !== id));
                     }}
                     onNavigate={navigate}
                   />

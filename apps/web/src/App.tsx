@@ -142,6 +142,52 @@ function useDocumentDir() {
   }, [lang]);
 }
 
+function useNavigationDiagnostics() {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const dispatchNav = (kind: string, extra: Record<string, unknown> = {}) => {
+      window.dispatchEvent(new CustomEvent("pnptv:navigation", {
+        detail: {
+          kind,
+          href: window.location.href,
+          pathname: window.location.pathname,
+          ...extra,
+        },
+      }));
+    };
+
+    const origPushState = window.history.pushState.bind(window.history);
+    const origReplaceState = window.history.replaceState.bind(window.history);
+
+    window.history.pushState = function (...args) {
+      const prevPath = window.location.pathname;
+      const ret = origPushState(...args);
+      dispatchNav("pushState", { prevPath, nextPath: window.location.pathname });
+      return ret;
+    };
+
+    window.history.replaceState = function (...args) {
+      const prevPath = window.location.pathname;
+      const ret = origReplaceState(...args);
+      dispatchNav("replaceState", { prevPath, nextPath: window.location.pathname });
+      return ret;
+    };
+
+    const onPopState = () => {
+      dispatchNav("popstate");
+    };
+
+    window.addEventListener("popstate", onPopState);
+
+    return () => {
+      window.history.pushState = origPushState;
+      window.history.replaceState = origReplaceState;
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, []);
+}
+
 // SW updates now apply silently after a 5s grace period (see main.tsx).
 // No banner — user does not need to take any action.
 
@@ -204,6 +250,7 @@ function AppOverlays() {
 
 export default function App() {
   useScreenCaptureGuard();
+  useNavigationDiagnostics();
 
   return (
     <ErrorBoundary>
