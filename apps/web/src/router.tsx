@@ -777,7 +777,7 @@ export const router = createBrowserRouter([
     path: "/login",
     element: (
       <ModuleLoader>
-        <LoginPage />
+        <LandingPage />
       </ModuleLoader>
     ),
   },
@@ -879,11 +879,7 @@ export const router = createBrowserRouter([
   },
   {
     path: "/landing",
-    element: (
-      <ModuleLoader>
-        <LandingPage />
-      </ModuleLoader>
-    ),
+    element: <Navigate to="/login" replace />,
   },
   {
     path: "/become-a-model",
