@@ -5,8 +5,8 @@
  *
  * Covers:
  *   1. POST /api/main-stage/token — unauth returns 401
- *   2. POST /api/main-stage/token — viewer gets role=viewer, no publish grants
- *   3. POST /api/main-stage/token — cammer cap reached returns 429
+ *   2. POST /api/main-stage/token — member gets role=member, video publish only
+ *   3. POST /api/main-stage/token — participant cap reached returns 429
  *   4. POST /api/main-stage/mode — non-admin returns 403
  *   5. POST /api/main-stage/mode — invalid mode returns 400
  *   6. POST /api/main-stage/volume — volume=200 is clamped to 100 (or 400)
@@ -17,8 +17,8 @@
  *  11. GET  /api/main-stage/state — public, returns sane defaults
  *  12. POST /api/main-stage/moderate — non-admin returns 403
  *  13. POST /api/main-stage/moderate — invalid action returns 400
- *  14. POST /api/main-stage/token — asCammer:true with empty queue issues cammer role
- *  15. POST /api/main-stage/token — admin always gets admin role regardless of asCammer
+ *  14. POST /api/main-stage/token — empty queue issues member role
+ *  15. POST /api/main-stage/token — admin always gets admin role
  */
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -65,6 +65,26 @@ jest.mock('../config/postgres', () => ({
   getPool: () => ({ query: mockQuery }),
 }));
 
+jest.mock('../services/mainStageConsentService', () => ({
+  getLatestConsentForUser: jest.fn(async () => ({
+    age_confirmed: true,
+    terms_version: '2026-05-01',
+    privacy_version: '2026-05-01',
+  })),
+  recordUserConsent: jest.fn(async () => undefined),
+  buildJoinCheck: jest.fn(() => ({
+    termsVersion: '2026-05-01',
+    privacyVersion: '2026-05-01',
+    ageConfirmed: true,
+    termsAccepted: true,
+    privacyAccepted: true,
+    requiresAgeVerification: false,
+    requiresTermsAcceptance: false,
+    requiresPrivacyAcceptance: false,
+    canJoin: true,
+  })),
+}));
+
 // Logger — silent
 jest.mock('../utils/logger', () => ({
   info: jest.fn(),
@@ -107,7 +127,7 @@ jest.mock('../services/mainStageService', () => {
     spotlight: { cammer: null, nextAt: null, queue: [] },
     media: { kind: 'off', src: null, playing: false, volume: 70, startedAt: null },
     cams: { volume: 80 },
-    counts: { cammers: 0, viewers: 0 },
+    counts: { participants: 0, guests: 0, cammers: 0, viewers: 0 },
   }));
 
   return {
@@ -258,7 +278,7 @@ beforeEach(() => {
     spotlight: { cammer: null, nextAt: null, queue: [] },
     media: { kind: 'off', src: null, playing: false, volume: 70, startedAt: null },
     cams: { volume: 80 },
-    counts: { cammers: 0, viewers: 0 },
+    counts: { participants: 0, guests: 0, cammers: 0, viewers: 0 },
   });
 });
 
@@ -268,59 +288,52 @@ describe('POST /api/main-stage/token — auth guard', () => {
   it('should return 401 when no session / user is present', async () => {
     const app = buildApp(null); // no user injected
     const res = await supertest(app)
-      .post('/api/main-stage/token')
-      .send({ asCammer: false });
+      .post('/api/main-stage/token');
 
     expect(res.status).toBe(401);
     expect(res.body.success).toBe(false);
   });
 });
 
-// ── 2. Viewer token — no publish grants ───────────────────────────────────────
+// ── 2. Member token — video publish only ──────────────────────────────────────
 
-describe('POST /api/main-stage/token — viewer grants', () => {
-  it('should return role=viewer with no publish grants when asCammer is false', async () => {
+describe('POST /api/main-stage/token — member grants', () => {
+  it('should return role=member with video publish enabled and audio publish disabled', async () => {
     mockUserRow(VIEWER_USER);
 
     const app = buildApp(VIEWER_USER);
-    const res = await supertest(app)
-      .post('/api/main-stage/token')
-      .send({ asCammer: false });
+    const res = await supertest(app).post('/api/main-stage/token');
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.role).toBe('viewer');
+    expect(res.body.role).toBe('member');
 
     const decoded = decodeToken(res.body.token);
-    expect(decoded.grants.canPublishVideo).toBe(false);
+    expect(decoded.grants.canPublishVideo).toBe(true);
     expect(decoded.grants.canPublishAudio).toBe(false);
     expect(decoded.grants.canPublishData).toBe(false);
     expect(decoded.grants.roomAdmin).toBe(false);
   });
 
-  it('should not grant admin caps even if asCammer:true is sent by a viewer', async () => {
+  it('should not grant admin caps to a regular member', async () => {
     mockUserRow(VIEWER_USER);
-    // Queue has space
     mainStageService.getState.mockResolvedValueOnce({
       mode: 'equal',
       spotlight: { cammer: null, nextAt: null, queue: [] },
       media: { kind: 'off', src: null, playing: false, volume: 70, startedAt: null },
       cams: { volume: 80 },
-      counts: { cammers: 0, viewers: 0 },
+      counts: { participants: 0, guests: 0, cammers: 0, viewers: 0 },
     });
 
     const app = buildApp(VIEWER_USER);
-    const res = await supertest(app)
-      .post('/api/main-stage/token')
-      .send({ asCammer: true });
+    const res = await supertest(app).post('/api/main-stage/token');
 
     expect(res.status).toBe(200);
-    expect(res.body.role).toBe('cammer');
+    expect(res.body.role).toBe('member');
 
     const decoded = decodeToken(res.body.token);
-    // Cammer gets A/V publish but NOT data publish and NOT roomAdmin
     expect(decoded.grants.canPublishVideo).toBe(true);
-    expect(decoded.grants.canPublishAudio).toBe(true);
+    expect(decoded.grants.canPublishAudio).toBe(false);
     expect(decoded.grants.canPublishData).toBe(false);
     expect(decoded.grants.roomAdmin).toBe(false);
   });
@@ -338,13 +351,11 @@ describe('POST /api/main-stage/token — cammer cap', () => {
       spotlight: { cammer: 'cammer0', nextAt: null, queue: fullQueue },
       media: { kind: 'off', src: null, playing: false, volume: 70, startedAt: null },
       cams: { volume: 80 },
-      counts: { cammers: 12, viewers: 0 },
+      counts: { participants: 12, guests: 0, cammers: 12, viewers: 0 },
     });
 
     const app = buildApp(VIEWER_USER);
-    const res = await supertest(app)
-      .post('/api/main-stage/token')
-      .send({ asCammer: true });
+    const res = await supertest(app).post('/api/main-stage/token');
 
     expect(res.status).toBe(429);
     expect(res.body.code).toBe('CAMMER_CAP_REACHED');
@@ -359,16 +370,14 @@ describe('POST /api/main-stage/token — cammer cap', () => {
       spotlight: { cammer: String(VIEWER_USER.id), nextAt: null, queue },
       media: { kind: 'off', src: null, playing: false, volume: 70, startedAt: null },
       cams: { volume: 80 },
-      counts: { cammers: 2, viewers: 0 },
+      counts: { participants: 2, guests: 0, cammers: 2, viewers: 0 },
     });
 
     const app = buildApp(VIEWER_USER);
-    const res = await supertest(app)
-      .post('/api/main-stage/token')
-      .send({ asCammer: true });
+    const res = await supertest(app).post('/api/main-stage/token');
 
     expect(res.status).toBe(200);
-    expect(res.body.role).toBe('cammer');
+    expect(res.body.role).toBe('member');
   });
 });
 
@@ -647,26 +656,24 @@ describe('POST /api/main-stage/moderate — input validation', () => {
   });
 });
 
-// ── 14. Cammer asCammer:true with space in queue ──────────────────────────────
+// ── 14. Member join with space in queue ───────────────────────────────────────
 
-describe('POST /api/main-stage/token — asCammer:true happy path', () => {
-  it('should issue a cammer token when queue has space', async () => {
+describe('POST /api/main-stage/token — member happy path', () => {
+  it('should issue a member token when queue has space', async () => {
     mockUserRow(VIEWER_USER);
     mainStageService.getState.mockResolvedValueOnce({
       mode: 'equal',
       spotlight: { cammer: null, nextAt: null, queue: ['other1', 'other2'] },
       media: { kind: 'off', src: null, playing: false, volume: 70, startedAt: null },
       cams: { volume: 80 },
-      counts: { cammers: 2, viewers: 10 },
+      counts: { participants: 2, guests: 0, cammers: 2, viewers: 0 },
     });
 
     const app = buildApp(VIEWER_USER);
-    const res = await supertest(app)
-      .post('/api/main-stage/token')
-      .send({ asCammer: true });
+    const res = await supertest(app).post('/api/main-stage/token');
 
     expect(res.status).toBe(200);
-    expect(res.body.role).toBe('cammer');
+    expect(res.body.role).toBe('member');
     expect(mainStageService.addCammer).toHaveBeenCalledWith(String(VIEWER_USER.id));
   });
 });
@@ -674,15 +681,13 @@ describe('POST /api/main-stage/token — asCammer:true happy path', () => {
 // ── 15. Admin always gets admin role ─────────────────────────────────────────
 
 describe('POST /api/main-stage/token — admin role', () => {
-  it('should return role=admin for a user with role=admin regardless of asCammer', async () => {
+  it('should return role=admin for a user with role=admin', async () => {
     mockQuery.mockResolvedValueOnce({
       rows: [{ id: ADMIN_USER.id, first_name: 'Admin', username: 'admin', role: 'admin' }],
     });
 
     const app = buildApp(ADMIN_USER);
-    const res = await supertest(app)
-      .post('/api/main-stage/token')
-      .send({ asCammer: false });
+    const res = await supertest(app).post('/api/main-stage/token');
 
     expect(res.status).toBe(200);
     expect(res.body.role).toBe('admin');
@@ -690,21 +695,5 @@ describe('POST /api/main-stage/token — admin role', () => {
     const decoded = decodeToken(res.body.token);
     expect(decoded.grants.canPublishData).toBe(true);
     expect(decoded.grants.roomAdmin).toBe(true);
-  });
-
-  it('admin asCammer:true still yields role=admin (not cammer)', async () => {
-    mockQuery.mockResolvedValueOnce({
-      rows: [{ id: ADMIN_USER.id, first_name: 'Admin', username: 'admin', role: 'admin' }],
-    });
-
-    const app = buildApp(ADMIN_USER);
-    const res = await supertest(app)
-      .post('/api/main-stage/token')
-      .send({ asCammer: true });
-
-    expect(res.status).toBe(200);
-    expect(res.body.role).toBe('admin');
-    // Admin should NOT call addCammer
-    expect(mainStageService.addCammer).not.toHaveBeenCalled();
   });
 });

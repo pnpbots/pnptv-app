@@ -19,10 +19,9 @@ export function MainStageFAB() {
       try {
         const res = await getMainStageState();
         if (cancelled) return;
-        // Consider live if there's at least one cammer or it's in a mode that implies activity
-        const cammerCount = res.counts?.cammers || 0;
-        setIsLive(cammerCount > 0);
-        setParticipantCount(cammerCount);
+        const participantCount = res.counts?.participants ?? res.counts?.cammers ?? 0;
+        setIsLive(participantCount > 0);
+        setParticipantCount(participantCount);
       } catch {
         if (!cancelled) setIsLive(false);
       }

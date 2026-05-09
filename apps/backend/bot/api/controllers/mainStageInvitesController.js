@@ -208,7 +208,7 @@ const guestToken = asyncHandler(async (req, res) => {
     false, // not a moderator
     {
       canPublishVideo: true,
-      canPublishAudio: true,
+      canPublishAudio: false,
       ttlSeconds:      6 * 3600,
     }
   );

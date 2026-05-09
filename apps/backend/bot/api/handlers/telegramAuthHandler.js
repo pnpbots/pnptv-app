@@ -122,8 +122,8 @@ const handleTelegramAuth = async (req, res) => {
               COALESCE(onboarding_complete, false) as onboarding_complete,
               COALESCE(role, 'user') as role
        FROM users
-       WHERE telegram = $1 OR ($2 IS NOT NULL AND pnptv_id = $2)`,
-      [telegramUser.id, pnptvId]
+       WHERE telegram = $1::varchar OR ($2::varchar IS NOT NULL AND pnptv_id = $2::varchar)`,
+      [String(telegramUser.id), pnptvId]
     );
 
     if (userQuery.rows.length === 0) {
@@ -169,8 +169,8 @@ const handleTelegramAuth = async (req, res) => {
                   COALESCE(onboarding_complete, false) as onboarding_complete,
                   COALESCE(role, 'user') as role
            FROM users
-           WHERE telegram = $1 OR pnptv_id = $2`,
-          [telegramUser.id, localPnptvId]
+           WHERE telegram = $1::varchar OR pnptv_id = $2::varchar`,
+          [String(telegramUser.id), localPnptvId]
         );
       } catch (createError) {
         logger.error('Error creating user record:', createError);

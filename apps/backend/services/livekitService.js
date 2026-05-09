@@ -7,13 +7,16 @@ const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
 const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_WS_URL = process.env.LIVEKIT_WS_URL || 'wss://livekit.pnptv.app';
 
-if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
-  throw new Error('LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set in environment');
+function assertConfigured() {
+  if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
+    throw new Error('LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set in environment');
+  }
 }
 
 // Lazy-init RoomServiceClient — first call only, reused for all room ops.
 let _roomClient = null;
 function getRoomClient() {
+  assertConfigured();
   if (_roomClient) return _roomClient;
   const host = LIVEKIT_WS_URL.replace(/^wss?:\/\//, 'https://');
   _roomClient = new RoomServiceClient(host, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
@@ -27,6 +30,10 @@ function getRoomClient() {
  */
 async function listParticipants(roomName) {
   try {
+    if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
+      logger.warn('[livekit] listParticipants skipped: LiveKit credentials not configured', { roomName });
+      return [];
+    }
     const client = getRoomClient();
     return await client.listParticipants(roomName);
   } catch (err) {
@@ -56,6 +63,7 @@ async function listParticipants(roomName) {
  * @returns {Promise<string>} Signed JWT string.
  */
 async function generateToken(roomName, participantIdentity, participantName, isModerator = false, options = {}) {
+  assertConfigured();
   // Default TTL is 2h — covers most call/DM/booking scenarios. Callers with
   // legitimately longer-lived rooms (Main Stage rotation, persistent hangouts)
   // must pass options.ttlSeconds explicitly. Booking flows should pass the

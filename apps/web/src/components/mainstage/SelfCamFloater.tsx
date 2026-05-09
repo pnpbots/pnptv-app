@@ -14,7 +14,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Track } from "livekit-client";
+import { RoomEvent, Track } from "livekit-client";
 import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
 
 export function SelfCamFloater() {
@@ -26,19 +26,16 @@ export function SelfCamFloater() {
   const [hasTrack, setHasTrack] = useState(false);
 
   const isOnMainStage = location.pathname === "/main-stage";
-  const isCammer = role === "cammer" || role === "admin";
+  const isParticipant = role === "member" || role === "admin";
 
   // Attach the local camera track to the <video> element whenever it
-  // changes. We listen to the Room's track-published events so we pick
-  // up the track as soon as it's enabled (joinAsCammer sets cam enabled
-  // after the Room connects, so the track arrives shortly after role flip).
+  // changes. We listen on the shared room so the floater survives route
+  // changes without depending on deprecated participant-scoped string events.
   useEffect(() => {
-    if (!isCammer || !videoRef.current) {
+    if (!isParticipant || !videoRef.current) {
       setHasTrack(false);
       return;
     }
-
-    const el = videoRef.current;
 
     function attachTrack() {
       const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
@@ -61,23 +58,23 @@ export function SelfCamFloater() {
 
     attachTrack();
 
-    room.localParticipant.on("trackPublished", attachTrack);
-    room.localParticipant.on("trackUnpublished", attachTrack);
-    room.localParticipant.on("trackEnabled", attachTrack);
-    room.localParticipant.on("trackDisabled", attachTrack);
+    room.on(RoomEvent.LocalTrackPublished, attachTrack);
+    room.on(RoomEvent.LocalTrackUnpublished, attachTrack);
+    room.on(RoomEvent.TrackMuted, attachTrack);
+    room.on(RoomEvent.TrackUnmuted, attachTrack);
 
     return () => {
       detachAll();
-      room.localParticipant.off("trackPublished", attachTrack);
-      room.localParticipant.off("trackUnpublished", attachTrack);
-      room.localParticipant.off("trackEnabled", attachTrack);
-      room.localParticipant.off("trackDisabled", attachTrack);
+      room.off(RoomEvent.LocalTrackPublished, attachTrack);
+      room.off(RoomEvent.LocalTrackUnpublished, attachTrack);
+      room.off(RoomEvent.TrackMuted, attachTrack);
+      room.off(RoomEvent.TrackUnmuted, attachTrack);
     };
-  }, [isCammer, room]);
+  }, [isParticipant, room]);
 
   // Don't render when on the Main Stage page (full tile visible there)
-  // or when not a cammer, or when the cam track isn't live yet.
-  if (isOnMainStage || !isCammer) return null;
+  // or when not a participant, or when the cam track isn't live yet.
+  if (isOnMainStage || !isParticipant) return null;
 
   return (
     <div

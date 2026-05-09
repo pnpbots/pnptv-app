@@ -351,7 +351,14 @@ function initSocketIO(io) {
 
   io.on('connection', async (socket) => {
     const user = socket.data.user;
-    logger.info(`Socket connected: user ${user.id}`);
+    const connectedAt = Date.now();
+    logger.info('Socket connected', {
+      userId: String(user.id),
+      socketId: socket.id,
+      transport: socket.conn?.transport?.name || null,
+      userAgent: socket.handshake?.headers?.['user-agent'] || null,
+      referer: socket.handshake?.headers?.referer || null,
+    });
 
     // Activity tracking — 5-min TTL key for notification throttling
     const _activityRedis = getRedis();
@@ -467,10 +474,30 @@ function initSocketIO(io) {
       const ms2 = getMainStageService();
       if (!ms2) return;
       try {
+        logger.info('[MainStageDiag] leave-cammer requested', {
+          userId: String(user.id),
+          socketId: socket.id,
+        });
         await ms2.removeCammer(String(user.id));
       } catch (err) {
         logger.warn('mainstage:leave-cammer error', { userId: user.id, error: err.message });
       }
+    });
+
+    socket.on('mainstage:client-lifecycle', (payload = {}) => {
+      const event = payload && typeof payload.event === 'string' ? payload.event : 'unknown';
+      logger.info('[MainStageDiag] client lifecycle', {
+        userId: String(user.id),
+        socketId: socket.id,
+        event,
+        role: typeof payload.role === 'string' ? payload.role : null,
+        reason: typeof payload.reason === 'string' ? payload.reason : null,
+        livekitState: typeof payload.livekitState === 'string' ? payload.livekitState : null,
+        roomName: typeof payload.roomName === 'string' ? payload.roomName : null,
+        sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : null,
+        visibilityState: typeof payload.visibilityState === 'string' ? payload.visibilityState : null,
+        pathname: typeof payload.pathname === 'string' ? payload.pathname : null,
+      });
     });
     // ── End Main Stage socket handlers ───────────────────────────────────────
 
@@ -2572,8 +2599,13 @@ function initSocketIO(io) {
       io.to(`live:${channelRef}`).emit('live:brb', { on: !!on });
     });
 
-    socket.on('disconnect', async () => {
-      logger.info(`Socket disconnected: user ${user.id}`);
+    socket.on('disconnect', async (reason) => {
+      logger.info('Socket disconnected', {
+        userId: String(user.id),
+        socketId: socket.id,
+        reason: reason || null,
+        durationMs: Date.now() - connectedAt,
+      });
 
       // Clean up any running FFmpeg browser-stream process
       if (socket.data.ffmpegProcess) {

@@ -50,19 +50,40 @@ const mockRedis = {
     redisMem[k] = redisMem[k].filter((x) => x !== String(val));
     return before - redisMem[k].length;
   }),
+  hset: jest.fn(async (k, field, value) => {
+    if (redisMem[k] == null || typeof redisMem[k] !== 'object' || Array.isArray(redisMem[k])) {
+      redisMem[k] = {};
+    }
+    redisMem[k][String(field)] = String(value);
+    return 1;
+  }),
+  hdel: jest.fn(async (k, field) => {
+    if (!redisMem[k] || typeof redisMem[k] !== 'object' || Array.isArray(redisMem[k])) return 0;
+    const exists = Object.prototype.hasOwnProperty.call(redisMem[k], String(field));
+    if (exists) delete redisMem[k][String(field)];
+    return exists ? 1 : 0;
+  }),
+  hgetall: jest.fn(async (k) => {
+    if (!redisMem[k] || typeof redisMem[k] !== 'object' || Array.isArray(redisMem[k])) return {};
+    return { ...redisMem[k] };
+  }),
   // Minimal Lua evaluator — dispatches on numKeys to match the two scripts used
   // by mainStageService: addCammer (1 key) and advanceSpotlight (3 keys).
   eval: jest.fn(async (_script, numKeys, ...rest) => {
     const n = parseInt(numKeys, 10);
-    if (n === 1) {
-      // ADD_CAMMER_LUA: KEYS=[queueKey], ARGV=[id, cap]
-      const [queueKey, id, capStr] = rest;
+    if (n === 2) {
+      // ADD_CAMMER_LUA: KEYS=[queueKey, tsKey], ARGV=[id, cap, now]
+      const [queueKey, tsKey, id, capStr, now] = rest;
       const cap  = parseInt(capStr, 10);
       const list = Array.isArray(redisMem[queueKey]) ? redisMem[queueKey] : [];
       if (list.includes(String(id))) return 'duplicate';
       if (list.length >= cap)       return 'full';
       if (!Array.isArray(redisMem[queueKey])) redisMem[queueKey] = [];
       redisMem[queueKey].push(String(id));
+      if (redisMem[tsKey] == null || typeof redisMem[tsKey] !== 'object' || Array.isArray(redisMem[tsKey])) {
+        redisMem[tsKey] = {};
+      }
+      redisMem[tsKey][String(id)] = String(now);
       return 'added';
     }
     if (n === 3) {
@@ -418,6 +439,7 @@ describe('setMode — socket emission', () => {
     // getState will read from mocked Redis (returns defaults)
 
     await svc.setMode('spotlight');
+    await new Promise((resolve) => setTimeout(resolve, 250));
 
     expect(mockTo).toHaveBeenCalledWith('mainstage');
     expect(mockEmit).toHaveBeenCalledWith('mainstage:state', expect.objectContaining({ mode: 'spotlight' }));

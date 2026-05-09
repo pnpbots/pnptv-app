@@ -5,29 +5,32 @@ import { useI18n } from "@/lib/i18n";
 interface ConnectionOverlayProps {
   connState: ConnectionState;
   errorMessage?: string | null;
+  hasEverConnected?: boolean;
 }
 
 export function ConnectionOverlay({
   connState,
   errorMessage,
+  hasEverConnected = false,
 }: ConnectionOverlayProps) {
   const t = useI18n();
   const [dismissed, setDismissed] = useState(false);
   const [showEscape, setShowEscape] = useState(false);
 
   const isDisconnected = connState === ConnectionState.Disconnected;
+  const hasActuallyLostConnection = isDisconnected && hasEverConnected;
 
   // Reset escape hatch every time the state actually changes.
   useEffect(() => {
     setShowEscape(false);
     setDismissed(false);
     if (connState === ConnectionState.Connected) return;
-    // Disconnected: surface the retry immediately. Connecting/Reconnecting
-    // gets the usual 6s breathing room first.
-    const delay = isDisconnected ? 0 : 6000;
+    // A true post-connect disconnect should surface retry immediately.
+    // Initial connect / reconnect gets breathing room first.
+    const delay = hasActuallyLostConnection ? 0 : 6000;
     const tid = setTimeout(() => setShowEscape(true), delay);
     return () => clearTimeout(tid);
-  }, [connState, isDisconnected]);
+  }, [connState, hasActuallyLostConnection]);
 
   if (connState === ConnectionState.Connected) return null;
   if (dismissed) return null;
@@ -38,13 +41,13 @@ export function ConnectionOverlay({
       style={{ background: "rgba(10,10,15,0.92)", backdropFilter: "blur(12px)" }}
     >
       <div className="flex flex-col items-center gap-3 px-6 text-center max-w-xs">
-        {!isDisconnected && (
+        {!hasActuallyLostConnection && (
           <div
             className="w-10 h-10 rounded-full border-2 animate-spin"
             style={{ borderColor: "rgba(212,0,122,0.3)", borderTopColor: "#D4007A" }}
           />
         )}
-        {isDisconnected && (
+        {hasActuallyLostConnection && (
           <div
             className="w-12 h-12 rounded-2xl flex items-center justify-center"
             style={{ background: "rgba(255,69,58,0.12)", border: "1px solid rgba(255,69,58,0.30)" }}
@@ -55,9 +58,9 @@ export function ConnectionOverlay({
           </div>
         )}
         <p className="text-white/85 text-sm font-semibold">
-          {isDisconnected
+          {hasActuallyLostConnection
             ? "Conexión perdida / Connection lost"
-            : connState === ConnectionState.Reconnecting
+            : connState === ConnectionState.Reconnecting || isDisconnected
               ? t.live.mainStageReconnecting
               : t.live.mainStageConnecting}
         </p>
@@ -77,7 +80,7 @@ export function ConnectionOverlay({
             >
               Reintentar / Try again
             </button>
-            {!isDisconnected && (
+            {!hasActuallyLostConnection && (
               <button
                 type="button"
                 onClick={() => setDismissed(true)}

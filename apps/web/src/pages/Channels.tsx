@@ -491,7 +491,7 @@ function ChannelDetailView({
                     channelSlug={channel.slug}
                     accessType={(channel.accessType as "free" | "subscription" | "prime" | "paid") || "free"}
                     pricePerMonth={channel.priceUsd ?? null}
-                    creatorUsername={channel.creator?.username ?? null}
+                    creatorUsername={channel.creatorUsername ?? null}
                   />
                   <input
                     ref={videoInputRef}

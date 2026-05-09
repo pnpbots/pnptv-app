@@ -375,8 +375,13 @@ const telegramGenerateToken = async (req, res) => {
     // Generate UUID v4 token for Telegram login session
     const token = uuidv4();
     const redis = getRedis();
-    // Store token with expiry (default 10 minutes)
+    // Store token with expiry; bind to the issuing session to prevent cross-session polling.
+    // Force session save so the cookie is issued now — required for session ID to be stable
+    // across the /token → /check polling loop.
+    req.session.tgPending = token;
+    await new Promise((resolve, reject) => req.session.save(err => (err ? reject(err) : resolve())));
     await redis.set(`${TELEGRAM_LOGIN_PREFIX}${token}`, 'pending', 'EX', TELEGRAM_LOGIN_TTL);
+    await redis.set(`${TELEGRAM_LOGIN_PREFIX}${token}:session`, req.session.id, 'EX', TELEGRAM_LOGIN_TTL);
 
     const botUsername = process.env.BOT_USERNAME || 'PNPLatinoTV_Bot';
     // Create deep link for Telegram authentication
@@ -405,7 +410,16 @@ const telegramCheckToken = async (req, res) => {
     if (!token) return res.status(400).json({ authenticated: false, error: 'Missing token' });
 
     const redis = getRedis();
-    const data = await redis.get(`${TELEGRAM_LOGIN_PREFIX}${token}`);
+
+    // Reject if the token was issued by a different browser session (prevents cross-session token theft)
+    const boundSession = await redis.get(`${TELEGRAM_LOGIN_PREFIX}${token}:session`);
+    if (boundSession && boundSession !== req.session.id) {
+      return res.status(401).json({ authenticated: false, error: 'Unauthorized' });
+    }
+
+    // Atomically get-and-delete the token so only one poll ever consumes it
+    const luaScript = `local v = redis.call('GET', KEYS[1]); if v ~= false and v ~= 'pending' then redis.call('DEL', KEYS[1]) end; return v`;
+    const data = await redis.eval(luaScript, 1, `${TELEGRAM_LOGIN_PREFIX}${token}`);
 
     if (!data || data === 'pending') {
       return res.json({ authenticated: false });
@@ -413,7 +427,6 @@ const telegramCheckToken = async (req, res) => {
 
     // data contains the user JSON set by the bot handler
     const telegramUser = JSON.parse(data);
-    await redis.del(`${TELEGRAM_LOGIN_PREFIX}${token}`);
 
     const telegramId = String(telegramUser.id);
 
@@ -2573,6 +2586,11 @@ const telegramWidgetAuth = async (req, res) => {
       username: username || null,
       photoFileId: photo_url || null,
     });
+
+    if (user.tier === 'banned') {
+      logger.warn('[TelegramWidget] Banned user attempted login', { userId: user.id });
+      return res.status(403).json({ success: false, error: 'Account suspended' });
+    }
 
     // Persist Authentik UUID if available and not yet stored
     if (pnptvId && (!user.pnptv_id || user.pnptv_id !== pnptvId)) {

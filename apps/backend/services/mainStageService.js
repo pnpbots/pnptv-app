@@ -91,7 +91,7 @@ function notifyViewersChanged() {
  *   spotlight: { cammer: string|null, nextAt: number|null, queue: string[] },
  *   media: { kind: string, src: string|null, playing: boolean, volume: number, startedAt: number|null },
  *   cams: { volume: number },
- *   counts: { cammers: number, viewers: number }
+ *   counts: { participants: number, guests: number, cammers: number, viewers: number }
  * }>}
  */
 async function getState() {
@@ -139,27 +139,19 @@ async function getState() {
       volume: camsVolRaw !== null ? parseInt(camsVolRaw, 10) : 80,
     },
     counts: {
+      participants: queue.length,
+      guests: queue.filter((identity) => String(identity).startsWith('guest_')).length,
       cammers: queue.length,
-      viewers: countViewers(queue.length),
+      viewers: 0,
     },
   };
 }
 
 /**
- * Best-effort viewer count: every authenticated socket auto-joins the
- * 'mainstage' Socket.IO room (see socketHandlers.js). Subtract the cammer
- * queue size so cammers aren't double-counted as both performer and viewer.
- * Returns 0 if io isn't wired yet (boot ordering) or the room is empty.
+ * Legacy no-op kept for compatibility while the room model has no viewer role.
  */
 function countViewers(cammerCount) {
-  if (!_io) return 0;
-  try {
-    const room = _io.sockets?.adapter?.rooms?.get('mainstage');
-    const total = room ? room.size : 0;
-    return Math.max(0, total - (cammerCount || 0));
-  } catch {
-    return 0;
-  }
+  return 0;
 }
 
 // ── Mode ──────────────────────────────────────────────────────────────────────

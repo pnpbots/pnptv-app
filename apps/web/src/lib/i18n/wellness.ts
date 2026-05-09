@@ -90,7 +90,7 @@ const en = {
     { label: "Mood journal", body: "Quick check-ins so patterns surface." },
     { label: "Accountability buddy", body: "Pair with someone in recovery." },
     { label: "Reflection prompts", body: "Cristina-guided journaling." },
-  ] as const,
+  ],
   centerComingSoonFooter:
     "Want something specific? Tell Cristina — she logs feature requests.",
 
@@ -182,7 +182,7 @@ const es: typeof en = {
     { label: "Diario de ánimo", body: "Check-ins rápidos para que afloren patrones." },
     { label: "Compañero de rendición de cuentas", body: "Empareja con alguien en recuperación." },
     { label: "Pautas de reflexión", body: "Diario guiado por Cristina." },
-  ] as const,
+  ],
   centerComingSoonFooter:
     "¿Quieres algo específico? Cuéntaselo a Cristina — ella registra solicitudes de funciones.",
 

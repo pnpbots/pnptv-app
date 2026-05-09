@@ -1,101 +1,11 @@
-import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMainStage } from "@/hooks/useMainStage";
 import { AdminPanelContent } from "@/pages/MainStage";
-import type { MainStageState } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 interface MainStageAdminProps {
   standalone?: boolean;
-}
-
-function CammerRow({
-  identity,
-  isFocused,
-  onSpotlight,
-  onMute,
-  onKick,
-}: {
-  identity: string;
-  isFocused: boolean;
-  onSpotlight: () => void;
-  onMute: () => void;
-  onKick: () => void;
-}) {
-  const t = useI18n();
-
-  return (
-    <div
-      className="flex items-center gap-3 px-4 py-3 transition-colors border-b border-white/[0.05]"
-      style={{
-        background: isFocused ? "rgba(212,0,122,0.08)" : "transparent",
-      }}
-    >
-      {/* Avatar placeholder */}
-      <div
-        className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold"
-        style={{
-          background: isFocused
-            ? "linear-gradient(135deg,#D4007A,#7B61FF)"
-            : "rgba(255,255,255,0.08)",
-          color: isFocused ? "#fff" : "rgba(255,255,255,0.50)",
-        }}
-      >
-        {identity.slice(0, 2).toUpperCase()}
-      </div>
-
-      {/* Identity */}
-      <div className="flex-1 min-w-0">
-        <p className="text-white text-xs font-semibold truncate">{identity}</p>
-        {isFocused && (
-          <p className="text-xs text-pnp-accent">
-            {t.live.mainStageAdminSpotlighted}
-          </p>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <button
-          type="button"
-          aria-label={t.live.mainStageAdminAriaSpotlight(identity)}
-          onClick={onSpotlight}
-          disabled={isFocused}
-          className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl transition-all active:scale-[0.92] disabled:opacity-30 disabled:cursor-not-allowed bg-pnp-accent/[0.12] border border-pnp-accent/20"
-          title={t.live.mainStageAdminTitleSpotlight}
-        >
-          <svg className="w-3.5 h-3.5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <circle cx="12" cy="10" r="4" />
-            <path strokeLinecap="round" d="M12 14v5M8 19h8" />
-          </svg>
-        </button>
-
-        <button
-          type="button"
-          aria-label={t.live.mainStageAdminAriaMute(identity)}
-          onClick={onMute}
-          className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl transition-all active:scale-[0.92] bg-pnp-amber/10 border border-pnp-amber/20"
-          title={t.live.mainStageAdminMute}
-        >
-          <svg className="w-3.5 h-3.5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3zM3 3l18 18" />
-          </svg>
-        </button>
-
-        <button
-          type="button"
-          aria-label={t.live.mainStageAdminAriaKick(identity)}
-          onClick={onKick}
-          className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl transition-all active:scale-[0.92] bg-pnp-error/10 border border-pnp-error/20"
-          title={t.live.mainStageAdminKick}
-        >
-          <svg className="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M22 10.5h-6m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
-          </svg>
-        </button>
-      </div>
-    </div>
-  );
 }
 
 export default function MainStageAdmin({ standalone = true }: MainStageAdminProps) {

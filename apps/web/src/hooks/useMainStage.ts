@@ -22,14 +22,13 @@ export type { MainStageState };
 interface UseMainStageReturn {
   state: MainStageState | null;
   isAdmin: boolean;
-  canBeCammer: boolean;
+  canJoinStage: boolean;
   role: MainStageTokenResponse["role"] | null;
   livekitUrl: string;
   roomName: string;
   loading: boolean;
   error: string | null;
-  joinAsCammer: () => Promise<void>;
-  leaveCammer: () => Promise<void>;
+  join: () => Promise<void>;
   leave: () => void;
   shuffle: () => Promise<void>;
   admin: {
@@ -55,8 +54,7 @@ export function useMainStage(): UseMainStageReturn {
     roomName,
     loading,
     error,
-    joinAsCammer,
-    leaveCammer,
+    join,
     leave,
   } = useMainStageRoom();
 
@@ -91,19 +89,18 @@ export function useMainStage(): UseMainStageReturn {
     }
   }, []);
 
-  const canBeCammer = isAuthenticated;
+  const canJoinStage = isAuthenticated;
 
   return {
     state,
     isAdmin: authIsAdmin,
-    canBeCammer,
+    canJoinStage,
     role,
     livekitUrl,
     roomName,
     loading,
     error,
-    joinAsCammer,
-    leaveCammer,
+    join,
     leave,
     shuffle,
     admin: {

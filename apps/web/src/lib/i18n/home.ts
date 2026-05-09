@@ -26,21 +26,21 @@ const en = {
   benefitsFree: [
     "Browse the community",
     "View public posts",
-  ] as const,
+  ],
   benefitsMember: [
     "Social feed & reactions",
     "DMs & messaging",
     "Hangouts video rooms",
     "PNP Live & Radio",
     "Nearby discovery",
-  ] as const,
+  ],
   benefitsPrime: [
     "Everything in Member +",
     "PRIME exclusive live shows",
     "PRIME-only VOD & posts",
     "Early access & priority",
     "Private video calls",
-  ] as const,
+  ],
 
   // Latest Posts preview
   latestPosts: "Latest Posts",
@@ -86,21 +86,21 @@ const es: typeof en = {
   benefitsFree: [
     "Explora la comunidad",
     "Ve publicaciones públicas",
-  ] as const,
+  ],
   benefitsMember: [
     "Feed social y reacciones",
     "DMs y mensajería",
     "Salas de video Hangouts",
     "PNP Live y Radio",
     "Descubrimiento Nearby",
-  ] as const,
+  ],
   benefitsPrime: [
     "Todo lo de Member +",
     "Shows en vivo exclusivos PRIME",
     "VOD y publicaciones solo PRIME",
     "Acceso anticipado y prioridad",
     "Videollamadas privadas",
-  ] as const,
+  ],
 
   latestPosts: "Últimas publicaciones",
   viewAll: "Ver todas",

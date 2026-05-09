@@ -9539,10 +9539,11 @@ app.post(
   mainStageController.setMode
 );
 
-// Shuffle cammers — same communal ethic as layout mode.
+// Shuffle spotlight order — admin-only shared-state mutation.
 app.post(
   '/api/main-stage/shuffle',
   authenticateUser,
+  roleGuard('admin', 'superadmin'),
   mainStageMutatorLimiter,
   mainStageController.shuffle
 );

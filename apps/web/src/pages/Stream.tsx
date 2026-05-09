@@ -145,19 +145,6 @@ function StreamInner() {
 
   // Chat & tips
   const [chatInput, setChatInput] = useState("");
-  // chatSendingRef gates rapid Enter-Enter and click-click to keep both
-  // handlers from emitting two messages before setChatInput("") propagates.
-  // 250ms is enough to clear the input + render; faster than a typist's
-  // double-tap.
-  const chatSendingRef = useRef(false);
-  const submitChat = useCallback(() => {
-    const text = chatInput.trim();
-    if (!text || chatSendingRef.current) return;
-    chatSendingRef.current = true;
-    sendMessage(text);
-    setChatInput("");
-    setTimeout(() => { chatSendingRef.current = false; }, 250);
-  }, [chatInput, sendMessage]);
   const [tipPaymentTab, setTipPaymentTab] = useState<"tokens" | "dash">("tokens");
   const [tipping, setTipping] = useState(false);
   // tippingRef gates re-entrant calls to handleTip — setTipping is async,
@@ -253,6 +240,20 @@ function StreamInner() {
     raidEvent,
     dismissRaid,
   } = useLiveSocket(streamId || null);
+
+  // chatSendingRef gates rapid Enter-Enter and click-click to keep both
+  // handlers from emitting two messages before setChatInput("") propagates.
+  // 250ms is enough to clear the input + render; faster than a typist's
+  // double-tap.
+  const chatSendingRef = useRef(false);
+  const submitChat = useCallback(() => {
+    const text = chatInput.trim();
+    if (!text || chatSendingRef.current) return;
+    chatSendingRef.current = true;
+    sendMessage(text);
+    setChatInput("");
+    setTimeout(() => { chatSendingRef.current = false; }, 250);
+  }, [chatInput, sendMessage]);
 
   // Cleanup all timers/intervals on unmount. Dash tip polling + countdown
   // intervals plus the three one-shot setTimeouts (tip-success toast, dash-tip

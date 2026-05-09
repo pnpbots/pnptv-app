@@ -929,11 +929,21 @@ export interface PostCardSnapshot {
   authorUsername?: string | null;
   authorFirstName?: string | null;
   authorAvatar?: string | null;
+  authorPhoto?: string | null;
+  authorCreatorStatus?: string | null;
+  authorTier?: string | null;
   content?: string | null;
   mediaUrl?: string | null;
   mediaType?: string | null;
   mediaThumbUrl?: string | null;
   createdAt?: string | null;
+  postCreatedAt?: string | null;
+  isExclusive?: boolean | null;
+  likesCount?: number | null;
+  repliesCount?: number | null;
+  videoThumbnailUrl?: string | null;
+  videoTitle?: string | null;
+  videoDescription?: string | null;
   /** Forward/share note prepended by the sharer */
   note?: string | null;
 }
@@ -6452,6 +6462,8 @@ export interface MainStageState {
     volume: number;
   };
   counts: {
+    participants: number;
+    guests: number;
     cammers: number;
     viewers: number;
   };
@@ -6461,7 +6473,7 @@ export interface MainStageTokenResponse {
   token: string;
   livekitUrl: string;
   roomName: string;
-  role: "admin" | "participant";
+  role: "admin" | "member";
 }
 
 export interface MainStageJoinCheck {

@@ -466,12 +466,23 @@ export function LandingPage() {
       pollRef.current = setInterval(async () => {
         if (++attempts > 60) {
           if (pollRef.current) clearInterval(pollRef.current);
-          setTgState("idle");
+          setTgState("error");
+          setTgError("Telegram sign-in timed out. If you already confirmed in Telegram, tap the button again.");
           return;
         }
         try {
           const check = await fetch(`${API_BASE}/api/webapp/auth/telegram/check?token=${data.token}`, { credentials: "include" });
           const result = await check.json();
+          if (!check.ok) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            setTgState("error");
+            setTgError(
+              typeof result?.error === "string" && result.error
+                ? `Telegram sign-in failed: ${result.error}`
+                : "Telegram sign-in failed after confirmation. Try again."
+            );
+            return;
+          }
           if (result.authenticated) {
             if (pollRef.current) clearInterval(pollRef.current);
             try {

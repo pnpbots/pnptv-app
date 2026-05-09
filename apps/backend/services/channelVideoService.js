@@ -460,7 +460,14 @@ async function publishVideo({ videoId, userId, isAdmin }) {
     const previewUrl = final.gif_url || final.thumbnail_url;
     if (previewUrl && !final.promo_post_id) {
       const appUrl = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
-      const descSnippet = final.description ? final.description.slice(0, 120) + (final.description.length > 120 ? '…' : '') : '';
+      // Only include description snippet if it adds something beyond the title
+      const rawDesc = (final.description || '').trim();
+      const titleNorm = (final.title || '').trim().toLowerCase();
+      const descNorm = rawDesc.toLowerCase();
+      const descDifferent = rawDesc && !descNorm.startsWith(titleNorm) && descNorm !== titleNorm;
+      const descSnippet = descDifferent
+        ? rawDesc.slice(0, 140) + (rawDesc.length > 140 ? '…' : '')
+        : '';
       const promoContent = [
         `🎬 NEW on PNP Channels: ${final.title}`,
         descSnippet,

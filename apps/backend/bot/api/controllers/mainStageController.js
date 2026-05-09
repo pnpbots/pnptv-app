@@ -10,9 +10,9 @@
 const logger            = require('../../../utils/logger');
 const { asyncHandler }  = require('../middleware/errorHandler');
 const { getPool }       = require('../../../config/postgres');
-const { getRedis }      = require('../../../config/redis');
 const mainStageService  = require('../../../services/mainStageService');
 const livekitService    = require('../../../services/livekitService');
+const mainStageConsentService = require('../../../services/mainStageConsentService');
 const { RoomServiceClient } = require('livekit-server-sdk');
 
 // ── Media source allowlist / SSRF guard ───────────────────────────────────────
@@ -120,45 +120,83 @@ async function getCachedState() {
 // ── Endpoints ─────────────────────────────────────────────────────────────────
 
 /**
+ * GET /api/main-stage/join-check
+ * Auth required. Returns the current consent state needed before a member can join.
+ */
+const getJoinCheck = asyncHandler(async (req, res) => {
+  const latestConsent = await mainStageConsentService.getLatestConsentForUser(req.user.id);
+  return res.json({
+    success: true,
+    ...mainStageConsentService.buildJoinCheck(latestConsent),
+  });
+});
+
+/**
+ * POST /api/main-stage/accept-consents
+ * Auth required. Records the caller's latest Main Stage consent.
+ */
+const acceptConsents = asyncHandler(async (req, res) => {
+  const { acceptTerms, acceptPrivacy, ageConfirmed } = req.body || {};
+  if (acceptTerms !== true || acceptPrivacy !== true || ageConfirmed !== true) {
+    return res.status(400).json({
+      success: false,
+      error: 'terms, privacy, and age confirmation are required',
+      code: 'MAIN_STAGE_CONSENT_REQUIRED',
+    });
+  }
+
+  await mainStageConsentService.recordUserConsent({
+    userId: req.user.id,
+    ageConfirmed: true,
+    ip: req.ip || req.headers['x-forwarded-for'] || null,
+    userAgent: req.get('user-agent') || null,
+  });
+
+  const latestConsent = await mainStageConsentService.getLatestConsentForUser(req.user.id);
+  return res.json({
+    success: true,
+    ...mainStageConsentService.buildJoinCheck(latestConsent),
+  });
+});
+
+/**
  * POST /api/main-stage/token
  * Auth required. Returns a LiveKit token for the main-stage-prime room.
- * Body: { asCammer?: boolean }
  */
 const token = asyncHandler(async (req, res) => {
-  const userId      = req.user?.id;
-  const { asCammer = false } = req.body || {};
+  const userId = req.user?.id;
 
   const userRow = await fetchUserRow(userId);
   if (!userRow) {
     return res.status(404).json({ success: false, error: 'User not found' });
   }
 
-  const displayName = userRow.first_name || userRow.username || `user_${userId}`;
-
-  // Determine role. Any authenticated user may request a cammer grant; the
-  // MAX_CAMMERS cap is still enforced atomically by addCammer's Lua script.
-  let role = 'viewer';
-  if (isAdminRole(userRow.role)) {
-    role = 'admin';
-  } else if (asCammer) {
-    const addResult = await mainStageService.addCammer(String(userId));
-    if (addResult === 'full') {
-      return res.status(429).json({
-        success: false,
-        error: `Cammer slots full (max ${MAX_CAMMERS})`,
-        code: 'CAMMER_CAP_REACHED',
-      });
-    }
-    role = 'cammer';
-  } else {
-    // Explicit viewer-token request. If the user is currently in the cammer
-    // queue, remove them so the queue doesn't hold a ghost with a viewer
-    // LiveKit token. Covers the case where useMainStage init re-mints a
-    // viewer token after a navigate-away + back.
-    await mainStageService.removeCammer(String(userId));
+  const latestConsent = await mainStageConsentService.getLatestConsentForUser(userId);
+  const joinCheck = mainStageConsentService.buildJoinCheck(latestConsent);
+  if (!joinCheck.canJoin) {
+    return res.status(403).json({
+      success: false,
+      error: 'Main Stage consent is required before joining',
+      code: 'MAIN_STAGE_CONSENT_REQUIRED',
+      ...joinCheck,
+    });
   }
 
-  const canPublish = role !== 'viewer';
+  const displayName = userRow.first_name || userRow.username || `user_${userId}`;
+  const role = isAdminRole(userRow.role) ? 'admin' : 'member';
+
+  // Main Stage is a publish-first room: every authenticated entrant is added
+  // to the stage rotation/visibility queue. Admins can still enter when the
+  // queue is at cap so they can moderate a full room.
+  const addResult = await mainStageService.addCammer(String(userId));
+  if (addResult === 'full' && role !== 'admin') {
+    return res.status(429).json({
+      success: false,
+      error: `Main Stage is full (max ${MAX_CAMMERS})`,
+      code: 'CAMMER_CAP_REACHED',
+    });
+  }
+
   const isModerator = role === 'admin';
 
   const lkToken = await livekitService.generateToken(
@@ -167,13 +205,18 @@ const token = asyncHandler(async (req, res) => {
     displayName,
     isModerator,
     {
-      canPublishVideo: canPublish,
-      canPublishAudio: canPublish,
+      canPublishVideo: true,
+      canPublishAudio: isModerator,
       ttlSeconds: 6 * 3600,
     }
   );
 
-  logger.info('[MainStage] token issued', { userId, role });
+  logger.info('[MainStage] token issued', {
+    userId,
+    role,
+    ip: req.ip || req.headers['x-forwarded-for'] || null,
+    userAgent: req.get('user-agent') || null,
+  });
 
   return res.json({
     success:     true,
@@ -353,8 +396,7 @@ const moderate = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/main-stage/shuffle
- * Auth required. Open to all authenticated users — same ethic as mode cycle.
- * Reshuffles the cammer queue and advances spotlight. Rate-limited.
+ * Admin only. Reshuffles the participant queue and advances spotlight.
  */
 const shuffle = asyncHandler(async (req, res) => {
   await mainStageService.shuffleCammers();
@@ -365,6 +407,8 @@ const shuffle = asyncHandler(async (req, res) => {
 module.exports = {
   token,
   getState,
+  getJoinCheck,
+  acceptConsents,
   setMode,
   setMedia,
   setVolume,

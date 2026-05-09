@@ -137,9 +137,9 @@ export function SharedPostCard({ postId, snapshot, isMe = false }: Props) {
         >
           {/* Avatar */}
           <span className="flex-shrink-0 w-8 h-8 rounded-full overflow-hidden bg-white/10 flex items-center justify-center">
-            {snapshot.authorPhoto ? (
+            {(snapshot.authorPhoto || snapshot.authorAvatar) ? (
               <img
-                src={snapshot.authorPhoto}
+                src={snapshot.authorPhoto || snapshot.authorAvatar || ""}
                 alt=""
                 className="w-full h-full object-cover"
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}

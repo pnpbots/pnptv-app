@@ -105,6 +105,7 @@ jest.mock('../services/authentikService', () => ({
   updateUserEmail: jest.fn(async () => true),
   syncUserGroups: jest.fn(async () => undefined),
 }));
+const AuthentikService = require('../services/authentikService');
 jest.mock('../services/platformBanService', () => ({
   isBanned: jest.fn(async () => null),
   isIpBanned: jest.fn(async () => null),
@@ -402,6 +403,33 @@ describe('Telegram Mini-App Auth — /api/telegram-auth', () => {
         .send({ initData: params.toString() });
 
       expect(res.status).toBe(401);
+    });
+
+    it('should authenticate existing Telegram user even when Authentik returns no UUID', async () => {
+      AuthentikService.syncTelegramUser.mockResolvedValueOnce(null);
+      mockQueryFn.mockImplementation(async (sql) => {
+        if (sql.includes('WHERE telegram = $1::varchar OR ($2::varchar IS NOT NULL AND pnptv_id = $2::varchar)')) {
+          return { rows: [{
+            id: 'legacy-user-1', pnptv_id: null, telegram: '12345678',
+            username: 'legacyuser', email: null, subscription_status: 'free',
+            tier: 'free', terms_accepted: false, first_name: 'Legacy',
+            language: 'en', photo_file_id: null,
+            age_verified: false, onboarding_complete: false, role: 'user',
+          }] };
+        }
+        if (sql.includes('plan_expiry')) return { rows: [] };
+        if (sql.includes("UPDATE users SET last_login_at = NOW(), last_login_method = 'mini_app'")) return { rows: [] };
+        return { rows: [] };
+      });
+
+      const initData = buildValidInitData('12345678');
+      const res = await request(testApp)
+        .post('/api/telegram-auth')
+        .send({ initData });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.user?.id).toBe('legacy-user-1');
     });
 
     it('should block banned users with 403', async () => {

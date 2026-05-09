@@ -3,6 +3,9 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles/globals.css";
 
+const REALTIME_SESSION_KEY = "pnptv:active-realtime-session";
+const SW_UPDATE_PENDING_KEY = "pnptv:sw-update-pending";
+
 async function clearClientCaches() {
   if ("serviceWorker" in navigator) {
     const regs = await navigator.serviceWorker.getRegistrations();
@@ -11,6 +14,38 @@ async function clearClientCaches() {
   if ("caches" in window) {
     const keys = await caches.keys();
     await Promise.all(keys.map((key) => caches.delete(key)));
+  }
+}
+
+function hasActiveRealtimeSession(): boolean {
+  try {
+    return !!sessionStorage.getItem(REALTIME_SESSION_KEY);
+  } catch {
+    return false;
+  }
+}
+
+function markSwUpdatePending(): void {
+  try {
+    sessionStorage.setItem(SW_UPDATE_PENDING_KEY, "1");
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function clearSwUpdatePending(): void {
+  try {
+    sessionStorage.removeItem(SW_UPDATE_PENDING_KEY);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function dispatchSwUpdateStatus(status: string): void {
+  try {
+    window.dispatchEvent(new CustomEvent("pnptv:sw-update-status", { detail: { status } }));
+  } catch {
+    // ignore event dispatch failures
   }
 }
 
@@ -111,28 +146,59 @@ if (!resetInProgress && "serviceWorker" in navigator) {
   };
 
   navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((reg) => {
+    const maybeActivateWaitingWorker = () => {
+      if (!reg.waiting) return;
+      if (hasActiveRealtimeSession()) {
+        markSwUpdatePending();
+        dispatchSwUpdateStatus("deferred-active-session");
+        return;
+      }
+      clearSwUpdatePending();
+      dispatchSwUpdateStatus("activating");
+      activateSoon(reg.waiting);
+    };
+
     // Poll for updates every 60s while the tab is open
-    setInterval(() => reg.update(), 60_000);
+    setInterval(() => {
+      reg.update();
+      maybeActivateWaitingWorker();
+    }, 60_000);
 
     const watchInstalling = (sw: ServiceWorker) => {
       sw.addEventListener("statechange", () => {
         if (sw.state === "installed" && navigator.serviceWorker.controller) {
+          if (hasActiveRealtimeSession()) {
+            markSwUpdatePending();
+            dispatchSwUpdateStatus("installed-deferred-active-session");
+            return;
+          }
+          clearSwUpdatePending();
+          dispatchSwUpdateStatus("installed-activating");
           activateSoon(sw);
         }
       });
     };
 
-    if (reg.waiting) activateSoon(reg.waiting);
+    if (reg.waiting) maybeActivateWaitingWorker();
     if (reg.installing) watchInstalling(reg.installing);
     reg.addEventListener("updatefound", () => {
       if (reg.installing) watchInstalling(reg.installing);
     });
+
+    window.addEventListener("pnptv:realtime-session-change", maybeActivateWaitingWorker);
   });
 
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hasActiveRealtimeSession()) {
+      markSwUpdatePending();
+      dispatchSwUpdateStatus("controllerchange-deferred-active-session");
+      return;
+    }
     if (!refreshing) {
       refreshing = true;
+      clearSwUpdatePending();
+      dispatchSwUpdateStatus("controllerchange-reload");
       window.location.reload();
     }
   });
