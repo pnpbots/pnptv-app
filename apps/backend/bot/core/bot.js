@@ -317,10 +317,14 @@ const startBot = async () => {
         }
         // Initialize Meru Link tracking in background (fire and forget)
         meruLinkInitializer.initialize();
-        // Bootstrap Meilisearch indexes + initial backfill (fire and forget)
-        require('../../services/meilisearchService').reindexAll().catch((e) =>
-          logger.warn('[Meilisearch] Boot reindex failed (non-fatal)', { error: e.message })
-        );
+        // Bootstrap Meilisearch indexes + initial backfill (fire and forget, service may not exist)
+        try {
+          require('../../services/meilisearchService').reindexAll().catch((e) =>
+            logger.warn('[Meilisearch] Boot reindex failed (non-fatal)', { error: e.message })
+          );
+        } catch (_) {
+          // meilisearchService not deployed — skip silently
+        }
       } else {
         logger.warn('⚠️ PostgreSQL connection test failed, but will retry on first query');
       }

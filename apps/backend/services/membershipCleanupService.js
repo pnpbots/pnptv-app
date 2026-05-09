@@ -156,6 +156,7 @@ class MembershipCleanupService {
         'peer_id_invalid',
         'chat not found',
         'user_id_invalid',
+        'invalid user_id',
         'member list is inaccessible',
       ];
       return benignPatterns.some(p => desc.includes(p));
@@ -194,19 +195,22 @@ class MembershipCleanupService {
     }
 
     try {
-      // Get all active Prime users from the database
+      // Get all active Prime users who have a Telegram ID (required for bot API calls)
       const primeUsers = await query(`
-        SELECT id, username FROM users
+        SELECT id, username, telegram FROM users
         WHERE subscription_status = 'active' AND tier = 'PRIME'
+          AND telegram IS NOT NULL
         ORDER BY id LIMIT 500
       `);
 
       logger.info(`Found ${primeUsers.rows.length} active Prime users to check for PRIME channel access`);
 
       for (const user of primeUsers.rows) {
+        const telegramId = user.telegram;
+        if (!telegramId) { results.skipped++; continue; }
         try {
           // Check if user is in the PRIME channel
-          const chatMember = await this.bot.telegram.getChatMember(this.primeChannelId, user.id);
+          const chatMember = await this.bot.telegram.getChatMember(this.primeChannelId, telegramId);
 
           // If user is not in the channel (left, kicked, or never joined), add them
           if (['left', 'kicked'].includes(chatMember.status)) {
@@ -216,7 +220,7 @@ class MembershipCleanupService {
               expire_date: Math.floor(Date.now() / 1000) + 3600 // 1 hour expiry
             });
 
-            await this.bot.telegram.sendMessage(user.id,
+            await this.bot.telegram.sendMessage(telegramId,
               `🎉 ¡Tu acceso al canal PRIME ha sido restaurado!\n\nUsa este enlace de un solo uso para unirte:\n${inviteLink.invite_link}`
             );
 
@@ -272,6 +276,7 @@ class MembershipCleanupService {
         AND plan_id != 'lifetime100'
         AND plan_id NOT ILIKE '%lifetime%'
         AND plan_id NOT ILIKE '%life-time%'
+        AND id NOT IN (SELECT DISTINCT user_id FROM user_entitlements WHERE is_lifetime = true)
       `);
 
       logger.info(`Found ${expiredActiveUsers.rows.length} users with expired 'active' subscriptions`);
@@ -324,6 +329,7 @@ class MembershipCleanupService {
           AND plan_id NOT ILIKE '%lifetime%'
           AND plan_id NOT ILIKE '%life-time%'
           AND plan_id != 'lifetime100'
+          AND id NOT IN (SELECT DISTINCT user_id FROM user_entitlements WHERE is_lifetime = true)
       `);
 
       logger.info(`Found ${expiredStatusUsers.rows.length} users with 'expired' status to convert to 'churned'`);
@@ -371,32 +377,35 @@ class MembershipCleanupService {
     }
 
     try {
-      // Get all churned users (formerly had subscription)
+      // Get all churned users who have a Telegram ID (required for bot API calls)
       const churnedUsers = await query(`
-        SELECT id, username FROM users
+        SELECT id, username, telegram FROM users
         WHERE subscription_status IN ('churned', 'expired')
+          AND telegram IS NOT NULL
         ORDER BY id LIMIT 500
       `);
 
       logger.info(`Found ${churnedUsers.rows.length} churned/expired users to check for PRIME channel access`);
 
       for (const user of churnedUsers.rows) {
+        const telegramId = user.telegram;
+        if (!telegramId) { results.skipped++; continue; }
         try {
           // Check if user is in the PRIME channel
-          const chatMember = await this.bot.telegram.getChatMember(this.primeChannelId, user.id);
+          const chatMember = await this.bot.telegram.getChatMember(this.primeChannelId, telegramId);
 
           // Only kick if they're actually a member (not already kicked/left)
           if (['member', 'restricted'].includes(chatMember.status)) {
-            await this.bot.telegram.banChatMember(this.primeChannelId, user.id);
+            await this.bot.telegram.banChatMember(this.primeChannelId, telegramId);
             // Immediately unban to allow re-joining if they resubscribe
-            await this.bot.telegram.unbanChatMember(this.primeChannelId, user.id);
+            await this.bot.telegram.unbanChatMember(this.primeChannelId, telegramId);
 
             results.kicked++;
             logger.info(`Kicked user ${user.id} (${user.username || 'no username'}) from PRIME channel`);
 
             // Notify user they were removed
             try {
-              await this.sendRemovalNotice(user.id);
+              await this.sendRemovalNotice(telegramId);
             } catch (notifyError) {
               // Don't fail if notification fails
               logger.debug(`Could not notify user ${user.id} of removal:`, notifyError.message);
