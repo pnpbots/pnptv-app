@@ -351,7 +351,9 @@ app.use(ipTracker); // Log every authenticated request IP for security
 // Cached per-IP in Redis 1h to avoid the geoip lookup on every request.
 // (geoip module is already required at the top of the file — reuse it.)
 const BLOCKED_US_REGIONS = new Set();
-const BLOCKED_COUNTRIES = new Set();
+const BLOCKED_COUNTRIES = new Set(['CO']);
+// Per-user geo-block whitelist — bypasses the hard country block for specific user IDs.
+const GEO_BLOCK_USER_WHITELIST = new Set(['7246621722']); // PNPLatinoBoy
 const GEO_BLOCK_BYPASS_PATHS = [
   /^\/blocked-jurisdiction$/,
   /^\/health$/,
@@ -410,6 +412,7 @@ app.use(async (req, res, next) => {
   // Admin bypass — once authenticated, admins can travel into blocked regions
   // to debug. Pre-auth requests fall through to the geo check.
   if (req.session?.user?.role === 'admin' || req.session?.user?.role === 'superadmin') return next();
+  if (req.session?.user?.id && GEO_BLOCK_USER_WHITELIST.has(String(req.session.user.id))) return next();
 
   // User-acknowledged bypass — session flag set via POST /api/public/geo-bypass.
   // Honour it for up to 24h so carrier-misidentified users are not repeatedly
@@ -1211,7 +1214,7 @@ const limiter = rateLimit({
   },
 });
 app.use('/api/', limiter);
-app.use(colombiaAccessGate);
+// colombiaAccessGate removed — Colombia is now hard-blocked via BLOCKED_COUNTRIES
 
 const ageVerificationUpload = multer({
   storage: multer.memoryStorage(),
