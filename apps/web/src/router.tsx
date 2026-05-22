@@ -130,8 +130,9 @@ const SelfCareCenter = lazy(() => import("@/pages/SelfCareCenter"));
 const CristinaPage = lazy(() => import("@/components/CristinaWidget").then((m) => ({ default: m.CristinaWidget })));
 const PrimeChannel = lazy(() => import("@/pages/admin/PrimeChannel"));
 const Compliance2257 = lazy(() => import("@/pages/admin/Compliance2257"));
+const AdminInviteLinks = lazy(() => import("@/pages/admin/InviteLinks"));
 const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
-const Lifetime100B = lazy(() => import("@/pages/Lifetime100B"));
+const InvitePage = lazy(() => import("@/pages/InvitePage"));
 
 // Creator Studio pages
 const CreatorLayout = lazy(() => import("@/components/creators/CreatorLayout"));
@@ -724,6 +725,14 @@ export const router = createBrowserRouter([
           </ModuleLoader>
         ),
       },
+      {
+        path: "invite-links",
+        element: (
+          <ModuleLoader>
+            <AdminInviteLinks />
+          </ModuleLoader>
+        ),
+      },
     ],
   },
   // Creator Studio section
@@ -910,17 +919,19 @@ export const router = createBrowserRouter([
       </ModuleLoader>
     ),
   },
-  // Public alias — /lifetime → /lifetime100. Lives OUTSIDE of <Layout /> so
-  // the auth-gate redirect (Layout.tsx:895) never fires for unauthenticated users.
-  { path: "/lifetime", element: <Navigate to="/lifetime100" replace /> },
+  // Invite page — public, no auth required (handles its own auth check inline)
   {
-    path: "/lifetime100b",
+    path: "/invite/:code",
     element: (
       <ModuleLoader>
-        <Lifetime100B />
+        <InvitePage />
       </ModuleLoader>
     ),
   },
+  // Public alias — /lifetime → /lifetime100. Lives OUTSIDE of <Layout /> so
+  // the auth-gate redirect (Layout.tsx:895) never fires for unauthenticated users.
+  { path: "/lifetime", element: <Navigate to="/lifetime100" replace /> },
+  { path: "/lifetime100b", element: <Navigate to="/lifetime100" replace /> },
   {
     path: "/page/:slug",
     element: (

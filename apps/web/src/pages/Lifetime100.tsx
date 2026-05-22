@@ -1,6 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSearchParams, useLocation, useNavigate, Link } from "react-router-dom";
+import { QRCodeSVG } from "qrcode.react";
 import { useLifetime100Strings, type Lifetime100Strings } from "@/lib/i18n/lifetime100";
+import { useAuth } from "@/hooks/useAuth";
+import { isTelegramContext } from "@/lib/telegram";
+import {
+  createPayment,
+  getPaymentStatus,
+  createDashSubscription,
+  getDashSubscriptionStatus,
+  getDashAvailable,
+  getDashPaymentDetails,
+  assertPaymentUrl,
+  ApiError,
+} from "@/lib/api";
 
 // ── Sheet content ─────────────────────────────────────────────────────────────
 // Translations for each sheet — keyed strings consumed by `makeSheets(lang)`.
@@ -979,6 +992,22 @@ function ActivateView({ s, initialCode }: ActivateViewProps) {
   );
 }
 
+// ── Direct-payment types ───────────────────────────────────────────────────────
+
+const PLAN_ID = "lifetime100";
+type PayMethod = "email" | "epayco" | "dash";
+type DashInvoice = {
+  invoiceId: string;
+  checkoutUrl: string;
+  planName: string;
+  destination?: string;
+  amount?: string;
+  invoiceAmount?: number | null;
+  loadingDetails?: boolean;
+  detailsError?: string;
+  createdAt: number;
+};
+
 // ── Default (hero) view ────────────────────────────────────────────────────────
 
 interface HeroViewProps {
@@ -991,33 +1020,234 @@ interface HeroViewProps {
 }
 
 function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpenSheet }: HeroViewProps) {
+  const { user, refreshUser } = useAuth();
+  const es = lang.startsWith("es");
+
+  // Email / Meru state
   const [modalOpen, setModalOpen] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [meruUrl, setMeruUrl] = useState<string | null>(null);
 
+  // Payment method selector
+  const [payMethod, setPayMethod] = useState<PayMethod>("email");
+
+  // Direct payment state
+  const [submitting, setSubmitting] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
+  const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
+  const [dashInvoice, setDashInvoice] = useState<DashInvoice | null>(null);
+  const [dashPolling, setDashPolling] = useState(false);
+  const [dashCopied, setDashCopied] = useState(false);
+  const [dashSecondsLeft, setDashSecondsLeft] = useState(900);
+  const [dashPaymentSuccess, setDashPaymentSuccess] = useState(false);
+  const dashCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const invoiceRef = useRef<HTMLDivElement>(null);
+
   const isSoldOut = available === 0;
   const isClosed = !availabilityLoading && isSoldOut;
+  const activateHref = `/lifetime100/activate`;
+
+  // Init: check Dash + resume any pending ePayco session
+  useEffect(() => {
+    getDashAvailable()
+      .then((r) => setDashAvailable(r.available === true && r.configured === true))
+      .catch(() => setDashAvailable(false));
+    try {
+      const pending = sessionStorage.getItem("pnp_pending_payment");
+      if (pending) { sessionStorage.removeItem("pnp_pending_payment"); setPollingPaymentId(pending); }
+    } catch {}
+  }, []);
+
+  // ePayco polling
+  useEffect(() => {
+    if (!pollingPaymentId) return;
+    let cancelled = false;
+    let attempts = 0;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      if (cancelled || attempts >= 120) {
+        if (attempts >= 120) { setPollingPaymentId(null); setPayError(es ? "Tiempo de espera agotado. Contacta soporte si completaste el pago." : "Payment timed out. Contact support if you completed the payment."); }
+        return;
+      }
+      attempts++;
+      try {
+        const data = await getPaymentStatus(pollingPaymentId);
+        if (cancelled) return;
+        if (data.status === "completed" || data.status === "paid" || data.status === "success") { setPollingPaymentId(null); setPaymentSuccess(true); await refreshUser(); return; }
+        if (data.status === "failed" || data.status === "refunded") { setPollingPaymentId(null); setPayError(data.message || (es ? "El pago no fue exitoso." : "Payment was not successful.")); return; }
+        if (!cancelled) timerId = setTimeout(poll, 5000);
+      } catch { if (!cancelled) timerId = setTimeout(poll, 5000); }
+    };
+    poll();
+    return () => { cancelled = true; if (timerId) clearTimeout(timerId); };
+  }, [pollingPaymentId, refreshUser, es]);
+
+  // Dash invoice polling
+  useEffect(() => {
+    if (!dashInvoice || !dashPolling) return;
+    let cancelled = false;
+    let attempts = 0;
+    const startedAt = Date.now();
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    const nextDelay = (n: number) => Math.min(5000 + Math.floor(n / 5) * 3000, 12000);
+    const poll = async () => {
+      if (cancelled) return;
+      if (Date.now() - startedAt >= 15 * 60 * 1000) { setDashPolling(false); return; }
+      attempts++;
+      try {
+        const data = await getDashSubscriptionStatus(dashInvoice.invoiceId);
+        if (cancelled) return;
+        if (data.status === "completed") {
+          setDashPolling(false); setDashPaymentSuccess(true);
+          try { sessionStorage.removeItem("pnp_pending_dash_invoice"); } catch {}
+          await refreshUser();
+          timerId = setTimeout(() => { setDashInvoice(null); setDashPaymentSuccess(false); setPaymentSuccess(true); }, 2000);
+          return;
+        }
+        if (data.status === "expired" || data.status === "invalid") {
+          setDashPolling(false);
+          try { sessionStorage.removeItem("pnp_pending_dash_invoice"); } catch {}
+          setPayError(es ? "Factura Dash expirada. Intenta de nuevo." : "Dash invoice expired. Please try again.");
+          return;
+        }
+        if (!cancelled) timerId = setTimeout(poll, nextDelay(attempts));
+      } catch { if (!cancelled) timerId = setTimeout(poll, nextDelay(attempts)); }
+    };
+    poll();
+    return () => { cancelled = true; if (timerId) clearTimeout(timerId); };
+  }, [dashInvoice, dashPolling, refreshUser, es]);
+
+  // Dash countdown
+  useEffect(() => {
+    if (!dashInvoice || !dashPolling) {
+      if (dashCountdownRef.current) { clearInterval(dashCountdownRef.current); dashCountdownRef.current = null; }
+      return;
+    }
+    const tick = () => {
+      const remaining = Math.max(0, 900 - Math.floor((Date.now() - dashInvoice.createdAt) / 1000));
+      setDashSecondsLeft(remaining);
+      if (remaining === 0) { if (dashCountdownRef.current) { clearInterval(dashCountdownRef.current); dashCountdownRef.current = null; } setDashPolling(false); }
+    };
+    tick();
+    dashCountdownRef.current = setInterval(tick, 1000);
+    return () => { if (dashCountdownRef.current) { clearInterval(dashCountdownRef.current); dashCountdownRef.current = null; } };
+  }, [dashInvoice, dashPolling]);
+
+  // Scroll invoice into view when created
+  useEffect(() => {
+    if (dashInvoice) setTimeout(() => invoiceRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+  }, [!!dashInvoice]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function cancelDash() {
+    setDashInvoice(null); setDashPolling(false); setDashCopied(false); setDashSecondsLeft(900); setDashPaymentSuccess(false);
+  }
+
+  async function handleDirectPay() {
+    if (!user) { window.location.href = `/login?returnTo=${encodeURIComponent("/lifetime100")}`; return; }
+    if (submitting || dashInvoice) return;
+    setSubmitting(true); setPayError(null);
+    try {
+      if (payMethod === "dash") {
+        const result = await createDashSubscription(PLAN_ID);
+        if (result.success && result.checkoutUrl) {
+          const invoice: DashInvoice = { invoiceId: result.invoiceId, checkoutUrl: assertPaymentUrl(result.checkoutUrl), planName: result.planName || "Lifetime100", loadingDetails: true, createdAt: Date.now() };
+          setDashInvoice(invoice); setDashSecondsLeft(900); setDashPolling(true);
+          try { sessionStorage.setItem("pnp_pending_dash_invoice", JSON.stringify({ invoiceId: result.invoiceId, createdAt: invoice.createdAt, planName: invoice.planName })); } catch {}
+          getDashPaymentDetails(result.invoiceId)
+            .then((d) => {
+              if (d.success) setDashInvoice((prev) => prev ? { ...prev, destination: d.destination, amount: d.amount, invoiceAmount: d.invoiceAmount, loadingDetails: false } : prev);
+              else setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: es ? "No se pudieron cargar los detalles." : "Could not load payment details." } : prev);
+            })
+            .catch(() => setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: es ? "No se pudieron cargar los detalles." : "Could not load payment details." } : prev));
+        } else {
+          setPayError(es ? "No se pudo crear la factura Dash." : "Failed to create Dash invoice. Please try again.");
+        }
+      } else {
+        const result = await createPayment(PLAN_ID, "epayco");
+        if (result.success && result.paymentUrl) {
+          const safeUrl = assertPaymentUrl(result.paymentUrl);
+          if (result.paymentId) { try { sessionStorage.setItem("pnp_pending_payment", result.paymentId); } catch {} setPollingPaymentId(result.paymentId); }
+          if (isTelegramContext()) { window.Telegram!.WebApp.openLink(safeUrl); }
+          else {
+            const win = window.open(safeUrl, "_blank", "noopener,noreferrer");
+            if (win === null) { setPayError(es ? "Popup bloqueado — abriendo en esta pestaña..." : "Popup blocked — opening checkout in this tab…"); window.location.href = safeUrl; }
+          }
+        } else {
+          setPayError(result.message || result.error || (es ? "Error al iniciar el pago." : "Failed to create payment."));
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        if (err.code === "BTCPAY_NOT_CONFIGURED") setPayError(es ? "Pagos Dash no configurados." : "Dash payments not configured.");
+        else if (err.code === "BTCPAY_UNREACHABLE") setPayError(es ? "Servidor Dash no disponible." : "Dash payment server unavailable.");
+        else setPayError(err.message || (es ? "Error de pago." : "Payment error."));
+      } else { setPayError(err instanceof Error ? err.message : (es ? "Error inesperado." : "Unexpected error.")); }
+    } finally { setSubmitting(false); }
+  }
 
   const handleCtaClick = () => {
-    if (isClosed) return;
-    setModalOpen(true);
+    if (payMethod === "email") { if (isClosed) return; setModalOpen(true); }
+    else if (payMethod === "dash" && dashInvoice) { cancelDash(); }
+    else { handleDirectPay(); }
   };
 
   const handleReserveSuccess = (url: string | null) => {
-    // Send the user straight to the Meru payment page. Backend already
-    // emailed them the code + activation link as a fallback. Only fall
-    // back to the confirmation modal if no payment URL came back (rare
-    // — would mean the reservation succeeded but Meru linking failed).
-    if (url) {
-      window.location.href = url;
-      return;
-    }
-    setMeruUrl(url);
-    setModalOpen(false);
-    setShowConfirmation(true);
+    if (url) { window.location.href = url; return; }
+    setMeruUrl(url); setModalOpen(false); setShowConfirmation(true);
   };
 
-  const activateHref = `/lifetime100/activate`;
+  const ctaDisabled = (() => {
+    if (payMethod === "email") return availabilityLoading || isClosed;
+    if (payMethod === "dash") return submitting || dashAvailable === false;
+    return submitting || !!pollingPaymentId;
+  })();
+
+  const ctaLabel = (() => {
+    if (payMethod === "email") {
+      if (availabilityLoading) return s.ctaLoading;
+      if (isClosed) return s.ctaSoldOut;
+      return s.ctaGetAccess;
+    }
+    if (submitting) return es ? "Procesando…" : "Processing…";
+    if (payMethod === "dash") {
+      if (dashAvailable === false) return es ? "Dash no disponible" : "Dash unavailable";
+      if (dashInvoice) return es ? "Cancelar Dash" : "Cancel Dash";
+      if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
+      return es ? "Pagar con Dash" : "Pay with Dash";
+    }
+    if (pollingPaymentId) return es ? "Esperando pago…" : "Waiting for payment…";
+    if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
+    return es ? "Pagar con tarjeta — $99.99" : "Pay with card — $99.99";
+  })();
+
+  // Direct-payment success screen
+  if (paymentSuccess) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--pnp-background)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px" }}>
+        <div style={{ maxWidth: 400, width: "100%", textAlign: "center" }}>
+          <div style={{ width: 80, height: 80, borderRadius: "50%", background: "rgba(255,153,51,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+              <path d="M5 13l4 4L19 7" stroke="#ff9933" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h2 style={{ margin: "0 0 12px", fontSize: 26, fontWeight: 900, color: "#ffffff" }}>
+            {es ? "¡Bienvenido, fundador! 🎉" : "Welcome, Founder! 🎉"}
+          </h2>
+          <p style={{ margin: "0 0 8px", fontSize: 15, color: "var(--pnp-text-secondary)" }}>
+            {es ? "Tu membresía de por vida está activa." : "Your lifetime membership is now active."}
+          </p>
+          <p style={{ margin: "0 0 32px", fontSize: 13, color: "var(--pnp-text-secondary)" }}>
+            {es ? "Incluye 2 meses de PRIME de regalo." : "Includes 2 months of PRIME as a bonus."}
+          </p>
+          <button onClick={() => { window.location.href = "/welcome"; }} style={{ padding: "16px 32px", borderRadius: 14, border: "none", background: "linear-gradient(90deg, #ff3377, #ff9933)", color: "#ffffff", fontSize: 15, fontWeight: 800, cursor: "pointer", width: "100%" }}>
+            {es ? "Entrar a PNPtv!" : "Enter PNPtv!"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -1028,37 +1258,14 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
         display: "flex",
         flexDirection: "column",
         overflowX: "hidden",
-        paddingBottom: 200, // clearance for stacked pills + legal + CTA footer
+        paddingBottom: 260,
       }}
     >
       {/* Ambient glow */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: "fixed",
-          top: "-20%",
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: "100vw",
-          height: "100vw",
-          background:
-            "radial-gradient(circle, rgba(255,0,204,0.13) 0%, transparent 70%)",
-          pointerEvents: "none",
-          zIndex: 0,
-        }}
-      />
+      <div aria-hidden="true" style={{ position: "fixed", top: "-20%", left: "50%", transform: "translateX(-50%)", width: "100vw", height: "100vw", background: "radial-gradient(circle, rgba(255,0,204,0.13) 0%, transparent 70%)", pointerEvents: "none", zIndex: 0 }} />
 
       {/* Header */}
-      <header
-        style={{
-          position: "relative",
-          zIndex: 1,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "20px 24px",
-        }}
-      >
+      <header style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px" }}>
         <a href="/" aria-label="PNPtv! home" style={{ display: "flex" }}>
           <img src="/logo-header.png" alt="PNPtv!" style={{ height: 36, width: "auto" }} />
         </a>
@@ -1066,127 +1273,32 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
       </header>
 
       {/* Content */}
-      <div
-        style={{
-          position: "relative",
-          zIndex: 1,
-          width: "100%",
-          maxWidth: 500,
-          margin: "0 auto",
-          padding: "0 16px",
-        }}
-      >
+      <div style={{ position: "relative", zIndex: 1, width: "100%", maxWidth: 500, margin: "0 auto", padding: "0 16px" }}>
+
         {/* Hero */}
         <section style={{ textAlign: "center", padding: "12px 8px 20px" }}>
-          <h1
-            style={{
-              fontSize: "clamp(26px, 7vw, 34px)",
-              fontWeight: 900,
-              lineHeight: 1.1,
-              margin: "0 0 10px",
-              textTransform: "uppercase",
-            }}
-          >
+          <h1 style={{ fontSize: "clamp(26px, 7vw, 34px)", fontWeight: 900, lineHeight: 1.1, margin: "0 0 10px", textTransform: "uppercase" }}>
             {s.heroTitle}
           </h1>
-          <p style={{ color: "var(--pnp-text-secondary)", fontSize: 16, margin: 0 }}>
-            {s.heroSubtitle}
-          </p>
+          <p style={{ color: "var(--pnp-text-secondary)", fontSize: 16, margin: 0 }}>{s.heroSubtitle}</p>
         </section>
 
         {/* Pricing glass card */}
-        <div
-          style={{
-            background: "rgba(44,44,46,0.7)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
-            border: "1px solid rgba(255,180,84,0.3)",
-            borderRadius: 24,
-            padding: "28px 24px",
-            marginBottom: 16,
-            position: "relative",
-            overflow: "hidden",
-            boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
-          }}
-        >
-          {/* Velvet rope top border */}
-          <div
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              height: 4,
-              background: "linear-gradient(90deg, #ff3377, #ff9933)",
-            }}
-          />
-
-          {/* Badge */}
-          <span
-            style={{
-              display: "block",
-              fontSize: 11,
-              textTransform: "uppercase",
-              letterSpacing: "0.15em",
-              color: "#ff9933",
-              fontWeight: 700,
-              marginBottom: 14,
-            }}
-          >
+        <div style={{ background: "rgba(44,44,46,0.7)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,180,84,0.3)", borderRadius: 24, padding: "28px 24px", marginBottom: 16, position: "relative", overflow: "hidden", boxShadow: "0 20px 40px rgba(0,0,0,0.5)" }}>
+          <div aria-hidden="true" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 4, background: "linear-gradient(90deg, #ff3377, #ff9933)" }} />
+          <span style={{ display: "block", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.15em", color: "#ff9933", fontWeight: 700, marginBottom: 14 }}>
             {s.limitedBadge}
           </span>
-
-          {/* Price */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              marginBottom: 20,
-            }}
-          >
-            <span
-              style={{
-                fontSize: 20,
-                color: "#636366",
-                textDecoration: "line-through",
-                fontWeight: 600,
-                marginBottom: 4,
-              }}
-            >
-              {s.oldPrice}
-            </span>
-            <div
-              style={{
-                fontSize: "clamp(56px, 15vw, 72px)",
-                fontWeight: 900,
-                lineHeight: 1,
-                textShadow: "0 0 30px rgba(255,180,84,0.4)",
-                display: "flex",
-                alignItems: "flex-start",
-              }}
-            >
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
+            <span style={{ fontSize: 20, color: "#636366", textDecoration: "line-through", fontWeight: 600, marginBottom: 4 }}>{s.oldPrice}</span>
+            <div style={{ fontSize: "clamp(56px, 15vw, 72px)", fontWeight: 900, lineHeight: 1, textShadow: "0 0 30px rgba(255,180,84,0.4)", display: "flex", alignItems: "flex-start" }}>
               <span style={{ fontSize: "0.36em", marginTop: "0.55em", opacity: 0.8 }}>$</span>
               <span>100</span>
             </div>
           </div>
-
-          {/* Benefits list */}
           <ul style={{ listStyle: "none", padding: 0, margin: 0, textAlign: "left" }}>
             {s.benefits.map((benefit, i) => (
-              <li
-                key={i}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  marginBottom: 14,
-                  fontSize: 14,
-                  lineHeight: 1.4,
-                  color: "rgba(255,255,255,0.9)",
-                  gap: 12,
-                }}
-              >
+              <li key={i} style={{ display: "flex", alignItems: "flex-start", marginBottom: 14, fontSize: 14, lineHeight: 1.4, color: "rgba(255,255,255,0.9)", gap: 12 }}>
                 <DiamondIcon color="#ff9933" />
                 <span>{benefit}</span>
               </li>
@@ -1194,42 +1306,10 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
           </ul>
         </div>
 
-        {/* Notice card — "Before you pay" */}
-        <div
-          role="note"
-          style={{
-            margin: "0 0 16px",
-            padding: "18px 20px",
-            borderRadius: 24,
-            border: "1px solid rgba(255,153,51,0.45)",
-            background:
-              "linear-gradient(135deg, rgba(255,153,51,0.10), rgba(255,51,119,0.06))",
-            backdropFilter: "blur(10px)",
-            WebkitBackdropFilter: "blur(10px)",
-          }}
-        >
-          <p
-            style={{
-              margin: "0 0 12px",
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "#ff9933",
-            }}
-          >
-            {s.noticeTitle}
-          </p>
-          <ul
-            style={{
-              margin: 0,
-              paddingLeft: 18,
-              fontSize: 13,
-              lineHeight: 1.55,
-              color: "#d6d6dc",
-              listStyleType: "disc",
-            }}
-          >
+        {/* Notice card */}
+        <div role="note" style={{ margin: "0 0 16px", padding: "18px 20px", borderRadius: 24, border: "1px solid rgba(255,153,51,0.45)", background: "linear-gradient(135deg, rgba(255,153,51,0.10), rgba(255,51,119,0.06))", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" }}>
+          <p style={{ margin: "0 0 12px", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#ff9933" }}>{s.noticeTitle}</p>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.55, color: "#d6d6dc", listStyleType: "disc" }}>
             <li style={{ marginBottom: 8 }}>{s.noticeFundraising}</li>
             <li style={{ marginBottom: 8 }}>{s.noticeEarlyAccess}</li>
             <li>{s.noticeInProgress}</li>
@@ -1237,76 +1317,128 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
         </div>
 
         {/* Diamond separator */}
-        <div
-          aria-hidden="true"
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: 4,
-            margin: "20px 0",
-            opacity: 0.5,
-          }}
-        >
+        <div aria-hidden="true" style={{ display: "flex", justifyContent: "center", gap: 4, margin: "20px 0", opacity: 0.5 }}>
           <span style={{ color: "#ff3377" }}>⬥</span>
           <span style={{ color: "var(--pnp-text-secondary)" }}>⬥</span>
           <span style={{ color: "#ff9933" }}>⬥</span>
         </div>
 
+        {/* Dash invoice widget */}
+        {dashInvoice && (
+          <div ref={invoiceRef} style={{ marginBottom: 20, padding: "20px 16px", borderRadius: 20, border: "1px solid rgba(0,141,228,0.40)", background: "rgba(0,141,228,0.06)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#008DE4", animation: "lt100b-pulse 1.5s ease-in-out infinite" }} />
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }}>{es ? "Esperando pago Dash…" : "Waiting for Dash payment…"}</span>
+            </div>
+            {dashInvoice.loadingDetails ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 0", gap: 10 }}>
+                <Spinner size={24} />
+                <p style={{ margin: 0, fontSize: 12, color: "var(--pnp-text-secondary)" }}>{es ? "Cargando detalles…" : "Loading details…"}</p>
+              </div>
+            ) : dashPaymentSuccess ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "24px 0" }}>
+                <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(52,199,89,0.20)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#34C759" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </div>
+                <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#34C759" }}>{es ? "¡Pago recibido!" : "Payment received!"}</p>
+              </div>
+            ) : dashSecondsLeft === 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "20px 0" }}>
+                <p style={{ margin: 0, fontSize: 14, color: "#FF453A", fontWeight: 600 }}>{es ? "Factura expirada." : "Invoice expired."}</p>
+                <button onClick={cancelDash} style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: "#008DE4", color: "#ffffff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{es ? "Reintentar" : "Try again"}</button>
+              </div>
+            ) : dashInvoice.destination && dashInvoice.amount ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+                <div style={{ background: "#ffffff", padding: 12, borderRadius: 16 }}>
+                  <QRCodeSVG value={`dash:${dashInvoice.destination}?amount=${dashInvoice.amount}`} size={176} level="M" />
+                </div>
+                <p style={{ margin: 0, fontSize: 11, color: "var(--pnp-text-secondary)" }}>{es ? "Escanea con tu wallet Dash" : "Scan with your Dash wallet"}</p>
+                <div style={{ textAlign: "center" }}>
+                  <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--pnp-text-secondary)" }}>{es ? "Monto a pagar" : "Amount due"}</p>
+                  <p style={{ margin: 0, fontSize: 24, fontWeight: 900, color: "#ffffff" }}>{dashInvoice.amount} DASH</p>
+                  {dashInvoice.invoiceAmount != null && <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--pnp-text-secondary)" }}>~${dashInvoice.invoiceAmount.toFixed(2)} USD</p>}
+                </div>
+                <p style={{ margin: 0, fontSize: 13, fontFamily: "monospace", fontWeight: 600, color: dashSecondsLeft <= 60 ? "#FF453A" : dashSecondsLeft <= 300 ? "#FF9F0A" : "var(--pnp-text-secondary)" }}>
+                  {String(Math.floor(dashSecondsLeft / 60)).padStart(2, "0")}:{String(dashSecondsLeft % 60).padStart(2, "0")} {es ? "restantes" : "remaining"}
+                </p>
+                <div style={{ width: "100%" }}>
+                  <p style={{ margin: "0 0 6px", fontSize: 11, color: "var(--pnp-text-secondary)" }}>{es ? "Enviar a" : "Send to"}</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
+                    <code style={{ flex: 1, fontSize: 11, color: "rgba(255,255,255,0.80)", wordBreak: "break-all", fontFamily: "monospace" }}>{dashInvoice.destination}</code>
+                    <button onClick={() => { navigator.clipboard.writeText(dashInvoice.destination!).catch(() => {}); setDashCopied(true); setTimeout(() => setDashCopied(false), 2000); }} style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: dashCopied ? "#34C759" : "#008DE4", background: "none", border: "none", cursor: "pointer", padding: "4px 6px" }}>
+                      {dashCopied ? (es ? "Copiado" : "Copied") : (es ? "Copiar" : "Copy")}
+                    </button>
+                  </div>
+                </div>
+                <a href={dashInvoice.checkoutUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "#008DE4", textDecoration: "underline" }}>{es ? "Abrir en BTCPay →" : "Open in BTCPay →"}</a>
+              </div>
+            ) : (
+              <div style={{ textAlign: "center" }}>
+                <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--pnp-text-secondary)" }}>{dashInvoice.detailsError || (es ? "Abre el checkout externo para completar el pago." : "Open the external checkout to complete payment.")}</p>
+                <a href={dashInvoice.checkoutUrl} target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: "12px 20px", borderRadius: 12, background: "#008DE4", color: "#ffffff", fontSize: 14, fontWeight: 600, textDecoration: "none" }}>{es ? "Abrir checkout Dash" : "Open Dash checkout"}</a>
+              </div>
+            )}
+            <button onClick={cancelDash} style={{ display: "block", width: "100%", marginTop: 14, padding: "8px", background: "none", border: "none", color: "var(--pnp-text-secondary)", fontSize: 12, cursor: "pointer" }}>{es ? "Cancelar" : "Cancel"}</button>
+          </div>
+        )}
+
+        {/* ePayco polling indicator */}
+        {pollingPaymentId && (
+          <div style={{ marginBottom: 16, padding: "14px 16px", borderRadius: 14, background: "rgba(212,0,122,0.10)", border: "1px solid rgba(212,0,122,0.20)", textAlign: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 4 }}>
+              <Spinner size={14} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#ffffff" }}>{es ? "Esperando confirmación de pago…" : "Waiting for payment confirmation…"}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: "var(--pnp-text-secondary)" }}>{es ? "Completa el pago en la ventana que se abrió." : "Complete the payment in the window that opened."}</p>
+          </div>
+        )}
+
+        {/* Dash info box */}
+        {payMethod === "dash" && dashAvailable !== false && !dashInvoice && (
+          <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(0,141,228,0.30)", background: "rgba(0,141,228,0.06)" }}>
+            <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--pnp-text-secondary)" }}>
+              {es ? "Paga con DASH desde tu wallet. Sin nombre, sin tarjeta." : "Pay with DASH from your wallet. No name, no card required."}
+            </p>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11 }}>
+              <a href="https://www.dash.org/downloads/" target="_blank" rel="noopener noreferrer" style={{ color: "#008DE4" }}>{es ? "Obtener wallet" : "Get wallet"}</a>
+              <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
+              <a href="https://www.kraken.com/learn/buy-dash-coin" target="_blank" rel="noopener noreferrer" style={{ color: "#008DE4" }}>Kraken</a>
+              <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
+              <a href="https://uphold.com/en/assets/crypto/buy-dash" target="_blank" rel="noopener noreferrer" style={{ color: "#008DE4" }}>Uphold</a>
+            </div>
+          </div>
+        )}
+
+        {/* Pay error */}
+        {payError && (
+          <div role="alert" style={{ marginBottom: 16, padding: "12px 16px", borderRadius: 12, background: "rgba(255,69,58,0.10)", border: "1px solid rgba(255,69,58,0.25)", textAlign: "center", fontSize: 13, color: "#FF453A" }}>
+            {payError}
+            <button onClick={() => setPayError(null)} style={{ display: "block", margin: "6px auto 0", fontSize: 11, color: "rgba(255,255,255,0.4)", background: "none", border: "none", cursor: "pointer" }}>{es ? "Cerrar" : "Dismiss"}</button>
+          </div>
+        )}
+
         {/* Already paid link */}
         <p style={{ textAlign: "center", fontSize: 13, color: "var(--pnp-text-secondary)" }}>
           {s.alreadyPaid}{" "}
-          <a
-            href={activateHref}
-            style={{
-              color: "#ff9933",
-              fontWeight: 600,
-              borderBottom: "1px solid rgba(255,153,51,0.5)",
-              textDecoration: "none",
-            }}
-          >
-            {s.alreadyPaidLink}
-          </a>
+          <a href={activateHref} style={{ color: "#ff9933", fontWeight: 600, borderBottom: "1px solid rgba(255,153,51,0.5)", textDecoration: "none" }}>{s.alreadyPaidLink}</a>
         </p>
+
+        {/* Fine print for card/dash */}
+        {payMethod !== "email" && (
+          <p style={{ marginTop: 20, fontSize: 11, color: "rgba(207,207,212,0.40)", textAlign: "center", lineHeight: 1.5 }}>
+            {es ? "🔒 Encriptado · Cobro discreto · No guardamos tu tarjeta · Precio en USD" : "🔒 Encrypted · Discreet billing · We never store your card · Price in USD"}
+          </p>
+        )}
       </div>
 
-      {/* Sticky footer: nav pills + legal + CTA button, stacked */}
-      <div
-        style={{
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          width: "100%",
-          background:
-            "linear-gradient(to top, rgba(18,13,20,0.98) 50%, rgba(18,13,20,0.9) 85%, transparent)",
-          zIndex: 50,
-          boxSizing: "border-box",
-          paddingBottom: "max(16px, env(safe-area-inset-bottom))",
-        }}
-      >
-        {/* Pill nav — opens bottom sheets in-place (stays on /lifetime100) */}
+      {/* Sticky footer */}
+      <div style={{ position: "fixed", bottom: 0, left: 0, width: "100%", background: "linear-gradient(to top, rgba(18,13,20,0.98) 50%, rgba(18,13,20,0.9) 85%, transparent)", zIndex: 50, boxSizing: "border-box", paddingBottom: "max(16px, env(safe-area-inset-bottom)" }}>
+
+        {/* Pill nav */}
         <nav style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }} aria-label="Explore PNPtv">
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", width: "max-content" }}>
             {NAV_ITEMS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onOpenSheet(item.id)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "6px 12px",
-                  borderRadius: 9999,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  whiteSpace: "nowrap",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  color: "#cfcfd4",
-                  cursor: "pointer",
-                  flexShrink: 0,
-                  background: "rgba(18,13,20,0.6)",
-                }}
-              >
+              <button key={item.id} type="button" onClick={() => onOpenSheet(item.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 9999, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", border: "1px solid rgba(255,255,255,0.12)", color: "#cfcfd4", cursor: "pointer", flexShrink: 0, background: "rgba(18,13,20,0.6)" }}>
                 <span>{item.emoji}</span>
                 <span>{item.label}</span>
               </button>
@@ -1315,112 +1447,66 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
         </nav>
 
         {/* Legal links */}
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "center",
-            columnGap: 12,
-            rowGap: 2,
-            padding: "4px 16px 8px",
-          }}
-        >
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", columnGap: 12, rowGap: 2, padding: "4px 16px 8px" }}>
           {LEGAL_LINKS.map((l) => (
-            <a
-              key={l.href}
-              href={l.href}
-              style={{
-                fontSize: 10,
-                color: "rgba(207,207,212,0.5)",
-                textDecoration: "none",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {l.label}
-            </a>
+            <a key={l.href} href={l.href} style={{ fontSize: 10, color: "rgba(207,207,212,0.5)", textDecoration: "none", whiteSpace: "nowrap" }}>{l.label}</a>
           ))}
         </div>
 
-        {/* CTA button container */}
-        <div style={{ padding: "4px 20px 0" }}>
-        <button
-          onClick={handleCtaClick}
-          disabled={availabilityLoading || isClosed}
-          aria-disabled={availabilityLoading || isClosed}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            width: "100%",
-            maxWidth: 500,
-            margin: "0 auto",
-            padding: "18px 24px",
-            borderRadius: 16,
-            border: "none",
-            background: isClosed
-              ? "rgba(255,255,255,0.08)"
-              : "linear-gradient(90deg, #ff3377, #ff9933)",
-            color: isClosed ? "#8E8E93" : "#ffffff",
-            fontSize: 15,
-            fontWeight: 800,
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            cursor: availabilityLoading || isClosed ? "not-allowed" : "pointer",
-            minHeight: 56,
-            boxShadow: isClosed
-              ? "none"
-              : "0 8px 32px rgba(255,51,119,0.4)",
-            transition: "opacity 0.15s, transform 0.1s",
-          }}
-          onMouseDown={(e) => {
-            if (!isClosed) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)";
-          }}
-          onMouseUp={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
-          }}
-          onTouchStart={(e) => {
-            if (!isClosed) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)";
-          }}
-          onTouchEnd={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
-          }}
-        >
-          {availabilityLoading && <Spinner size={16} />}
-          {availabilityLoading
-            ? s.ctaLoading
-            : isClosed
-            ? s.ctaSoldOut
-            : s.ctaGetAccess}
-        </button>
+        {/* Payment method selector */}
+        <div style={{ display: "flex", gap: 6, padding: "0 16px 6px" }}>
+          {([
+            { id: "email" as PayMethod, emoji: "📧", label: es ? "Email" : "Email", disabled: false },
+            { id: "epayco" as PayMethod, emoji: "💳", label: es ? "Tarjeta" : "Card", disabled: false },
+            { id: "dash" as PayMethod, emoji: "🥷", label: "Dash", disabled: dashAvailable === false },
+          ]).map(({ id, emoji, label, disabled }) => (
+            <button
+              key={id}
+              onClick={() => { if (!disabled) { setPayMethod(id); setPayError(null); } }}
+              disabled={disabled}
+              style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, padding: "7px 4px", borderRadius: 10, border: `1px solid ${payMethod === id ? "rgba(255,153,51,0.6)" : "rgba(255,255,255,0.10)"}`, background: payMethod === id ? "rgba(255,153,51,0.12)" : "rgba(255,255,255,0.03)", color: payMethod === id ? "#ff9933" : disabled ? "#636366" : "#cfcfd4", fontSize: 11, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1, whiteSpace: "nowrap", position: "relative" }}
+            >
+              <span>{emoji}</span>
+              <span>{label}</span>
+              {id === "dash" && dashAvailable !== false && (
+                <span style={{ position: "absolute", top: -5, right: -4, fontSize: 8, fontWeight: 700, background: "#008DE4", color: "#fff", padding: "1px 4px", borderRadius: 99, lineHeight: 1.4 }}>ANON</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* CTA button */}
+        <div style={{ padding: "0 20px" }}>
+          <button
+            onClick={handleCtaClick}
+            disabled={ctaDisabled}
+            aria-disabled={ctaDisabled}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", maxWidth: 500, margin: "0 auto", padding: "18px 24px", borderRadius: 16, border: "none", background: ctaDisabled ? "rgba(255,255,255,0.08)" : "linear-gradient(90deg, #ff3377, #ff9933)", color: ctaDisabled ? "#8E8E93" : "#ffffff", fontSize: 15, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", cursor: ctaDisabled ? "not-allowed" : "pointer", minHeight: 56, boxShadow: ctaDisabled ? "none" : "0 8px 32px rgba(255,51,119,0.4)", transition: "opacity 0.15s, transform 0.1s" }}
+            onMouseDown={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
+            onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
+            onTouchStart={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
+            onTouchEnd={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
+          >
+            {(submitting || (payMethod === "email" && availabilityLoading)) && <Spinner size={16} />}
+            {ctaLabel}
+          </button>
         </div>
       </div>
 
       {/* Modals */}
       {modalOpen && !showConfirmation && (
-        <EmailModal
-          s={s}
-          lang={lang}
-          onClose={() => setModalOpen(false)}
-          onSuccess={handleReserveSuccess}
-        />
+        <EmailModal s={s} lang={lang} onClose={() => setModalOpen(false)} onSuccess={handleReserveSuccess} />
       )}
       {showConfirmation && (
         <ConfirmationModal
           s={s}
           onClose={() => setShowConfirmation(false)}
-          onDismiss={() => {
-            setShowConfirmation(false);
-            if (meruUrl) {
-              window.location.assign(meruUrl);
-            } else {
-              window.location.assign("/landing");
-            }
-          }}
+          onDismiss={() => { setShowConfirmation(false); if (meruUrl) { window.location.assign(meruUrl); } else { window.location.assign("/landing"); } }}
           activateHref={activateHref}
         />
       )}
+
+      <style>{`@keyframes lt100b-pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
     </div>
   );
 }
