@@ -3,6 +3,7 @@ const UserModel = require('../../../models/userModel');
 const { query } = require('../../../utils/db');
 const PermissionService = require('../../../services/permissionService');
 const supportRoutingService = require('../../../services/supportRoutingService');
+const AuthentikService = require('../../../services/authentikService');
 const { resolveUserId } = require('../../utils/helpers');
 
 // Escape LIKE/ILIKE metacharacters so user input cannot widen search patterns
@@ -66,6 +67,12 @@ class AdminUserController {
 
         await UserModel.updateProfile(userId, updates);
         logger.info('Admin updated user profile', { adminId, userId, updates });
+
+        if (email !== undefined && user.pnptvId) {
+          AuthentikService.updateUserEmailByUuid(user.pnptvId, email).catch(err =>
+            logger.error('[Admin] Authentik email sync failed', { userId, error: err.message })
+          );
+        }
       }
 
       // Update subscription status

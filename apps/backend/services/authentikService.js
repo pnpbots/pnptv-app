@@ -190,6 +190,16 @@ class AuthentikService {
     }
   }
 
+  static async updateUserEmailByUuid(pnptvUuid, email) {
+    if (!pnptvUuid || !email) return false;
+    const pk = await AuthentikService._getUserPkBySub(pnptvUuid);
+    if (!pk) {
+      logger.warn('[Authentik] updateUserEmailByUuid: user not found', { pnptvUuid });
+      return false;
+    }
+    return AuthentikService.updateUserEmail(pk, email);
+  }
+
   /**
    * Sync a Telegram user with Authentik.
    * Ensures the user exists in Authentik and returns their UUID (sub).

@@ -2,6 +2,7 @@ const logger = require('../utils/logger');
 const UserModel = require('../models/userModel');
 const { query } = require('../config/postgres');
 const { Pool } = require('pg');
+const AuthentikService = require('./authentikService');
 
 /**
  * Helper to check if user is admin/superadmin from env vars
@@ -598,6 +599,12 @@ async function ensureEmailCredentials(userId, email, language, options = {}) {
   if (existing[0].password_hash) {
     if (existing[0].email !== email) {
       await query('UPDATE users SET email = $1 WHERE id = $2', [email, String(userId)]);
+      const { rows: pRows } = await query('SELECT pnptv_id FROM users WHERE id = $1', [String(userId)]);
+      if (pRows[0]?.pnptv_id) {
+        AuthentikService.updateUserEmailByUuid(pRows[0].pnptv_id, email).catch(err =>
+          logger.error('[ensureEmailCredentials] Authentik sync failed', { userId, error: err.message })
+        );
+      }
     }
     return { created: false };
   }
@@ -619,6 +626,13 @@ async function ensureEmailCredentials(userId, email, language, options = {}) {
 
   if (rowCount === 0) {
     return { created: false };
+  }
+
+  const { rows: pRows } = await query('SELECT pnptv_id FROM users WHERE id = $1', [String(userId)]);
+  if (pRows[0]?.pnptv_id) {
+    AuthentikService.updateUserEmailByUuid(pRows[0].pnptv_id, email).catch(err =>
+      logger.error('[ensureEmailCredentials] Authentik sync failed', { userId, error: err.message })
+    );
   }
 
   if (!skipEmail) {

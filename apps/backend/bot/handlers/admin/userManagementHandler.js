@@ -2,6 +2,7 @@ const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');
 const UserModel = require('../../../models/userModel');
 const PermissionService = require('../../../services/permissionService');
+const AuthentikService = require('../../../services/authentikService');
 const { getLanguage } = require('../../utils/helpers');
 const { query } = require('../../../utils/db');
 
@@ -232,6 +233,11 @@ async function handleUserManagementInput(ctx, next) {
       } else if (field === 'email') {
         await UserModel.updateProfile(userId, { email: text });
         logger.info('Admin updated user email', { adminId, userId, newEmail: text });
+        if (user.pnptvId) {
+          AuthentikService.updateUserEmailByUuid(user.pnptvId, text).catch(err =>
+            logger.error('[BotAdmin] Authentik email sync failed', { userId, error: err.message })
+          );
+        }
         await ctx.reply(`✅ Email actualizado a: ${text}`);
       }
 
