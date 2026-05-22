@@ -556,6 +556,186 @@ const handlePaymentResponse = async (req, res) => {
   }
 };
 
+// ── Stripe Webhook ────────────────────────────────────────────────────────────
+// Receives Stripe events. Raw body is required for signature verification;
+// the route registers express.raw({ type: 'application/json' }) before this handler.
+
+const stripeService = require('../../../services/stripeService');
+
+/**
+ * Notify a user via Telegram that their invoice payment failed.
+ * Non-critical — we swallow errors so the webhook still returns 200.
+ *
+ * @param {string} userId   - PNPtv user UUID from subscription metadata
+ * @param {object} invoice  - Stripe Invoice object
+ */
+async function notifyInvoicePaymentFailed(userId, invoice) {
+  try {
+    const UserModel = require('../../../models/userModel');
+    const user = await UserModel.getById(userId);
+    if (!user?.telegram) return;
+
+    const { Telegraf } = require('telegraf');
+    let bot;
+    try {
+      const botModule = require('../../../bot/core/bot');
+      bot = typeof botModule?.getBotInstance === 'function' ? botModule.getBotInstance() : null;
+    } catch (_) { /* not yet loaded */ }
+    if (!bot) bot = new Telegraf(process.env.BOT_TOKEN);
+
+    const amountDue = invoice.amount_due != null ? `$${(invoice.amount_due / 100).toFixed(2)}` : '';
+    const escapedAmount = amountDue.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' }[c]));
+    const message = `⚠️ *PNPtv\\!* — Payment failed\n\nWe could not process your renewal payment${escapedAmount ? ` of ${escapedAmount}` : ''}\\. Please update your payment method to keep your subscription active\\.\n\n[Manage subscription](https://pnptv.app/settings/payments)`;
+
+    await bot.telegram.sendMessage(user.telegram, message, { parse_mode: 'MarkdownV2' });
+  } catch (err) {
+    logger.warn('[stripeWebhook] Telegram notification for invoice failure failed (non-critical)', {
+      userId, error: err.message,
+    });
+  }
+}
+
+const handleStripeWebhook = async (req, res) => {
+  const signature = req.headers['stripe-signature'];
+  if (!signature) {
+    logger.warn('[stripeWebhook] Missing stripe-signature header');
+    return res.status(400).json({ error: 'Missing stripe-signature' });
+  }
+
+  // req.rawBody is set by the global express.json() verify callback
+  const rawBody = req.rawBody instanceof Buffer
+    ? req.rawBody
+    : Buffer.from(typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(req.body || {}), 'utf8');
+
+  let event;
+  try {
+    event = stripeService.constructWebhookEvent(rawBody, signature);
+  } catch (err) {
+    logger.error('[stripeWebhook] Signature verification failed', { error: err.message });
+    return res.status(400).json({ error: `Webhook signature verification failed: ${err.message}` });
+  }
+
+  logger.info('[stripeWebhook] Event received', { type: event.type, id: event.id });
+
+  // Idempotency guard — cache processed event IDs in Redis for 48 h
+  let alreadyProcessed = false;
+  const idempotencyKey = `stripe:evt:${event.id}`;
+  try {
+    const redis = require('../../../config/redis').getRedis();
+    const set = await redis.set(idempotencyKey, '1', 'EX', 172800, 'NX');
+    if (set === null) {
+      alreadyProcessed = true;
+    }
+  } catch (_) { /* Redis unavailable — continue without idempotency guard */ }
+
+  if (alreadyProcessed) {
+    logger.info('[stripeWebhook] Duplicate event, skipping', { eventId: event.id });
+    return res.status(200).json({ received: true, duplicate: true });
+  }
+
+  try {
+    switch (event.type) {
+
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        // Only process sessions that are fully paid (mode=payment) or active (mode=subscription)
+        if (session.payment_status !== 'paid' && session.status !== 'complete') {
+          logger.info('[stripeWebhook] checkout.session.completed but not paid yet — skipping', {
+            sessionId: session.id,
+            paymentStatus: session.payment_status,
+          });
+          break;
+        }
+        const result = await PaymentService.processStripeCheckout(session);
+        if (!result.success && !result.skipped) {
+          logger.error('[stripeWebhook] processStripeCheckout failed', {
+            sessionId: session.id, error: result.error,
+          });
+        }
+        break;
+      }
+
+      case 'customer.subscription.updated': {
+        // When a subscription is un-cancelled or changes price, extend or update entitlements
+        const sub = event.data.object;
+        const userId = sub.metadata?.pnptv_user_id;
+        const planId = sub.metadata?.pnptv_plan_id;
+        if (userId && planId && sub.status === 'active') {
+          await PaymentService.renewStripeSubscriptionEntitlements(sub.id, userId, planId);
+        }
+        break;
+      }
+
+      case 'customer.subscription.deleted': {
+        const sub = event.data.object;
+        await PaymentService.deactivateStripeSubscriptionEntitlements(sub.id);
+        break;
+      }
+
+      case 'invoice.payment_succeeded': {
+        const invoice = event.data.object;
+        // Only act on renewal invoices (billing_reason = 'subscription_cycle')
+        // Initial payment is handled by checkout.session.completed
+        if (invoice.billing_reason !== 'subscription_cycle') break;
+
+        const subId = invoice.subscription ? String(invoice.subscription) : null;
+        if (!subId) break;
+
+        // Fetch subscription to get our metadata
+        try {
+          const Stripe = require('stripe');
+          const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-04-10' });
+          const sub = await stripe.subscriptions.retrieve(subId);
+          const userId = sub.metadata?.pnptv_user_id;
+          const planId = sub.metadata?.pnptv_plan_id;
+          if (userId && planId) {
+            await PaymentService.renewStripeSubscriptionEntitlements(subId, userId, planId);
+          }
+        } catch (fetchErr) {
+          logger.error('[stripeWebhook] Failed to fetch subscription for renewal', {
+            subId, error: fetchErr.message,
+          });
+        }
+        break;
+      }
+
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object;
+        const subId = invoice.subscription ? String(invoice.subscription) : null;
+        if (!subId) break;
+
+        try {
+          const Stripe = require('stripe');
+          const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-04-10' });
+          const sub = await stripe.subscriptions.retrieve(subId);
+          const userId = sub.metadata?.pnptv_user_id;
+          if (userId) {
+            await notifyInvoicePaymentFailed(userId, invoice);
+          }
+        } catch (fetchErr) {
+          logger.warn('[stripeWebhook] Could not fetch subscription for payment_failed notification', {
+            subId, error: fetchErr.message,
+          });
+        }
+        break;
+      }
+
+      default:
+        logger.debug('[stripeWebhook] Unhandled event type', { type: event.type });
+    }
+  } catch (processingErr) {
+    logger.error('[stripeWebhook] Error processing event', {
+      eventId: event.id,
+      type: event.type,
+      error: processingErr.message,
+      stack: processingErr.stack,
+    });
+    // Return 200 so Stripe does not keep retrying; we log and alert instead
+  }
+
+  return res.status(200).json({ received: true });
+};
+
 // ── LiveKit Webhook ───────────────────────────────────────────────────────────
 // Receives participant_joined, participant_left, room_finished events from LiveKit.
 // Keeps hangout_video_calls.participant_count in sync without relying on manual
@@ -650,4 +830,5 @@ module.exports = {
   handleDaimoWebhook,
   handlePaymentResponse,
   handleLiveKitWebhook,
+  handleStripeWebhook,
 };

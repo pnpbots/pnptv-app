@@ -4306,6 +4306,251 @@ class PaymentService {
     }
     return result;
   }
+  // ─── Stripe ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Process a completed Stripe Checkout Session.
+   * Called by the stripe webhook handler after signature verification.
+   *
+   * Idempotent: if payments.stripe_session_id already exists for this session
+   * the row is already in 'completed' state and we skip all side-effects.
+   *
+   * @param {import('stripe').Stripe.Checkout.Session} session
+   * @returns {Promise<{success: boolean, skipped?: boolean, error?: string}>}
+   */
+  static async processStripeCheckout(session) {
+    const sessionId = session.id;
+    const meta = session.metadata || {};
+    const userId = meta.pnptv_user_id;
+    const planId = meta.pnptv_plan_id;
+    // pnptv_payment_id is set by callCheckoutService for call-package sessions
+    // so the pre-created payments row can be looked up directly.
+    const existingPaymentId = meta.pnptv_payment_id || null;
+    const paymentType = meta.payment_type || 'one_time'; // 'subscription' | 'call_package' | 'one_time'
+    const stripeSubscriptionId = session.subscription ? String(session.subscription) : null;
+
+    if (!userId) {
+      logger.error('[processStripeCheckout] Missing pnptv_user_id in session metadata', { sessionId });
+      return { success: false, error: 'MISSING_USER_ID' };
+    }
+
+    try {
+      // Idempotency check — has this session already been processed?
+      const existingCheck = await query(
+        `SELECT id, status FROM payments WHERE stripe_session_id = $1 LIMIT 1`,
+        [sessionId]
+      );
+      if (existingCheck.rows.length > 0 && existingCheck.rows[0].status === 'completed') {
+        logger.info('[processStripeCheckout] Session already processed, skipping', { sessionId });
+        return { success: true, skipped: true };
+      }
+
+      const amountTotal = session.amount_total != null ? session.amount_total / 100 : 0;
+      const currency = (session.currency || 'usd').toUpperCase();
+
+      // Upsert the payment row — create if not yet inserted, complete if pending
+      let paymentId;
+      if (existingCheck.rows.length > 0) {
+        paymentId = existingCheck.rows[0].id;
+        await query(
+          `UPDATE payments
+             SET status = 'completed',
+                 amount = $1,
+                 currency = $2,
+                 stripe_subscription_id = $3,
+                 completed_at = NOW(),
+                 updated_at = NOW()
+           WHERE id = $4`,
+          [amountTotal, currency, stripeSubscriptionId, paymentId]
+        );
+      } else {
+        const { v4: uuidv4 } = require('uuid');
+        paymentId = uuidv4();
+        await query(
+          `INSERT INTO payments
+             (id, reference, user_id, plan_id, provider, amount, currency,
+              status, stripe_session_id, stripe_subscription_id,
+              metadata, completed_at, created_at, updated_at)
+           VALUES
+             ($1, $2, $3, $4, 'stripe', $5, $6,
+              'completed', $7, $8,
+              $9::jsonb, NOW(), NOW(), NOW())`,
+          [
+            paymentId,
+            sessionId,
+            userId,
+            planId || null,
+            amountTotal,
+            currency,
+            sessionId,
+            stripeSubscriptionId,
+            JSON.stringify({ stripe_session_id: sessionId, payment_type: paymentType, ...meta }),
+          ]
+        );
+      }
+
+      // Route by payment type
+      if (paymentType === 'call_package') {
+        // Call booking — the payments row was pre-created by callCheckoutService
+        // with pnptv_payment_id in metadata. Use that ID directly if available
+        // so onCallPaymentSuccess finds the correct row.
+        const callCheckoutService = require('./callCheckoutService');
+        const callPaymentId = existingPaymentId || paymentId;
+        // Mark the pre-existing payment row as completed if it was already there
+        if (existingPaymentId && existingPaymentId !== paymentId) {
+          await query(
+            `UPDATE payments
+               SET status = 'completed',
+                   stripe_session_id = $2,
+                   completed_at = NOW(),
+                   updated_at = NOW()
+             WHERE id = $1 AND status = 'pending'`,
+            [existingPaymentId, sessionId]
+          );
+        }
+        await callCheckoutService.onCallPaymentSuccess(callPaymentId);
+        logger.info('[processStripeCheckout] Call package processed', { sessionId, callPaymentId });
+        return { success: true };
+      }
+
+      // Token purchase — credit tokens to wallet
+      if (paymentType === 'token_purchase') {
+        const purchaseUuid = meta.purchase_uuid;
+        if (!purchaseUuid) {
+          logger.error('[processStripeCheckout] Missing purchase_uuid for token_purchase', { sessionId });
+          return { success: false, error: 'MISSING_PURCHASE_UUID' };
+        }
+        const TokenCheckoutService = require('./tokenCheckoutService');
+        const result = await TokenCheckoutService.creditTokensFromPayment(purchaseUuid, 'stripe', {
+          stripeSessionId: sessionId,
+          amountTotal: session.amount_total != null ? session.amount_total / 100 : 0,
+        });
+        if (result.notFound) {
+          logger.error('[processStripeCheckout] Token purchase not found', { sessionId, purchaseUuid });
+          return { success: false, error: 'PURCHASE_NOT_FOUND' };
+        }
+        logger.info('[processStripeCheckout] Tokens credited', { sessionId, purchaseUuid, tokens: result.tokens, newBalance: result.newBalance });
+        return { success: true };
+      }
+
+      // Subscription or one-time plan — grant entitlements
+      if (!planId) {
+        logger.error('[processStripeCheckout] Cannot grant entitlements: pnptv_plan_id missing', { sessionId });
+        return { success: false, error: 'MISSING_PLAN_ID' };
+      }
+
+      const grantMeta = { ...meta };
+      if (stripeSubscriptionId) grantMeta.stripeSubscriptionId = stripeSubscriptionId;
+
+      const grantResult = await PaymentService.grantEntitlementsForPlan(
+        userId,
+        planId,
+        'stripe',
+        grantMeta,
+        paymentId
+      );
+
+      if (grantResult.warning === 'NO_PLAN_ADDONS') {
+        logger.error('[processStripeCheckout] No plan_add_ons mapping — entitlements NOT granted', {
+          sessionId, userId, planId,
+        });
+        return { success: false, error: 'NO_PLAN_ADDONS' };
+      }
+
+      // If it's a subscription, stamp stripe_subscription_id on each new entitlement row
+      if (stripeSubscriptionId) {
+        try {
+          await query(
+            `UPDATE user_entitlements
+               SET stripe_subscription_id = $1
+             WHERE user_id = $2
+               AND source_payment_id = $3
+               AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')`,
+            [stripeSubscriptionId, userId, paymentId]
+          );
+        } catch (stampErr) {
+          logger.warn('[processStripeCheckout] Could not stamp stripe_subscription_id on entitlements', {
+            error: stampErr.message,
+          });
+        }
+      }
+
+      logger.info('[processStripeCheckout] Entitlements granted', {
+        sessionId, userId, planId, granted: grantResult.granted,
+      });
+      return { success: true };
+
+    } catch (err) {
+      logger.error('[processStripeCheckout] Unexpected error', { sessionId, userId, planId, error: err.message });
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Extend a user's entitlements on a successful subscription renewal.
+   * Called by invoice.payment_succeeded webhook.
+   *
+   * @param {string} stripeSubscriptionId
+   * @param {string} userId  - pnptv_user_id from subscription metadata
+   * @param {string} planId  - pnptv_plan_id from subscription metadata
+   * @returns {Promise<{success: boolean}>}
+   */
+  static async renewStripeSubscriptionEntitlements(stripeSubscriptionId, userId, planId) {
+    if (!stripeSubscriptionId || !userId || !planId) {
+      logger.warn('[renewStripeSubscriptionEntitlements] Missing required fields', {
+        stripeSubscriptionId, userId, planId,
+      });
+      return { success: false, error: 'MISSING_FIELDS' };
+    }
+
+    try {
+      const grantResult = await PaymentService.grantEntitlementsForPlan(
+        userId,
+        planId,
+        'stripe_renewal',
+        { stripeSubscriptionId },
+        null
+      );
+      logger.info('[renewStripeSubscriptionEntitlements] Entitlements renewed', {
+        stripeSubscriptionId, userId, planId, granted: grantResult.granted,
+      });
+      return { success: true };
+    } catch (err) {
+      logger.error('[renewStripeSubscriptionEntitlements] Error', { error: err.message });
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Mark a user's subscription entitlements as churned when a subscription is cancelled/deleted.
+   * Sets expires_at to NOW() on all active entitlements tied to this subscription.
+   *
+   * @param {string} stripeSubscriptionId
+   * @returns {Promise<{success: boolean, deactivated: number}>}
+   */
+  static async deactivateStripeSubscriptionEntitlements(stripeSubscriptionId) {
+    if (!stripeSubscriptionId) return { success: false, error: 'MISSING_ID' };
+
+    try {
+      const result = await query(
+        `UPDATE user_entitlements
+           SET expires_at = NOW(), updated_at = NOW()
+         WHERE stripe_subscription_id = $1
+           AND (expires_at IS NULL OR expires_at > NOW())
+           AND is_lifetime = false
+         RETURNING id`,
+        [stripeSubscriptionId]
+      );
+      const deactivated = result.rows.length;
+      logger.info('[deactivateStripeSubscriptionEntitlements] Entitlements deactivated', {
+        stripeSubscriptionId, deactivated,
+      });
+      return { success: true, deactivated };
+    } catch (err) {
+      logger.error('[deactivateStripeSubscriptionEntitlements] Error', { error: err.message });
+      return { success: false, error: err.message };
+    }
+  }
 }
 
 module.exports = PaymentService;

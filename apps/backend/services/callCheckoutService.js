@@ -68,7 +68,7 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     throw err;
   }
 
-  if (!['epayco', 'dash'].includes(provider)) {
+  if (!['epayco', 'stripe', 'dash'].includes(provider)) {
     const err = new Error(`Invalid payment provider: ${provider}`);
     err.code = 'INVALID_PROVIDER';
     throw err;
@@ -133,6 +133,7 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
         [payment.id, JSON.stringify({ bookingId: booking.id })]
       );
       await slotClient.query('COMMIT');
+      paymentMetadata.bookingId = booking.id;
     } catch (lockErr) {
       await slotClient.query('ROLLBACK');
       // Mark the pending payment as failed so it doesn't orphan.
@@ -170,6 +171,64 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
           expected_epayco_currency: 'COP',
         }),
       ]
+    );
+  } else if (provider === 'stripe') {
+    // Stripe Checkout Session — one-time payment.
+    // pnptv_payment_id is threaded into the session metadata so the webhook
+    // handler can call onCallPaymentSuccess(paymentId) after confirmation.
+    const Stripe = require('stripe');
+    const stripeService = require('./stripeService');
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-04-10' });
+    const WEB_APP = process.env.WEB_APP_URL || 'https://pnptv.app';
+
+    let userEmail;
+    try {
+      const { rows: userRows } = await query('SELECT email FROM users WHERE id = $1', [memberId]);
+      userEmail = userRows[0]?.email || undefined;
+    } catch (_) { /* non-fatal */ }
+
+    const customerId = await stripeService.getOrCreateCustomer(memberId, userEmail);
+
+    const bookingId = paymentMetadata.bookingId || null;
+    const successPath = bookingId
+      ? `/booking/${bookingId}/confirm`
+      : `/dashboard?stripe=success&session_id={CHECKOUT_SESSION_ID}`;
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: 'usd',
+          unit_amount: Math.round(parseFloat(pkg.price_usd) * 100),
+          product_data: {
+            name: `${pkg.duration_minutes}-min Private Call`,
+            description: 'PNPtv private call booking',
+          },
+        },
+      }],
+      customer: customerId,
+      success_url: `${WEB_APP}${successPath}`,
+      cancel_url: `${WEB_APP}/`,
+      metadata: {
+        pnptv_user_id: String(memberId),
+        pnptv_payment_id: payment.id,
+        payment_type: 'call_package',
+        package_id: String(pkg.id),
+        package_sku: pkg.sku || '',
+      },
+    });
+
+    checkoutUrl = session.url;
+
+    // Store stripe_session_id on the payment row for idempotency
+    await query(
+      `UPDATE payments
+         SET stripe_session_id = $2,
+             metadata = metadata || $3::jsonb,
+             updated_at = NOW()
+       WHERE id = $1`,
+      [payment.id, session.id, JSON.stringify({ stripe_session_id: session.id, payment_url: session.url })]
     );
   }
 

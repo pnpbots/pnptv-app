@@ -394,6 +394,13 @@ export default function TokenCheckout() {
       return;
     }
 
+    // Stripe redirect — user paid and Stripe sent them back with ?stripe=success
+    if (searchParams.get("stripe") === "success") {
+      setState("pending");
+      startPolling(purchaseId);
+      return;
+    }
+
     getTokenCheckoutData(purchaseId)
       .then((res) => {
         if (!res.success) {
@@ -410,7 +417,7 @@ export default function TokenCheckout() {
           setState("error");
           return;
         }
-        if ((res.provider as string) !== "epayco") {
+        if ((res.provider as string) !== "epayco" && (res.provider as string) !== "stripe") {
           // Legacy Daimo purchase or unknown provider — Daimo is sunset.
           // Send the user back to the wallet where they can start a new
           // purchase via Card or Dash.
@@ -493,7 +500,7 @@ export default function TokenCheckout() {
             </p>
             {pollElapsed < POLL_TIMEOUT_MS ? (
               <p style={{ fontSize: 13, color: "var(--pnp-text-secondary, #8E8E93)", marginBottom: 20 }}>
-                Your payment was submitted. We&rsquo;re waiting for confirmation from ePayco.
+                Your payment was submitted. We&rsquo;re waiting for confirmation from the payment processor.
                 This usually takes a few seconds.
               </p>
             ) : (

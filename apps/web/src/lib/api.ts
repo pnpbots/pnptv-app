@@ -726,6 +726,10 @@ export function buyTokensCard(packageId: string): Promise<{ success: boolean; ch
   return request("/api/wallet/buy-card", { method: "POST", body: { packageId } });
 }
 
+export function buyTokensStripe(packageId: string): Promise<{ success: boolean; purchaseId: string; checkoutUrl: string; tokens: number; usd: number }> {
+  return request("/api/wallet/buy-stripe", { method: "POST", body: { packageId } });
+}
+
 export function buyTokensWallet(packageId: string): Promise<{ success: boolean; checkoutUrl: string; tokens: number; usd: number }> {
   return request("/api/wallet/buy-wallet", { method: "POST", body: { packageId } });
 }
@@ -2551,6 +2555,8 @@ export interface SubscriptionPlan {
   active: boolean;
   tier?: string;
   isLifetime?: boolean;
+  /** Stripe Price ID — required for Stripe checkout */
+  stripe_price_id?: string;
 }
 
 export function getSubscriptionPlans(): Promise<{
@@ -2629,6 +2635,64 @@ export function createPayment(
   });
 }
 
+// ─── Stripe payment API ───────────────────────────────────────────────────────
+
+export interface StripeCheckoutPayload {
+  planId: string;
+  priceId: string;
+  sku?: string;
+  metadata?: Record<string, string>;
+}
+
+export interface StripeCheckoutResponse {
+  success: boolean;
+  sessionId?: string;
+  checkoutUrl?: string;
+  error?: string;
+}
+
+/**
+ * Create a Stripe Checkout Session for a one-time payment
+ * (week pass, lifetime, call booking).
+ */
+export function createStripeCheckout(
+  payload: StripeCheckoutPayload
+): Promise<StripeCheckoutResponse> {
+  return request("/api/webapp/payments/stripe/checkout", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+/**
+ * Create a Stripe Checkout Session for a recurring subscription
+ * (monthly, annual plans).
+ */
+export function createStripeSubscription(
+  payload: StripeCheckoutPayload
+): Promise<StripeCheckoutResponse> {
+  return request("/api/webapp/payments/stripe/subscription", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+/**
+ * Open a Stripe Customer Portal session for self-service
+ * subscription management (cancel, update card, view invoices).
+ */
+export function createStripePortalSession(): Promise<{
+  success: boolean;
+  url?: string;
+  error?: string;
+}> {
+  return request("/api/webapp/payments/stripe/portal", {
+    method: "POST",
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export type PromoPricing = {
   originalPrice: number | null;
   discountAmount: number | null;
@@ -2674,6 +2738,18 @@ export function initiateCreatorSubscriptionPayment(
   return request("/api/webapp/payments/create", {
     method: "POST",
     body: { planId: "creator_monthly", provider, email, creatorId },
+  });
+}
+
+export function createCreatorStripeSubscription(creatorId: string): Promise<{
+  success: boolean;
+  checkoutUrl?: string;
+  sessionId?: string;
+  error?: string;
+}> {
+  return request("/api/webapp/payments/stripe/creator-subscription", {
+    method: "POST",
+    body: { creatorId },
   });
 }
 

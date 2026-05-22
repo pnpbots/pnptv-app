@@ -26,6 +26,7 @@ import {
   getBookingOptions,
   createCallCheckout,
   createCallCheckoutDash,
+  createStripeCheckout,
   getBookingPaymentStatus,
   assertPaymentUrl,
   type CallPackage,
@@ -37,7 +38,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "epayco" | "dash";
+type Provider = "stripe" | "dash";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -153,7 +154,7 @@ export function BookCallModal({
   const [isOnline, setIsOnline] = useState(initialIsOnline);
   const [duration, setDuration] = useState<30 | 60>(initialDuration);
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
-  const [provider, setProvider] = useState<Provider>("epayco");
+  const [provider, setProvider] = useState<Provider>("stripe");
   const [email, setEmail] = useState("");
 
   // ── Data state ──────────────────────────────────────────────────────────────
@@ -232,7 +233,7 @@ export function BookCallModal({
     setIsOnline(initialIsOnline);
     setDuration(initialDuration);
     setSelectedSlot(null);
-    setProvider("epayco");
+    setProvider("stripe");
     setEmail("");
     setCheckoutError(null);
     setConfirmedStartAt(null);
@@ -506,22 +507,23 @@ export function BookCallModal({
         return;
       }
 
-      const payload = {
+      // Stripe Checkout — call the backend to create a Checkout Session,
+      // then redirect to the Stripe-hosted page.
+      const callPayload = {
         packageId: activePackage.id,
-        provider,
+        // provider cast: backend now accepts 'stripe' as a valid provider value
+        provider: provider as "epayco",
         email,
         quantity: 1,
         selectedSlot: selectedSlot?.startUtc ?? null,
-        // Pass slot times so the backend locks the slot + creates a bookings
-        // row at checkout; this makes "My Upcoming Calls" + reminders work
-        // for ePayco-paid bookings (previously only Dash had this).
         ...(selectedSlot?.startUtc && selectedSlot?.endUtc
           ? { startTimeUtc: selectedSlot.startUtc, endTimeUtc: selectedSlot.endUtc }
           : {}),
       };
-      const res = await createCallCheckout(payload);
+      const res = await createCallCheckout(callPayload);
 
-      if (provider === "epayco" && res.checkoutUrl) {
+      if (provider === "stripe" && res.checkoutUrl) {
+        // Stripe redirects back to success_url after payment — same-tab navigation
         window.location.href = assertPaymentUrl(res.checkoutUrl);
         return;
       }
@@ -1096,8 +1098,8 @@ export function BookCallModal({
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider mb-2.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.paymentMethodLabel}</p>
         <div className="flex gap-2">
-          {(["epayco", "dash"] as Provider[]).map((p) => {
-            const label = p === "epayco" ? t.creator.payMethodCard : "Dash";
+          {(["stripe", "dash"] as Provider[]).map((p) => {
+            const label = p === "stripe" ? t.creator.payMethodCard : "Dash";
             return (
               <button
                 key={p}

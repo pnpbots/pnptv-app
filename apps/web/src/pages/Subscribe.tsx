@@ -6,6 +6,8 @@ import { QRCodeSVG } from "qrcode.react";
 import {
   getSubscriptionPlans,
   createPayment,
+  createStripeCheckout,
+  createStripeSubscription,
   getPaymentStatus,
   createDashSubscription,
   getDashSubscriptionStatus,
@@ -23,7 +25,7 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
 import { isTelegramContext } from "@/lib/telegram";
 
-type Provider = "epayco" | "dash";
+type Provider = "stripe" | "dash";
 
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
@@ -70,7 +72,7 @@ export default function Subscribe() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
-  const [provider, setProvider] = useState<Provider>("epayco");
+  const [provider, setProvider] = useState<Provider>("stripe");
   const [submitting, setSubmitting] = useState(false);
   const [showCOP, setShowCOP] = useState(false);
   // Per-plan benefits expand state — plans start collapsed (N-06)
@@ -445,43 +447,34 @@ export default function Subscribe() {
           setError(s.failedToCreateDashInvoice);
         }
       } else {
-        const result = await createPayment(
-          selectedPlan,
-          provider,
-          undefined,
-          appliedPromo?.code,
-        );
-        if (result.success && result.paymentUrl) {
-          const safeUrl = assertPaymentUrl(result.paymentUrl);
+        // Stripe checkout — requires a Stripe Price ID on the plan.
+        const plan = plans.find((p) => p.id === selectedPlan);
+        const priceId = plan?.stripe_price_id;
 
-          // F2: Write resume key BEFORE navigation so it survives a same-tab redirect.
-          if (result.paymentId) {
-            try { sessionStorage.setItem("pnp_pending_payment", result.paymentId); } catch {}
-            setPollingPaymentId(result.paymentId);
-          }
+        if (!priceId) {
+          setError("This plan is not yet available for card payment. Please use Dash or contact support.");
+          setSubmitting(false);
+          return;
+        }
 
-          // F1: Branch on Telegram WebView vs. normal browser.
-          // window.open() after an await loses the user-gesture context in Telegram WebView
-          // and mobile Safari, silently returning null or doing nothing.
-          if (isTelegramContext()) {
-            // Telegram Mini App SDK openLink() is safe to call outside a gesture context.
-            window.Telegram!.WebApp.openLink(safeUrl);
-          } else {
-            // F5: Detect popup-blocked condition (window.open returns null).
-            const newWin = window.open(safeUrl, "_blank", "noopener,noreferrer");
-            if (newWin === null) {
-              // Popup was blocked — inform the user, then fall back to same-tab navigation.
-              setError("Popup blocked — opening checkout in this tab…");
-              window.location.href = safeUrl;
-            }
-          }
+        const isRecurring = !isLifetimePlan(plan!) && (plan!.duration_days ?? 0) <= 365;
+        const payload = {
+          planId: selectedPlan,
+          priceId,
+          sku: plan?.sku || selectedPlan,
+          metadata: appliedPromo?.code ? { promo_code: appliedPromo.code } : {},
+        };
+
+        const result = isRecurring
+          ? await createStripeSubscription(payload)
+          : await createStripeCheckout(payload);
+
+        if (result.success && result.checkoutUrl) {
+          const safeUrl = assertPaymentUrl(result.checkoutUrl);
+          // Stripe redirects to success_url after completion — same-tab is correct.
+          window.location.href = safeUrl;
         } else {
-          // If the promo got rejected at claim-time (e.g. already_redeemed),
-          // surface the message and clear the applied promo so the user can retry.
-          setError(result.message || result.error || s.failedToCreatePayment);
-          if (result.error && /promo|claim|redeem/.test(result.error)) {
-            setAppliedPromo(null);
-          }
+          setError(result.error || s.failedToCreatePayment);
         }
       }
     } catch (err: unknown) {
@@ -1013,16 +1006,16 @@ export default function Subscribe() {
         <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">{s.paymentMethod}</h3>
         <div className="grid grid-cols-2 gap-2">
           <button
-            onClick={() => setProvider("epayco")}
+            onClick={() => setProvider("stripe")}
             className={`rounded-xl p-3 border-2 transition-all text-center ${
-              provider === "epayco"
+              provider === "stripe"
                 ? "border-[#D4007A] bg-[#D4007A]/10"
                 : "border-white/10 bg-white/5 hover:border-white/20"
             }`}
           >
             <div className="text-lg mb-1">💳</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">{s.cardPse}</div>
-            <div className="text-[10px] text-pnp-textSecondary">{s.cardPseDesc}</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">Card</div>
+            <div className="text-[10px] text-pnp-textSecondary">Credit / Debit</div>
           </button>
           <button
             onClick={() => dashAvailable !== false && setProvider("dash")}

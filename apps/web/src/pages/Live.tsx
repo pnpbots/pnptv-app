@@ -22,6 +22,7 @@ import {
   getTokenPackages,
   buyTokens,
   buyTokensCard,
+  buyTokensStripe,
   buyTokensWallet,
   linkDPNS,
   getWalletHistory,
@@ -306,12 +307,16 @@ export default function Live() {
     setBuyError(null);
     try {
       let checkoutUrl: string;
-      let openedPopup: Window | null = null;
       if (buyMethod === 'card') {
-        const result = await buyTokensCard(pkg.id);
+        // Stripe Checkout — same-tab redirect (no popup)
+        const result = await buyTokensStripe(pkg.id);
         checkoutUrl = assertPaymentUrl(result.checkoutUrl);
-        openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
-      } else if (buyMethod === 'wallet') {
+        setShowBuyModal(false);
+        window.location.href = checkoutUrl;
+        return;
+      }
+      let openedPopup: Window | null = null;
+      if (buyMethod === 'wallet') {
         const result = await buyTokensWallet(pkg.id);
         checkoutUrl = assertPaymentUrl(result.checkoutUrl);
         openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");

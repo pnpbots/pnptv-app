@@ -1827,6 +1827,173 @@ app.post('/api/webhook/epayco', webhookLimiter, webhookController.handleEpaycoWe
 app.post('/checkout/pnp', webhookLimiter, webhookController.handleEpaycoWebhook);
 app.post('/checkout/pnp/confirmation', webhookLimiter, webhookController.handleEpaycoWebhook);
 
+// Stripe webhook — checkout.session.completed, subscription events, invoice events
+// The global express.json() verify callback (line ~291) already stores the raw body
+// buffer in req.rawBody — handleStripeWebhook reads that directly.
+app.post(
+  '/api/webhooks/stripe',
+  webhookLimiter,
+  asyncHandler(webhookController.handleStripeWebhook)
+);
+
+// ── Stripe checkout / portal routes (authenticated) ───────────────────────────
+
+const stripeService = require('../../services/stripeService');
+
+// POST /api/webapp/payments/stripe/checkout — one-time payment checkout
+app.post('/api/webapp/payments/stripe/checkout', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { planId, sku, priceId, metadata } = req.body;
+
+  if (!priceId) {
+    return res.status(400).json({ success: false, error: 'priceId is required' });
+  }
+  if (!planId) {
+    return res.status(400).json({ success: false, error: 'planId is required' });
+  }
+
+  const successUrl = `https://pnptv.app/dashboard?stripe=success&session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `https://pnptv.app/`;
+
+  let email;
+  try {
+    const { rows } = await require('../../config/postgres').query(
+      'SELECT email FROM users WHERE id = $1',
+      [userId]
+    );
+    email = rows[0]?.email || undefined;
+  } catch (_) { /* non-fatal */ }
+
+  const { sessionId, url } = await stripeService.createCheckoutSession({
+    userId,
+    planId,
+    sku: sku || '',
+    priceId,
+    successUrl,
+    cancelUrl,
+    customerEmail: email,
+    metadata: metadata || {},
+  });
+
+  return res.json({ success: true, sessionId, checkoutUrl: url });
+}));
+
+// POST /api/webapp/payments/stripe/subscription — recurring subscription checkout
+app.post('/api/webapp/payments/stripe/subscription', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { planId, sku, priceId, metadata } = req.body;
+
+  if (!priceId) {
+    return res.status(400).json({ success: false, error: 'priceId is required' });
+  }
+  if (!planId) {
+    return res.status(400).json({ success: false, error: 'planId is required' });
+  }
+
+  const successUrl = `https://pnptv.app/dashboard?stripe=success&session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `https://pnptv.app/`;
+
+  let email;
+  try {
+    const { rows } = await require('../../config/postgres').query(
+      'SELECT email FROM users WHERE id = $1',
+      [userId]
+    );
+    email = rows[0]?.email || undefined;
+  } catch (_) { /* non-fatal */ }
+
+  const { sessionId, url } = await stripeService.createSubscriptionCheckout({
+    userId,
+    planId,
+    sku: sku || '',
+    priceId,
+    successUrl,
+    cancelUrl,
+    customerEmail: email,
+    metadata: metadata || {},
+  });
+
+  return res.json({ success: true, sessionId, checkoutUrl: url });
+}));
+
+// POST /api/webapp/payments/stripe/portal — customer portal (manage/cancel subscription)
+app.post('/api/webapp/payments/stripe/portal', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const returnUrl = `https://pnptv.app/settings/payments`;
+
+  // Look up the stripe customer id
+  const { rows } = await require('../../config/postgres').query(
+    'SELECT stripe_customer_id, email FROM users WHERE id = $1',
+    [userId]
+  );
+  const user = rows[0];
+
+  let customerId = user?.stripe_customer_id;
+  if (!customerId) {
+    // Create customer on demand so the portal session can be opened
+    customerId = await stripeService.getOrCreateCustomer(userId, user?.email || undefined);
+  }
+
+  const { url } = await stripeService.createCustomerPortalSession(customerId, returnUrl);
+  return res.json({ success: true, url });
+}));
+
+// POST /api/webapp/payments/stripe/creator-subscription — subscribe to a specific creator
+app.post('/api/webapp/payments/stripe/creator-subscription', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { creatorId } = req.body;
+  if (!creatorId) return res.status(400).json({ success: false, error: 'creatorId is required' });
+
+  const pg = require('../../config/postgres');
+
+  // Resolve creator type to determine pricing tier
+  const { rows: creatorRows } = await pg.query(
+    `SELECT u.creator_type FROM users u WHERE u.id = $1::text AND u.role IN ('creator','model')`,
+    [creatorId]
+  );
+  if (!creatorRows.length) return res.status(404).json({ success: false, error: 'Creator not found' });
+
+  const creatorType = creatorRows[0].creator_type;
+  const planMap = { ice: 'creator_ice', crystal: 'creator_crystal', diamond: 'creator_diamond' };
+  const planId = planMap[creatorType] || 'creator_monthly';
+
+  const { rows: planRows } = await pg.query(
+    'SELECT stripe_price_id FROM plans WHERE id = $1 AND active = true',
+    [planId]
+  );
+  const priceId = planRows[0]?.stripe_price_id;
+  if (!priceId) return res.status(400).json({ success: false, error: 'Stripe not configured for this creator tier' });
+
+  let email;
+  try {
+    const { rows } = await pg.query('SELECT email FROM users WHERE id = $1', [userId]);
+    email = rows[0]?.email || undefined;
+  } catch (_) { /* non-fatal */ }
+
+  const successUrl = `https://pnptv.app/profile/${creatorId}?stripe_sub=1`;
+  const cancelUrl  = `https://pnptv.app/profile/${creatorId}`;
+
+  const { sessionId, url } = await stripeService.createSubscriptionCheckout({
+    userId,
+    planId,
+    sku: planId,
+    priceId,
+    successUrl,
+    cancelUrl,
+    customerEmail: email,
+    metadata: { creatorId, payment_type: 'creator_subscription' },
+  });
+
+  return res.json({ success: true, sessionId, checkoutUrl: url });
+}));
+
+// ── Creator subscription user-facing routes ───────────────────────────────────
+
+const creatorController = require('./controllers/creatorController');
+app.get('/api/webapp/creator/:creatorId/subscription-status', requireSessionAuth, asyncHandler(creatorController.getSubscriptionStatus));
+app.post('/api/webapp/creator/:creatorId/subscribe', requireSessionAuth, asyncHandler(creatorController.subscribeToCreator));
+app.post('/api/webapp/creator/:creatorId/unsubscribe', requireSessionAuth, asyncHandler(creatorController.unsubscribeFromCreator));
+
 // LiveKit webhook — participant_joined, participant_left, room_finished
 // express.raw() is required — livekit-server-sdk verifies the raw body signature
 app.post(
@@ -8033,6 +8200,22 @@ app.post('/api/wallet/buy-card', requireSessionAuth, asyncHandler(async (req, re
       return res.status(400).json({ success: false, error: 'Invalid package ID' });
     }
     res.status(500).json({ success: false, error: 'Failed to create card checkout. Please try again.' });
+  }
+}));
+
+// POST /api/wallet/buy-stripe — purchase tokens via Stripe Checkout
+app.post('/api/wallet/buy-stripe', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  const { packageId } = req.body;
+  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
+  const userId = String(user.id);
+  try {
+    const result = await TokenCheckoutService.createStripeCheckout(userId, packageId);
+    res.json(result);
+  } catch (err) {
+    logger.error(`Wallet buy-stripe error: ${err.message}`);
+    if (err.code === 'INVALID_PACKAGE') return res.status(400).json({ success: false, error: 'Invalid package ID' });
+    res.status(500).json({ success: false, error: 'Failed to create Stripe checkout. Please try again.' });
   }
 }));
 

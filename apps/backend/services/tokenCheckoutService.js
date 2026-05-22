@@ -310,6 +310,97 @@ class TokenCheckoutService {
     };
   }
 
+  // ── Stripe checkout ───────────────────────────────────────────────────────
+
+  /**
+   * Create a Stripe Checkout Session for a token package.
+   * Records a pending purchase in token_purchases and returns the Stripe-hosted checkout URL.
+   *
+   * @param {string} userId
+   * @param {string} packageId  e.g. 'pkg_10'
+   * @returns {Promise<{
+   *   success: boolean,
+   *   purchaseId: string,
+   *   checkoutUrl: string,
+   *   tokens: number,
+   *   usd: number,
+   * }>}
+   */
+  static async createStripeCheckout(userId, packageId) {
+    const pkg = resolvePackage(packageId);
+    if (!pkg) throw Object.assign(new Error('Invalid package ID'), { code: 'INVALID_PACKAGE', status: 400 });
+
+    const purchaseUuid = uuidv4();
+    const invoiceKey = idempotencyKey('stripe', purchaseUuid);
+
+    let userEmail;
+    try {
+      const { rows } = await query('SELECT email FROM users WHERE id = $1', [userId]);
+      userEmail = rows[0]?.email || undefined;
+    } catch (_) {}
+
+    const Stripe = require('stripe');
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-04-10' });
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer_email: userEmail,
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: 'usd',
+          unit_amount: Math.round(pkg.usd * 100),
+          product_data: {
+            name: `${pkg.tokens} PNP Tokens`,
+            description: 'PNPtv tip tokens — use to tip creators during live shows',
+          },
+        },
+      }],
+      success_url: `${WEB_APP_URL}/token-checkout/${purchaseUuid}?stripe=success`,
+      cancel_url: `${WEB_APP_URL}/live`,
+      metadata: {
+        pnptv_user_id: String(userId),
+        payment_type: 'token_purchase',
+        purchase_uuid: purchaseUuid,
+      },
+    });
+
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      await insertPendingPurchase(client, {
+        purchaseUuid,
+        userId,
+        tokens: pkg.tokens,
+        usd: pkg.usd,
+        invoiceKey,
+        paymentMethod: 'stripe',
+      });
+      // Store stripe_session_id for idempotency lookup
+      await client.query(
+        `UPDATE token_purchases SET stripe_session_id = $1 WHERE purchase_uuid = $2`,
+        [session.id, purchaseUuid]
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      logger.error('TokenCheckoutService.createStripeCheckout DB error', { userId, packageId, error: err.message });
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    logger.info('Token Stripe checkout created', { userId, packageId, purchaseUuid, tokens: pkg.tokens, sessionId: session.id });
+
+    return {
+      success: true,
+      purchaseId: purchaseUuid,
+      checkoutUrl: session.url,
+      tokens: pkg.tokens,
+      usd: pkg.usd,
+    };
+  }
+
   // ── Checkout page data ────────────────────────────────────────────────────
 
   /**
@@ -428,6 +519,11 @@ class TokenCheckoutService {
           clientSecret: stored?.daimo_client_secret || null,
         },
       };
+    }
+
+    // Stripe — no widget needed; return base status so polling works
+    if (provider === 'stripe') {
+      return { ...base, success: true };
     }
 
     // Dash (BTCPay) — BTCPay has its own checkout page; no internal page needed
