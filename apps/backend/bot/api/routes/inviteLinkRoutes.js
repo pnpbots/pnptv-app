@@ -80,6 +80,7 @@ router.get('/invite/:code', checkLimiter, asyncHandler(async (req, res) => {
     maxUses: link.max_uses || null,
     useCount: link.use_count,
     sku: link.sku,
+    isLifetime: link.is_lifetime,
   });
 }));
 
@@ -119,7 +120,7 @@ router.get('/admin/invite-links', requireAdminAccess, asyncHandler(async (_req, 
  * Body: { note?, maxUses?, expiresAt? }
  */
 router.post('/admin/invite-links', requireAdminAccess, asyncHandler(async (req, res) => {
-  const { note, maxUses, expiresAt } = req.body;
+  const { note, maxUses, expiresAt, isLifetime } = req.body;
   const createdBy = req.user?.id || req.session?.user?.id;
 
   const link = await inviteLinkService.createLink({
@@ -127,6 +128,7 @@ router.post('/admin/invite-links', requireAdminAccess, asyncHandler(async (req, 
     note: note || null,
     maxUses: maxUses ? parseInt(maxUses, 10) : null,
     expiresAt: expiresAt || null,
+    isLifetime: isLifetime !== false,
   });
 
   return res.status(201).json({

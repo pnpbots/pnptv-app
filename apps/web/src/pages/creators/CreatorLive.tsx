@@ -5,6 +5,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
 import { getRtmpKey, provisionChannel, broadcastLiveNow } from "@/lib/api";
 
+const STUDIO_LOGIN_URL = `/login?returnTo=${encodeURIComponent("https://studio.pnptv.app/")}`;
+
 export default function CreatorLive() {
   const { user } = useAuth();
   const t = useI18n().creator;
@@ -208,7 +210,7 @@ export default function CreatorLive() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Option 1 — Stream from this app (recommended) */}
             <a
-              href="https://studio.pnptv.app"
+              href={STUDIO_LOGIN_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="relative block rounded-xl p-4 transition-all hover:scale-[1.02]"

@@ -621,7 +621,7 @@ export function LoginPage() {
     navigator.language?.startsWith("es") ? "es" : undefined,
   );
   const t = getI18n(lang).login;
-  const { refreshUser } = useAuth();
+  const { refreshUser, isAuthenticated, isLoading } = useAuth();
 
   const [lastMethod, setLastMethod] = useState<string | null>(null);
   const [lastUsername, setLastUsername] = useState<string | null>(null);
@@ -639,6 +639,12 @@ export function LoginPage() {
     }
 
   }, []);
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && returnTo) {
+      window.location.replace(returnTo);
+    }
+  }, [isAuthenticated, isLoading, returnTo]);
 
   // Handle Telegram widget redirect mode (popup blocked on mobile/some browsers).
   // Telegram delivers auth data either as:
@@ -849,8 +855,8 @@ export function LoginPage() {
       if (finish.user?.username) {
         try { localStorage.setItem("pnptv_last_username", finish.user.username); } catch { /* ignore */ }
       }
-      const rt = new URLSearchParams(window.location.search).get("returnTo");
-      window.location.href = rt && /^\/[a-z0-9/_-]*/i.test(rt) ? rt : "/";
+      const rt = sanitizeReturnTo(new URLSearchParams(window.location.search).get("returnTo"));
+      window.location.href = rt || "/";
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Passkey sign-in failed.";
       setPasskeyLoading(false);

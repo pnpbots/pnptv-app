@@ -57,6 +57,8 @@ import type { CreatorCardCreator } from "@/components/creators/CreatorCard";
 import { NearbyBadge, useNearbyToggle } from "@/components/NearbyBadge";
 import { getDistanceToUser } from "@/lib/api";
 
+const STUDIO_LOGIN_URL = `/login?returnTo=${encodeURIComponent("https://studio.pnptv.app/")}`;
+
 function resolvePhotoUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   // Only accept valid web paths, not Telegram file IDs
@@ -1258,7 +1260,7 @@ export default function Profile() {
                             </button>
                             <a
                               role="menuitem"
-                              href="https://studio.pnptv.app"
+                              href={STUDIO_LOGIN_URL}
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={() => setOverflowOpen(false)}

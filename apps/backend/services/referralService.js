@@ -184,9 +184,34 @@ async function grantReferralReward(refereeId, planId) {
   return { credited: true, referrerId: referralRow.referrer_id, tokens, planId };
 }
 
+/**
+ * List individual referral rows for a user, newest first.
+ * @param {string} userId
+ * @param {number} [limit=20]
+ * @returns {Promise<object[]>}
+ */
+async function getReferralList(userId, limit = 20) {
+  const { rows } = await query(
+    `SELECT
+       u.username            AS referee_username,
+       r.status,
+       r.reward_tokens,
+       r.created_at,
+       r.completed_at
+     FROM referrals r
+     LEFT JOIN users u ON u.id = r.referee_id
+     WHERE r.referrer_id = $1
+     ORDER BY r.created_at DESC
+     LIMIT $2`,
+    [userId, limit]
+  );
+  return rows;
+}
+
 module.exports = {
   getOrCreateRefCode,
   getReferralStats,
+  getReferralList,
   redeemReferral,
   grantReferralReward,
   tokenRewardForPlan,

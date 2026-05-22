@@ -644,8 +644,20 @@ export interface ReferralStats {
   tokensEarned?: number;
 }
 
+export interface ReferralEntry {
+  referee_username: string | null;
+  status: "pending" | "completed";
+  reward_tokens: number;
+  created_at: string;
+  completed_at: string | null;
+}
+
 export function getMyReferral(): Promise<ReferralStats> {
   return request("/api/webapp/me/referral");
+}
+
+export function getReferralList(): Promise<{ success: boolean; list: ReferralEntry[] }> {
+  return request("/api/webapp/me/referral/list");
 }
 
 export function redeemReferralCode(
@@ -6344,6 +6356,7 @@ export interface InviteLinkCheck {
   maxUses?: number | null;
   useCount?: number;
   sku?: string;
+  isLifetime?: boolean;
 }
 
 export function checkInviteLink(code: string): Promise<InviteLinkCheck> {
@@ -6362,6 +6375,7 @@ export function createAdminInviteLink(data: {
   note?: string;
   maxUses?: number | null;
   expiresAt?: string | null;
+  isLifetime?: boolean;
 }): Promise<{ success: boolean; code: string; url: string; link: InviteLink }> {
   return request("/api/admin/invite-links", { method: "POST", body: data });
 }

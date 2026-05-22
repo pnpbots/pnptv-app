@@ -272,41 +272,9 @@ function groupBehaviorMiddleware() {
         return;
       }
 
-      // Regular text message in a linked hangout group: rate-limited redirect
-      const isRegularTextMessage = ctx.message?.text && !isCommand;
-      if (isRegularTextMessage && userId) {
-        const HANGOUT_COOLDOWN_MS = 10 * 60 * 1000;
-        const cooldownKey = `u${userId}`;
-        const lastSent = hangoutRedirectCooldown[cooldownKey] || 0;
-
-        if (Date.now() - lastSent > HANGOUT_COOLDOWN_MS) {
-          hangoutRedirectCooldown[cooldownKey] = Date.now();
-
-          const { text, buttonText, buttonUrl } = getHangoutChatRedirectMessage({
-            username: displayName,
-            lang: userLang,
-            hangoutId: linkedHangout.hangoutId,
-            hangoutName: linkedHangout.hangoutName,
-            rules: linkedHangout.hangoutRules,
-          });
-
-          try {
-            const notice = await originalSendMessage(chatId, text, {
-              message_thread_id: ctx.message?.message_thread_id,
-              reply_to_message_id: ctx.message?.message_id,
-              reply_markup: { inline_keyboard: [[{ text: buttonText, url: buttonUrl }]] },
-            });
-            if (notice) {
-              ChatCleanupService.scheduleDelete(
-                ctx.telegram, chatId, notice.message_id, 'hangout-redirect-notice', AUTO_DELETE_DELAY
-              );
-            }
-            logger.info('Hangout redirect sent (linked group)', { userId, chatId, hangoutId: linkedHangout.hangoutId });
-          } catch (err) {
-            logger.debug('Could not send hangout redirect notice:', err.message);
-          }
-        }
-      }
+      // Linked hangout groups are already bridged into the app in real time.
+      // Do not inject Cristina redirect notices on normal chat messages here;
+      // they add noise and make the Telegram side feel spammy.
 
       // Still call next() so the bridge handler can mirror the message to the webapp
       return next();

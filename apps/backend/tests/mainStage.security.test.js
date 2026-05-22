@@ -155,6 +155,12 @@ jest.mock('../services/mainStageService', () => {
       if (queue.length >= MAX_CAMMERS)      return 'full';
       return 'added';
     }),
+    addCammerForce: jest.fn(async (identity) => {
+      const state = await _getState();
+      const queue = state.spotlight.queue || [];
+      if (queue.includes(String(identity))) return 'duplicate';
+      return 'added';
+    }),
     removeCammer: jest.fn(),
     setSpotlight: jest.fn(),
     advanceSpotlight: jest.fn(),

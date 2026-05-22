@@ -27,15 +27,15 @@ function generateCode() {
  * @param {string} [opts.expiresAt] - ISO string or null
  * @returns {Promise<object>}      - full invite_links row
  */
-async function createLink({ createdBy, note = null, maxUses = null, expiresAt = null } = {}) {
+async function createLink({ createdBy, note = null, maxUses = null, expiresAt = null, isLifetime = true } = {}) {
   if (!createdBy) throw new Error('createdBy is required');
 
   const code = generateCode();
   const { rows } = await query(
-    `INSERT INTO invite_links (code, created_by, note, max_uses, expires_at)
-     VALUES ($1, $2, $3, $4, $5::timestamptz)
+    `INSERT INTO invite_links (code, created_by, note, max_uses, expires_at, is_lifetime)
+     VALUES ($1, $2, $3, $4, $5::timestamptz, $6)
      RETURNING *`,
-    [code, String(createdBy), note, maxUses ?? null, expiresAt ?? null],
+    [code, String(createdBy), note, maxUses ?? null, expiresAt ?? null, isLifetime],
   );
   return rows[0];
 }
@@ -167,6 +167,15 @@ async function redeemLink(code, userId) {
     );
 
     await client.query('COMMIT');
+
+    if (link.is_lifetime) {
+      try {
+        const gamificationService = require('./gamificationService');
+        await gamificationService.awardBadge(uid, 'parche', null, 'Lifetime invite link redemption');
+      } catch (badgeErr) {
+        logger.warn('parche badge award failed (non-critical)', { userId: uid, error: badgeErr.message });
+      }
+    }
 
     logger.info('Invite link redeemed', { code: normalCode, userId: uid, alreadyHadEntitlement });
     return { success: true, alreadyRedeemed: false, alreadyHadEntitlement };

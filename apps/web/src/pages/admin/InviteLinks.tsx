@@ -37,6 +37,7 @@ function CreateModal({ onClose, onCreated }: CreateModalProps) {
   const [note, setNote] = useState("");
   const [maxUses, setMaxUses] = useState<string>("");
   const [expiresAt, setExpiresAt] = useState<string>("");
+  const [isLifetime, setIsLifetime] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +50,7 @@ function CreateModal({ onClose, onCreated }: CreateModalProps) {
         note: note.trim() || undefined,
         maxUses: maxUses ? parseInt(maxUses, 10) : null,
         expiresAt: expiresAt || null,
+        isLifetime,
       });
       if (result.success) {
         onCreated(result.link, result.url);
@@ -91,11 +93,10 @@ function CreateModal({ onClose, onCreated }: CreateModalProps) {
               onChange={(e) => setNote(e.target.value)}
               placeholder="p.ej. Grupo Colombia Telegram"
               maxLength={200}
-              className="w-full rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:ring-1"
+              className="w-full rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:ring-1 focus:ring-[#D4007A]"
               style={{
                 background: "rgba(255,255,255,0.06)",
                 border: "1px solid rgba(255,255,255,0.10)",
-                focusRingColor: "#D4007A",
               }}
             />
           </div>
@@ -127,6 +128,32 @@ function CreateModal({ onClose, onCreated }: CreateModalProps) {
               style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", colorScheme: "dark" }}
             />
           </div>
+
+          <label
+            className="flex items-center gap-3 cursor-pointer select-none"
+            style={{ padding: "10px 14px", borderRadius: 12, background: isLifetime ? "rgba(255,180,84,0.08)" : "rgba(255,255,255,0.04)", border: `1px solid ${isLifetime ? "rgba(255,180,84,0.25)" : "rgba(255,255,255,0.08)"}`, transition: "all 0.15s" }}
+          >
+            <input
+              type="checkbox"
+              checked={isLifetime}
+              onChange={(e) => setIsLifetime(e.target.checked)}
+              className="sr-only"
+            />
+            <span
+              className="inline-flex items-center justify-center w-5 h-5 rounded-md flex-shrink-0"
+              style={{ background: isLifetime ? "linear-gradient(135deg,#FFB454,#FF9933)" : "rgba(255,255,255,0.08)", border: `1.5px solid ${isLifetime ? "#FFB454" : "rgba(255,255,255,0.18)"}`, transition: "all 0.15s" }}
+            >
+              {isLifetime && <span className="text-white text-xs font-bold">✓</span>}
+            </span>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: isLifetime ? "#FFB454" : "rgba(255,255,255,0.6)" }}>
+                💎 Acceso de por vida + badge Parche
+              </p>
+              <p className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
+                Otorga pnp-member vitalicio y el badge Parche 💎 al canjear
+              </p>
+            </div>
+          </label>
 
           {error && (
             <p className="text-xs text-red-400">{error}</p>
@@ -238,10 +265,10 @@ export default function InviteLinks() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-lg font-bold text-white">
-            🇨🇴 Enlace de Invitación — Socio Colombia
+            🔗 Enlaces de Invitación
           </h1>
           <p className="text-sm text-white/50 mt-0.5">
-            Cada enlace otorga membresía pnp-member de por vida + badge Socio Colombia.
+            Los enlaces 💎 otorgan pnp-member vitalicio + badge Socio Colombia + badge Parche.
           </p>
         </div>
         <button
@@ -311,7 +338,7 @@ export default function InviteLinks() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: "rgba(255,255,255,0.04)" }}>
-                  {["Código", "Nota", "Usos", "Expira", "Estado", "Acción"].map((h) => (
+                  {["Código", "Tipo", "Nota", "Usos", "Expira", "Estado", "Acción"].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-left text-xs font-semibold text-white/50 uppercase tracking-wider whitespace-nowrap"
@@ -334,6 +361,18 @@ export default function InviteLinks() {
                     <tr key={link.code} style={{ background: rowBg }}>
                       <td className="px-4 py-3 font-mono font-bold text-white/90">
                         {link.code}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {link.is_lifetime ? (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
+                            style={{ background: "rgba(255,180,84,0.12)", color: "#FFB454", border: "1px solid rgba(255,180,84,0.25)" }}
+                          >
+                            💎 Lifetime
+                          </span>
+                        ) : (
+                          <span className="text-xs text-white/30">Regular</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-white/60 max-w-xs truncate">
                         {link.note || <span className="text-white/25 italic">sin nota</span>}

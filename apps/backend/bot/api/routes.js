@@ -2539,6 +2539,25 @@ const oidcCallbackLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const OIDC_ALLOWED_RETURN_HOSTS = new Set([
+  'pnptv.app',
+  'app.pnptv.app',
+  'studio.pnptv.app',
+]);
+
+function sanitizeOidcReturnTo(raw) {
+  if (typeof raw !== 'string' || !raw) return '/';
+  if (/^\/[a-z0-9/_-]*/i.test(raw)) return raw;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:') return '/';
+    if (!OIDC_ALLOWED_RETURN_HOSTS.has(parsed.hostname)) return '/';
+    return parsed.toString();
+  } catch {
+    return '/';
+  }
+}
+
 /**
  * GET /api/webapp/auth/oidc/login
  * Initiate Authentik OIDC login. Generates a PKCE verifier + state, stores them
@@ -2557,9 +2576,7 @@ app.get('/api/webapp/auth/oidc/login', oidcLoginLimiter, asyncHandler(async (req
 
   // Store verifier + optional return URL in Redis (single-use, 10 min TTL)
   const redis = getRedis();
-  const returnTo = typeof req.query.return_to === 'string' && /^\/[a-z0-9/_-]*/i.test(req.query.return_to)
-    ? req.query.return_to
-    : '/';
+  const returnTo = sanitizeOidcReturnTo(req.query.return_to);
   const pkceKey = `oidc:pkce:${state}`;
   await redis.set(pkceKey, JSON.stringify({ codeVerifier, returnTo }), 'EX', 600);
 
@@ -2600,8 +2617,9 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
   const APP_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
   const loginRedirect = (code, returnTo) => {
     const qs = new URLSearchParams({ oidc_error: code });
-    if (typeof returnTo === 'string' && /^\/[a-z0-9/_-]*/i.test(returnTo)) {
-      qs.set('returnTo', returnTo);
+    const safeReturnTo = sanitizeOidcReturnTo(returnTo);
+    if (safeReturnTo !== '/') {
+      qs.set('returnTo', safeReturnTo);
     }
     return `${APP_URL}/login?${qs.toString()}`;
   };
@@ -2932,8 +2950,13 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     } catch {}
   });
 
-  // Redirect to the app (return_to must start with / to prevent open redirect)
-  const safeReturnTo = typeof returnTo === 'string' && /^\/[a-z0-9/_-]*/i.test(returnTo) ? returnTo : '/';
+  // Redirect back to the trusted caller, preserving cross-subdomain Studio SSO.
+  const safeReturnTo = sanitizeOidcReturnTo(returnTo);
+  if (safeReturnTo.startsWith('https://')) {
+    const target = new URL(safeReturnTo);
+    target.searchParams.set('oidc_linked', '1');
+    return res.redirect(target.toString());
+  }
   res.redirect(`${APP_URL}${safeReturnTo === '/' ? '' : safeReturnTo}?oidc_linked=1`);
 }));
 
@@ -5780,6 +5803,13 @@ app.get('/api/webapp/me/referral', asyncHandler(async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
   const stats = await referralService.getReferralStats(user.id);
   return res.json({ ...stats, link: `https://app.pnptv.app/join?ref=${stats.code}` });
+}));
+
+app.get('/api/webapp/me/referral/list', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ error: 'Not authenticated' });
+  const list = await referralService.getReferralList(user.id);
+  return res.json({ success: true, list });
 }));
 
 // Referral: redeem a code (called on register)

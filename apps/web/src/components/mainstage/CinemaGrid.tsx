@@ -57,11 +57,11 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        manifestLoadingMaxRetry: 4,
+        manifestLoadingMaxRetry: 6,
         manifestLoadingRetryDelay: 2000,
-        levelLoadingMaxRetry: 4,
+        levelLoadingMaxRetry: 6,
         levelLoadingRetryDelay: 2000,
-        fragLoadingMaxRetry: 4,
+        fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 2000,
       });
       hlsRef.current = hls;
@@ -106,7 +106,7 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
     // Anti-capture: play Prime Videos slightly fast so screen recordings
     // desync and don't match the original master. Main Stage is silent by
     // design so there's no pitch artifact.
-    if (kind === "video") el.playbackRate = 1.25;
+    // if (kind === "video") el.playbackRate = 1.08;
     if (!canPlay) return;
     if (playing) {
       el.play().catch(() => {
@@ -170,7 +170,7 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
             {t.mainStageTapForSound}
           </button>
         )}
-        <audio ref={audioRef} autoPlay playsInline preload="auto" muted />
+        <audio ref={audioRef} playsInline preload="auto" muted />
       </div>
     );
   }
@@ -180,7 +180,6 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
       <video
         ref={videoRef}
         className="w-full h-full object-contain"
-        autoPlay
         playsInline
         preload="auto"
         muted={muted}
@@ -236,8 +235,8 @@ function PrimeWatermark() {
   const [cornerIdx, setCornerIdx] = useState(() => Math.floor(Math.random() * 4));
   const [patternOffset, setPatternOffset] = useState(() => Math.floor(Math.random() * 300));
   useEffect(() => {
-    const cornerTimer = setInterval(() => setCornerIdx((i) => (i + 1) % 4), 8000);
-    const patternTimer = setInterval(() => setPatternOffset((o) => (o + 47) % 300), 4000);
+    const cornerTimer = setInterval(() => setCornerIdx((i) => (i + 1) % 4), 10000);
+    const patternTimer = setInterval(() => setPatternOffset((o) => (o + 47) % 300), 12000);
     return () => { clearInterval(cornerTimer); clearInterval(patternTimer); };
   }, []);
 
@@ -280,7 +279,8 @@ function PrimeWatermark() {
           backgroundRepeat: "repeat",
           backgroundSize: "320px 180px",
           backgroundPosition: `${patternOffset}px ${patternOffset}px`,
-          transition: "background-position 3s linear",
+          transition: "background-position 12s linear",
+          willChange: "background-position",
         }}
       />
 
@@ -333,15 +333,14 @@ function PrimeWatermark() {
 
 /**
  * Strip tile for the Cinema layout cammer row.
- * Requests VideoQuality.LOW to reduce decoder pressure when many participants
- * are visible simultaneously (12 cammers + ingress can saturate ~16 slots).
+ * Requests VideoQuality.MEDIUM to provide better visual clarity for cammers.
  * Tile height uses viewport-relative clamping for clean desktop scaling.
  */
 function CinemaStripTile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
   useEffect(() => {
     const pub = trackRef.publication as RemoteTrackPublication | undefined;
     if (!pub || !("setVideoQuality" in pub)) return;
-    pub.setVideoQuality(VideoQuality.LOW);
+    pub.setVideoQuality(VideoQuality.MEDIUM);
   }, [trackRef.publication]);
 
   return (

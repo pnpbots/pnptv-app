@@ -134,6 +134,7 @@ const Compliance2257 = lazy(() => import("@/pages/admin/Compliance2257"));
 const AdminInviteLinks = lazy(() => import("@/pages/admin/InviteLinks"));
 const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
 const GamificationPage = lazy(() => import("@/pages/GamificationPage"));
+const ReferralCenter = lazy(() => import("@/pages/ReferralCenter"));
 const InvitePage = lazy(() => import("@/pages/InvitePage"));
 
 // Creator Studio pages
@@ -484,6 +485,16 @@ export const router = createBrowserRouter([
           <ModuleLoader>
             <VerificationGate>
               <GamificationPage />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "referrals",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <ReferralCenter />
             </VerificationGate>
           </ModuleLoader>
         ),

@@ -26,6 +26,9 @@ const ALLOWED_RETURN_HOSTS = new Set([
 
 export function sanitizeReturnTo(raw: string | null | undefined): string | null {
   if (!raw) return null;
+  if (/^\/[a-z0-9/_-]*/i.test(raw)) {
+    return raw;
+  }
   try {
     const url = new URL(raw);
     if (url.protocol !== "https:") return null;
