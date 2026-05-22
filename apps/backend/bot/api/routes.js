@@ -351,7 +351,7 @@ app.use(ipTracker); // Log every authenticated request IP for security
 // Cached per-IP in Redis 1h to avoid the geoip lookup on every request.
 // (geoip module is already required at the top of the file — reuse it.)
 const BLOCKED_US_REGIONS = new Set();
-const BLOCKED_COUNTRIES = new Set(['CO']);
+const BLOCKED_COUNTRIES = new Set();
 // Per-user geo-block whitelist — bypasses the hard country block for specific user IDs.
 const GEO_BLOCK_USER_WHITELIST = new Set(['7246621722']); // PNPLatinoBoy
 const GEO_BLOCK_BYPASS_PATHS = [
@@ -1214,7 +1214,7 @@ const limiter = rateLimit({
   },
 });
 app.use('/api/', limiter);
-// colombiaAccessGate removed — Colombia is now hard-blocked via BLOCKED_COUNTRIES
+app.use(colombiaAccessGate);
 
 const ageVerificationUpload = multer({
   storage: multer.memoryStorage(),
