@@ -1258,7 +1258,7 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
         display: "flex",
         flexDirection: "column",
         overflowX: "hidden",
-        paddingBottom: 260,
+        paddingBottom: 300,
       }}
     >
       {/* Ambient glow */}
@@ -1454,25 +1454,39 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
         </div>
 
         {/* Payment method selector */}
-        <div style={{ display: "flex", gap: 6, padding: "0 16px 6px" }}>
-          {([
-            { id: "email" as PayMethod, emoji: "📧", label: es ? "Email" : "Email", disabled: false },
-            { id: "epayco" as PayMethod, emoji: "💳", label: es ? "Tarjeta" : "Card", disabled: false },
-            { id: "dash" as PayMethod, emoji: "🥷", label: "Dash", disabled: dashAvailable === false },
-          ]).map(({ id, emoji, label, disabled }) => (
-            <button
-              key={id}
-              onClick={() => { if (!disabled) { setPayMethod(id); setPayError(null); } }}
-              disabled={disabled}
-              style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, padding: "7px 4px", borderRadius: 10, border: `1px solid ${payMethod === id ? "rgba(255,153,51,0.6)" : "rgba(255,255,255,0.10)"}`, background: payMethod === id ? "rgba(255,153,51,0.12)" : "rgba(255,255,255,0.03)", color: payMethod === id ? "#ff9933" : disabled ? "#636366" : "#cfcfd4", fontSize: 11, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1, whiteSpace: "nowrap", position: "relative" }}
-            >
-              <span>{emoji}</span>
-              <span>{label}</span>
-              {id === "dash" && dashAvailable !== false && (
-                <span style={{ position: "absolute", top: -5, right: -4, fontSize: 8, fontWeight: 700, background: "#008DE4", color: "#fff", padding: "1px 4px", borderRadius: 99, lineHeight: 1.4 }}>ANON</span>
-              )}
-            </button>
-          ))}
+        <div style={{ padding: "0 16px 6px" }}>
+          <p style={{ margin: "0 0 7px", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(207,207,212,0.45)", textAlign: "center" }}>
+            {es ? "¿Cómo quieres pagar?" : "How do you want to pay?"}
+          </p>
+          <div style={{ display: "flex", gap: 6 }}>
+            {([
+              { id: "email" as PayMethod, emoji: "📧", label: es ? "Email" : "Email", sublabel: es ? "Link Meru · Fácil" : "Meru link · Easy", disabled: false },
+              { id: "epayco" as PayMethod, emoji: "💳", label: es ? "Tarjeta" : "Card", sublabel: "Visa / Mastercard", disabled: false },
+              { id: "dash" as PayMethod, emoji: "🥷", label: "Crypto", sublabel: es ? "Anónimo · Dash" : "Anonymous · Dash", disabled: dashAvailable === false },
+            ]).map(({ id, emoji, label, sublabel, disabled }) => {
+              const sel = payMethod === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => { if (!disabled) { setPayMethod(id); setPayError(null); } }}
+                  disabled={disabled}
+                  style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, padding: "8px 4px", borderRadius: 12, border: `1.5px solid ${sel ? "rgba(255,153,51,0.75)" : "rgba(255,255,255,0.10)"}`, background: sel ? "rgba(255,153,51,0.13)" : "rgba(255,255,255,0.03)", color: sel ? "#ff9933" : disabled ? "#636366" : "#cfcfd4", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1, position: "relative", boxShadow: sel ? "0 0 16px rgba(255,153,51,0.22)" : "none", transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s" }}
+                >
+                  <span style={{ fontSize: 18, lineHeight: 1, marginBottom: 2 }}>{emoji}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>{label}</span>
+                  <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.65, lineHeight: 1.3, textAlign: "center", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sublabel}</span>
+                  {id === "dash" && dashAvailable !== false && (
+                    <span style={{ position: "absolute", top: -5, right: -4, fontSize: 7, fontWeight: 800, background: "#008DE4", color: "#fff", padding: "1px 4px", borderRadius: 99, lineHeight: 1.4, letterSpacing: "0.03em" }}>ANON</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <p style={{ margin: "6px 0 0", fontSize: 10, color: "rgba(207,207,212,0.45)", textAlign: "center", lineHeight: 1.4, minHeight: 14 }}>
+            {payMethod === "email" && (es ? "Recibe un enlace de pago por correo. Sin tarjeta, sin cuenta." : "Get a payment link by email. No card or account needed.")}
+            {payMethod === "epayco" && (es ? "Paga con Visa o Mastercard de forma segura vía ePayco." : "Pay securely with Visa or Mastercard via ePayco.")}
+            {payMethod === "dash" && (es ? "Criptomoneda Dash — rápido, sin nombre, sin banco." : "Dash crypto — fast, no name, no bank required.")}
+          </p>
         </div>
 
         {/* CTA button */}

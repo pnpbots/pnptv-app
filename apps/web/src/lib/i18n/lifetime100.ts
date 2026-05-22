@@ -5,40 +5,40 @@ export const strings = {
 
     // ── Hero ───────────────────────────────────────────────────────────────────
     heroTitle: "Lifetime Member + 2 Months PRIME",
-    heroSubtitle: "One time payment. Member forever, PRIME for 2 months.",
+    heroSubtitle: "Pay once. Yours forever.",
 
     // ── Pricing card ──────────────────────────────────────────────────────────
     oldPrice: "$250",
     newPrice: "$100",
-    limitedBadge: "Limited Time Offer",
+    limitedBadge: "FOUNDERS PRICE · LIMITED SPOTS",
 
-    // ── Benefits list (5 items) ────────────────────────────────────────────────
+    // ── Benefits list ─────────────────────────────────────────────────────────
     benefits: [
-      "Lifetime Member access — Hangouts, Live streams, Social feed, Direct Messages, and Booking forever.",
-      "2 months of PRIME — Exclusive adult content, premium media library, and all PRIME features included.",
-      "Access to PNP Connect, PNP Hangouts, and PNP Live.",
-      "Access to our Community Telegram Group.",
-      "24/7 Support through our AI powered chat bot.",
+      "Pay once — full access forever, no renewals ever.",
+      "2 months PRIME included — all exclusive content unlocked from day one.",
+      "Everything: Live streams, Hangouts, Feed, DMs, Nearby, Videorama.",
+      "Private sessions with creators + founding member status.",
+      "Priority support, always.",
     ],
 
     // ── "Before you pay" notice ────────────────────────────────────────────────
-    noticeTitle: "Before you pay — please read",
+    noticeTitle: "Good to know",
     noticeFundraising:
-      "Special fundraising price. Your one-time $100 helps us finish building PNPtv. This is a founders' price while we complete the app.",
+      "Your $100 goes directly to building PNPtv — founders' price while we finish.",
     noticeEarlyAccess:
-      "Early access forever. You'll use PNPtv early and keep lifetime access to every feature we launch.",
+      "You lock in lifetime access to every feature we ever ship.",
     noticeInProgress:
-      "Work in progress. Some features are still being built. You may find rough edges or work-in-progress screens.",
+      "Some screens still in progress — we're moving fast.",
 
     // ── Sticky CTA ─────────────────────────────────────────────────────────────
-    ctaGetAccess: "GET LIFETIME ACCESS",
+    ctaGetAccess: "CLAIM YOUR SPOT — $100",
     ctaLoading: "Checking availability...",
     ctaSoldOut: "Sold Out",
 
     // ── Email capture modal ────────────────────────────────────────────────────
-    modalTitle: "Reserve Your Spot",
+    modalTitle: "Get Your Payment Link",
     modalSubtitle:
-      "Enter your email and we'll send you a unique payment link. After paying, you'll get a code to activate your lifetime membership.",
+      "Enter your email — we send a secure Meru payment link instantly. After paying you'll get an activation code.",
     emailLabel: "Email address",
     emailPlaceholder: "you@example.com",
     invalidEmail: "Please enter a valid email address.",
@@ -49,15 +49,15 @@ export const strings = {
     // ── Confirmation modal ─────────────────────────────────────────────────────
     confirmationTitle: "Check Your Email!",
     confirmationBody:
-      "We've sent a payment link to your inbox. Complete the payment and you'll receive an activation code within minutes.",
+      "Payment link sent. Complete the payment and you'll get an activation code within minutes.",
     confirmationCheckEmail:
-      "Didn't get it? Check your spam folder or try again.",
+      "Didn't get it? Check spam or try again.",
     confirmationClose: "Got it",
 
     // ── Activate view ──────────────────────────────────────────────────────────
     activateTitle: "Activate Your Membership",
     activateSubtitle:
-      "Enter the activation code you received after completing your payment.",
+      "Enter the activation code from your payment confirmation email.",
     codeLabel: "Activation code",
     codePlaceholder: "Enter your code",
     activateSubmit: "Activate",
@@ -73,9 +73,9 @@ export const strings = {
       "All spots have been claimed. Join our waitlist to be notified if a spot opens up.",
     errorCodeExpired:
       "This code has expired. Please request a new payment link.",
-    errorCodeInvalid: "Code not found. Double-check your code and try again.",
+    errorCodeInvalid: "Code not found. Double-check and try again.",
     errorPaymentNotReceived:
-      "Payment not received yet. Please wait a few minutes and try again.",
+      "Payment not received yet. Wait a few minutes and try again.",
 
     // ── Already paid link ──────────────────────────────────────────────────────
     alreadyPaid: "Already paid?",
@@ -88,59 +88,59 @@ export const strings = {
 
     // ── Hero ───────────────────────────────────────────────────────────────────
     heroTitle: "Miembro de por vida + 2 Meses PRIME",
-    heroSubtitle: "Un solo pago. Miembro para siempre, PRIME por 2 meses.",
+    heroSubtitle: "Paga una vez. Tuyo para siempre.",
 
     // ── Pricing card ──────────────────────────────────────────────────────────
     oldPrice: "$250",
     newPrice: "$100",
-    limitedBadge: "Oferta Limitada",
+    limitedBadge: "PRECIO DE FUNDADORES · CUPOS LIMITADOS",
 
-    // ── Benefits list (5 items) ────────────────────────────────────────────────
+    // ── Benefits list ─────────────────────────────────────────────────────────
     benefits: [
-      "Acceso Member de por vida — Hangouts, Live streams, Social feed, Mensajes Directos y Reservas para siempre.",
-      "2 meses de PRIME — Contenido adulto exclusivo, biblioteca multimedia premium y todas las funciones PRIME incluidas.",
-      "Acceso a PNP Connect, Hangouts y Live.",
-      "Acceso a nuestro Grupo de Comunidad en Telegram.",
-      "Soporte 24/7 a través de nuestro chat bot con IA.",
+      "Paga una vez — acceso completo para siempre, sin renovaciones.",
+      "2 meses PRIME incluidos — todo el contenido exclusivo desbloqueado desde el primer día.",
+      "Todo: Live, Hangouts, Feed, Mensajes, Nearby, Videorama.",
+      "Sesiones privadas con creadores + estatus de miembro fundador.",
+      "Soporte prioritario, siempre.",
     ],
 
     // ── "Before you pay" notice ────────────────────────────────────────────────
-    noticeTitle: "Antes de pagar — por favor lee",
+    noticeTitle: "Bueno saber",
     noticeFundraising:
-      "Precio especial de recaudación. Tu pago único de $100 nos ayuda a terminar de construir PNPtv. Es un precio de fundadores mientras completamos la app.",
+      "Tu $100 va directamente a construir PNPtv — precio de fundadores mientras terminamos.",
     noticeEarlyAccess:
-      "Acceso anticipado para siempre. Serás de los primeros en usar PNPtv y mantendrás acceso de por vida a cada función que lancemos.",
+      "Aseguras acceso de por vida a cada función que lancemos.",
     noticeInProgress:
-      "En desarrollo. Algunas funciones aún se están construyendo. Podrías encontrar detalles sin pulir o pantallas en desarrollo.",
+      "Algunas pantallas aún en progreso — avanzando rápido.",
 
     // ── Sticky CTA ─────────────────────────────────────────────────────────────
-    ctaGetAccess: "OBTENER ACCESO DE POR VIDA",
+    ctaGetAccess: "RECLAMA TU LUGAR — $100",
     ctaLoading: "Verificando disponibilidad...",
     ctaSoldOut: "Agotado",
 
     // ── Email capture modal ────────────────────────────────────────────────────
-    modalTitle: "Reserva Tu Lugar",
+    modalTitle: "Obtén Tu Link de Pago",
     modalSubtitle:
-      "Ingresa tu correo y te enviaremos un enlace de pago único. Después de pagar, recibirás un código para activar tu membresía de por vida.",
+      "Escribe tu correo — te enviamos un link de pago seguro al instante. Después de pagar recibes tu código de activación.",
     emailLabel: "Correo electrónico",
     emailPlaceholder: "tu@correo.com",
     invalidEmail: "Por favor ingresa un correo electrónico válido.",
-    modalSubmit: "Enviar Mi Enlace",
+    modalSubmit: "Enviar Mi Link",
     modalSubmitting: "Enviando...",
     modalCancel: "Cancelar",
 
     // ── Confirmation modal ─────────────────────────────────────────────────────
     confirmationTitle: "¡Revisa Tu Correo!",
     confirmationBody:
-      "Te hemos enviado un enlace de pago a tu bandeja de entrada. Completa el pago y recibirás un código de activación en minutos.",
+      "Link de pago enviado. Completa el pago y recibirás tu código de activación en minutos.",
     confirmationCheckEmail:
-      "¿No lo ves? Revisa tu carpeta de spam o intenta de nuevo.",
+      "¿No lo ves? Revisa spam o intenta de nuevo.",
     confirmationClose: "Entendido",
 
     // ── Activate view ──────────────────────────────────────────────────────────
     activateTitle: "Activa Tu Membresía",
     activateSubtitle:
-      "Ingresa el código de activación que recibiste después de completar tu pago.",
+      "Ingresa el código de activación de tu correo de confirmación de pago.",
     codeLabel: "Código de activación",
     codePlaceholder: "Ingresa tu código",
     activateSubmit: "Activar",
@@ -157,9 +157,9 @@ export const strings = {
     errorCodeExpired:
       "Este código ha expirado. Por favor solicita un nuevo enlace de pago.",
     errorCodeInvalid:
-      "Código no encontrado. Verifica tu código e intenta de nuevo.",
+      "Código no encontrado. Verifica e intenta de nuevo.",
     errorPaymentNotReceived:
-      "Pago no recibido aún. Por favor espera unos minutos e intenta de nuevo.",
+      "Pago no recibido aún. Espera unos minutos e intenta de nuevo.",
 
     // ── Already paid link ──────────────────────────────────────────────────────
     alreadyPaid: "¿Ya pagaste?",
