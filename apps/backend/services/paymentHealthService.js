@@ -123,6 +123,25 @@ class PaymentHealthService {
       logger.warn(`paymentHealth: pg query failed: ${err.message}`);
     }
 
+    // ── Pending token purchases (stuck > 30 min) ─────────────────────────
+    let pendingTokenCount = 0;
+    let pendingTokenMaxAgeMinutes = 0;
+    try {
+      const r = await query(
+        `SELECT COUNT(*)::int AS count,
+                COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60), 0)::int AS max_age_min
+         FROM token_purchases
+         WHERE status = 'pending'
+           AND btcpay_invoice_id IS NOT NULL
+           AND created_at < NOW() - INTERVAL '30 minutes'
+           AND created_at > NOW() - INTERVAL '30 days'`
+      );
+      pendingTokenCount = r.rows[0]?.count || 0;
+      pendingTokenMaxAgeMinutes = r.rows[0]?.max_age_min || 0;
+    } catch (err) {
+      logger.warn(`paymentHealth: token_purchases query failed: ${err.message}`);
+    }
+
     // ── Boot-check marker from Redis ────────────────────────────────────
     let bootCheck = { ok: false, recordedAt: null, autoConfigured: false, ageMinutes: null, reason: 'no_marker' };
     let redisReachable = true;
@@ -153,6 +172,7 @@ class PaymentHealthService {
     // Aggregate verdict — every structural fix in place + nothing stuck pending too long.
     const ok = m233 && m234 && m235
       && pendingMaxAgeMinutes < 30
+      && pendingTokenMaxAgeMinutes < 60
       && bootCheck.ok === true
       && pgReachable
       && redisReachable;
@@ -168,6 +188,10 @@ class PaymentHealthService {
       pendingDash: {
         count: pendingCount,
         maxAgeMinutes: pendingMaxAgeMinutes,
+      },
+      pendingTokens: {
+        count: pendingTokenCount,
+        maxAgeMinutes: pendingTokenMaxAgeMinutes,
       },
       bootCheck,
       postgres: { reachable: pgReachable },

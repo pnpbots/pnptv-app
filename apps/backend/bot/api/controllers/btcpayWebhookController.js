@@ -498,17 +498,19 @@ async function handleBtcpayWebhook(req, res) {
         return res.status(200).json({ success: false, error: 'plan_not_found', invoiceId });
       }
 
-      // Synthesize an order-like shape so settleSubscription can be reused.
-      const syntheticOrder = {
-        id: null,
-        user_id: metaUserId,
-        plan_id: metaPlanId,
-        status: 'pending',
-        creator_id: null,
-        metadata: null,
-        usd_amount: event.amount || 0,
-        amount: event.amount || 0,
-      };
+      const metaPlanPrice = parseFloat(metaPlan.price || metaPlan.usd_amount || '0');
+      const metaPaidAmount = parseFloat(event.amount || '0');
+      if (metaPlanPrice > 0 && metaPaidAmount > 0 && metaPaidAmount < metaPlanPrice - 0.01) {
+        logger.error('BTCPay metadata flow: underpayment — refusing entitlement grant', {
+          invoiceId,
+          planId: metaPlanId,
+          userId: metaUserId,
+          planPrice: metaPlanPrice,
+          paidAmount: metaPaidAmount,
+          shortfall: metaPlanPrice - metaPaidAmount,
+        });
+        return res.status(200).json({ success: false, error: 'underpayment', invoiceId });
+      }
 
       // For the Greenfield flow we don't have a DB order row — use grantEntitlementsForPlan
       // directly (idempotent via ON CONFLICT in grantEntitlementsForPlan).

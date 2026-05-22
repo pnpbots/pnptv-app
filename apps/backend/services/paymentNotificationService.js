@@ -212,20 +212,8 @@ class PaymentNotificationService {
       }
 
       const lang = user.language || 'es';
-      const groupId = process.env.PRIME_CHANNEL_ID || '-1002997324714';
-
-      // Generate unique invite link for PRIME channel
-      let inviteLink = 'https://t.me/PNPTV_PRIME'; // Fallback
-      try {
-        const response = await bot.telegram.createChatInviteLink(groupId, {
-          member_limit: 1,
-          name: `Subscription ${transactionId}`,
-        });
-        inviteLink = response.invite_link;
-        logger.info('PRIME channel invite link created', { userId, transactionId, channelId: groupId });
-      } catch (linkError) {
-        logger.warn('Failed to create invite link, using fallback', { userId, error: linkError.message });
-      }
+      // PRIME channel migrated to webapp 2026-04-28 — no longer a Telegram group.
+      const inviteLink = 'https://pnptv.app';
 
       // Use unified message template
       const message = MessageTemplates.buildPrimeActivationMessage({

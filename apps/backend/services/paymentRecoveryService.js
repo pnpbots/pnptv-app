@@ -679,9 +679,9 @@ class PaymentRecoveryService {
       const cleanupResult = await query(`
         UPDATE payments
         SET status = 'abandoned',
-            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('abandoned_at', $1::text, 'reason', CASE WHEN provider = 'daimo' THEN 'DAIMO_TIMEOUT' WHEN provider = 'epayco' AND (metadata->>'epayco_ref') IS NULL THEN 'PRE_CHARGE_ABANDONED' ELSE '3DS_TIMEOUT' END)
+            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('abandoned_at', $1::text, 'reason', CASE WHEN provider = 'epayco' AND (metadata->>'epayco_ref') IS NULL THEN 'PRE_CHARGE_ABANDONED' ELSE '3DS_TIMEOUT' END)
         WHERE status = 'pending'
-          AND provider IN ('epayco', 'daimo')
+          AND provider = 'epayco'
           AND created_at < NOW() - INTERVAL '24 hours'
         RETURNING id, user_id, reference, provider
       `, [new Date().toISOString()]);
@@ -734,7 +734,7 @@ class PaymentRecoveryService {
           MIN(created_at) as oldest_pending,
           MAX(created_at) as newest_pending
         FROM payments
-        WHERE status = 'pending' AND provider IN ('epayco', 'daimo')
+        WHERE status = 'pending' AND provider = 'epayco'
       `);
 
       const row = stats.rows[0];

@@ -1413,6 +1413,16 @@ class PaymentController {
         const planId = payment.plan_id || payment.planId;
         const plan = await PlanModel.getById(planId);
 
+        if (!plan) {
+          await cache.releaseLock(activationLockKey).catch(() => {});
+          logger.error('3DS2: plan not found — entitlements NOT granted', { paymentId, planId, userId });
+          return res.status(422).json({
+            success: false,
+            error: 'Plan not found — subscription could not be activated. Please contact support.',
+            code: 'PLAN_NOT_FOUND',
+          });
+        }
+
         if (userId && plan) {
           const durationDays = plan.duration_days || plan.duration || 30;
           // Extend from current expiry if active (don't lose remaining days on renewal)

@@ -80,8 +80,6 @@ class PaymentModel {
       transactionId: row.transaction_id,
       epaycoRef: row.epayco_ref || metadata.epayco_ref || row.reference || null,
       paymentUrl: row.payment_url,
-      daimoLink: row.daimo_link,
-      daimoPaymentId: row.daimo_payment_id,
       completedAt: row.completed_at,
       completedBy: row.completed_by,
       manualCompletion: row.manual_completion,
@@ -166,16 +164,6 @@ class PaymentModel {
         updates.push(`payment_url = $${paramIndex++}`);
         values.push(metadata.paymentUrl);
         consumedMetadataKeys.add('paymentUrl');
-      }
-      if (metadata.daimoLink) {
-        updates.push(`daimo_link = $${paramIndex++}`);
-        values.push(metadata.daimoLink);
-        consumedMetadataKeys.add('daimoLink');
-      }
-      if (metadata.daimo_payment_id) {
-        updates.push(`daimo_payment_id = $${paramIndex++}`);
-        values.push(metadata.daimo_payment_id);
-        consumedMetadataKeys.add('daimo_payment_id');
       }
       if (metadata.provider) {
         updates.push(`provider = $${paramIndex++}`);

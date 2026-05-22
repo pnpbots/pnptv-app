@@ -1017,7 +1017,7 @@ class PaymentService {
     if (!headerSignature) return { valid: false };
 
     const secretKey = process.env.EPAYCO_P_KEY || process.env.EPAYCO_PRIVATE_KEY;
-    const custId = process.env.EPAYCO_P_CUST_ID || process.env.EPAYCO_PUBLIC_KEY;
+    const custId = process.env.EPAYCO_P_CUST_ID || process.env.EPAYCO_P_CUST_ID_CLIENTE;
     if (!secretKey || !custId) return { valid: false };
 
     const {
@@ -1059,11 +1059,11 @@ class PaymentService {
     currencyCode,
   }) {
     const pKey = process.env.EPAYCO_P_KEY || process.env.EPAYCO_PRIVATE_KEY;
-    const custId = process.env.EPAYCO_P_CUST_ID || process.env.EPAYCO_PUBLIC_KEY;
+    const custId = process.env.EPAYCO_P_CUST_ID || process.env.EPAYCO_P_CUST_ID_CLIENTE;
 
     if (!pKey || !custId) {
       if (process.env.NODE_ENV === 'production') {
-        throw new Error('EPAYCO_P_KEY or EPAYCO_PRIVATE_KEY and EPAYCO_P_CUST_ID or EPAYCO_PUBLIC_KEY must be configured in production');
+        throw new Error('EPAYCO_P_KEY (or EPAYCO_PRIVATE_KEY) and EPAYCO_P_CUST_ID (or EPAYCO_P_CUST_ID_CLIENTE) must be configured in production');
       }
       return null;
     }

@@ -370,7 +370,17 @@ class TokenCheckoutService {
       // PNPtv displays prices in USD to international users but settles via ePayco's
       // Colombian acquiring network in COP. The rate is fetched daily from a public
       // FX API (see services/paymentService.js getEpaycoCopRate). Do not hardcode a fallback — fail closed instead.
-      const _fxRate = await getEpaycoCopRate();
+      let _fxRate;
+      try {
+        _fxRate = await getEpaycoCopRate();
+      } catch (fxErr) {
+        const err = Object.assign(new Error('FX rate temporarily unavailable — try again shortly'), {
+          code: 'FX_RATE_UNAVAILABLE',
+          statusCode: 503,
+          retryable: true,
+        });
+        throw err;
+      }
       const priceInCOP = Math.round(usdAmount * _fxRate);
       const amountCOPString = String(priceInCOP);
       const currencyCode = 'COP';

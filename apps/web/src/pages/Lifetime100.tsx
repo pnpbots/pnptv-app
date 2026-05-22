@@ -67,7 +67,7 @@ const SHEET_STRINGS: Record<SheetLang, {
       lead: "Multiple ways to pay — pick what works for you.",
       cards: [
         { e: "💳", t: "Credit & Debit Card", b: "Visa, Mastercard via ePayco. Fast and familiar." },
-        { e: "⚡", t: "Crypto (USDC)", b: "Pay with USDC on Base via Daimo. Near-instant, low fees." },
+        { e: "⚡", t: "Crypto (Dash)", b: "Pay with Dash via BTCPay. Near-instant, low fees." },
         { e: "🪙", t: "PNP Tokens", b: "Buy tokens inside the app for tips, subscriptions & exclusive content." },
       ],
       fineprint: "🔒 Encrypted · Discreet billing · We never store your card",
@@ -135,7 +135,7 @@ const SHEET_STRINGS: Record<SheetLang, {
       lead: "Varias formas de pagar — elige la que te funcione.",
       cards: [
         { e: "💳", t: "Tarjeta crédito y débito", b: "Visa, Mastercard vía ePayco. Rápido y familiar." },
-        { e: "⚡", t: "Cripto (USDC)", b: "Paga con USDC en Base vía Daimo. Casi instantáneo, comisiones bajas." },
+        { e: "⚡", t: "Cripto (Dash)", b: "Paga con Dash vía BTCPay. Casi instantáneo, comisiones bajas." },
         { e: "🪙", t: "PNP Tokens", b: "Compra tokens dentro de la app para propinas, suscripciones y contenido exclusivo." },
       ],
       fineprint: "🔒 Encriptado · Cobro discreto · Nunca guardamos tu tarjeta",

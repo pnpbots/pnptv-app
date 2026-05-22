@@ -53,7 +53,7 @@ class SubscriptionPaymentController {
    */
   static async getMySubscription(req, res) {
     try {
-      const userId = req.user?.id;
+      const userId = req.session?.user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -91,7 +91,7 @@ class SubscriptionPaymentController {
    */
   static async createCheckout(req, res) {
     try {
-      const userId = req.user?.id;
+      const userId = req.session?.user?.id;
       const { planId, paymentMethod = 'epayco' } = req.body;
 
       if (!userId) {
@@ -198,7 +198,7 @@ class SubscriptionPaymentController {
    */
   static async cancelSubscription(req, res) {
     try {
-      const userId = req.user?.id;
+      const userId = req.session?.user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -236,7 +236,7 @@ class SubscriptionPaymentController {
    */
   static async getPaymentHistory(req, res) {
     try {
-      const userId = req.user?.id;
+      const userId = req.session?.user?.id;
       const { limit = 20, offset = 0 } = req.query;
 
       if (!userId) {
@@ -252,7 +252,7 @@ class SubscriptionPaymentController {
       const result = await query(
         `SELECT id, reference, amount, currency, provider, status, created_at
          FROM payments
-         WHERE user_id = $1 AND user_type = 'subscription_payment'
+         WHERE user_id = $1
          ORDER BY created_at DESC
          LIMIT $2 OFFSET $3`,
         [userId, parseInt(limit), parseInt(offset)]
@@ -282,7 +282,7 @@ class SubscriptionPaymentController {
    */
   static async checkFeatureAccess(req, res) {
     try {
-      const userId = req.user?.id;
+      const userId = req.session?.user?.id;
       const { feature } = req.query;
 
       if (!userId) {

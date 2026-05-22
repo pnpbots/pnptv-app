@@ -226,12 +226,13 @@ async function checkInvoiceProcessed(invoiceId) {
     const value = await cache.get(key);
     return value !== null;
   } catch (err) {
-    // Redis failure must never block payment processing — log and allow through.
-    logger.warn('BTCPay checkInvoiceProcessed: Redis error (allowing through)', {
+    // Fail-closed: if we cannot confirm whether this invoice was processed,
+    // block reprocessing rather than risk a double-grant.
+    logger.warn('BTCPay checkInvoiceProcessed: Redis error — treating as already processed (fail-closed)', {
       invoiceId,
       error: err.message,
     });
-    return false;
+    return true;
   }
 }
 
