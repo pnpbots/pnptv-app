@@ -131,6 +131,7 @@ const CristinaPage = lazy(() => import("@/components/CristinaWidget").then((m) =
 const PrimeChannel = lazy(() => import("@/pages/admin/PrimeChannel"));
 const Compliance2257 = lazy(() => import("@/pages/admin/Compliance2257"));
 const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
+const Lifetime100B = lazy(() => import("@/pages/Lifetime100B"));
 
 // Creator Studio pages
 const CreatorLayout = lazy(() => import("@/components/creators/CreatorLayout"));
@@ -912,6 +913,14 @@ export const router = createBrowserRouter([
   // Public alias — /lifetime → /lifetime100. Lives OUTSIDE of <Layout /> so
   // the auth-gate redirect (Layout.tsx:895) never fires for unauthenticated users.
   { path: "/lifetime", element: <Navigate to="/lifetime100" replace /> },
+  {
+    path: "/lifetime100b",
+    element: (
+      <ModuleLoader>
+        <Lifetime100B />
+      </ModuleLoader>
+    ),
+  },
   {
     path: "/page/:slug",
     element: (

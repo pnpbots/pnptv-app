@@ -114,9 +114,14 @@ async function generateToken(roomName, participantIdentity, participantName, isM
   // Role-aware publish grants:
   //  - Moderator (creator): can publish audio + video, room admin
   //  - Participant (member): subscribe-only by default; options can override
-  const canPublish = isModerator ? true : false;
-  const canPublishAudio = options.canPublishAudio !== undefined ? options.canPublishAudio : canPublish;
-  const canPublishVideo = options.canPublishVideo !== undefined ? options.canPublishVideo : canPublish;
+  //
+  // IMPORTANT: In LiveKit SDK v2.x, canPublish is the master publish flag.
+  // canPublish=false blocks ALL track publishing regardless of canPublishVideo
+  // or canPublishAudio. Derive canPublish AFTER resolving the per-kind flags
+  // so that options.canPublishVideo=true correctly unlocks publishing for members.
+  const canPublishAudio = options.canPublishAudio !== undefined ? options.canPublishAudio : (isModerator ? true : false);
+  const canPublishVideo = options.canPublishVideo !== undefined ? options.canPublishVideo : (isModerator ? true : false);
+  const canPublish = canPublishVideo || canPublishAudio;
 
   at.addGrant({
     roomJoin: true,

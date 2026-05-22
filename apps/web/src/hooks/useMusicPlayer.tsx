@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from "react";
 import { getMediaTracks, type MediaTrack } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 
 declare global {
   interface Window {
@@ -43,6 +44,7 @@ type MusicPlayerContextType = MusicPlayerState & MusicPlayerActions;
 const MusicPlayerContext = createContext<MusicPlayerContextType | null>(null);
 
 export function MusicPlayerProvider({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const soundcloudPlayerRef = useRef<any>(null);
   const scIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -218,8 +220,9 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
     currentTrackRef.current = currentTrack;
   });
 
-  // Load initial tracks
+  // Load initial tracks — only when authenticated to avoid 401s for guests
   useEffect(() => {
+    if (!isAuthenticated) return;
     setIsLoadingTracks(true);
     getMediaTracks(0, 30)
       .then((res) => {
@@ -231,7 +234,7 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
       })
       .catch(() => { setLoadError("Music service unavailable"); })
       .finally(() => setIsLoadingTracks(false));
-  }, []);
+  }, [isAuthenticated]);
 
   // MediaSession API — update lock-screen controls when track changes
   useEffect(() => {
@@ -543,7 +546,7 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const loadMore = useCallback(() => {
-    if (loadingRef.current || !hasMore) return;
+    if (!isAuthenticated || loadingRef.current || !hasMore) return;
     loadingRef.current = true;
     setIsLoadingTracks(true);
     getMediaTracks(offsetRef.current, 30)
@@ -568,6 +571,7 @@ export function MusicPlayerProvider({ children }: { children: React.ReactNode })
   }, [hasMore]);
 
   const retryLoad = useCallback(() => {
+    if (!isAuthenticated) return;
     setLoadError(null);
     setTracks([]);
     offsetRef.current = 0;

@@ -920,13 +920,16 @@ class PaymentController {
             resolvedToken = tokenResult.token;
           }
           if (!resolvedToken) {
+            const epaycoMsg = tokenResult?.message || tokenResult?.data?.description || null;
             logger.error('Server-side tokenization returned unexpected shape', {
               paymentId,
               keys: Object.keys(tokenResult || {}),
+              epaycoStatus: tokenResult?.status,
+              epaycoMessage: epaycoMsg,
             });
             return res.status(400).json({
               success: false,
-              error: 'No se pudo tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+              error: epaycoMsg || 'No se pudo tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
             });
           }
           logger.info('Server-side card tokenization succeeded', {

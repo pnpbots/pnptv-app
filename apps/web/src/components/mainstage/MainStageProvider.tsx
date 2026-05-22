@@ -185,9 +185,12 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
         setLivekitUrl(res.livekitUrl);
         setRoomName(res.roomName);
         setRole(res.role);
-        // If the room is connected, reconnect with the fresh token so
-        // the old token doesn't expire mid-session.
-        if (intentConnectedRef.current && sharedRoom.state !== "disconnected") {
+        // Only reconnect if the room has fully disconnected. Calling connect()
+        // on an already-connected room forces a full reconnect cycle, dropping
+        // all published tracks for every viewer for ~1-2s. LiveKit handles
+        // token refresh internally when the room is still connected — we just
+        // need to store the new token so it's available for the next reconnect.
+        if (intentConnectedRef.current && sharedRoom.state === "disconnected") {
           await sharedRoom.connect(res.livekitUrl, res.token);
         }
         scheduleTokenRefresh();
@@ -301,6 +304,21 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       sharedRoom.off(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
     };
   }, [emitDiagnostic]);
+
+  // Track external (non-user-initiated) disconnects so isJoined stays accurate.
+  // leave() sets intentConnectedRef.current = false BEFORE calling sharedRoom.disconnect(),
+  // so we skip those here — leave() already resets all state itself.
+  useEffect(() => {
+    const onDisconnected = () => {
+      if (!mountedRef.current) return;
+      if (!intentConnectedRef.current) return; // user-initiated leave — already handled
+      setIsJoined(false);
+    };
+    sharedRoom.on(RoomEvent.Disconnected, onDisconnected);
+    return () => {
+      sharedRoom.off(RoomEvent.Disconnected, onDisconnected);
+    };
+  }, []);
 
   // ── Logout cleanup ──────────────────────────────────────────────────────
 
@@ -475,6 +493,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
         const visibility = typeof document !== "undefined" ? document.visibilityState : "visible";
         if (visibility !== "visible") {
           emitDiagnostic("join-deferred-hidden", { reason: visibility });
+          if (mountedRef.current) setError("Switch to this tab before joining Main Stage.");
           return;
         }
 
@@ -500,7 +519,41 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
 
         // Join the room, then force camera on and mic muted for entry.
         await connectRoom(res.livekitUrl, res.token);
-        await sharedRoom.localParticipant.setCameraEnabled(true);
+
+        // Guard: if the tab became hidden during the LiveKit handshake, the browser
+        // will deny getUserMedia. Bail early with a clear error instead of a silent
+        // permission denial that leaves the room in a half-connected state.
+        if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+          intentConnectedRef.current = false;
+          await sharedRoom.disconnect();
+          if (mountedRef.current) {
+            setIsJoined(false);
+            setError("Please switch to this tab before joining Main Stage.");
+          }
+          emitDiagnostic("join-abort-tab-hidden", { reason: "hidden-after-connect" });
+          return;
+        }
+
+        try {
+          await sharedRoom.localParticipant.setCameraEnabled(true);
+        } catch (camErr) {
+          // Camera permission denied or device unavailable — surface a clear message
+          // instead of letting this propagate to the outer catch and showing a generic error.
+          const msg =
+            camErr instanceof Error && camErr.message
+              ? camErr.message
+              : "Camera access was denied. Please allow camera access and try again.";
+          // Reset connection intent so subsequent join() calls don't short-circuit.
+          intentConnectedRef.current = false;
+          if (mountedRef.current) {
+            setError(msg);
+            setIsJoined(false);
+          }
+          emitDiagnostic("camera-error", { reason: msg });
+          // Leave the room cleanly — we joined but can't publish.
+          await sharedRoom.disconnect();
+          return;
+        }
         try {
           await sharedRoom.localParticipant.setMicrophoneEnabled(false);
         } catch {

@@ -232,11 +232,14 @@ const token = asyncHandler(async (req, res) => {
   }
 
   // Main Stage is a publish-first room: every authenticated entrant is added
-  // to the stage rotation/visibility queue. Admins can still enter when the
-  // queue is at cap so they can moderate a full room.
+  // to the stage rotation/visibility queue. Admins bypass the cap so they can
+  // always join and moderate a full room — addCammerForce skips the cap check
+  // but still deduplicates, so calling it twice for the same admin is a no-op.
   let addResult;
   try {
-    addResult = await mainStageService.addCammer(String(userId));
+    addResult = adminUser
+      ? await mainStageService.addCammerForce(String(userId))
+      : await mainStageService.addCammer(String(userId));
   } catch (addErr) {
     logger.error('[MainStage] token: addCammer failed', { error: addErr.message });
     return res.status(503).json({
@@ -246,7 +249,7 @@ const token = asyncHandler(async (req, res) => {
     });
   }
 
-  if (addResult === 'full' && role !== 'admin') {
+  if (addResult === 'full') {
     return res.status(429).json({
       success: false,
       error: `Main Stage is full (max ${MAX_CAMMERS})`,
@@ -264,7 +267,7 @@ const token = asyncHandler(async (req, res) => {
     {
       canPublishVideo: true,
       canPublishAudio: isModerator,
-      ttlSeconds: isModerator ? 6 * 3600 : 30 * 60,
+      ttlSeconds: 6 * 3600, // 6h for all roles — matches the provider's refresh schedule (5.5h)
     }
   );
 
@@ -440,6 +443,14 @@ const moderate = asyncHandler(async (req, res) => {
         logger.warn('[MainStage] removeParticipant failed', { error: err.message, identity });
       }
       await mainStageService.removeCammer(String(identity));
+      // Write the kicked-set key so the token endpoint blocks immediate rejoin.
+      // 24h TTL — admin can clear via redis-cli DEL mainstage:kicked:<identity>.
+      try {
+        const redis = getRedis();
+        await redis.set(`mainstage:kicked:${String(identity)}`, '1', 'EX', 86400);
+      } catch (redisErr) {
+        logger.error('[MainStage] kick: failed to write kicked-set key', { error: redisErr.message, identity });
+      }
       await mainStageService.logAdminAction(req.user.id, 'moderate_kick', { identity });
       break;
     }

@@ -4,7 +4,7 @@
  */
 
 const logger = require('../utils/logger');
-const redis = require('../config/redis');
+const { getRedis } = require('../config/redis');
 const { query } = require('../config/postgres');
 const crypto = require('crypto');
 
@@ -15,10 +15,10 @@ class FraudDetectionService {
   static async checkVelocityAbuse(userId, timeWindowMinutes = 5) {
     try {
       const cacheKey = `fraud:velocity:${userId}`;
-      const current = await redis.incr(cacheKey);
+      const current = await getRedis().incr(cacheKey);
       
       if (current === 1) {
-        await redis.expire(cacheKey, timeWindowMinutes * 60);
+        await getRedis().expire(cacheKey, timeWindowMinutes * 60);
       }
 
       const attempts = parseInt(current);
@@ -51,7 +51,7 @@ class FraudDetectionService {
   static async checkLocationAnomaly(userId, currentLocation) {
     try {
       const cacheKey = `fraud:location:${userId}`;
-      const lastLocation = await redis.get(cacheKey);
+      const lastLocation = await getRedis().get(cacheKey);
 
       if (lastLocation) {
         const last = JSON.parse(lastLocation);
@@ -77,7 +77,7 @@ class FraudDetectionService {
       }
 
       // Store current location
-      await redis.setex(cacheKey, 3600, JSON.stringify(currentLocation));
+      await getRedis().setex(cacheKey, 3600, JSON.stringify(currentLocation));
 
       return { flagged: false };
     } catch (error) {
@@ -178,10 +178,10 @@ class FraudDetectionService {
   static async checkBruteForce(userId, paymentId) {
     try {
       const cacheKey = `fraud:failed:${userId}`;
-      const failedAttempts = await redis.incr(cacheKey);
+      const failedAttempts = await getRedis().incr(cacheKey);
 
       if (failedAttempts === 1) {
-        await redis.expire(cacheKey, 3600); // 1 hour window
+        await getRedis().expire(cacheKey, 3600); // 1 hour window
       }
 
       const maxFailed = 5;
@@ -217,7 +217,7 @@ class FraudDetectionService {
         .update(`${ipAddress}:${userAgent}`)
         .digest('hex');
 
-      const lastFingerprint = await redis.get(cacheKey);
+      const lastFingerprint = await getRedis().get(cacheKey);
 
       if (lastFingerprint && lastFingerprint !== fingerprint) {
         logger.warn('Device fingerprint changed', {
@@ -235,7 +235,7 @@ class FraudDetectionService {
         };
       }
 
-      await redis.setex(cacheKey, 86400 * 30, fingerprint); // 30 days
+      await getRedis().setex(cacheKey, 86400 * 30, fingerprint); // 30 days
 
       return { flagged: false, newDevice: false };
     } catch (error) {
@@ -250,7 +250,7 @@ class FraudDetectionService {
   static async checkBlacklistedCard(cardLastFour, cardBrand) {
     try {
       const key = `fraud:blacklist:card:${cardBrand}:${cardLastFour}`;
-      const isBlacklisted = await redis.get(key);
+      const isBlacklisted = await getRedis().get(key);
 
       if (isBlacklisted) {
         logger.warn('Blacklisted card detected', {
@@ -612,7 +612,7 @@ class FraudDetectionService {
   static async resetFailedCounter(userId) {
     try {
       const key = `fraud:failed:${userId}`;
-      await redis.del(key);
+      await getRedis().del(key);
       logger.info('Failed payment counter reset', { userId });
     } catch (error) {
       logger.error('Error resetting counter:', error);
@@ -625,7 +625,7 @@ class FraudDetectionService {
   static async blacklistCard(cardLastFour, cardBrand, reason, durationDays = 30) {
     try {
       const key = `fraud:blacklist:card:${cardBrand}:${cardLastFour}`;
-      await redis.setex(
+      await getRedis().setex(
         key,
         durationDays * 86400,
         JSON.stringify({ reason, blockedAt: new Date() })

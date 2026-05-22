@@ -462,6 +462,9 @@ function initSocketIO(io) {
           });
           return;
         }
+        // Mark this socket as an active cammer so the disconnect handler knows
+        // to remove them from the queue if their last socket closes.
+        socket.data.isMainStageCammer = true;
         socket.emit('mainstage:cammer-joined', { identity: String(user.id) });
       } catch (err) {
         logger.error('mainstage:join-cammer error', { userId: user.id, error: err.message });
@@ -2706,9 +2709,13 @@ function initSocketIO(io) {
             setImmediate(() => emitGroupPresence(io, gid));
           }
 
-          // Main Stage: self-heal the spotlight queue when a cammer's last
-          // socket closes. Without this, closed tabs leave stale IDs that
-          // eat slots against MAX_CAMMERS until an admin or rotation runs.
+          // Main Stage: self-heal the spotlight queue on disconnect.
+          // removeCammer uses LREM and is a no-op (returns 0) for users who were
+          // never in the cammer queue, so unconditional calls are safe and cheap.
+          // The previous isMainStageCammer flag was never set by the frontend
+          // (the REST token flow doesn't emit the socket event), so the guard
+          // silently defeated all disconnect cleanup. Removed in favour of always
+          // calling removeCammer and relying on its idempotency.
           const _ms = getMainStageService();
           if (_ms && typeof _ms.removeCammer === 'function') {
             _ms.removeCammer(String(user.id)).catch(() => {});

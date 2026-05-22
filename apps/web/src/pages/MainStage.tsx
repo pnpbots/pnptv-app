@@ -281,6 +281,11 @@ export default function MainStage() {
   const [acceptPrivacy, setAcceptPrivacy] = useState(false);
   const [confirmAge, setConfirmAge] = useState(false);
   const isParticipant = isGuestMode || role === "member" || role === "admin";
+
+  // Refs so effect closures always read current values without stale captures.
+  const hasEverConnectedRef = useRef(hasEverConnected);
+  useEffect(() => { hasEverConnectedRef.current = hasEverConnected; }, [hasEverConnected]);
+
   // Clear stale camera-permission banners whenever the user leaves the room.
   useEffect(() => {
     if (!isParticipant) setCamError(null);
@@ -318,6 +323,12 @@ export default function MainStage() {
         setJoining(false);
         return;
       }
+      // If the room is already connected the join() short-circuit will fire immediately.
+      // Skip the loading spinner to avoid a flash on navigation-back-to-stage.
+      if (room.state === ConnectionState.Connected) {
+        join().catch(() => {});
+        return;
+      }
       setJoining(true);
       join()
         .catch(() => {})
@@ -331,6 +342,11 @@ export default function MainStage() {
     const onVisibilityChange = () => {
       if (cancelled) return;
       if (document.visibilityState !== "visible") return;
+      // After the first successful connect, tab-focus events must NOT trigger
+      // an auto-rejoin. The ConnectionOverlay shows "Connection lost" with a
+      // manual "Reintentar" button for post-connect drops. Auto-rejoin here
+      // creates a kick loop when the user has multiple tabs open.
+      if (hasEverConnectedRef.current) return;
       attemptJoin();
     };
 
@@ -339,7 +355,7 @@ export default function MainStage() {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [isGuestMode, join, joinCheck?.canJoin]);
+  }, [isGuestMode, join, joinCheck?.canJoin, room]);
 
   useEffect(() => {
     if (connState === ConnectionState.Connected) {
@@ -449,7 +465,10 @@ export default function MainStage() {
     (
       loading ||
       joining ||
-      (joinCheck?.canJoin === true && !isJoined) ||
+      // Only block on !isJoined before the first successful connect. After that
+      // the ConnectionOverlay handles post-connect drops — re-showing the full
+      // loading skeleton on a kicked/network-drop disconnect is jarring.
+      (joinCheck?.canJoin === true && !isJoined && !hasEverConnected) ||
       (!joinCheck && !consentError)
     )
   ) {

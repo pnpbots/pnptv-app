@@ -387,13 +387,46 @@ async function shuffleCammers() {
   await emitState();
 }
 
+// Force-add a cammer bypassing the cap check (used for admin users).
+// Dedup check still applies — calling twice for the same identity is a no-op.
+async function addCammerForce(identity) {
+  if (!identity) return 'invalid';
+  const redis    = getRedis();
+  const queueKey = 'mainstage:spotlight:queue';
+
+  const existing = await redis.lrange(queueKey, 0, -1);
+  if (existing.includes(String(identity))) return 'duplicate';
+
+  await redis.rpush(queueKey, String(identity));
+  await redis.hset(QUEUE_TS_KEY, String(identity), String(Date.now()));
+  await redis.expire(queueKey, STATE_CACHE_TTL_S);
+
+  const current = await redis.get('mainstage:spotlight:cammer');
+  if (!current) {
+    await redis.set('mainstage:spotlight:cammer', String(identity), 'EX', STATE_CACHE_TTL_S);
+    const nextAt = Date.now() + ROTATE_INTERVAL_MS;
+    await redis.set('mainstage:spotlight:nextAt', String(nextAt), 'EX', STATE_CACHE_TTL_S);
+  }
+
+  logger.info('[MainStage] admin cammer force-added', { identity });
+  upsertCammerStats(identity).catch(() => {});
+  await emitState();
+  return 'added';
+}
+
 async function removeCammer(identity) {
   if (!identity) return;
   const redis    = getRedis();
   const queueKey = 'mainstage:spotlight:queue';
 
-  await redis.lrem(queueKey, 0, String(identity));
+  // LREM returns the number of elements removed. Only proceed with queue
+  // maintenance and logging when the identity was actually present, avoiding
+  // spurious state broadcasts and misleading log entries when called for users
+  // who were never in the cammer queue.
+  const removed = await redis.lrem(queueKey, 0, String(identity));
   await redis.hdel(QUEUE_TS_KEY, String(identity));
+
+  if (removed === 0) return; // identity was not in the queue — nothing to do
 
   // If this was the spotlight cammer, advance to the next
   const current = await redis.get('mainstage:spotlight:cammer');
@@ -813,6 +846,7 @@ module.exports = {
   setMediaVolume,
   setCamsVolume,
   addCammer,
+  addCammerForce,
   removeCammer,
   shuffleCammers,
   setSpotlight,

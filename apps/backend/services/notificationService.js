@@ -15,8 +15,13 @@ class NotificationService {
    */
   static async notifyAdmins(message, action = null) {
     try {
-      const admins = await PermissionService.getAllAdmins();
-      
+      const grouped = await PermissionService.getAllAdmins();
+      const admins = [
+        ...(grouped.superadmins || []),
+        ...(grouped.admins || []),
+        ...(grouped.moderators || []),
+      ];
+
       if (admins.length === 0) {
         logger.warn('No admins found to notify');
         return false;

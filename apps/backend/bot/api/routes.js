@@ -800,7 +800,7 @@ app.get('/cms/assets/:assetId', async (req, res) => {
 // request fetches per playback and we don't want each one to hit Postgres.
 const VIDEO_PATH_RE = /^\/uploads\/posts\/(vid-[^/]+\.(?:mp4|webm|mov))$/i;
 const videoMetaCache = new Map(); // url → { isExclusive, authorId, expiresAt }
-const VIDEO_FETCH_RATE_LIMIT = parseInt(process.env.VIDEO_FETCH_RATE_LIMIT || '300', 10);
+const VIDEO_FETCH_RATE_LIMIT = parseInt(process.env.VIDEO_FETCH_RATE_LIMIT || '1500', 10);
 const VIDEO_FETCH_RATE_WINDOW_SEC = 60 * 60; // 1 hour
 const { query: videoGuardQuery } = require('../../config/postgres');
 const { validateTierFresh: videoGuardValidateTier } = require('../../services/accessService');
