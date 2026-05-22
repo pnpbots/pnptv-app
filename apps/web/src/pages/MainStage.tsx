@@ -459,18 +459,16 @@ export default function MainStage() {
     shuffle();
   }, [shuffle]);
 
+  // Show the skeleton only while the join-check fetch is in flight. Once
+  // joinCheck arrives, <LiveKitRoom> must stay mounted for the entire join
+  // lifecycle — unmounting it while the room is connecting and remounting
+  // it afterwards causes LiveKitRoom's internal connect={false} effect to
+  // call room.disconnect() on an already-connected room (CLIENT_INITIATED).
+  // ConnectionOverlay handles the connecting/reconnecting visual instead.
   if (
     !isGuestMode &&
     !error &&
-    (
-      loading ||
-      joining ||
-      // Only block on !isJoined before the first successful connect. After that
-      // the ConnectionOverlay handles post-connect drops — re-showing the full
-      // loading skeleton on a kicked/network-drop disconnect is jarring.
-      (joinCheck?.canJoin === true && !isJoined && !hasEverConnected) ||
-      (!joinCheck && !consentError)
-    )
+    (!joinCheck && !consentError)
   ) {
     return (
       <div

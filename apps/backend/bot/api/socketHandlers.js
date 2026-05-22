@@ -489,6 +489,13 @@ function initSocketIO(io) {
 
     socket.on('mainstage:client-lifecycle', (payload = {}) => {
       const event = payload && typeof payload.event === 'string' ? payload.event : 'unknown';
+      const extra = {};
+      // Capture event-specific diagnostic fields so they show up in logs.
+      if (payload.disconnectReasonName !== undefined) extra.disconnectReasonName = payload.disconnectReasonName;
+      if (payload.disconnectReason !== undefined) extra.disconnectReason = payload.disconnectReason;
+      if (payload.nextState !== undefined) extra.nextState = payload.nextState;
+      if (typeof payload.persisted === 'boolean') extra.persisted = payload.persisted;
+      if (typeof payload.tokenRole === 'string') extra.tokenRole = payload.tokenRole;
       logger.info('[MainStageDiag] client lifecycle', {
         userId: String(user.id),
         socketId: socket.id,
@@ -500,6 +507,7 @@ function initSocketIO(io) {
         sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : null,
         visibilityState: typeof payload.visibilityState === 'string' ? payload.visibilityState : null,
         pathname: typeof payload.pathname === 'string' ? payload.pathname : null,
+        ...extra,
       });
     });
     // ── End Main Stage socket handlers ───────────────────────────────────────

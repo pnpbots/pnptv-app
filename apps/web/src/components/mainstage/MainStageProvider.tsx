@@ -31,6 +31,7 @@ import {
   RoomOptions,
   RoomEvent,
   Track,
+  DisconnectReason,
   type LocalParticipant,
 } from "livekit-client";
 import {
@@ -213,6 +214,12 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     try {
       intentConnectedRef.current = true;
       await sharedRoom.connect(url, token);
+      // Pre-set the session key synchronously here — before setCameraEnabled() runs —
+      // so any service-worker controller-change that fires while camera is initialising
+      // will see an active session and defer the page reload instead of blowing the
+      // LiveKit connection away. The useEffect([isJoined]) path sets the same key later;
+      // this is just an earlier, synchronous guard against the race window.
+      try { sessionStorage.setItem(REALTIME_SESSION_KEY, "main-stage"); } catch { /* noop */ }
       if (mountedRef.current) setIsJoined(true);
     } catch (err) {
       intentConnectedRef.current = false;
@@ -309,16 +316,21 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   // leave() sets intentConnectedRef.current = false BEFORE calling sharedRoom.disconnect(),
   // so we skip those here — leave() already resets all state itself.
   useEffect(() => {
-    const onDisconnected = () => {
+    const onDisconnected = (reason?: DisconnectReason) => {
       if (!mountedRef.current) return;
       if (!intentConnectedRef.current) return; // user-initiated leave — already handled
       setIsJoined(false);
+      // Log reason so we can diagnose DUPLICATE_IDENTITY vs SIGNAL_CLOSE vs network drop.
+      emitDiagnostic("room-disconnected", {
+        disconnectReason: reason ?? null,
+        disconnectReasonName: reason !== undefined ? DisconnectReason[reason] ?? String(reason) : "none",
+      });
     };
     sharedRoom.on(RoomEvent.Disconnected, onDisconnected);
     return () => {
       sharedRoom.off(RoomEvent.Disconnected, onDisconnected);
     };
-  }, []);
+  }, [emitDiagnostic]);
 
   // ── Logout cleanup ──────────────────────────────────────────────────────
 
