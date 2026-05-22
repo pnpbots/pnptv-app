@@ -764,7 +764,7 @@ export default function Profile() {
       color: "#D0D0D0",
       border: "rgba(192,192,192,0.4)",
       borderColor: "rgba(192,192,192,0.25)",
-      roleBadge: "Rush Papi",
+      roleBadge: "The Rush Papi",
       roleStyle: { background: "rgba(192,192,192,0.15)", color: "#D0D0D0", border: "1px solid rgba(192,192,192,0.3)" },
     },
     "8250283246": { // Lexboytv — light silver
