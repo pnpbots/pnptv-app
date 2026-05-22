@@ -832,6 +832,8 @@ export interface UserProfile {
   wellnessDaysAccumulated?: number;
   // Colombia Socio badge
   colombiaBadge?: boolean;
+  // Gamification badges earned by this user
+  gamificationBadges?: UserBadgeEntry[];
 }
 
 /** Sidecar metadata stored on social_posts.metadata for channel-promo rows. */
@@ -4421,6 +4423,35 @@ export function getPaymentHealth(): Promise<PaymentHealth> {
   return request("/api/webapp/admin/payment-health");
 }
 
+export interface HangoutTelegramHealthItem {
+  groupId: number;
+  groupName: string;
+  telegramChatId: string;
+  telegramInviteLink: string | null;
+  status: "ok" | "stale" | "error" | "unknown";
+  chatType: string | null;
+  telegramTitle: string | null;
+  error: string | null;
+}
+
+export interface HangoutTelegramHealth {
+  success: boolean;
+  checkedAt: string;
+  summary: {
+    totalLinked: number;
+    ok: number;
+    stale: number;
+    missingInviteLink: number;
+    telegramConfigured: boolean;
+  };
+  items: HangoutTelegramHealthItem[];
+  error?: string;
+}
+
+export function getHangoutTelegramHealth(): Promise<HangoutTelegramHealth> {
+  return request("/api/webapp/admin/hangout-telegram-health");
+}
+
 // Admin Demographics
 export interface AdminDemographics {
   tiers: { label: string; count: number }[];
@@ -5005,17 +5036,29 @@ export interface GamificationHolder {
 }
 
 export interface UserBadgeEntry {
-  badge_slug: string;
-  badge_name_en: string;
-  badge_name_es: string;
-  badge_icon: string;
-  badge_level: number;
+  id: number;
+  badge_id: number;
+  slug: string;
+  name_en: string;
+  name_es: string;
+  description_en?: string | null;
+  description_es?: string | null;
+  icon: string;
+  level: number;
   awarded_at: string;
   note: string | null;
+  category_slug: string;
+  category_name_en: string;
+  category_name_es: string;
+  category_icon: string;
 }
 
 export function getGamificationCategories(): Promise<{ success: boolean; categories: GamificationCategory[] }> {
   return request("/api/webapp/gamification/categories");
+}
+
+export function getUserGamificationBadges(userId: string): Promise<{ success: boolean; badges: UserBadgeEntry[] }> {
+  return request(`/api/webapp/gamification/user/${encodeURIComponent(userId)}/badges`);
 }
 
 

@@ -3339,6 +3339,14 @@ app.get('/api/webapp/admin/payment-health', adminGuard, asyncHandler(async (req,
   });
 }));
 
+// GET /api/webapp/admin/hangout-telegram-health — verify linked Telegram chats
+// still exist and surface stale chat IDs before operators hit posting failures.
+app.get('/api/webapp/admin/hangout-telegram-health', adminGuard, asyncHandler(async (_req, res) => {
+  const HangoutTelegramHealthService = require('../../services/hangoutTelegramHealthService');
+  const snapshot = await HangoutTelegramHealthService.getSnapshot();
+  return res.json(snapshot);
+}));
+
 // GET /api/webapp/admin/reports — admin list
 app.get('/api/webapp/admin/reports', adminGuard, asyncHandler(async (req, res) => {
   const { status, limit, offset } = req.query || {};
@@ -4415,6 +4423,14 @@ app.post('/api/public/lifetime100/activate', lifetime100ActivateLimiter, asyncHa
       logger.error('public lifetime100 activate: entitlement grant failed', { userId, error: entErr.message });
     }
 
+    // Award founder gamification badge (non-blocking)
+    try {
+      const gamificationService = require('../../services/gamificationService');
+      await gamificationService.awardBadge(userId, 'founder', null, 'Lifetime100 founding member');
+    } catch (badgeErr) {
+      logger.warn('lifetime100 public activate: founder badge award failed (non-critical)', { userId, error: badgeErr.message });
+    }
+
     // Create session so the user is logged in on return
     try {
       const { rows: freshUser } = await pool.query(
@@ -4568,6 +4584,14 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
     } catch (entErr) {
       logger.error('Meru entitlement grant failed (user has tier but no entitlements)', { userId, error: entErr.message });
       // Continue — users.tier is set, so legacy paths still work; entitlements will be synced by daily cleanup
+    }
+
+    // Award founder gamification badge (non-blocking)
+    try {
+      const gamificationService = require('../../services/gamificationService');
+      await gamificationService.awardBadge(userId, 'founder', null, 'Lifetime100 founding member');
+    } catch (badgeErr) {
+      logger.warn('Meru webapp activate: founder badge award failed (non-critical)', { userId, error: badgeErr.message });
     }
 
     // 4. Mark activation code used in activation_codes table (non-critical; Meru link already claimed above)

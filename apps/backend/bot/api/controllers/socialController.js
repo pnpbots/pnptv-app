@@ -1128,6 +1128,9 @@ const getPublicProfile = async (req, res) => {
     const EntitlementAccessService = require('../../../services/entitlementAccessService');
     const label = await EntitlementAccessService.getUserLabel(profile.id);
 
+    const gamificationService = require('../../../services/gamificationService');
+    const gamificationBadges = await gamificationService.getUserBadges(profile.id).catch(() => []);
+
     return res.json({
       success: true,
       profile: {
@@ -1160,6 +1163,7 @@ const getPublicProfile = async (req, res) => {
           totalCalls: pd.total_calls,
           availabilityMessage: pd.availability_message || null,
         } : null,
+        gamificationBadges,
       },
       posts: result.posts,
       nextCursor: result.nextCursor,

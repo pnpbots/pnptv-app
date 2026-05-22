@@ -759,6 +759,14 @@ export default function Profile() {
       roleBadge: "The Meth Daddy",
       roleStyle: { background: "rgba(255,215,0,0.15)", color: "#FFD700", border: "1px solid rgba(255,215,0,0.3)" },
     },
+    "7246621722": { // PNPLatinoBoy — light silver
+      gradient: "linear-gradient(135deg, #C0C0C0, #E8E8E8)",
+      color: "#D0D0D0",
+      border: "rgba(192,192,192,0.4)",
+      borderColor: "rgba(192,192,192,0.25)",
+      roleBadge: "Rush Papi",
+      roleStyle: { background: "rgba(192,192,192,0.15)", color: "#D0D0D0", border: "1px solid rgba(192,192,192,0.3)" },
+    },
     "8250283246": { // Lexboytv — light silver
       gradient: "linear-gradient(135deg, #C0C0C0, #E8E8E8)",
       color: "#D0D0D0",
@@ -786,11 +794,14 @@ export default function Profile() {
   };
 
   const customTheme = profileThemes[profile.id];
-  const accentGradient = customTheme?.gradient ?? (isPerformer
-    ? "linear-gradient(135deg, #5ED1C4, #00D4E8)"
-    : "linear-gradient(135deg, #D4007A, #E69138)");
-  const accentColor = customTheme?.color ?? (isPerformer ? "#5ED1C4" : "#D4007A");
-  const accentBorder = customTheme?.border ?? (isPerformer ? "rgba(94,209,196,0.35)" : "rgba(255,255,255,0.1)");
+  const isFounder = !customTheme && (profile.gamificationBadges?.some(b => b.slug === 'founder') ?? false);
+  const accentGradient = customTheme?.gradient ?? (isFounder
+    ? "linear-gradient(135deg, #FFB454, #FF9933)"
+    : isPerformer
+      ? "linear-gradient(135deg, #5ED1C4, #00D4E8)"
+      : "linear-gradient(135deg, #D4007A, #E69138)");
+  const accentColor = customTheme?.color ?? (isFounder ? "#FFB454" : isPerformer ? "#5ED1C4" : "#D4007A");
+  const accentBorder = customTheme?.border ?? (isFounder ? "rgba(255,180,84,0.4)" : isPerformer ? "rgba(94,209,196,0.35)" : "rgba(255,255,255,0.1)");
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -984,6 +995,20 @@ export default function Profile() {
                 >
                   <span aria-hidden="true">🇨🇴</span>
                   Socio Colombia
+                </span>
+              )}
+              {isFounder && (
+                <span
+                  className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full"
+                  style={{
+                    background: "linear-gradient(135deg, rgba(255,180,84,0.20) 0%, rgba(255,153,51,0.15) 100%)",
+                    color: "#FFB454",
+                    border: "1px solid rgba(255,180,84,0.40)",
+                    boxShadow: "0 0 8px rgba(255,180,84,0.18)",
+                  }}
+                >
+                  <span aria-hidden="true">🏅</span>
+                  Miembro Fundador
                 </span>
               )}
             </div>

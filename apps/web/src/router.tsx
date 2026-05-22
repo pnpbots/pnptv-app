@@ -125,6 +125,7 @@ const XAutoCampaigns = lazy(() => import("@/pages/admin/XAutoCampaigns"));
 const MeruLinks = lazy(() => import("@/pages/admin/MeruLinks"));
 const DuplicateAccounts = lazy(() => import("@/pages/admin/DuplicateAccounts"));
 const PaymentHealth = lazy(() => import("@/pages/admin/PaymentHealth"));
+const HangoutTelegramHealth = lazy(() => import("@/pages/admin/HangoutTelegramHealth"));
 const WellnessShell = lazy(() => import("@/pages/WellnessShell"));
 const SelfCareCenter = lazy(() => import("@/pages/SelfCareCenter"));
 const CristinaPage = lazy(() => import("@/components/CristinaWidget").then((m) => ({ default: m.CristinaWidget })));
@@ -132,6 +133,7 @@ const PrimeChannel = lazy(() => import("@/pages/admin/PrimeChannel"));
 const Compliance2257 = lazy(() => import("@/pages/admin/Compliance2257"));
 const AdminInviteLinks = lazy(() => import("@/pages/admin/InviteLinks"));
 const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
+const GamificationPage = lazy(() => import("@/pages/GamificationPage"));
 const InvitePage = lazy(() => import("@/pages/InvitePage"));
 
 // Creator Studio pages
@@ -477,6 +479,16 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "badges",
+        element: (
+          <ModuleLoader>
+            <VerificationGate>
+              <GamificationPage />
+            </VerificationGate>
+          </ModuleLoader>
+        ),
+      },
+      {
         path: "support",
         element: (
           <ModuleLoader>
@@ -714,6 +726,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <PaymentHealth />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "hangout-telegram-health",
+        element: (
+          <ModuleLoader>
+            <HangoutTelegramHealth />
           </ModuleLoader>
         ),
       },

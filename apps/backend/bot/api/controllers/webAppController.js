@@ -1886,6 +1886,9 @@ const getProfile = async (req, res) => {
     const EntitlementAccessService = require('../../../services/entitlementAccessService');
     const label = await EntitlementAccessService.getUserLabel(p.id);
 
+    const gamificationService = require('../../../services/gamificationService');
+    const gamificationBadges = await gamificationService.getUserBadges(p.id).catch(() => []);
+
     return res.json({
       success: true,
       profile: {
@@ -1925,6 +1928,7 @@ const getProfile = async (req, res) => {
         creatorSubscriberCount: p.creator_subscriber_count || 0,
         hasTelegram: !!p.telegram,
         colombiaBadge: p.colombia_badge || false,
+        gamificationBadges,
         performerData,
       },
     });
