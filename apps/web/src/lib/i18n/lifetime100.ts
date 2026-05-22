@@ -16,7 +16,7 @@ export const strings = {
     benefits: [
       "Pay once — full access forever, no renewals ever.",
       "2 months PRIME included — all exclusive content unlocked from day one.",
-      "Everything: Live streams, Hangouts, Feed, DMs, Nearby, Videorama.",
+      "Everything: Live, Hangouts, Feed, DMs, Nearby, and more.",
       "Private sessions with creators + founding member status.",
       "Priority support, always.",
     ],
@@ -99,7 +99,7 @@ export const strings = {
     benefits: [
       "Paga una vez — acceso completo para siempre, sin renovaciones.",
       "2 meses PRIME incluidos — todo el contenido exclusivo desbloqueado desde el primer día.",
-      "Todo: Live, Hangouts, Feed, DMs, Nearby, Videorama.",
+      "Todo: Live, Hangouts, Feed, DMs, Nearby y más.",
       "Sesiones privadas con creadores + estatus de miembro fundador.",
       "Soporte prioritario, siempre.",
     ],
