@@ -28,6 +28,17 @@ import { checkAuthStatus, getXStatus, sharePostToX, getOwnChannels, getProfile, 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
+
+const POST_CATEGORIES = [
+  { value: "fun",       label: "Fun",       color: "#E69138" },
+  { value: "wellness",  label: "Wellness",  color: "#34D399" },
+  { value: "adult",     label: "+18",       color: "#D4007A" },
+  { value: "community", label: "Community", color: "#60A5FA" },
+  { value: "media",     label: "Media",     color: "#A78BFA" },
+  { value: "social",    label: "Social",    color: "#8E8E93" },
+] as const;
+
+type PostCategory = (typeof POST_CATEGORIES)[number]["value"];
 const MAX_IMAGES = 4;
 const MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024; // 512 MB
 const MAX_CHARS = 5000;
@@ -269,6 +280,7 @@ export function PostComposer({
   const [videoDescription, setVideoDescription] = useState("");
   const [channels, setChannels] = useState<CreatorChannel[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
+  const [category, setCategory] = useState<PostCategory | null>(null);
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -493,6 +505,7 @@ export function PostComposer({
     setVideoTitle("");
     setVideoDescription("");
     setSelectedChannelId(null);
+    setCategory(null);
     if (compact) setIsExpanded(false);
   }, [compact]);
 
@@ -519,6 +532,7 @@ export function PostComposer({
             if (!isShareable) formData.append("isShareable", "false");
             if (selectedChannelId !== null) formData.append("channelId", String(selectedChannelId));
             if (hangoutGroupId) formData.append("hangoutGroupId", String(hangoutGroupId));
+            if (category) formData.append("category", category);
 
             const xhr = new XMLHttpRequest();
             xhr.open("POST", `${API_BASE}/api/webapp/social/posts/with-multi-media`);
@@ -565,6 +579,7 @@ export function PostComposer({
             if (videoDescription.trim()) formData.append("videoDescription", videoDescription.trim());
             if (selectedChannelId !== null) formData.append("channelId", String(selectedChannelId));
             if (hangoutGroupId) formData.append("hangoutGroupId", String(hangoutGroupId));
+            if (category) formData.append("category", category);
 
             const xhr = new XMLHttpRequest();
             xhr.open("POST", `${API_BASE}/api/webapp/social/posts/with-media`);
@@ -610,6 +625,7 @@ export function PostComposer({
             isShareable: isShareable,
             ...(selectedChannelId !== null ? { channelId: selectedChannelId } : {}),
             ...(hangoutGroupId ? { hangoutGroupId } : {}),
+            ...(category ? { category } : {}),
           }),
         });
         if (!res.ok) {
@@ -865,6 +881,29 @@ export function PostComposer({
               {error}
             </p>
           )}
+
+          {/* Category chips */}
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {POST_CATEGORIES.map((cat) => {
+              const active = category === cat.value;
+              return (
+                <button
+                  key={cat.value}
+                  type="button"
+                  onClick={() => setCategory(active ? null : cat.value)}
+                  disabled={isPosting}
+                  className="px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all disabled:opacity-40"
+                  style={{
+                    background: active ? `${cat.color}22` : "transparent",
+                    borderColor: active ? cat.color : "rgba(255,255,255,0.12)",
+                    color: active ? cat.color : "#8E8E93",
+                  }}
+                >
+                  {cat.label}
+                </button>
+              );
+            })}
+          </div>
 
           {/* Action row — media buttons + post button */}
           <div className="flex items-center justify-between gap-2">

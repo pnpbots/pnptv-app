@@ -164,7 +164,7 @@ function emitNewPost(io, post, authorId) {
 
 const createPost = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, isExclusive, isShareable, hangoutGroupId: rawHangoutGroupId } = req.body;
+  const { content, isExclusive, isShareable, hangoutGroupId: rawHangoutGroupId, category: rawCategory } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
 
   try {
@@ -259,7 +259,7 @@ const createPost = async (req, res) => {
       if (!isOwner && !isCollaborator) return res.status(403).json({ error: 'Channel not found or not yours' });
     }
 
-    const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, exclusive, shareable, null, null, null, hangoutGroupId);
+    const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, exclusive, shareable, null, null, null, hangoutGroupId, null, rawCategory || null);
 
     // Assign to channel and update post_count
     if (channelId) {
@@ -502,7 +502,7 @@ const postToMastodon = async (req, res) => {
 
 const createPostWithMedia = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, isExclusive, isShareable, videoTitle, videoDescription } = req.body;
+  const { content, isExclusive, isShareable, videoTitle, videoDescription, category: rawCategory } = req.body;
 
   // Media-attached post: content may be empty (caption-less photo/video is valid).
   const hasContent = content && content.toString().trim().length > 0;
@@ -722,7 +722,7 @@ const createPostWithMedia = async (req, res) => {
     }
 
     const post = await SocialPostService.createPost(
-      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, videoThumbnailUrl, vTitle, vDesc, hangoutGroupId
+      user.id, content.toString().trim(), mediaUrl, mediaType, replyToId, repostOfId, false, exclusive, shareable, videoThumbnailUrl, vTitle, vDesc, hangoutGroupId, null, rawCategory || null
     );
 
     // Assign to channel and update post_count
@@ -802,7 +802,7 @@ const VIDEO_EXT_MAP = { 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/3
 
 const createPostWithMultiMedia = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, isExclusive, isShareable } = req.body;
+  const { content, isExclusive, isShareable, category: rawCategory } = req.body;
 
   // Media-attached post: content may be empty (caption-less multi-photo post is valid).
   const hasContent = content && content.toString().trim().length > 0;
@@ -972,14 +972,19 @@ const createPostWithMultiMedia = async (req, res) => {
       }
     }
 
+    const VALID_CATS = new Set(['fun', 'wellness', 'adult', 'community', 'social', 'media']);
+    const resolvedCategory = (rawCategory && VALID_CATS.has(rawCategory))
+      ? rawCategory
+      : SocialPostService._classifyByKeywords(content ? content.toString() : '');
+
     const result = await dbQuery(
       `INSERT INTO social_posts
          (user_id, content, media_url, media_type, media_urls, reply_to_id, repost_of_id,
-          is_wof, is_exclusive, is_shareable, content_tier, channel_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, $10, $11)
+          is_wof, is_exclusive, is_shareable, content_tier, channel_id, category)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, $10, $11, $12)
        RETURNING id, content, media_url, media_type, media_urls, video_thumbnail_url,
                  reply_to_id, repost_of_id, channel_id,
-                 likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, content_tier, created_at`,
+                 likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, content_tier, created_at, category`,
       [
         user.id,
         content.toString().trim(),
@@ -992,6 +997,7 @@ const createPostWithMultiMedia = async (req, res) => {
         shareable,
         contentTier,
         channelId || null,
+        resolvedCategory,
       ]
     );
 

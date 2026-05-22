@@ -55,7 +55,7 @@ class SocialPostService {
 
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
-              sp.source_channel, sp.hangout_group_id,
+              sp.source_channel, sp.hangout_group_id, sp.category,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
               sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
@@ -92,6 +92,8 @@ class SocialPostService {
     if (viewerTier !== undefined) {
       posts = SocialPostService._applyContentTierBlur(posts, viewerTier, isAdmin);
     }
+    // Reorder within the page for category variety + engagement boost
+    posts = SocialPostService._diversifyFeed(posts);
     const page = posts.slice(0, lim);
     const nextCursor = posts.length > lim ? String(page[page.length - 1].id) : null;
 
@@ -276,6 +278,73 @@ class SocialPostService {
         media_urls: null,
       };
     });
+  }
+
+  // Keyword-based auto-classifier. Returns a category string for the post.
+  static _classifyByKeywords(content) {
+    if (!content || typeof content !== 'string') return 'social';
+    const t = content.toLowerCase();
+    const has = (terms) => terms.some(w => t.includes(w));
+
+    if (has(['harm reduction', 'naloxone', 'narcan', 'recovery', ' sober', 'clean time',
+              'mental health', 'reducción de daños', 'bienestar', 'salud mental',
+              'prep ', ' hiv', ' sti ', ' pep ', 'safe sex', 'fentanyl test', 'clinic',
+              'therapy', 'harm reduc'])) return 'wellness';
+
+    if (has(['announcement', 'join us', 'bienvenid', ' evento ', 'meetup', 'community news',
+              'esta noche join', 'anyone know', 'alguien sabe', 'help needed',
+              'necesito ayuda', 'looking for info'])) return 'community';
+
+    if (has(['party', 'fiesta', 'hookup', 'pnp fun', 'let\'s play', 'pipe', 'cloud9',
+              'party and play', 'juguemos', 'partyhost'])) return 'fun';
+
+    if (has([' video', 'música', 'music', 'playlist', 'podcast', 'watch this',
+              'escucha', 'listen to', 'new track', 'nueva canción'])) return 'media';
+
+    return 'social';
+  }
+
+  // Reorder a page of posts for category variety + engagement relevance.
+  // All posts are returned (no skipping), just reordered within the page.
+  static _diversifyFeed(posts) {
+    if (posts.length <= 4) return posts;
+
+    const now = Date.now();
+    const scored = posts.map(p => {
+      const ageHours = Math.max(0, (now - new Date(p.created_at).getTime()) / 3600000);
+      const engagement = (p.likes_count || 0) * 3 + (p.reposts_count || 0) * 2 + (p.replies_count || 0);
+      // Small engagement boost decays over 48h; keeps recent content relevant even at 0 engagement
+      return { ...p, _score: engagement + Math.exp(-ageHours / 48) };
+    });
+
+    // Group by category, sort each group by score desc
+    const byCategory = {};
+    scored.forEach(p => {
+      const cat = p.category || 'social';
+      if (!byCategory[cat]) byCategory[cat] = [];
+      byCategory[cat].push(p);
+    });
+    Object.values(byCategory).forEach(arr => arr.sort((a, b) => b._score - a._score));
+
+    // Round-robin interleave across categories (sorted for determinism)
+    const cats = Object.keys(byCategory).sort();
+    const idx = {};
+    cats.forEach(c => { idx[c] = 0; });
+
+    const result = [];
+    while (result.length < posts.length) {
+      let added = false;
+      for (const cat of cats) {
+        if (idx[cat] < byCategory[cat].length) {
+          const p = byCategory[cat][idx[cat]++];
+          delete p._score;
+          result.push(p);
+          added = true;
+        }
+      }
+      if (!added) break;
+    }
+    return result;
   }
 
   /**
@@ -562,14 +631,18 @@ class SocialPostService {
 
   // ── Create Post ───────────────────────────────────────────────────────────
 
-  static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false, isExclusive = false, isShareable = true, videoThumbnailUrl = null, videoTitle = null, videoDescription = null, hangoutGroupId = null, sourceMessageId = null) {
+  static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false, isExclusive = false, isShareable = true, videoThumbnailUrl = null, videoTitle = null, videoDescription = null, hangoutGroupId = null, sourceMessageId = null, category = null) {
     const contentTier = isExclusive ? 'PRIME' : 'free';
+    const VALID_CATEGORIES = new Set(['fun', 'wellness', 'adult', 'community', 'social', 'media']);
+    const resolvedCategory = (category && VALID_CATEGORIES.has(category))
+      ? category
+      : SocialPostService._classifyByKeywords(content);
     const { rows } = await query(
-      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof, is_exclusive, is_shareable, video_thumbnail_url, content_tier, video_title, video_description, hangout_group_id, source_message_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      `INSERT INTO social_posts (user_id, content, media_url, media_type, reply_to_id, repost_of_id, is_wof, is_exclusive, is_shareable, video_thumbnail_url, content_tier, video_title, video_description, hangout_group_id, source_message_id, category)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        RETURNING id, content, media_url, media_type, video_thumbnail_url, video_title, video_description, reply_to_id, repost_of_id,
-                 likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, content_tier, created_at, hangout_group_id, source_message_id`,
-      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof, isExclusive, isShareable, videoThumbnailUrl || null, contentTier, videoTitle || null, videoDescription || null, hangoutGroupId || null, sourceMessageId || null]
+                 likes_count, reposts_count, replies_count, is_wof, is_exclusive, is_shareable, content_tier, created_at, hangout_group_id, source_message_id, category`,
+      [userId, content, mediaUrl, mediaType, replyToId || null, repostOfId || null, isWof, isExclusive, isShareable, videoThumbnailUrl || null, contentTier, videoTitle || null, videoDescription || null, hangoutGroupId || null, sourceMessageId || null, resolvedCategory]
     );
     const post = rows[0];
 
