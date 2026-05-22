@@ -101,7 +101,7 @@ const SHEET_STRINGS: Record<SheetLang, {
   es: {
     about: {
       title: "¿Qué es PNPtv?",
-      lead: "Una red social privada hecha para la comunidad queer PNP. Publica, chatea, transmite, conoce gente cerca — sin juicios, sin algoritmos, sin baneos.",
+      lead: "Una red social privada hecha para la comunidad queer PNP. Publica, chatea, transmite, conoce gente cerca — sin juicios, sin algoritmos, sin censura.",
       leadEmphasis: "Tus datos se quedan con nosotros.",
       cards: [
         { e: "🔒", t: "Privado por defecto", b: "Nada de lo que publiques sale de nuestras paredes a menos que tú mismo lo compartas." },
@@ -114,22 +114,22 @@ const SHEET_STRINGS: Record<SheetLang, {
       eyebrow: "Tu feed, tus reglas",
       p1: "Publica texto, fotos o videos. Da like, responde, repostea. Sigue a quien vibres y recibe un feed que sí es relevante —",
       p1Emphasis: "sin shadow banning, sin anuncios, sin policías de contenido.",
-      p2: "Los creadores pueden bloquear publicaciones exclusivas solo para suscriptores.",
+      p2: "Los creadores pueden publicar contenido exclusivo solo para sus suscriptores.",
     },
     hangouts: {
       title: "Hangouts",
       eyebrow: "Como Discord — pero más simple",
-      p1: "Crea un Hangout, invita a los tuyos, entra a video o voz grupal. Salas públicas o privadas con contraseña.",
+      p1: "Crea un Hangout, invita a los tuyos, entra a videollamada grupal o solo voz. Salas públicas o privadas con contraseña.",
       p2Emphasis: "Sin bots. Sin configurar servidor. Sin 47 canales que nunca usarás.",
     },
     live: {
-      title: "En Vivo",
+      title: "Live",
       eyebrow: "Como Chaturbate — pero en la nube ☁️",
       p1: "Transmite directo desde tu navegador o usa OBS con una clave de stream. Tus seguidores reciben aviso al instante, chatean en tiempo real y te dan propinas directo.",
       p2Emphasis: "Sin strikes. Sin suspensiones. Sin policías de contenido.",
     },
     nearby: {
-      title: "Conectar",
+      title: "Nearby",
       eyebrow: "Como Grindr — pero para PNP de verdad",
       p1: "Ve miembros de la comunidad y lugares PNP-friendly cerca de ti en un mapa.",
       p1Emphasis: "Sin bots, sin escorts, sin juicios.",
@@ -141,7 +141,7 @@ const SHEET_STRINGS: Record<SheetLang, {
       lead: "Suscripciones, contenido exclusivo, propinas, transmisión en vivo —",
       leadEmphasis: "te quedas con el 80% de todo.",
       stats: [{ v: "80%", l: "Ingresos tuyos" }, { v: "0", l: "Intermediarios" }, { v: "Rápido", l: "Pagos" }],
-      cta: "Aplica como Creador →",
+      cta: "Conviértete en Creador →",
     },
     payments: {
       title: "Pagos",
@@ -159,7 +159,7 @@ const SHEET_STRINGS: Record<SheetLang, {
       checks: [
         "Verificación de edad e identidad para todos los miembros",
         "Moderación humana — personas reales revisando los reportes",
-        "Mensajes directos encriptados",
+        "DMs encriptados",
         "Herramientas para bloquear, silenciar y reportar en cada publicación",
         "Recursos de reducción de daños y reglas de comunidad",
       ],
