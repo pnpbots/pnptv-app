@@ -303,15 +303,15 @@ export default function CallRoom() {
       .then((res) => {
         if (controller.signal.aborted) return;
         const booking = res.booking;
-        const startMs = new Date(booking.start_at).getTime();
-        const nowMs = Date.now();
-        const windowMs = 15 * 60 * 1000;
-
-        // Not yet within join window
-        if (startMs - nowMs > windowMs) {
-          setNotYetTime({ startAt: booking.start_at, creatorUsername: booking.creator_username });
-          setLoading(false);
-          return;
+        // null start_at = unscheduled credit, always within join window
+        if (booking.start_at != null) {
+          const startMs = new Date(booking.start_at).getTime();
+          const nowMs = Date.now();
+          if (startMs - nowMs > 15 * 60 * 1000) {
+            setNotYetTime({ startAt: booking.start_at, creatorUsername: booking.creator_username });
+            setLoading(false);
+            return;
+          }
         }
 
         // Step 2: call join endpoint to get LiveKit token
@@ -445,7 +445,12 @@ export default function CallRoom() {
         audio={false}
         video={true}
         options={{ adaptiveStream: true, dynacast: true }}
-        onDisconnected={() => navigate(-1)}
+        onDisconnected={() => {
+          try {
+            if (bookingId) sessionStorage.setItem(`pnptv:call:ended:${bookingId}`, '1');
+          } catch { /* private browsing */ }
+          navigate(-1);
+        }}
         style={{ height: "100dvh" }}
       >
         <CallStage />

@@ -8709,13 +8709,23 @@ app.get('/api/webapp/bookings/:bookingId/payment-status',
   requireSessionAuth,
   asyncHandler(callBookingController.getBookingPaymentStatus));
 
+const callJoinLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Join a booked private call — returns a LiveKit access token
 app.post('/api/webapp/bookings/:bookingId/join',
   requireSessionAuth,
+  callJoinLimiter,
   asyncHandler(callBookingController.joinBooking));
 
 app.get('/api/webapp/bookings/:bookingId',
   requireSessionAuth,
+  callJoinLimiter,
   asyncHandler(callBookingController.getBooking));
 
 app.post('/api/webapp/bookings/:bookingId/survey',

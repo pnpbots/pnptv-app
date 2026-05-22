@@ -99,7 +99,14 @@ export default function BookingConfirmation() {
     getCallBooking(Number(bookingId))
       .then((res) => {
         setBooking(res.booking);
-        // Don't store token at load time — fetch fresh on join
+        // Check if user just returned from a completed call
+        try {
+          const key = `pnptv:call:ended:${bookingId}`;
+          if (sessionStorage.getItem(key)) {
+            sessionStorage.removeItem(key);
+            setShowSurvey(true);
+          }
+        } catch { /* private browsing */ }
       })
       .catch((err) => setError(err instanceof Error ? err.message : s.failedToLoad))
       .finally(() => setLoading(false));
