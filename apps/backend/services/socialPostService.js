@@ -357,7 +357,7 @@ class SocialPostService {
     const lim = Math.min(Number(limit) || 10, 20);
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
-              sp.source_channel,
+              sp.source_channel, sp.category,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_wof, sp.created_at,
               u.id as author_id, u.username as author_username,
