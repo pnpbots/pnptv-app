@@ -72,6 +72,9 @@ const cashoutRoutes = require('./routes/cashoutRoutes');
 // Courtesy invite links — admin/model create, any authenticated user redeems
 const courtesyInviteRoutes = require('./routes/courtesyInviteRoutes');
 
+// Admin invite links — Colombia Socio program
+const inviteLinkRoutes = require('./routes/inviteLinkRoutes');
+
 // Main Stage — 24/7 LiveKit room
 const mainStageController = require('./controllers/mainStageController');
 
@@ -8049,7 +8052,7 @@ app.post('/api/wallet/link-dpns', requireSessionAuth, asyncHandler(async (req, r
 }));
 
 // GET /api/webapp/payments/dash/available — check if Dash/BTCPay is configured & reachable
-app.get('/api/webapp/payments/dash/available', requireSessionAuth, asyncHandler(async (req, res) => {
+app.get('/api/webapp/payments/dash/available', asyncHandler(async (req, res) => {
   const { checkBtcpayHealth } = require('../../config/btcpay');
   const health = await checkBtcpayHealth();
   return res.json({ available: health.configured && health.reachable, ...health });
@@ -8847,6 +8850,13 @@ contentFeedSyncController.startContentFeedSync();
 // POST /api/courtesy-invites/:code/redeem — redeem (any authenticated user)
 // ==========================================
 app.use('/api/courtesy-invites', courtesyInviteRoutes);
+
+// Admin invite links — Colombia Socio program
+// GET  /api/invite/:code              — validate (public)
+// POST /api/invite/:code/redeem       — redeem (session auth)
+// GET  /api/admin/invite-links        — list (admin)
+// POST /api/admin/invite-links        — create (admin)
+app.use('/api', inviteLinkRoutes);
 
 // ==========================================
 // PUBLIC ENDPOINTS (no auth required)
