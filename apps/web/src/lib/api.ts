@@ -830,6 +830,8 @@ export interface UserProfile {
   } | null;
   // Wellness: cumulative days of self-care breaks across all sessions
   wellnessDaysAccumulated?: number;
+  // Colombia Socio badge
+  colombiaBadge?: boolean;
 }
 
 /** Sidecar metadata stored on social_posts.metadata for channel-promo rows. */
@@ -6275,6 +6277,50 @@ export function addMeruLinks(
 
 export function deleteMeruLink(id: string): Promise<{ success: boolean; message: string }> {
   return request(`/api/webapp/admin/meru-links/${id}`, { method: "DELETE" });
+}
+
+// ─── Invite Links (Colombia Socio program) ────────────────────────────────────
+
+export interface InviteLink {
+  code: string;
+  created_by: string;
+  note: string | null;
+  sku: string;
+  is_lifetime: boolean;
+  max_uses: number | null;
+  use_count: number;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface InviteLinkCheck {
+  valid: boolean;
+  reason?: "expired" | "exhausted";
+  note?: string | null;
+  expiresAt?: string | null;
+  maxUses?: number | null;
+  useCount?: number;
+  sku?: string;
+}
+
+export function checkInviteLink(code: string): Promise<InviteLinkCheck> {
+  return request(`/api/invite/${encodeURIComponent(code)}`);
+}
+
+export function redeemInviteLink(code: string): Promise<{ success: boolean; alreadyRedeemed: boolean; alreadyHadEntitlement: boolean; error?: string }> {
+  return request(`/api/invite/${encodeURIComponent(code)}/redeem`, { method: "POST" });
+}
+
+export function listAdminInviteLinks(): Promise<{ success: boolean; links: InviteLink[] }> {
+  return request("/api/admin/invite-links");
+}
+
+export function createAdminInviteLink(data: {
+  note?: string;
+  maxUses?: number | null;
+  expiresAt?: string | null;
+}): Promise<{ success: boolean; code: string; url: string; link: InviteLink }> {
+  return request("/api/admin/invite-links", { method: "POST", body: data });
 }
 
 // ── Stream Analytics ──────────────────────────────────────────────────────────

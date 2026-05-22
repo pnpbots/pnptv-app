@@ -1924,6 +1924,7 @@ const getProfile = async (req, res) => {
         creatorFeatured: p.creator_featured || false,
         creatorSubscriberCount: p.creator_subscriber_count || 0,
         hasTelegram: !!p.telegram,
+        colombiaBadge: p.colombia_badge || false,
         performerData,
       },
     });

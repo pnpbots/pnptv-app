@@ -22,6 +22,7 @@ const CREATOR_RESTRICTED_PATHS = new Set([
   "/admin/duplicate-accounts",
   "/admin/payment-health",
   "/admin/compliance-2257",
+  "/admin/invite-links",
 ]);
 
 // Nav item definitions — internal items use { to, labelKey }; external items use { externalUrl, label }
@@ -56,6 +57,7 @@ const allNavItems: NavItem[] = [
   { to: "/admin/duplicate-accounts", labelKey: "duplicateAccounts", icon: "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z", creatorAllowed: false },
   { to: "/admin/payment-health", label: "Payment Health", icon: "M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z", creatorAllowed: false },
   { to: "/admin/prime", label: "Prime Channel", icon: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z", creatorAllowed: false },
+  { to: "/admin/invite-links", label: "Socio Colombia", icon: "M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z", creatorAllowed: false },
   // Direct CMS (Directus) shortcuts — open in a new tab
   { externalUrl: "https://cms.pnptv.app/admin/content/social_posts", label: "CMS: X Posts", icon: "M6 18L18 6M6 6l12 12", creatorAllowed: false },
 ];
