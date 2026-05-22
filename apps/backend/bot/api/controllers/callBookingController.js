@@ -53,6 +53,7 @@ async function resolveBooking(rawId, callerUserId) {
        JOIN users u_creator ON u_creator.id = cc.creator_id
        JOIN users u_member  ON u_member.id  = cc.member_id
        WHERE b.id = $1
+         AND b.status IN ('confirmed', 'held', 'awaiting_payment')
          AND (cc.member_id = $2 OR cc.creator_id = $2)`,
       [rawId, callerUserId]
     );
@@ -60,6 +61,8 @@ async function resolveBooking(rawId, callerUserId) {
   }
 
   if (INT_RE.test(rawId)) {
+    // Cap digit length to avoid float precision issues with very large integers
+    if (rawId.length > 15) return null;
     const creditId = Number(rawId);
     if (!Number.isInteger(creditId) || creditId < 1) return null;
     const result = await query(
@@ -270,6 +273,12 @@ async function joinBooking(req, res) {
       return res.status(404).json({ success: false, error: 'Booking not found' });
     }
 
+    // Reject terminal credit statuses (expired, refunded, cancelled)
+    const TERMINAL_STATUSES = new Set(['expired', 'refunded', 'cancelled']);
+    if (TERMINAL_STATUSES.has(credit.status)) {
+      return res.status(403).json({ success: false, error: 'This booking is no longer active' });
+    }
+
     // Enforce join window when a scheduled time exists
     if (credit.start_at) {
       const startMs = new Date(credit.start_at).getTime();
@@ -310,8 +319,9 @@ async function joinBooking(req, res) {
       userId,
       roomName,
       isModerator,
+      ttlSeconds,
     });
-    return res.json({ token, livekitUrl: LIVEKIT_WS_URL, roomName });
+    return res.json({ token, livekitUrl: LIVEKIT_WS_URL, roomName, ttlSeconds });
   } catch (err) {
     logger.error('[callBookingController] joinBooking error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to join call' });
@@ -998,7 +1008,7 @@ async function getBookingPaymentStatus(req, res) {
          p_row.status          AS payment_status,
          p_row.metadata        AS payment_metadata,
          perf_user.id          AS performer_user_id,
-         COALESCE(b.room_name, CONCAT('booking-', b.id::text)) AS room_name
+         CONCAT('booking-', b.credit_id::text) AS room_name
        FROM bookings b
        LEFT JOIN payments p_row ON p_row.id = b.payment_id
        LEFT JOIN performers perf ON perf.id = b.performer_id
@@ -1052,16 +1062,8 @@ async function getBookingPaymentStatus(req, res) {
       }
     }
 
-    // Ensure room_name is persisted on the bookings row for confirmed bookings
-    let roomName = row.room_name;
-    if (status === 'paid' && !row.room_name) {
-      const generatedRoom = `booking-${row.booking_id}`;
-      await query(
-        `UPDATE bookings SET room_name = $2, updated_at = NOW() WHERE id = $1 AND room_name IS NULL`,
-        [row.booking_id, generatedRoom]
-      ).catch(() => {});
-      roomName = generatedRoom;
-    }
+    // roomName is always booking-{credit_id} — consistent with joinBooking and getBooking
+    const roomName = row.credit_id ? `booking-${row.credit_id}` : row.room_name;
 
     return res.json({
       success: true,

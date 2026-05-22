@@ -262,10 +262,11 @@ export default function CallRoom() {
     };
   }, []);
 
-  // Mint a fresh token 30 min before the 2h booking token expires.
-  const scheduleTokenRefresh = useCallback((bId: string) => {
+  // Refresh the LiveKit token 5 min before it expires. ttlSeconds comes from /join response.
+  const scheduleTokenRefresh = useCallback((bId: string, ttlSeconds: number) => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    const REFRESH_MS = 90 * 60 * 1000; // 1h30m — 30 min before 2h expiry
+    const BUFFER_S = 5 * 60;
+    const delayMs = Math.max((ttlSeconds - BUFFER_S) * 1000, 60_000);
     refreshTimerRef.current = setTimeout(async () => {
       if (!mountedRef.current) return;
       try {
@@ -274,7 +275,7 @@ export default function CallRoom() {
           { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" } },
         );
         if (!r.ok) throw new Error("refresh failed");
-        const data = await r.json() as { token?: string; livekitUrl?: string; roomName?: string };
+        const data = await r.json() as { token?: string; livekitUrl?: string; roomName?: string; ttlSeconds?: number };
         if (!mountedRef.current) return;
         if (data.token) {
           setJoinData((prev) =>
@@ -282,13 +283,13 @@ export default function CallRoom() {
               ? { ...prev, token: data.token!, livekitUrl: data.livekitUrl ?? prev.livekitUrl, roomName: data.roomName ?? prev.roomName }
               : prev,
           );
+          scheduleTokenRefresh(bId, data.ttlSeconds ?? ttlSeconds);
         }
-        scheduleTokenRefresh(bId);
       } catch {
         // Retry in 5 minutes on failure.
-        refreshTimerRef.current = setTimeout(() => scheduleTokenRefresh(bId), 5 * 60 * 1000);
+        refreshTimerRef.current = setTimeout(() => scheduleTokenRefresh(bId, ttlSeconds), 5 * 60 * 1000);
       }
-    }, REFRESH_MS);
+    }, delayMs);
   }, []);
 
   useEffect(() => {
@@ -326,20 +327,21 @@ export default function CallRoom() {
           .then((r) => {
             if (!r.ok) {
               return r.json().then((body: unknown) => {
-                const msg =
-                  typeof body === "object" &&
-                  body !== null &&
-                  "message" in body &&
-                  typeof (body as Record<string, unknown>).message === "string"
-                    ? (body as Record<string, string>).message
-                    : cs.couldNotJoin;
+                const b = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+                // 403 with startAt = call hasn't started yet → show countdown instead of error
+                if (r.status === 403 && typeof b.startAt === "string") {
+                  setNotYetTime({ startAt: b.startAt, creatorUsername: booking.creator_username });
+                  setLoading(false);
+                  return null;
+                }
+                const msg = typeof b.error === "string" ? b.error : cs.couldNotJoin;
                 throw new Error(msg);
               });
             }
-            return r.json() as Promise<{ token?: string; livekitUrl?: string; roomName?: string }>;
+            return r.json() as Promise<{ token?: string; livekitUrl?: string; roomName?: string; ttlSeconds?: number }>;
           })
           .then((data) => {
-            if (controller.signal.aborted) return;
+            if (!data || controller.signal.aborted) return;
             if (!data.token || !data.livekitUrl) {
               // Room not ready yet — show countdown
               setNotYetTime({ startAt: booking.start_at, creatorUsername: booking.creator_username });
@@ -354,7 +356,7 @@ export default function CallRoom() {
               startAt: booking.start_at,
             });
             setLoading(false);
-            scheduleTokenRefresh(bookingId!);
+            scheduleTokenRefresh(bookingId!, data.ttlSeconds ?? 5400);
           });
       })
       .catch((err: unknown) => {
