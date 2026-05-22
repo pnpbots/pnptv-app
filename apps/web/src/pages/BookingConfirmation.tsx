@@ -20,14 +20,14 @@ const STRINGS = {
     duration: "Duration",
     minutes: "minutes",
     status: "Status",
-    joinCall: "Join Call on Telegram",
+    joinCall: "Join Call",
     howToJoinTitle: "How to Join & Call Rules",
     howToJoinHeading: "How to Join",
     howToJoinSteps: [
       "Return to this page 15 minutes before your call.",
-      'Click "Join Call on Telegram" — Telegram opens to the creator\'s DM.',
-      "The creator will start a Telegram video call at the scheduled time.",
-      "Accept the incoming video call in Telegram.",
+      'Click "Join Call" — your browser opens the video call room.',
+      "Allow camera and microphone access when prompted.",
+      "The creator will join at the scheduled time.",
     ],
     callEtiquetteHeading: "Call Etiquette",
     callEtiquetteRules: [
@@ -54,14 +54,14 @@ const STRINGS = {
     duration: "Duración",
     minutes: "minutos",
     status: "Estado",
-    joinCall: "Unirse a la llamada en Telegram",
+    joinCall: "Unirse a la llamada",
     howToJoinTitle: "Cómo unirte y reglas de la llamada",
     howToJoinHeading: "Cómo unirte",
     howToJoinSteps: [
       "Vuelve a esta página 15 minutos antes de tu llamada.",
-      'Toca "Unirse a la llamada en Telegram" — Telegram se abre en el DM del creador.',
-      "El creador iniciará una videollamada en Telegram a la hora programada.",
-      "Acepta la videollamada entrante en Telegram.",
+      'Toca "Unirse a la llamada" — tu navegador abre la sala de videollamada.',
+      "Permite acceso a cámara y micrófono cuando se solicite.",
+      "El creador se unirá a la hora programada.",
     ],
     callEtiquetteHeading: "Etiqueta de la llamada",
     callEtiquetteRules: [
@@ -105,14 +105,10 @@ export default function BookingConfirmation() {
       .finally(() => setLoading(false));
   }, [bookingId, s.invalidBooking, s.failedToLoad]);
 
-  // Open Telegram DM with the creator to start the video call
   const handleJoinCall = useCallback(() => {
-    const creatorUsername = booking?.creator_username;
-    const telegramUrl = creatorUsername
-      ? `https://t.me/${creatorUsername}`
-      : "https://t.me/pnptvapp";
-    window.open(telegramUrl, "_blank", "noopener,noreferrer");
-  }, [booking?.creator_username]);
+    if (!bookingId) return;
+    navigate(`/call/${encodeURIComponent(bookingId)}`);
+  }, [bookingId, navigate]);
 
   const startTime = booking?.start_at ? new Date(booking.start_at) : null;
   const [canJoin, setCanJoin] = useState(() => {

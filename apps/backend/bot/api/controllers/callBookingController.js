@@ -24,6 +24,72 @@ const ONLINE_KEY = (userId) => `user:${userId}:active`;
 // TTL for the online presence key (30 minutes — heartbeat is expected from frontend)
 const ONLINE_TTL_SECONDS = 30 * 60;
 
+// UUID pattern
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const INT_RE = /^\d+$/;
+
+/**
+ * Resolve a booking by either call_credits.id (positive integer string)
+ * or bookings.id (UUID). Returns the credit row with booking times merged in,
+ * or null if not found or caller is not a participant.
+ */
+async function resolveBooking(rawId, callerUserId) {
+  if (UUID_RE.test(rawId)) {
+    const result = await query(
+      `SELECT cc.*,
+              cp.duration_minutes, cp.title AS package_title,
+              u_creator.username AS creator_username,
+              u_creator.display_name AS creator_display_name,
+              u_creator.photo_url AS creator_photo,
+              u_member.username AS member_username,
+              u_member.display_name AS member_display_name,
+              u_member.photo_url AS member_photo,
+              b.start_time_utc AS start_at,
+              b.end_time_utc AS end_at,
+              b.status AS booking_status
+       FROM bookings b
+       JOIN call_credits cc ON cc.id = b.credit_id
+       JOIN call_packages cp ON cp.id = cc.package_id
+       JOIN users u_creator ON u_creator.id = cc.creator_id
+       JOIN users u_member  ON u_member.id  = cc.member_id
+       WHERE b.id = $1
+         AND (cc.member_id = $2 OR cc.creator_id = $2)`,
+      [rawId, callerUserId]
+    );
+    return result.rows[0] || null;
+  }
+
+  if (INT_RE.test(rawId)) {
+    const creditId = Number(rawId);
+    if (!Number.isInteger(creditId) || creditId < 1) return null;
+    const result = await query(
+      `SELECT cc.*,
+              cp.duration_minutes, cp.title AS package_title,
+              u_creator.username AS creator_username,
+              u_creator.display_name AS creator_display_name,
+              u_creator.photo_url AS creator_photo,
+              u_member.username AS member_username,
+              u_member.display_name AS member_display_name,
+              u_member.photo_url AS member_photo,
+              b.start_time_utc AS start_at,
+              b.end_time_utc AS end_at,
+              b.status AS booking_status
+       FROM call_credits cc
+       JOIN call_packages cp ON cp.id = cc.package_id
+       JOIN users u_creator ON u_creator.id = cc.creator_id
+       JOIN users u_member  ON u_member.id  = cc.member_id
+       LEFT JOIN bookings b ON b.credit_id = cc.id
+                           AND b.status IN ('confirmed', 'held', 'awaiting_payment')
+       WHERE cc.id = $1
+         AND (cc.member_id = $2 OR cc.creator_id = $2)`,
+      [creditId, callerUserId]
+    );
+    return result.rows[0] || null;
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/webapp/book-call/checkout
 // ---------------------------------------------------------------------------
@@ -113,7 +179,7 @@ async function createCheckout(req, res) {
 
 /**
  * Returns credit details plus a fresh LiveKit token for the caller.
- * :bookingId is call_credits.id.
+ * :bookingId accepts call_credits.id (integer) or bookings.id (UUID).
  */
 async function getBooking(req, res) {
   try {
@@ -122,53 +188,30 @@ async function getBooking(req, res) {
       return res.status(401).json({ success: false, error: 'Not authenticated' });
     }
     const userId = String(sessionUser.id);
-    const creditId = Number(req.params.bookingId);
+    const { bookingId } = req.params;
 
-    if (!Number.isInteger(creditId) || creditId < 1) {
-      return res.status(400).json({ success: false, error: 'Invalid bookingId' });
-    }
-
-    // BC-C-01/DB-C2: Load credit with LEFT JOIN to bookings for start_at/end_at
-    const creditResult = await query(
-      `SELECT cc.*,
-              cp.duration_minutes, cp.title AS package_title,
-              u_creator.username AS creator_username,
-              u_creator.display_name AS creator_display_name,
-              u_creator.photo_url AS creator_photo,
-              u_member.username AS member_username,
-              u_member.display_name AS member_display_name,
-              u_member.photo_url AS member_photo,
-              b.start_time_utc AS start_at,
-              b.end_time_utc AS end_at,
-              b.status AS booking_status
-       FROM call_credits cc
-       JOIN call_packages cp ON cp.id = cc.package_id
-       JOIN users u_creator ON u_creator.id = cc.creator_id
-       JOIN users u_member  ON u_member.id  = cc.member_id
-       LEFT JOIN bookings b ON b.credit_id = cc.id AND b.status IN ('confirmed', 'held', 'awaiting_payment')
-       WHERE cc.id = $1
-         AND (cc.member_id = $2 OR cc.creator_id = $2)`,
-      [creditId, userId]
-    );
-
-    const credit = creditResult.rows[0];
+    const credit = await resolveBooking(bookingId, userId);
     if (!credit) {
+      if (!UUID_RE.test(bookingId) && !INT_RE.test(bookingId)) {
+        return res.status(400).json({ success: false, error: 'Invalid bookingId' });
+      }
       return res.status(404).json({ success: false, error: 'Booking not found' });
     }
 
-    // Deterministic, stable room name per credit
     const roomName = `booking-${credit.id}`;
     const isModerator = userId === String(credit.creator_id);
     const displayName = (isModerator ? credit.creator_display_name : credit.member_display_name) || userId;
-    const photoUrl = (isModerator ? credit.creator_photo : credit.member_photo) || '';
 
     let livekitInfo = null;
     try {
-      const token = await generateToken(roomName, userId, displayName, isModerator);
+      const token = await generateToken(roomName, userId, displayName, isModerator, {
+        canPublishAudio: true,
+        canPublishVideo: true,
+      });
       livekitInfo = { token, roomName, livekitUrl: LIVEKIT_WS_URL };
     } catch (livekitErr) {
       logger.warn('[callBookingController] LiveKit token generation failed', {
-        creditId,
+        creditId: credit.id,
         error: livekitErr.message,
       });
     }
@@ -197,6 +240,81 @@ async function getBooking(req, res) {
   } catch (err) {
     logger.error('[callBookingController] getBooking error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to retrieve booking' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/webapp/bookings/:bookingId/join
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a LiveKit access token for joining a booked private call.
+ * :bookingId accepts call_credits.id (integer) or bookings.id (UUID).
+ * Both the member and creator can join; both get publish rights so they
+ * can send audio and video to each other.
+ */
+async function joinBooking(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+    const { bookingId } = req.params;
+
+    const credit = await resolveBooking(bookingId, userId);
+    if (!credit) {
+      if (!UUID_RE.test(bookingId) && !INT_RE.test(bookingId)) {
+        return res.status(400).json({ success: false, error: 'Invalid bookingId' });
+      }
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    // Enforce join window when a scheduled time exists
+    if (credit.start_at) {
+      const startMs = new Date(credit.start_at).getTime();
+      const durationMs = (credit.duration_minutes || 60) * 60 * 1000;
+      const nowMs = Date.now();
+      const EARLY_MS = 15 * 60 * 1000;  // allow joining 15 min before
+      const GRACE_MS = 30 * 60 * 1000;  // allow joining up to 30 min after end
+
+      if (nowMs < startMs - EARLY_MS) {
+        return res.status(403).json({
+          success: false,
+          error: 'The call has not started yet',
+          startAt: credit.start_at,
+        });
+      }
+      if (nowMs > startMs + durationMs + GRACE_MS) {
+        return res.status(410).json({ success: false, error: 'This call has ended' });
+      }
+    }
+
+    const roomName = `booking-${credit.id}`;
+    const isModerator = userId === String(credit.creator_id);
+    const displayName = isModerator
+      ? (credit.creator_display_name || credit.creator_username || userId)
+      : (credit.member_display_name || credit.member_username || userId);
+
+    // TTL = booking duration + 30 min buffer so the token outlasts the call
+    const ttlSeconds = (credit.duration_minutes || 60) * 60 + 30 * 60;
+
+    const token = await generateToken(roomName, userId, displayName, isModerator, {
+      canPublishAudio: true,
+      canPublishVideo: true,
+      ttlSeconds,
+    });
+
+    logger.info('[callBookingController] joinBooking token issued', {
+      creditId: credit.id,
+      userId,
+      roomName,
+      isModerator,
+    });
+    return res.json({ token, livekitUrl: LIVEKIT_WS_URL, roomName });
+  } catch (err) {
+    logger.error('[callBookingController] joinBooking error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to join call' });
   }
 }
 
@@ -1010,6 +1128,7 @@ module.exports = {
   createCheckout,
   createCheckoutDash,
   getBooking,
+  joinBooking,
   getBookingPaymentStatus,
   submitSurvey,
   saveAvailabilitySchedule,

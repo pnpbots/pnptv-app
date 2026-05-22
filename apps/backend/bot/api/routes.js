@@ -8706,6 +8706,11 @@ app.get('/api/webapp/bookings/:bookingId/payment-status',
   requireSessionAuth,
   asyncHandler(callBookingController.getBookingPaymentStatus));
 
+// Join a booked private call — returns a LiveKit access token
+app.post('/api/webapp/bookings/:bookingId/join',
+  requireSessionAuth,
+  asyncHandler(callBookingController.joinBooking));
+
 app.get('/api/webapp/bookings/:bookingId',
   requireSessionAuth,
   asyncHandler(callBookingController.getBooking));
