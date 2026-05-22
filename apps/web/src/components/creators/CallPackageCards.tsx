@@ -159,7 +159,8 @@ function PackageCard({ pkg, onBookNow }: PackageCardProps) {
         onClick={onBookNow}
         aria-label={pkg.bookNowAriaLabel}
         className={clsx(
-          "w-full min-h-[48px] rounded-xl text-sm font-bold text-white",
+          "w-full min-h-[56px] rounded-xl text-base font-bold text-white",
+          "flex items-center justify-center gap-2",
           "transition-all duration-150 active:scale-[0.97]",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background",
           pkg.duration === 30
@@ -172,8 +173,22 @@ function PackageCard({ pkg, onBookNow }: PackageCardProps) {
             pkg.duration === 30
               ? "linear-gradient(90deg, #D4007A, #E69138)"
               : "linear-gradient(90deg, #7C3AED, #3B82F6)",
+          boxShadow:
+            pkg.duration === 30
+              ? "0 4px 18px rgba(212,0,122,0.30)"
+              : "0 4px 18px rgba(124,58,237,0.30)",
         }}
       >
+        <svg
+          style={{ width: 18, height: 18, flexShrink: 0 }}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+        </svg>
         {pkg.bookNowLabel}
       </button>
     </div>
@@ -243,24 +258,35 @@ export function CallPackageCards({
   return (
     <div className={clsx("", className)}>
       {/* Section header */}
-      <div className="flex items-center gap-2 mb-3">
-        <svg
-          className="w-4 h-4 flex-shrink-0 text-pnp-accent"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={1.8}
-          aria-hidden="true"
+      <div className="flex items-center gap-2.5 mb-4">
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.22), rgba(230,145,56,0.14))", border: "1px solid rgba(212,0,122,0.28)" }}
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
-          />
-        </svg>
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary">
-          {t.creator.bookPrivateSession}
-        </h2>
+          <svg
+            className="w-4 h-4"
+            style={{ color: "#D4007A" }}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"
+            />
+          </svg>
+        </div>
+        <div>
+          <h2 className="text-sm font-bold" style={{ color: "#EBEBF5" }}>
+            {t.creator.bookPrivateSession}
+          </h2>
+          <p className="text-[11px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+            Private 1-on-1 video call
+          </p>
+        </div>
       </div>
 
       {/* Cards grid */}

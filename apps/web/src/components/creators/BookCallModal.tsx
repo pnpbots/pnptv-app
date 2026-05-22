@@ -1342,7 +1342,7 @@ export function BookCallModal({
                 type="button"
                 disabled={joinCallLoading}
                 onClick={handleJoinCallWithToken}
-                className="w-full min-h-[48px] rounded-2xl text-base font-bold text-white flex items-center justify-center gap-2 transition-opacity hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full min-h-[52px] rounded-2xl text-base font-bold text-white flex items-center justify-center gap-2 transition-opacity hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ background: "linear-gradient(90deg, #7B61FF, #D4007A)" }}
               >
                 {joinCallLoading ? (
@@ -1360,15 +1360,38 @@ export function BookCallModal({
                 )}
               </button>
             </div>
-          ) : startTimeForJoin && !isWithinJoinWindow ? (
-            <div
-              className="w-full rounded-xl px-4 py-3 text-sm text-center"
-              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary, #8E8E93)" }}
-            >
-              Your call with <span style={{ color: "#EBEBF5" }}>@{creator.username}</span> is scheduled for{" "}
-              <span style={{ color: "#EBEBF5" }}>
-                {(() => { const { date, time } = formatSlotDate(startTimeForJoin); return `${date} at ${time}`; })()}
-              </span>. We'll send a reminder 15 min before.
+          ) : confirmedBookingId ? (
+            // Future booking — send user to the confirmation page with countdown timer
+            <div className="w-full space-y-2.5">
+              <div
+                className="w-full rounded-xl px-4 py-3 text-sm text-center"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+              >
+                {startTimeForJoin ? (
+                  <>
+                    Scheduled for{" "}
+                    <span style={{ color: "#EBEBF5" }}>
+                      {(() => { const { date, time } = formatSlotDate(startTimeForJoin); return `${date} at ${time}`; })()}
+                    </span>. We'll send a reminder 15 min before.
+                  </>
+                ) : (
+                  "Your booking is confirmed. The creator will reach out to schedule."
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  navigate(`/booking/${encodeURIComponent(String(confirmedBookingId))}/confirm`);
+                }}
+                className="w-full min-h-[52px] rounded-2xl text-base font-bold text-white flex items-center justify-center gap-2 transition-opacity hover:opacity-90 active:scale-[0.98]"
+                style={{ background: "linear-gradient(90deg, #D4007A, #E69138)" }}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 9v7.5m-9-6h.008v.008H12V9zm0 3.75h.008v.008H12v-.008zm0 3.75h.008v.008H12v-.008zm-3.75 0h.008v.008H8.25v-.008zm0-3.75h.008v.008H8.25v-.008zm7.5 3.75h.008v.008h-.008v-.008zm0-3.75h.008v.008h-.008v-.008z" />
+                </svg>
+                View Booking Details
+              </button>
             </div>
           ) : null}
 

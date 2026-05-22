@@ -106,9 +106,17 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
   //     booking row. Same pattern as createCallCheckoutDash so the two
   //     payment providers converge at onCallPaymentSuccess.
   if (slotTimes?.startTimeUtc && slotTimes?.endTimeUtc) {
+    const pool = getPool();
+    const slotClient = await pool.connect();
     try {
-      const performerId = await _getPerformerId(pkg.creator_id);
-      const booking = await _lockSlotAndInsertBooking({
+      await slotClient.query('BEGIN');
+      const performerId = await _getPerformerId(slotClient, pkg.creator_id);
+      if (!performerId) {
+        throw Object.assign(new Error(`Creator ${pkg.creator_id} has no performer profile`), {
+          code: 'PERFORMER_NOT_FOUND', status: 404,
+        });
+      }
+      const booking = await _lockSlotAndInsertBooking(slotClient, {
         performerId,
         memberId,
         packageId: pkg.id,
@@ -116,20 +124,24 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
         startTimeUtc: slotTimes.startTimeUtc,
         endTimeUtc: slotTimes.endTimeUtc,
         durationMinutes: pkg.duration_minutes,
-        priceCents: Math.round(parseFloat(pkg.price_usd) * 100),
+        priceUsd: pkg.price_usd,
       });
       // Persist booking id into payment metadata so onCallPaymentSuccess
       // flips the right row to 'confirmed' when the webhook lands.
-      await query(
+      await slotClient.query(
         `UPDATE payments SET metadata = metadata || $2::jsonb, updated_at = NOW() WHERE id = $1`,
         [payment.id, JSON.stringify({ bookingId: booking.id })]
       );
+      await slotClient.query('COMMIT');
     } catch (lockErr) {
+      await slotClient.query('ROLLBACK');
       // Mark the pending payment as failed so it doesn't orphan.
       await PaymentModel.updateStatus(payment.id, 'failed', {
         error_reason: `slot_lock_failed: ${lockErr.message || 'unknown'}`.slice(0, 500),
       }).catch(() => {});
       throw lockErr;
+    } finally {
+      slotClient.release();
     }
   }
 
@@ -602,7 +614,7 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
   let btcpayInvoice;
   try {
     const orderId = `call-${payment.id}`;
-    const redirectUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/bookings/${booking.id}`;
+    const redirectUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/booking/${booking.id}/confirm`;
 
     btcpayInvoice = await createInvoice({
       amount: amountUsd,
