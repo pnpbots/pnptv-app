@@ -1295,7 +1295,7 @@ class EmailService {
                 Después de cada intento de cierre, nos levantamos más fuertes, trayéndote el contenido que amas y un bot de nueva generación construido para mantener a nuestra comunidad más unida que nunca.
               </p>
               <p>
-                Disfruta de tus videos favoritos, explora nuevas experiencias como Nearby, Hangouts, Videorama y PNP Live, y reconecta con un espacio donde la <span class="highlight">libertad, la conexión y el placer</span> se encuentran.
+                Disfruta de tus videos favoritos, explora nuevas experiencias como Nearby, Hangouts y PNP Live, y reconecta con un espacio donde la <span class="highlight">libertad, la conexión y el placer</span> se encuentran.
               </p>
               <p style="text-align: center; font-style: italic; font-size: 18px; color: #ff00cc;">
                 Tu espacio. Tu gente. Tu momento.
@@ -1445,7 +1445,7 @@ class EmailService {
                 After every shutdown attempt, we rise stronger, bringing you the content you love and a new generation bot built to keep our community closer than ever.
               </p>
               <p>
-                Enjoy your favorite videos, explore new experiences like Nearby, Hangouts, Videorama, and PNP Live, and reconnect with a space where <span class="highlight">freedom, connection, and pleasure</span> meet.
+                Enjoy your favorite videos, explore new experiences like Nearby, Hangouts, and PNP Live, and reconnect with a space where <span class="highlight">freedom, connection, and pleasure</span> meet.
               </p>
               <p style="text-align: center; font-style: italic; font-size: 18px; color: #ff00cc;">
                 Your space. Your people. Your moment.

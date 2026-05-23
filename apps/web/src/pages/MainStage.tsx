@@ -505,6 +505,44 @@ export default function MainStage() {
   }
 
   if (error) {
+    const isMembershipRequired = /membership/i.test(error);
+
+    if (isMembershipRequired) {
+      return (
+        <div className="fixed inset-0 flex flex-col items-center justify-center gap-6 px-6 text-center bg-pnp-background">
+          <div
+            className="w-20 h-20 rounded-3xl flex items-center justify-center"
+            style={{ background: "linear-gradient(135deg,rgba(212,0,122,0.18),rgba(123,97,255,0.18))", border: "1px solid rgba(212,0,122,0.3)" }}
+          >
+            <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#D4007A" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-pnp-text-primary font-bold text-lg mb-2">Members Only</p>
+            <p className="text-white/55 text-sm max-w-xs mx-auto">Main Stage is exclusive to PNPtv! members. Subscribe to join the room and hang out live.</p>
+          </div>
+          <div className="flex flex-col gap-3 w-full max-w-xs">
+            <button
+              type="button"
+              onClick={() => navigate("/subscribe")}
+              className="min-h-[48px] w-full rounded-2xl text-sm font-bold text-white transition-all active:scale-[0.97]"
+              style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+            >
+              Subscribe to Join
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="min-h-[44px] w-full rounded-2xl text-sm font-semibold text-white/60 transition-all active:scale-[0.97] bg-white/[0.06] border border-white/10"
+            >
+              {t.live.mainStageGoBack}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center bg-pnp-background">
         <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-pnp-error/[0.12] border border-pnp-error/25">

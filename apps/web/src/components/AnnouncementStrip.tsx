@@ -60,8 +60,8 @@ const UPDATE_MESSAGES: RawMessage[] = [
   },
   {
     category: "UPDATE",
-    en: "Your $100 Lifetime Founder pass is still available — limited spots.",
-    es: "Tu pase Lifetime Founder de $100 sigue disponible — cupos limitados.",
+    en: "Last 12 hours — Lifetime Founder pass closes tonight. Pay with Dash and save 20%.",
+    es: "Últimas 12 horas — El pase Lifetime Founder cierra esta noche. Paga con Dash y ahorra 20%.",
     href: "/lifetime100",
   },
   {

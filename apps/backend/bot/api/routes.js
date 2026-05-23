@@ -8613,6 +8613,7 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(as
 
   let planDisplayName;
   let usdAmount;
+  let discountInfo = null;
 
   if (planId === 'creator_monthly') {
     if (!creatorId) {
@@ -8636,7 +8637,13 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(as
     const PlanModel = require('../../models/planModel');
     const plan = await PlanModel.getById(planId);
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
-    usdAmount = parseFloat(plan.price);
+    const basePrice = parseFloat(plan.price);
+    if (planId === 'lifetime100') {
+      usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
+      discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    } else {
+      usdAmount = basePrice;
+    }
     planDisplayName = plan.display_name || plan.name;
   }
 
@@ -8664,6 +8671,7 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(as
       checkoutUrl: invoice.checkoutUrl,
       planName: planDisplayName,
       usdAmount,
+      ...(discountInfo || {}),
     });
   } catch (err) {
     logger.error(`Dash subscription invoice error: ${err.message}`);

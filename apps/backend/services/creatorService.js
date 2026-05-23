@@ -361,24 +361,34 @@ class CreatorService {
       [creatorId, subscriberId, priceUsd, expiresAt, paymentId || null]
     );
 
-    // Increment subscriber count
+    // Recompute the visible subscriber count from canonical rows instead of
+    // incrementing blindly, which drifts on renewals and idempotent replays.
     await query(
-      'UPDATE users SET creator_subscriber_count = creator_subscriber_count + 1 WHERE id = $1',
+      `UPDATE users
+          SET creator_subscriber_count = (
+            SELECT COUNT(*)
+            FROM creator_subscriptions
+            WHERE creator_id = $1
+              AND status = 'active'
+              AND (expires_at IS NULL OR expires_at > NOW())
+          )
+        WHERE id = $1`,
       [creatorId]
     );
 
     // Write creator-subscription entitlement so entitlement-based access checks work
     try {
       await query(`
-        INSERT INTO user_entitlements (user_id, add_on_id, creator_id, expires_at, source_plan_id)
-        VALUES ($1, 'creator-subscription', $2, NOW() + INTERVAL '30 days', 'creator_monthly')
+        INSERT INTO user_entitlements (user_id, add_on_id, creator_id, expires_at, source_plan_id, source_payment_id)
+        VALUES ($1, 'creator-subscription', $2, NOW() + INTERVAL '30 days', 'creator_monthly', $3)
         ON CONFLICT (user_id, add_on_id, creator_id)
         DO UPDATE SET
           expires_at = GREATEST(user_entitlements.expires_at, NOW() + INTERVAL '30 days'),
           is_consumed = false,
+          source_payment_id = COALESCE(EXCLUDED.source_payment_id, user_entitlements.source_payment_id),
           updated_at = NOW()
         WHERE NOT user_entitlements.is_lifetime
-      `, [String(subscriberId), String(creatorId)]);
+      `, [String(subscriberId), String(creatorId), paymentId || null]);
       const EntitlementAccessService = require('./entitlementAccessService');
       await EntitlementAccessService.invalidateCache(String(subscriberId));
     } catch (entErr) {

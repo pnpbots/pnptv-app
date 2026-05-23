@@ -17,13 +17,11 @@ class Plan {
       'Hangouts — group video rooms',
       'PNP Live — watch streams & tip',
       'PNP Radio — music & audio',
-      'Videorama — VOD & series',
       'Nearby — map, places & people',
       'Creator profiles & subscriptions',
     ],
     'prime': [
       'PRIME exclusive live shows',
-      'PRIME-only Videorama VOD',
       'PRIME-exclusive posts & content',
       'Early access & priority queue',
     ],
@@ -528,12 +526,10 @@ class Plan {
         description: 'WEEK PASS - 007PASS - $14.99 USD',
         descriptionEs: 'PASE SEMANAL - 007PASS - $14.99 USD',
         features: [
-          '🔥 Videorama: Unlimited hot content',
           '📍 Find papis nearby ready to connect',
           '🎥 1 Hangout session per week',
         ],
         featuresEs: [
-          '🔥 Videorama: Contenido caliente ilimitado',
           '📍 Encuentra papis cerca listos para conectar',
           '🎥 1 sesión de Hangout por semana',
         ],
@@ -552,14 +548,12 @@ class Plan {
         description: '3X MONTHLY PASS - 090PASS - $49.99 USD',
         descriptionEs: 'PASE TRIMESTRAL - 090PASS - $49.99 USD',
         features: [
-          '💎 Full Videorama library access',
           '📍 Who is Nearby - your local circle',
           '🎥 9 Hangouts quarterly - join the party',
           '📺 PNP Latino Live streams',
           '⚡ Priority support',
         ],
         featuresEs: [
-          '💎 Acceso completo a Videorama',
           '📍 Quién está Cerca - tu círculo local',
           '🎥 9 Hangouts trimestrales - únete a la fiesta',
           '📺 Transmisiones en vivo de PNP Latino',
@@ -580,14 +574,12 @@ class Plan {
         description: 'CRYSTAL PASS - 180PASS - $74.99 USD',
         descriptionEs: 'PASE CRYSTAL - 180PASS - $74.99 USD',
         features: [
-          '💎 Extended Videorama access + premieres',
           '📍 Premium Nearby filters unlocked',
           '🎥 12 Hangouts credit with the crew',
           '📺 PNP Latino Live + private shows',
           '⚡ Priority Cristina support whenever you need it',
         ],
         featuresEs: [
-          '💎 Acceso extendido a Videorama + estrenos',
           '📍 Filtros Nearby Premium desbloqueados',
           '🎥 12 créditos de Hangouts con la crew',
           '📺 PNP Latino Live + shows privados',
@@ -607,7 +599,6 @@ class Plan {
         duration: 365,
         features: [
           '👑 VIP access to everything',
-          '🔥 Videorama: Exclusive drops first',
           '📍 Premium Nearby - see who is watching',
           '🎥 Unlimited Hangouts with Santino & Lex',
           '📺 All PNP Latino Live events',
@@ -615,7 +606,6 @@ class Plan {
         ],
         featuresEs: [
           '👑 Acceso VIP a todo',
-          '🔥 Videorama: Estrenos exclusivos primero',
           '📍 Nearby Premium - ve quién está mirando',
           '🎥 Hangouts ilimitados con Santino & Lex',
           '📺 Todos los eventos de PNP Latino Live',
@@ -636,7 +626,6 @@ class Plan {
         features: [
           '♾️ Lifetime access - pay once, stay forever',
           '👑 Full VIP status in The Circle',
-          '🔥 Videorama: Everything, always',
           '📍 Premium Nearby with priority visibility',
           '🎥 Unlimited Hangouts - you are the party',
           '📺 All PNP Latino Live + private streams',
@@ -645,7 +634,6 @@ class Plan {
         featuresEs: [
           '♾️ Acceso de por vida - paga una vez, quédate siempre',
           '👑 Estatus VIP completo en El Círculo',
-          '🔥 Videorama: Todo, siempre',
           '📍 Nearby Premium con visibilidad prioritaria',
           '🎥 Hangouts ilimitados - tú eres la fiesta',
           '📺 Todo PNP Latino Live + streams privados',
@@ -666,7 +654,6 @@ class Plan {
         features: [
           '🔥 LIMITED PROMO - Lifetime at $100!',
           '♾️ Forever access to The Circle',
-          '🎥 Videorama + Hangouts unlimited',
           '📍 Premium Nearby features',
           '📺 All PNP Latino Live events',
           '🎬 Live sessions with Santino',
@@ -675,7 +662,6 @@ class Plan {
         featuresEs: [
           '🔥 PROMO LIMITADA - Lifetime a $100!',
           '♾️ Acceso para siempre a El Círculo',
-          '🎥 Videorama + Hangouts ilimitados',
           '📍 Funciones Nearby Premium',
           '📺 Todos los eventos de PNP Latino Live',
           '🎬 Sesiones en vivo con Santino',

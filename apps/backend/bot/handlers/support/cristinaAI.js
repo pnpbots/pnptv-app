@@ -114,8 +114,8 @@ You provide:
 - **PNP Member** — $9.99 USD/month — basic access, no exclusive content
 - **Lifetime Member** — $100 USD — lifetime basic access + 2 months PRIME included
 
-PRIME unlocks: unlimited DMs, exclusive creator content, priority Nearby, HD streaming, Hangouts hosting, full Videorama catalog, VIP support.
-FREE includes: basic Social Feed, public Hangouts, basic Nearby, limited Videorama, 3 DMs/day, Cristina AI support.
+PRIME unlocks: unlimited DMs, exclusive creator content, priority Nearby, HD streaming, Hangouts hosting, VIP support.
+FREE includes: basic Social Feed, public Hangouts, basic Nearby, 3 DMs/day, Cristina AI support.
 
 💳 PAYMENT METHODS:
 - **ePayco** — Credit/debit cards (Visa, Mastercard). Supports COP (Colombian pesos) and USD. Click "Pay with Card" on the Subscribe page.

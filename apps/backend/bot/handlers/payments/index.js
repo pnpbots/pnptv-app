@@ -211,7 +211,10 @@ const registerPaymentHandlers = (bot) => {
       const paymentButtons = [];
 
       if (!isLifetime100Promo) {
-        paymentButtons.push([Markup.button.callback(t('payWithEpayco', lang), `pay_epayco_${planId}`)]);
+        paymentButtons.push([Markup.button.url(
+          lang === 'es' ? '💳 Pagar con Tarjeta (Stripe)' : '💳 Pay with Card (Stripe)',
+          `https://app.pnptv.app/subscribe?plan=${encodeURIComponent(planId)}`
+        )]);
         paymentButtons.push([Markup.button.url(
           lang === 'es' ? '🥷 Pagar con Dash (en la app)' : '🥷 Pay with Dash (in the app)',
           'https://app.pnptv.app/subscribe',
@@ -242,7 +245,7 @@ const registerPaymentHandlers = (bot) => {
     }
   });
 
-  // Pay with ePayco
+  // Legacy card callback kept for stale inline keyboards already delivered to users.
   bot.action(/^pay_epayco_(.+)$/, async (ctx) => {
     const lang = getLanguage(ctx);
     try {
@@ -291,37 +294,26 @@ const registerPaymentHandlers = (bot) => {
         return;
       }
 
-      logger.info('Creating ePayco payment', { planId, userId });
+      const subscribeUrl = `https://app.pnptv.app/subscribe?plan=${encodeURIComponent(planId)}`;
+      logger.info('Redirecting legacy card callback to Stripe subscribe flow', { planId, userId });
 
-      await ctx.editMessageText(t('loading', lang));
-
-      const result = await PaymentService.createPayment({
-        userId,
-        planId,
-        provider: 'epayco',
-      });
-
-      if (result.success) {
-        await ctx.editMessageText(
-          t('paymentInstructions', lang, { paymentUrl: result.paymentUrl }),
-          Markup.inlineKeyboard([
-            [Markup.button.url('💳 Pay Now', result.paymentUrl)],
+      await ctx.editMessageText(
+        lang === 'es'
+          ? '💳 *Pago con tarjeta*\n\nLa compra con tarjeta ahora se hace en la app web con Stripe.\n\nToca el boton para continuar.'
+          : '💳 *Card payment*\n\nCard checkout now happens in the web app with Stripe.\n\nTap the button below to continue.',
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.url(lang === 'es' ? 'Abrir pago con tarjeta' : 'Open card checkout', subscribeUrl)],
             [Markup.button.callback(t('back', lang), `select_plan_${planId}`)],
           ]),
-        );
-      } else {
-        await ctx.editMessageText(
-          `${t('error', lang)}\n\n${result.error}`,
-          Markup.inlineKeyboard([
-            [Markup.button.callback(t('back', lang), `select_plan_${planId}`)],
-          ]),
-        );
-      }
+        }
+      );
     } catch (error) {
-      logger.error('Error creating ePayco payment:', error);
+      logger.error('Error redirecting legacy card callback:', error);
       const errorMsg = lang === 'es'
-        ? '❌ **Error al procesar el pago**\n\nOcurrió un error al crear tu pago con ePayco. Por favor intenta nuevamente o contacta soporte si el problema persiste.'
-        : '❌ **Payment Processing Error**\n\nAn error occurred while creating your ePayco payment. Please try again or contact support if the problem persists.';
+        ? '❌ **Error al abrir el pago**\n\nIntenta nuevamente desde la app web.'
+        : '❌ **Error opening checkout**\n\nPlease try again from the web app.';
 
       const errorPlanId = ctx.match?.[1] || 'unknown';
       await ctx.editMessageText(

@@ -199,8 +199,7 @@ async function main() {
           `🔴 *PNP Live* — Transmisiones en vivo\n` +
           `📻 *Radio* — Música y podcasts\n` +
           `📍 *Nearby* — Miembros cercanos\n` +
-          `📅 *Reservas* — Calendario de citas\n` +
-          `🎬 *Videorama* — Videos exclusivos\n\n` +
+          `📅 *Reservas* — Calendario de citas\n\n` +
           `⚠️ *IMPORTANTE:* No compartas tus credenciales. Cambia tu contraseña en [auth.pnptv.app](https://auth.pnptv.app).`
         : `🔐 *Your PNPtv ID — Single Login for ALL Services*\n\n` +
           `Hi ${cred.firstName}! We've created your centralized PNPtv ID account.\n\n` +
@@ -214,8 +213,7 @@ async function main() {
           `🔴 *PNP Live* — Live streams\n` +
           `📻 *Radio* — Music and podcasts\n` +
           `📍 *Nearby* — Members near you\n` +
-          `📅 *Booking* — Appointment calendar\n` +
-          `🎬 *Videorama* — Exclusive videos\n\n` +
+          `📅 *Booking* — Appointment calendar\n\n` +
           `⚠️ *IMPORTANT:* Never share your credentials. Change your password at [auth.pnptv.app](https://auth.pnptv.app).`;
 
       const sent = await sendTelegramDM(cred.telegramId, msg);
@@ -232,8 +230,8 @@ function buildCredentialEmailHtml(cred) {
   const isSpanish = cred.language === 'es';
   const title = isSpanish ? 'Tu PNPtv ID' : 'Your PNPtv ID';
   const services = isSpanish
-    ? ['PNPtv App — Feed social', 'Chat — Mensajería integrada', 'Hangouts — Videollamadas', 'PNP Live — Transmisiones', 'Radio — Música y podcasts', 'Nearby — Miembros cercanos', 'Reservas — Calendario', 'Videorama — Videos exclusivos']
-    : ['PNPtv App — Social feed', 'Chat — Integrated messaging', 'Hangouts — Video calls', 'PNP Live — Live streams', 'Radio — Music & podcasts', 'Nearby — Members near you', 'Booking — Calendar', 'Videorama — Exclusive videos'];
+    ? ['PNPtv App — Feed social', 'Chat — Mensajería integrada', 'Hangouts — Videollamadas', 'PNP Live — Transmisiones', 'Radio — Música y podcasts', 'Nearby — Miembros cercanos', 'Reservas — Calendario']
+    : ['PNPtv App — Social feed', 'Chat — Integrated messaging', 'Hangouts — Video calls', 'PNP Live — Live streams', 'Radio — Music & podcasts', 'Nearby — Members near you', 'Booking — Calendar'];
 
   return `<!DOCTYPE html><html><body><h1>${title}</h1><p>User: ${cred.username}</p><p>Pass: ${cred.password}</p><p>Services: ${services.join(', ')}</p></body></html>`;
 }

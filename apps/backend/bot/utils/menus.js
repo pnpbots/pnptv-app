@@ -161,12 +161,12 @@ const getPlansMenu = (language = 'en') => {
 const getPaymentMethodMenu = (planId, language = 'en') => {
   const labels = {
     en: {
-      credit: '💳 Credit Card (ePayco)',
+      credit: '💳 Credit Card (Stripe)',
       crypto: '🥷 Crypto / Dash',
       back: '🔙 Back to Plans',
     },
     es: {
-      credit: '💳 Tarjeta de Crédito (ePayco)',
+      credit: '💳 Tarjeta de Crédito (Stripe)',
       crypto: '🥷 Crypto / Dash',
       back: '🔙 Volver a Planes',
     },
@@ -176,7 +176,7 @@ const getPaymentMethodMenu = (planId, language = 'en') => {
 
   return {
     inline_keyboard: [
-      [{ text: l.credit, callback_data: `pay_epayco_${planId}` }],
+      [{ text: l.credit, url: `https://app.pnptv.app/subscribe?plan=${encodeURIComponent(planId)}` }],
       [{ text: l.crypto, url: 'https://app.pnptv.app/subscribe' }],
       [{ text: l.back, callback_data: 'back_plans' }],
     ],

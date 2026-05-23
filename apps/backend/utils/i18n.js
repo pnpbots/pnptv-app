@@ -378,7 +378,6 @@ Your PRIME access includes:
 📍 Nearby — Community PNP Grindr
 🎥 Hangouts — Private and public video rooms
 🔴 PNP Television Live — Live shows and events
-🎶 Videorama — PNP playlists and podcasts
 
 🤖 Cristina AI — 24/7 Support
 
@@ -392,7 +391,6 @@ Your FREE access includes:
 
 📍 Nearby — Community PNP Grindr (basic)
 🎥 Hangouts — Public video rooms
-🎶 Videorama — PNP playlists and podcasts (limited selection)
 
 🤖 Cristina AI — 24/7 Support
 
@@ -406,7 +404,6 @@ Your FREE access includes:
 • PNP Connect - Connect with the community
 • PNP Hangouts - Private video rooms
 • PNP Television Live - Live events
-• PNP Videorama - Full playlists
 
 📱 Use /menu to explore all features.
 
@@ -793,7 +790,6 @@ Your PRIME access includes:
 📍 Nearby — Community PNP Grindr
 🎥 Hangouts — Private and public video rooms
 🔴 PNP Television Live — Live shows and events
-🎶 Videorama — PNP playlists and podcasts
 
 🤖 Cristina AI — Soporte 24/7
 
@@ -807,7 +803,6 @@ Tu acceso FREE incluye:
 
 📍 Nearby — Community PNP Grindr (basic)
 🎥 Hangouts — Salas de video públicas
-🎶 Videorama — Playlists y podcasts PNP (limited selection)
 
 🤖 Cristina AI — Soporte 24/7
 
@@ -821,7 +816,6 @@ Tu acceso FREE incluye:
 • PNP Connect - Conecta con la comunidad
 • PNP Hangouts - Salas de video privadas
 • PNP Television Live - Eventos en vivo
-• PNP Videorama - Playlists completas
 
 📱 Usa /menu para explorar todas las funciones.
 
@@ -924,7 +918,6 @@ Tu acceso FREE incluye:
 • Nearby completo + filtros
 • Hangouts privados
 • PNP Television Live (en vivo)
-• Videorama completo
 • Eventos exclusivos
 
 📱 *Cómo actualizar:* /subscribe`,
@@ -942,11 +935,6 @@ Tu acceso FREE incluye:
 • Salas de video temáticas
 • Eventos en vivo
 • Chat comunitario
-
-🎶 *Videorama:*
-• Playlists exclusivas
-• Podcasts PNP
-• Contenido bajo demanda
 
 💡 *Consejo:* Usa /menu para acceder rápidamente!`,
 

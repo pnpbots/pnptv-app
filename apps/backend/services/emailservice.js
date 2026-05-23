@@ -299,7 +299,6 @@ class EmailService {
       <div class="services-grid">
         <span class="service-badge">PNPtv App</span>
         <span class="service-badge">Matrix Chat</span>
-        <span class="service-badge">Videorama</span>
         <span class="service-badge">PNP Live</span>
         <span class="service-badge">Hangouts</span>
         <span class="service-badge">Radio</span>
@@ -491,7 +490,6 @@ class EmailService {
 
       <p style="margin-top: 20px;"><strong>¿Qué puedes hacer con PNPtv?</strong></p>
       <ul>
-        <li>📺 Videorama — Videos, música y podcasts exclusivos</li>
         <li>📹 Hangouts — Salas de videollamadas comunitarias</li>
         <li>🔴 PNP Live — Transmisiones en vivo</li>
         <li>💬 Social Feed — Publica, comenta y conecta</li>
@@ -585,7 +583,6 @@ class EmailService {
 
       <p style="margin-top: 20px;"><strong>What can you do with PNPtv?</strong></p>
       <ul>
-        <li>📺 Videorama — Exclusive videos, music, and podcasts</li>
         <li>📹 Hangouts — Community video call rooms</li>
         <li>🔴 PNP Live — Live streams</li>
         <li>💬 Social Feed — Post, comment, and connect</li>

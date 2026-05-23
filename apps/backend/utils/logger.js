@@ -1,9 +1,21 @@
 const winston = require('winston');
 const DailyRotateFile = require('winston-daily-rotate-file');
+const fs = require('fs');
 const path = require('path');
 
 const logDir = process.env.LOG_DIR || './logs';
 const logLevel = process.env.LOG_LEVEL || 'info';
+const isJestProcess = process.argv.some((arg) => /jest(?:\.js)?$/i.test(arg) || /node_modules\/jest\//i.test(arg));
+const isTestEnv = process.env.NODE_ENV === 'test' || !!process.env.JEST_WORKER_ID || isJestProcess;
+
+const canWriteLogDir = (() => {
+  try {
+    fs.accessSync(logDir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 const safeStringify = (value) => {
   const seen = new WeakSet();
@@ -48,35 +60,35 @@ const consoleFormat = winston.format.combine(
 
 // Create transports
 const transports = [
-  // Console transport with error handling
   new winston.transports.Console({
     format: consoleFormat,
     level: logLevel,
     handleExceptions: true,
     handleRejections: true,
   }),
-
-  // Error log file
-  new DailyRotateFile({
-    filename: path.join(logDir, 'error-%DATE%.log'),
-    datePattern: 'YYYY-MM-DD',
-    level: 'error',
-    format: logFormat,
-    maxSize: '20m',
-    maxFiles: '14d',
-    zippedArchive: true,
-  }),
-
-  // Combined log file
-  new DailyRotateFile({
-    filename: path.join(logDir, 'combined-%DATE%.log'),
-    datePattern: 'YYYY-MM-DD',
-    format: logFormat,
-    maxSize: '20m',
-    maxFiles: '14d',
-    zippedArchive: true,
-  }),
 ];
+
+if (!isTestEnv && canWriteLogDir) {
+  transports.push(
+    new DailyRotateFile({
+      filename: path.join(logDir, 'error-%DATE%.log'),
+      datePattern: 'YYYY-MM-DD',
+      level: 'error',
+      format: logFormat,
+      maxSize: '20m',
+      maxFiles: '14d',
+      zippedArchive: true,
+    }),
+    new DailyRotateFile({
+      filename: path.join(logDir, 'combined-%DATE%.log'),
+      datePattern: 'YYYY-MM-DD',
+      format: logFormat,
+      maxSize: '20m',
+      maxFiles: '14d',
+      zippedArchive: true,
+    })
+  );
+}
 
 // Create logger instance
 const logger = winston.createLogger({

@@ -160,7 +160,7 @@ export default function WellnessShell() {
             <div className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
               {(() => {
                 const days = daysSinceLastParty(tracker);
-                const phrase = encouragementPhrase(days);
+                const phrase = encouragementPhrase(days, t.wellness);
                 return (
                   <div
                     className="rounded-xl px-3 py-2.5 mb-3 leading-relaxed"

@@ -216,8 +216,8 @@ const registerSupportRoutingHandlers = (bot) => {
       const primeChannelLink = await createChatInviteLink(ctx, process.env.PRIME_CHANNEL_ID, `support_activation_${targetUserId}`, 1);
 
       const notificationMessage = userLang === 'en'
-      ? `🎉 *Membership Activated!*\n\n✅ Your *${planName}* membership has been activated by ${adminName}.\n\n${isLifetime ? '♾️ This is a lifetime membership - enjoy forever!' : `📅 Expires: ${expiryDate.toLocaleDateString()}`}\n\nYou now have full access to:\n🔥 Videorama\n📍 Nearby\n🎥 Hangouts\n📺 PNP Live\n\n- PNP Latino TV PRIME content: ${primeChannelLink}\n- PNP Live: Latinos streaming on webcam.\n- PNP Hangouts: video call rooms.\n- PNP Videorama: Podcasts and Music Playlist in the PNP Latino style you love.\n\nEnjoy! 🎊`
-      : `🎉 *¡Membresía Activada!*\n\n✅ Tu membresía *${planName}* ha sido activada por ${adminName}.\n\n${isLifetime ? '♾️ Esta es una membresía de por vida - ¡disfruta para siempre!' : `📅 Expira: ${expiryDate.toLocaleDateString()}`}\n\nAhora tienes acceso completo a:\n🔥 Videorama\n📍 Nearby (Quién está cerca)\n🎥 Hangouts\n📺 PNP Live\n\n- Contenido PRIME de PNP Latino TV: ${primeChannelLink}\n- PNP Live: Latinos transmitiendo en vivo por webcam.\n- PNP Hangouts: salas de videollamadas.\n- PNP Videorama: Podcasts y listas de reproducción de música al estilo que te encanta de PNP Latino.\n\n¡Disfruta! 🎊`;
+      ? `🎉 *Membership Activated!*\n\n✅ Your *${planName}* membership has been activated by ${adminName}.\n\n${isLifetime ? '♾️ This is a lifetime membership - enjoy forever!' : `📅 Expires: ${expiryDate.toLocaleDateString()}`}\n\nYou now have full access to:\n📍 Nearby\n🎥 Hangouts\n📺 PNP Live\n\n- PNP Latino TV PRIME content: ${primeChannelLink}\n- PNP Live: Latinos streaming on webcam.\n- PNP Hangouts: video call rooms.\n\nEnjoy! 🎊`
+      : `🎉 *¡Membresía Activada!*\n\n✅ Tu membresía *${planName}* ha sido activada por ${adminName}.\n\n${isLifetime ? '♾️ Esta es una membresía de por vida - ¡disfruta para siempre!' : `📅 Expira: ${expiryDate.toLocaleDateString()}`}\n\nAhora tienes acceso completo a:\n📍 Nearby (Quién está cerca)\n🎥 Hangouts\n📺 PNP Live\n\n- Contenido PRIME de PNP Latino TV: ${primeChannelLink}\n- PNP Live: Latinos transmitiendo en vivo por webcam.\n- PNP Hangouts: salas de videollamadas.\n\n¡Disfruta! 🎊`;
 
 
       try {
@@ -1379,8 +1379,8 @@ ${subscriptionEmoji} *Estado:* ${subscriptionStatus}
     3: {
       id: 'membership_confirmed',
       title: 'Confirmar activación / Confirm Activation',
-      es: '✅ *¡Membresía Confirmada!*\n\nHemos verificado tu pago y tu membresía está activa.\n\nAhora tienes acceso completo a:\n🔥 Videorama - Contenido exclusivo\n📍 Nearby - Encuentra gente cerca\n🎥 Hangouts - Videollamadas grupales\n📺 PNP Live - Transmisiones en vivo\n\n💡 _Usa /menu para acceder a todas las funciones._\n\n¡Disfruta! 🎉',
-      en: '✅ *Membership Confirmed!*\n\nWe have verified your payment and your membership is now active.\n\nYou now have full access to:\n🔥 Videorama - Exclusive content\n📍 Nearby - Find people near you\n🎥 Hangouts - Group video calls\n📺 PNP Live - Live streams\n\n💡 _Use /menu to access all features._\n\nEnjoy! 🎉',
+      es: '✅ *¡Membresía Confirmada!*\n\nHemos verificado tu pago y tu membresía está activa.\n\nAhora tienes acceso completo a:\n📍 Nearby - Encuentra gente cerca\n🎥 Hangouts - Videollamadas grupales\n📺 PNP Live - Transmisiones en vivo\n\n💡 _Usa /menu para acceder a todas las funciones._\n\n¡Disfruta! 🎉',
+      en: '✅ *Membership Confirmed!*\n\nWe have verified your payment and your membership is now active.\n\nYou now have full access to:\n📍 Nearby - Find people near you\n🎥 Hangouts - Group video calls\n📺 PNP Live - Live streams\n\n💡 _Use /menu to access all features._\n\nEnjoy! 🎉',
     },
     4: {
       id: 'refund_denied',

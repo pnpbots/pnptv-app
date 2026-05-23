@@ -1,5 +1,4 @@
 const CallPackageModel = require('../../../models/callPackageModel');
-const PaymentService = require('../../../services/paymentService');
 const logger = require('../../../utils/logger');
 
 /**
@@ -114,47 +113,29 @@ function registerCallPackageHandlers(bot) {
       ctx.session.temp.purchasingPackage = packageId;
       await ctx.saveSession();
 
-      // Create payment for the package (Daimo retired — fall back to ePayco
-      // for any legacy bot flow that still hits this code path; users now
-      // book calls via the webapp Book-Call modal which supports Dash too).
-      const result = await PaymentService.createPayment({
-        userId: ctx.from.id,
-        planId: `call_package_${pkg.calls}calls`,
-        provider: 'epayco',
-        chatId: ctx.chat.id,
-      });
-
-      if (!result.success) {
-        await ctx.reply(`❌ Error creating payment: ${result.error}`);
-        return;
-      }
+      const checkoutUrl = 'https://app.pnptv.app/book-call';
 
       await ctx.editMessageText(
         `📦 *${pkg.name}*\n\n` +
         `💰 Total: $${pkg.price} USD\n\n` +
-        `Click the button below to complete your payment.\n\n` +
-        `📱 You can pay using:\n` +
-        `• Zelle\n` +
-        `• CashApp\n` +
-        `• Venmo\n` +
-        `• Revolut\n` +
-        `• Wise\n\n` +
+        `Package checkout now runs in the web app.\n\n` +
+        `Open the page below to pay with card via Stripe or crypto via Dash.\n\n` +
         `After payment, you'll receive ${pkg.calls} call credits!`,
         {
           parse_mode: 'Markdown',
           reply_markup: {
             inline_keyboard: [
-              [{ text: '💳 Pay Now', url: result.paymentUrl }],
+              [{ text: '💳 Open Checkout', url: checkoutUrl }],
               [{ text: '❌ Cancel', callback_data: 'back_to_packages' }],
             ],
           },
         }
       );
 
-      logger.info('Package payment initiated', {
+      logger.info('Package checkout redirected to web app', {
         userId: ctx.from.id,
         packageId,
-        paymentId: result.paymentId,
+        checkoutUrl,
       });
     } catch (error) {
       logger.error('Error buying package:', error);

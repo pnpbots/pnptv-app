@@ -98,6 +98,92 @@ const en = {
     "Everything here is private to your account. PNPtv staff cannot see your tracker logs.",
   centerFooterPrivacyLink: "Privacy",
   centerFooterSafetyLink: "Safety",
+
+  // ── WellnessModeCard ───────────────────────────────────────────────────────
+  modeCardTitle: "Wellness Break Mode",
+  modeCardActiveBadge: "ACTIVE",
+  modeCardDaysAccumulatedOne: "{days} day of self-care, total. That's real.",
+  modeCardDaysAccumulatedMany: "{days} days of self-care, total. That's real.",
+  modeCardDescInactive:
+    "Hide everything except wellness hangouts, Cristina, and your settings. For when you need a sober break, are in recovery, or just want to step away from the rest of the platform.",
+  modeCardDescInactiveBold: "Once enabled, it cannot be turned off without a 24-hour wait",
+  modeCardDurationLabel: "Duration",
+  modeCardEnablingBusy: "Enabling…",
+  modeCardEnableForDayOne: "Enable for 1 day",
+  modeCardEnableForDays: "Enable for {days} days",
+  modeCardEnableIndefinite: "Enable indefinitely",
+  modeCardActiveIndefinite:
+    "You're in Wellness Break Mode indefinitely. Only the Wellness Break hangouts, Cristina, and Settings are accessible.",
+  modeCardActiveUntil:
+    "You're in Wellness Break Mode until {date}. Only the Wellness Break hangouts, Cristina, and Settings are accessible.",
+  modeCardAutoEndNote:
+    "Mode will end automatically at the time above. You can extend by re-enabling with a longer duration.",
+  modeCardDisableButton: "Request to disable (24h cooling-off)",
+  modeCardCoolingCompleteText:
+    "Cooling-off complete. Your 24-hour wait has passed. You can now disable Wellness Mode — or stay in it if you've changed your mind.",
+  modeCardDisableNow: "Disable now",
+  modeCardStayInMode: "Stay in mode",
+  modeCardCoolingOffHourOne:
+    "Disable requested. Wellness Mode will turn off in 1 hour if you don't cancel before then. The wait is a feature — give yourself time to make sure this is what you want.",
+  modeCardCoolingOffHours:
+    "Disable requested. Wellness Mode will turn off in {hours} hours if you don't cancel before then. The wait is a feature — give yourself time to make sure this is what you want.",
+  modeCardCancelButton: "Cancel disable request — stay in Wellness Mode",
+  modeCardBusy: "…",
+  modeCardErrLoad: "Couldn't reach the server — try refreshing.",
+  modeCardErrEnable: "Something got in the way — give it a moment and try again. You've got this.",
+  modeCardErrDisable:
+    "Couldn't reach the server — your Wellness Mode is still protecting you. Try again in a moment.",
+  modeCardErrCancelDisable:
+    "Couldn't reach the server — your cooling-off period is still running. Try again in a moment.",
+
+  // ── UseTrackerCard ─────────────────────────────────────────────────────────
+  trackerTitle: "Use Tracker",
+  trackerPrivateLabel: "Private",
+  trackerDesc:
+    "A private space to track your use — no one else sees this. Awareness is the first step in harm reduction.",
+  trackerErrLoad: "Couldn't load your tracker — try refreshing.",
+  trackerErrSave: "Couldn't save that — your last tap didn't go through. Try again.",
+  trackerEmpty:
+    "Nothing logged in the last 30 days. Tap a button when you want to log — no judgment, no streaks to break.",
+  trackerKindSlamLabel: "Slam",
+  trackerKindSmokeLabel: "Smoke",
+  trackerRowLogButton: "Log {label}",
+  trackerRowAriaLog: "Log a {label}",
+  trackerStatToday: "today",
+  trackerStat7d: "7d",
+  trackerStat30d: "30d",
+  trackerStatLast: "last",
+  trackerGridAria: "30-day usage history",
+  trackerGridTooltipToday: "today",
+  trackerGridTooltipDayAgo: "{n} day ago",
+  trackerGridTooltipDaysAgo: "{n} days ago",
+
+  // ── relTime ────────────────────────────────────────────────────────────────
+  relTimeNever: "never",
+  relTimeJustNow: "just now",
+  relTimeMinAgo: "{m}m ago",
+  relTimeHourAgo: "{h}h ago",
+  relTimeDayAgo: "{d}d ago",
+
+  // ── encouragementPhrase ────────────────────────────────────────────────────
+  phraseNullHeadline: "Track your first session whenever you're ready.",
+  phraseNullBody: "No streaks to chase, just awareness.",
+  phrase0Headline: "Logged today.",
+  phrase0Body:
+    "Be gentle with yourself — rest is part of the play. Your body needs time to be ready for the next one.",
+  phrase1Headline: "It's been 1 day since you last partied.",
+  phrase2Headline: "It's been {days} days since you last partied.",
+  phrase1to2Body:
+    "Your body's still recovering — keep listening to it. Sleep, water, food. The next one will hit better when you're rested.",
+  phrase3to6Headline: "{days} days since your last party.",
+  phrase3to6Body:
+    "Your body's getting strong again — that's worth something. Whatever you choose next, you've given yourself the runway.",
+  phrase7to29Headline: "{days} days clear.",
+  phrase7to29Body:
+    "Real progress. Whatever comes next, you've earned the rest. You're proving to yourself you've got control over this.",
+  phrase30plusHeadline: "{days} days. That's huge.",
+  phrase30plusBody:
+    "Whether this is a long break or a permanent shift, you're doing something most people never even attempt. Keep going.",
 };
 
 const es: typeof en = {
@@ -190,6 +276,92 @@ const es: typeof en = {
     "Todo aquí es privado para tu cuenta. El equipo de PNPtv no puede ver tus registros.",
   centerFooterPrivacyLink: "Privacidad",
   centerFooterSafetyLink: "Seguridad",
+
+  // ── WellnessModeCard ───────────────────────────────────────────────────────
+  modeCardTitle: "Pausa de bienestar",
+  modeCardActiveBadge: "ACTIVO",
+  modeCardDaysAccumulatedOne: "{days} día de autocuidado en total. Eso es real.",
+  modeCardDaysAccumulatedMany: "{days} días de autocuidado en total. Eso es real.",
+  modeCardDescInactive:
+    "Oculta todo excepto los hangouts de bienestar, Cristina y tus ajustes. Para cuando necesites un descanso sobrio, estés en recuperación o simplemente quieras alejarte del resto de la plataforma.",
+  modeCardDescInactiveBold: "Una vez activado, no se puede desactivar sin una espera de 24 horas",
+  modeCardDurationLabel: "Duración",
+  modeCardEnablingBusy: "Activando…",
+  modeCardEnableForDayOne: "Activar por 1 día",
+  modeCardEnableForDays: "Activar por {days} días",
+  modeCardEnableIndefinite: "Activar indefinidamente",
+  modeCardActiveIndefinite:
+    "Estás en Pausa de bienestar indefinidamente. Solo los hangouts de bienestar, Cristina y Ajustes son accesibles.",
+  modeCardActiveUntil:
+    "Estás en Pausa de bienestar hasta {date}. Solo los hangouts de bienestar, Cristina y Ajustes son accesibles.",
+  modeCardAutoEndNote:
+    "El modo terminará automáticamente a la hora indicada arriba. Puedes extenderlo reactivándolo con una duración mayor.",
+  modeCardDisableButton: "Solicitar desactivación (espera de 24h)",
+  modeCardCoolingCompleteText:
+    "Espera completada. Han pasado tus 24 horas. Ahora puedes desactivar la Pausa de bienestar — o seguir en ella si has cambiado de idea.",
+  modeCardDisableNow: "Desactivar ahora",
+  modeCardStayInMode: "Permanecer en el modo",
+  modeCardCoolingOffHourOne:
+    "Desactivación solicitada. La Pausa de bienestar se apagará en 1 hora si no cancelas antes. La espera es una función — date tiempo para asegurarte de que esto es lo que quieres.",
+  modeCardCoolingOffHours:
+    "Desactivación solicitada. La Pausa de bienestar se apagará en {hours} horas si no cancelas antes. La espera es una función — date tiempo para asegurarte de que esto es lo que quieres.",
+  modeCardCancelButton: "Cancelar solicitud de desactivación — seguir en Pausa de bienestar",
+  modeCardBusy: "…",
+  modeCardErrLoad: "No se pudo conectar al servidor — intenta refrescar.",
+  modeCardErrEnable: "Algo salió mal — espera un momento e inténtalo de nuevo. Tú puedes.",
+  modeCardErrDisable:
+    "No se pudo conectar al servidor — tu Pausa de bienestar sigue protegiéndote. Inténtalo de nuevo en un momento.",
+  modeCardErrCancelDisable:
+    "No se pudo conectar al servidor — tu período de espera sigue en marcha. Inténtalo de nuevo en un momento.",
+
+  // ── UseTrackerCard ─────────────────────────────────────────────────────────
+  trackerTitle: "Registro de uso",
+  trackerPrivateLabel: "Privado",
+  trackerDesc:
+    "Un espacio privado para registrar tu uso — nadie más puede verlo. La consciencia es el primer paso en la reducción de daños.",
+  trackerErrLoad: "No se pudo cargar tu registro — intenta refrescar.",
+  trackerErrSave: "No se pudo guardar — tu último toque no se procesó. Inténtalo de nuevo.",
+  trackerEmpty:
+    "Nada registrado en los últimos 30 días. Toca un botón cuando quieras registrar — sin juicios, sin rachas que romper.",
+  trackerKindSlamLabel: "Slam",
+  trackerKindSmokeLabel: "Fumar",
+  trackerRowLogButton: "Registrar {label}",
+  trackerRowAriaLog: "Registrar un {label}",
+  trackerStatToday: "hoy",
+  trackerStat7d: "7d",
+  trackerStat30d: "30d",
+  trackerStatLast: "último",
+  trackerGridAria: "Historial de uso de 30 días",
+  trackerGridTooltipToday: "hoy",
+  trackerGridTooltipDayAgo: "hace {n} día",
+  trackerGridTooltipDaysAgo: "hace {n} días",
+
+  // ── relTime ────────────────────────────────────────────────────────────────
+  relTimeNever: "nunca",
+  relTimeJustNow: "ahora mismo",
+  relTimeMinAgo: "hace {m}m",
+  relTimeHourAgo: "hace {h}h",
+  relTimeDayAgo: "hace {d}d",
+
+  // ── encouragementPhrase ────────────────────────────────────────────────────
+  phraseNullHeadline: "Registra tu primera sesión cuando estés listo.",
+  phraseNullBody: "Sin rachas que perseguir, solo consciencia.",
+  phrase0Headline: "Registrado hoy.",
+  phrase0Body:
+    "Sé amable contigo mismo — el descanso es parte del juego. Tu cuerpo necesita tiempo para estar listo para la próxima.",
+  phrase1Headline: "Hace 1 día que no hiciste fiesta.",
+  phrase2Headline: "Hace {days} días que no hiciste fiesta.",
+  phrase1to2Body:
+    "Tu cuerpo todavía se está recuperando — sigue escuchándolo. Duerme, toma agua, come. La próxima golpeará mejor cuando estés descansado.",
+  phrase3to6Headline: "{days} días desde tu última fiesta.",
+  phrase3to6Body:
+    "Tu cuerpo se está fortaleciendo de nuevo — eso vale algo. Pase lo que pase después, ya te diste el espacio.",
+  phrase7to29Headline: "{days} días despejado.",
+  phrase7to29Body:
+    "Progreso real. Lo que venga después, te lo has ganado. Te estás demostrando que tienes el control sobre esto.",
+  phrase30plusHeadline: "{days} días. Eso es enorme.",
+  phrase30plusBody:
+    "Ya sea un descanso largo o un cambio permanente, estás haciendo algo que la mayoría de personas nunca intenta. Sigue adelante.",
 };
 
 // Other 14 languages: fall back to English so the type contract is satisfied.

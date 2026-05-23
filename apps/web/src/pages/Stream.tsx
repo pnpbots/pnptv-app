@@ -667,7 +667,7 @@ function StreamInner() {
   }, []);
 
   // ── Ticket purchase handler ────────────────────────────────────────────────
-  const handleBuyTicket = useCallback(async (currency: "tokens" | "epayco" | "dash") => {
+  const handleBuyTicket = useCallback(async (currency: "tokens" | "stripe" | "dash") => {
     if (!streamId) return;
     setTicketBuying(true);
     setTicketError(null);
@@ -688,40 +688,8 @@ function StreamInner() {
         return;
       }
 
-      // ePayco path — open the ePayco JS widget using the returned config.
-      // The widget is loaded globally by the app (epayco.min.js + validateThreeds.min.js).
-      // On confirmation the webhook settles, then the socket event fires hasTicket: true.
-      if (currency === "epayco" && result.epayco) {
-        const cfg = result.epayco;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ePayco = (window as any).ePayco;
-        if (!ePayco || typeof ePayco.checkout?.configure !== "function") {
-          // Fallback: redirect to hosted checkout page (host-allowlisted)
-          window.open(assertPaymentUrl(result.checkoutUrl), "_blank", "noopener,noreferrer");
-          return;
-        }
-        const handler = ePayco.checkout.configure({
-          key: cfg.publicKey,
-          test: cfg.test,
-        });
-        handler.open({
-          name: cfg.description,
-          description: cfg.description,
-          currency: cfg.currency,
-          amount: String(cfg.amount),
-          tax_base: "0",
-          tax: "0",
-          invoice: cfg.invoice,
-          signature: cfg.signature || undefined,
-          extra1: cfg.extra1,
-          extra2: cfg.extra2,
-          extra3: cfg.extra3,
-          country: "CO",
-          lang: "es",
-          external: "false",
-          response: cfg.response,
-          confirmation: cfg.confirmation,
-        });
+      if (currency === "stripe" && result.checkoutUrl) {
+        window.open(assertPaymentUrl(result.checkoutUrl), "_blank", "noopener,noreferrer");
         return;
       }
 
@@ -1369,7 +1337,7 @@ function StreamInner() {
                   {ticketStatus.priceUsd && !dashTicketPollActive && (
                     <>
                       <button
-                        onClick={() => handleBuyTicket("epayco")}
+                        onClick={() => handleBuyTicket("stripe")}
                         disabled={ticketBuying}
                         className="w-full px-4 py-2.5 rounded-lg bg-pnp-surface border border-pnp-accent/40 text-pnp-accent text-xs font-bold disabled:opacity-50 active:scale-95 transition-all"
                       >

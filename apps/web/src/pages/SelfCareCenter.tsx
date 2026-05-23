@@ -187,7 +187,7 @@ export default function SelfCareCenter() {
   }, []);
 
   const days = daysSinceLastParty(tracker);
-  const phrase = encouragementPhrase(days);
+  const phrase = encouragementPhrase(days, t.wellness);
   const firstName = user?.firstName || t.wellness.centerHeroNameFallback;
 
   return (

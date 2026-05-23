@@ -329,7 +329,7 @@ export default function Profile() {
     // Strip the param from the URL without a reload
     const clean = window.location.pathname;
     window.history.replaceState({}, '', clean);
-    const id = params.get('creatorId') || (window.location.pathname.split('/').pop() ?? '');
+    const id = window.location.pathname.split('/profile/')[1]?.split('?')[0] ?? '';
     getCreatorSubscriptionStatus(id).then((res) => {
       if (res.success && res.subscribed) setIsSubscribed(true);
     }).catch(() => {});

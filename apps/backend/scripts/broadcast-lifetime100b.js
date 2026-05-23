@@ -67,7 +67,7 @@ Hey! While Meru is briefly under maintenance, you can now get the Lifetime100 pl
 
 💎 <b>$99.99 USD — one payment, lifetime PRIME access</b>
 
-✅ Unlimited Videorama & Hangouts
+✅ Unlimited Hangouts
 ✅ Premium Nearby features
 ✅ All PNP Latino Live events
 ✅ Live sessions with Santino
@@ -82,7 +82,7 @@ Hey! While Meru is briefly under maintenance, you can now get the Lifetime100 pl
 
 💎 <b>$99.99 USD — un pago, acceso PRIME de por vida</b>
 
-✅ Videorama y Hangouts ilimitados
+✅ Hangouts ilimitados
 ✅ Funciones Nearby Premium
 ✅ Todos los eventos PNP Latino Live
 ✅ Sesiones en vivo con Santino
@@ -110,14 +110,14 @@ function buildEmailHtml(lang, name) {
     : 'Un pago · Acceso PRIME de por vida';
   const benefits = en
     ? [
-        'Unlimited Videorama & Hangouts',
+        'Unlimited Hangouts',
         'Premium Nearby features',
         'All PNP Latino Live events',
         'Live sessions with Santino',
         'No subscriptions, no renewals — ever',
       ]
     : [
-        'Videorama y Hangouts ilimitados',
+        'Hangouts ilimitados',
         'Funciones Nearby Premium',
         'Todos los eventos PNP Latino Live',
         'Sesiones en vivo con Santino',

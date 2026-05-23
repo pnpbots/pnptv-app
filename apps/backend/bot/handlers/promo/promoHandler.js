@@ -225,10 +225,10 @@ async function handlePromoDeepLink(ctx, promoCode) {
 
     // Payment buttons
     const keyboard = Markup.inlineKeyboard([
-      [Markup.button.callback(
-        lang === 'es' ? `Pagar $${pricing.finalPrice} con Tarjeta` : `Pay $${pricing.finalPrice} with Card`,
-        `promo_pay_epayco_${promo.code}`
-      )],
+        [Markup.button.url(
+          lang === 'es' ? `Pagar $${pricing.finalPrice} con Tarjeta` : `Pay $${pricing.finalPrice} with Card`,
+          `https://app.pnptv.app/subscribe?promo=${encodeURIComponent(promo.code)}`
+        )],
       [Markup.button.url(
         lang === 'es' ? `Pagar $${pricing.finalPrice} con Dash (en la app)` : `Pay $${pricing.finalPrice} with Dash (in the app)`,
         'https://app.pnptv.app/subscribe',
@@ -380,9 +380,9 @@ function registerPromoHandlers(bot) {
         : `You Save: $${pricing.discountAmount}\n\n`;
 
       const keyboard = Markup.inlineKeyboard([
-        [Markup.button.callback(
+        [Markup.button.url(
           lang === 'es' ? `Pagar $${pricing.finalPrice} con Tarjeta` : `Pay $${pricing.finalPrice} with Card`,
-          `promo_pay_epayco_${promo.code}|${plan.id}`
+          `https://app.pnptv.app/subscribe?promo=${encodeURIComponent(promo.code)}&plan=${encodeURIComponent(plan.id)}`
         )],
         [Markup.button.url(
           lang === 'es' ? `Pagar $${pricing.finalPrice} con Dash (en la app)` : `Pay $${pricing.finalPrice} with Dash (in the app)`,
@@ -421,9 +421,31 @@ function registerPromoHandlers(bot) {
     }
   });
 
-  // Pay with ePayco (credit card)
+  // Legacy promo card callback kept only for stale already-sent bot messages.
   bot.action(/^promo_pay_epayco_(.+)$/, async (ctx) => {
-    await handlePromoPayment(ctx, 'epayco');
+    const lang = getLanguage(ctx);
+    try {
+      await ctx.answerCbQuery();
+      const raw = ctx.match?.[1] || '';
+      const [promoCode, planId] = raw.split('|');
+      const subscribeUrl = planId
+        ? `https://app.pnptv.app/subscribe?promo=${encodeURIComponent(promoCode)}&plan=${encodeURIComponent(planId)}`
+        : `https://app.pnptv.app/subscribe?promo=${encodeURIComponent(promoCode)}`;
+      await ctx.editMessageText(
+        lang === 'es'
+          ? '💳 *Pago con tarjeta*\n\nLos pagos con tarjeta ahora se hacen en la app web con Stripe.\n\nAbre el checkout para continuar.'
+          : '💳 *Card payment*\n\nCard checkout now runs in the web app with Stripe.\n\nOpen checkout to continue.',
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.url(lang === 'es' ? 'Abrir checkout' : 'Open checkout', subscribeUrl)],
+            [Markup.button.callback(lang === 'es' ? 'Menu Principal' : 'Main Menu', 'menu:back')],
+          ]),
+        }
+      );
+    } catch (error) {
+      logger.error('Error redirecting legacy promo card callback:', error);
+    }
   });
 
   logger.info('Promo handlers registered');

@@ -172,6 +172,15 @@ async function createCheckout(req, res) {
     if (err.code === 'INVALID_PROVIDER') {
       return res.status(400).json({ success: false, error: err.message });
     }
+    if (err.code === 'SLOT_TAKEN') {
+      return res.status(409).json({ success: false, error: 'That time slot is no longer available. Please choose another.', code: 'SLOT_TAKEN' });
+    }
+    if (err.code === 'STRIPE_ACCOUNT_NOT_ACTIVATED') {
+      return res.status(503).json({ success: false, error: 'Card payments are temporarily unavailable. Please try Dash or contact support.', code: 'STRIPE_ACCOUNT_NOT_ACTIVATED' });
+    }
+    if (err.code === 'STRIPE_SESSION_FAILED') {
+      return res.status(502).json({ success: false, error: 'Payment provider error. Please try again or use Dash.', code: 'STRIPE_SESSION_FAILED' });
+    }
     return res.status(500).json({ success: false, error: 'Failed to create checkout' });
   }
 }

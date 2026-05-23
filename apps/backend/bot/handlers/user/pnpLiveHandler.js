@@ -102,7 +102,7 @@ const registerPNPLiveHandlers = (bot) => {
         // Add payment options
         buttons.push([
           {
-            text: lang === 'es' ? '💳 Pagar con ePayco' : '💳 Pay with ePayco',
+            text: lang === 'es' ? '💳 Pagar con Tarjeta (Stripe)' : '💳 Pay with Card (Stripe)',
             callback_data: 'pnp_show_payment_options'
           },
           {
@@ -270,34 +270,22 @@ Choose a model for your Private Show:`;
       const lang = getLanguage(ctx);
       
       const paymentMessage = lang === 'es'
-        ? `💳 *Opciones de Pago - ePayco*
+        ? `💳 *Opciones de Pago - Stripe*
 \n` +
           `🏦 *Métodos disponibles:*
 ` +
           `• Tarjetas de crédito/débito
-` +
-          `• PSE (Bancos colombianos)
-` +
-          `• Transferencias bancarias
-` +
-          `• Efecty, Baloto, y más
 \n` +
           `🔒 *Seguro y discreto*
 ` +
           `• Facturación como: "Servicio de Entretenimiento Digital"
 ` +
           `• Protección de datos garantizada`
-        : `💳 *Payment Options - ePayco*
+        : `💳 *Payment Options - Stripe*
 \n` +
           `🏦 *Available methods:*
 ` +
           `• Credit/Debit cards
-` +
-          `• PSE (Colombian banks)
-` +
-          `• Bank transfers
-` +
-          `• Efecty, Baloto, and more
 \n` +
           `🔒 *Secure and discreet*
 ` +
@@ -460,9 +448,9 @@ Choose a model for your Private Show:`;
       }]);
       
       // Payment options
-      buttons.push([
-        {
-          text: lang === 'es' ? '💳 Pagar con ePayco' : '💳 Pay with ePayco',
+        buttons.push([
+          {
+          text: lang === 'es' ? '💳 Pagar con Tarjeta (Stripe)' : '💳 Pay with Card (Stripe)',
           callback_data: `pnp_pay_epayco_${modelId}_${duration}`
         },
         {
@@ -1103,7 +1091,7 @@ Select your payment method:`;
     }
   }
 
-  // Handle payment selection - Credit Card (ePayco)
+  // Handle payment selection - Credit Card
   bot.action('pnp_pay_credit_card', async (ctx) => {
     try {
       await ctx.answerCbQuery();
@@ -1150,7 +1138,7 @@ Select your payment method:`;
       ctx.session.pnpLive.bookingId = booking.id;
       await ctx.saveSession();
 
-      // Generate ePayco checkout URL
+      // Generate hosted checkout URL
       const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
       const checkoutUrl = `${webhookDomain}/pnp/live/checkout/${booking.id}`;
 
@@ -1162,7 +1150,7 @@ Select your payment method:`;
 
 👇 *Haz clic en el botón para completar tu pago:*
 
-🔒 *Pago seguro con ePayco*
+🔒 *Pago seguro con Stripe*
 ✅ Encriptación SSL
 ✅ Protección contra fraude
 ✅ Reembolso garantizado
@@ -1175,7 +1163,7 @@ Select your payment method:`;
 
 👇 *Click the button below to complete your payment:*
 
-🔒 *Secure payment with ePayco*
+🔒 *Secure payment with Stripe*
 ✅ SSL Encryption
 ✅ Fraud Protection
 ✅ Guaranteed Refund

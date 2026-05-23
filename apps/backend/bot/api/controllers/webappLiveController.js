@@ -3,7 +3,6 @@ const { getPool } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
 const axios = require('axios');
 const restreamerService = require('../../../services/restreamerService');
-const { getEpaycoCopRate } = require('../../../services/paymentService');
 const IdentityVerificationService = require('../../../services/identityVerificationService');
 
 /**
@@ -1078,9 +1077,9 @@ const getSlotTicketStatus = async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // POST /api/webapp/live/slot/:id/buy-ticket
-// Body: { currency: 'tokens' | 'epayco' | 'dash' }
+// Body: { currency: 'tokens' | 'stripe' | 'dash' }
 // tokens  — atomic debit from user_token_wallets + ticket insert.
-// epayco  — create payments row, return checkout URL for ePayco card flow.
+// stripe  — create payments row, return Stripe Checkout URL for card flow.
 // dash    — create BTCPay invoice via dash_subscription_orders, return checkoutUrl.
 // Webhook settlement for both USD paths calls handleTicketSettlement() below.
 // ---------------------------------------------------------------------------
@@ -1094,8 +1093,8 @@ const buySlotTicket = async (req, res) => {
   if (!id || typeof id !== 'string') {
     return res.status(400).json({ success: false, error: 'Invalid slot id' });
   }
-  if (currency !== 'tokens' && currency !== 'epayco' && currency !== 'dash') {
-    return res.status(400).json({ success: false, error: "currency must be 'tokens', 'epayco', or 'dash'" });
+  if (currency !== 'tokens' && currency !== 'stripe' && currency !== 'dash') {
+    return res.status(400).json({ success: false, error: "currency must be 'tokens', 'stripe', or 'dash'" });
   }
 
   const userId = String(req.session.user.id);
@@ -1184,8 +1183,8 @@ const buySlotTicket = async (req, res) => {
       }
     }
 
-    // ── ePayco card purchase path ────────────────────────────────────────────
-    if (currency === 'epayco') {
+    // ── Stripe card purchase path ────────────────────────────────────────────
+    if (currency === 'stripe') {
       const priceUsd = parseFloat(slot.ticket_price_usd);
       if (!priceUsd || priceUsd <= 0) {
         return res.status(400).json({ success: false, error: 'USD price not configured for this slot' });
@@ -1210,43 +1209,24 @@ const buySlotTicket = async (req, res) => {
           [userId, id]
         );
         if (existingPayment.length > 0 && existingPayment[0].checkout_url) {
-          logger.info('buySlotTicket (epayco): returning existing pending checkout', { userId, slotId: id, paymentId: existingPayment[0].id });
-          return res.json({ success: true, provider: 'epayco', paymentId: existingPayment[0].id, checkoutUrl: existingPayment[0].checkout_url, idempotent: true });
+          logger.info('buySlotTicket (stripe): returning existing pending checkout', { userId, slotId: id, paymentId: existingPayment[0].id });
+          return res.json({ success: true, provider: 'stripe', paymentId: existingPayment[0].id, checkoutUrl: existingPayment[0].checkout_url, idempotent: true });
         }
       } catch (idempErr) {
-        logger.warn('buySlotTicket (epayco): idempotency check failed, proceeding with new payment', { error: idempErr.message });
+        logger.warn('buySlotTicket (stripe): idempotency check failed, proceeding with new payment', { error: idempErr.message });
       }
 
       const PaymentModel = require('../../../models/paymentModel');
       const { v4: uuidv4 } = require('uuid');
+      const stripeService = require('../../../services/stripeService');
 
       const paymentId = uuidv4();
-      // PNPtv displays prices in USD to international users but settles via ePayco's
-      // Colombian acquiring network in COP. The rate is fetched daily from a public
-      // FX API (see services/paymentService.js getEpaycoCopRate). Do not hardcode a fallback — fail closed instead.
-      let usdToCopRate;
-      try {
-        usdToCopRate = await getEpaycoCopRate();
-      } catch (fxErr) {
-        logger.error('[ePayco FX] Rate unavailable for live slot payment', { error: fxErr.message });
-        return res.status(503).json({
-          success: false,
-          error: 'FX rate unavailable, please retry in a few minutes',
-          code: 'FX_RATE_UNAVAILABLE',
-        });
-      }
-      const priceInCOP = Math.round(priceUsd * usdToCopRate);
-      const CHECKOUT_DOMAIN = process.env.CHECKOUT_DOMAIN || process.env.WEB_APP_URL || 'https://pnptv.app';
-      const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
-      const EPAYCO_WEBHOOK_DOMAIN = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app';
-
-      const checkoutUrl = `${CHECKOUT_DOMAIN}/payment/${paymentId}`;
 
       await PaymentModel.create({
         paymentId,
         userId,
         planId: null,
-        provider: 'epayco',
+        provider: 'stripe',
         sku: `ticket-${id}`,
         amount: priceUsd,
         currency: 'USD',
@@ -1257,52 +1237,45 @@ const buySlotTicket = async (req, res) => {
           slotId: id,
           slotTitle: slot.title || null,
           email: userEmail,
-          // Phase 4: Persist USD + COP explicitly. payment.amount is the canonical USD
-          // value; amount_usd in metadata is a defensive duplicate so the webhook-side
-          // settlement (paymentService.js live_show_ticket branch) can never confuse
-          // x_amount (COP from ePayco) with the original USD price.
+          payment_type: 'live_show_ticket',
           amount_usd: priceUsd,
-          expected_epayco_amount: String(priceInCOP),
-          expected_epayco_currency: 'COP',
-          expected_epayco_amount_usd: String(priceUsd),
-          fx_rate_at_checkout: usdToCopRate,
-          fx_locked_at: new Date().toISOString(),
-          payment_url: checkoutUrl,
         },
       });
 
-      // Build the ePayco widget config for the frontend to drive the dialog
-      const crypto = require('crypto');
-      const pKey = process.env.EPAYCO_P_KEY || process.env.EPAYCO_PRIVATE_KEY;
-      const custId = process.env.EPAYCO_P_CUST_ID;
-      const paymentRef = `TKT-${paymentId.substring(0, 8).toUpperCase()}`;
-      let signature = null;
-      if (pKey && custId) {
-        const raw = `${custId}^${pKey}^${paymentRef}^${priceInCOP}^COP`;
-        signature = crypto.createHash('sha256').update(raw).digest('hex');
-      }
+      const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
+      const stripeCheckout = await stripeService.createCustomCheckoutSession({
+        userId,
+        sku: `ticket-${id}`,
+        amountUsd: priceUsd,
+        productName: `Live Show Ticket: ${slot.title || id}`,
+        description: 'One-time ticket for a paid live show',
+        successUrl: `${WEB_APP_URL}/live/${id}?stripe_paid=1`,
+        cancelUrl: `${WEB_APP_URL}/live/${id}`,
+        customerEmail: userEmail || undefined,
+        metadata: {
+          pnptv_payment_id: paymentId,
+          payment_type: 'live_show_ticket',
+          slotId: String(id),
+          slotTitle: slot.title || '',
+        },
+      });
 
-      logger.info('Live ticket checkout created (epayco)', { userId, slotId: id, paymentId, priceUsd });
+      await getPool().query(
+        `UPDATE payments
+            SET stripe_session_id = $2,
+                metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
+                updated_at = NOW()
+          WHERE id = $1`,
+        [paymentId, stripeCheckout.sessionId, JSON.stringify({ stripe_session_id: stripeCheckout.sessionId, payment_url: stripeCheckout.url })]
+      );
+
+      logger.info('Live ticket checkout created (stripe)', { userId, slotId: id, paymentId, priceUsd });
 
       return res.json({
         success: true,
-        provider: 'epayco',
+        provider: 'stripe',
         paymentId,
-        checkoutUrl,
-        epayco: {
-          publicKey: process.env.EPAYCO_PUBLIC_KEY,
-          amount: priceInCOP,
-          currency: 'COP',
-          description: `Ticket: ${slot.title || id}`,
-          invoice: paymentRef,
-          signature,
-          extra1: userId,
-          extra2: 'live_show_ticket',
-          extra3: paymentId,
-          test: process.env.EPAYCO_TEST_MODE === 'true',
-          response: `${WEB_APP_URL}/payment-response?x_extra3=${encodeURIComponent(paymentId)}`,
-          confirmation: `${EPAYCO_WEBHOOK_DOMAIN}/api/webhooks/epayco`,
-        },
+        checkoutUrl: stripeCheckout.url,
       });
     }
 
@@ -1403,7 +1376,7 @@ const buySlotTicket = async (req, res) => {
 //
 // @param {string} userId
 // @param {string} slotId  — UUID of the live_streams row
-// @param {string} provider — 'epayco' | 'dash'
+// @param {string} provider — 'stripe' | 'dash'
 // @param {number} pricePaidUsd
 // ---------------------------------------------------------------------------
 const handleTicketSettlement = async (userId, slotId, provider, pricePaidUsd) => {

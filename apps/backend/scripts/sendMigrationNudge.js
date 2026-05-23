@@ -39,7 +39,6 @@ This Telegram group is no longer where the action is. Telegram is phasing out gr
 • 💬 <b>Hangouts</b> — private rooms with live chat, media feeds and video calls
 • 📺 <b>PNP Live</b> — live streams from creators with tips and overlays
 • 📍 <b>Nearby</b> — find members close to you with the live map
-• 🎬 <b>Videorama + Radio</b> — full VOD library and 24/7 audio
 • 🧜‍♀️ <b>Cristina AI</b> — your personal assistant for anything PNPtv
 • 💎 <b>Creator content, DMs, payments</b> — all in one place
 
@@ -60,7 +59,6 @@ Este grupo de Telegram ya no es el centro. Telegram está eliminando grupos y ca
 • 💬 <b>Hangouts</b> — salas privadas con chat en vivo, feed de medios y videollamadas
 • 📺 <b>PNP Live</b> — streams en vivo de los creadores con propinas y overlays
 • 📍 <b>Cerca</b> — encontrá miembros cerca tuyo con el mapa en vivo
-• 🎬 <b>Videorama + Radio</b> — biblioteca VOD completa y audio 24/7
 • 🧜‍♀️ <b>Cristina AI</b> — tu asistente personal para todo lo de PNPtv
 • 💎 <b>Contenido de creadores, DMs, pagos</b> — todo en un solo lugar
 

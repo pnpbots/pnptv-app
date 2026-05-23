@@ -132,13 +132,11 @@ const ADD_ON_FEATURES = {
     'Hangouts — group video rooms',
     'PNP Live — watch streams & tip',
     'PNP Radio — music & audio',
-    'Videorama — VOD & series',
     'Nearby — map, places & people',
     'Creator profiles & subscriptions',
   ],
   'prime': [
     'PRIME exclusive live shows',
-    'PRIME-only Videorama VOD',
     'PRIME-exclusive posts & content',
     'Early access & priority queue',
   ],

@@ -530,6 +530,8 @@ export const router = createBrowserRouter([
       { path: "community-room", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "da-haus", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "portal", element: <Navigate to="/" replace /> },
+      { path: "plans", element: <Navigate to="/subscribe" replace /> },
+      { path: "memberships", element: <Navigate to="/subscribe" replace /> },
     ],
   },
   {
