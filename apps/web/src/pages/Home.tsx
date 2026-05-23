@@ -10,7 +10,6 @@ import { SocialFeedTabs } from "@/components/social";
 import { UpcomingEvents } from "@/components/events/UpcomingEvents";
 import { NearbyWidget } from "@/components/NearbyWidget";
 import { useI18n } from "@/lib/i18n";
-import { MainStageLiveBanner } from "@/components/mainstage/MainStageLiveBanner";
 
 const ChatEmbedded = lazy(() => import("@/pages/Chat"));
 
@@ -89,9 +88,6 @@ export default function Home() {
         <meta name="description" content={t.home.metaDescription} />
       </Helmet>
       {showTutorial && viewMode === "feed" && <TutorialOverlay section="home" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
-
-      {/* Main Stage live banner — only when broadcasting, hidden on /main-stage itself */}
-      {isAuthenticated && <MainStageLiveBanner />}
 
       {/* Dashboard: Welcome + Latest Posts + Events — only in home view */}
       {isAuthenticated && viewMode === "home" && (
