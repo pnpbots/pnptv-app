@@ -871,7 +871,7 @@ function HangoutChatPanel({
                                   </p>
                                 )}
                                 <div className="w-full rounded-lg overflow-hidden border border-white/15 hover:border-white/25 bg-black/20 transition-colors">
-                                  {snap.mediaUrl && (
+                                  {(snap.videoThumbnailUrl || snap.mediaUrl) && (
                                     <button
                                       type="button"
                                       onClick={(e) => { e.stopPropagation(); navigate(`/post/${msg.meta!.postId}`); }}
@@ -879,11 +879,7 @@ function HangoutChatPanel({
                                       aria-label="View post"
                                     >
                                       <div className="relative w-full bg-black/40" style={{ aspectRatio: "16/9" }}>
-                                        {isVideo ? (
-                                          <video src={snap.mediaUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-                                        ) : (
-                                          <img src={snap.mediaUrl} alt="" className="w-full h-full object-cover" />
-                                        )}
+                                        <img src={snap.videoThumbnailUrl || snap.mediaUrl} alt="" className="w-full h-full object-cover" />
                                         {isVideo && (
                                           <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
                                             <span className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
