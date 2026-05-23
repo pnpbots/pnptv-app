@@ -451,11 +451,13 @@ export function BookCallModal({
         // Store paymentId for retry if needed
         setDashPaymentId(dashRes.paymentId ?? null);
 
-        // Poll /api/webapp/bookings/:paymentId/payment-status every 5s, hard-stop at 15min
-        if (dashRes.paymentId) {
+        // Poll with bookingId when available (scheduled); fall back to paymentId
+        // for the "NOW" flow where no booking exists at checkout time.
+        const pollId = dashRes.bookingId ?? dashRes.paymentId;
+        if (pollId) {
           if (dashPollRef.current) clearInterval(dashPollRef.current);
 
-          const pollId = dashRes.paymentId;
+
           const POLL_INTERVAL_MS = 5_000;
           const POLL_TIMEOUT_MS = 900_000; // 15 min
           const pollStart = Date.now();

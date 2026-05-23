@@ -645,17 +645,21 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
       });
     }
 
-    // 4. Slot-lock + insert booking row
-    booking = await _lockSlotAndInsertBooking(client, {
-      performerId,
-      memberId: userId,
-      startTimeUtc,
-      endTimeUtc,
-      paymentId: payment.id,
-      packageId: pkg.id,
-      durationMinutes: pkg.duration_minutes,
-      priceUsd: pkg.price_usd,
-    });
+    // 4. Slot-lock + insert booking row only when slot times are provided.
+    // When null (creator is online / "NOW" flow), the booking is created later
+    // in onCallPaymentSuccess after BTCPay confirms — same pattern as Stripe.
+    if (startTimeUtc && endTimeUtc) {
+      booking = await _lockSlotAndInsertBooking(client, {
+        performerId,
+        memberId: userId,
+        startTimeUtc,
+        endTimeUtc,
+        paymentId: payment.id,
+        packageId: pkg.id,
+        durationMinutes: pkg.duration_minutes,
+        priceUsd: pkg.price_usd,
+      });
+    }
 
     await client.query('COMMIT');
   } catch (txErr) {

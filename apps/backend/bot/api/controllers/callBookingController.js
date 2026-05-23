@@ -936,30 +936,33 @@ async function createCheckoutDash(req, res) {
     }
 
     const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-    if (!startTimeUtc || typeof startTimeUtc !== 'string' || !ISO_RE.test(startTimeUtc)) {
-      return res.status(400).json({ success: false, error: 'startTimeUtc must be an ISO 8601 timestamp with timezone' });
-    }
-    if (!endTimeUtc || typeof endTimeUtc !== 'string' || !ISO_RE.test(endTimeUtc)) {
-      return res.status(400).json({ success: false, error: 'endTimeUtc must be an ISO 8601 timestamp with timezone' });
-    }
-
-    const start = new Date(startTimeUtc);
-    const end = new Date(endTimeUtc);
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      return res.status(400).json({ success: false, error: 'startTimeUtc or endTimeUtc is not a valid date' });
-    }
-    if (start >= end) {
-      return res.status(400).json({ success: false, error: 'endTimeUtc must be after startTimeUtc' });
-    }
-    if (start <= new Date()) {
-      return res.status(400).json({ success: false, error: 'startTimeUtc must be in the future' });
+    let slotTimes = null;
+    if (startTimeUtc || endTimeUtc) {
+      if (!startTimeUtc || typeof startTimeUtc !== 'string' || !ISO_RE.test(startTimeUtc)) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc must be an ISO 8601 timestamp with timezone' });
+      }
+      if (!endTimeUtc || typeof endTimeUtc !== 'string' || !ISO_RE.test(endTimeUtc)) {
+        return res.status(400).json({ success: false, error: 'endTimeUtc must be an ISO 8601 timestamp with timezone' });
+      }
+      const start = new Date(startTimeUtc);
+      const end = new Date(endTimeUtc);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc or endTimeUtc is not a valid date' });
+      }
+      if (start >= end) {
+        return res.status(400).json({ success: false, error: 'endTimeUtc must be after startTimeUtc' });
+      }
+      if (start <= new Date()) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc must be in the future' });
+      }
+      slotTimes = { startTimeUtc, endTimeUtc };
     }
 
     const result = await callCheckoutService.createCallCheckoutDash({
       userId,
       packageId: Number(packageId),
-      startTimeUtc,
-      endTimeUtc,
+      startTimeUtc: slotTimes?.startTimeUtc ?? null,
+      endTimeUtc: slotTimes?.endTimeUtc ?? null,
     });
 
     return res.status(201).json({ success: true, ...result });
@@ -1004,7 +1007,9 @@ async function getBookingPaymentStatus(req, res) {
       return res.status(400).json({ success: false, error: 'Invalid bookingId' });
     }
 
-    // Load booking + join payment + performer user for auth check
+    // Load booking + join payment + performer user for auth check.
+    // Accepts either bookings.id (UUID) or payments.id (UUID) — the "NOW" Dash
+    // flow has no booking at poll-time, so frontend may pass the payment UUID.
     const result = await query(
       `SELECT
          b.id                  AS booking_id,
@@ -1022,7 +1027,7 @@ async function getBookingPaymentStatus(req, res) {
        LEFT JOIN payments p_row ON p_row.id = b.payment_id
        LEFT JOIN performers perf ON perf.id = b.performer_id
        LEFT JOIN users perf_user ON perf_user.id = perf.user_id
-       WHERE b.id = $1`,
+       WHERE b.id = $1 OR b.payment_id = $1`,
       [bookingId]
     );
 

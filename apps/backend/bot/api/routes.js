@@ -8641,6 +8641,9 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(as
     if (planId === 'lifetime100') {
       usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
       discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    } else if (planId === 'prime-diamond-pass-365d') {
+      usdAmount = 90.99;
+      discountInfo = { originalAmount: basePrice, discountPct: 9 };
     } else {
       usdAmount = basePrice;
     }

@@ -905,6 +905,9 @@ export default function Subscribe() {
                         {s.lifetime}
                       </span>
                     )}
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                      {s.launchRate}
+                    </span>
                   </div>
                   <div className="text-xs text-pnp-textSecondary">{s.monthly}</div>
                 </div>
