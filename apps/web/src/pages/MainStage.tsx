@@ -7,7 +7,7 @@ import {
 import { ConnectionState, RoomEvent } from "livekit-client";
 import { useMainStage, type MainStageState } from "@/hooks/useMainStage";
 import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
-import { getMainStageJoinCheck, acceptMainStageConsents, type MainStageJoinCheck } from "@/lib/api";
+import { getMainStageJoinCheck, acceptMainStageConsents, getWalletBalance, type MainStageJoinCheck } from "@/lib/api";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -281,6 +281,12 @@ export default function MainStage() {
   const [acceptPrivacy, setAcceptPrivacy] = useState(false);
   const [confirmAge, setConfirmAge] = useState(false);
   const isParticipant = isGuestMode || role === "member" || role === "admin";
+
+  const [tokenBalance, setTokenBalance] = useState<number | null>(null);
+  useEffect(() => {
+    if (isGuestMode) return;
+    getWalletBalance().then((res) => { if (typeof res.balance === "number") setTokenBalance(res.balance); }).catch(() => {});
+  }, [isGuestMode]);
 
   // Refs so effect closures always read current values without stale captures.
   const hasEverConnectedRef = useRef(hasEverConnected);
@@ -762,6 +768,14 @@ export default function MainStage() {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          {!isGuestMode && tokenBalance !== null && (
+            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/[0.06] border border-white/10">
+              <div className="w-3.5 h-3.5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
+                <svg viewBox="0 0 24 24" className="w-2 h-2 fill-white"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/></svg>
+              </div>
+              <span className="text-[11px] font-semibold text-white/80 tabular-nums">{tokenBalance}</span>
+            </div>
+          )}
           {isGuestMode && (
             <span
               className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"

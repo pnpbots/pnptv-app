@@ -1,9 +1,9 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { getRtmpKey, provisionChannel, broadcastLiveNow } from "@/lib/api";
+import { getRtmpKey, provisionChannel, broadcastLiveNow, getWalletBalance } from "@/lib/api";
 
 const STUDIO_LOGIN_URL = `/login?returnTo=${encodeURIComponent("https://studio.pnptv.app/")}`;
 
@@ -23,6 +23,11 @@ export default function CreatorLive() {
   const [broadcastStatus, setBroadcastStatus] = useState<"idle" | "sending" | "done" | "dedup" | "error">("idle");
   const [broadcastDisabled, setBroadcastDisabled] = useState(false);
   const [broadcastToast, setBroadcastToast] = useState<string | null>(null);
+
+  const [tokenBalance, setTokenBalance] = useState<number | null>(null);
+  useEffect(() => {
+    getWalletBalance().then((res) => { if (typeof res.balance === "number") setTokenBalance(res.balance); }).catch(() => {});
+  }, []);
 
   const handleBroadcast = useCallback(async () => {
     if (broadcastDisabled || broadcastStatus === "sending") return;
@@ -114,6 +119,17 @@ export default function CreatorLive() {
         <title>Go Live — PNPtv!</title>
       </Helmet>
       <div className="p-4 lg:p-6 space-y-5 max-w-2xl mx-auto">
+
+        {/* Token balance chip */}
+        {tokenBalance !== null && (
+          <div className="flex items-center gap-1.5 self-start px-3 py-1.5 rounded-full w-fit"
+            style={{ background: "rgba(0,140,231,0.12)", border: "1px solid rgba(0,140,231,0.25)" }}>
+            <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
+              <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 fill-white"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/></svg>
+            </div>
+            <span className="text-xs font-semibold tabular-nums" style={{ color: "#5BB8F5" }}>{tokenBalance} tokens</span>
+          </div>
+        )}
 
         {/* Notify followers card */}
         <Card className="p-5 space-y-3">

@@ -33,6 +33,7 @@ import {
   getHostedChannel,
   getSlotTicketStatus,
   buySlotTicket,
+  isCreatorPayLocked,
 } from "@/lib/api";
 import { StreamHealthPanel } from "@/components/stream/StreamHealthPanel";
 import { type LivePlayerStats } from "@/components/LivePlayer";
@@ -372,6 +373,7 @@ function StreamInner() {
             hlsUrl: performer.hlsUrl,
             isLive: true,
             thumbnailUrl: performer.photoUrl || null,
+            username: performer.slug || null,
           });
           setError(null);
           setStreamError(false);
@@ -1316,7 +1318,9 @@ function StreamInner() {
                 <p className="text-sm font-bold text-pnp-textPrimary">{stream.name}</p>
                 <p className="text-[11px] text-pnp-textSecondary mt-1">This is a ticketed show</p>
               </div>
-              {(!ticketStatus.priceTokens && !ticketStatus.priceUsd) ? (
+              {isCreatorPayLocked(stream.username) ? (
+                <p className="text-[10px] text-pnp-textSecondary text-center py-1">🔒 Launches June 1st</p>
+              ) : (!ticketStatus.priceTokens && !ticketStatus.priceUsd) ? (
                 <p className="text-[10px] text-pnp-textSecondary">
                   Tickets unavailable — contact support
                 </p>
@@ -1730,6 +1734,9 @@ function StreamInner() {
 
       {/* Tip bar — hidden when stream is offline */}
       <div className={`flex items-center gap-2 ${!stream.isLive ? 'opacity-50 pointer-events-none' : ''}`}>
+        {isCreatorPayLocked(stream.username) ? (
+          <p className="text-[10px] text-pnp-textSecondary text-center w-full py-1">🔒 Launches June 1st</p>
+        ) : (<>
         <div className="flex gap-1.5 flex-1 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
           {TIP_AMOUNTS.map((amount) => (
             <button
@@ -1763,6 +1770,7 @@ function StreamInner() {
             </button>
           </div>
         )}
+        </>)}
       </div>
       {tipError && <p className="text-[10px] text-pnp-error">{tipError}</p>}
       {tipSuccess && <p className="text-[10px] text-gradient">{tipSuccess}</p>}

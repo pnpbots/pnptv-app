@@ -1,5 +1,13 @@
 const API_BASE = import.meta.env.VITE_API_URL || (window.location.hostname === "pnptv.app" ? "https://pnptv.app" : "https://pnptv.app");
 
+// Creators whose pay buttons are live before the June 1 launch gate lifts
+const LAUNCH_UNLOCKED = new Set(['SantinoFurioso', 'PNPLatinoBoy'].map(u => u.toLowerCase()));
+export const LAUNCH_DATE = new Date('2026-06-01T00:00:00-05:00');
+export function isCreatorPayLocked(username?: string | null): boolean {
+  if (new Date() >= LAUNCH_DATE) return false;
+  return !LAUNCH_UNLOCKED.has((username ?? '').toLowerCase());
+}
+
 function friendlyHttpError(status: number, fallback: string): string {
   if (status === 413) return "File is too large. Max 512 MB (or 3 GB for creators).";
   if (status === 401) return "Please log in again to continue.";
@@ -387,6 +395,8 @@ export interface LiveStream {
   viewerCount?: number;
   title?: string;
   performerName?: string;
+  /** Performer username/slug — used for launch gate check */
+  username?: string | null;
   /** Category tags set by the streamer at go-live time */
   tags?: string[];
   /** Base64 JPEG thumbnail data URL captured from the streamer's preview */

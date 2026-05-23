@@ -43,6 +43,7 @@ import {
   type SocialPostItem,
   type EventItem,
   type HangoutActivity,
+  isCreatorPayLocked,
 } from "@/lib/api";
 import { EventCard } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
@@ -1398,6 +1399,13 @@ export default function Profile() {
                 )}
                 {profile.creatorStatus === "active" && isAuthenticated && (() => {
                   const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
+                  if (isCreatorPayLocked(profile.username)) {
+                    return (
+                      <button disabled className="flex-1 min-w-[100px] min-h-[40px] py-2 rounded-lg text-sm font-semibold opacity-50 cursor-not-allowed bg-white/5 border border-white/10 text-pnp-textSecondary">
+                        🔒 Launches June 1st
+                      </button>
+                    );
+                  }
                   return (
                     <button
                       onClick={handleSubscribe}
@@ -1450,6 +1458,13 @@ export default function Profile() {
                       </svg>
                       Book a Session
                     </a>
+                  ) : isCreatorPayLocked(profile.username) ? (
+                    <button
+                      disabled
+                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 opacity-50 cursor-not-allowed bg-white/5 border border-white/10 text-pnp-textSecondary"
+                    >
+                      🔒 Launches June 1st
+                    </button>
                   ) : (
                     <button
                       onClick={() => setShowBookCall(true)}
