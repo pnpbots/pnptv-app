@@ -246,7 +246,7 @@ describe('creatorSubscriptionAdminController.processCreatorPayout', () => {
       .mockResolvedValueOnce({           // creator info
         rows: [{
           id: 'c-1', username: 'alice',
-          creator_wallet_address: '0xABC',
+          creator_dash_address: '0xABC',
           payout_method: 'crypto',
           email: 'alice@test.com',
         }],

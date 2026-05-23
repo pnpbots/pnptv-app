@@ -63,10 +63,27 @@ jest.mock('../utils/logger', () => ({
 
 // ─── Mock: paymentService (getEpaycoCopRate) ──────────────────────────────────
 
-const mockGetEpaycoCopRate = jest.fn();
+jest.mock('../services/paymentService', () => ({}));
 
-jest.mock('../services/paymentService', () => ({
-  getEpaycoCopRate: mockGetEpaycoCopRate,
+// ─── Mock: Stripe config + stripeService ──────────────────────────────────────
+
+const mockStripeSessionCreate = jest.fn();
+const mockStripeClient = { checkout: { sessions: { create: mockStripeSessionCreate } } };
+
+jest.mock('../config/stripe', () => ({
+  assertStripeSecretKeyConfigured: jest.fn(() => 'sk_test_mock'),
+  createStripeClient: jest.fn(() => mockStripeClient),
+  getStripeSecretKey: jest.fn(() => 'sk_test_mock'),
+  getStripeWebhookSecret: jest.fn(() => 'whsec_test'),
+  isRestrictedStripeKey: jest.fn(() => false),
+  getRestrictedKeyRequiredScopes: jest.fn(() => []),
+  STRIPE_API_VERSION: '2024-04-10',
+}));
+
+const mockGetOrCreateCustomer = jest.fn();
+
+jest.mock('../services/stripeService', () => ({
+  getOrCreateCustomer: (...args) => mockGetOrCreateCustomer(...args),
 }));
 
 // ─── Mock: monetizationConfig ─────────────────────────────────────────────────
@@ -122,7 +139,7 @@ const SLOT_TIMES = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Wire up the standard happy-path client queries for slot-lock + ePayco checkout. */
+/** Wire up the standard happy-path client queries for slot-lock + Stripe checkout. */
 function setupSlotLockClientMocks({ bookingId = 99 } = {}) {
   mockPoolConnect.mockResolvedValueOnce(mockClient);
   mockClientQuery
@@ -130,7 +147,7 @@ function setupSlotLockClientMocks({ bookingId = 99 } = {}) {
     .mockResolvedValueOnce({ rows: [{ id: 'perf-001' }] })          // _getPerformerId SELECT
     .mockResolvedValueOnce({ rows: [] })                             // overlap check (empty → slot free)
     .mockResolvedValueOnce({ rows: [{ id: bookingId }] })           // INSERT bookings RETURNING
-    .mockResolvedValueOnce({ rowCount: 1 })                          // UPDATE payments metadata
+    .mockResolvedValueOnce({ rowCount: 1 })                          // UPDATE payments SET metadata (bookingId)
     .mockResolvedValueOnce({});                                      // COMMIT
 }
 
@@ -145,50 +162,56 @@ describe('callCheckoutService', () => {
 
     // Re-wire constant return values that resetAllMocks wiped
     mockGetPool.mockReturnValue({ connect: mockPoolConnect });
-    mockGetEpaycoCopRate.mockResolvedValue(4000);
     mockPaymentUpdateStatus.mockResolvedValue({});
+    mockGetOrCreateCustomer.mockResolvedValue('cus_test_mock');
+    mockStripeSessionCreate.mockResolvedValue({
+      id: 'cs_test_session_123',
+      url: 'https://checkout.stripe.com/pay/cs_test_session_123',
+    });
+    require('../config/stripe').createStripeClient.mockReturnValue(mockStripeClient);
 
     service = require('../services/callCheckoutService');
   });
 
-  // ── createCallCheckout — ePayco slot-lock path ───────────────────────────────
+  // ── createCallCheckout — Stripe slot-lock path ───────────────────────────────
 
-  describe('createCallCheckout with slotTimes (ePayco)', () => {
+  describe('createCallCheckout with slotTimes (Stripe)', () => {
     function setupCheckout() {
       mockQuery.mockResolvedValueOnce({ rows: [PACKAGE] });          // package lookup
       mockPaymentCreate.mockResolvedValueOnce(PAYMENT);
       setupSlotLockClientMocks();
-      mockQuery.mockResolvedValueOnce({ rowCount: 1 });              // UPDATE payments metadata (COP/checkoutUrl)
+      mockQuery.mockResolvedValueOnce({ rows: [] });                 // SELECT email FROM users
+      mockQuery.mockResolvedValueOnce({ rowCount: 1 });              // UPDATE payments SET stripe_session_id
     }
 
     it('opens a pool client for the slot-lock transaction', async () => {
       setupCheckout();
-      await service.createCallCheckout('member-uuid-xyz', 7, 'epayco', 'test@example.com', SLOT_TIMES);
+      await service.createCallCheckout('member-uuid-xyz', 7, 'stripe', 'test@example.com', SLOT_TIMES);
       expect(mockPoolConnect).toHaveBeenCalledTimes(1);
     });
 
     it('issues BEGIN as the first client query', async () => {
       setupCheckout();
-      await service.createCallCheckout('member-uuid-xyz', 7, 'epayco', 'test@example.com', SLOT_TIMES);
+      await service.createCallCheckout('member-uuid-xyz', 7, 'stripe', 'test@example.com', SLOT_TIMES);
       expect(mockClientQuery.mock.calls[0][0]).toBe('BEGIN');
     });
 
     it('issues COMMIT as the last client query on success', async () => {
       setupCheckout();
-      await service.createCallCheckout('member-uuid-xyz', 7, 'epayco', 'test@example.com', SLOT_TIMES);
+      await service.createCallCheckout('member-uuid-xyz', 7, 'stripe', 'test@example.com', SLOT_TIMES);
       const last = mockClientQuery.mock.calls.at(-1);
       expect(last[0]).toBe('COMMIT');
     });
 
     it('releases the client after the transaction', async () => {
       setupCheckout();
-      await service.createCallCheckout('member-uuid-xyz', 7, 'epayco', 'test@example.com', SLOT_TIMES);
+      await service.createCallCheckout('member-uuid-xyz', 7, 'stripe', 'test@example.com', SLOT_TIMES);
       expect(mockClientRelease).toHaveBeenCalledTimes(1);
     });
 
     it('passes priceUsd (not priceCents) to the INSERT bookings query', async () => {
       setupCheckout();
-      await service.createCallCheckout('member-uuid-xyz', 7, 'epayco', 'test@example.com', SLOT_TIMES);
+      await service.createCallCheckout('member-uuid-xyz', 7, 'stripe', 'test@example.com', SLOT_TIMES);
 
       // _lockSlotAndInsertBooking does: Math.round(parseFloat(priceUsd) * 100) internally
       // price_usd = '60.00' → expected priceCents param = 6000
@@ -211,7 +234,7 @@ describe('callCheckoutService', () => {
         .mockResolvedValueOnce({});                                   // ROLLBACK
 
       await expect(
-        service.createCallCheckout('member-uuid-xyz', 7, 'epayco', 'test@example.com', SLOT_TIMES)
+        service.createCallCheckout('member-uuid-xyz', 7, 'stripe', 'test@example.com', SLOT_TIMES)
       ).rejects.toThrow('no longer available');
 
       const rollbackCall = mockClientQuery.mock.calls.find((c) => c[0] === 'ROLLBACK');
@@ -230,21 +253,23 @@ describe('callCheckoutService', () => {
     it('does NOT open a pool client', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [PACKAGE] });
       mockPaymentCreate.mockResolvedValueOnce(PAYMENT);
-      mockQuery.mockResolvedValueOnce({ rowCount: 1 }); // UPDATE payments metadata
+      mockQuery.mockResolvedValueOnce({ rows: [] });       // SELECT email FROM users
+      mockQuery.mockResolvedValueOnce({ rowCount: 1 });    // UPDATE payments SET stripe_session_id
 
-      await service.createCallCheckout('member-uuid-xyz', 7, 'epayco', 'test@example.com', null);
+      await service.createCallCheckout('member-uuid-xyz', 7, 'stripe', 'test@example.com', null);
       expect(mockPoolConnect).not.toHaveBeenCalled();
     });
 
-    it('returns a checkoutUrl for ePayco', async () => {
+    it('returns a Stripe checkoutUrl', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [PACKAGE] });
       mockPaymentCreate.mockResolvedValueOnce(PAYMENT);
-      mockQuery.mockResolvedValueOnce({ rowCount: 1 });
+      mockQuery.mockResolvedValueOnce({ rows: [] });       // SELECT email FROM users
+      mockQuery.mockResolvedValueOnce({ rowCount: 1 });    // UPDATE payments SET stripe_session_id
 
       const result = await service.createCallCheckout(
-        'member-uuid-xyz', 7, 'epayco', 'test@example.com', null
+        'member-uuid-xyz', 7, 'stripe', 'test@example.com', null
       );
-      expect(result.checkoutUrl).toMatch(/\/payment\/payment-uuid-abc/);
+      expect(result.checkoutUrl).toMatch(/checkout\.stripe\.com/);
       expect(result.paymentId).toBe(PAYMENT.id);
     });
   });

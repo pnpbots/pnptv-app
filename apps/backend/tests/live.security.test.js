@@ -579,13 +579,17 @@ describe('PNPLiveService.createBooking — response does not leak internal field
 
 describe('Tip message length truncation in route handler', () => {
   it('createTip receives message truncated to 200 chars', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [{ id: 1, amount: 10 }] });
+    // createTip calls assertCreatorUnlocked (1 query) then INSERT (1 query)
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })                          // assertCreatorUnlocked: not locked
+      .mockResolvedValueOnce({ rows: [{ id: 1, amount: 10 }] });   // INSERT INTO pnp_tips
 
     const longMessage = 'A'.repeat(500);
     // Call createTip directly — the route handler does .slice(0, 200) before calling this
     await PNPLiveTipsService.createTip('u1', null, null, 10, longMessage.slice(0, 200), 'p1');
 
-    const [, params] = mockQuery.mock.calls[0];
+    // Call index 1 (0-based) = INSERT query; params[5] = message
+    const [, params] = mockQuery.mock.calls[1];
     const messageParam = params[5]; // index 5 is the message
     expect(messageParam.length).toBeLessThanOrEqual(200);
   });
@@ -664,26 +668,46 @@ describe('PNPLiveNotificationService.sendFeedbackToModel — Markdown escaping',
 // ─── 12. Tip idempotency — confirmTipPayment is safe to call twice ────────────
 
 describe('PNPLiveTipsService.confirmTipPayment — idempotency', () => {
+  // confirmTipPayment uses a transaction client (getClient), not the bare query function
+  const mockClientQuery = jest.fn();
+  const mockClientRelease = jest.fn();
+  const mockTxClient = { query: mockClientQuery, release: mockClientRelease };
+
+  beforeEach(() => {
+    mockGetClient.mockResolvedValue(mockTxClient);
+  });
+
   afterEach(() => {
     mockQuery.mockReset();
+    mockClientQuery.mockReset();
+    mockClientRelease.mockReset();
+    mockGetClient.mockReset();
   });
 
   it('second call with same tipId is a no-op (tip already completed)', async () => {
-    // Simulate the UPDATE affecting 0 rows (already completed)
-    mockQuery.mockResolvedValueOnce({ rows: [] });
+    // BEGIN → ok, UPDATE → 0 rows → ROLLBACK → release → return null
+    mockClientQuery
+      .mockResolvedValueOnce({})                   // BEGIN
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })  // UPDATE (already done)
+      .mockResolvedValueOnce({});                  // ROLLBACK
 
     await expect(PNPLiveTipsService.confirmTipPayment(1, 'TXN-001'))
       .resolves.toBeNull();
+    expect(mockClientRelease).toHaveBeenCalledTimes(1);
   });
 
   it('first call succeeds and returns the updated tip', async () => {
-    mockQuery.mockResolvedValueOnce({
-      rows: [{ id: 1, payment_status: 'completed', transaction_id: 'TXN-001' }],
-    });
+    // BEGIN → ok, UPDATE → 1 row (no performer_id → skip earnings), COMMIT → release → return tip
+    const tip = { id: 1, payment_status: 'completed', transaction_id: 'TXN-001', performer_id: null, model_id: null, amount: '10' };
+    mockClientQuery
+      .mockResolvedValueOnce({})                          // BEGIN
+      .mockResolvedValueOnce({ rows: [tip], rowCount: 1 }) // UPDATE
+      .mockResolvedValueOnce({});                         // COMMIT
 
     const result = await PNPLiveTipsService.confirmTipPayment(1, 'TXN-001');
     expect(result.payment_status).toBe('completed');
     expect(result.transaction_id).toBe('TXN-001');
+    expect(mockClientRelease).toHaveBeenCalledTimes(1);
   });
 });
 

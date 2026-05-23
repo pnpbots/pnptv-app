@@ -19,6 +19,16 @@
 // Minimum env needed to require modules without them blowing up at load time.
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-padding-padding-padding';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-padding-padding';
+process.env.NODE_ENV = 'test';
+
+jest.mock('../utils/logger', () => ({
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+  stream: { write: jest.fn() },
+  addUserContext: jest.fn(() => ({})),
+}));
 
 describe('payment routes — import contract', () => {
   test('services/userService exports ensureEmailCredentials as a function', () => {

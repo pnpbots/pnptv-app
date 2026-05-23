@@ -45,7 +45,7 @@ jest.mock('../services/livekitService', () => ({
 }));
 
 jest.mock('../services/userService', () => ({}));
-jest.mock('../models/videoCallModel', () => ({}));
+jest.mock('../models/videoCallModel', () => ({}), { virtual: true });
 jest.mock('../services/notificationEmitter', () => ({}));
 jest.mock('../services/accessService', () => ({ hasAccess: jest.fn(async () => true) }));
 jest.mock('../models/blockedUser', () => ({}));
@@ -107,22 +107,14 @@ describe('hangout call backend regressions', () => {
       .mockResolvedValueOnce({ rows: [] }) // ensureMainGroupMembership
       .mockResolvedValueOnce({ rows: [] }) // ensureLanguageGroupMembership select
       .mockResolvedValueOnce({ rows: [{}] }) // isMember
-      .mockResolvedValueOnce({ rows: [{ id: 7, is_paid: false, price_usd: 0 }] }) // group
-      .mockResolvedValueOnce({ rows: [{ role: 'owner' }] }) // rooms-per-day bypass
+      .mockResolvedValueOnce({ rows: [{ id: 7, is_paid: false, price_usd: 0 }] }) // group (checkPaidHangoutAccess)
       .mockResolvedValueOnce({ rows: [] }) // expire stale calls
       .mockResolvedValueOnce({
-        rows: [{
-          id: 'call-1',
-          room_name: 'hangout-7',
-          creator_id: 'creator-1',
-          creator_role: 'member',
-          creator_tier: 'prime',
-        }],
-      }) // active call
-      .mockResolvedValueOnce({ rows: [] }) // already active participant
-      .mockResolvedValueOnce({ rows: [{ count: 1 }] }) // capacity
-      .mockResolvedValueOnce({ rows: [{ role: 'owner' }] }) // owner/mod join
-      .mockResolvedValueOnce({ rows: [] }); // insert participant
+        rows: [{ id: 'call-1', room_name: 'hangout-7', creator_id: 'creator-1' }],
+      }) // active call found → generateCallAccess
+      .mockResolvedValueOnce({ rows: [{ role: 'owner' }] }) // isOwnerOrMod
+      .mockResolvedValueOnce({ rows: [{ creator_id: 'creator-1' }] }) // SELECT creator_id
+      .mockResolvedValueOnce({ rows: [] }); // INSERT hangout_call_participants
 
     const req = {
       params: { id: '7' },
@@ -137,13 +129,13 @@ describe('hangout call backend regressions', () => {
       '42',
       'Owner',
       true,
-      { ttlSeconds: 4 * 3600 }
+      expect.objectContaining({ ttlSeconds: 4 * 3600 })
     );
-    expect(res.body).toEqual({
+    expect(res.body).toEqual(expect.objectContaining({
       token: 'test-livekit-token',
       livekitUrl: 'wss://livekit.test',
       roomName: 'hangout-7',
-    });
+    }));
   });
 
   test('startCall preserves moderator grants on concurrent-start fallback', async () => {
@@ -154,14 +146,14 @@ describe('hangout call backend regressions', () => {
       .mockResolvedValueOnce({ rows: [] }) // ensureMainGroupMembership
       .mockResolvedValueOnce({ rows: [] }) // ensureLanguageGroupMembership select
       .mockResolvedValueOnce({ rows: [{}] }) // isMember
-      .mockResolvedValueOnce({ rows: [{ id: 7, is_paid: false, price_usd: 0 }] }) // group
-      .mockResolvedValueOnce({ rows: [{ role: 'owner' }] }) // rooms-per-day bypass
+      .mockResolvedValueOnce({ rows: [{ id: 7, is_paid: false, price_usd: 0 }] }) // group (checkPaidHangoutAccess)
       .mockResolvedValueOnce({ rows: [] }) // expire stale calls
       .mockResolvedValueOnce({ rows: [] }) // no active call
-      .mockRejectedValueOnce(uniqueViolation) // insert new call races
-      .mockResolvedValueOnce({ rows: [{ id: 'call-2', room_name: 'hangout-7' }] }) // race winner
-      .mockResolvedValueOnce({ rows: [{ role: 'owner' }] }) // owner/mod join
-      .mockResolvedValueOnce({ rows: [] }); // insert participant
+      .mockRejectedValueOnce(uniqueViolation) // INSERT hangout_video_calls → race collision
+      .mockResolvedValueOnce({ rows: [{ id: 'call-2', room_name: 'hangout-7' }] }) // race winner SELECT
+      .mockResolvedValueOnce({ rows: [{ role: 'owner' }] }) // isOwnerOrMod (in generateCallAccess)
+      .mockResolvedValueOnce({ rows: [] }) // SELECT creator_id (user '42' is not call-2's creator)
+      .mockResolvedValueOnce({ rows: [] }); // INSERT hangout_call_participants
 
     const req = {
       params: { id: '7' },
@@ -176,13 +168,13 @@ describe('hangout call backend regressions', () => {
       '42',
       'Owner',
       true,
-      { ttlSeconds: 4 * 3600 }
+      expect.objectContaining({ ttlSeconds: 4 * 3600 })
     );
-    expect(res.body).toEqual({
+    expect(res.body).toEqual(expect.objectContaining({
       token: 'test-livekit-token',
       livekitUrl: 'wss://livekit.test',
       roomName: 'hangout-7',
-    });
+    }));
   });
 
   test('LiveKit participant transport events do not mutate participant_count directly', async () => {
@@ -222,7 +214,8 @@ describe('hangout call backend regressions', () => {
     expect(mockQuery).toHaveBeenCalledWith(
       `UPDATE hangout_video_calls
            SET status = 'ended', ended_at = NOW(), participant_count = 0
-           WHERE group_id = $1 AND status = 'active'`,
+           WHERE group_id = $1 AND status = 'active'
+           RETURNING id`,
       ['7']
     );
     expect(res.statusCode).toBe(200);

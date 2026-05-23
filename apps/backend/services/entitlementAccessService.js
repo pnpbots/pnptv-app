@@ -435,6 +435,14 @@ class EntitlementAccessService {
       if (await EntitlementAccessService.hasEntitlement(userId, 'channel-access', { creatorId: String(resource.id) })) {
         return { allowed: true, reason: 'scoped_channel_access', scoped: true };
       }
+      // Subscription channels also accept creator-subscription entitlements
+      // (granted when a user subscribes to a creator's subscription plan via any provider).
+      if (resource.access_type === 'subscription') {
+        const creatorId = resource.creator_id ? String(resource.creator_id) : String(resource.id);
+        if (await EntitlementAccessService.hasEntitlement(userId, 'creator-subscription', { creatorId })) {
+          return { allowed: true, reason: 'creator_subscriber', scoped: true };
+        }
+      }
     }
     if (kind === 'hangout') {
       // Standalone paid hangout

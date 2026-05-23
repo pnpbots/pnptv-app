@@ -168,30 +168,56 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
       ? `/booking/${bookingId}/confirm`
       : `/dashboard?stripe=success&session_id={CHECKOUT_SESSION_ID}`;
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      line_items: [{
-        quantity: 1,
-        price_data: {
-          currency: 'usd',
-          unit_amount: Math.round(parseFloat(pkg.price_usd) * 100),
-          product_data: {
-            name: `${pkg.duration_minutes}-min Private Call`,
-            description: 'PNPtv private call booking',
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [{
+          quantity: 1,
+          price_data: {
+            currency: 'usd',
+            unit_amount: Math.round(parseFloat(pkg.price_usd) * 100),
+            product_data: {
+              name: `${pkg.duration_minutes}-min Private Call`,
+              description: 'PNPtv private call booking',
+            },
           },
+        }],
+        customer: customerId,
+        success_url: `${WEB_APP}${successPath}`,
+        cancel_url: `${WEB_APP}/`,
+        metadata: {
+          pnptv_user_id: String(memberId),
+          pnptv_payment_id: payment.id,
+          payment_type: 'call_package',
+          package_id: String(pkg.id),
+          package_sku: pkg.sku || '',
         },
-      }],
-      customer: customerId,
-      success_url: `${WEB_APP}${successPath}`,
-      cancel_url: `${WEB_APP}/`,
-      metadata: {
-        pnptv_user_id: String(memberId),
-        pnptv_payment_id: payment.id,
-        payment_type: 'call_package',
-        package_id: String(pkg.id),
-        package_sku: pkg.sku || '',
-      },
-    });
+      });
+    } catch (stripeErr) {
+      // Stripe session failed — expire the pre-created booking and mark payment failed
+      // so the slot is freed and the DB doesn't accumulate orphaned awaiting_payment rows.
+      if (bookingId) {
+        await query(
+          `UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+          [bookingId]
+        ).catch(() => {});
+      }
+      await query(
+        `UPDATE payments SET status = 'failed', updated_at = NOW(),
+         metadata = metadata || $2::jsonb WHERE id = $1`,
+        [payment.id, JSON.stringify({ error_reason: stripeErr.message?.slice(0, 500) })]
+      ).catch(() => {});
+
+      // Surface a clear error code so the controller can return a meaningful response
+      const err = new Error(stripeErr.message || 'Stripe checkout creation failed');
+      err.code = stripeErr.code || 'STRIPE_SESSION_FAILED';
+      err.stripeType = stripeErr.type;
+      if (stripeErr.message?.includes('cannot currently make live charges')) {
+        err.code = 'STRIPE_ACCOUNT_NOT_ACTIVATED';
+      }
+      throw err;
+    }
 
     checkoutUrl = session.url;
 

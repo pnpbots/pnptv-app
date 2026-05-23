@@ -3,6 +3,9 @@
 /** @type {import('jest').Config} */
 module.exports = {
   testEnvironment: 'node',
+  moduleNameMapper: {
+    '^uuid$': '<rootDir>/tests/mocks/uuid.js',
+  },
   testMatch: [
     '**/tests/**/*.test.js',
     '**/*.test.js',

@@ -136,12 +136,14 @@ describe('hasResourceAccess — channel', () => {
     expect(result.reason).toBe('scoped_channel_access');
   });
 
-  it('denies paid channel with payment required when no scoped entitlement + no prime', async () => {
+  it('denies paid channel with payment required when user has member but no scoped entitlement', async () => {
+    // Paid channels need a scoped channel-access purchase. Members get PAYMENT_REQUIRED
+    // (they can buy it). Non-members get MEMBER_REQUIRED (upgrade first).
     queueDb(
       [],                                          // isBanned=false
       [{ id: 'c-paid', access_type: 'paid', creator_id: 'u-1', price_usd: 5 }],
       [],                                          // no channel-access
-      [],                                          // no prime
+      [{ 1: 1 }],                                  // pnp-member EXISTS (has basic membership)
     );
     const result = await EntitlementAccessService.hasResourceAccess('42', 'channel', 'c-paid');
     expect(result.allowed).toBe(false);
@@ -150,16 +152,19 @@ describe('hasResourceAccess — channel', () => {
     expect(result.priceUsd).toBe(5);
   });
 
-  it('allows paid channel when user has prime (global override)', async () => {
+  it('denies paid channel for prime-only user (PRIME no longer overrides paid channels)', async () => {
+    // PRIME no longer bypasses paid channels — user must purchase channel-access separately.
+    // Prime users are shown PAYMENT_REQUIRED (not MEMBER_REQUIRED) since they qualify to buy.
     queueDb(
       [],                                          // isBanned=false
       [{ id: 'c-paid', access_type: 'paid', creator_id: 'u-1', price_usd: 5 }],
       [],                                          // no channel-access
-      [{ 1: 1 }],                                  // prime EXISTS
+      [],                                          // no pnp-member
+      [{ 1: 1 }],                                  // prime EXISTS → hasPrime=true
     );
     const result = await EntitlementAccessService.hasResourceAccess('42', 'channel', 'c-paid');
-    expect(result.allowed).toBe(true);
-    expect(result.reason).toBe('prime_override');
+    expect(result.allowed).toBe(false);
+    expect(result.code).toBe('PAYMENT_REQUIRED');
   });
 
   it('requires prime on a prime-gated channel', async () => {
@@ -175,11 +180,11 @@ describe('hasResourceAccess — channel', () => {
   });
 
   it('allows a subscription channel when user has creator-subscription entitlement', async () => {
+    // creator-subscription (from Stripe/ePayco subscription) is checked after channel-access
     queueDb(
       [],                                          // isBanned=false
       [{ id: 'c-sub', access_type: 'subscription', creator_id: 'u-creator' }],
       [],                                          // no direct channel-access
-      [],                                          // no prime
       [{ 1: 1 }],                                  // creator-subscription:u-creator EXISTS
     );
     const result = await EntitlementAccessService.hasResourceAccess('42', 'channel', 'c-sub');
@@ -188,13 +193,14 @@ describe('hasResourceAccess — channel', () => {
     expect(result.scoped).toBe(true);
   });
 
-  it('denies a subscription channel when user has no subscription and no prime', async () => {
+  it('denies a subscription channel when user has no subscription but has member', async () => {
+    // Members without a creator-subscription get CREATOR_SUBSCRIPTION_REQUIRED (they can subscribe).
     queueDb(
       [],                                          // isBanned=false
       [{ id: 'c-sub', access_type: 'subscription', creator_id: 'u-creator' }],
       [],                                          // no direct channel-access
-      [],                                          // no prime
       [],                                          // no creator-subscription
+      [{ 1: 1 }],                                  // pnp-member EXISTS → qualifies for CREATOR_SUBSCRIPTION_REQUIRED
     );
     const result = await EntitlementAccessService.hasResourceAccess('42', 'channel', 'c-sub');
     expect(result.allowed).toBe(false);
@@ -219,11 +225,12 @@ describe('hasResourceAccess — hangout', () => {
   });
 
   it('denies standalone paid hangout with payment required when no scoped access', async () => {
+    // User has basic membership so they qualify to purchase: PAYMENT_REQUIRED (not MEMBER_REQUIRED).
     queueDb(
       [],                                          // isBanned=false
       [{ id: 'h-1', is_paid: true, channel_id: null, creator_id: 'u-1', price_usd: 3 }],
       [],                                          // no hangout-access
-      [],                                          // no prime
+      [{ 1: 1 }],                                  // pnp-member EXISTS → qualifies for PAYMENT_REQUIRED
     );
     const result = await EntitlementAccessService.hasResourceAccess('42', 'hangout', 'h-1');
     expect(result.allowed).toBe(false);
@@ -256,9 +263,8 @@ describe('hasResourceAccess — hangout', () => {
       [],                                                      // isBanned
       [{ id: 'h-3', is_paid: false, channel_id: null }],      // standalone free
       [],                                                      // no hangout-access
-      [],                                                      // no membership row
-      [],                                                      // no prime
-      [{ 1: 1 }],                                              // pnp-member YES
+      [],                                                      // no membership row (hangout_group_members)
+      [{ 1: 1 }],                                              // pnp-member YES (global fallback)
     );
     const result = await EntitlementAccessService.hasResourceAccess('42', 'hangout', 'h-3');
     expect(result.allowed).toBe(true);
@@ -282,11 +288,12 @@ describe('hasResourceAccess — hangout', () => {
   it('does NOT grandfather existing members of a paid hangout (scope required)', async () => {
     // When scoped access expires, hangout_group_members rows persist — the
     // resolver must enforce the scope entitlement, not fall back to member status.
+    // User has basic membership so they get PAYMENT_REQUIRED (can re-purchase).
     queueDb(
       [],                                                      // isBanned
       [{ id: 'h-4', is_paid: true, channel_id: null, creator_id: 'u-1', price_usd: 10 }],
       [],                                                      // no hangout-access (expired)
-      [],                                                      // no prime
+      [{ 1: 1 }],                                              // pnp-member EXISTS → PAYMENT_REQUIRED
     );
     const result = await EntitlementAccessService.hasResourceAccess('42', 'hangout', 'h-4');
     expect(result.allowed).toBe(false);
@@ -303,13 +310,12 @@ describe('hasResourceAccess — hangout', () => {
       [{ id: 'h-5', is_paid: false, channel_id: 'c-linked' }], // loadResource hangout
       [],                                                      // no hangout-access
       [],                                                      // no channel-access on linked channel (pre-delegation shortcut)
-      [],                                                      // no prime (global override — hangout path)
-      // Hangout kind is_paid=false so PAYMENT_REQUIRED branch is skipped.
-      // Delegates to channel kind → recursive hasResourceAccess('channel', 'c-linked').
+      // Hangout kind is_paid=false AND has channel_id → delegates to channel kind.
+      // Recursive hasResourceAccess('channel', 'c-linked'):
       // Note: recursive isBanned hits Redis cache (set during the outer call) — no DB query.
       [{ id: 'c-linked', access_type: 'paid', creator_id: 'u-1', price_usd: 10 }], // recursive loadResource channel
       [],                                                      // recursive no channel-access
-      [],                                                      // recursive no prime
+      [{ 1: 1 }],                                              // recursive pnp-member EXISTS → PAYMENT_REQUIRED
     );
     const result = await EntitlementAccessService.hasResourceAccess('42', 'hangout', 'h-5');
     expect(result.allowed).toBe(false);
