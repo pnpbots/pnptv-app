@@ -4,7 +4,7 @@
 /**
  * broadcast-lifetime100-pulse.js
  *
- * Recurring urgency nudge for the Lifetime100 deal. Designed to run on cron
+ * Recurring urgency nudge for the Lifetime Prime deal. Designed to run on cron
  * every 2 hours. Sends push + in-app to all users who do NOT already hold a
  * lifetime pnp-member entitlement.
  *
@@ -46,24 +46,24 @@ const isEn  = (lang) => typeof lang === 'string' && lang.toLowerCase().startsWit
 // ── Message copy ──────────────────────────────────────────────────────────────
 
 const NOTIFICATION_MSG = {
-  en: `⏰ Only 1 hour left — Lifetime100 is almost gone! Get lifetime PRIME for $99.99. Tap to grab yours →`,
-  es: `⏰ ¡Solo 1 hora! — Lifetime100 está a punto de cerrar. PRIME de por vida por $99.99. Toca aquí →`,
+  en: `⏰ Only 1 hour left — Lifetime Prime is almost gone! Get lifetime PRIME for $99.99. Tap to grab yours →`,
+  es: `⏰ ¡Solo 1 hora! — Lifetime Prime está a punto de cerrar. PRIME de por vida por $99.99. Toca aquí →`,
 };
 
 const PUSH = {
   en: {
-    title: '⏰ 1 hour left — Lifetime100 closes soon!',
+    title: '⏰ 1 hour left — Lifetime Prime closes soon!',
     body:  'Lifetime PRIME access for $99.99 — one payment, forever. Don\'t miss out.',
   },
   es: {
-    title: '⏰ ¡1 hora! — ¡Lifetime100 cierra pronto!',
+    title: '⏰ ¡1 hora! — ¡Lifetime Prime cierra pronto!',
     body:  'Acceso PRIME de por vida por $99.99 — un pago, para siempre. No te lo pierdas.',
   },
 };
 
 const TG = {
   en:
-`⏰ <b>Only 1 hour left — Lifetime100 is almost gone</b>
+`⏰ <b>Only 1 hour left — Lifetime Prime is almost gone</b>
 
 Grab lifetime PRIME access to PNPtv! for just $99.99.
 
@@ -75,7 +75,7 @@ Grab lifetime PRIME access to PNPtv! for just $99.99.
 👉 <a href="${CHECKOUT_URL}">${CHECKOUT_URL}</a>`,
 
   es:
-`⏰ <b>¡Solo 1 hora! — Lifetime100 está a punto de cerrar</b>
+`⏰ <b>¡Solo 1 hora! — Lifetime Prime está a punto de cerrar</b>
 
 Obtén acceso PRIME de por vida a PNPtv! por solo $99.99.
 
@@ -91,7 +91,7 @@ Obtén acceso PRIME de por vida a PNPtv! por solo $99.99.
 
 async function main() {
   console.log('\n═══════════════════════════════════════════════════════════════');
-  console.log(' Lifetime100 Pulse Broadcast — Urgency Push');
+  console.log(' Lifetime Prime Pulse Broadcast — Urgency Push');
   console.log('═══════════════════════════════════════════════════════════════');
   if (DRY_RUN)       console.log(' MODE: DRY RUN — nothing will be sent or written\n');
   if (!DRY_RUN)      console.log(' MODE: LIVE — will send real messages\n');

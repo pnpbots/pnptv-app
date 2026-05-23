@@ -1,7 +1,7 @@
 export const strings = {
   en: {
     // ── Page head ──────────────────────────────────────────────────────────────
-    pageTitle: "Founder Lifetime100 — PNPtv!",
+    pageTitle: "Founder Lifetime Prime — PNPtv!",
 
     // ── Hero ───────────────────────────────────────────────────────────────────
     heroTitle: "Lifetime Member + 2 Months PRIME",
@@ -84,7 +84,7 @@ export const strings = {
 
   es: {
     // ── Page head ──────────────────────────────────────────────────────────────
-    pageTitle: "Fundador Lifetime100 — PNPtv!",
+    pageTitle: "Fundador Lifetime Prime — PNPtv!",
 
     // ── Hero ───────────────────────────────────────────────────────────────────
     heroTitle: "Miembro de por vida + 2 Meses PRIME",

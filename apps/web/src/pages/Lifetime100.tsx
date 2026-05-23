@@ -1160,7 +1160,7 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
       if (payMethod === "dash") {
         const result = await createDashSubscription(PLAN_ID);
         if (result.success && result.checkoutUrl) {
-          const invoice: DashInvoice = { invoiceId: result.invoiceId, checkoutUrl: assertPaymentUrl(result.checkoutUrl), planName: result.planName || "Lifetime100", loadingDetails: true, createdAt: Date.now() };
+          const invoice: DashInvoice = { invoiceId: result.invoiceId, checkoutUrl: assertPaymentUrl(result.checkoutUrl), planName: result.planName || "Lifetime Prime", loadingDetails: true, createdAt: Date.now() };
           setDashInvoice(invoice); setDashSecondsLeft(900); setDashPolling(true);
           try { sessionStorage.setItem("pnp_pending_dash_invoice", JSON.stringify({ invoiceId: result.invoiceId, createdAt: invoice.createdAt, planName: invoice.planName })); } catch {}
           getDashPaymentDetails(result.invoiceId)

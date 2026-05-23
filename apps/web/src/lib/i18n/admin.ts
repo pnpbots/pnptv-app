@@ -669,7 +669,7 @@ const strings = {
       },
       actions: {
         new: "New Campaign",
-        lifetime100: "Lifetime100 Template",
+        lifetime100: "Lifetime Prime Template",
         addAccount: "Add X Account",
         pause: "Pause",
         resume: "Resume",
@@ -791,7 +791,7 @@ const strings = {
         fixFailing: "Fix failing posts",
         improvePrompts: "Improve prompts",
         addVideo: "Add random video",
-        lifetime100: "Lifetime100 campaign",
+        lifetime100: "Lifetime Prime campaign",
       },
       tableActions: {
         pause: "Pause",
@@ -816,7 +816,7 @@ const strings = {
         collapse: "Collapse",
         open: "Open",
         failed: "failed",
-        lifetime100Format: "Lifetime100 Required Format",
+        lifetime100Format: "Lifetime Prime Required Format",
         every: "Every",
       },
     },
@@ -1469,7 +1469,7 @@ const strings = {
       },
       actions: {
         new: "Nueva Campaña",
-        lifetime100: "Plantilla Lifetime100",
+        lifetime100: "Plantilla Lifetime Prime",
         addAccount: "Agregar Cuenta X",
         pause: "Pausar",
         resume: "Reanudar",
@@ -1591,7 +1591,7 @@ const strings = {
         fixFailing: "Arreglar posts fallidos",
         improvePrompts: "Mejorar prompts",
         addVideo: "Agregar video aleatorio",
-        lifetime100: "Campaña Lifetime100",
+        lifetime100: "Campaña Lifetime Prime",
       },
       tableActions: {
         pause: "Pausar",
@@ -1616,7 +1616,7 @@ const strings = {
         collapse: "Contraer",
         open: "Abrir",
         failed: "fallidos",
-        lifetime100Format: "Formato Requerido Lifetime100",
+        lifetime100Format: "Formato Requerido Lifetime Prime",
         every: "Cada",
       },
     },
