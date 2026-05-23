@@ -6,7 +6,8 @@
  * All Stripe operations go through this module so secrets never leak
  * to frontend code.
  *
- * Webhook endpoint: https://pnptv.app/api/webhooks/stripe
+ * Hosted at pay.codigosdemujeres.com — the checkout/webhook domain is
+ * separate from pnptv.app but points at the same Express backend.
  */
 
 const { query } = require('../config/postgres');
