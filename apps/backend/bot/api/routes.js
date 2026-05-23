@@ -8526,7 +8526,7 @@ app.get('/api/token-checkout/:purchaseId', requireSessionAuth, asyncHandler(asyn
 app.get('/token-checkout/:purchaseId', (req, res) => {
   const purchaseId = encodeURIComponent(req.params.purchaseId);
   const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
-  res.redirect(302, `https://app.pnptv.app/token-checkout/${purchaseId}${qs}`);
+  res.redirect(302, `https://pnptv.app/token-checkout/${purchaseId}${qs}`);
 });
 
 // POST /api/wallet/link-dpns — link a Dash DPNS handle
@@ -8719,11 +8719,13 @@ app.get('/api/webapp/payments/dash/details/:invoiceId', requireSessionAuth, asyn
       return res.status(400).json({ success: false, error: 'Invalid invoiceId' });
     }
 
-    // Verify ownership — check both subscription orders and token purchases
+    // Verify ownership — check subscription orders, token purchases, and tips
     const ownerCheck = await pool.query(
       `SELECT user_id FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2
        UNION ALL
        SELECT user_id FROM token_purchases WHERE btcpay_invoice_id = $1 AND user_id = $2
+       UNION ALL
+       SELECT user_id FROM pnp_tips WHERE transaction_id = $1 AND user_id = $2
        LIMIT 1`,
       [invoiceId, userId]
     );

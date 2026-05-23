@@ -985,7 +985,8 @@ function StreamInner() {
     setTipError(null);
     setTipSuccess(null);
     try {
-      await sendTip(streamId || "", amount, undefined, "tokens");
+      const tipResult = await sendTip(streamId || "", amount, undefined, "tokens");
+      if (tipResult?.newBalance !== undefined) setTokenBalance(tipResult.newBalance);
       setTipSuccess(t.live.tipSuccess);
       if (tipSuccessTimerRef.current) clearTimeout(tipSuccessTimerRef.current);
       tipSuccessTimerRef.current = setTimeout(() => {
