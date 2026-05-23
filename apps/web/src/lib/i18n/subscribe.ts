@@ -32,7 +32,7 @@ const strings = {
 
     // ── Plan badge ────────────────────────────────────────────────────────────
     bestValue: "Best Value",
-    launchRate: "Launch Rate",
+    launchRate: "✦ Intro",
 
     // ── Entitlement-driven features ───────────────────────────────────────────
     everythingInMemberPlus: "Everything in Member, plus:",
@@ -165,7 +165,7 @@ const strings = {
     perMonth: "/mes",
 
     bestValue: "Mejor precio",
-    launchRate: "Precio de lanzamiento",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Todo lo del plan Miembro, más:",
     showBenefits: "Ver beneficios",

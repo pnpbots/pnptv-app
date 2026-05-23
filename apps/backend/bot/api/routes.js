@@ -7524,6 +7524,10 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
   if (channels.length === 0) return res.status(404).json({ error: 'Channel not found' });
   const channel = channels[0];
 
+  if (channel.access_type === 'prime') {
+    return res.status(400).json({ error: 'This channel is included with PRIME membership', code: 'PRIME_REQUIRED' });
+  }
+
   if (channel.access_type !== 'paid' || !channel.price_usd || Number(channel.price_usd) <= 0) {
     return res.status(400).json({ error: 'This channel does not require payment' });
   }
@@ -7580,6 +7584,12 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
   }
 
   // ── Stripe branch ─────────────────────────────────────────────────────────
+  const { CHANNEL_PRICE_MAP } = require('../../config/channelPricing');
+  const priceId = CHANNEL_PRICE_MAP[String(channelPrice)];
+  if (!priceId) {
+    return res.status(400).json({ error: 'No payment option available for this channel price', code: 'UNSUPPORTED_PRICE' });
+  }
+
   const PaymentModel = require('../../models/paymentModel');
   const stripeService = require('../../services/stripeService');
   const payment = await PaymentModel.create({
@@ -7599,21 +7609,19 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
 
   const successUrl = `https://pnptv.app/chat/${channel.hangout_group_id || ''}?stripe_paid=1`;
   const cancelUrl = `https://pnptv.app/chat/${channel.hangout_group_id || ''}`;
-  const stripeCheckout = await stripeService.createCustomCheckoutSession({
+  const stripeCheckout = await stripeService.createCheckoutSession({
     userId: String(user.id),
     planId: 'channel_access',
     sku: 'channel_access',
-    amountUsd: channelPrice,
-    productName: `Channel access: ${channel.name}`,
-    description: 'One-time access to a paid creator channel',
+    priceId,
     successUrl,
     cancelUrl,
     customerEmail: email || user.email || undefined,
     metadata: {
       pnptv_payment_id: payment.id,
+      pnptv_type: 'channel_access',
       channelId: String(channel.id),
       hangoutGroupId: channel.hangout_group_id ? String(channel.hangout_group_id) : '',
-      channelName: channel.name || '',
     },
   });
 
