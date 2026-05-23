@@ -360,23 +360,23 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   // the widget is in widget mode and not currently open). Expansion state and
   // toast confirmation are local to this widget.
   const [selfCareFanOpen, setSelfCareFanOpen] = useState(false);
-  const [selfCareToast, setSelfCareToast] = useState<{ kind: "slam" | "smoke"; until: number } | null>(null);
+  const [selfCareToast, setSelfCareToast] = useState<{ kind: "slam" | "smoke"; count: number; until: number } | null>(null);
   const selfCareBusyRef = useRef<"slam" | "smoke" | null>(null);
   const handleSelfCareLog = useCallback(async (kind: "slam" | "smoke") => {
     if (selfCareBusyRef.current) return;
     selfCareBusyRef.current = kind;
     setSelfCareFanOpen(false);
     try {
-      await logUse(kind);
-      setSelfCareToast({ kind, until: Date.now() + 1800 });
-      navigate("/self-care#tracker");
+      const res = await logUse(kind);
+      const count = res[kind]?.today ?? 1;
+      setSelfCareToast({ kind, count, until: Date.now() + 2500 });
     } catch {
       // Silent — failures here would be jarring. The Settings card surfaces
       // load/save problems; this FAB is fire-and-forget on purpose.
     } finally {
       selfCareBusyRef.current = null;
     }
-  }, [navigate]);
+  }, []);
   // Auto-clear toast after its lifetime.
   useEffect(() => {
     if (!selfCareToast) return;
@@ -2121,7 +2121,7 @@ function SelfCareSatellite({
           role="status"
           aria-live="polite"
         >
-          ✓ Logged · {toast.kind}
+          {toast.kind === "slam" ? "💉" : "💨"} {toast.count} {toast.kind === "slam" ? "slam" : "smoke"}{toast.count !== 1 ? "s" : ""} today
         </div>
       )}
 
