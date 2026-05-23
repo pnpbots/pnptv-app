@@ -164,7 +164,7 @@ const COLOMBIA_EXEMPT_PREFIXES = [
   '/api/webapp/auth/', '/api/auth-status', '/api/logout', '/api/accept-terms',
   '/api/webapp/geo',
   '/api/subscription/plans', '/api/webapp/plans',
-  '/api/payment/', '/api/webapp/payment/',
+  '/api/payment/', '/api/webapp/payment/', '/api/webapp/payments/',
   '/api/webhook/', '/pnp/webhook/',
   '/api/health', '/health',
   '/api/cms/', '/api/webapp/cms/',
@@ -9244,6 +9244,11 @@ app.post('/api/webapp/book-call/checkout/dash',
   requireSessionAuth,
   asyncHandler(callBookingController.createCheckoutDash));
 
+// Member: upcoming confirmed bookings — must be before /:bookingId catch-all
+app.get('/api/webapp/bookings/upcoming',
+  requireSessionAuth,
+  asyncHandler(callBookingController.getUpcomingBookings));
+
 // Payment-status poller for Dash checkout flow (must be before /:bookingId catch-all)
 app.get('/api/webapp/bookings/:bookingId/payment-status',
   requireSessionAuth,
@@ -9306,11 +9311,6 @@ app.patch('/api/webapp/bookings/:bookingId/complete',
 app.post('/api/webapp/bookings/:bookingId/cancel',
   requireSessionAuth,
   asyncHandler(callBookingController.cancelBooking));
-
-// Member: upcoming confirmed bookings (with 15-min join window)
-app.get('/api/webapp/bookings/upcoming',
-  requireSessionAuth,
-  asyncHandler(callBookingController.getUpcomingBookings));
 
 // Creator: get/set next show date
 app.get('/api/webapp/creator/next-show-date',
