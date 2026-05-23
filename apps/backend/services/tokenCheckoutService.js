@@ -175,7 +175,7 @@ class TokenCheckoutService {
         usdAmount: pkg.usd,
         userId,
         orderId: `pnptv-tokens-${userId}-${Date.now()}`,
-        description: `${pkg.tokens} PNP Tokens`,
+        description: `${pkg.tokens} Digital Credits`,
         redirectUrl: `${WEB_APP_URL}/wallet`,
       });
     } catch (btcpayErr) {
@@ -280,8 +280,8 @@ class TokenCheckoutService {
             currency: 'usd',
             unit_amount: Math.round(pkg.usd * 100),
             product_data: {
-              name: `${pkg.tokens} PNP Tokens`,
-              description: 'PNPtv tip tokens — use to tip creators during live shows',
+              name: `${pkg.tokens} Digital Credits`,
+              description: 'Digital credits for online content',
             },
           },
         }],

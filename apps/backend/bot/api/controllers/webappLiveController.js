@@ -1247,8 +1247,8 @@ const buySlotTicket = async (req, res) => {
         userId,
         sku: `ticket-${id}`,
         amountUsd: priceUsd,
-        productName: `Live Show Ticket: ${slot.title || id}`,
-        description: 'One-time ticket for a paid live show',
+        productName: 'Online Event Access',
+        description: 'One-time access to an online event',
         successUrl: `${WEB_APP_URL}/live/${id}?stripe_paid=1`,
         cancelUrl: `${WEB_APP_URL}/live/${id}`,
         customerEmail: userEmail || undefined,
@@ -1325,7 +1325,7 @@ const buySlotTicket = async (req, res) => {
         usdAmount: priceUsd,
         userId,
         orderId: `pnptv-ticket-${userId}-${id}-${Date.now()}`,
-        description: `Live Show Ticket: ${slot.title || id}`,
+        description: 'Online event access',
         redirectUrl: `${WEB_APP_URL}/live/${id}`,
       });
 

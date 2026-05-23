@@ -178,8 +178,8 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
             currency: 'usd',
             unit_amount: Math.round(parseFloat(pkg.price_usd) * 100),
             product_data: {
-              name: `${pkg.duration_minutes}-min Private Call`,
-              description: 'PNPtv private call booking',
+              name: `${pkg.duration_minutes}-min Video Session`,
+              description: 'Online video session',
             },
           },
         }],

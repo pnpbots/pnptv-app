@@ -7421,7 +7421,7 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
         usdAmount: hangoutPrice,
         userId,
         orderId,
-        description: `Hangout access: ${hangout.name}`,
+        description: 'Community access',
         redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/chat/${hangout.id}`,
       });
       const insertRes = await getPool().query(
@@ -7473,8 +7473,8 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
     planId: 'hangout_access',
     sku: 'hangout_access',
     amountUsd: hangoutPrice,
-    productName: `Hangout access: ${hangout.name}`,
-    description: 'One-time access to a paid hangout',
+    productName: 'Community Access',
+    description: 'One-time membership access',
     successUrl,
     cancelUrl,
     customerEmail: email || user.email || undefined,
@@ -8580,7 +8580,7 @@ app.get('/api/invoice/:paymentId', requireSessionAuth, asyncHandler(async (req, 
   const r = row.rows[0];
   const InvoiceService = require('../../../services/invoiceservice');
   const customerName = r.display_name || r.first_name || r.username || 'Member';
-  const planName = r.plan_display_name || r.plan_name || 'PNPtv Purchase';
+  const planName = r.plan_display_name || r.plan_name || 'Digital Purchase';
   const invoiceNumber = r.stripe_invoice_id || `INV-${r.id.slice(0, 8).toUpperCase()}`;
 
   const { buffer } = await InvoiceService.generateInvoice({
@@ -8640,7 +8640,7 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(as
       return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
     }
     usdAmount = price;
-    planDisplayName = `Creator subscription: ${creator.username || creator.first_name || 'creator'}`;
+    planDisplayName = 'Premium subscription';
   } else {
     const PlanModel = require('../../models/planModel');
     const plan = await PlanModel.getById(planId);
@@ -8665,7 +8665,7 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(as
       usdAmount,
       userId,
       orderId,
-      description: `PNPtv ${planDisplayName} subscription`,
+      description: `${planDisplayName} subscription`,
       redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`,
     });
 
