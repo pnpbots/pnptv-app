@@ -299,47 +299,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Mobile: PRIME CTA — only in feed mode */}
-      {viewMode === "feed" && (
-        <div className="lg:hidden space-y-2 mb-4">
-          {!isPrime && (
-            <button onClick={() => navigate("/subscribe")} className="w-full group">
-              <div
-                className="rounded-xl px-4 py-2.5 flex items-center gap-3 transition-all"
-                style={{
-                  background: "rgba(229,255,0,0.06)",
-                  border: "1px solid rgba(229,255,0,0.15)",
-                }}
-              >
-                <svg
-                  className="w-3.5 h-3.5 flex-shrink-0"
-                  style={{ color: "#E5FF00" }}
-                  fill="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                </svg>
-                <p
-                  className="font-semibold text-xs flex-1 text-left"
-                  style={{ color: "#E5FF00" }}
-                >
-                  {isMember ? t.home.primeCtaUpgrade : t.home.primeCtaUnlock}
-                </p>
-                <svg
-                  className="w-3.5 h-3.5 flex-shrink-0 group-hover:translate-x-0.5 transition-transform"
-                  style={{ color: "rgba(229,255,0,0.4)" }}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </div>
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Feed / Hangouts toggle removed — each section has its own page now */}
 
