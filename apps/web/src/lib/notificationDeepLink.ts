@@ -51,8 +51,13 @@ export function getNotificationDeepLink(notif: {
       return entityId ? `/live/${entityId}` : "/live";
 
     case "announcement":
-    case "system":
+    case "system": {
+      const raw = metadata?.url as string | undefined;
+      if (raw) {
+        try { const p = new URL(raw); return p.pathname + p.search + p.hash; } catch { return raw; }
+      }
       return "/";
+    }
   }
 
   // Fallback: route by entity type
