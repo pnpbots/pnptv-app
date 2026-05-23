@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
+import { Outlet, NavLink, Navigate, useNavigate, useLocation } from "react-router-dom";
 import CreatorEnrollmentWizard, { type TierId } from "@/components/profile/CreatorEnrollmentWizard";
 import { useAuth } from "@/hooks/useAuth";
 import { Toast } from "@/components/Toast";
@@ -108,17 +108,7 @@ export default function CreatorLayout() {
       return null;
     }
     if (!isAuthenticated) {
-      return (
-        <div className="min-h-dvh bg-pnp-background flex items-center justify-center">
-          <div className="text-center">
-            <h1 className="text-xl font-bold text-pnp-textPrimary mb-2">Sign in required</h1>
-            <p className="text-sm text-pnp-textSecondary mb-4">Please sign in to access Creator Studio.</p>
-            <button onClick={() => navigate("/")} className="px-4 py-2 rounded-lg text-white text-sm btn-gradient">
-              Go Home
-            </button>
-          </div>
-        </div>
-      );
+      return <Navigate to={`/login?returnTo=${encodeURIComponent(location.pathname)}`} replace />;
     }
   }
 
