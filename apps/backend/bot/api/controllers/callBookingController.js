@@ -99,7 +99,7 @@ async function resolveBooking(rawId, callerUserId) {
 
 /**
  * Create a payment intent for a call package.
- * Body: { packageId: number, provider: 'epayco', email: string,
+ * Body: { packageId: number, provider: 'stripe', email: string,
  *         startTimeUtc?: string, endTimeUtc?: string }
  * Dash payments use POST /book-call/checkout/dash instead.
  */
@@ -116,10 +116,10 @@ async function createCheckout(req, res) {
     if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
     }
-    if (!provider || !['epayco'].includes(provider)) {
+    if (!provider || !['stripe'].includes(provider)) {
       // Dash is handled by the dedicated /book-call/checkout/dash endpoint
       // since it needs startTime/endTime params and a BTCPay invoice flow.
-      return res.status(400).json({ success: false, error: 'provider must be epayco (use /book-call/checkout/dash for crypto)' });
+      return res.status(400).json({ success: false, error: 'provider must be stripe (use /book-call/checkout/dash for crypto)' });
     }
     if (!email || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ success: false, error: 'A valid email is required' });

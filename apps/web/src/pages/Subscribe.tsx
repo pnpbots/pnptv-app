@@ -5,7 +5,6 @@ import { Card, Skeleton } from "@pnptv/ui-kit";
 import { QRCodeSVG } from "qrcode.react";
 import {
   getSubscriptionPlans,
-  createPayment,
   createStripeCheckout,
   createStripeSubscription,
   getPaymentStatus,
@@ -16,6 +15,7 @@ import {
   getLabelColor,
   assertPaymentUrl,
   validatePromoCode,
+  checkAuthStatus,
   ApiError,
   type SubscriptionPlan,
 } from "@/lib/api";
@@ -145,7 +145,13 @@ export default function Subscribe() {
           .then((res) => {
             if (res.success && res.plans.length > 0) {
               setPlans(res.plans);
-              if (co) {
+              const requestedPlanId = searchParams.get("plan");
+              const requestedPlan = requestedPlanId
+                ? res.plans.find((p) => p.id === requestedPlanId)
+                : null;
+              if (requestedPlan) {
+                setSelectedPlan(requestedPlan.id);
+              } else if (co) {
                 const monthly = res.plans.find((p) => p.id === "pnp_col_monthly");
                 setSelectedPlan(monthly?.id || res.plans[0].id);
               } else {
@@ -172,6 +178,51 @@ export default function Subscribe() {
         setPollingPaymentId(pending);
       }
     } catch {}
+  }, [searchParams]);
+
+  // Stripe redirect: ?stripe_paid=1&plan=<planId>&session_id=<id>
+  // The URL param alone is not proof of payment — anyone can append stripe_paid=1.
+  // We verify server-side via checkAuthStatus, which reads the user's current DB state.
+  // The Stripe webhook updates the user's tier before or shortly after the redirect,
+  // so we retry up to 3 times with exponential backoff to tolerate webhook latency.
+  const [stripeVerifying, setStripeVerifying] = useState(false);
+  useEffect(() => {
+    if (searchParams.get("stripe_paid") !== "1") return;
+    window.history.replaceState({}, "", window.location.pathname);
+
+    let cancelled = false;
+    setStripeVerifying(true);
+
+    const verify = async (attempt: number): Promise<void> => {
+      if (cancelled) return;
+      try {
+        const status = await checkAuthStatus();
+        if (cancelled) return;
+        if (status.authenticated && status.user) {
+          const tier = (status.user.tier ?? "free").toLowerCase();
+          if (tier !== "free") {
+            await refreshUser().catch(() => {});
+            setStripeVerifying(false);
+            setPaymentSuccess(true);
+            return;
+          }
+        }
+      } catch { /* network error — fall through to retry */ }
+
+      if (attempt < 3 && !cancelled) {
+        await new Promise<void>((res) => setTimeout(res, attempt * 2000 + 1500));
+        return verify(attempt + 1);
+      }
+
+      if (!cancelled) {
+        setStripeVerifying(false);
+        setError("Payment could not be verified. If you paid, your access will be activated automatically. Contact support if it does not appear within a few minutes.");
+      }
+    };
+
+    verify(1);
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Validate a promo code server-side. For base-plan promos, we lock the
@@ -257,7 +308,7 @@ export default function Subscribe() {
     setSearchParams(next, { replace: true });
   }
 
-  // Poll payment status after card checkout opens (ePayco redirect flow).
+  // Poll payment status after hosted checkout opens (legacy fallback flow).
   useEffect(() => {
     if (!pollingPaymentId) return;
 
@@ -451,6 +502,12 @@ export default function Subscribe() {
         const plan = plans.find((p) => p.id === selectedPlan);
         const priceId = plan?.stripe_price_id;
 
+        if (appliedPromo?.code) {
+          setError("Promo codes are not supported with Stripe checkout yet. Please use Dash or remove the promo code.");
+          setSubmitting(false);
+          return;
+        }
+
         if (!priceId) {
           setError("This plan is not yet available for card payment. Please use Dash or contact support.");
           setSubmitting(false);
@@ -462,7 +519,7 @@ export default function Subscribe() {
           planId: selectedPlan,
           priceId,
           sku: plan?.sku || selectedPlan,
-          metadata: appliedPromo?.code ? { promo_code: appliedPromo.code } : {},
+          metadata: appliedPromo?.code ? { promo_code: appliedPromo.code } : undefined,
         };
 
         const result = isRecurring
@@ -584,6 +641,24 @@ export default function Subscribe() {
     try { localStorage.setItem("pnp_newsletter_dismissed", "1"); } catch { /* noop */ }
     setNewsletterDismissed(true);
   }, []);
+
+  // Stripe verification in progress
+  if (stripeVerifying) {
+    return (
+      <div className="page-container flex items-center justify-center min-h-[60vh]">
+        <Card className="max-w-md w-full p-6 text-center">
+          <div className="w-12 h-12 rounded-full bg-[#D4007A]/20 flex items-center justify-center mx-auto mb-4">
+            <svg className="animate-spin w-6 h-6" style={{ color: "#D4007A" }} viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+          <h2 className="text-lg font-bold text-pnp-textPrimary mb-1">Verifying payment…</h2>
+          <p className="text-sm text-pnp-textSecondary">Please wait while we confirm your payment with the server.</p>
+        </Card>
+      </div>
+    );
+  }
 
   // Loading state
   if (loading) {

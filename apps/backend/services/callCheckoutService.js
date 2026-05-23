@@ -18,8 +18,6 @@ const { sendNotificationViaTelegram } = require('./notificationBotDelivery');
 const emailService = require('./emailservice');
 const logger = require('../utils/logger');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
-const { getEpaycoCopRate } = require('./paymentService');
-
 // Loaded lazily to avoid circular-require on startup
 function getBtcpay() {
   return require('../config/btcpay');
@@ -50,7 +48,7 @@ function escapeHtml(str) {
  *
  * @param {string} memberId    - users.id of the purchasing member
  * @param {number} packageId   - call_packages.id
- * @param {string} provider    - 'epayco' (Dash uses createCallCheckoutDash)
+ * @param {string} provider    - 'stripe' (Dash uses createCallCheckoutDash)
  * @param {string} email       - member email for payment confirmation
  * @param {object|null} slotTimes - optional { startTimeUtc, endTimeUtc } for slot-locked bookings
  * @returns {{ paymentId: string, checkoutUrl: string, amount: number, currency: string, sku: string }}
@@ -68,7 +66,7 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     throw err;
   }
 
-  if (!['epayco', 'stripe', 'dash'].includes(provider)) {
+  if (!['stripe'].includes(provider)) {
     const err = new Error(`Invalid payment provider: ${provider}`);
     err.code = 'INVALID_PROVIDER';
     throw err;
@@ -146,39 +144,15 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     }
   }
 
-  // 3. Persist metadata and build checkout URL
+  // 3. Build checkout URL
   let checkoutUrl;
-  if (provider === 'epayco') {
-    // ePayco tokenized checkout page — same pattern as subscription payments
-    checkoutUrl = `${CHECKOUT_DOMAIN}/payment/${payment.id}`;
-
-    // PNPtv displays prices in USD to international users but settles via ePayco's
-    // Colombian acquiring network in COP. The rate is fetched daily from a public
-    // FX API (see services/paymentService.js getEpaycoCopRate). Do not hardcode a fallback — fail closed instead.
-    const usdToCopRate = await getEpaycoCopRate();
-    const expectedCOP = String(Math.round(parseFloat(pkg.price_usd) * usdToCopRate));
-
-    await query(
-      `UPDATE payments
-       SET metadata = metadata || $2::jsonb,
-           updated_at = NOW()
-       WHERE id = $1`,
-      [
-        payment.id,
-        JSON.stringify({
-          payment_url: checkoutUrl,
-          expected_epayco_amount: expectedCOP,
-          expected_epayco_currency: 'COP',
-        }),
-      ]
-    );
-  } else if (provider === 'stripe') {
+  if (provider === 'stripe') {
     // Stripe Checkout Session — one-time payment.
     // pnptv_payment_id is threaded into the session metadata so the webhook
     // handler can call onCallPaymentSuccess(paymentId) after confirmation.
-    const Stripe = require('stripe');
+    const { createStripeClient } = require('../config/stripe');
     const stripeService = require('./stripeService');
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-04-10' });
+    const stripe = createStripeClient();
     const WEB_APP = process.env.WEB_APP_URL || 'https://pnptv.app';
 
     let userEmail;
@@ -318,13 +292,13 @@ async function onCallPaymentSuccess(paymentId) {
     );
 
     // Confirm the bookings row that was pre-created at checkout time (Dash flow).
-    // For ePayco, startTimeUtc/endTimeUtc come from payment metadata.
-    // ON CONFLICT: a booking row may not exist (ePayco path without pre-slot) — that is OK.
+    // For Stripe without a pre-slot, startTimeUtc/endTimeUtc come from payment metadata.
+    // ON CONFLICT: a booking row may not exist (Stripe path without pre-slot) — that is OK.
     const bookingMeta = meta.startTimeUtc && meta.endTimeUtc ? meta : null;
     let confirmedBookingId = meta.bookingId || null;
 
     if (!confirmedBookingId) {
-      // ePayco path: no pre-created booking row. Create one now if times are provided.
+      // Stripe path: no pre-created booking row. Create one now if times are provided.
       if (bookingMeta) {
         const pkgForBooking = pkgResult.rows[0];
         const performerRes = await client.query(
@@ -362,6 +336,27 @@ async function onCallPaymentSuccess(paymentId) {
       );
     }
 
+    // Record 70/30 earnings split inside the transaction so a post-COMMIT crash
+    // cannot silently absorb creator earnings with no audit trail.
+    try {
+      const pkg = pkgResult.rows[0];
+      const grossAmount = parseFloat(pkg.price_usd);
+      const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
+      const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
+      await client.query(
+        `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+         VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+        [creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId || null]
+      );
+      logger.info('[callCheckoutService] creator earnings recorded (holding)', {
+        creatorId: creator_id, grossAmount, amountCreator, amountPlatform,
+      });
+    } catch (earningsErr) {
+      logger.warn('[onCallPaymentSuccess] creator_earnings insert failed (non-fatal, call credit still granted)', {
+        paymentId, error: earningsErr.message,
+      });
+    }
+
     await client.query('COMMIT');
 
     logger.info('[callCheckoutService] call credits granted after payment', {
@@ -371,24 +366,6 @@ async function onCallPaymentSuccess(paymentId) {
       creditId: credit.id,
       bookingId: confirmedBookingId,
     });
-
-    // Record 70/30 earnings split for the creator
-    try {
-      const pkg = pkgResult.rows[0];
-      const grossAmount = parseFloat(pkg.price_usd);
-      const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
-      const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
-      await query(
-        `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
-         VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
-        [creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId || null]
-      );
-      logger.info('[callCheckoutService] creator earnings recorded (holding)', {
-        creatorId: creator_id, grossAmount, amountCreator, amountPlatform,
-      });
-    } catch (earningsErr) {
-      logger.warn('[callCheckoutService] failed to record creator earnings (non-critical)', { error: earningsErr.message });
-    }
 
     // ── Post-payment notifications (fire-and-forget) ─────────────────────
     // Notify buyer + creator that credits have been granted.

@@ -1,21 +1,16 @@
 /**
  * TokenCheckoutService
  * Single source of truth for all token purchase checkout flows.
- * Handles ePayco (card), Daimo (crypto wallet), and Dash/BTCPay checkout creation,
- * plus unified idempotent crediting used by webhook handlers.
+ * Handles Stripe and Dash/BTCPay checkout creation, plus unified idempotent
+ * crediting used by webhook handlers.
  *
  * Design decisions:
  *  - token_purchases is the authoritative record; no payments table entry is created.
  *  - The existing integer PK (`id`) is preserved; a new `purchase_uuid` UUID column
  *    (migration 120) is added as the external, URL-safe identifier.
  *  - btcpay_invoice_id doubles as a namespaced idempotency key for all providers:
- *      dash    → actual BTCPay invoice ID
- *      epayco  → "epayco:<purchaseUuid>"
- *      daimo   → "daimo:<purchaseUuid>"
- *  - Daimo session data is stored in a `checkout_data` JSONB column (migration 120).
- *    If that column is absent the service gracefully re-creates the Daimo session
- *    on demand inside getCheckoutData().
- *  - ePayco signature is generated on-the-fly in getCheckoutData() — never stored.
+ *      dash   → actual BTCPay invoice ID
+ *      stripe → "stripe:<purchaseUuid>"
  *
  * Required migration (apps/backend/migrations/120_token_purchase_uuid.sql):
  *   ALTER TABLE token_purchases
@@ -27,23 +22,16 @@
 
 'use strict';
 
-const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { query, getClient } = require('../config/postgres');
-// Daimo retired — createWalletCheckout always throws DAIMO_DISABLED before any
-// Daimo API call. The require is removed; if we ever need Dash token checkout,
-// it lives in createDashCheckout below.
 const { createDashInvoice } = require('../config/btcpay');
 const DashTokenService = require('./dashTokenService');
 const logger = require('../utils/logger');
 const { cache } = require('../config/redis');
-const { getEpaycoCopRate } = require('./paymentService');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
-const EPAYCO_WEBHOOK_DOMAIN = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app';
-const BOT_WEBHOOK_DOMAIN = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -58,38 +46,12 @@ function resolvePackage(packageId) {
 
 /**
  * Build a namespaced idempotency key for non-BTCPay providers.
- * @param {'epayco'|'daimo'} provider
+ * @param {string} provider
  * @param {string} purchaseUuid
  * @returns {string}
  */
 function idempotencyKey(provider, purchaseUuid) {
   return `${provider}:${purchaseUuid}`;
-}
-
-/**
- * Generate an ePayco checkout HMAC-SHA256 signature.
- * Mirrors PaymentService.generateEpaycoCheckoutSignature() without the import.
- * Returns null if credentials are not configured (non-production) or throws in production.
- * @param {{ invoice: string, amount: string, currencyCode: string }} params
- * @returns {string|null}
- */
-function generateEpaycoSignature({ invoice, amount, currencyCode }) {
-  const pKey = process.env.EPAYCO_P_KEY || process.env.EPAYCO_PRIVATE_KEY;
-  const custId = process.env.EPAYCO_P_CUST_ID;
-
-  if (!pKey || !custId) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('ePayco signing credentials not configured in production');
-    }
-    return null;
-  }
-
-  if (!invoice || !amount || !currencyCode) {
-    return null;
-  }
-
-  const raw = `${custId}^${pKey}^${invoice}^${amount}^${currencyCode}`;
-  return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
 /**
@@ -156,91 +118,6 @@ class TokenCheckoutService {
   /** The 5 canonical token packages (1 token = $1 USD). */
   static PACKAGES = DashTokenService.TOKEN_PACKAGES;
 
-  // ── ePayco card checkout ──────────────────────────────────────────────────
-
-  /**
-   * Create an ePayco card checkout for a token package.
-   * Records a pending purchase in token_purchases and returns the checkout page URL.
-   *
-   * @param {string} userId
-   * @param {string} packageId  e.g. 'pkg_10'
-   * @returns {Promise<{
-   *   success: boolean,
-   *   purchaseId: string,
-   *   checkoutUrl: string,
-   *   tokens: number,
-   *   usd: number,
-   * }>}
-   */
-  static async createCardCheckout(userId, packageId) {
-    const pkg = resolvePackage(packageId);
-    if (!pkg) {
-      throw Object.assign(new Error('Invalid package ID'), { code: 'INVALID_PACKAGE', status: 400 });
-    }
-
-    const purchaseUuid = uuidv4();
-    const invoiceKey = idempotencyKey('epayco', purchaseUuid);
-
-    const client = await getClient();
-    try {
-      await client.query('BEGIN');
-      await insertPendingPurchase(client, {
-        purchaseUuid,
-        userId,
-        tokens: pkg.tokens,
-        usd: pkg.usd,
-        invoiceKey,
-        paymentMethod: 'epayco',
-      });
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      logger.error('TokenCheckoutService.createCardCheckout DB error', {
-        userId, packageId, error: err.message,
-      });
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    const checkoutUrl = `${WEB_APP_URL}/token-checkout/${purchaseUuid}`;
-
-    logger.info('Token card checkout created', { userId, packageId, purchaseUuid, tokens: pkg.tokens });
-
-    return {
-      success: true,
-      purchaseId: purchaseUuid,
-      checkoutUrl,
-      tokens: pkg.tokens,
-      usd: pkg.usd,
-    };
-  }
-
-  // ── Daimo wallet checkout ─────────────────────────────────────────────────
-
-  /**
-   * Create a Daimo crypto-wallet checkout for a token package.
-   * Creates the Daimo session immediately and stores session data in the purchase record.
-   *
-   * @param {string} userId
-   * @param {string} packageId
-   * @returns {Promise<{
-   *   success: boolean,
-   *   purchaseId: string,
-   *   checkoutUrl: string,
-   *   tokens: number,
-   *   usd: number,
-   * }>}
-   */
-  static async createWalletCheckout(_userId, _packageId) {
-    // Daimo Pay retired. Token wallet checkout is no longer available;
-    // route callers to createCardCheckout (ePayco) or createDashCheckout (BTCPay).
-    throw Object.assign(
-      new Error('Daimo Pay has been retired. Please use Card or Dash.'),
-      { code: 'DAIMO_RETIRED', status: 410 }
-    );
-  }
-
   // ── Dash / BTCPay checkout ────────────────────────────────────────────────
 
   /**
@@ -265,14 +142,9 @@ class TokenCheckoutService {
     }
 
     const purchaseUuid = uuidv4();
-
-    const invoice = await createDashInvoice({
-      usdAmount: pkg.usd,
-      userId,
-      orderId: `pnptv-tokens-${userId}-${Date.now()}`,
-      description: `${pkg.tokens} PNP Tokens`,
-      redirectUrl: `${WEB_APP_URL}/wallet`,
-    });
+    // Use the UUID as a placeholder invoice key so the row exists before we call BTCPay.
+    // The real BTCPay invoice ID will overwrite this once the invoice is created.
+    const placeholderKey = idempotencyKey('dash-pending', purchaseUuid);
 
     const client = await getClient();
     try {
@@ -282,7 +154,7 @@ class TokenCheckoutService {
         userId,
         tokens: pkg.tokens,
         usd: pkg.usd,
-        invoiceKey: invoice.invoiceId,   // raw BTCPay invoice ID (no prefix for dash)
+        invoiceKey: placeholderKey,
         paymentMethod: 'dash',
       });
       await client.query('COMMIT');
@@ -295,6 +167,38 @@ class TokenCheckoutService {
     } finally {
       client.release();
     }
+
+    // Row committed — now create the BTCPay invoice. If this fails we mark the row failed.
+    let invoice;
+    try {
+      invoice = await createDashInvoice({
+        usdAmount: pkg.usd,
+        userId,
+        orderId: `pnptv-tokens-${userId}-${Date.now()}`,
+        description: `${pkg.tokens} PNP Tokens`,
+        redirectUrl: `${WEB_APP_URL}/wallet`,
+      });
+    } catch (btcpayErr) {
+      await query(
+        `UPDATE token_purchases SET status = 'failed' WHERE purchase_uuid = $1`,
+        [purchaseUuid]
+      ).catch(() => {});
+      logger.error('TokenCheckoutService.createDashCheckout BTCPay error', {
+        userId, packageId, purchaseUuid, error: btcpayErr.message,
+      });
+      throw btcpayErr;
+    }
+
+    // Best-effort: overwrite the placeholder key with the real BTCPay invoice ID.
+    // The webhook uses btcpay_invoice_id for lookup, so this must succeed.
+    await query(
+      `UPDATE token_purchases SET btcpay_invoice_id = $1 WHERE purchase_uuid = $2`,
+      [invoice.invoiceId, purchaseUuid]
+    ).catch((updateErr) => {
+      logger.error('TokenCheckoutService.createDashCheckout: failed to write real invoiceId', {
+        purchaseUuid, invoiceId: invoice.invoiceId, error: updateErr.message,
+      });
+    });
 
     logger.info('Token Dash checkout created', {
       userId, packageId, purchaseUuid, invoiceId: invoice.invoiceId, tokens: pkg.tokens,
@@ -339,32 +243,9 @@ class TokenCheckoutService {
       userEmail = rows[0]?.email || undefined;
     } catch (_) {}
 
-    const Stripe = require('stripe');
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-04-10' });
-
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      customer_email: userEmail,
-      line_items: [{
-        quantity: 1,
-        price_data: {
-          currency: 'usd',
-          unit_amount: Math.round(pkg.usd * 100),
-          product_data: {
-            name: `${pkg.tokens} PNP Tokens`,
-            description: 'PNPtv tip tokens — use to tip creators during live shows',
-          },
-        },
-      }],
-      success_url: `${WEB_APP_URL}/token-checkout/${purchaseUuid}?stripe=success`,
-      cancel_url: `${WEB_APP_URL}/live`,
-      metadata: {
-        pnptv_user_id: String(userId),
-        payment_type: 'token_purchase',
-        purchase_uuid: purchaseUuid,
-      },
-    });
-
+    // Persist the pending row BEFORE calling Stripe so the webhook cannot arrive
+    // before the row exists. The webhook resolves the purchase by purchase_uuid in
+    // metadata — stripe_session_id is backfilled below as enrichment only.
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -376,11 +257,6 @@ class TokenCheckoutService {
         invoiceKey,
         paymentMethod: 'stripe',
       });
-      // Store stripe_session_id for idempotency lookup
-      await client.query(
-        `UPDATE token_purchases SET stripe_session_id = $1 WHERE purchase_uuid = $2`,
-        [session.id, purchaseUuid]
-      );
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -389,6 +265,52 @@ class TokenCheckoutService {
     } finally {
       client.release();
     }
+
+    const { createStripeClient } = require('../config/stripe');
+    const stripe = createStripeClient();
+
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer_email: userEmail,
+        line_items: [{
+          quantity: 1,
+          price_data: {
+            currency: 'usd',
+            unit_amount: Math.round(pkg.usd * 100),
+            product_data: {
+              name: `${pkg.tokens} PNP Tokens`,
+              description: 'PNPtv tip tokens — use to tip creators during live shows',
+            },
+          },
+        }],
+        success_url: `${WEB_APP_URL}/token-checkout/${purchaseUuid}?stripe=success`,
+        cancel_url: `${WEB_APP_URL}/live`,
+        metadata: {
+          pnptv_user_id: String(userId),
+          payment_type: 'token_purchase',
+          purchase_uuid: purchaseUuid,
+        },
+      });
+    } catch (stripeErr) {
+      await query(
+        `UPDATE token_purchases SET status = 'failed' WHERE purchase_uuid = $1`,
+        [purchaseUuid]
+      ).catch(() => {});
+      logger.error('TokenCheckoutService.createStripeCheckout Stripe error', { userId, packageId, purchaseUuid, error: stripeErr.message });
+      throw stripeErr;
+    }
+
+    // Best-effort backfill — webhook lookup uses purchase_uuid from metadata, not session ID.
+    await query(
+      `UPDATE token_purchases SET stripe_session_id = $1 WHERE purchase_uuid = $2`,
+      [session.id, purchaseUuid]
+    ).catch((updateErr) => {
+      logger.warn('TokenCheckoutService.createStripeCheckout: failed to backfill stripe_session_id', {
+        purchaseUuid, sessionId: session.id, error: updateErr.message,
+      });
+    });
 
     logger.info('Token Stripe checkout created', { userId, packageId, purchaseUuid, tokens: pkg.tokens, sessionId: session.id });
 
@@ -405,8 +327,7 @@ class TokenCheckoutService {
 
   /**
    * Return all data needed to render the /token-checkout/:purchaseId page.
-   * For ePayco: returns widget config including a fresh HMAC signature.
-   * For Daimo:  returns session ID and client secret (re-creates if missing).
+   * For Stripe: returns base status so the polling loop can detect confirmation.
    * For Dash:   returns null (BTCPay has its own hosted page).
    *
    * @param {string} purchaseUuid  UUID stored in purchase_uuid column
@@ -456,77 +377,13 @@ class TokenCheckoutService {
       usd: usdAmount,
     };
 
-    // ── ePayco ───────────────────────────────────────────────────────────────
-    if (provider === 'epayco') {
-      // PNPtv displays prices in USD to international users but settles via ePayco's
-      // Colombian acquiring network in COP. The rate is fetched daily from a public
-      // FX API (see services/paymentService.js getEpaycoCopRate). Do not hardcode a fallback — fail closed instead.
-      let _fxRate;
-      try {
-        _fxRate = await getEpaycoCopRate();
-      } catch (fxErr) {
-        const err = Object.assign(new Error('FX rate temporarily unavailable — try again shortly'), {
-          code: 'FX_RATE_UNAVAILABLE',
-          statusCode: 503,
-          retryable: true,
-        });
-        throw err;
-      }
-      const priceInCOP = Math.round(usdAmount * _fxRate);
-      const amountCOPString = String(priceInCOP);
-      const currencyCode = 'COP';
-      const paymentRef = `TOK-${purchaseUuid.substring(0, 8).toUpperCase()}`;
-
-      const signature = generateEpaycoSignature({
-        invoice: paymentRef,
-        amount: amountCOPString,
-        currencyCode,
-      });
-
-      if (!signature && process.env.NODE_ENV === 'production') {
-        throw new Error('ePayco signature generation failed — credentials not configured');
-      }
-
-      return {
-        ...base,
-        epayco: {
-          publicKey: process.env.EPAYCO_PUBLIC_KEY,
-          amount: priceInCOP,
-          currency: currencyCode,
-          description: `${tokens} PNP Tokens`,
-          invoice: paymentRef,
-          signature: signature,
-          extra1: String(userId),
-          extra2: 'token_purchase',
-          extra3: purchaseUuid,
-          test: process.env.EPAYCO_TEST_MODE === 'true',
-          response: `${WEB_APP_URL}/token-checkout/${purchaseUuid}?status=response`,
-          confirmation: `${EPAYCO_WEBHOOK_DOMAIN}/api/webhooks/epayco`,
-        },
-      };
-    }
-
-    // Daimo retired — return stored session data ONLY for legacy purchases so
-    // the React TokenCheckout page can render its retired-method error cleanly
-    // (it surfaces a "this method is no longer available" message). NEVER
-    // re-create a Daimo session.
-    if (provider === 'daimo') {
-      const stored = purchase.checkout_data || null;
-      return {
-        ...base,
-        daimo: {
-          sessionId: stored?.daimo_session_id || null,
-          clientSecret: stored?.daimo_client_secret || null,
-        },
-      };
-    }
-
     // Stripe — no widget needed; return base status so polling works
     if (provider === 'stripe') {
       return { ...base, success: true };
     }
 
     // Dash (BTCPay) — BTCPay has its own checkout page; no internal page needed
+    // Legacy ePayco/Daimo purchases return null so callers surface an error.
     return null;
   }
 
@@ -538,14 +395,13 @@ class TokenCheckoutService {
    * wallet, and marks the purchase as paid — all in a single transaction.
    *
    * Callers:
-   *   ePayco webhook: provider='epayco', referenceId=purchaseUuid
-   *   Daimo webhook:  provider='daimo',  referenceId=purchaseUuid
+   *   Stripe webhook: provider='stripe', referenceId=purchaseUuid
    *   BTCPay webhook: provider='dash',   referenceId=btcpayInvoiceId (raw BTCPay ID)
    *
    * @param {string} referenceId
-   *   For epayco/daimo: the purchaseUuid (the UUID, not the namespaced key).
+   *   For stripe: the purchaseUuid (the UUID, not the namespaced key).
    *   For dash: the raw BTCPay invoice ID string.
-   * @param {'epayco'|'daimo'|'dash'} provider
+   * @param {'stripe'|'dash'} provider
    * @param {object} [txData]  optional extra data to log (txHash, amount, etc.)
    * @returns {Promise<{
    *   success: boolean,
@@ -666,6 +522,47 @@ class TokenCheckoutService {
       client.release();
       await cache.releaseLock(lockKey).catch(() => {});
     }
+  }
+
+  /**
+   * Mark a pending token purchase terminal without crediting tokens.
+   * Used for non-success webhook outcomes in non-BTCPay providers.
+   *
+   * @param {string} referenceId
+   * @param {'stripe'|'dash'} provider
+   * @param {'expired'|'invalid'} status
+   * @param {object} [txData]
+   * @returns {Promise<{success: boolean, updated: boolean}>}
+   */
+  static async markPurchaseTerminalStatus(referenceId, provider, status, txData = {}) {
+    if (!referenceId || !provider) {
+      return { success: false, updated: false };
+    }
+    if (!['expired', 'invalid'].includes(status)) {
+      throw new Error(`Unsupported token purchase status: ${status}`);
+    }
+
+    const lookupKey = provider === 'dash'
+      ? referenceId
+      : idempotencyKey(provider, referenceId);
+
+    const result = await query(
+      `UPDATE token_purchases
+       SET status = $2
+       WHERE btcpay_invoice_id = $1
+         AND status = 'pending'`,
+      [lookupKey, status]
+    );
+
+    logger.info('Token purchase terminal status updated', {
+      lookupKey,
+      provider,
+      status,
+      updated: (result.rowCount || 0) > 0,
+      ...txData,
+    });
+
+    return { success: true, updated: (result.rowCount || 0) > 0 };
   }
 }
 

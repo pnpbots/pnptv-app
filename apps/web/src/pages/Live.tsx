@@ -21,9 +21,7 @@ import {
   getWalletBalance,
   getTokenPackages,
   buyTokens,
-  buyTokensCard,
   buyTokensStripe,
-  buyTokensWallet,
   linkDPNS,
   getWalletHistory,
   assertPaymentUrl,
@@ -99,7 +97,7 @@ export default function Live() {
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
-  const [buyMethod, setBuyMethod] = useState<"card" | "wallet" | "dash">("card");
+  const [buyMethod, setBuyMethod] = useState<"card" | "dash">("card");
   const [showDpnsInput, setShowDpnsInput] = useState(false);
   const [dpnsInput, setDpnsInput] = useState("");
   const [dpnsSaving, setDpnsSaving] = useState(false);
@@ -315,17 +313,10 @@ export default function Live() {
         window.location.href = checkoutUrl;
         return;
       }
-      let openedPopup: Window | null = null;
-      if (buyMethod === 'wallet') {
-        const result = await buyTokensWallet(pkg.id);
-        checkoutUrl = assertPaymentUrl(result.checkoutUrl);
-        openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
-      } else {
-        // Dash — BTCPay has its own checkout page
-        const result = await buyTokens(pkg.id);
-        checkoutUrl = assertPaymentUrl(result.checkoutUrl);
-        openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
-      }
+      // Dash — BTCPay has its own checkout page
+      const result = await buyTokens(pkg.id);
+      checkoutUrl = assertPaymentUrl(result.checkoutUrl);
+      const openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
       if (!openedPopup) {
         setBuyError("Your browser blocked the payment popup. Please allow popups for this site and try again.");
         return; // don't close modal — user can retry

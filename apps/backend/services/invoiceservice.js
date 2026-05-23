@@ -90,7 +90,14 @@ class InvoiceService {
     doc.rect(50, y, doc.page.width - 100, 32).fill(LIGHT_BG);
     doc.fontSize(10).fill(DARK);
     doc.text(planName || 'Subscription', 60, y + 10, { width: 250 });
-    doc.fill(GRAY).text(provider === 'daimo' ? 'Daimo Pay' : 'ePayco', 320, y + 10, { width: 100 });
+    const PROVIDER_LABELS = {
+      stripe: 'Stripe',
+      dash: 'Dash (BTCPay)',
+      epayco: 'ePayco',
+      daimo: 'Daimo Pay (legacy)',
+    };
+    const providerLabel = PROVIDER_LABELS[provider] || provider || 'Unknown';
+    doc.fill(GRAY).text(providerLabel, 320, y + 10, { width: 100 });
     doc.fill(DARK).text(
       `$${(parseFloat(amount) || 0).toFixed(2)} ${currency}`,
       430, y + 10, { width: 100, align: 'right' }
@@ -114,7 +121,7 @@ class InvoiceService {
 
     const details = [
       [isEs ? 'ID de Transacción' : 'Transaction ID', transactionId || id],
-      [isEs ? 'Método de Pago' : 'Payment Method', provider === 'daimo' ? 'Daimo Pay (Crypto/Apps)' : 'ePayco (Card/PSE)'],
+      [isEs ? 'Método de Pago' : 'Payment Method', providerLabel],
       [isEs ? 'Estado' : 'Status', isEs ? 'Completado' : 'Completed'],
     ];
 
@@ -247,11 +254,6 @@ class InvoiceService {
     // Feature list (page 1 — first 4 features)
     const features = isEs ? [
       {
-        icon: '📺',
-        title: 'Videorama',
-        desc: 'Biblioteca de videos, musica y podcasts. Navega por categorias, crea tus propias listas de reproduccion y disfruta de contenido exclusivo en streaming.',
-      },
-      {
         icon: '📹',
         title: 'Hangouts',
         desc: 'Salas de videollamadas comunitarias. Crea o unete a grupos publicos y privados, comparte multimedia y haz videollamadas con otros miembros.',
@@ -267,11 +269,6 @@ class InvoiceService {
         desc: 'Publica contenido, da likes, reposts y comenta. Conecta con la comunidad y comparte tus momentos. ',
       },
     ] : [
-      {
-        icon: '📺',
-        title: 'Videorama',
-        desc: 'Video, music, and podcast library. Browse by category, create your own playlists, and enjoy exclusive streaming content.',
-      },
       {
         icon: '📹',
         title: 'Hangouts',
@@ -331,8 +328,8 @@ class InvoiceService {
       },
       {
         icon: '⭐',
-        title: 'Canal PRIME de Telegram',
-        desc: 'Como miembro PRIME, tienes acceso exclusivo al canal de Telegram con contenido premium, anuncios anticipados y beneficios especiales. Usa tu enlace de invitacion unico.',
+        title: 'Contenido PRIME',
+        desc: 'Como miembro PRIME, tienes acceso exclusivo a shows, posts y eventos de miembros en pnptv.app. Explora todo el contenido PRIME directamente en la plataforma.',
       },
       {
         icon: '📅',
@@ -362,8 +359,8 @@ class InvoiceService {
       },
       {
         icon: '⭐',
-        title: 'PRIME Telegram Channel',
-        desc: 'As a PRIME member, you have exclusive access to the Telegram channel with premium content, early announcements, and special perks. Use your unique invite link.',
+        title: 'PRIME Content',
+        desc: 'As a PRIME member, you have exclusive access to shows, posts, and member events on pnptv.app. Explore all PRIME content directly on the platform.',
       },
       {
         icon: '📅',
@@ -409,20 +406,18 @@ class InvoiceService {
     const checklist = isEs ? [
       'Visita https://pnptv.app e inicia sesion',
       'Completa tu perfil con foto y bio',
-      'Explora Videorama para ver contenido exclusivo',
       'Unete a un Hangout o crea tu propio grupo',
       'Publica tu primer post en el Social Feed',
       'Activa tu ubicacion para ver miembros cercanos',
-      'Unete al Canal PRIME de Telegram con tu enlace de invitacion',
+      'Explora el contenido PRIME en https://pnptv.app/prime',
       'Envia un mensaje directo a alguien de la comunidad',
     ] : [
       'Visit https://pnptv.app and log in',
       'Complete your profile with a photo and bio',
-      'Explore Videorama for exclusive content',
       'Join a Hangout or create your own group',
       'Publish your first post on the Social Feed',
       'Enable your location to see nearby members',
-      'Join the PRIME Telegram Channel with your invite link',
+      'Explore PRIME content at https://pnptv.app/prime',
       'Send a direct message to someone in the community',
     ];
 

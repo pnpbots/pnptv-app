@@ -400,8 +400,17 @@ class PaymentRecoveryService {
    * Resource-typed orders (live_show_ticket, private_call_booking, call_package)
    * are skipped here — those depend on external services the reconciler cannot
    * safely call. Mark for operator review instead.
+   *
+   * @param {string} invoiceId
+   * @param {string} source  - 'dash_subscription_orders' | 'token_purchases'
+   * @param {object} [opts]
+   * @param {boolean} [opts.allowExpired=false] - Also settle orders in 'expired' status.
+   *   Use for PaidLate invoices (BTCPay status=Expired, additionalStatus=PaidLate)
+   *   where funds were received but the 15-minute window had already lapsed.
+   *   The reconciler never passes this — only explicit admin/operator calls do.
    */
-  static async settleStuckDashInvoice(invoiceId, source) {
+  static async settleStuckDashInvoice(invoiceId, source, opts = {}) {
+    const { allowExpired = false } = opts;
     const PaymentSettlementService = require('./paymentSettlementService');
 
     // Token-purchase reconciliation delegates to settleTokenPurchase.
@@ -432,8 +441,22 @@ class PaymentRecoveryService {
       return { skipped: true, reason: 'no_order_row' };
     }
     const order = orderRows[0];
-    if (order.status !== 'pending') {
+    if (order.status !== 'pending' && !(allowExpired && order.status === 'expired')) {
       return { alreadyProcessed: true, finalStatus: order.status };
+    }
+
+    // For PaidLate orders that were marked expired: reset to pending so the
+    // settlement methods' atomic UPDATE-WHERE-status='pending' guards work correctly.
+    if (allowExpired && order.status === 'expired') {
+      await query(
+        `UPDATE dash_subscription_orders SET status = 'pending', notes = COALESCE(notes,'') || ' paid_late_reset'
+         WHERE id = $1 AND status = 'expired'`,
+        [order.id]
+      );
+      order.status = 'pending';
+      logger.info('settleStuckDashInvoice: reset expired order to pending for PaidLate settlement', {
+        invoiceId, orderId: order.id, userId: order.user_id,
+      });
     }
 
     const meta = order.metadata && typeof order.metadata === 'object'
@@ -661,6 +684,99 @@ class PaymentRecoveryService {
   }
 
   /**
+   * Reconcile Stripe Checkout sessions stuck in `pending` in our `payments` table.
+   *
+   * Failure mode: the Stripe webhook handler sets a Redis idempotency key then
+   * crashes before completing the entitlement grant. The key prevents the real
+   * webhook from retrying, and no other job ever revisits the row.
+   *
+   * This method polls Stripe directly for every `payments` row that is:
+   *   - provider = 'stripe'
+   *   - status   = 'pending'
+   *   - has a stripe_session_id
+   *   - created >10 min ago and <7 days ago
+   *
+   * Actions taken:
+   *   paid      → call processStripeCheckout (idempotent; skips if already completed)
+   *   expired   → mark row 'abandoned' (session can no longer be paid)
+   *   open/other → leave pending; the user may still be filling in payment details
+   *
+   * @returns {Promise<{recovered: number, failed: number}>}
+   */
+  static async processStuckStripePayments() {
+    const { createStripeClient } = require('../config/stripe');
+
+    const results = { recovered: 0, failed: 0 };
+
+    const lockKey = 'stripe:reconcile:lock';
+    const lockAcquired = await cache.acquireLock(lockKey, 1800);
+    if (!lockAcquired) {
+      logger.warn('[stripeRecovery] already running, skipping');
+      return results;
+    }
+
+    try {
+      let stripe;
+      try {
+        stripe = createStripeClient();
+      } catch (configErr) {
+        logger.info('[stripeRecovery] Stripe not configured — skipping', { error: configErr.message });
+        return results;
+      }
+
+      const { rows: stuck } = await query(`
+        SELECT id, stripe_session_id, user_id, plan_id, metadata
+        FROM payments
+        WHERE provider = 'stripe'
+          AND status = 'pending'
+          AND stripe_session_id IS NOT NULL
+          AND created_at < NOW() - INTERVAL '10 minutes'
+          AND created_at > NOW() - INTERVAL '7 days'
+        LIMIT 50
+      `);
+
+      if (stuck.length === 0) return results;
+
+      logger.info('[stripeRecovery] found stuck Stripe payments', { count: stuck.length });
+
+      for (const row of stuck) {
+        try {
+          const session = await stripe.checkout.sessions.retrieve(row.stripe_session_id);
+
+          if (session.payment_status === 'paid') {
+            await PaymentService.processStripeCheckout(session);
+            results.recovered++;
+            logger.info('[stripeRecovery] settled stuck payment', { paymentId: row.id });
+          } else if (session.status === 'expired') {
+            await query(
+              `UPDATE payments SET status = 'abandoned' WHERE id = $1 AND status = 'pending'`,
+              [row.id]
+            );
+            logger.info('[stripeRecovery] marked expired session as abandoned', { paymentId: row.id });
+          }
+          // status='open' with payment_status='unpaid' → user may still complete it; leave pending
+        } catch (err) {
+          results.failed++;
+          logger.error('[stripeRecovery] error processing stuck payment', {
+            paymentId: row.id,
+            stripeSessionId: row.stripe_session_id,
+            error: err.message,
+          });
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      return results;
+    } catch (err) {
+      logger.error('[stripeRecovery] processStuckStripePayments failed', { error: err.message });
+      return results;
+    } finally {
+      await cache.releaseLock(lockKey).catch(() => {});
+    }
+  }
+
+  /**
    * Mark stuck pending payments older than 24h as 'abandoned'.
    * Covers both ePayco (3DS timeout) and any straggler Daimo rows from before retirement.
    */
@@ -681,7 +797,7 @@ class PaymentRecoveryService {
         SET status = 'abandoned',
             metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('abandoned_at', $1::text, 'reason', CASE WHEN provider = 'epayco' AND (metadata->>'epayco_ref') IS NULL THEN 'PRE_CHARGE_ABANDONED' ELSE '3DS_TIMEOUT' END)
         WHERE status = 'pending'
-          AND provider = 'epayco'
+          AND provider IN ('epayco', 'stripe')
           AND created_at < NOW() - INTERVAL '24 hours'
         RETURNING id, user_id, reference, provider
       `, [new Date().toISOString()]);

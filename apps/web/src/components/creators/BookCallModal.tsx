@@ -444,7 +444,9 @@ export function BookCallModal({
           selectedSlot?.endUtc ?? undefined
         );
         if (dashRes.checkoutUrl) {
-          window.open(dashRes.checkoutUrl, "_blank");
+          // iOS Safari blocks window.open called after an await. Navigate in the same
+          // tab — BTCPay's successUrl redirects back to /booking/:id/confirm after payment.
+          window.location.href = dashRes.checkoutUrl;
         }
         // Store paymentId for retry if needed
         setDashPaymentId(dashRes.paymentId ?? null);
@@ -511,8 +513,7 @@ export function BookCallModal({
       // then redirect to the Stripe-hosted page.
       const callPayload = {
         packageId: activePackage.id,
-        // provider cast: backend now accepts 'stripe' as a valid provider value
-        provider: provider as "epayco",
+        provider: provider as "stripe",
         email,
         quantity: 1,
         selectedSlot: selectedSlot?.startUtc ?? null,

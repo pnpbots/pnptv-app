@@ -10,18 +10,30 @@
  * separate from pnptv.app but points at the same Express backend.
  */
 
-const Stripe = require('stripe');
 const { query } = require('../config/postgres');
 const { getRedis } = require('../config/redis');
+const {
+  assertStripeSecretKeyConfigured,
+  createStripeClient,
+  getRestrictedKeyRequiredScopes,
+  getStripeSecretKey,
+  getStripeWebhookSecret,
+  isRestrictedStripeKey,
+} = require('../config/stripe');
 const logger = require('../utils/logger');
 
 // Fail fast at startup if the secret key is not set
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const STRIPE_SECRET_KEY = getStripeSecretKey();
 if (!STRIPE_SECRET_KEY) {
   logger.warn('[stripeService] STRIPE_SECRET_KEY is not set — Stripe operations will fail at runtime');
+} else if (isRestrictedStripeKey(STRIPE_SECRET_KEY)) {
+  logger.warn('[stripeService] STRIPE_SECRET_KEY is a restricted key', {
+    allowRestricted: process.env.STRIPE_ALLOW_RESTRICTED_KEY === 'true',
+    requiredScopes: getRestrictedKeyRequiredScopes(),
+  });
 }
 
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+const STRIPE_WEBHOOK_SECRET = getStripeWebhookSecret();
 
 // Redis key prefix for customer-id cache (TTL: 24 h)
 const CUSTOMER_CACHE_PREFIX = 'stripe:cust:';
@@ -34,10 +46,8 @@ const CUSTOMER_CACHE_TTL = 86400;
 let _stripe = null;
 function getStripe() {
   if (!_stripe) {
-    if (!STRIPE_SECRET_KEY) {
-      throw new Error('STRIPE_SECRET_KEY environment variable is not configured');
-    }
-    _stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2024-04-10' });
+    assertStripeSecretKeyConfigured();
+    _stripe = createStripeClient();
   }
   return _stripe;
 }
@@ -154,11 +164,11 @@ async function createCheckoutSession({
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: {
+      ...metadata,
       pnptv_user_id: String(userId),
       pnptv_plan_id: planId || '',
       pnptv_sku: sku || '',
       payment_type: 'one_time',
-      ...metadata,
     },
     // Allow promo codes entered at checkout
     allow_promotion_codes: true,
@@ -174,6 +184,89 @@ async function createCheckoutSession({
 
   const session = await stripe.checkout.sessions.create(sessionParams);
   logger.info('[stripeService] Checkout session created', { userId, planId, sessionId: session.id });
+  return { sessionId: session.id, url: session.url };
+}
+
+/**
+ * Create a Stripe Checkout Session for a custom one-time price.
+ * Used for resource-priced purchases that do not map 1:1 to a static Stripe Price.
+ *
+ * @param {object} opts
+ * @param {string} opts.userId
+ * @param {string} [opts.planId]
+ * @param {string} [opts.sku]
+ * @param {number} opts.amountUsd
+ * @param {string} opts.productName
+ * @param {string} [opts.description]
+ * @param {string} opts.successUrl
+ * @param {string} opts.cancelUrl
+ * @param {string} [opts.customerEmail]
+ * @param {object} [opts.metadata]
+ * @returns {Promise<{sessionId: string, url: string}>}
+ */
+async function createCustomCheckoutSession({
+  userId,
+  planId,
+  sku,
+  amountUsd,
+  productName,
+  description,
+  successUrl,
+  cancelUrl,
+  customerEmail,
+  metadata = {},
+}) {
+  if (!(Number(amountUsd) > 0)) {
+    throw new Error('createCustomCheckoutSession: amountUsd must be > 0');
+  }
+
+  const stripe = getStripe();
+
+  let customerId;
+  try {
+    customerId = await getOrCreateCustomer(userId, customerEmail);
+  } catch (err) {
+    logger.warn('[stripeService] Could not resolve customer for custom checkout', { error: err.message });
+  }
+
+  const sessionParams = {
+    mode: 'payment',
+    line_items: [{
+      quantity: 1,
+      price_data: {
+        currency: 'usd',
+        unit_amount: Math.round(Number(amountUsd) * 100),
+        product_data: {
+          name: productName,
+          ...(description ? { description } : {}),
+        },
+      },
+    }],
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    metadata: {
+      ...metadata,
+      pnptv_user_id: String(userId),
+      pnptv_plan_id: planId || '',
+      pnptv_sku: sku || '',
+      payment_type: metadata.payment_type || 'one_time',
+    },
+    billing_address_collection: 'auto',
+  };
+
+  if (customerId) {
+    sessionParams.customer = customerId;
+  } else if (customerEmail) {
+    sessionParams.customer_email = customerEmail;
+  }
+
+  const session = await stripe.checkout.sessions.create(sessionParams);
+  logger.info('[stripeService] Custom checkout session created', {
+    userId,
+    planId,
+    sessionId: session.id,
+    amountUsd,
+  });
   return { sessionId: session.id, url: session.url };
 }
 
@@ -217,14 +310,15 @@ async function createSubscriptionCheckout({
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: {
+      ...metadata,
       pnptv_user_id: String(userId),
       pnptv_plan_id: planId || '',
       pnptv_sku: sku || '',
       payment_type: 'subscription',
-      ...metadata,
     },
     subscription_data: {
       metadata: {
+        ...metadata,
         pnptv_user_id: String(userId),
         pnptv_plan_id: planId || '',
         pnptv_sku: sku || '',
@@ -300,13 +394,30 @@ function constructWebhookEvent(rawBody, signature, secret) {
   return stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
 }
 
+// ─── Subscription retrieval ───────────────────────────────────────────────────
+
+/**
+ * Retrieve a Stripe Subscription object by ID.
+ * Used by webhook handlers to avoid inline Stripe client instantiation.
+ *
+ * @param {string} subscriptionId  - Stripe sub_xxx ID
+ * @returns {Promise<import('stripe').Stripe.Subscription>}
+ */
+async function getSubscription(subscriptionId) {
+  const stripe = getStripe();
+  return stripe.subscriptions.retrieve(subscriptionId);
+}
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
+  getStripe,
   getOrCreateCustomer,
   createCheckoutSession,
+  createCustomCheckoutSession,
   createSubscriptionCheckout,
   createCustomerPortalSession,
   cancelSubscription,
   constructWebhookEvent,
+  getSubscription,
 };

@@ -47,6 +47,10 @@ export class NetworkError extends Error {
   }
 }
 
+function looksLikeMachineCode(value: string): boolean {
+  return /^[A-Z0-9_]+$/.test(value);
+}
+
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 
@@ -73,15 +77,21 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: res.statusText }));
+        const stringError = typeof error.error === "string" ? error.error : undefined;
+        const nestedErrorMessage =
+          typeof (error.error as { message?: string })?.message === "string"
+            ? (error.error as { message: string }).message
+            : undefined;
+        const stringMessage = typeof error.message === "string" ? error.message : undefined;
         const errorMessage =
-          typeof error.error === "string"
-            ? error.error
-            : typeof (error.error as { message?: string })?.message === "string"
-              ? (error.error as { message: string }).message
-              : typeof error.message === "string"
-                ? error.message
-                : friendlyHttpError(res.status, `API error ${res.status}`);
-        const errorCode = typeof error.code === "string" ? error.code : undefined;
+          stringMessage
+            || nestedErrorMessage
+            || (stringError && !looksLikeMachineCode(stringError) ? stringError : undefined)
+            || friendlyHttpError(res.status, `API error ${res.status}`);
+        const errorCode =
+          typeof error.code === "string"
+            ? error.code
+            : (stringError && looksLikeMachineCode(stringError) ? stringError : undefined);
         // Colombia gate: redirect to /subscribe so the user can purchase PNP Col.
         // Skip when already on /subscribe to avoid a redirect loop.
         if (
@@ -450,34 +460,18 @@ export function getSlotTicketStatus(slotId: string): Promise<{
   return request(`/api/webapp/live/slot/${encodeURIComponent(slotId)}/ticket-status`);
 }
 
-export interface EpaycoTicketCheckout {
-  publicKey: string;
-  amount: number;
-  currency: string;
-  description: string;
-  invoice: string;
-  signature: string | null;
-  extra1: string;
-  extra2: string;
-  extra3: string;
-  test: boolean;
-  response: string;
-  confirmation: string;
-}
-
 export function buySlotTicket(
   slotId: string,
-  currency: "tokens" | "epayco" | "dash"
+  currency: "tokens" | "stripe" | "dash"
 ): Promise<{
   success: boolean;
   hasTicket?: boolean;
   alreadyOwned?: boolean;
   newBalance?: number;
   error?: string;
-  provider?: "epayco" | "dash";
+  provider?: "stripe" | "dash";
   paymentId?: string;
   checkoutUrl?: string;
-  epayco?: EpaycoTicketCheckout;
   invoiceId?: string;
 }> {
   return request(`/api/webapp/live/slot/${encodeURIComponent(slotId)}/buy-ticket`, {
@@ -722,16 +716,8 @@ export function buyTokens(packageId: string): Promise<{ success: boolean; invoic
   return request("/api/wallet/buy", { method: "POST", body: { packageId } });
 }
 
-export function buyTokensCard(packageId: string): Promise<{ success: boolean; checkoutUrl: string; tokens: number; usd: number }> {
-  return request("/api/wallet/buy-card", { method: "POST", body: { packageId } });
-}
-
 export function buyTokensStripe(packageId: string): Promise<{ success: boolean; purchaseId: string; checkoutUrl: string; tokens: number; usd: number }> {
   return request("/api/wallet/buy-stripe", { method: "POST", body: { packageId } });
-}
-
-export function buyTokensWallet(packageId: string): Promise<{ success: boolean; checkoutUrl: string; tokens: number; usd: number }> {
-  return request("/api/wallet/buy-wallet", { method: "POST", body: { packageId } });
 }
 
 export function linkDPNS(dpnsHandle: string): Promise<{ success: boolean; dpnsHandle: string }> {
@@ -744,24 +730,10 @@ export function getWalletHistory(): Promise<{ success: boolean; history: TokenPu
 
 export interface TokenCheckoutData {
   success: boolean;
-  provider: "epayco";
+  provider: "stripe" | "dash";
   tokens: number;
   usd: number;
   status: string;
-  epayco?: {
-    publicKey: string;
-    amount: number;
-    currency: string;
-    description: string;
-    invoice: string;
-    signature: string | null;
-    extra1: string;
-    extra2: string;
-    extra3: string;
-    test: boolean;
-    response: string;
-    confirmation: string;
-  };
 }
 
 export function getTokenCheckoutData(purchaseId: string): Promise<TokenCheckoutData> {
@@ -2615,7 +2587,7 @@ export function getMyAccess(): Promise<MyAccessResponse> {
 
 export function createPayment(
   planId: string,
-  provider: "epayco" | "dash",
+  provider: "stripe" | "dash",
   email?: string,
   promoCode?: string
 ): Promise<{
@@ -2727,7 +2699,7 @@ export function validatePromoCode(
 
 export function initiateCreatorSubscriptionPayment(
   creatorId: string,
-  provider: "epayco" | "dash",
+  provider: "stripe" | "dash",
   email: string
 ): Promise<{
   success: boolean;
@@ -2770,7 +2742,7 @@ export function getPaymentStatus(
 
 export function purchaseChannelAccess(
   channelId: number,
-  provider: 'epayco' | 'dash',
+  provider: 'stripe' | 'dash',
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/channels/${channelId}/purchase`, {
@@ -2784,7 +2756,7 @@ export function purchaseChannelAccess(
 // channel-access grants cover both the channel and its linked hangout.
 export function purchaseHangoutAccess(
   hangoutGroupId: number,
-  provider: 'epayco' | 'dash',
+  provider: 'stripe' | 'dash',
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/hangouts/groups/${hangoutGroupId}/purchase`, {
@@ -5596,6 +5568,7 @@ const ALLOWED_PAYMENT_HOSTS = [
   "app.pnptv.app",
   "btcpay.pnptv.app",
   "checkout.epayco.co",
+  "checkout.stripe.com",
 ];
 
 function isAllowedPaymentHost(hostname: string): boolean {
@@ -5930,14 +5903,14 @@ export interface CreatorCallEarnings {
 export interface CallCheckoutPayload {
   packageId: number;
   // For Dash payments use createCallCheckoutDash() — this endpoint is
-  // card-only (ePayco 3DS 2.0 flow). Server rejects any other value.
-  provider: "epayco";
+  // card-only and now routes through Stripe Checkout.
+  provider: "stripe";
   email: string;
   quantity?: number;
   selectedSlot?: string | null;
   // When both are provided the server locks the slot + creates a bookings
   // row at checkout, mirroring the Dash path so reminders + My Calls work
-  // for ePayco-paid bookings too.
+  // for Stripe-paid bookings too.
   startTimeUtc?: string;
   endTimeUtc?: string;
 }

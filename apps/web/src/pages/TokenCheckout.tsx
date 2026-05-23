@@ -2,18 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { getTokenCheckoutData } from "@/lib/api";
 
-// Augment Window with the ePayco checkout object injected by checkout.js
-declare global {
-  interface Window {
-    ePayco?: {
-      checkout: {
-        configure: (config: Record<string, unknown>) => { open: () => void };
-      };
-    };
-  }
-}
-
-type CheckoutState = "loading" | "ready" | "pending" | "success" | "error";
+type CheckoutState = "loading" | "pending" | "success" | "error";
 
 const BG_STYLES: React.CSSProperties = {
   minHeight: "100vh",
@@ -47,15 +36,6 @@ const CARD_STYLES: React.CSSProperties = {
   padding: 32,
   position: "relative",
   zIndex: 10,
-};
-
-const SUMMARY_BOX: React.CSSProperties = {
-  background: "rgba(255,255,255,0.05)",
-  border: "1px solid rgba(255,255,255,0.1)",
-  borderRadius: 16,
-  padding: 16,
-  marginBottom: 20,
-  textAlign: "center",
 };
 
 const SPINNER_STYLE: React.CSSProperties = {
@@ -128,212 +108,6 @@ const SECONDARY_BTN: React.CSSProperties = {
   fontFamily: "'Roboto Mono', monospace",
 };
 
-// Loads an external script once and resolves when it is ready.
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
-      resolve();
-      return;
-    }
-    const s = document.createElement("script");
-    s.src = src;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Failed to load script: ${src}`));
-    document.head.appendChild(s);
-  });
-}
-
-// ── ePayco Checkout widget component ─────────────────────────────────────────
-const EPAYCO_ORIGINS = new Set([
-  "https://checkout.epayco.co",
-  "https://secure.epayco.co",
-  "https://epayco.co",
-]);
-interface EPaycoConfig {
-  publicKey: string;
-  amount: number;
-  currency: string;
-  description: string;
-  invoice: string;
-  signature: string | null;
-  extra1: string;
-  extra2: string;
-  extra3: string;
-  test: boolean;
-  response: string;
-  confirmation: string;
-}
-
-interface EPaycoWidgetProps {
-  config: EPaycoConfig;
-  tokens: number;
-  usd: number;
-  purchaseId: string;
-  onStartPolling: (id: string) => void;
-}
-
-function EPaycoWidget({ config, tokens, usd, purchaseId, onStartPolling }: EPaycoWidgetProps) {
-  const [sdkReady, setSdkReady] = useState(false);
-  const [sdkError, setSdkError] = useState("");
-  const [opening, setOpening] = useState(false);
-  const handlerRef = useRef<{ open: () => void } | null>(null);
-
-  useEffect(() => {
-    loadScript("https://checkout.epayco.co/checkout.js")
-      .then(() => {
-        if (!window.ePayco?.checkout?.configure) {
-          setSdkError("ePayco checkout SDK failed to initialise.");
-          return;
-        }
-        const logoUrl = `${window.location.origin}/Logo2-50.png`;
-        const ogImageUrl = `${window.location.origin}/og-image.png`;
-        handlerRef.current = window.ePayco.checkout.configure({
-          key: config.publicKey,
-          test: config.test,
-          external: "false",
-          invoice: config.invoice,
-          ...(config.signature ? { p_hash_key: config.signature } : {}),
-          amount: String(config.amount),
-          name: "PNPtv!",
-          description: config.description,
-          currency: config.currency,
-          country: "CO",
-          lang: "en",
-          extra1: config.extra1,
-          extra2: config.extra2,
-          extra3: config.extra3,
-          response: config.response,
-          confirmation: config.confirmation,
-          // Brand identity — shown inside the ePayco popup
-          logo: logoUrl,
-          img_logo: logoUrl,
-          img: ogImageUrl,
-        });
-        setSdkReady(true);
-      })
-      .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : "Unknown error loading ePayco";
-        setSdkError(msg);
-      });
-
-    // Listen for the ePayco postMessage response so we can detect that the
-    // user completed the payment form. We do NOT trust this event as final
-    // confirmation — instead we hand off to the server-side polling loop.
-    function onMessage(evt: MessageEvent) {
-      if (!EPAYCO_ORIGINS.has(evt.origin)) return;
-      try {
-        const data = typeof evt.data === "string" ? JSON.parse(evt.data) : evt.data;
-        if (data?.status === "Aceptada" || data?.x_transaction_state === "Aceptada") {
-          // Start polling backend for authoritative confirmation; do NOT call
-          // onSuccess directly — the popup signal cannot be trusted alone.
-          onStartPolling(purchaseId);
-        }
-      } catch {
-        // Not a JSON message — ignore
-      }
-    }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [config, purchaseId, onStartPolling]);
-
-  const handleOpen = useCallback(() => {
-    if (!handlerRef.current) return;
-    setOpening(true);
-    handlerRef.current.open();
-    // Reset the opening spinner after a brief delay — the popup takes over from here
-    setTimeout(() => setOpening(false), 2000);
-  }, []);
-
-  if (sdkError) {
-    return (
-      <p style={{ color: "#FF453A", fontSize: 13, textAlign: "center" }}>
-        {sdkError}
-      </p>
-    );
-  }
-
-  return (
-    <div>
-      <div style={SUMMARY_BOX}>
-        <div style={{ fontSize: 40, marginBottom: 8 }}>🪙</div>
-        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>
-          {tokens.toLocaleString()} PNP Tokens
-        </div>
-        <div style={{ fontSize: 26, fontWeight: 700, ...GRADIENT_TEXT }}>
-          ${usd.toFixed(2)} USD
-        </div>
-        <div style={{ fontSize: 11, color: "var(--pnp-text-secondary, #8E8E93)", marginTop: 6 }}>
-          Paid via credit / debit card — powered by ePayco
-        </div>
-      </div>
-
-      <p style={{ textAlign: "center", fontSize: 13, color: "var(--pnp-text-secondary, #8E8E93)", marginBottom: 16 }}>
-        Tap the button below to open the secure ePayco checkout. Your card
-        details are processed entirely by ePayco and never stored on our
-        servers.
-      </p>
-
-      <button
-        onClick={handleOpen}
-        disabled={!sdkReady || opening}
-        style={{
-          ...PAY_BTN,
-          opacity: !sdkReady || opening ? 0.6 : 1,
-          cursor: !sdkReady || opening ? "not-allowed" : "pointer",
-        }}
-      >
-        {!sdkReady ? (
-          <>
-            <div
-              style={{
-                width: 18,
-                height: 18,
-                border: "2px solid rgba(255,255,255,0.3)",
-                borderTopColor: "#fff",
-                borderRadius: "50%",
-                animation: "spin 1s linear infinite",
-              }}
-            />
-            Loading checkout…
-          </>
-        ) : opening ? (
-          <>
-            <div
-              style={{
-                width: 18,
-                height: 18,
-                border: "2px solid rgba(255,255,255,0.3)",
-                borderTopColor: "#fff",
-                borderRadius: "50%",
-                animation: "spin 1s linear infinite",
-              }}
-            />
-            Opening checkout…
-          </>
-        ) : (
-          <>
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
-              <line x1="1" y1="10" x2="23" y2="10" />
-            </svg>
-            Pay ${usd.toFixed(2)} with Card
-          </>
-        )}
-      </button>
-    </div>
-  );
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 120_000;
@@ -342,7 +116,6 @@ export default function TokenCheckout() {
   const { purchaseId } = useParams<{ purchaseId: string }>();
   const [searchParams] = useSearchParams();
   const [state, setState] = useState<CheckoutState>("loading");
-  const [data, setData] = useState<Awaited<ReturnType<typeof getTokenCheckoutData>> | null>(null);
   const [error, setError] = useState("");
   const [pollElapsed, setPollElapsed] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -368,6 +141,14 @@ export default function TokenCheckout() {
         if (res.status === "paid" || res.status === "completed") {
           stopPolling();
           setState("success");
+        } else if (res.status === "expired" || res.status === "cancelled" || res.status === "invalid") {
+          stopPolling();
+          setError(
+            res.status === "expired"
+              ? "This payment link has expired. Please start a new purchase from the app."
+              : "This payment was not completed. Please try again with a new payment link."
+          );
+          setState("error");
         }
       } catch {
         // non-fatal — keep polling
@@ -383,14 +164,6 @@ export default function TokenCheckout() {
     if (!purchaseId) {
       setError("No purchase ID found. Please generate a new payment link from the app.");
       setState("error");
-      return;
-    }
-
-    // ePayco redirect — ?status=response means the user completed the payment form.
-    // The webhook hasn't necessarily fired yet, so poll until confirmed.
-    if (searchParams.get("status") === "response") {
-      setState("pending");
-      startPolling(purchaseId);
       return;
     }
 
@@ -412,21 +185,23 @@ export default function TokenCheckout() {
           setState("success");
           return;
         }
-        if (res.status === "expired" || res.status === "cancelled") {
-          setError("This payment link has expired. Please start a new purchase from the app.");
+        if (res.status === "expired" || res.status === "cancelled" || res.status === "invalid") {
+          setError(
+            res.status === "expired"
+              ? "This payment link has expired. Please start a new purchase from the app."
+              : "This payment was not completed. Please start a new purchase from the app."
+          );
           setState("error");
           return;
         }
-        if ((res.provider as string) !== "epayco" && (res.provider as string) !== "stripe") {
-          // Legacy Daimo purchase or unknown provider — Daimo is sunset.
-          // Send the user back to the wallet where they can start a new
-          // purchase via Card or Dash.
-          setError("This crypto checkout method is no longer available. Please start a new purchase from your wallet — pay with Card or Dash instead.");
+        if ((res.provider as string) !== "stripe") {
+          setError("This payment method is no longer available. Please start a new purchase from your wallet.");
           setState("error");
           return;
         }
-        setData(res);
-        setState("ready");
+        // Stripe purchase still pending — poll until the webhook fires
+        setState("pending");
+        startPolling(purchaseId);
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : "Could not load checkout details.";
@@ -491,7 +266,7 @@ export default function TokenCheckout() {
           </div>
         )}
 
-        {/* Pending — ePayco redirect, waiting for webhook confirmation */}
+        {/* Pending — waiting for webhook confirmation */}
         {state === "pending" && (
           <div style={{ textAlign: "center", padding: "24px 0" }}>
             <div style={SPINNER_STYLE} />
@@ -506,8 +281,11 @@ export default function TokenCheckout() {
             ) : (
               <p style={{ fontSize: 13, color: "var(--pnp-text-secondary, #8E8E93)", marginBottom: 20 }}>
                 Payment confirmation is taking longer than expected. Your tokens will be
-                credited automatically once the payment clears. You can close this window —
-                check your wallet in a minute.
+                credited automatically once the payment clears.{" "}
+                <a href="/wallet" style={{ color: "var(--pnp-accent, #D4007A)" }}>
+                  Check your wallet
+                </a>{" "}
+                in a minute or close this window.
               </p>
             )}
             <button
@@ -523,20 +301,6 @@ export default function TokenCheckout() {
               Return to App
             </button>
           </div>
-        )}
-
-        {/* Ready — render ePayco widget */}
-        {state === "ready" && data && data.epayco && purchaseId && (
-          <EPaycoWidget
-            config={data.epayco}
-            tokens={data.tokens}
-            usd={data.usd}
-            purchaseId={purchaseId}
-            onStartPolling={(id) => {
-              setState("pending");
-              startPolling(id);
-            }}
-          />
         )}
 
         {/* Success */}

@@ -602,10 +602,14 @@ const handleStripeWebhook = async (req, res) => {
     return res.status(400).json({ error: 'Missing stripe-signature' });
   }
 
-  // req.rawBody is set by the global express.json() verify callback
-  const rawBody = req.rawBody instanceof Buffer
-    ? req.rawBody
-    : Buffer.from(typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(req.body || {}), 'utf8');
+  // req.rawBody is set by the global express.json() verify callback.
+  // Hard-fail if it is absent — a fallback buffer would produce a wrong HMAC
+  // and let forged webhooks appear valid.
+  if (!(req.rawBody instanceof Buffer)) {
+    logger.error('[stripeWebhook] req.rawBody is not a Buffer — is express.json verify callback active?');
+    return res.status(500).json({ error: 'Webhook body capture misconfigured' });
+  }
+  const rawBody = req.rawBody;
 
   let event;
   try {
@@ -617,20 +621,18 @@ const handleStripeWebhook = async (req, res) => {
 
   logger.info('[stripeWebhook] Event received', { type: event.type, id: event.id });
 
-  // Idempotency guard — cache processed event IDs in Redis for 48 h
-  let alreadyProcessed = false;
+  // Idempotency guard — check if already processed before touching anything
   const idempotencyKey = `stripe:evt:${event.id}`;
   try {
     const redis = require('../../../config/redis').getRedis();
-    const set = await redis.set(idempotencyKey, '1', 'EX', 172800, 'NX');
-    if (set === null) {
-      alreadyProcessed = true;
+    const alreadyProcessed = await redis.get(idempotencyKey);
+    if (alreadyProcessed) {
+      logger.info('[stripeWebhook] Duplicate event, skipping', { eventId: event.id });
+      return res.status(200).json({ received: true, duplicate: true });
     }
-  } catch (_) { /* Redis unavailable — continue without idempotency guard */ }
-
-  if (alreadyProcessed) {
-    logger.info('[stripeWebhook] Duplicate event, skipping', { eventId: event.id });
-    return res.status(200).json({ received: true, duplicate: true });
+  } catch (_) {
+    // Redis unavailable — DB-level constraints will prevent double-processing
+    logger.warn('[stripeWebhook] Redis unavailable for duplicate check — continuing', { eventId: event.id });
   }
 
   try {
@@ -656,19 +658,29 @@ const handleStripeWebhook = async (req, res) => {
       }
 
       case 'customer.subscription.updated': {
-        // When a subscription is un-cancelled or changes price, extend or update entitlements
+        // Log only — entitlement grants are handled exclusively by invoice.payment_succeeded.
+        // Acting here would double-grant on every status transition (e.g. trialing→active).
         const sub = event.data.object;
-        const userId = sub.metadata?.pnptv_user_id;
-        const planId = sub.metadata?.pnptv_plan_id;
-        if (userId && planId && sub.status === 'active') {
-          await PaymentService.renewStripeSubscriptionEntitlements(sub.id, userId, planId);
-        }
+        logger.info('[stripeWebhook] customer.subscription.updated', {
+          subId: sub.id,
+          status: sub.status,
+          cancelAtPeriodEnd: sub.cancel_at_period_end,
+        });
         break;
       }
 
       case 'customer.subscription.deleted': {
         const sub = event.data.object;
-        await PaymentService.deactivateStripeSubscriptionEntitlements(sub.id);
+        // If cancel_at_period_end was set, the user already paid for the current period.
+        // Use current_period_end as the expiry; otherwise deactivate immediately.
+        const periodEnd = sub.current_period_end
+          ? new Date(sub.current_period_end * 1000)
+          : new Date();
+        if (periodEnd > new Date()) {
+          await PaymentService.scheduleStripeEntitlementExpiry(sub.id, periodEnd);
+        } else {
+          await PaymentService.deactivateStripeSubscriptionEntitlements(sub.id);
+        }
         break;
       }
 
@@ -683,13 +695,22 @@ const handleStripeWebhook = async (req, res) => {
 
         // Fetch subscription to get our metadata
         try {
-          const Stripe = require('stripe');
-          const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-04-10' });
-          const sub = await stripe.subscriptions.retrieve(subId);
+          const sub = await stripeService.getSubscription(subId);
           const userId = sub.metadata?.pnptv_user_id;
           const planId = sub.metadata?.pnptv_plan_id;
+          const creatorId = sub.metadata?.creatorId;
           if (userId && planId) {
-            await PaymentService.renewStripeSubscriptionEntitlements(subId, userId, planId);
+            await PaymentService.renewStripeSubscriptionEntitlements(subId, userId, planId, {
+              creatorId: creatorId || null,
+              invoiceId: invoice.id ? String(invoice.id) : null,
+              paymentIntentId: invoice.payment_intent ? String(invoice.payment_intent) : null,
+              amountTotal: invoice.amount_paid != null ? invoice.amount_paid / 100 : 0,
+              currency: (invoice.currency || 'usd').toUpperCase(),
+              metadata: {
+                stripe_invoice_id: invoice.id ? String(invoice.id) : null,
+                stripe_payment_intent_id: invoice.payment_intent ? String(invoice.payment_intent) : null,
+              },
+            });
           }
         } catch (fetchErr) {
           logger.error('[stripeWebhook] Failed to fetch subscription for renewal', {
@@ -705,9 +726,7 @@ const handleStripeWebhook = async (req, res) => {
         if (!subId) break;
 
         try {
-          const Stripe = require('stripe');
-          const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-04-10' });
-          const sub = await stripe.subscriptions.retrieve(subId);
+          const sub = await stripeService.getSubscription(subId);
           const userId = sub.metadata?.pnptv_user_id;
           if (userId) {
             await notifyInvoicePaymentFailed(userId, invoice);
@@ -720,8 +739,51 @@ const handleStripeWebhook = async (req, res) => {
         break;
       }
 
+      case 'charge.refunded': {
+        const charge = event.data.object;
+        // If a subscription payment is refunded, revoke access immediately.
+        // If a one-time payment is refunded, mark the payments row as refunded.
+        const paymentIntentId = charge.payment_intent ? String(charge.payment_intent) : null;
+        if (paymentIntentId) {
+          try {
+            const { query } = require('../../../config/postgres');
+            const { rows } = await query(
+              `UPDATE payments SET status = 'refunded', updated_at = NOW()
+               WHERE provider = 'stripe'
+                 AND (reference = $1 OR metadata->>'stripe_payment_intent_id' = $1)
+               RETURNING id, user_id, plan_id, stripe_subscription_id`,
+              [paymentIntentId]
+            );
+            if (rows.length > 0) {
+              const row = rows[0];
+              logger.info('[stripeWebhook] charge.refunded: payment row marked refunded', {
+                paymentId: row.id, userId: row.user_id, planId: row.plan_id,
+              });
+              if (row.stripe_subscription_id) {
+                await PaymentService.deactivateStripeSubscriptionEntitlements(row.stripe_subscription_id);
+              }
+            }
+          } catch (refundErr) {
+            logger.error('[stripeWebhook] charge.refunded: error updating payment row', {
+              paymentIntentId, error: refundErr.message,
+            });
+          }
+        }
+        break;
+      }
+
       default:
         logger.debug('[stripeWebhook] Unhandled event type', { type: event.type });
+    }
+
+    // Mark processed only after the switch completes successfully so that a crash
+    // mid-handler does not permanently swallow Stripe retries.
+    try {
+      const redis = require('../../../config/redis').getRedis();
+      await redis.set(idempotencyKey, '1', 'EX', 172800);
+    } catch (_) {
+      // Non-critical — DB constraints are the authoritative idempotency guard
+      logger.warn('[stripeWebhook] Redis mark failed post-processing (non-fatal)', { eventId: event.id });
     }
   } catch (processingErr) {
     logger.error('[stripeWebhook] Error processing event', {
@@ -730,7 +792,8 @@ const handleStripeWebhook = async (req, res) => {
       error: processingErr.message,
       stack: processingErr.stack,
     });
-    // Return 200 so Stripe does not keep retrying; we log and alert instead
+    // Return 500 so Stripe retries — Redis key was NOT written, so the retry will proceed
+    return res.status(500).json({ error: 'Event processing failed' });
   }
 
   return res.status(200).json({ received: true });

@@ -5,8 +5,9 @@ import {
   getWalletBalance,
   getTokenPackages,
   buyTokens,
-  buyTokensCard,
+  buyTokensStripe,
   getDashPaymentDetails,
+  getDashSubscriptionStatus,
   assertPaymentUrl,
   type TokenPackage,
 } from "@/lib/api";
@@ -103,7 +104,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
       let openedPopup: Window | null = null;
       
       if (buyMethod === 'card') {
-        const result = await buyTokensCard(pkg.id);
+        const result = await buyTokensStripe(pkg.id);
         checkoutUrl = assertPaymentUrl(result.checkoutUrl);
         openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
       } else {
@@ -133,19 +134,27 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
             setDashPayment((prev) => prev ? { ...prev, loading: false, error: "Could not load payment details" } : prev);
           });
 
-        // Poll for payment confirmation
+        // Poll for payment confirmation using the invoice status, not wallet balance.
+        // Wallet balance is pre-existing and would produce false positives for users who
+        // already have tokens.
+        const pollInvoiceId = result.invoiceId;
         dashPollRef.current = setInterval(async () => {
           try {
-            const balRes = await getWalletBalance();
-            if (typeof balRes.balance === 'number' && balRes.balance > 0) {
+            const statusRes = await getDashSubscriptionStatus(pollInvoiceId);
+            if (statusRes.status === 'completed') {
               if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
               setDashPaymentSuccess(true);
+              // Fetch the updated balance to pass to onSuccess.
+              const balRes = await getWalletBalance().catch(() => ({ balance: 0 }));
               setTimeout(() => {
                 if (onSuccess) onSuccess(balRes.balance);
                 onClose();
               }, 1500);
+            } else if (statusRes.status === 'expired' || statusRes.status === 'invalid') {
+              if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+              setDashPayment((prev) => prev ? { ...prev, error: 'Invoice expired. Please try again.' } : prev);
             }
-          } catch { /* ignore */ }
+          } catch { /* network hiccup — keep polling */ }
         }, 5000);
 
         return; // Skip the popup logic below
@@ -240,7 +249,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-pnp-textPrimary">Buy with Card</p>
-                <p className="text-xs text-pnp-textSecondary truncate">Visa, Mastercard, PSE</p>
+                <p className="text-xs text-pnp-textSecondary truncate">Stripe checkout for Visa, Mastercard, and more</p>
               </div>
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -403,7 +412,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           <>
             {/* Method explanation */}
             <p className="text-xs text-pnp-textSecondary mb-4 leading-relaxed">
-              {buyMethod === 'card' && "Pay instantly with your credit or debit card via ePayco. Secure checkout — your card details are never stored on our servers."}
+              {buyMethod === 'card' && "Pay instantly with Stripe Checkout. Your card details are processed by Stripe and never stored on our servers."}
               {buyMethod === 'dash' && "Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed."}
             </p>
 

@@ -130,6 +130,21 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // Stripe payment reconciliation — every 30 min
+    // Covers the crash-after-idempotency-mark failure mode: webhook sets Redis key
+    // then dies before granting entitlements, leaving the payments row stuck pending.
+    // processStripeCheckout is idempotent; expired sessions are marked abandoned.
+    cron.schedule(process.env.STRIPE_RECONCILE_CRON || '*/30 * * * *', async () => {
+      try {
+        const results = await PaymentRecoveryService.processStuckStripePayments();
+        if (results.recovered > 0 || results.failed > 0) {
+          logger.info('Stripe reconciliation completed', results);
+        }
+      } catch (error) {
+        logger.error('Error in Stripe reconciliation cron:', error);
+      }
+    });
+
     // Video leak detector — every hour at :17
     // Scans video_fetch_log over the last 60 min and alerts the operator
     // group when an exclusive video URL has been fetched by 3+ distinct

@@ -69,7 +69,6 @@ class PaymentNotificationService {
         message += `✅ Tu membresía ha sido activada automáticamente—sin espera, sin aprobación manual.\n\n`;
 
         message += `📦 *Lo que incluye tu membresía:*\n\n`;
-        message += `• Videorama – Listas de reproducción de videos, música y podcasts\n`;
         message += `• Hangouts – Salas de videollamadas comunitarias\n`;
         message += `• PNP Television Live – Transmisiones en vivo y grabaciones exclusivas\n\n`;
 
@@ -104,7 +103,6 @@ class PaymentNotificationService {
         message += `✅ Your membership is activated automatically—no waiting, no manual approval.\n\n`;
 
         message += `📦 *What's included in your membership:*\n\n`;
-        message += `• Videorama – Video, music, and podcast playlists\n`;
         message += `• Hangouts – Community video call rooms\n`;
         message += `• PNP Television Live – Live streams and exclusive recordings\n\n`;
 
@@ -184,6 +182,7 @@ class PaymentNotificationService {
    */
   static getProviderName(provider, lang = 'en') {
     const providers = {
+      stripe: { en: 'Stripe', es: 'Stripe' },
       // Daimo kept for legacy receipts (in-flight + refund history)
       daimo: { en: 'Daimo Pay (legacy)', es: 'Daimo Pay (legacy)' },
       epayco: { en: 'ePayco', es: 'ePayco' },

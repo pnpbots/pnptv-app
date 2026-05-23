@@ -1321,7 +1321,13 @@ class PaymentService {
         return { success: true, alreadyProcessed: true };
       }
 
-      if (!payment && paymentIdOrType && paymentIdOrType !== 'pnp_live' && this.isUuidLike(paymentIdOrType)) {
+      if (
+        !payment
+        && paymentIdOrType
+        && paymentIdOrType !== 'pnp_live'
+        && planIdOrBookingId !== 'token_purchase'
+        && this.isUuidLike(paymentIdOrType)
+      ) {
         // The x_extra3 UUID may come from an external checkout site (e.g. easybots.site) that
         // generates its own payment record with a different UUID than the one stored in our DB.
         // Before hard-failing, attempt to recover the local payment using x_extra1 (userId)
@@ -1564,15 +1570,7 @@ class PaymentService {
               paymentId: paymentIdOrType,
               refPayco: x_ref_payco,
             });
-          }
-
-          // Mark token purchase as completed
-          if (paymentIdOrType) {
-            await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
-              transaction_id: x_transaction_id,
-              reference_code: x_ref_payco,
-              webhook_processed_at: new Date().toISOString(),
-            });
+            return { success: false, code: 'TOKEN_CREDIT_FAILED', message: tokenErr.message };
           }
 
           return { success: true, type: 'token_purchase' };
@@ -2101,6 +2099,26 @@ class PaymentService {
         || effectiveState === 'Cancelada'
         || effectiveState === 'Expirada'
       ) {
+        if (planIdOrBookingId === 'token_purchase' && paymentIdOrType) {
+          try {
+            const TokenCheckoutService = require('./tokenCheckoutService');
+            const terminalStatus = effectiveState === 'Expirada' ? 'expired' : 'invalid';
+            await TokenCheckoutService.markPurchaseTerminalStatus(paymentIdOrType, 'epayco', terminalStatus, {
+              transactionId: x_transaction_id,
+              referenceCode: x_ref_payco,
+              epaycoState: effectiveState,
+            });
+          } catch (tokenStatusErr) {
+            logger.error('ePayco token purchase failure-state update failed', {
+              error: tokenStatusErr.message,
+              paymentId: paymentIdOrType,
+              refPayco: x_ref_payco,
+              state: effectiveState,
+            });
+            return { success: false, code: 'TOKEN_STATUS_UPDATE_FAILED', message: tokenStatusErr.message };
+          }
+        }
+
         // Payment failed/cancelled/expired (includes abandoned 3DS authentication
         // and links that expired before the user completed the challenge).
         if (payment) {
@@ -4089,6 +4107,37 @@ class PaymentService {
             userId, addOn: row.add_on_name, planId, isLifetime, durationDays,
             scopeCreatorId: scopeCreatorId || null,
           });
+
+          // Auto-grant pnp-member inside the transaction when prime is being granted,
+          // so a crash after COMMIT cannot leave the user with PRIME but no pnp-member.
+          if (row.add_on_id === 'prime') {
+            const memberIsLifetime = isLifetime;
+            const memberDays = parseInt(durationDays, 10);
+            if (memberIsLifetime) {
+              await txClient.query(`
+                INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, source_plan_id, source_payment_id)
+                VALUES ($1, 'pnp-member', true, NULL, $2, $3)
+                ON CONFLICT (user_id, add_on_id, creator_id)
+                DO UPDATE SET is_lifetime = true, expires_at = NULL, is_consumed = false, updated_at = NOW()
+              `, [userId, planId, resolvedPaymentId]);
+            } else {
+              await txClient.query(`
+                INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id, source_payment_id)
+                VALUES ($1, 'pnp-member', NOW() + ($2::integer * INTERVAL '1 day'), $3, $4)
+                ON CONFLICT (user_id, add_on_id, creator_id)
+                DO UPDATE SET
+                  expires_at = CASE
+                    WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+                    WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
+                      THEN user_entitlements.expires_at + ($2::integer * INTERVAL '1 day')
+                    ELSE NOW() + ($2::integer * INTERVAL '1 day')
+                  END,
+                  is_consumed = false, updated_at = NOW()
+                WHERE NOT user_entitlements.is_lifetime
+              `, [userId, memberDays, planId, resolvedPaymentId]);
+            }
+            logger.info('Auto-granted pnp-member alongside prime (within transaction)', { userId, planId });
+          }
         }
 
         await txClient.query('COMMIT');
@@ -4219,50 +4268,8 @@ class PaymentService {
         } catch (_) { /* non-critical */ }
       }
 
-      // After granting all add-ons: auto-grant pnp-member if prime was granted,
-      // invalidate entitlement caches and sync users.tier.
-      // This is non-critical — payment is already committed above.
+      // After granting all add-ons: invalidate entitlement caches and sync users.tier.
       if (result.granted > 0) {
-        const grantedAddOnIds = addOnsResult.rows.map(r => r.add_on_id);
-
-        // Auto-grant pnp-member when prime is granted (cascade)
-        if (grantedAddOnIds.includes('prime') && !grantedAddOnIds.includes('pnp-member')) {
-          try {
-            const primeRow = addOnsResult.rows.find(r => r.add_on_id === 'prime');
-            const memberLifetime = primeRow?.is_lifetime || false;
-            const memberDays = primeRow?.addon_duration_days || primeRow?.plan_duration_days || 30;
-            if (memberLifetime) {
-              // Same reason as the main lifetime branch above: must set
-              // expires_at = NULL on conflict so a pre-existing timed
-              // pnp-member row gets cleared, not left with a stale expiry.
-              await query(`
-                INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, source_plan_id)
-                VALUES ($1, 'pnp-member', true, NULL, $2)
-                ON CONFLICT (user_id, add_on_id, creator_id)
-                DO UPDATE SET is_lifetime = true, expires_at = NULL, is_consumed = false, updated_at = NOW()
-              `, [userId, planId]);
-            } else {
-              await query(`
-                INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id)
-                VALUES ($1, 'pnp-member', NOW() + ($2::integer * INTERVAL '1 day'), $3)
-                ON CONFLICT (user_id, add_on_id, creator_id)
-                DO UPDATE SET
-                  expires_at = CASE
-                    WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
-                    WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
-                      THEN user_entitlements.expires_at + ($2::integer * INTERVAL '1 day')
-                    ELSE NOW() + ($2::integer * INTERVAL '1 day')
-                  END,
-                  is_consumed = false, updated_at = NOW()
-                WHERE NOT user_entitlements.is_lifetime
-              `, [userId, memberDays, planId]);
-            }
-            logger.info('Auto-granted pnp-member alongside prime via plan payment', { userId, planId });
-          } catch (memberErr) {
-            logger.warn('Auto-grant pnp-member failed (non-fatal)', { userId, error: memberErr.message });
-          }
-        }
-
         try {
           const EntitlementAccessService = require('./entitlementAccessService');
           await EntitlementAccessService.invalidateCache(userId);
@@ -4306,6 +4313,218 @@ class PaymentService {
     }
     return result;
   }
+
+  static isStripeCreatorSubscriptionPlan(planId) {
+    return typeof planId === 'string'
+      && ['creator_monthly', 'creator_ice', 'creator_crystal', 'creator_diamond'].includes(planId);
+  }
+
+  static async upsertStripeRenewalPayment({ userId, planId, stripeSubscriptionId, invoiceId, paymentIntentId, amountTotal, currency, metadata = {} }) {
+    const reference = paymentIntentId || invoiceId || stripeSubscriptionId;
+    if (!reference) {
+      throw new Error('MISSING_STRIPE_RENEWAL_REFERENCE');
+    }
+
+    const metadataJson = JSON.stringify({
+      stripe_invoice_id: invoiceId || null,
+      stripe_payment_intent_id: paymentIntentId || null,
+      payment_type: 'subscription_renewal',
+      ...metadata,
+    });
+
+    // Idempotency: check by stripe_invoice_id first (strong guard against concurrent webhooks)
+    if (invoiceId) {
+      const existing = await query(
+        `SELECT id, status FROM payments WHERE stripe_invoice_id = $1 LIMIT 1`,
+        [invoiceId]
+      );
+      if (existing.rows.length > 0) {
+        return existing.rows[0].id;
+      }
+    }
+
+    // Fall back to reference match (paymentIntentId or subscriptionId) for rows
+    // inserted before the stripe_invoice_id column existed.
+    const existingByRef = await query(
+      `SELECT id
+         FROM payments
+        WHERE provider = 'stripe'
+          AND reference = $1
+        ORDER BY created_at ASC
+        LIMIT 1`,
+      [reference]
+    );
+
+    if (existingByRef.rows.length > 0) {
+      const paymentId = existingByRef.rows[0].id;
+      await query(
+        `UPDATE payments
+            SET user_id = $2,
+                plan_id = $3,
+                amount = $4,
+                currency = $5,
+                stripe_subscription_id = $6,
+                stripe_invoice_id = COALESCE(stripe_invoice_id, $8),
+                metadata = COALESCE(metadata, '{}'::jsonb) || $7::jsonb,
+                status = 'completed',
+                completed_at = COALESCE(completed_at, NOW()),
+                updated_at = NOW()
+          WHERE id = $1`,
+        [paymentId, userId, planId || null, amountTotal, currency, stripeSubscriptionId || null, metadataJson, invoiceId || null]
+      );
+      return paymentId;
+    }
+
+    const { rows } = await query(
+      `INSERT INTO payments
+         (id, reference, user_id, plan_id, provider, amount, currency, status,
+          stripe_subscription_id, stripe_invoice_id, metadata, completed_at, created_at, updated_at)
+       VALUES
+         (gen_random_uuid(), $1, $2, $3, 'stripe', $4, $5, 'completed',
+          $6, $7, $8::jsonb, NOW(), NOW(), NOW())
+       RETURNING id`,
+      [
+        reference,
+        userId,
+        planId || null,
+        amountTotal,
+        currency,
+        stripeSubscriptionId || null,
+        invoiceId || null,
+        metadataJson,
+      ]
+    );
+
+    return rows[0]?.id || null;
+  }
+
+  static async syncStripeCreatorSubscriptionSettlement({
+    subscriberId,
+    creatorId,
+    paymentId = null,
+    notifyNewSubscriber = false,
+  }) {
+    if (!subscriberId || !creatorId) {
+      throw new Error('MISSING_CREATOR_SUBSCRIPTION_SCOPE');
+    }
+
+    const creatorRes = await query(
+      `SELECT creator_status, creator_locked, creator_price_usd
+         FROM users
+        WHERE id = $1`,
+      [creatorId]
+    );
+    const creator = creatorRes.rows[0];
+    if (!creator || creator.creator_status !== 'active') {
+      throw new Error('Creator is not active');
+    }
+    if (creator.creator_locked === true) {
+      const err = new Error('This creator is completing onboarding and cannot accept new subscriptions yet.');
+      err.code = 'CREATOR_LOCKED';
+      throw err;
+    }
+
+    const priceUsd = parseFloat(creator.creator_price_usd);
+    if (!Number.isFinite(priceUsd) || priceUsd <= 0) {
+      throw new Error('Invalid creator subscription price');
+    }
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+
+    const subRes = await query(
+      `INSERT INTO creator_subscriptions (creator_id, subscriber_id, price_usd, expires_at, payment_id, status)
+       VALUES ($1, $2, $3, $4, $5, 'active')
+       ON CONFLICT (creator_id, subscriber_id)
+       DO UPDATE SET status = 'active',
+                     price_usd = $3,
+                     payment_id = COALESCE($5, creator_subscriptions.payment_id),
+                     cancelled_at = NULL,
+                     auto_renew = TRUE,
+                     updated_at = NOW()
+       RETURNING id, expires_at`,
+      [creatorId, subscriberId, priceUsd, expiresAt, paymentId || null]
+    );
+
+    const subscriptionId = subRes.rows[0]?.id || null;
+    const effectiveExpiry = subRes.rows[0]?.expires_at || expiresAt;
+
+    await query(
+      `UPDATE users
+          SET creator_subscriber_count = (
+            SELECT COUNT(*)
+            FROM creator_subscriptions
+            WHERE creator_id = $1
+              AND status = 'active'
+              AND (expires_at IS NULL OR expires_at > NOW())
+          )
+        WHERE id = $1`,
+      [creatorId]
+    );
+
+    if (paymentId) {
+      const amountCreator = Math.round(priceUsd * CREATOR_REVENUE_RATE * 100) / 100;
+      const amountPlatform = Math.round(priceUsd * PLATFORM_COMMISSION_RATE * 100) / 100;
+      await query(
+        `INSERT INTO creator_earnings (creator_id, subscription_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+         SELECT $1, $2, $3, $4, $5, 'holding', NOW() + ($6 || ' hours')::interval, $7, date_trunc('month', CURRENT_DATE)::date
+         WHERE NOT EXISTS (
+           SELECT 1 FROM creator_earnings WHERE source_payment_id = $7 AND creator_id = $1
+         )`,
+        [creatorId, subscriptionId, priceUsd, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId]
+      );
+    }
+
+    try {
+      const socketSingleton = require('./socketSingleton');
+      const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+      if (io) {
+        io.to(`user:${subscriberId}`).emit('subscription:updated', {
+          creatorId,
+          status: 'active',
+          expiresAt: effectiveExpiry,
+        });
+      }
+    } catch (socketErr) {
+      logger.warn('syncStripeCreatorSubscriptionSettlement: failed to emit subscription:updated', {
+        subscriberId,
+        creatorId,
+        error: socketErr.message,
+      });
+    }
+
+    if (notifyNewSubscriber && subscriptionId) {
+      try {
+        const subscriberRes = await query(
+          'SELECT username, first_name FROM users WHERE id = $1',
+          [subscriberId]
+        );
+        const subscriberName =
+          subscriberRes.rows[0]?.first_name ||
+          subscriberRes.rows[0]?.username ||
+          'Someone';
+
+        NotificationEmitter.emit({
+          type: 'creator_new_subscriber',
+          category: 'commerce',
+          priority: 'normal',
+          actorId: subscriberId,
+          targetUserId: creatorId,
+          entityType: 'creator_subscription',
+          entityId: String(subscriptionId),
+          message: `${subscriberName} subscribed to your creator profile for $${priceUsd}/mo`,
+        });
+      } catch (notifyErr) {
+        logger.warn('syncStripeCreatorSubscriptionSettlement: failed to emit creator notification', {
+          subscriberId,
+          creatorId,
+          error: notifyErr.message,
+        });
+      }
+    }
+
+    return { subscriptionId, expiresAt: effectiveExpiry, priceUsd };
+  }
   // ─── Stripe ─────────────────────────────────────────────────────────────────
 
   /**
@@ -4326,8 +4545,9 @@ class PaymentService {
     // pnptv_payment_id is set by callCheckoutService for call-package sessions
     // so the pre-created payments row can be looked up directly.
     const existingPaymentId = meta.pnptv_payment_id || null;
-    const paymentType = meta.payment_type || 'one_time'; // 'subscription' | 'call_package' | 'one_time'
+    const paymentType = meta.payment_type || 'one_time'; // 'subscription' | 'call_package' | 'creator_subscription' | 'one_time'
     const stripeSubscriptionId = session.subscription ? String(session.subscription) : null;
+    const paymentIntentId = session.payment_intent ? String(session.payment_intent) : null;
 
     if (!userId) {
       logger.error('[processStripeCheckout] Missing pnptv_user_id in session metadata', { sessionId });
@@ -4340,28 +4560,132 @@ class PaymentService {
         `SELECT id, status FROM payments WHERE stripe_session_id = $1 LIMIT 1`,
         [sessionId]
       );
-      if (existingCheck.rows.length > 0 && existingCheck.rows[0].status === 'completed') {
-        logger.info('[processStripeCheckout] Session already processed, skipping', { sessionId });
+      if (existingCheck.rows.length > 0) {
+        if (existingCheck.rows[0].status === 'completed') {
+          logger.info('[processStripeCheckout] Session already processed, skipping', { sessionId });
+          return { success: true, skipped: true };
+        }
+        // Row exists but not yet completed — a concurrent webhook is processing it.
+        // Abort to avoid double-granting; Stripe will retry if needed.
+        logger.warn('[processStripeCheckout] session row exists with non-completed status — aborting to prevent double-grant', {
+          sessionId, existingStatus: existingCheck.rows[0].status,
+        });
         return { success: true, skipped: true };
       }
 
       const amountTotal = session.amount_total != null ? session.amount_total / 100 : 0;
       const currency = (session.currency || 'usd').toUpperCase();
+      const reference = paymentIntentId || sessionId;
+
+      // For creator_subscription: validate PRIME before writing any payment row so
+      // we never emit a completed→failed flip that creates a visibility window.
+      if (paymentType === 'creator_subscription') {
+        if (!meta.creatorId) {
+          logger.error('[processStripeCheckout] creator_subscription missing creatorId', { sessionId, userId });
+          return { success: false, error: 'MISSING_CREATOR_ID' };
+        }
+        const primeRow = await query(
+          `SELECT id FROM user_entitlements WHERE user_id = $1 AND add_on_id = 'prime' AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1`,
+          [userId]
+        );
+        if (primeRow.rows.length === 0) {
+          logger.warn('[processStripeCheckout] creator_subscription rejected: subscriber lacks PRIME', {
+            sessionId, userId, creatorId: meta.creatorId,
+          });
+          const { v4: uuidv4 } = require('uuid');
+          const failedPaymentId = uuidv4();
+          await query(
+            `INSERT INTO payments
+               (id, reference, user_id, plan_id, provider, amount, currency,
+                status, stripe_session_id, stripe_subscription_id,
+                metadata, created_at, updated_at)
+             VALUES
+               ($1, $2, $3, $4, 'stripe', $5, $6,
+                'failed', $7, $8,
+                $9::jsonb, NOW(), NOW())`,
+            [
+              failedPaymentId,
+              reference,
+              userId,
+              planId || null,
+              amountTotal,
+              currency,
+              sessionId,
+              stripeSubscriptionId,
+              JSON.stringify({
+                stripe_session_id: sessionId,
+                stripe_payment_intent_id: paymentIntentId,
+                payment_type: paymentType,
+                error: 'PRIME subscription required to subscribe to creators',
+                ...meta,
+              }),
+            ]
+          );
+          return { success: false, error: 'PRIME_REQUIRED' };
+        }
+      }
 
       // Upsert the payment row — create if not yet inserted, complete if pending
       let paymentId;
-      if (existingCheck.rows.length > 0) {
+      if (paymentType === 'call_package' && existingPaymentId) {
+        paymentId = existingPaymentId;
+        await query(
+          `UPDATE payments
+             SET status = 'completed',
+                 reference = $1,
+                 amount = $2,
+                 currency = $3,
+                 stripe_session_id = $4,
+                 stripe_subscription_id = $5,
+                 stripe_invoice_id = COALESCE(stripe_invoice_id, $8),
+                 completed_at = NOW(),
+                 updated_at = NOW(),
+                 metadata = COALESCE(metadata, '{}'::jsonb) || $7::jsonb
+           WHERE id = $6`,
+          [
+            reference,
+            amountTotal,
+            currency,
+            sessionId,
+            stripeSubscriptionId,
+            paymentId,
+            JSON.stringify({
+              stripe_session_id: sessionId,
+              stripe_payment_intent_id: paymentIntentId,
+              payment_type: paymentType,
+              ...meta,
+            }),
+            session.invoice ? String(session.invoice) : null,
+          ]
+        );
+      } else if (existingCheck.rows.length > 0) {
         paymentId = existingCheck.rows[0].id;
         await query(
           `UPDATE payments
              SET status = 'completed',
-                 amount = $1,
-                 currency = $2,
-                 stripe_subscription_id = $3,
+                 reference = $1,
+                 amount = $2,
+                 currency = $3,
+                 stripe_subscription_id = $4,
+                 stripe_invoice_id = COALESCE(stripe_invoice_id, $7),
                  completed_at = NOW(),
-                 updated_at = NOW()
-           WHERE id = $4`,
-          [amountTotal, currency, stripeSubscriptionId, paymentId]
+                 updated_at = NOW(),
+                 metadata = COALESCE(metadata, '{}'::jsonb) || $6::jsonb
+           WHERE id = $5`,
+          [
+            reference,
+            amountTotal,
+            currency,
+            stripeSubscriptionId,
+            paymentId,
+            JSON.stringify({
+              stripe_session_id: sessionId,
+              stripe_payment_intent_id: paymentIntentId,
+              payment_type: paymentType,
+              ...meta,
+            }),
+            session.invoice ? String(session.invoice) : null,
+          ]
         );
       } else {
         const { v4: uuidv4 } = require('uuid');
@@ -4369,22 +4693,28 @@ class PaymentService {
         await query(
           `INSERT INTO payments
              (id, reference, user_id, plan_id, provider, amount, currency,
-              status, stripe_session_id, stripe_subscription_id,
+              status, stripe_session_id, stripe_subscription_id, stripe_invoice_id,
               metadata, completed_at, created_at, updated_at)
            VALUES
              ($1, $2, $3, $4, 'stripe', $5, $6,
-              'completed', $7, $8,
+              'completed', $7, $8, $10,
               $9::jsonb, NOW(), NOW(), NOW())`,
           [
             paymentId,
-            sessionId,
+            reference,
             userId,
             planId || null,
             amountTotal,
             currency,
             sessionId,
             stripeSubscriptionId,
-            JSON.stringify({ stripe_session_id: sessionId, payment_type: paymentType, ...meta }),
+            JSON.stringify({
+              stripe_session_id: sessionId,
+              stripe_payment_intent_id: paymentIntentId,
+              payment_type: paymentType,
+              ...meta,
+            }),
+            session.invoice ? String(session.invoice) : null,
           ]
         );
       }
@@ -4396,18 +4726,6 @@ class PaymentService {
         // so onCallPaymentSuccess finds the correct row.
         const callCheckoutService = require('./callCheckoutService');
         const callPaymentId = existingPaymentId || paymentId;
-        // Mark the pre-existing payment row as completed if it was already there
-        if (existingPaymentId && existingPaymentId !== paymentId) {
-          await query(
-            `UPDATE payments
-               SET status = 'completed',
-                   stripe_session_id = $2,
-                   completed_at = NOW(),
-                   updated_at = NOW()
-             WHERE id = $1 AND status = 'pending'`,
-            [existingPaymentId, sessionId]
-          );
-        }
         await callCheckoutService.onCallPaymentSuccess(callPaymentId);
         logger.info('[processStripeCheckout] Call package processed', { sessionId, callPaymentId });
         return { success: true };
@@ -4433,6 +4751,26 @@ class PaymentService {
         return { success: true };
       }
 
+      if (paymentType === 'live_show_ticket') {
+        const slotId = meta.slotId;
+        if (!slotId) {
+          logger.error('[processStripeCheckout] Missing slotId for live_show_ticket', { sessionId, paymentId });
+          return { success: false, error: 'MISSING_SLOT_ID' };
+        }
+
+        const pricePaidUsd = amountTotal > 0 ? amountTotal : (meta.amount_usd || 0);
+
+        await handleTicketSettlement(userId, String(slotId), 'stripe', Number(pricePaidUsd) || 0);
+        logger.info('[processStripeCheckout] Live show ticket settled', {
+          sessionId,
+          paymentId,
+          userId,
+          slotId: String(slotId),
+          pricePaidUsd: Number(pricePaidUsd) || 0,
+        });
+        return { success: true, type: 'live_show_ticket' };
+      }
+
       // Subscription or one-time plan — grant entitlements
       if (!planId) {
         logger.error('[processStripeCheckout] Cannot grant entitlements: pnptv_plan_id missing', { sessionId });
@@ -4441,6 +4779,10 @@ class PaymentService {
 
       const grantMeta = { ...meta };
       if (stripeSubscriptionId) grantMeta.stripeSubscriptionId = stripeSubscriptionId;
+      // Ensure creatorId is present for creator-subscription payment type.
+      // The ...meta spread includes it when set in session metadata, but be
+      // explicit here so it is never silently lost if meta was modified above.
+      if (meta.creatorId) grantMeta.creatorId = meta.creatorId;
 
       const grantResult = await PaymentService.grantEntitlementsForPlan(
         userId,
@@ -4475,9 +4817,74 @@ class PaymentService {
         }
       }
 
+      if (paymentType === 'creator_subscription') {
+        await PaymentService.syncStripeCreatorSubscriptionSettlement({
+          subscriberId: userId,
+          creatorId: String(meta.creatorId),
+          paymentId,
+          notifyNewSubscriber: true,
+        });
+      }
+
       logger.info('[processStripeCheckout] Entitlements granted', {
         sessionId, userId, planId, granted: grantResult.granted,
       });
+
+      // Fire-and-forget: invoice PDF + email. Never blocks or throws.
+      (async () => {
+        try {
+          const user = await UserModel.getById(userId);
+          const plan = await PlanModel.getById(planId);
+          if (!user || !plan) return;
+
+          const customerEmail = user.email;
+          if (!customerEmail) return;
+
+          const customerName = user.display_name || user.first_name || user.username || 'Valued Member';
+          const userLanguage = user.language || 'en';
+          const amountForInvoice = session.amount_total != null ? session.amount_total / 100 : 0;
+          const currency = (session.currency || 'usd').toUpperCase();
+          const isLifetime = plan.is_lifetime || false;
+          const durationDays = plan.duration_days || plan.duration || 30;
+          const expiryDate = isLifetime ? null : (() => { const d = new Date(); d.setDate(d.getDate() + durationDays); return d; })();
+          const invoiceNumber = sessionId;
+
+          try {
+            const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
+              invoiceNumber,
+              customerName,
+              planName: plan.display_name || plan.name,
+              amount: amountForInvoice,
+              currency,
+              provider: 'stripe',
+              transactionId: paymentIntentId || sessionId,
+              purchaseDate: new Date(),
+              expiryDate,
+              language: userLanguage,
+            });
+
+            await EmailService.sendInvoiceEmail({
+              to: customerEmail,
+              customerName,
+              invoiceNumber,
+              amount: amountForInvoice,
+              planName: plan.display_name || plan.name,
+              invoicePdf,
+            });
+
+            logger.info('[processStripeCheckout] Invoice email sent', { sessionId, to: customerEmail });
+          } catch (invoiceErr) {
+            logger.warn('[processStripeCheckout] Invoice email failed (non-critical)', {
+              sessionId, error: invoiceErr.message,
+            });
+          }
+        } catch (notifyErr) {
+          logger.warn('[processStripeCheckout] Notification block failed (non-critical)', {
+            sessionId, error: notifyErr.message,
+          });
+        }
+      })();
+
       return { success: true };
 
     } catch (err) {
@@ -4495,7 +4902,7 @@ class PaymentService {
    * @param {string} planId  - pnptv_plan_id from subscription metadata
    * @returns {Promise<{success: boolean}>}
    */
-  static async renewStripeSubscriptionEntitlements(stripeSubscriptionId, userId, planId) {
+  static async renewStripeSubscriptionEntitlements(stripeSubscriptionId, userId, planId, opts = {}) {
     if (!stripeSubscriptionId || !userId || !planId) {
       logger.warn('[renewStripeSubscriptionEntitlements] Missing required fields', {
         stripeSubscriptionId, userId, planId,
@@ -4504,15 +4911,68 @@ class PaymentService {
     }
 
     try {
+      const paymentId = await PaymentService.upsertStripeRenewalPayment({
+        userId,
+        planId,
+        stripeSubscriptionId,
+        invoiceId: opts.invoiceId || null,
+        paymentIntentId: opts.paymentIntentId || null,
+        amountTotal: opts.amountTotal != null ? opts.amountTotal : 0,
+        currency: opts.currency || 'USD',
+        metadata: { payment_type: 'subscription_renewal', ...opts.metadata },
+      });
+
+      if (PaymentService.isStripeCreatorSubscriptionPlan(planId)) {
+        const primeCheck = await query(
+          `SELECT id FROM user_entitlements WHERE user_id = $1 AND add_on_id = 'prime' AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1`,
+          [userId]
+        );
+        if (primeCheck.rows.length === 0) {
+          logger.warn('[renewStripeSubscriptionEntitlements] creator_subscription renewal blocked: user lacks active PRIME', {
+            userId, planId, stripeSubscriptionId,
+          });
+          try {
+            const { cancelSubscription } = require('./stripeService');
+            await cancelSubscription(stripeSubscriptionId);
+          } catch (cancelErr) {
+            logger.error('[renewStripeSubscriptionEntitlements] failed to cancel Stripe subscription', {
+              stripeSubscriptionId, error: cancelErr.message,
+            });
+          }
+          return { success: false, error: 'PRIME_REQUIRED' };
+        }
+      }
+
       const grantResult = await PaymentService.grantEntitlementsForPlan(
         userId,
         planId,
         'stripe_renewal',
-        { stripeSubscriptionId },
-        null
+        {
+          stripeSubscriptionId,
+          creatorId: opts.creatorId || null,
+        },
+        paymentId
       );
+      if (stripeSubscriptionId && paymentId) {
+        await query(
+          `UPDATE user_entitlements
+             SET stripe_subscription_id = $1
+           WHERE user_id = $2
+             AND source_payment_id = $3
+             AND (stripe_subscription_id IS NULL OR stripe_subscription_id = '')`,
+          [stripeSubscriptionId, userId, paymentId]
+        );
+      }
+      if (PaymentService.isStripeCreatorSubscriptionPlan(planId) && opts.creatorId) {
+        await PaymentService.syncStripeCreatorSubscriptionSettlement({
+          subscriberId: userId,
+          creatorId: String(opts.creatorId),
+          paymentId,
+          notifyNewSubscriber: false,
+        });
+      }
       logger.info('[renewStripeSubscriptionEntitlements] Entitlements renewed', {
-        stripeSubscriptionId, userId, planId, granted: grantResult.granted,
+        stripeSubscriptionId, userId, planId, granted: grantResult.granted, paymentId,
       });
       return { success: true };
     } catch (err) {
@@ -4538,17 +4998,65 @@ class PaymentService {
          WHERE stripe_subscription_id = $1
            AND (expires_at IS NULL OR expires_at > NOW())
            AND is_lifetime = false
-         RETURNING id`,
+         RETURNING id, user_id`,
         [stripeSubscriptionId]
       );
       const deactivated = result.rows.length;
+      const affectedUserIds = [...new Set(result.rows.map((row) => String(row.user_id)).filter(Boolean))];
+      if (affectedUserIds.length > 0) {
+        try {
+          const EntitlementAccessService = require('./entitlementAccessService');
+          for (const userId of affectedUserIds) {
+            await EntitlementAccessService.invalidateCache(userId);
+            await EntitlementAccessService.recomputeUserTier(userId);
+          }
+        } catch (syncErr) {
+          logger.warn('[deactivateStripeSubscriptionEntitlements] cache/tier sync failed', {
+            stripeSubscriptionId,
+            error: syncErr.message,
+          });
+        }
+      }
       logger.info('[deactivateStripeSubscriptionEntitlements] Entitlements deactivated', {
-        stripeSubscriptionId, deactivated,
+        stripeSubscriptionId, deactivated, affectedUsers: affectedUserIds.length,
       });
       return { success: true, deactivated };
     } catch (err) {
       logger.error('[deactivateStripeSubscriptionEntitlements] Error', { error: err.message });
       return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Schedule entitlement expiry at a future date instead of revoking immediately.
+   * Used when a subscription is cancelled with cancel_at_period_end=true — the user
+   * paid for the current period and retains access until it lapses naturally.
+   *
+   * Only shortens expires_at; never extends an entitlement that already has a later
+   * expiry (the WHERE guard prevents overwriting a longer-running entitlement).
+   *
+   * @param {string} stripeSubscriptionId
+   * @param {Date}   expiresAt  - When access should end
+   * @returns {Promise<void>}
+   */
+  static async scheduleStripeEntitlementExpiry(stripeSubscriptionId, expiresAt) {
+    try {
+      const { rows } = await query(
+        `UPDATE user_entitlements
+           SET expires_at = $2, updated_at = NOW()
+         WHERE stripe_subscription_id = $1
+           AND (expires_at IS NULL OR expires_at > $2)
+           AND is_lifetime = false
+         RETURNING add_on_id`,
+        [stripeSubscriptionId, expiresAt]
+      );
+      logger.info('[scheduleStripeEntitlementExpiry] Entitlements scheduled for expiry', {
+        stripeSubscriptionId,
+        expiresAt,
+        count: rows.length,
+      });
+    } catch (err) {
+      logger.error('[scheduleStripeEntitlementExpiry] Error', { error: err.message });
     }
   }
 }
