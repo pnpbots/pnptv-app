@@ -9,6 +9,7 @@
 import React, { useState } from "react";
 import clsx from "clsx";
 import { BookCallModal } from "./BookCallModal";
+import { isCreatorPayLocked } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -192,46 +193,56 @@ export function CreatorCard({
           </p>
 
           {/* Book a Call button */}
-          <button
-            type="button"
-            aria-label={`Book a call with ${creator.username}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setModalOpen(true);
-            }}
-            className={clsx(
-              "mt-1 w-full min-h-[52px] rounded-xl text-base font-bold text-white",
-              "flex items-center justify-center gap-2",
-              "transition-all duration-150 active:scale-[0.97]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
-              isOnline ? "opacity-100 animate-pulse-subtle" : "opacity-90 hover:opacity-100 hover:brightness-110"
-            )}
-            style={{
-              background: isOnline
-                ? "linear-gradient(90deg, #34C759, #00C49A)"
-                : "linear-gradient(90deg, #D4007A, #E69138)",
-              boxShadow: isOnline
-                ? "0 0 16px rgba(52,199,89,0.35)"
-                : "0 0 12px rgba(212,0,122,0.25)",
-            }}
-          >
-            <svg
-              className="w-4.5 h-4.5 flex-shrink-0"
-              style={{ width: 18, height: 18 }}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-              aria-hidden="true"
+          {isCreatorPayLocked(creator.username) ? (
+            <button
+              type="button"
+              disabled
+              className="mt-1 w-full min-h-[52px] rounded-xl text-base font-bold flex items-center justify-center opacity-50 cursor-not-allowed bg-white/5 border border-white/10 text-pnp-textSecondary"
             >
-              {isOnline ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 9v7.5" />
+              🔒 Launches June 1st
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label={`Book a call with ${creator.username}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setModalOpen(true);
+              }}
+              className={clsx(
+                "mt-1 w-full min-h-[52px] rounded-xl text-base font-bold text-white",
+                "flex items-center justify-center gap-2",
+                "transition-all duration-150 active:scale-[0.97]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+                isOnline ? "opacity-100 animate-pulse-subtle" : "opacity-90 hover:opacity-100 hover:brightness-110"
               )}
-            </svg>
-            {isOnline ? "Call Now" : "Book a Call"}
-          </button>
+              style={{
+                background: isOnline
+                  ? "linear-gradient(90deg, #34C759, #00C49A)"
+                  : "linear-gradient(90deg, #D4007A, #E69138)",
+                boxShadow: isOnline
+                  ? "0 0 16px rgba(52,199,89,0.35)"
+                  : "0 0 12px rgba(212,0,122,0.25)",
+              }}
+            >
+              <svg
+                className="w-4.5 h-4.5 flex-shrink-0"
+                style={{ width: 18, height: 18 }}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                {isOnline ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 9v7.5" />
+                )}
+              </svg>
+              {isOnline ? "Call Now" : "Book a Call"}
+            </button>
+          )}
         </div>
       </div>
 

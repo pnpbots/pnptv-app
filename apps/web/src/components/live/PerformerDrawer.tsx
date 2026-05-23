@@ -21,6 +21,7 @@ import {
   listCreatorRecordings,
   getCreatorSubscriptionStatus,
   subscribeToCreator,
+  isCreatorPayLocked,
   type CreatorMediaItem,
   type StreamRecording,
   type FeaturedPerformer,
@@ -537,28 +538,46 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
             )}
 
             {/* Book Call */}
-            <button
-              onClick={() => setShowBookModal(true)}
-              className="col-span-1 py-2.5 rounded-xl text-xs font-bold text-pnp-textPrimary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40 active:scale-95 transition-all"
-            >
-              Book Call
-            </button>
+            {isCreatorPayLocked(performer.slug) ? (
+              <button
+                disabled
+                className="col-span-1 py-2.5 rounded-xl text-xs font-bold opacity-50 cursor-not-allowed bg-white/5 border border-white/10 text-pnp-textSecondary"
+              >
+                🔒 June 1st
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowBookModal(true)}
+                className="col-span-1 py-2.5 rounded-xl text-xs font-bold text-pnp-textPrimary bg-pnp-surface border border-pnp-border hover:border-pnp-accent/40 active:scale-95 transition-all"
+              >
+                Book Call
+              </button>
+            )}
 
             {/* Subscribe */}
-            <button
-              onClick={() => {
-                if (subscribed) return;
-                setShowSubscribePrompt((v) => !v);
-              }}
-              className="col-span-1 py-2.5 rounded-xl text-xs font-bold text-white active:scale-95 transition-all"
-              style={
-                subscribed
-                  ? { background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }
-                  : { background: "linear-gradient(135deg,#D4007A,#E69138)" }
-              }
-            >
-              {subscribed ? "Subscribed" : `$${subPrice > 0 ? subPrice.toFixed(0) : "?"}/mo`}
-            </button>
+            {isCreatorPayLocked(performer.slug) ? (
+              <button
+                disabled
+                className="col-span-1 py-2.5 rounded-xl text-xs font-bold opacity-50 cursor-not-allowed bg-white/5 border border-white/10 text-pnp-textSecondary"
+              >
+                🔒 June 1st
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  if (subscribed) return;
+                  setShowSubscribePrompt((v) => !v);
+                }}
+                className="col-span-1 py-2.5 rounded-xl text-xs font-bold text-white active:scale-95 transition-all"
+                style={
+                  subscribed
+                    ? { background: "rgba(94,209,196,0.15)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.3)" }
+                    : { background: "linear-gradient(135deg,#D4007A,#E69138)" }
+                }
+              >
+                {subscribed ? "Subscribed" : `$${subPrice > 0 ? subPrice.toFixed(0) : "?"}/mo`}
+              </button>
+            )}
           </div>
         </div>
       </div>
