@@ -171,6 +171,8 @@ const COLOMBIA_EXEMPT_PREFIXES = [
   // Main Stage is free-to-access for everyone, including Colombia users
   // without pnp-col — viewing + going on cam have no tier gates by design.
   '/api/main-stage/',
+  // Onboarding must complete before a Colombian user can even purchase pnp-col
+  '/api/verify-age-self', '/api/complete-onboarding',
 ];
 
 async function colombiaAccessGate(req, res, next) {
@@ -3355,7 +3357,7 @@ app.post('/api/webapp/auth/enable-pnptv-id', requireSessionAuth, enablePnptvIdLi
   }
 
   try {
-    const EmailService = require('../../services/emailservice');
+    const EmailService = require('../../services/emailService');
     const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
     const displayName = user.displayName || user.firstName || user.username || 'there';
     await EmailService.send({
@@ -5849,6 +5851,50 @@ app.post('/api/webapp/wellness-mode/cancel-disable', requireSessionAuth, asyncHa
   const status = await WellnessModeService.cancelDisable(req.session.user.id);
   return res.json({ success: true, ...status });
 }));
+
+// Use Tracker — private harm-reduction log (slam / smoke)
+function buildUseTypeStats(entries, type) {
+  const typed = entries.filter(r => r.type === type);
+  const now = new Date();
+  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const today = typed.filter(r => new Date(r.logged_at) >= todayStart).length;
+  const week  = typed.filter(r => new Date(r.logged_at) >= weekAgo).length;
+  const month = typed.length;
+  const lastAt = typed.length > 0 ? typed[0].logged_at : null;
+  const recentDays = Array.from({ length: 30 }, (_, i) => {
+    const dayStart = new Date(todayStart.getTime() - i * 86400000);
+    const dayEnd   = new Date(dayStart.getTime() + 86400000);
+    return typed.some(r => { const t = new Date(r.logged_at); return t >= dayStart && t < dayEnd; });
+  });
+  return { lastAt, today, week, month, recentDays };
+}
+
+app.get('/api/webapp/use-tracker', requireSessionAuth, asyncHandler(async (req, res) => {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT type, logged_at FROM use_tracker_logs
+     WHERE user_id = $1 AND logged_at >= NOW() - INTERVAL '30 days'
+     ORDER BY logged_at DESC`,
+    [req.session.user.id]
+  );
+  return res.json({ success: true, slam: buildUseTypeStats(rows, 'slam'), smoke: buildUseTypeStats(rows, 'smoke') });
+}));
+
+app.post('/api/webapp/use-tracker/log', requireSessionAuth, asyncHandler(async (req, res) => {
+  const { type } = req.body;
+  if (type !== 'slam' && type !== 'smoke') return res.status(400).json({ success: false, error: 'Invalid type' });
+  const pool = getPool();
+  await pool.query('INSERT INTO use_tracker_logs (user_id, type) VALUES ($1, $2)', [req.session.user.id, type]);
+  const { rows } = await pool.query(
+    `SELECT type, logged_at FROM use_tracker_logs
+     WHERE user_id = $1 AND logged_at >= NOW() - INTERVAL '30 days'
+     ORDER BY logged_at DESC`,
+    [req.session.user.id]
+  );
+  return res.json({ success: true, slam: buildUseTypeStats(rows, 'slam'), smoke: buildUseTypeStats(rows, 'smoke') });
+}));
+
 app.post('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutGroupController.createGroup));
 
 
@@ -6026,6 +6072,73 @@ app.post('/api/webapp/nearby/places/submit', asyncHandler(async (req, res) => {
     website?.trim().slice(0,500) || null, instagram?.trim().slice(0,100) || null,
   ]);
   return res.json({ success: true, message: 'Place submitted for review!' });
+}));
+
+// Get current user's favorited place IDs
+app.get('/api/webapp/nearby/places/favorites', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+  const userId = parseInt(user.id, 10);
+  if (isNaN(userId)) return res.json({ success: true, placeIds: [] });
+  const pool = getPool();
+  const { rows } = await pool.query(
+    'SELECT place_id FROM user_place_favorites WHERE user_id = $1',
+    [userId]
+  );
+  return res.json({ success: true, placeIds: rows.map(r => r.place_id) });
+}));
+
+// Toggle favorite on a place
+app.post('/api/webapp/nearby/places/:id/favorite', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+  const userId = parseInt(user.id, 10);
+  if (isNaN(userId)) return res.status(400).json({ success: false, error: 'Invalid user' });
+  const placeId = parseInt(req.params.id, 10);
+  if (isNaN(placeId)) return res.status(400).json({ success: false, error: 'Invalid place' });
+  const pool = getPool();
+  const existing = await pool.query(
+    'SELECT 1 FROM user_place_favorites WHERE user_id = $1 AND place_id = $2',
+    [userId, placeId]
+  );
+  if (existing.rows.length > 0) {
+    await pool.query('DELETE FROM user_place_favorites WHERE user_id = $1 AND place_id = $2', [userId, placeId]);
+    return res.json({ success: true, favorited: false });
+  } else {
+    await pool.query('INSERT INTO user_place_favorites (user_id, place_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [userId, placeId]);
+    return res.json({ success: true, favorited: true });
+  }
+}));
+
+// Track a place view
+app.post('/api/webapp/nearby/places/:id/view', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+  const placeId = parseInt(req.params.id, 10);
+  if (isNaN(placeId)) return res.status(400).json({ success: false, error: 'Invalid place' });
+  const pool = getPool();
+  await pool.query(
+    'UPDATE nearby_places SET view_count = COALESCE(view_count, 0) + 1 WHERE id = $1',
+    [placeId]
+  );
+  return res.json({ success: true });
+}));
+
+// Report a place
+app.post('/api/webapp/nearby/places/:id/report', asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+  const placeId = parseInt(req.params.id, 10);
+  if (isNaN(placeId)) return res.status(400).json({ success: false, error: 'Invalid place' });
+  const VALID_TYPES = ['closed', 'incorrect_info', 'inappropriate', 'spam', 'other'];
+  const reportType = VALID_TYPES.includes(req.body?.reportType) ? req.body.reportType : 'other';
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO nearby_place_reports (place_id, user_id, report_type, description)
+     VALUES ($1, $2, $3, $4)`,
+    [placeId, user.id, reportType, req.body?.description?.slice(0, 500) || null]
+  );
+  return res.json({ success: true });
 }));
 
 // Context-aware nearby endpoints (session-auth required)
