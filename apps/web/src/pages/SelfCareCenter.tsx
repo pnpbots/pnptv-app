@@ -249,7 +249,7 @@ export default function SelfCareCenter() {
           </header>
 
           {/* ── Section 1: The trackers (the core) ──────────────────────────── */}
-          <section className="mb-8">
+          <section id="tracker" className="mb-8">
             <SectionHeader
               eyebrow={t.wellness.centerSec1Eyebrow}
               title={t.wellness.centerSec1Title}

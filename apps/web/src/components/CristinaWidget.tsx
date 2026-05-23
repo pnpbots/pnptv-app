@@ -365,17 +365,18 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   const handleSelfCareLog = useCallback(async (kind: "slam" | "smoke") => {
     if (selfCareBusyRef.current) return;
     selfCareBusyRef.current = kind;
+    setSelfCareFanOpen(false);
     try {
       await logUse(kind);
       setSelfCareToast({ kind, until: Date.now() + 1800 });
+      navigate("/self-care#tracker");
     } catch {
       // Silent — failures here would be jarring. The Settings card surfaces
       // load/save problems; this FAB is fire-and-forget on purpose.
     } finally {
       selfCareBusyRef.current = null;
-      setSelfCareFanOpen(false);
     }
-  }, []);
+  }, [navigate]);
   // Auto-clear toast after its lifetime.
   useEffect(() => {
     if (!selfCareToast) return;
