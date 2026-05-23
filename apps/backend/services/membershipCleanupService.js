@@ -83,13 +83,9 @@ class MembershipCleanupService {
       const statusResults = await this.updateAllSubscriptionStatuses();
       results.statusUpdates = statusResults;
 
-      // Step 2: Add missing PRIME users to the channel
-      if (this.bot && this.primeChannelId) {
-        const addResults = await this.addMissingUsersToPrimeChannel();
-        results.channelAdds = addResults;
-      } else {
-        logger.warn('Skipping channel adds: Bot or PRIME_CHANNEL_ID not configured');
-      }
+      // Step 2: PRIME-channel auto-restore disabled — PRIME migrated to webapp 2026-04-28.
+      // Previously DM'd users a one-time invite link to the legacy Telegram PRIME channel,
+      // which is no longer the access surface. Keep status updates + expiry kicks active.
 
       // Step 3: Kick churned/expired users from PRIME channel
       if (this.bot && this.primeChannelId) {
@@ -105,7 +101,6 @@ class MembershipCleanupService {
       logger.info('Membership cleanup completed', {
         duration: `${duration}s`,
         statusUpdates: results.statusUpdates,
-        channelAdds: results.channelAdds,
         channelKicks: results.channelKicks
       });
 

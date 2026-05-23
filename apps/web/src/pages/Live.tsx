@@ -460,13 +460,6 @@ export default function Live() {
                 border: "1px solid rgba(212,0,122,0.25)",
               }}
             >
-              <div className="flex items-center gap-2 mb-2">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <h3 className="text-sm font-bold text-white">We are casting now!</h3>
-              </div>
-              <p className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.65)" }}>
-                Want to perform on PNP Live? You need a profile picture and {castingStatus.requiredPosts} posts to apply.
-              </p>
               <div className="space-y-1.5 mb-3">
                 <div className="flex items-center gap-2 text-xs" style={{ color: castingStatus.hasPhoto ? "#34C759" : "#FF3B30" }}>
                   <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
@@ -563,14 +556,6 @@ export default function Live() {
             border: "1px solid rgba(212,0,122,0.25)",
           }}
         >
-          <div className="flex items-center gap-2 mb-2">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <h3 className="text-sm font-bold text-white">We are casting now!</h3>
-          </div>
-          <p className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.65)" }}>
-            Join PNP Live as a performer. Apply now and start streaming.
-          </p>
-
           {castingStatus.application?.status === "pending" ? (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(255,179,64,0.1)", border: "1px solid rgba(255,179,64,0.25)" }}>
               <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#FFB340" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
