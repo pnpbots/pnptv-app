@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 // Note: joining state removed — call now opens Telegram directly
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { getCallBooking } from "@/lib/api";
 import { PostCallSurveyModal } from "@/components/creators/PostCallSurveyModal";
 import { useI18n } from "@/lib/i18n";
@@ -79,12 +79,14 @@ const STRINGS = {
 export default function BookingConfirmation() {
   const { bookingId } = useParams<{ bookingId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const i18n = useI18n();
   const s = STRINGS[i18n.lang === "es" ? "es" : "en"];
   const [booking, setBooking] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showSurvey, setShowSurvey] = useState(false);
+  // Open survey if coming from the post-call notification deep-link (?survey=1)
+  const [showSurvey, setShowSurvey] = useState(() => searchParams.get("survey") === "1");
 
   useEffect(() => {
     if (!bookingId) return;

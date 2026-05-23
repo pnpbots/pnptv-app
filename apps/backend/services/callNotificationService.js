@@ -398,9 +398,67 @@ async function reconcileReminders() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Post-call survey prompt
+// ---------------------------------------------------------------------------
+
+function postCallSurveyHtml({ creatorName, surveyUrl }) {
+  return buildBaseEmailHtml({
+    headerSubtitle: 'Book a Call',
+    title: `How was your call with ${creatorName}?`,
+    contentHtml: `
+    <p>Hi there,</p>
+    <p>Your 1-on-1 call with <strong>${creatorName}</strong> has ended. We hope it was great!</p>
+    <p>If you have a minute, leave a quick rating — it helps creators improve and helps other members choose the right person for them.</p>
+    <div style="text-align:center;"><a href="${surveyUrl}" class="btn">Rate your call</a></div>
+    <p>Takes less than 30 seconds.<br><strong>The PNPtv Team</strong></p>
+    `,
+  });
+}
+
+/**
+ * Send a post-call survey prompt to the member after a booking ends.
+ * Non-fatal — all errors are swallowed and logged as warnings.
+ *
+ * @param {string} memberId
+ * @param {string} bookingId
+ * @param {string} creatorDisplayName
+ */
+async function sendPostCallSurveyPrompt(memberId, bookingId, creatorDisplayName) {
+  try {
+    const memberInfo = await fetchUserInfo(memberId);
+    const surveyUrl = `${APP_URL}/booking/${encodeURIComponent(bookingId)}/confirm?survey=1`;
+    const creatorName = creatorDisplayName || 'the creator';
+
+    const tgMsg =
+      `✅ Your call with ${creatorName} has ended!\n\n` +
+      `How did it go? Leave a quick rating (takes 30 seconds):\n${surveyUrl}`;
+
+    await sendNotificationViaTelegram(memberId, {
+      type: 'hangout_call',
+      message: tgMsg,
+      entityType: 'call',
+      entityId: null,
+    });
+
+    if (memberInfo.email) {
+      await sendBookingEmail({
+        to: memberInfo.email,
+        subject: `How was your call with ${creatorName}?`,
+        html: postCallSurveyHtml({ creatorName, surveyUrl }),
+      });
+    }
+
+    logger.info('[callNotificationService] post-call survey prompt sent', { memberId, bookingId });
+  } catch (err) {
+    logger.warn('[callNotificationService] sendPostCallSurveyPrompt failed', { memberId, bookingId, error: err.message });
+  }
+}
+
 module.exports = {
   sendBookingConfirmationToMember,
   sendBookingConfirmationToCreator,
   scheduleCallReminders,
   reconcileReminders,
+  sendPostCallSurveyPrompt,
 };

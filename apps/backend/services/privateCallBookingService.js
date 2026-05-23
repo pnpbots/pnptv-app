@@ -5,6 +5,8 @@ const BookingNotificationModel = require('../models/bookingNotificationModel');
 const PerformerModel = require('../models/performerModel');
 const UserService = require('./userService');
 const { generateToken, LIVEKIT_WS_URL } = require('./livekitService');
+const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
+const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
 
 /**
@@ -642,8 +644,8 @@ class PrivateCallBookingService {
       const endResult = await CallSessionModel.end(session.id);
 
       if (endResult.success) {
-        // Mark booking as completed
         await BookingModel.complete(bookingId);
+        PrivateCallBookingService._onCallCompleted(bookingId).catch(() => {});
       }
 
       return endResult;
@@ -781,6 +783,7 @@ class PrivateCallBookingService {
         try {
           await CallSessionModel.end(session.id);
           await BookingModel.complete(session.bookingId);
+          PrivateCallBookingService._onCallCompleted(session.bookingId).catch(() => {});
           endedCount++;
         } catch (endError) {
           logger.error('Error auto-ending session:', { sessionId: session.id, error: endError.message });
@@ -801,6 +804,58 @@ class PrivateCallBookingService {
   /**
    * Check for no-shows (run every 5 minutes)
    */
+  /**
+   * Post-completion hook: record creator earnings + send survey prompt to member.
+   * Fire-and-forget — all errors are swallowed so they never block the caller.
+   */
+  static async _onCallCompleted(bookingId) {
+    try {
+      const booking = await BookingModel.getById(bookingId);
+      if (!booking) return;
+
+      const performer = await PerformerModel.getById(booking.performerId);
+      if (!performer) return;
+
+      // 1. Record 70/30 earnings split in creator_earnings (holding, 72h hold)
+      const grossAmount = (booking.priceCents || 0) / 100;
+      if (grossAmount > 0) {
+        try {
+          const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
+          const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
+          const pmtRow = await query(
+            `SELECT id FROM booking_payments WHERE booking_id = $1 AND status = 'paid' LIMIT 1`,
+            [bookingId]
+          );
+          const sourcePaymentId = pmtRow.rows[0]?.id || null;
+          await query(
+            `INSERT INTO creator_earnings
+               (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+             VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))
+             ON CONFLICT DO NOTHING`,
+            [performer.userId, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
+          );
+          logger.info('[privateCallBookingService] creator earnings recorded on completion', {
+            bookingId, creatorId: performer.userId, grossAmount, amountCreator,
+          });
+        } catch (earningsErr) {
+          logger.warn('[privateCallBookingService] creator_earnings insert failed (non-fatal)', {
+            bookingId, error: earningsErr.message,
+          });
+        }
+      }
+
+      // 2. Send post-call survey prompt to member
+      const callNotificationService = require('./callNotificationService');
+      await callNotificationService.sendPostCallSurveyPrompt(
+        booking.userId,
+        bookingId,
+        performer.displayName || 'the creator'
+      );
+    } catch (err) {
+      logger.warn('[privateCallBookingService] _onCallCompleted hook failed', { bookingId, error: err.message });
+    }
+  }
+
   static async checkNoShows(gracePeriodMinutes = 10) {
     try {
       const { query } = require('../config/postgres');
