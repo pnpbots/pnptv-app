@@ -2807,7 +2807,7 @@ app.get('/api/webapp/auth/oidc/login', oidcLoginLimiter, asyncHandler(async (req
   // Optional method hint — "passkey" or "magic_link". Mapped to Authentik
   // acr_values so a flow policy (operator-side config) can route the user to
   // the matching auth stage. Unrecognized values are dropped silently.
-  const methodHint = ['passkey', 'magic_link'].includes(req.query.method) ? req.query.method : undefined;
+  const methodHint = ['passkey', 'magic_link', 'register'].includes(req.query.method) ? req.query.method : undefined;
   const loginHint = typeof req.query.login_hint === 'string' ? req.query.login_hint.trim() : '';
 
   // Build Authentik authorization URL (PKCE S256, no client_secret in URL)

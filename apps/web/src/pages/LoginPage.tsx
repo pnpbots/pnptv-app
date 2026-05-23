@@ -720,15 +720,18 @@ export function LoginPage() {
       return;
     }
     setSignupEmailError(null);
-    // Persist so Settings / downstream can pick it up, and pre-fill Authentik
     try { localStorage.setItem("pnptv_signup_email", email); } catch { /* ignore */ }
-    const url = `${ENROLLMENT_FLOW_URL}?email=${encodeURIComponent(email)}`;
-    window.location.href = url;
+    const rt = new URLSearchParams(window.location.search).get("returnTo");
+    const params = new URLSearchParams({ method: "register", login_hint: email });
+    if (rt) params.set("return_to", rt);
+    window.location.href = `/api/webapp/auth/oidc/login?${params.toString()}`;
   };
 
   const handleCreateAccountNoEmail = () => {
-    // Fallback: user clicks CTA without filling email
-    window.location.href = ENROLLMENT_FLOW_URL;
+    const rt = new URLSearchParams(window.location.search).get("returnTo");
+    const params = new URLSearchParams({ method: "register" });
+    if (rt) params.set("return_to", rt);
+    window.location.href = `/api/webapp/auth/oidc/login?${params.toString()}`;
   };
 
   const [oidcLoading, setOidcLoading] = useState(false);

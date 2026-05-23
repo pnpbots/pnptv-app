@@ -448,6 +448,12 @@ class AuthentikService {
     } else if (options.method === 'magic_link') {
       params.set('acr_values', 'urn:authentik:email');
       params.set('prompt', 'login');
+    } else if (options.method === 'register') {
+      params.set('prompt', 'create');
+    }
+
+    if (options.loginHint) {
+      params.set('login_hint', options.loginHint);
     }
 
     return `${OIDC_AUTH_ENDPOINT}?${params.toString()}`;
