@@ -1683,11 +1683,11 @@ function deriveHashtags(tags = [], max = 3) {
  * URL and at least one hashtag are always preserved.
  * Description is trimmed first; title is trimmed second if still over limit.
  */
-function buildVideoTweetText({ title, description, tags = [], creatorXHandle = null, url, limit = 280 }) {
+function buildVideoTweetText({ title, description, tags = [], creatorXHandle = null, pnptvUsername = null, url, limit = 280 }) {
   const hashtags = deriveHashtags(tags);
   const mention = creatorXHandle
     ? ` @${creatorXHandle.replace(/^@/, '')}`
-    : '';
+    : (pnptvUsername ? ` | pnptv.app/@${pnptvUsername}` : '');
   const suffix = `\n\n${url}\n\n${hashtags}${mention}`;
 
   // suffix is non-negotiable — calculate how many chars remain for body

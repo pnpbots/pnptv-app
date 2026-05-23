@@ -458,6 +458,7 @@ const shareToX = async (req, res) => {
       description: post.video_description || post.content || null,
       tags: [],
       creatorXHandle,
+      pnptvUsername: sessionUser.username || null,
       url: shareUrl,
       limit: X_MAX_TEXT_LENGTH,
     });

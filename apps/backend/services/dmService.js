@@ -471,16 +471,20 @@ class DmService {
     if (noteText) bodyParts.push(noteText);
     bodyParts.push(`📎 ${authorHandle}:`);
     if (preview) bodyParts.push(preview + (post.content && post.content.length > 180 ? '…' : ''));
-    bodyParts.push(`https://app.pnptv.app/post/${post.id}`);
+    bodyParts.push(`https://pnptv.app/post/${post.id}`);
     const content = bodyParts.join('\n');
     const meta = {
       postId: post.id,
       snapshot: {
         authorUsername: post.authorUsername || null,
         authorFirstName: post.authorFirstName || null,
+        authorPhoto: post.authorPhoto || null,
         content: preview || null,
         mediaUrl: post.mediaUrl || null,
         mediaType: post.mediaType || null,
+        videoTitle: post.videoTitle || null,
+        videoDescription: post.videoDescription || null,
+        videoThumbnailUrl: post.videoThumbnailUrl || null,
         note: noteText || null,
       },
     };

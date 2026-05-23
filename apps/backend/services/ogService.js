@@ -535,7 +535,7 @@ const getVideoPreviewOG = async (postId) => {
     const createdAtIso = post.created_at ? new Date(post.created_at).toISOString() : null;
     const creatorXHandle = post.x_username || null;
     const authorProfileUrl = post.username
-      ? `${APP_BASE_URL}/profile/${post.user_id}`
+      ? `${APP_BASE_URL}/profile/${post.username}`
       : `${APP_BASE_URL}`;
 
     let ogData;
@@ -563,8 +563,10 @@ const getVideoPreviewOG = async (postId) => {
         videoDuration: null, // no duration column in social_posts
         creatorXHandle,
         authorName,
+        authorUsername: post.username || null,
         authorProfileUrl,
         thumbnailUrl: absoluteThumbUrl || `${APP_BASE_URL}/og-default.png`,
+        contentSnippet,
       };
     } else {
       // Image or text post — still use the preview page
@@ -587,8 +589,10 @@ const getVideoPreviewOG = async (postId) => {
         videoDuration: null,
         creatorXHandle,
         authorName,
+        authorUsername: post.username || null,
         authorProfileUrl,
         thumbnailUrl: absoluteThumbUrl || toAbsoluteUrl(effectiveMediaUrl) || `${APP_BASE_URL}/og-default.png`,
+        contentSnippet,
       };
     }
 

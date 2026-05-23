@@ -702,7 +702,9 @@ const shareDmPost = async (req, res) => {
   const { rows: postRows } = await query(
     `SELECT sp.id, sp.user_id, sp.content, sp.media_url, sp.media_type,
             sp.is_deleted, sp.is_shareable,
-            u.username AS author_username, u.first_name AS author_first_name
+            sp.video_title, sp.video_description, sp.video_thumbnail_url,
+            u.username AS author_username, u.first_name AS author_first_name,
+            u.photo_file_id AS author_photo
        FROM social_posts sp
        JOIN users u ON u.id = sp.user_id
       WHERE sp.id = $1`,
@@ -712,6 +714,7 @@ const shareDmPost = async (req, res) => {
   if (!post || post.is_deleted) return res.status(404).json({ error: 'Post not found' });
 
   try {
+    const resolvePhoto = (p) => (p && (p.startsWith('/') || p.startsWith('http'))) ? p : null;
     const msg = await DmService.sharePostToDm(
       user.id,
       partnerId,
@@ -719,9 +722,13 @@ const shareDmPost = async (req, res) => {
         id: post.id,
         authorUsername: post.author_username || null,
         authorFirstName: post.author_first_name || null,
+        authorPhoto: resolvePhoto(post.author_photo),
         content: post.content || null,
         mediaUrl: post.media_url || null,
         mediaType: post.media_type || null,
+        videoTitle: post.video_title || null,
+        videoDescription: post.video_description || null,
+        videoThumbnailUrl: post.video_thumbnail_url || null,
       },
       note
     );

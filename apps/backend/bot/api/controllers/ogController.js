@@ -586,15 +586,18 @@ const renderVideoPreview = async (req, res) => {
     </div>
 
     <div class="info">
-      <h1>Clouds &amp; Rush Network</h1>
-      <p>Exclusive community content. Stream, connect, and vibe with the hottest PNP creators.</p>
+      ${og.authorUsername
+        ? `<p style="font-size:13px;color:#8E8E93;margin-bottom:6px;"><a href="${escAttr(`${APP_BASE_URL}/profile/${og.authorUsername}`)}" style="color:#5ED1C4;text-decoration:none;font-weight:600;">@${escAttr(og.authorUsername)}</a></p>`
+        : (og.authorName ? `<p style="font-size:13px;color:#8E8E93;margin-bottom:6px;">${escAttr(og.authorName)}</p>` : '')}
+      <h1>${escAttr(og.title || 'PNPtv!')}</h1>
+      ${og.contentSnippet ? `<p>${escAttr(og.contentSnippet)}</p>` : `<p>Watch on PNPtv! — the queer PNP community streaming platform.</p>`}
     </div>
 
-    <a href="${APP_BASE_URL}" class="cta-btn">
+    <a href="${escAttr(og.authorUsername ? `${APP_BASE_URL}/profile/${og.authorUsername}` : APP_BASE_URL)}" class="cta-btn">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.58-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.39a4.493 4.493 0 00-1.757 4.306 4.493 4.493 0 004.306-1.758M16.5 9a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
       </svg>
-      Get PNPtv!
+      ${og.authorUsername ? `View @${escAttr(og.authorUsername)}` : 'Join PNPtv!'}
     </a>
 
     <p class="footer-text">
