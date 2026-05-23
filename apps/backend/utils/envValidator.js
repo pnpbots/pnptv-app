@@ -42,6 +42,7 @@ const ENV_VAR_GROUPS = {
   payment_epayco: ['EPAYCO_PUBLIC_KEY', 'EPAYCO_PRIVATE_KEY'],
   payment_daimo: ['DAIMO_API_KEY', 'DAIMO_WEBHOOK_SECRET'],
   payment_stripe: ['STRIPE_PUBLISHABLE_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'],
+  payment_btcpay: ['BTCPAY_URL', 'BTCPAY_API_KEY', 'BTCPAY_WEBHOOK_SECRET'],
   monitoring: ['SENTRY_DSN'],
   ai: ['OPENAI_API_KEY'],
 };
