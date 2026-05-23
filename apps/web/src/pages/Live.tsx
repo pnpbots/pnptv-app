@@ -984,7 +984,13 @@ export default function Live() {
             <button onClick={openWalletHistory} className="text-[10px] text-pnp-textSecondary hover:text-pnp-accent transition-colors">
               {t.live.history}
             </button>
-            <button onClick={() => setShowBuyModal(true)} className="px-2 py-1 rounded-md text-[10px] font-semibold text-white btn-gradient">
+            <button onClick={() => setShowBuyModal(true)} className="relative flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold text-white btn-gradient">
+              {tokenBalance !== null && tokenBalance < 10 && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              )}
+              <svg viewBox="0 0 24 24" className="w-3 h-3 fill-white flex-shrink-0">
+                <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+              </svg>
               {t.live.buyTokens}
             </button>
           </div>

@@ -29,6 +29,7 @@ import { NowPlayingChip } from "@/components/mainstage/NowPlayingChip";
 import { FullscreenToggle } from "@/components/mainstage/FullscreenToggle";
 import { TheaterCurtains } from "@/components/mainstage/TheaterCurtains";
 import { AdminDrawer, AdminPanelContent, type ModeId } from "@/components/mainstage/AdminDrawer";
+import { BuyTokensModal } from "@/components/BuyTokensModal";
 
 // ── Guest credential shape (written by MainStageGuestJoin, consumed once here) ─
 
@@ -283,6 +284,7 @@ export default function MainStage() {
   const isParticipant = isGuestMode || role === "member" || role === "admin";
 
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
+  const [showBuyTokens, setShowBuyTokens] = useState(false);
   useEffect(() => {
     if (isGuestMode) return;
     getWalletBalance().then((res) => { if (typeof res.balance === "number") setTokenBalance(res.balance); }).catch(() => {});
@@ -769,12 +771,19 @@ export default function MainStage() {
 
         <div className="flex items-center gap-2 flex-shrink-0">
           {!isGuestMode && tokenBalance !== null && (
-            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/[0.06] border border-white/10">
+            <button
+              onClick={() => setShowBuyTokens(true)}
+              className="relative flex items-center gap-1 px-2 py-1 rounded-full bg-white/[0.06] border border-white/10 hover:bg-white/10 active:scale-95 transition-all"
+              title="Buy tokens"
+            >
+              {tokenBalance < 10 && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              )}
               <div className="w-3.5 h-3.5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
                 <svg viewBox="0 0 24 24" className="w-2 h-2 fill-white"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/></svg>
               </div>
               <span className="text-[11px] font-semibold text-white/80 tabular-nums">{tokenBalance}</span>
-            </div>
+            </button>
           )}
           {isGuestMode && (
             <span
@@ -1072,6 +1081,13 @@ export default function MainStage() {
           onResetLocalView={handleResetViewMode}
         />
       )}
+
+      <BuyTokensModal
+        isOpen={showBuyTokens}
+        onClose={() => setShowBuyTokens(false)}
+        onSuccess={(newBalance) => setTokenBalance(newBalance)}
+        dpnsHandle={null}
+      />
     </div>
   );
 }
