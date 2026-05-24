@@ -9098,7 +9098,7 @@ app.post('/api/webapp/payments/usdc/create', requireSessionAuth, asyncHandler(as
       order_id: orderId,
       order_description: `${planDisplayName} subscription`,
       ipn_callback_url: `${webappUrl}/api/webhooks/nowpayments`,
-      success_url: `${webappUrl}/subscribe?nowpayments=success`,
+      success_url: `${webappUrl}/subscribe?nowpayments=success&order=${orderId}`,
       cancel_url: `${webappUrl}/subscribe`,
       is_fixed_rate: false,
       is_fee_paid_by_user: false,
@@ -9176,7 +9176,15 @@ app.get('/api/webapp/payments/usdc/status/:orderId', requireSessionAuth, asyncHa
   );
 
   if (result.rows.length === 0) return res.status(404).json({ success: false, error: 'Order not found' });
-  return res.json({ success: true, status: result.rows[0].status });
+  const { status } = result.rows[0];
+  return res.json({
+    success: true,
+    status,
+    completed: status === 'completed',
+    confirming: status === 'confirming' || status === 'confirmed',
+    failed: status === 'failed' || status === 'expired',
+    partiallyPaid: status === 'partially_paid',
+  });
 }));
 
 // POST /api/webhooks/nowpayments — NOWPayments IPN webhook
@@ -9187,13 +9195,30 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     return res.status(400).json({ error: 'invalid_signature' });
   }
 
-  const { payment_id, payment_status, order_id } = req.body;
+  const { payment_id, payment_status, order_id, actually_paid, pay_currency } = req.body;
   logger.info('[NOWPayments] IPN received', { payment_id, payment_status, order_id });
 
   // Respond immediately — NOWPayments expects fast acknowledgement
   res.json({ received: true });
 
-  if (payment_status !== 'finished') return;
+  // Map NOWPayments statuses to our internal statuses
+  const STATUS_MAP = {
+    waiting: 'pending',
+    confirming: 'confirming',
+    confirmed: 'confirmed',
+    sending: 'confirming',
+    partially_paid: 'partially_paid',
+    finished: 'completed',
+    failed: 'failed',
+    refunded: 'failed',
+    expired: 'expired',
+  };
+
+  const internalStatus = STATUS_MAP[payment_status];
+  if (!internalStatus) {
+    logger.warn('[NOWPayments] IPN: unknown payment_status', { payment_status, order_id });
+    return;
+  }
 
   try {
     const { query: dbQuery } = require('../../config/postgres');
@@ -9212,6 +9237,42 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       logger.info('[NOWPayments] IPN: already completed (idempotent)', { order_id });
       return;
     }
+
+    if (payment_status === 'partially_paid') {
+      logger.warn('[NOWPayments] IPN: partial payment received', { order_id, actually_paid, pay_currency });
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
+        [order_id, `nowpayments:${payment_id}:partial:${actually_paid}${pay_currency ? ' ' + pay_currency : ''}`]
+      );
+      return;
+    }
+
+    if (payment_status === 'wrong_asset_confirmed') {
+      logger.error('[NOWPayments] IPN: wrong asset sent', { order_id, pay_currency, payment_id });
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'failed', notes = $2 WHERE btcpay_invoice_id = $1`,
+        [order_id, `nowpayments:${payment_id}:wrong_asset`]
+      );
+      return;
+    }
+
+    if (payment_status === 'failed' || payment_status === 'refunded' || payment_status === 'expired') {
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = $2, notes = $3 WHERE btcpay_invoice_id = $1`,
+        [order_id, internalStatus, `nowpayments:${payment_id}:${payment_status}`]
+      );
+      return;
+    }
+
+    if (payment_status === 'confirming' || payment_status === 'confirmed' || payment_status === 'sending') {
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = $2 WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
+        [order_id, internalStatus]
+      );
+      return;
+    }
+
+    if (payment_status !== 'finished') return;
 
     await dbQuery(
       `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,

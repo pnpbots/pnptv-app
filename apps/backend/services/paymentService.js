@@ -4540,17 +4540,17 @@ class PaymentService {
   static async processStripeCheckout(session) {
     const sessionId = session.id;
     const meta = session.metadata || {};
-    const userId = meta.pnptv_user_id;
-    const planId = meta.pnptv_plan_id;
-    // pnptv_payment_id is set by callCheckoutService for call-package sessions
+    const userId = meta.user_id;
+    const planId = meta.plan_id;
+    // payment_id is set by callCheckoutService for call-package sessions
     // so the pre-created payments row can be looked up directly.
-    const existingPaymentId = meta.pnptv_payment_id || null;
+    const existingPaymentId = meta.payment_id || null;
     const paymentType = meta.payment_type || 'one_time'; // 'subscription' | 'call_package' | 'creator_subscription' | 'one_time'
     const stripeSubscriptionId = session.subscription ? String(session.subscription) : null;
     const paymentIntentId = session.payment_intent ? String(session.payment_intent) : null;
 
     if (!userId) {
-      logger.error('[processStripeCheckout] Missing pnptv_user_id in session metadata', { sessionId });
+      logger.error('[processStripeCheckout] Missing user_id in session metadata', { sessionId });
       return { success: false, error: 'MISSING_USER_ID' };
     }
 
@@ -4722,7 +4722,7 @@ class PaymentService {
       // Route by payment type
       if (paymentType === 'call_package') {
         // Call booking — the payments row was pre-created by callCheckoutService
-        // with pnptv_payment_id in metadata. Use that ID directly if available
+        // with payment_id in metadata. Use that ID directly if available
         // so onCallPaymentSuccess finds the correct row.
         const callCheckoutService = require('./callCheckoutService');
         const callPaymentId = existingPaymentId || paymentId;
@@ -4773,7 +4773,7 @@ class PaymentService {
 
       // Subscription or one-time plan — grant entitlements
       if (!planId) {
-        logger.error('[processStripeCheckout] Cannot grant entitlements: pnptv_plan_id missing', { sessionId });
+        logger.error('[processStripeCheckout] Cannot grant entitlements: plan_id missing', { sessionId });
         return { success: false, error: 'MISSING_PLAN_ID' };
       }
 
@@ -4898,8 +4898,8 @@ class PaymentService {
    * Called by invoice.payment_succeeded webhook.
    *
    * @param {string} stripeSubscriptionId
-   * @param {string} userId  - pnptv_user_id from subscription metadata
-   * @param {string} planId  - pnptv_plan_id from subscription metadata
+   * @param {string} userId  - user_id from subscription metadata
+   * @param {string} planId  - plan_id from subscription metadata
    * @returns {Promise<{success: boolean}>}
    */
   static async renewStripeSubscriptionEntitlements(stripeSubscriptionId, userId, planId, opts = {}) {

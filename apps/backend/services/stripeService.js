@@ -98,7 +98,7 @@ async function getOrCreateCustomer(userId, email) {
   const stripe = getStripe();
   const customer = await stripe.customers.create({
     email: email || undefined,
-    metadata: { pnptv_user_id: String(userId) },
+    metadata: { user_id: String(userId) },
   });
 
   const customerId = customer.id;
@@ -160,19 +160,18 @@ async function createCheckoutSession({
 
   const sessionParams = {
     mode: 'payment',
+    payment_method_types: ['card', 'link'],
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: {
       ...metadata,
-      pnptv_user_id: String(userId),
-      pnptv_plan_id: planId || '',
-      pnptv_sku: sku || '',
+      user_id: String(userId),
+      plan_id: planId || '',
+      sku: sku || '',
       payment_type: 'one_time',
     },
-    // Allow promo codes entered at checkout
     allow_promotion_codes: true,
-    // Collect billing address for fraud prevention
     billing_address_collection: 'auto',
   };
 
@@ -231,6 +230,7 @@ async function createCustomCheckoutSession({
 
   const sessionParams = {
     mode: 'payment',
+    payment_method_types: ['card', 'link'],
     line_items: [{
       quantity: 1,
       price_data: {
@@ -246,9 +246,9 @@ async function createCustomCheckoutSession({
     cancel_url: cancelUrl,
     metadata: {
       ...metadata,
-      pnptv_user_id: String(userId),
-      pnptv_plan_id: planId || '',
-      pnptv_sku: sku || '',
+      user_id: String(userId),
+      plan_id: planId || '',
+      sku: sku || '',
       payment_type: metadata.payment_type || 'one_time',
     },
     billing_address_collection: 'auto',
@@ -306,22 +306,23 @@ async function createSubscriptionCheckout({
 
   const sessionParams = {
     mode: 'subscription',
+    payment_method_types: ['card', 'link'],
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: {
       ...metadata,
-      pnptv_user_id: String(userId),
-      pnptv_plan_id: planId || '',
-      pnptv_sku: sku || '',
+      user_id: String(userId),
+      plan_id: planId || '',
+      sku: sku || '',
       payment_type: 'subscription',
     },
     subscription_data: {
       metadata: {
         ...metadata,
-        pnptv_user_id: String(userId),
-        pnptv_plan_id: planId || '',
-        pnptv_sku: sku || '',
+        user_id: String(userId),
+        plan_id: planId || '',
+        sku: sku || '',
       },
     },
     allow_promotion_codes: true,

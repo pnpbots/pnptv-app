@@ -696,8 +696,8 @@ const handleStripeWebhook = async (req, res) => {
         // Fetch subscription to get our metadata
         try {
           const sub = await stripeService.getSubscription(subId);
-          const userId = sub.metadata?.pnptv_user_id;
-          const planId = sub.metadata?.pnptv_plan_id;
+          const userId = sub.metadata?.user_id;
+          const planId = sub.metadata?.plan_id;
           const creatorId = sub.metadata?.creatorId;
           if (userId && planId) {
             await PaymentService.renewStripeSubscriptionEntitlements(subId, userId, planId, {
@@ -727,7 +727,7 @@ const handleStripeWebhook = async (req, res) => {
 
         try {
           const sub = await stripeService.getSubscription(subId);
-          const userId = sub.metadata?.pnptv_user_id;
+          const userId = sub.metadata?.user_id;
           if (userId) {
             await notifyInvoicePaymentFailed(userId, invoice);
           }

@@ -148,7 +148,7 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
   let checkoutUrl;
   if (provider === 'stripe') {
     // Stripe Checkout Session — one-time payment.
-    // pnptv_payment_id is threaded into the session metadata so the webhook
+    // payment_id is threaded into the session metadata so the webhook
     // handler can call onCallPaymentSuccess(paymentId) after confirmation.
     const { createStripeClient } = require('../config/stripe');
     const stripeService = require('./stripeService');
@@ -172,6 +172,7 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     try {
       session = await stripe.checkout.sessions.create({
         mode: 'payment',
+        payment_method_types: ['card', 'link'],
         line_items: [{
           quantity: 1,
           price_data: {
@@ -187,8 +188,8 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
         success_url: `${WEB_APP}${successPath}`,
         cancel_url: `${WEB_APP}/`,
         metadata: {
-          pnptv_user_id: String(memberId),
-          pnptv_payment_id: payment.id,
+          user_id: String(memberId),
+          payment_id: payment.id,
           payment_type: 'call_package',
           package_id: String(pkg.id),
           package_sku: pkg.sku || '',

@@ -287,16 +287,21 @@ export default function Subscribe() {
   useEffect(() => {
     const nowpSuccess = searchParams.get("nowpayments");
     if (nowpSuccess !== "success") return;
-    // Clean up the URL param so refreshes don't re-trigger
+    // Clean up the URL params so refreshes don't re-trigger
+    const orderFromUrl = searchParams.get("order");
     const next = new URLSearchParams(searchParams);
     next.delete("nowpayments");
+    next.delete("order");
     setSearchParams(next, { replace: true });
-    // Restore pending order from session storage and start polling
+    // Restore pending order — prefer sessionStorage, fall back to URL param
     try {
       const storedOrder = sessionStorage.getItem("pnp_pending_usdc_order");
       if (storedOrder) {
         const parsed = JSON.parse(storedOrder);
         setUsdcOrder(parsed);
+        setUsdcPolling(true);
+      } else if (orderFromUrl) {
+        setUsdcOrder({ orderId: orderFromUrl });
         setUsdcPolling(true);
       }
     } catch {}
@@ -553,7 +558,7 @@ export default function Subscribe() {
       try {
         const data = await getUsdcSubscriptionStatus(usdcOrder.orderId);
         if (cancelled) return;
-        if (data.status === "completed") {
+        if (data.completed) {
           setUsdcPolling(false);
           setUsdcPaymentSuccess(true);
           try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
@@ -565,10 +570,15 @@ export default function Subscribe() {
           }, 2000);
           return;
         }
-        if (data.status === "expired" || data.status === "failed") {
+        if (data.failed) {
           setUsdcPolling(false);
           setError(s.usdcExpired);
           try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
+          return;
+        }
+        if (data.partiallyPaid) {
+          // Partial payment — keep polling (user may top up), but don't count down timer
+          if (!cancelled) timerId = setTimeout(poll, 10000);
           return;
         }
         if (!cancelled) timerId = setTimeout(poll, 5000);
