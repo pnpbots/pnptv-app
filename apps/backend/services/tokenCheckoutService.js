@@ -270,10 +270,12 @@ class TokenCheckoutService {
     const { createStripeClient } = require('../config/stripe');
     const stripe = createStripeClient();
 
+    const CHECKOUT_DOMAIN = process.env.CHECKOUT_DOMAIN || WEB_APP_URL;
     let session;
     try {
       session = await stripe.checkout.sessions.create({
         mode: 'payment',
+        payment_method_types: ['card', 'link'],
         customer_email: userEmail,
         line_items: [{
           quantity: 1,
@@ -286,10 +288,10 @@ class TokenCheckoutService {
             },
           },
         }],
-        success_url: `${WEB_APP_URL}/token-checkout/${purchaseUuid}?stripe=success`,
-        cancel_url: `${WEB_APP_URL}/live`,
+        success_url: `${CHECKOUT_DOMAIN}/token-checkout/${purchaseUuid}?stripe=success`,
+        cancel_url: `${CHECKOUT_DOMAIN}/live`,
         metadata: {
-          pnptv_user_id: String(userId),
+          user_id: String(userId),
           payment_type: 'token_purchase',
           purchase_uuid: purchaseUuid,
         },
