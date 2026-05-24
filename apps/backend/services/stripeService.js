@@ -172,7 +172,9 @@ async function createCheckoutSession({
       payment_type: 'one_time',
     },
     allow_promotion_codes: true,
-    billing_address_collection: 'auto',
+    billing_address_collection: 'required',
+    phone_number_collection: { enabled: true },
+    payment_method_options: { card: { request_three_d_secure: 'automatic' } },
   };
 
   if (customerId) {
@@ -251,7 +253,9 @@ async function createCustomCheckoutSession({
       sku: sku || '',
       payment_type: metadata.payment_type || 'one_time',
     },
-    billing_address_collection: 'auto',
+    billing_address_collection: 'required',
+    phone_number_collection: { enabled: true },
+    payment_method_options: { card: { request_three_d_secure: 'automatic' } },
   };
 
   if (customerId) {
@@ -326,7 +330,9 @@ async function createSubscriptionCheckout({
       },
     },
     allow_promotion_codes: true,
-    billing_address_collection: 'auto',
+    billing_address_collection: 'required',
+    phone_number_collection: { enabled: true },
+    payment_method_options: { card: { request_three_d_secure: 'automatic' } },
   };
 
   if (customerId) {

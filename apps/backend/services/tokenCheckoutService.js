@@ -290,6 +290,9 @@ class TokenCheckoutService {
         }],
         success_url: `${CHECKOUT_DOMAIN}/token-checkout/${purchaseUuid}?stripe=success`,
         cancel_url: `${CHECKOUT_DOMAIN}/live`,
+        billing_address_collection: 'required',
+        phone_number_collection: { enabled: true },
+        payment_method_options: { card: { request_three_d_secure: 'automatic' } },
         metadata: {
           user_id: String(userId),
           payment_type: 'token_purchase',

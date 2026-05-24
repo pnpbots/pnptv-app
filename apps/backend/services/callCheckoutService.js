@@ -187,6 +187,9 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
         customer: customerId,
         success_url: `${WEB_APP}${successPath}`,
         cancel_url: `${WEB_APP}/`,
+        billing_address_collection: 'required',
+        phone_number_collection: { enabled: true },
+        payment_method_options: { card: { request_three_d_secure: 'automatic' } },
         metadata: {
           user_id: String(memberId),
           payment_id: payment.id,

@@ -569,6 +569,24 @@ const stripeService = require('../../../services/stripeService');
  * @param {string} userId   - PNPtv user UUID from subscription metadata
  * @param {object} invoice  - Stripe Invoice object
  */
+async function notifyStripeAdminAlert(text) {
+  try {
+    const { Telegraf } = require('telegraf');
+    let bot;
+    try {
+      const botModule = require('../../../bot/core/bot');
+      bot = typeof botModule?.getBotInstance === 'function' ? botModule.getBotInstance() : null;
+    } catch (_) {}
+    if (!bot) bot = new Telegraf(process.env.BOT_TOKEN);
+    const channelId = process.env.NOTIFICATION_CHANNEL_ID || process.env.ADMIN_ID;
+    if (channelId) {
+      await bot.telegram.sendMessage(channelId, text, { parse_mode: 'Markdown' });
+    }
+  } catch (err) {
+    logger.warn('[stripeWebhook] Admin alert failed (non-critical)', { error: err.message });
+  }
+}
+
 async function notifyInvoicePaymentFailed(userId, invoice) {
   try {
     const UserModel = require('../../../models/userModel');
@@ -769,6 +787,69 @@ const handleStripeWebhook = async (req, res) => {
             });
           }
         }
+        break;
+      }
+
+      case 'review.opened': {
+        const review = event.data.object;
+        logger.warn('[stripeWebhook] Radar review opened', {
+          reviewId: review.id,
+          chargeId: review.charge,
+          paymentIntentId: review.payment_intent,
+          reason: review.reason,
+          openedReason: review.opened_reason,
+        });
+        notifyStripeAdminAlert(
+          `🚨 *Stripe Radar Review Opened*\nReview: \`${review.id}\`\nReason: ${review.reason || 'unknown'}\nOpened by: ${review.opened_reason || '—'}\nCharge: \`${review.charge || '—'}\``
+        ).catch(() => {});
+        break;
+      }
+
+      case 'review.closed': {
+        const review = event.data.object;
+        logger.info('[stripeWebhook] Radar review closed', {
+          reviewId: review.id,
+          chargeId: review.charge,
+          closedReason: review.closed_reason,
+        });
+        if (review.closed_reason === 'refunded_as_fraud' || review.closed_reason === 'refunded') {
+          logger.warn('[stripeWebhook] Review closed as fraud — Stripe refunded the charge', {
+            reviewId: review.id, chargeId: review.charge,
+          });
+          notifyStripeAdminAlert(
+            `⛔ *Stripe Review: Fraud Confirmed*\nReview: \`${review.id}\`\nCharge: \`${review.charge || '—'}\`\nOutcome: ${review.closed_reason}`
+          ).catch(() => {});
+        }
+        break;
+      }
+
+      case 'charge.dispute.created': {
+        const dispute = event.data.object;
+        logger.error('[stripeWebhook] Chargeback dispute created', {
+          disputeId: dispute.id,
+          chargeId: dispute.charge,
+          amount: dispute.amount / 100,
+          currency: dispute.currency,
+          reason: dispute.reason,
+          status: dispute.status,
+        });
+        notifyStripeAdminAlert(
+          `🚨 *Chargeback Filed*\nDispute: \`${dispute.id}\`\nCharge: \`${dispute.charge}\`\nAmount: $${(dispute.amount / 100).toFixed(2)} ${(dispute.currency || 'usd').toUpperCase()}\nReason: ${dispute.reason}\nDue: respond in Stripe dashboard`
+        ).catch(() => {});
+        break;
+      }
+
+      case 'radar.early_fraud_warning.created': {
+        const warning = event.data.object;
+        logger.warn('[stripeWebhook] Radar early fraud warning', {
+          warningId: warning.id,
+          chargeId: warning.charge,
+          fraudType: warning.fraud_type,
+          actionable: warning.actionable,
+        });
+        notifyStripeAdminAlert(
+          `⚠️ *Stripe Early Fraud Warning*\nWarning: \`${warning.id}\`\nCharge: \`${warning.charge}\`\nType: ${warning.fraud_type}\nActionable: ${warning.actionable}`
+        ).catch(() => {});
         break;
       }
 
