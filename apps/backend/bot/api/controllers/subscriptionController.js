@@ -26,9 +26,8 @@ class SubscriptionController {
       const country = geo?.country || req.session?.user?.country || null;
       const isColombia = country === 'CO';
 
-      const plans = isColombia
-        ? allPlans.filter((p) => p.tier === 'pnp-col')
-        : allPlans.filter((p) => p.tier !== 'pnp-col');
+      // Colombia gate lifted 2026-05-24 — all users see the full catalog
+      const plans = allPlans.filter((p) => p.tier !== 'pnp-col');
 
       // Add currency conversion for each plan
       const plansWithPrices = await Promise.all(

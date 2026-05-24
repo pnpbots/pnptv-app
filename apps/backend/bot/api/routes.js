@@ -1219,7 +1219,8 @@ const limiter = rateLimit({
   },
 });
 app.use('/api/', limiter);
-app.use(colombiaAccessGate);
+// Colombia gate lifted 2026-05-24 — CO users now access the full platform
+// app.use(colombiaAccessGate);
 
 const ageVerificationUpload = multer({
   storage: multer.memoryStorage(),
@@ -7551,9 +7552,10 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
   if (provider === 'dash') {
     try {
       const userId = String(user.telegram_id || user.id);
+      const discountedChannelPrice = Math.round(channelPrice * 0.95 * 100) / 100;
       const orderId = `pnptv-channel-${userId}-${channel.id}-${Date.now()}`;
       const invoice = await createDashInvoice({
-        usdAmount: channelPrice,
+        usdAmount: discountedChannelPrice,
         userId,
         orderId,
         description: `Channel access: ${channel.name}`,
@@ -7566,7 +7568,7 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
          ON CONFLICT (btcpay_invoice_id) DO UPDATE
            SET status = dash_subscription_orders.status
          RETURNING id`,
-        [userId, email || null, channelPrice, invoice.invoiceId, JSON.stringify(scopeMetadata)]
+        [userId, email || null, discountedChannelPrice, invoice.invoiceId, JSON.stringify(scopeMetadata)]
       );
       return res.json({
         success: true,

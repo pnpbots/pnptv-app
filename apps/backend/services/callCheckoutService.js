@@ -609,7 +609,7 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
     throw err;
   }
 
-  const amountUsd = parseFloat(pkg.price_usd);
+  const amountUsd = Math.round(parseFloat(pkg.price_usd) * 0.95 * 100) / 100;
 
   // 2. Create a pending payment record so we have a payment UUID before the invoice
   const payment = await PaymentModel.create({

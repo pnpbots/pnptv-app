@@ -146,6 +146,7 @@ class TokenCheckoutService {
     // The real BTCPay invoice ID will overwrite this once the invoice is created.
     const placeholderKey = idempotencyKey('dash-pending', purchaseUuid);
 
+    const discountedUsd = Math.round(pkg.usd * 0.95 * 100) / 100;
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -153,7 +154,7 @@ class TokenCheckoutService {
         purchaseUuid,
         userId,
         tokens: pkg.tokens,
-        usd: pkg.usd,
+        usd: discountedUsd,
         invoiceKey: placeholderKey,
         paymentMethod: 'dash',
       });
@@ -172,7 +173,7 @@ class TokenCheckoutService {
     let invoice;
     try {
       invoice = await createDashInvoice({
-        usdAmount: pkg.usd,
+        usdAmount: discountedUsd,
         userId,
         orderId: `pnptv-tokens-${userId}-${Date.now()}`,
         description: `${pkg.tokens} Digital Credits`,
@@ -210,7 +211,7 @@ class TokenCheckoutService {
       invoiceId: invoice.invoiceId,
       checkoutUrl: invoice.checkoutUrl,
       tokens: pkg.tokens,
-      usd: pkg.usd,
+      usd: discountedUsd,
     };
   }
 
