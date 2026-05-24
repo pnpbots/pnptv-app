@@ -936,22 +936,8 @@ export const router = createBrowserRouter([
     path: "/become-model",
     element: <Navigate to="/become-a-model" replace />,
   },
-  {
-    path: "/lifetime100",
-    element: (
-      <ModuleLoader>
-        <Lifetime100 />
-      </ModuleLoader>
-    ),
-  },
-  {
-    path: "/lifetime100/activate",
-    element: (
-      <ModuleLoader>
-        <Lifetime100 />
-      </ModuleLoader>
-    ),
-  },
+  { path: "/lifetime100", element: <Navigate to="/subscribe" replace /> },
+  { path: "/lifetime100/activate", element: <Navigate to="/subscribe" replace /> },
   // Invite page — public, no auth required (handles its own auth check inline)
   {
     path: "/invite/:code",
@@ -961,10 +947,9 @@ export const router = createBrowserRouter([
       </ModuleLoader>
     ),
   },
-  // Public alias — /lifetime → /lifetime100. Lives OUTSIDE of <Layout /> so
-  // the auth-gate redirect (Layout.tsx:895) never fires for unauthenticated users.
-  { path: "/lifetime", element: <Navigate to="/lifetime100" replace /> },
-  { path: "/lifetime100b", element: <Navigate to="/lifetime100" replace /> },
+  // Public alias — /lifetime → /subscribe (offer closed)
+  { path: "/lifetime", element: <Navigate to="/subscribe" replace /> },
+  { path: "/lifetime100b", element: <Navigate to="/subscribe" replace /> },
   {
     path: "/page/:slug",
     element: (

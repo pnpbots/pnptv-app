@@ -995,7 +995,7 @@ function ActivateView({ s, initialCode }: ActivateViewProps) {
 // ── Direct-payment types ───────────────────────────────────────────────────────
 
 const PLAN_ID = "lifetime100";
-type PayMethod = "email" | "stripe" | "dash";
+type PayMethod = "stripe" | "dash";
 type DashInvoice = {
   invoiceId: string;
   checkoutUrl: string;
@@ -1024,13 +1024,8 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
   const [searchParams] = useSearchParams();
   const es = lang.startsWith("es");
 
-  // Email / Meru state
-  const [modalOpen, setModalOpen] = useState(false);
-  const [showConfirmation, setShowConfirmation] = useState(false);
-  const [meruUrl, setMeruUrl] = useState<string | null>(null);
-
   // Payment method selector
-  const [payMethod, setPayMethod] = useState<PayMethod>("email");
+  const [payMethod, setPayMethod] = useState<PayMethod>("stripe");
 
   // Direct payment state
   const [submitting, setSubmitting] = useState(false);
@@ -1046,8 +1041,6 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
   const dashCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const invoiceRef = useRef<HTMLDivElement>(null);
 
-  const isSoldOut = available === 0;
-  const isClosed = !availabilityLoading && isSoldOut;
   const activateHref = `/lifetime100/activate`;
 
   // Init: check Dash + resume any pending hosted payment polling
@@ -1195,28 +1188,16 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
   }
 
   const handleCtaClick = () => {
-    if (payMethod === "email") { if (isClosed) return; setModalOpen(true); }
-    else if (payMethod === "dash" && dashInvoice) { cancelDash(); }
+    if (payMethod === "dash" && dashInvoice) { cancelDash(); }
     else { handleDirectPay(); }
   };
 
-  const handleReserveSuccess = (url: string | null) => {
-    if (url) { window.location.href = url; return; }
-    setMeruUrl(url); setModalOpen(false); setShowConfirmation(true);
-  };
-
   const ctaDisabled = (() => {
-    if (payMethod === "email") return availabilityLoading || isClosed;
     if (payMethod === "dash") return submitting || dashAvailable === false;
     return submitting || !!pollingPaymentId;
   })();
 
   const ctaLabel = (() => {
-    if (payMethod === "email") {
-      if (availabilityLoading) return s.ctaLoading;
-      if (isClosed) return s.ctaSoldOut;
-      return s.ctaGetAccess;
-    }
     if (submitting) return es ? "Procesando…" : "Processing…";
     if (payMethod === "dash") {
       if (dashAvailable === false) return es ? "Dash no disponible" : "Dash unavailable";
@@ -1470,7 +1451,6 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
           </p>
           <div style={{ display: "flex", gap: 6 }}>
             {([
-              { id: "email" as PayMethod, emoji: "📧", label: es ? "Email" : "Email", sublabel: es ? "Link Meru · Fácil" : "Meru link · Easy", disabled: false },
               { id: "stripe" as PayMethod, emoji: "💳", label: es ? "Tarjeta" : "Card", sublabel: "Visa / Mastercard", disabled: false },
               { id: "dash" as PayMethod, emoji: "🥷", label: "Crypto", sublabel: es ? "$79.99 · 20% off" : "$79.99 · 20% off", disabled: dashAvailable === false },
             ]).map(({ id, emoji, label, sublabel, disabled }) => {
@@ -1493,7 +1473,6 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
             })}
           </div>
           <p style={{ margin: "6px 0 0", fontSize: 10, color: "rgba(207,207,212,0.45)", textAlign: "center", lineHeight: 1.4, minHeight: 14 }}>
-            {payMethod === "email" && (es ? "Recibe un enlace de pago por correo. Sin tarjeta, sin cuenta." : "Get a payment link by email. No card or account needed.")}
             {payMethod === "stripe" && (es ? "Paga con Visa o Mastercard de forma segura vía Stripe." : "Pay securely with Visa or Mastercard via Stripe.")}
             {payMethod === "dash" && (es ? "Criptomoneda Dash — rápido, sin nombre, sin banco." : "Dash crypto — fast, no name, no bank required.")}
           </p>
@@ -1511,24 +1490,12 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
             onTouchStart={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
             onTouchEnd={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
           >
-            {(submitting || (payMethod === "email" && availabilityLoading)) && <Spinner size={16} />}
+            {submitting && <Spinner size={16} />}
             {ctaLabel}
           </button>
         </div>
       </div>
 
-      {/* Modals */}
-      {modalOpen && !showConfirmation && (
-        <EmailModal s={s} lang={lang} onClose={() => setModalOpen(false)} onSuccess={handleReserveSuccess} />
-      )}
-      {showConfirmation && (
-        <ConfirmationModal
-          s={s}
-          onClose={() => setShowConfirmation(false)}
-          onDismiss={() => { setShowConfirmation(false); if (meruUrl) { window.location.assign(meruUrl); } else { window.location.assign("/landing"); } }}
-          activateHref={activateHref}
-        />
-      )}
 
       <style>{`@keyframes lt100b-pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
     </div>
