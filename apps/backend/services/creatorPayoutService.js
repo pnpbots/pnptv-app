@@ -490,11 +490,29 @@ class CreatorPayoutService {
     } = sub;
 
     const creatorName = creator_username || creator_first_name || String(creator_id);
-    const priceUsd = parseFloat(price_usd);
+    let priceUsd = parseFloat(price_usd);
 
     // Lazy-require to avoid circular dependency issues at module load time
     const PaymentModel = require('../models/paymentModel');
     const { createDashInvoice } = require('../config/btcpay');
+    const { query: dbQuery } = require('../config/postgres');
+
+    // price_usd can be NULL when the subscription was originally created without
+    // recording the price (legacy path). Fall back to the creator's current price.
+    if (!Number.isFinite(priceUsd) || priceUsd <= 0) {
+      logger.warn('CreatorPayoutService: price_usd missing on subscription, falling back to creator_price_usd', {
+        subscriptionId: subscription_id, price_usd,
+      });
+      const fallback = await dbQuery(
+        'SELECT creator_price_usd FROM users WHERE id = $1',
+        [String(creator_id)]
+      );
+      priceUsd = parseFloat(fallback.rows[0]?.creator_price_usd);
+      if (!Number.isFinite(priceUsd) || priceUsd <= 0) {
+        logger.error('CreatorPayoutService: cannot determine renewal price, skipping', { subscriptionId: subscription_id });
+        return { renewed: false };
+      }
+    }
 
     let newPaymentId;
     let checkoutUrl;
@@ -539,7 +557,6 @@ class CreatorPayoutService {
 
       // Persist the dash_subscription_orders row so the BTCPay webhook can
       // settle the renewal exactly the same way it settles a fresh creator sub.
-      const { query: dbQuery } = require('../config/postgres');
       await dbQuery(
         `INSERT INTO dash_subscription_orders (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id)
          VALUES ($1, 'creator_monthly', NULL, $2, $3, 'pending', $4)

@@ -61,13 +61,14 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Anonymous",
     dashComingSoon: "Coming soon",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     // ── Dash info panel ───────────────────────────────────────────────────────
-    dashInfoText: "Pay anonymously with Dash — no credit card, no identity required. You'll get a payment address + QR code to send from any Dash wallet.",
+    dashInfoText: "Pay with Dash and save 5% — anonymous, no credit card, no identity required. You'll get a payment address + QR code to send from any Dash wallet.",
     getDashWallet: "Get Dash Wallet ↗",
     buyOnKraken: "Buy on Kraken ↗",
     buyOnUphold: "Buy on Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     // ── Dash invoice panel ────────────────────────────────────────────────────
     waitingForDashPayment: "Waiting for Dash payment —",
@@ -191,12 +192,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Anónimo",
     dashComingSoon: "Próximamente",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
-    dashInfoText: "Paga de forma anónima con Dash — sin tarjeta de crédito, sin identidad requerida. Recibirás una dirección de pago + código QR para enviar desde cualquier billetera Dash.",
+    dashInfoText: "Paga con Dash y ahorra 5% — anónimo, sin tarjeta de crédito, sin identidad requerida. Recibirás una dirección de pago + código QR para enviar desde cualquier billetera Dash.",
     getDashWallet: "Obtener billetera Dash ↗",
     buyOnKraken: "Comprar en Kraken ↗",
     buyOnUphold: "Comprar en Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "Esperando pago Dash —",
     dashInvoiceDesc: "Envía el monto exacto a la dirección indicada. Esta página se actualiza automáticamente.",
@@ -312,12 +314,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Anônimo",
     dashComingSoon: "Em breve",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "Pague anonimamente com Dash — sem cartão de crédito, sem identidade necessária. Você receberá um endereço de pagamento + código QR para enviar de qualquer carteira Dash.",
     getDashWallet: "Obter Carteira Dash ↗",
     buyOnKraken: "Comprar na Kraken ↗",
     buyOnUphold: "Comprar na Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "Aguardando pagamento Dash —",
     dashInvoiceDesc: "Envie o valor exato para o endereço abaixo. Esta página atualiza automaticamente.",
@@ -426,12 +429,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "匿名",
     dashComingSoon: "即将推出",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "使用 Dash 匿名支付 — 无需信用卡，无需身份验证。您将收到支付地址和二维码，可从任意 Dash 钱包发送。",
     getDashWallet: "获取 Dash 钱包 ↗",
     buyOnKraken: "在 Kraken 购买 ↗",
     buyOnUphold: "在 Uphold 购买 ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "等待 Dash 付款 —",
     dashInvoiceDesc: "请将确切金额发送至以下地址。本页面将自动更新。",
@@ -540,12 +544,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "匿名",
     dashComingSoon: "即將推出",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "使用 Dash 匿名付款 — 無需信用卡，無需身份驗證。您將收到付款地址和 QR 碼，可從任意 Dash 錢包發送。",
     getDashWallet: "取得 Dash 錢包 ↗",
     buyOnKraken: "在 Kraken 購買 ↗",
     buyOnUphold: "在 Uphold 購買 ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "等待 Dash 付款 —",
     dashInvoiceDesc: "請將確切金額發送至以下地址。本頁面將自動更新。",
@@ -654,12 +659,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Anonyme",
     dashComingSoon: "Bientôt disponible",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "Payez anonymement avec Dash — sans carte de crédit, sans identité requise. Vous recevrez une adresse de paiement + code QR à envoyer depuis n'importe quel portefeuille Dash.",
     getDashWallet: "Obtenir un portefeuille Dash ↗",
     buyOnKraken: "Acheter sur Kraken ↗",
     buyOnUphold: "Acheter sur Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "En attente du paiement Dash —",
     dashInvoiceDesc: "Envoyez le montant exact à l'adresse ci-dessous. Cette page se met à jour automatiquement.",
@@ -768,12 +774,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Anonym",
     dashComingSoon: "Demnächst verfügbar",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "Zahle anonym mit Dash — keine Kreditkarte, keine Identität erforderlich. Du erhältst eine Zahlungsadresse + QR-Code zum Senden von einer beliebigen Dash-Wallet.",
     getDashWallet: "Dash-Wallet holen ↗",
     buyOnKraken: "Auf Kraken kaufen ↗",
     buyOnUphold: "Auf Uphold kaufen ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "Warte auf Dash-Zahlung —",
     dashInvoiceDesc: "Sende den exakten Betrag an die untenstehende Adresse. Diese Seite wird automatisch aktualisiert.",
@@ -882,12 +889,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "ไม่ระบุตัวตน",
     dashComingSoon: "เร็วๆ นี้",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "ชำระแบบไม่ระบุตัวตนด้วย Dash — ไม่ต้องใช้บัตรเครดิต ไม่ต้องยืนยันตัวตน คุณจะได้รับที่อยู่การชำระเงินและ QR Code เพื่อส่งจากกระเป๋า Dash ใดก็ได้",
     getDashWallet: "รับกระเป๋า Dash ↗",
     buyOnKraken: "ซื้อที่ Kraken ↗",
     buyOnUphold: "ซื้อที่ Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "รอการชำระเงิน Dash —",
     dashInvoiceDesc: "ส่งจำนวนเงินที่แน่นอนไปยังที่อยู่ด้านล่าง หน้านี้จะอัปเดตโดยอัตโนมัติ",
@@ -996,12 +1004,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Anonimo",
     dashComingSoon: "Prossimamente",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "Paga anonimamente con Dash — nessuna carta di credito, nessuna identità richiesta. Riceverai un indirizzo di pagamento + codice QR da inviare da qualsiasi wallet Dash.",
     getDashWallet: "Ottieni Wallet Dash ↗",
     buyOnKraken: "Acquista su Kraken ↗",
     buyOnUphold: "Acquista su Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "In attesa del pagamento Dash —",
     dashInvoiceDesc: "Invia l'importo esatto all'indirizzo qui sotto. La pagina si aggiorna automaticamente.",
@@ -1110,12 +1119,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Anonim",
     dashComingSoon: "Yakında",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "Dash ile anonim öde — kredi kartı gerekmez, kimlik gerekmez. Herhangi bir Dash cüzdanından gönderebileceğin bir ödeme adresi ve QR kodu alacaksın.",
     getDashWallet: "Dash Cüzdanı Al ↗",
     buyOnKraken: "Kraken'dan Satın Al ↗",
     buyOnUphold: "Uphold'dan Satın Al ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "Dash ödemesi bekleniyor —",
     dashInvoiceDesc: "Tam tutarı aşağıdaki adrese gönder. Bu sayfa otomatik olarak güncellenir.",
@@ -1224,12 +1234,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Анонимно",
     dashComingSoon: "Скоро",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "Плати анонимно с Dash — без кредитной карты, без удостоверения личности. Ты получишь платёжный адрес + QR-код для отправки из любого Dash-кошелька.",
     getDashWallet: "Получить Dash-кошелёк ↗",
     buyOnKraken: "Купить на Kraken ↗",
     buyOnUphold: "Купить на Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "Ожидание Dash-платежа —",
     dashInvoiceDesc: "Отправь точную сумму на указанный ниже адрес. Страница обновится автоматически.",
@@ -1338,12 +1349,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Anoniem",
     dashComingSoon: "Binnenkort beschikbaar",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "Betaal anoniem met Dash — geen creditcard, geen identiteit vereist. Je ontvangt een betaaladres + QR-code om te verzenden vanuit elke Dash-wallet.",
     getDashWallet: "Dash-wallet ophalen ↗",
     buyOnKraken: "Kopen op Kraken ↗",
     buyOnUphold: "Kopen op Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "Wachten op Dash-betaling —",
     dashInvoiceDesc: "Stuur het exacte bedrag naar het onderstaande adres. Deze pagina werkt automatisch bij.",
@@ -1452,12 +1464,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Ẩn danh",
     dashComingSoon: "Sắp ra mắt",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "Thanh toán ẩn danh bằng Dash — không cần thẻ tín dụng, không cần xác minh danh tính. Bạn sẽ nhận được địa chỉ thanh toán + mã QR để gửi từ bất kỳ ví Dash nào.",
     getDashWallet: "Lấy Ví Dash ↗",
     buyOnKraken: "Mua trên Kraken ↗",
     buyOnUphold: "Mua trên Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "Đang chờ thanh toán Dash —",
     dashInvoiceDesc: "Gửi đúng số tiền đến địa chỉ bên dưới. Trang này tự động cập nhật.",
@@ -1566,12 +1579,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "匿名",
     dashComingSoon: "近日公開",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "Dash で匿名支払い — クレジットカード不要、身元確認不要。任意の Dash ウォレットから送金できる支払いアドレス + QR コードが届きます。",
     getDashWallet: "Dash ウォレットを取得 ↗",
     buyOnKraken: "Kraken で購入 ↗",
     buyOnUphold: "Uphold で購入 ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "Dash 支払いを待っています —",
     dashInvoiceDesc: "以下のアドレスに正確な金額を送金してください。このページは自動的に更新されます。",
@@ -1680,12 +1694,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "Anonim",
     dashComingSoon: "Segera hadir",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "Bayar secara anonim dengan Dash — tanpa kartu kredit, tanpa identitas. Kamu akan mendapat alamat pembayaran + kode QR untuk dikirim dari dompet Dash mana pun.",
     getDashWallet: "Dapatkan Dompet Dash ↗",
     buyOnKraken: "Beli di Kraken ↗",
     buyOnUphold: "Beli di Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "Menunggu pembayaran Dash —",
     dashInvoiceDesc: "Kirim jumlah yang tepat ke alamat di bawah. Halaman ini diperbarui secara otomatis.",
@@ -1794,12 +1809,13 @@ const strings = {
     dash: "Dash",
     dashAnonymous: "مجهول الهوية",
     dashComingSoon: "قريباً",
-    dashAnonBadge: "ANON",
+    dashAnonBadge: "5% OFF",
 
     dashInfoText: "ادفع بشكل مجهول مع Dash — دون بطاقة ائتمان ودون إثبات هوية. ستحصل على عنوان دفع + رمز QR للإرسال من أي محفظة Dash.",
     getDashWallet: "احصل على محفظة Dash ↗",
     buyOnKraken: "اشتر على Kraken ↗",
     buyOnUphold: "اشتر على Uphold ↗",
+    buyOnMoonPay: "MoonPay ↗",
 
     waitingForDashPayment: "في انتظار دفع Dash —",
     dashInvoiceDesc: "أرسل المبلغ المحدد إلى العنوان أدناه. تتحدث هذه الصفحة تلقائياً.",

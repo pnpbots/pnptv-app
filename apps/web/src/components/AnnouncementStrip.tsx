@@ -48,6 +48,12 @@ const MARQUEE_END_PAD_PX = 12; // ensure the last character clears the edge
 const UPDATE_MESSAGES: RawMessage[] = [
   {
     category: "UPDATE",
+    en: "Pay with Dash and save 5% on any plan — private, instant, no banks.",
+    es: "Paga con Dash y ahorra 5% en cualquier plan — privado, instantáneo, sin bancos.",
+    href: "/subscribe",
+  },
+  {
+    category: "UPDATE",
     en: "Santino & Lex just started a 2-week wellness break — follow along.",
     es: "Santino y Lex empiezan pausa de bienestar de 2 semanas — síguelos.",
     href: "/self-care",

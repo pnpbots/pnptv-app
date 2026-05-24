@@ -8653,7 +8653,9 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(as
       usdAmount = 90.99;
       discountInfo = { originalAmount: basePrice, discountPct: 9 };
     } else {
-      usdAmount = basePrice;
+      // 5% crypto discount for all other plans
+      usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
+      discountInfo = { originalAmount: basePrice, discountPct: 5 };
     }
     planDisplayName = plan.display_name || plan.name;
   }

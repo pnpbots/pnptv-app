@@ -1123,10 +1123,13 @@ export default function Subscribe() {
         {/* Dash info panel */}
         {provider === "dash" && (
           <div className="mt-3 rounded-xl p-3 border border-[#008DE4]/30 bg-[#008DE4]/5 space-y-2">
-            <p className="text-xs text-pnp-textSecondary">
-              {s.dashInfoText}
-            </p>
+            <p className="text-xs text-pnp-textSecondary">{s.dashInfoText}</p>
             <div className="flex flex-wrap gap-2 text-[10px]">
+              <a href="https://www.moonpay.com/buy/dash" target="_blank" rel="noopener noreferrer"
+                className="text-[#008DE4] hover:underline font-semibold">
+                {s.buyOnMoonPay}
+              </a>
+              <span className="text-pnp-textSecondary/40">·</span>
               <a href="https://www.dash.org/downloads/" target="_blank" rel="noopener noreferrer"
                 className="text-[#008DE4] hover:underline">
                 {s.getDashWallet}
