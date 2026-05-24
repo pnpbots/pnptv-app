@@ -48,6 +48,24 @@ const MARQUEE_END_PAD_PX = 12; // ensure the last character clears the edge
 const UPDATE_MESSAGES: RawMessage[] = [
   {
     category: "UPDATE",
+    en: "Save 20% on yearly & lifetime plans when you pay with crypto — Dash, USDC, or Lightning.",
+    es: "Ahorra 20% en planes anuales y lifetime pagando con cripto — Dash, USDC o Lightning.",
+    href: "/subscribe",
+  },
+  {
+    category: "UPDATE",
+    en: "Crypto prices now shown right on each plan card — pick your method and see your savings instantly.",
+    es: "Los precios cripto ahora se muestran en cada tarjeta de plan — elige tu método y ve tus ahorros al instante.",
+    href: "/subscribe",
+  },
+  {
+    category: "UPDATE",
+    en: "Crypto payments just got more reliable — faster settlement, better recovery, fewer failures.",
+    es: "Los pagos cripto ahora son más confiables — liquidación más rápida, mejor recuperación, menos fallos.",
+    href: "/subscribe",
+  },
+  {
+    category: "UPDATE",
     en: "PNP Live launches June 1st — live cams, tips & real-time fun. Get ready.",
     es: "PNP Live arranca el 1 de junio — cams en vivo, tips y diversión en tiempo real. Prepárate.",
     href: "/live",
@@ -60,15 +78,9 @@ const UPDATE_MESSAGES: RawMessage[] = [
   },
   {
     category: "UPDATE",
-    en: "Pay with Dash and save 5% on any plan — private, instant, no banks.",
-    es: "Paga con Dash y ahorra 5% en cualquier plan — privado, instantáneo, sin bancos.",
+    en: "Pay with Dash, USDC, or Lightning and save 5–20% on every plan.",
+    es: "Paga con Dash, USDC o Lightning y ahorra 5–20% en cualquier plan.",
     href: "/subscribe",
-  },
-  {
-    category: "UPDATE",
-    en: "Santino & Lex just started a 2-week wellness break — follow along.",
-    es: "Santino y Lex empiezan pausa de bienestar de 2 semanas — síguelos.",
-    href: "/self-care",
   },
   {
     category: "UPDATE",
