@@ -1,6 +1,7 @@
 'use strict';
 const { query } = require('../config/postgres');
 const callPackageService = require('./callPackageService');
+const NotificationEmitter = require('./notificationEmitter');
 const logger = require('../utils/logger');
 const moment = require('moment-timezone');
 const { v4: uuidv4 } = require('uuid');
@@ -255,22 +256,41 @@ class CallBookingService {
 
   /**
    * DB-H2: Cancel a booking — unreserve credit + update booking status.
+   *
+   * @param {string} bookingId
+   * @param {string} [reason='User cancellation']
+   * @param {'member'|'creator'|null} [cancelledByRole=null] — who is cancelling; drives notification copy
+   * @param {string|null} [cancelledByUserId=null] — users.id of the cancelling party
    */
-  static async cancelBooking(bookingId, reason = 'User cancellation') {
+  static async cancelBooking(bookingId, reason = 'User cancellation', cancelledByRole = null, cancelledByUserId = null) {
     const pool = require('../config/postgres').getPool();
     const client = await pool.connect();
+
+    let bookingSnapshot = null;
 
     try {
       await client.query('BEGIN');
 
       const bookingResult = await client.query(
-        `SELECT * FROM bookings WHERE id = $1 AND status NOT IN ('completed', 'cancelled', 'expired') FOR UPDATE`,
+        `SELECT b.*,
+                p.user_id AS creator_user_id,
+                u_member.display_name  AS member_display_name,
+                u_creator.display_name AS creator_display_name,
+                u_member.username      AS member_username,
+                u_creator.username     AS creator_username
+         FROM bookings b
+         JOIN performers p ON p.id = b.performer_id
+         JOIN users u_member  ON u_member.id = b.user_id
+         JOIN users u_creator ON u_creator.id = p.user_id
+         WHERE b.id = $1 AND b.status NOT IN ('completed', 'cancelled', 'expired')
+         FOR UPDATE`,
         [bookingId]
       );
       if (bookingResult.rows.length === 0) {
         throw new Error(`Booking ${bookingId} not found or already in terminal status`);
       }
       const booking = bookingResult.rows[0];
+      bookingSnapshot = booking;
 
       // Unreserve the credit (quantity_scheduled--)
       if (booking.credit_id) {
@@ -288,13 +308,99 @@ class CallBookingService {
       );
 
       await client.query('COMMIT');
-      logger.info('Booking cancelled', { bookingId, reason });
+      logger.info('Booking cancelled', { bookingId, reason, cancelledByRole });
     } catch (error) {
       await client.query('ROLLBACK');
       logger.error('cancelBooking failed:', error);
       throw error;
     } finally {
       client.release();
+    }
+
+    // ── Post-cancel notifications (fire-and-forget, after commit) ─────────────
+    if (bookingSnapshot) {
+      (async () => {
+        try {
+          const booking = bookingSnapshot;
+          const memberId = booking.user_id;
+          const creatorId = booking.creator_user_id;
+
+          const startLabel = booking.start_time_utc
+            ? moment.utc(booking.start_time_utc).format('MMM D [at] h:mm A [UTC]')
+            : 'your scheduled call';
+
+          const memberName = booking.member_display_name || booking.member_username || 'A member';
+          const creatorName = booking.creator_display_name || booking.creator_username || 'Your creator';
+
+          if (cancelledByRole === 'member') {
+            // Notify creator: member cancelled
+            await NotificationEmitter.emit({
+              type: 'system',
+              category: 'booking',
+              targetUserId: creatorId,
+              actorId: memberId,
+              entityType: 'booking',
+              entityId: bookingId,
+              message: `${memberName} cancelled their booking for ${startLabel}.`,
+            });
+
+            // Notify member: self-confirmation
+            await NotificationEmitter.emit({
+              type: 'system',
+              category: 'booking',
+              targetUserId: memberId,
+              entityType: 'booking',
+              entityId: bookingId,
+              message: `Your booking for ${startLabel} has been cancelled. Your session credit has been returned.`,
+            });
+
+          } else if (cancelledByRole === 'creator') {
+            // Notify member: creator cancelled, credit returned
+            await NotificationEmitter.emit({
+              type: 'system',
+              category: 'booking',
+              targetUserId: memberId,
+              actorId: creatorId,
+              entityType: 'booking',
+              entityId: bookingId,
+              message: `${creatorName} cancelled your booking for ${startLabel}. Your session credit has been returned — you can rebook any time.`,
+            });
+
+            // Notify creator: confirmation
+            await NotificationEmitter.emit({
+              type: 'system',
+              category: 'booking',
+              targetUserId: creatorId,
+              entityType: 'booking',
+              entityId: bookingId,
+              message: `You cancelled the booking for ${startLabel}. The member's session credit has been returned.`,
+            });
+
+          } else {
+            // Generic fallback (admin cancel or unknown role)
+            await NotificationEmitter.emit({
+              type: 'system',
+              category: 'booking',
+              targetUserId: memberId,
+              entityType: 'booking',
+              entityId: bookingId,
+              message: `Your booking for ${startLabel} has been cancelled. Your session credit has been returned.`,
+            });
+            await NotificationEmitter.emit({
+              type: 'system',
+              category: 'booking',
+              targetUserId: creatorId,
+              entityType: 'booking',
+              entityId: bookingId,
+              message: `A booking for ${startLabel} has been cancelled.`,
+            });
+          }
+        } catch (notifErr) {
+          logger.warn('[CallBookingService] cancelBooking notification error (non-fatal)', {
+            bookingId, error: notifErr.message,
+          });
+        }
+      })();
     }
   }
 }

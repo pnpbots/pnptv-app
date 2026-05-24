@@ -810,9 +810,13 @@ async function cancelBooking(req, res) {
       return res.status(400).json({ success: false, error: 'Invalid bookingId' });
     }
 
-    // Verify the caller is either the member or the creator of this booking
+    // Verify the caller is either the member or the creator of this booking.
+    // Also determine the role so notification copy is accurate (H-02).
     const ownerCheck = await query(
-      `SELECT b.id FROM bookings b
+      `SELECT b.id, b.user_id AS member_id, b.status AS booking_status,
+              b.start_time_utc, b.credit_id,
+              p.user_id AS creator_user_id
+       FROM bookings b
        JOIN performers p ON p.id = b.performer_id
        WHERE b.id = $1 AND (b.user_id = $2 OR p.user_id = $2)`,
       [bookingId, userId]
@@ -821,14 +825,29 @@ async function cancelBooking(req, res) {
       return res.status(403).json({ success: false, error: 'Not authorised to cancel this booking' });
     }
 
+    const booking = ownerCheck.rows[0];
+    const cancelledByRole = (userId === String(booking.creator_user_id)) ? 'creator' : 'member';
+
     const reason = typeof req.body?.reason === 'string'
       ? req.body.reason.trim().slice(0, 500)
       : 'User cancellation';
 
-    await CallBookingService.cancelBooking(bookingId, reason);
+    // H-05: Log a structured warning when a creator cancels a confirmed booking
+    // so operators can track cases where a refund/credit may be warranted.
+    if (cancelledByRole === 'creator' && booking.booking_status === 'confirmed') {
+      logger.warn('[CallBookings] Creator cancelled confirmed booking', {
+        bookingId,
+        creatorId: userId,
+        memberId: booking.member_id,
+        startTime: booking.start_time_utc,
+        creditId: booking.credit_id,
+      });
+    }
 
-    logger.info('[callBookingController] booking cancelled', { bookingId, userId, reason });
-    return res.json({ success: true });
+    await CallBookingService.cancelBooking(bookingId, reason, cancelledByRole, userId);
+
+    logger.info('[callBookingController] booking cancelled', { bookingId, userId, reason, cancelledByRole });
+    return res.json({ success: true, creditReturned: true });
   } catch (err) {
     logger.error('[callBookingController] cancelBooking error', { error: err.message });
     if (err.message && err.message.includes('not found or already in terminal status')) {

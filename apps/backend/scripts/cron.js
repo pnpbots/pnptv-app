@@ -690,6 +690,50 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // M-05: Auto-complete confirmed bookings that ended more than 30 minutes ago.
+    // Transitions confirmed → completed and increments quantity_used on the credit
+    // so surveys can be submitted and earnings can be tallied. Runs every 15 minutes.
+    cron.schedule('*/15 * * * *', async () => {
+      try {
+        const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
+        const expired = await pgQuery(`
+          SELECT b.id, b.credit_id FROM bookings b
+          WHERE b.status = 'confirmed'
+            AND b.end_time_utc IS NOT NULL
+            AND b.end_time_utc < NOW() - INTERVAL '30 minutes'
+        `);
+        for (const row of expired.rows) {
+          try {
+            // Use status = 'confirmed' guard to ensure idempotency
+            const updated = await pgQuery(
+              `UPDATE bookings SET status = 'completed', updated_at = NOW()
+               WHERE id = $1 AND status = 'confirmed'
+               RETURNING id`,
+              [row.id]
+            );
+            if (updated.rowCount === 0) continue; // already transitioned by another runner
+            if (row.credit_id) {
+              await pgQuery(
+                `UPDATE call_credits
+                 SET quantity_used = quantity_used + 1,
+                     quantity_scheduled = GREATEST(0, quantity_scheduled - 1),
+                     updated_at = NOW()
+                 WHERE id = $1`,
+                [row.credit_id]
+              );
+            }
+          } catch (innerErr) {
+            logger.error('[Cron] Auto-complete booking error', { bookingId: row.id, error: innerErr.message });
+          }
+        }
+        if (expired.rows.length > 0) {
+          logger.info('[Cron] Auto-completed past-end bookings', { count: expired.rows.length });
+        }
+      } catch (err) {
+        logger.error('[Cron] Auto-complete bookings cron error', { error: err.message });
+      }
+    });
+
     // Release expired Meru reservations back to the active pool every 5 minutes
     const meruLinkService = require(path.join(backendPath, 'services/meruLinkService'));
     cron.schedule(process.env.MERU_RESERVATION_CLEANUP_CRON || '*/5 * * * *', async () => {
