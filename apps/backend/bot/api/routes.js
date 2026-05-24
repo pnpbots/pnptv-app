@@ -8801,6 +8801,200 @@ app.get('/api/webapp/payments/dash/details/:invoiceId', requireSessionAuth, asyn
   }
 });
 
+// GET /api/webapp/payments/lightning/available — check if Lightning is configured & enabled in BTCPay store
+app.get('/api/webapp/payments/lightning/available', asyncHandler(async (req, res) => {
+  const { checkLightningHealth } = require('../../config/btcpay');
+  const health = await checkLightningHealth();
+  return res.json({ available: health.configured && health.reachable, ...health });
+}));
+
+// POST /api/webapp/payments/lightning/create — create a BTCPay Lightning invoice for a subscription plan.
+app.post('/api/webapp/payments/lightning/create', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session.user;
+
+  const { planId, email, creatorId } = req.body;
+  if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
+
+  const userId = String(user.telegram_id || user.id);
+  const { query: dbQuery } = require('../../config/postgres');
+
+  // Gate: check Lightning is configured before doing any work
+  const { checkLightningHealth, createLightningInvoice } = require('../../config/btcpay');
+  const health = await checkLightningHealth();
+  if (!health.configured) {
+    return res.status(503).json({
+      success: false,
+      error: 'Lightning payments are not available yet. Please use Card or Dash.',
+      code: 'LIGHTNING_NOT_CONFIGURED',
+    });
+  }
+  if (!health.reachable) {
+    return res.status(503).json({
+      success: false,
+      error: 'Payment server is temporarily unavailable. Please try again later.',
+      code: 'BTCPAY_UNREACHABLE',
+    });
+  }
+
+  let planDisplayName;
+  let usdAmount;
+  let discountInfo = null;
+
+  if (planId === 'creator_monthly') {
+    if (!creatorId) {
+      return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
+    }
+    const creatorRes = await dbQuery(
+      'SELECT id, username, first_name, creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
+      [String(creatorId), 'active']
+    );
+    if (creatorRes.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Creator not found or not active' });
+    }
+    const creator = creatorRes.rows[0];
+    const price = parseFloat(creator.creator_price_usd);
+    if (!Number.isFinite(price) || price <= 0) {
+      return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
+    }
+    usdAmount = price;
+    planDisplayName = 'Premium subscription';
+  } else {
+    const PlanModel = require('../../models/planModel');
+    const plan = await PlanModel.getById(planId);
+    if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+    const basePrice = parseFloat(plan.price);
+    if (planId === 'lifetime100') {
+      usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
+      discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    } else if (planId === 'prime-diamond-pass-365d') {
+      usdAmount = 90.99;
+      discountInfo = { originalAmount: basePrice, discountPct: 9 };
+    } else {
+      // 5% crypto discount for all other plans
+      usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
+      discountInfo = { originalAmount: basePrice, discountPct: 5 };
+    }
+    planDisplayName = plan.display_name || plan.name;
+  }
+
+  const orderId = `pnptv-ln-${userId}-${Date.now()}`;
+
+  try {
+    const invoice = await createLightningInvoice({
+      usdAmount,
+      userId,
+      orderId,
+      description: `${planDisplayName} subscription`,
+      redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`,
+    });
+
+    await dbQuery(
+      `INSERT INTO dash_subscription_orders (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+       ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
+      [userId, planId, email || null, usdAmount, invoice.invoiceId, creatorId ? String(creatorId) : null]
+    );
+
+    return res.json({
+      success: true,
+      invoiceId: invoice.invoiceId,
+      checkoutUrl: invoice.checkoutUrl,
+      planName: planDisplayName,
+      usdAmount,
+      ...(discountInfo || {}),
+    });
+  } catch (err) {
+    logger.error(`Lightning subscription invoice error: ${err.message}`);
+    if (err.message?.includes('not configured')) {
+      return res.status(503).json({ success: false, error: 'Lightning payments are not available yet. Please use another payment method.', code: 'LIGHTNING_NOT_CONFIGURED' });
+    }
+    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
+      return res.status(503).json({ success: false, error: 'Payment server is temporarily unavailable. Please try again later.', code: 'BTCPAY_UNREACHABLE' });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to create Lightning invoice. Please try again.', code: 'LIGHTNING_ERROR' });
+  }
+}));
+
+// GET /api/webapp/payments/lightning/status/:invoiceId — poll invoice status
+app.get('/api/webapp/payments/lightning/status/:invoiceId', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { invoiceId } = req.params;
+  if (!invoiceId || !/^[A-Za-z0-9_-]{5,64}$/.test(invoiceId)) {
+    return res.status(400).json({ success: false, error: 'Invalid invoiceId' });
+  }
+  const { query: dbQuery } = require('../../config/postgres');
+  const result = await dbQuery(
+    `SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2`,
+    [invoiceId, String(user.telegram_id || user.id)]
+  );
+
+  if (result.rows.length === 0) return res.status(404).json({ success: false, error: 'Order not found' });
+  return res.json({ success: true, status: result.rows[0].status });
+}));
+
+// GET /api/webapp/payments/lightning/details/:invoiceId — fetch Lightning bolt11 + amount for a pending invoice
+app.get('/api/webapp/payments/lightning/details/:invoiceId', requireSessionAuth, async (req, res) => {
+  try {
+    const user = req.session?.user;
+    if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+    const userId = String(user.telegram_id || user.id);
+    const { invoiceId } = req.params;
+
+    if (!invoiceId || !/^[A-Za-z0-9_-]{5,64}$/.test(invoiceId)) {
+      return res.status(400).json({ success: false, error: 'Invalid invoiceId' });
+    }
+
+    // Verify ownership — Lightning invoices are stored in dash_subscription_orders
+    const ownerCheck = await pool.query(
+      `SELECT user_id FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2 LIMIT 1`,
+      [invoiceId, userId]
+    );
+
+    if (ownerCheck.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Invoice not found' });
+    }
+
+    const { getInvoicePaymentMethods, getInvoice } = require('../../config/btcpay');
+
+    const [methods, invoice] = await Promise.all([
+      getInvoicePaymentMethods(invoiceId),
+      getInvoice(invoiceId),
+    ]);
+
+    // Find the Lightning payment method
+    const lightningMethod = methods.find(
+      (m) =>
+        m.paymentMethodId?.includes('Lightning') ||
+        m.paymentMethodId === 'BTC-LightningNetwork'
+    );
+
+    if (!lightningMethod) {
+      return res.status(404).json({ success: false, error: 'No Lightning payment method found for this invoice' });
+    }
+
+    // For Lightning, the destination field IS the bolt11 string
+    const bolt11 = lightningMethod.destination || lightningMethod.bolt11 || '';
+    const amount = lightningMethod.amount || lightningMethod.cryptoAmount || '0';
+    const invoiceAmount = invoice?.amount ? parseFloat(invoice.amount) : null;
+
+    res.json({
+      success: true,
+      bolt11,
+      amount,
+      due: lightningMethod.due || amount,
+      rate: lightningMethod.rate || null,
+      status: invoice?.status || 'New',
+      currency: invoice?.currency || 'USD',
+      invoiceAmount,
+    });
+  } catch (err) {
+    logger.error('[Lightning] Failed to get payment details', { error: err.message, invoiceId: req.params.invoiceId });
+    res.status(500).json({ success: false, error: 'Failed to fetch payment details' });
+  }
+});
+
 // POST /api/webhooks/btcpay — BTCPay Server webhook (Dash payment confirmed)
 // Full handler extracted to btcpayWebhookController for maintainability.
 const btcpayWebhookController = require('./controllers/btcpayWebhookController');

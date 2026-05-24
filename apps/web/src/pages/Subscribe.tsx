@@ -12,6 +12,10 @@ import {
   getDashSubscriptionStatus,
   getDashAvailable,
   getDashPaymentDetails,
+  createLightningSubscription,
+  getLightningAvailable,
+  getLightningSubscriptionStatus,
+  getLightningPaymentDetails,
   getLabelColor,
   assertPaymentUrl,
   validatePromoCode,
@@ -25,7 +29,7 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
 import { isTelegramContext } from "@/lib/telegram";
 
-type Provider = "stripe" | "dash";
+type Provider = "stripe" | "dash" | "lightning";
 
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
@@ -130,6 +134,27 @@ export default function Subscribe() {
   const [dashPaymentSuccess, setDashPaymentSuccess] = useState(false);
   const dashCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Lightning state
+  const [lightningAvailable, setLightningAvailable] = useState<boolean | null>(null);
+  const [lightningInvoice, setLightningInvoice] = useState<{
+    invoiceId: string;
+    checkoutUrl: string;
+    planName: string;
+    bolt11?: string;
+    amount?: string;
+    due?: string;
+    rate?: string | null;
+    loadingDetails?: boolean;
+    detailsError?: string;
+    invoiceAmount?: number | null;
+    createdAt: number;
+  } | null>(null);
+  const [lightningPolling, setLightningPolling] = useState(false);
+  const [lightningCopied, setLightningCopied] = useState(false);
+  const [lightningSecondsLeft, setLightningSecondsLeft] = useState(600);
+  const [lightningPaymentSuccess, setLightningPaymentSuccess] = useState(false);
+  const lightningCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     // Detect country first so we can prefer the pnp-col plan when applicable
     fetch("/api/webapp/geo", { credentials: "include" })
@@ -169,6 +194,10 @@ export default function Subscribe() {
     getDashAvailable()
       .then((res) => setDashAvailable(res.available === true && res.configured === true))
       .catch(() => setDashAvailable(false));
+
+    getLightningAvailable()
+      .then((res) => setLightningAvailable(res.available === true && res.configured === true))
+      .catch(() => setLightningAvailable(false));
 
     // Resume polling if returning from same-tab Daimo checkout
     try {
@@ -411,6 +440,83 @@ export default function Subscribe() {
     };
   }, [dashInvoice, dashPolling, refreshUser]);
 
+  // Poll Lightning invoice status after showing checkout.
+  // Cap matches the BTCPay 10-minute Lightning invoice TTL. Poll every 2s because Lightning settles in seconds.
+  useEffect(() => {
+    if (!lightningInvoice || !lightningPolling) return;
+    let cancelled = false;
+    const maxDurationMs = 10 * 60 * 1000; // 10 min, matches Lightning invoice TTL
+    const startedAt = Date.now();
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      if (cancelled) return;
+      if (Date.now() - startedAt >= maxDurationMs) {
+        setLightningPolling(false);
+        return;
+      }
+      try {
+        const data = await getLightningSubscriptionStatus(lightningInvoice.invoiceId);
+        if (cancelled) return;
+        if (data.status === "completed") {
+          setLightningPolling(false);
+          setLightningPaymentSuccess(true);
+          await refreshUser();
+          timerId = setTimeout(() => {
+            setLightningInvoice(null);
+            setLightningPaymentSuccess(false);
+            setPaymentSuccess(true);
+          }, 2000);
+          return;
+        }
+        if (data.status === "expired" || data.status === "invalid") {
+          setLightningPolling(false);
+          setError(s.lightningExpired);
+          return;
+        }
+        if (!cancelled) timerId = setTimeout(poll, 2000);
+      } catch {
+        if (!cancelled) timerId = setTimeout(poll, 2000);
+      }
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [lightningInvoice, lightningPolling, refreshUser]);
+
+  // Countdown timer for Lightning invoice (10-minute expiry)
+  useEffect(() => {
+    if (!lightningInvoice || !lightningPolling) {
+      if (lightningCountdownRef.current) {
+        clearInterval(lightningCountdownRef.current);
+        lightningCountdownRef.current = null;
+      }
+      return;
+    }
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - lightningInvoice.createdAt) / 1000);
+      const remaining = Math.max(0, 600 - elapsed);
+      setLightningSecondsLeft(remaining);
+      if (remaining === 0) {
+        if (lightningCountdownRef.current) {
+          clearInterval(lightningCountdownRef.current);
+          lightningCountdownRef.current = null;
+        }
+        setLightningPolling(false);
+      }
+    };
+    tick();
+    lightningCountdownRef.current = setInterval(tick, 1000);
+    return () => {
+      if (lightningCountdownRef.current) {
+        clearInterval(lightningCountdownRef.current);
+        lightningCountdownRef.current = null;
+      }
+    };
+  }, [lightningInvoice, lightningPolling]);
+
   // Countdown timer for Dash invoice (15-minute expiry)
   useEffect(() => {
     if (!dashInvoice || !dashPolling) {
@@ -497,6 +603,41 @@ export default function Subscribe() {
           // 200-OK shapes.
           setError(s.failedToCreateDashInvoice);
         }
+      } else if (provider === "lightning") {
+        const result = await createLightningSubscription(selectedPlan);
+        if (result.success && result.checkoutUrl) {
+          const invoice = {
+            invoiceId: result.invoiceId,
+            checkoutUrl: assertPaymentUrl(result.checkoutUrl),
+            planName: result.planName || "subscription",
+            loadingDetails: true,
+            createdAt: Date.now(),
+          };
+          setLightningInvoice(invoice);
+          setLightningSecondsLeft(600);
+          setLightningPolling(true);
+          getLightningPaymentDetails(result.invoiceId)
+            .then((details) => {
+              if (details.success) {
+                setLightningInvoice((prev) => prev ? {
+                  ...prev,
+                  bolt11: details.bolt11,
+                  amount: details.amount,
+                  due: details.due,
+                  rate: details.rate,
+                  invoiceAmount: details.invoiceAmount,
+                  loadingDetails: false,
+                } : prev);
+              } else {
+                setLightningInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: "Could not load invoice" } : prev);
+              }
+            })
+            .catch(() => {
+              setLightningInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: "Could not load invoice" } : prev);
+            });
+        } else {
+          setError(s.failedToCreateLightningInvoice);
+        }
       } else {
         // Stripe checkout — requires a Stripe Price ID on the plan.
         const plan = plans.find((p) => p.id === selectedPlan);
@@ -540,7 +681,11 @@ export default function Subscribe() {
       // codes (BTCPAY_NOT_CONFIGURED / BTCPAY_UNREACHABLE / BTCPAY_ERROR) only
       // ever land here, never in the result.success === false branch above.
       if (err instanceof ApiError) {
-        if (err.code === "BTCPAY_NOT_CONFIGURED") {
+        if (err.code === "LIGHTNING_NOT_CONFIGURED") {
+          setError(s.lightningNotConfigured);
+        } else if (err.code === "LIGHTNING_ERROR") {
+          setError(s.failedToCreateLightningInvoice);
+        } else if (err.code === "BTCPAY_NOT_CONFIGURED") {
           setError(s.dashNotConfigured);
         } else if (err.code === "BTCPAY_UNREACHABLE") {
           setError(s.dashServerUnavailable);
@@ -1085,7 +1230,7 @@ export default function Subscribe() {
       {/* Payment method */}
       <div className="mb-6">
         <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">{s.paymentMethod}</h3>
-        <div className="grid grid-cols-2 gap-2">
+        <div className={`grid ${lightningAvailable !== null ? "grid-cols-3" : "grid-cols-2"} gap-2`}>
           <button
             onClick={() => setProvider("stripe")}
             className={`rounded-xl p-3 border-2 transition-all text-center ${
@@ -1118,6 +1263,28 @@ export default function Subscribe() {
               </span>
             )}
           </button>
+          {lightningAvailable !== null && (
+            <button
+              onClick={() => lightningAvailable !== false && setProvider("lightning")}
+              disabled={lightningAvailable === false}
+              className={`rounded-xl p-3 border-2 transition-all text-center relative ${
+                lightningAvailable === false
+                  ? "border-white/5 bg-white/3 opacity-50 cursor-not-allowed"
+                  : provider === "lightning"
+                  ? "border-[#F7931A] bg-[#F7931A]/10"
+                  : "border-white/10 bg-white/5 hover:border-white/20"
+              }`}
+            >
+              <div className="text-lg mb-1">⚡</div>
+              <div className="text-xs font-medium text-pnp-textPrimary">{s.lightning}</div>
+              <div className="text-[10px] text-pnp-textSecondary">{lightningAvailable === false ? s.lightningComingSoon : s.lightningInstant}</div>
+              {lightningAvailable !== false && (
+                <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#F7931A] text-white px-1.5 py-0.5 rounded-full leading-none">
+                  {s.lightningBadge}
+                </span>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Dash info panel */}
@@ -1144,6 +1311,26 @@ export default function Subscribe() {
                 className="text-[#008DE4] hover:underline">
                 {s.buyOnUphold}
               </a>
+            </div>
+          </div>
+        )}
+
+        {/* Lightning info panel */}
+        {provider === "lightning" && (
+          <div className="mt-3 rounded-xl p-3 border border-[#F7931A]/30 bg-[#F7931A]/5 space-y-2">
+            <p className="text-xs text-pnp-textSecondary">{s.lightningInfoText}</p>
+            <div className="flex flex-wrap gap-2 text-[10px]">
+              <a href="https://phoenix.acinq.co/" target="_blank" rel="noopener noreferrer"
+                className="text-[#F7931A] hover:underline font-semibold">Phoenix ↗</a>
+              <span className="text-pnp-textSecondary/40">·</span>
+              <a href="https://muun.com/" target="_blank" rel="noopener noreferrer"
+                className="text-[#F7931A] hover:underline">Muun ↗</a>
+              <span className="text-pnp-textSecondary/40">·</span>
+              <a href="https://strike.me/" target="_blank" rel="noopener noreferrer"
+                className="text-[#F7931A] hover:underline">Strike ↗</a>
+              <span className="text-pnp-textSecondary/40">·</span>
+              <a href="https://www.binance.com/en/buy-sell-crypto" target="_blank" rel="noopener noreferrer"
+                className="text-[#F7931A] hover:underline">{s.buyOnBinance}</a>
             </div>
           </div>
         )}
@@ -1274,6 +1461,142 @@ export default function Subscribe() {
 
           <button
             onClick={() => { setDashInvoice(null); setDashPolling(false); setDashCopied(false); setDashSecondsLeft(900); setDashPaymentSuccess(false); }}
+            className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1 mt-2"
+          >
+            {s.cancel}
+          </button>
+        </div>
+      )}
+
+      {/* Lightning in-app payment widget */}
+      {lightningInvoice && (
+        <div className="mb-6 rounded-xl border border-[#F7931A]/40 bg-[#F7931A]/5 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-[#F7931A] animate-pulse" />
+            <span className="text-sm font-medium text-pnp-textPrimary">
+              {s.waitingForLightningPayment} {lightningInvoice.planName}
+            </span>
+          </div>
+
+          {lightningInvoice.loadingDetails ? (
+            <div className="flex flex-col items-center py-6 gap-3">
+              <svg className="animate-spin h-6 w-6 text-[#F7931A]" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <p className="text-xs text-pnp-textSecondary">{s.lightningLoadingDetails}</p>
+            </div>
+          ) : lightningPaymentSuccess ? (
+            <div className="flex flex-col items-center gap-3 py-6">
+              <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
+                <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <p className="text-base font-semibold text-green-400">{s.lightningPaymentConfirmed}</p>
+              <p className="text-xs text-pnp-textSecondary">{s.subscriptionNowActive}</p>
+            </div>
+          ) : lightningSecondsLeft === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-6">
+              <p className="text-sm font-medium text-red-400">{s.lightningExpired}</p>
+              <button
+                onClick={() => { setLightningInvoice(null); setLightningPolling(false); setLightningCopied(false); setLightningSecondsLeft(600); setLightningPaymentSuccess(false); }}
+                className="mt-1 px-4 py-2 rounded-lg bg-[#F7931A] text-white text-xs font-semibold hover:bg-[#d97d0f] transition-colors"
+              >
+                {s.retry}
+              </button>
+            </div>
+          ) : lightningInvoice.bolt11 && lightningInvoice.amount ? (
+            <div className="flex flex-col items-center gap-4">
+              {/* QR Code — bolt11 uppercase for QR efficiency */}
+              <div className="bg-white p-3 rounded-xl">
+                <QRCodeSVG
+                  value={lightningInvoice.bolt11.toUpperCase()}
+                  size={180}
+                  level="M"
+                />
+              </div>
+              <p className="text-[10px] text-pnp-textSecondary">{s.lightningInvoiceDesc}</p>
+
+              {/* Amount */}
+              <div className="text-center">
+                <p className="text-xs text-pnp-textSecondary mb-1">{s.lightningAmountDue}</p>
+                <p className="text-xl font-bold text-white">{lightningInvoice.amount} BTC</p>
+                {lightningInvoice.invoiceAmount != null && (
+                  <p className="text-xs text-pnp-textSecondary mt-0.5">
+                    ~${lightningInvoice.invoiceAmount.toFixed(2)} USD
+                  </p>
+                )}
+              </div>
+
+              {/* Countdown timer */}
+              <p className={`text-xs font-mono tabular-nums ${
+                lightningSecondsLeft <= 60
+                  ? "text-red-400"
+                  : lightningSecondsLeft <= 120
+                  ? "text-orange-400"
+                  : "text-pnp-textSecondary"
+              }`}>
+                {String(Math.floor(lightningSecondsLeft / 60)).padStart(2, "0")}:{String(lightningSecondsLeft % 60).padStart(2, "0")} remaining
+              </p>
+
+              {/* Bolt11 display (truncated) + Copy */}
+              <div className="w-full">
+                <p className="text-[10px] text-pnp-textSecondary mb-1">Lightning invoice</p>
+                <div className="flex items-center gap-2 rounded-lg px-3 py-2 bg-white/5 border border-white/10">
+                  <code className="flex-1 text-xs text-white/80 font-mono truncate">
+                    {lightningInvoice.bolt11.slice(0, 20)}...{lightningInvoice.bolt11.slice(-8)}
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(lightningInvoice.bolt11!).catch(() => {});
+                      setLightningCopied(true);
+                      setTimeout(() => setLightningCopied(false), 2000);
+                    }}
+                    className={`flex-shrink-0 text-xs font-semibold px-2 py-1 rounded transition-colors ${lightningCopied ? "text-green-400" : "text-[#F7931A]"}`}
+                  >
+                    {lightningCopied ? s.lightningCopied : s.lightningCopyInvoice}
+                  </button>
+                </div>
+              </div>
+
+              {/* Open in wallet link */}
+              <a
+                href={`lightning:${lightningInvoice.bolt11}`}
+                className="text-xs text-[#F7931A] hover:underline transition-colors"
+              >
+                {s.lightningOpenWallet}
+              </a>
+
+              {/* Fallback external BTCPay link */}
+              <a
+                href={lightningInvoice.checkoutUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+              >
+                {s.openLightningCheckout}
+              </a>
+            </div>
+          ) : (
+            /* Fallback if details failed to load — show original external link */
+            <>
+              <p className="text-xs text-pnp-textSecondary mb-3">
+                {lightningInvoice.detailsError || s.lightningInvoiceDesc}
+              </p>
+              <a
+                href={lightningInvoice.checkoutUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full text-center py-2.5 rounded-xl bg-[#F7931A] text-white text-sm font-semibold hover:bg-[#d97d0f] transition-colors mb-2"
+              >
+                {s.openLightningCheckout}
+              </a>
+            </>
+          )}
+
+          <button
+            onClick={() => { setLightningInvoice(null); setLightningPolling(false); setLightningCopied(false); setLightningSecondsLeft(600); setLightningPaymentSuccess(false); }}
             className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1 mt-2"
           >
             {s.cancel}

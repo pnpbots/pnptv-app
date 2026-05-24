@@ -2830,6 +2830,59 @@ export function getDashPaymentDetails(
   return request(`/api/webapp/payments/dash/details/${encodeURIComponent(invoiceId)}`);
 }
 
+export function createLightningSubscription(
+  planId: string,
+  email?: string,
+  creatorId?: string,
+): Promise<{
+  success: boolean;
+  invoiceId: string;
+  checkoutUrl: string;
+  planName?: string;
+  usdAmount?: number;
+  error?: string;
+}> {
+  const body: Record<string, string> = { planId };
+  if (email) body.email = email;
+  if (creatorId) body.creatorId = creatorId;
+  return request("/api/webapp/payments/lightning/create", {
+    method: "POST",
+    body,
+  });
+}
+
+export function getLightningSubscriptionStatus(invoiceId: string): Promise<{
+  success: boolean;
+  status: string;
+  error?: string;
+}> {
+  return request(`/api/webapp/payments/lightning/status/${encodeURIComponent(invoiceId)}`);
+}
+
+export function getLightningAvailable(): Promise<{
+  available: boolean;
+  configured: boolean;
+  reachable: boolean;
+  reason?: string;
+}> {
+  return request("/api/webapp/payments/lightning/available");
+}
+
+export function getLightningPaymentDetails(
+  invoiceId: string
+): Promise<{
+  success: boolean;
+  bolt11: string;
+  amount: string;
+  due: string;
+  rate: string | null;
+  status: string;
+  currency: string;
+  invoiceAmount: number | null;
+}> {
+  return request(`/api/webapp/payments/lightning/details/${encodeURIComponent(invoiceId)}`);
+}
+
 export function activateMeruCode(
   code: string,
   email: string

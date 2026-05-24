@@ -375,6 +375,85 @@ async function archivePullPayment(pullPaymentId) {
 }
 
 /**
+ * Create a Lightning Network invoice in BTCPay Server
+ * @param {object} opts
+ * @param {number}  opts.usdAmount     — Amount in USD
+ * @param {string}  opts.userId        — PNPtv user ID (stored as metadata)
+ * @param {string}  opts.orderId       — Unique order reference (idempotency key)
+ * @param {string}  [opts.description] — Invoice description
+ * @param {string}  [opts.redirectUrl] — URL to redirect after payment
+ * @returns {Promise<{success: boolean, invoiceId: string, checkoutUrl: string, status: string}>}
+ */
+async function createLightningInvoice({ usdAmount, userId, orderId, description = 'PNP Subscription', redirectUrl }) {
+  if (!BTCPAY_API_KEY || !BTCPAY_STORE_ID) {
+    throw new Error('BTCPay Server not configured (missing BTCPAY_API_KEY or BTCPAY_STORE_ID)');
+  }
+
+  const payload = {
+    currency: 'USD',
+    amount: usdAmount,
+    orderId,
+    metadata: {
+      userId,
+      platform: 'pnptv',
+      description,
+    },
+    checkout: {
+      paymentMethods: ['BTC-LightningNetwork'],
+      redirectURL: redirectUrl || `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`,
+      redirectAutomatically: true,
+      requiresRefundEmail: false,
+    },
+    receipt: { enabled: false },
+  };
+
+  try {
+    const response = await btcpayClient.post(`/stores/${BTCPAY_STORE_ID}/invoices`, payload);
+    const invoice = response.data;
+
+    return {
+      success: true,
+      invoiceId: invoice.id,
+      checkoutUrl: `${BTCPAY_PUBLIC_URL}/i/${invoice.id}`,
+      status: invoice.status,
+    };
+  } catch (err) {
+    logger.error('BTCPay createLightningInvoice failed:', {
+      status: err.response?.status,
+      data: err.response?.data,
+      message: err.message,
+    });
+    throw err;
+  }
+}
+
+/**
+ * Check whether the BTCPay store has a Lightning Network payment method enabled.
+ * Returns { configured: boolean, reachable: boolean, reason?: string }
+ */
+async function checkLightningHealth() {
+  if (!BTCPAY_API_KEY || !BTCPAY_STORE_ID) {
+    return { configured: false, reachable: false, reason: 'not_configured' };
+  }
+  try {
+    const response = await btcpayClient.get(`/stores/${BTCPAY_STORE_ID}/payment-methods`);
+    const methods = response.data || [];
+    const lightningEnabled = methods.some(
+      (m) =>
+        (m.paymentMethodId?.includes('Lightning') || m.paymentMethodId === 'BTC-LightningNetwork') &&
+        m.enabled === true
+    );
+    if (!lightningEnabled) {
+      return { configured: false, reachable: true, reason: 'lightning_not_enabled' };
+    }
+    return { configured: true, reachable: true };
+  } catch (err) {
+    const reason = (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') ? 'unreachable' : 'api_error';
+    return { configured: false, reachable: false, reason };
+  }
+}
+
+/**
  * Check whether BTCPay is configured and reachable.
  * Returns { configured: boolean, reachable: boolean, reason?: string }
  */
@@ -466,6 +545,7 @@ async function verifyWebhookRegistration({ expectedUrl, autoConfigure = false } 
 
 module.exports = {
   createDashInvoice,
+  createLightningInvoice,
   createInvoice,
   getInvoice,
   getInvoicePaymentMethods,
@@ -473,6 +553,7 @@ module.exports = {
   markInvoiceProcessed,
   validateWebhookSignature,
   checkBtcpayHealth,
+  checkLightningHealth,
   verifyWebhookRegistration,
   // Outbound (creator payouts via Dash Pull Payments)
   createPullPayment,
