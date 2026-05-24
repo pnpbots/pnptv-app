@@ -1081,6 +1081,7 @@ export default function Subscribe() {
 
   const selectedPlanData = plans.find((p) => p.id === selectedPlan);
   const cryptoDiscountPct = (selectedPlanData && (selectedPlanData.isLifetime || (selectedPlanData.duration_days ?? 0) >= 365)) ? 20 : 5;
+  const isCrypto = provider === "dash" || provider === "lightning" || provider === "usdc";
 
   return (
     <div className="page-container py-6 px-4 max-w-2xl mx-auto">
@@ -1213,6 +1214,11 @@ export default function Subscribe() {
           const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
           const planLabel = getPlanLabel(plan, true);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
+          const planIsLongTerm = plan.isLifetime || (plan.duration_days ?? plan.duration ?? 0) >= 365;
+          const planDiscountPct = planIsLongTerm ? 20 : 5;
+          const cryptoPriceUSD = Math.round(plan.priceUSD * (1 - planDiscountPct / 100) * 100) / 100;
+          const cryptoPriceCOP = Math.round(plan.priceCOP * (1 - planDiscountPct / 100));
+          const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
           return (
             <button
@@ -1244,7 +1250,14 @@ export default function Subscribe() {
                   </div>
                   <div className="text-xs text-pnp-textSecondary">{s.monthly}</div>
                 </div>
-                <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
+                {isCrypto ? (
+                  <span className="flex flex-col items-end">
+                    <del className="text-xs text-pnp-textSecondary/50 leading-none">{displayPrice}</del>
+                    <span className="text-lg font-bold text-green-400 leading-tight">{cryptoDisplayPrice}</span>
+                  </span>
+                ) : (
+                  <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
+                )}
               </div>
               <span
                 role="button"
@@ -1311,6 +1324,11 @@ export default function Subscribe() {
           const planLabel = getPlanLabel(plan, false);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
           const planDays = plan.duration_days || plan.duration || 30;
+          const planIsLongTerm = plan.isLifetime || planDays >= 365;
+          const planDiscountPct = planIsLongTerm ? 20 : 5;
+          const cryptoPriceUSD = Math.round(plan.priceUSD * (1 - planDiscountPct / 100) * 100) / 100;
+          const cryptoPriceCOP = Math.round(plan.priceCOP * (1 - planDiscountPct / 100));
+          const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
           return (
             <button
@@ -1350,12 +1368,19 @@ export default function Subscribe() {
                   </span>
                 </div>
                 <div className="text-right">
-                  <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
+                  {isCrypto ? (
+                    <div className="flex flex-col items-end">
+                      <del className="text-xs text-pnp-textSecondary/50 leading-none">{displayPrice}</del>
+                      <span className="text-lg font-bold text-green-400 leading-tight">{cryptoDisplayPrice}</span>
+                    </div>
+                  ) : (
+                    <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
+                  )}
                   {planDays >= 30 && planDays < 36500 && (
                     <div className="text-[10px] text-pnp-textSecondary">
                       {showCOP
-                        ? formatPrice(plan.priceCOP / Math.max(1, Math.round(planDays / 30)), "COP")
-                        : formatPrice(plan.priceUSD / Math.max(1, Math.round(planDays / 30)), "USD")
+                        ? formatPrice((isCrypto ? cryptoPriceCOP : plan.priceCOP) / Math.max(1, Math.round(planDays / 30)), "COP")
+                        : formatPrice((isCrypto ? cryptoPriceUSD : plan.priceUSD) / Math.max(1, Math.round(planDays / 30)), "USD")
                       }{s.perMonth}
                     </div>
                   )}
