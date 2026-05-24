@@ -72,12 +72,6 @@ const UPDATE_MESSAGES: RawMessage[] = [
   },
   {
     category: "UPDATE",
-    en: "PRIME Lifetime Pass — $250 once, yours forever. Includes $20 in tip credit.",
-    es: "Pase Lifetime PRIME — $250 una vez, tuyo para siempre. Incluye $20 en crédito de tips.",
-    href: "/subscribe",
-  },
-  {
-    category: "UPDATE",
     en: "Payments are faster and more reliable — Dash and USDC flows rebuilt from the ground up.",
     es: "Los pagos son más rápidos y confiables — flujos de Dash y USDC reconstruidos desde cero.",
     href: "/subscribe",
