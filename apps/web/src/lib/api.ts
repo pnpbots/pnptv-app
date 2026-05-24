@@ -2390,6 +2390,10 @@ export function editDmMessage(
   });
 }
 
+export function deleteDmMessage(messageId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/dm/messages/${messageId}`, { method: "DELETE" });
+}
+
 
 
 export interface DmVideoCallInvite {

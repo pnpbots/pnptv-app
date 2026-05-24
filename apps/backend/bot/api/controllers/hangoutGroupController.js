@@ -2083,10 +2083,13 @@ const deleteMessage = async (req, res) => {
   }
 
   // Accept forAll from both query-string and body
-  const forAll = (req.query.forAll ?? req.body?.forAll) === 'true';
+  const isAdminUser = user.role === 'admin' || user.role === 'superadmin';
+  const forAllParam = (req.query.forAll ?? req.body?.forAll) === 'true';
+  // Admins always delete for everyone
+  const forAll = isAdminUser ? true : forAllParam;
 
   try {
-    if (!(await isMember(groupId, user.id))) {
+    if (!isAdminUser && !(await isMember(groupId, user.id))) {
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
@@ -2101,14 +2104,15 @@ const deleteMessage = async (req, res) => {
 
     const isOwnMessage = String(msg.user_id) === String(user.id);
 
-    if (forAll && !isOwnMessage) {
-      // Only mods/owner may delete others' messages for everyone
-      if (!(await isOwnerOrMod(groupId, user.id))) {
-        return res.status(403).json({ error: 'Not authorized to delete this message for all' });
+    if (!isAdminUser) {
+      if (forAll && !isOwnMessage) {
+        // Only mods/owner may delete others' messages for everyone
+        if (!(await isOwnerOrMod(groupId, user.id))) {
+          return res.status(403).json({ error: 'Not authorized to delete this message for all' });
+        }
+      } else if (!forAll && !isOwnMessage) {
+        return res.status(403).json({ error: 'Cannot delete another user\'s message' });
       }
-    } else if (!forAll && !isOwnMessage) {
-      // Cannot delete someone else's message (even for self only)
-      return res.status(403).json({ error: 'Cannot delete another user\'s message' });
     }
 
     await query(

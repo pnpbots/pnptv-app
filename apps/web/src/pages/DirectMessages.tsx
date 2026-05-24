@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
@@ -19,6 +20,7 @@ import {
   setDmReadReceipts,
   markDmThreadUnread,
   pinDmMessage as pinDmMessageApi,
+  deleteDmMessage as deleteDmMessageApi,
   searchAllDms,
   forwardDmMessage,
   getDmPresence,
@@ -252,7 +254,7 @@ function DmCallSurface({ token, livekitUrl, roomName, partnerName, onClose }: Dm
 
 // ─── Chat View (conversation with a specific user) ──────────────────────────
 
-function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: string; myUserId: string }) {
+function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myDbId: string; myUserId: string; isAdmin: boolean }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<DmMessage[]>([]);
@@ -850,14 +852,20 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
     setConfirmDelete(msg);
   };
 
-  const handleDeleteConfirm = (forAll: boolean) => {
+  const handleDeleteConfirm = async (forAll: boolean) => {
     if (!confirmDelete) return;
     const msg = confirmDelete;
     setConfirmDelete(null);
-    if (forAll) {
+    const isOwnMsg = String(msg.sender_id) === String(myDbId);
+    if (forAll || isAdmin) {
       setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, is_deleted: true, content: null } : m));
     }
-    connectSocket().emit("dm:message:delete", { messageId: msg.id, forAll });
+    if (isAdmin && !isOwnMsg) {
+      // Use HTTP API for admin deletes on others' messages so the backend respects the role
+      try { await deleteDmMessageApi(msg.id); } catch { /* non-fatal; optimistic update already applied */ }
+    } else {
+      connectSocket().emit("dm:message:delete", { messageId: msg.id, forAll });
+    }
   };
 
   const handleReply = (msg: DmMessage) => {
@@ -1877,8 +1885,8 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v3.586l1.707 1.707a1 1 0 01.293.707V13a1 1 0 01-1 1h-2v4a1 1 0 11-2 0v-4H6a1 1 0 01-1-1V9a1 1 0 01.293-.707L7 6.586V3a1 1 0 011-1h2z" /></svg>
               {pinnedMessageId === contextMenu.msg.id ? "Unpin from chat" : "Pin in chat"}
             </button>
-            {/* Delete option — sender only */}
-            {String(contextMenu.msg.sender_id) === String(myDbId) && (
+            {/* Delete option — sender or admin */}
+            {(String(contextMenu.msg.sender_id) === String(myDbId) || isAdmin) && (
               <button
                 onClick={() => handleDeleteMsg(contextMenu.msg)}
                 className="w-full px-4 py-2.5 text-sm text-left text-red-400 hover:bg-white/10 transition-colors flex items-center gap-3 border-t border-white/5"
@@ -1886,7 +1894,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
-                Delete
+                {isAdmin && String(contextMenu.msg.sender_id) !== String(myDbId) ? "Delete (admin)" : "Delete"}
               </button>
             )}
           </div>
@@ -1906,6 +1914,7 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
       {/* Delete confirmation modal — Telegram iOS style */}
       {confirmDelete && (() => {
         const isSender = String(confirmDelete.sender_id) === String(myDbId);
+        const canDeleteForAll = isSender || isAdmin;
         const preview = confirmDelete.media_type === "image" ? "📷 Photo"
           : confirmDelete.media_type === "video" ? "🎥 Video"
           : confirmDelete.media_type === "audio" ? "🎤 Voice message"
@@ -1918,14 +1927,16 @@ function DmChatView({ userId, myDbId, myUserId }: { userId: string; myDbId: stri
                 {preview && <p className="text-sm text-pnp-textSecondary text-center line-clamp-3">{preview}</p>}
               </div>
               <div className="flex flex-col border-t border-white/5">
-                {isSender && (
+                {canDeleteForAll && (
                   <button onClick={() => handleDeleteConfirm(true)} className="w-full px-5 py-3.5 text-sm font-medium text-red-400 hover:bg-white/5 transition-colors border-b border-white/5">
                     Delete for everyone
                   </button>
                 )}
-                <button onClick={() => handleDeleteConfirm(false)} className="w-full px-5 py-3.5 text-sm font-medium text-red-400 hover:bg-white/5 transition-colors border-b border-white/5">
-                  Delete for me only
-                </button>
+                {isSender && (
+                  <button onClick={() => handleDeleteConfirm(false)} className="w-full px-5 py-3.5 text-sm font-medium text-red-400 hover:bg-white/5 transition-colors border-b border-white/5">
+                    Delete for me only
+                  </button>
+                )}
                 <button onClick={() => setConfirmDelete(null)} className="w-full px-5 py-3.5 text-sm font-medium text-pnp-textSecondary hover:bg-white/5 transition-colors">
                   Cancel
                 </button>
@@ -2677,6 +2688,7 @@ export default function DirectMessages() {
   const { userId } = useParams<{ userId: string }>();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const { isAdmin } = useTier();
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("dm");
   const { dm: t } = useI18n();
   const inviteCallerId = searchParams.get("caller");
@@ -2700,7 +2712,7 @@ export default function DirectMessages() {
       {showTutorial && !activeUserId && <TutorialOverlay section="dm" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
       <div className="max-w-3xl mx-auto">
         {activeUserId ? (
-          <DmChatView userId={activeUserId} myDbId={user?.dbId ?? user?.id ?? ""} myUserId={user?.id ?? ""} />
+          <DmChatView userId={activeUserId} myDbId={user?.dbId ?? user?.id ?? ""} myUserId={user?.id ?? ""} isAdmin={isAdmin} />
         ) : (
           <ThreadListView myDbId={user?.dbId ?? user?.id ?? ""} />
         )}

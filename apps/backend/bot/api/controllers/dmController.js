@@ -574,7 +574,8 @@ const deleteDmMessage = async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Message not found' });
 
     const msg = rows[0];
-    if (String(msg.sender_id) !== String(user.id)) {
+    const isAdminUser = user.role === 'admin' || user.role === 'superadmin';
+    if (!isAdminUser && String(msg.sender_id) !== String(user.id)) {
       return res.status(403).json({ error: 'Cannot delete another user\'s message' });
     }
     if (msg.is_deleted) {

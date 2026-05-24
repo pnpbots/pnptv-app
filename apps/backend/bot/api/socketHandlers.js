@@ -1765,7 +1765,8 @@ function initSocketIO(io) {
         }
 
         const msg = rows[0];
-        if (String(msg.sender_id) !== String(user.id)) {
+        const isAdminSocket = user.role === 'admin' || user.role === 'superadmin';
+        if (!isAdminSocket && String(msg.sender_id) !== String(user.id)) {
           socket.emit('dm:error', { message: 'Cannot delete another user\'s message', code: 'FORBIDDEN' });
           return;
         }
