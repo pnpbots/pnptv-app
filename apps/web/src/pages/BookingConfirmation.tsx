@@ -91,14 +91,15 @@ export default function BookingConfirmation() {
   useEffect(() => {
     if (!bookingId) return;
 
-    // Bug: bookingId NaN crash — validate it's a pure integer string before casting
-    if (!/^\d+$/.test(bookingId)) {
+    // Validate bookingId: accept pure integer strings OR UUIDs
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!bookingId || (!/^\d+$/.test(bookingId) && !UUID_RE.test(bookingId))) {
       setError(s.invalidBooking);
       setLoading(false);
       return;
     }
 
-    getCallBooking(Number(bookingId))
+    getCallBooking(bookingId)
       .then((res) => {
         setBooking(res.booking);
         // Check if user just returned from a completed call
@@ -278,7 +279,7 @@ export default function BookingConfirmation() {
 
       <PostCallSurveyModal
         open={showSurvey}
-        bookingId={Number(bookingId)}
+        bookingId={bookingId}
         creatorName={booking.creator_username || s.creatorFallback}
         onClose={() => setShowSurvey(false)}
       />

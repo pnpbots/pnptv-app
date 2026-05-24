@@ -375,7 +375,8 @@ async function onCallPaymentSuccess(paymentId) {
       const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
       await client.query(
         `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
-         VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+         VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))
+         ON CONFLICT (source_payment_id) DO NOTHING`,
         [creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId || null]
       );
       logger.info('[callCheckoutService] creator earnings recorded (holding)', {
@@ -698,7 +699,7 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
         resource: 'call_package',
         packageId: pkg.id,
         paymentId: payment.id,
-        bookingId: booking.id,
+        bookingId: booking?.id ?? null,
         creatorId: pkg.creator_id,
         startTimeUtc,
         endTimeUtc,
@@ -739,7 +740,7 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
         resource: 'call_package',
         packageId: pkg.id,
         paymentId: payment.id,
-        bookingId: booking.id,
+        bookingId: booking?.id ?? null,
         startTimeUtc,
         endTimeUtc,
       }),
@@ -751,7 +752,7 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
     `UPDATE payments
      SET metadata = metadata || $2::jsonb, updated_at = NOW()
      WHERE id = $1`,
-    [payment.id, JSON.stringify({ btcpay_invoice_id: btcpayInvoice.invoiceId, booking_id: booking.id })]
+    [payment.id, JSON.stringify({ btcpay_invoice_id: btcpayInvoice.invoiceId, booking_id: booking?.id ?? null })]
   );
 
   // BTCPay invoices expire after the store's default window (usually 15 min).
@@ -760,7 +761,7 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
 
   logger.info('[callCheckoutService] Dash checkout created', {
     paymentId: payment.id,
-    bookingId: booking.id,
+    bookingId: booking?.id ?? null,
     btcpayInvoiceId: btcpayInvoice.invoiceId,
     packageId: pkg.id,
     amountUsd,
@@ -770,7 +771,7 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
     invoiceId: btcpayInvoice.invoiceId,
     checkoutUrl: btcpayInvoice.checkoutLink,
     paymentId: payment.id,
-    bookingId: booking.id,
+    bookingId: booking?.id ?? null,
     amountUsd,
     expiresAt,
   };

@@ -9955,9 +9955,19 @@ app.get('/api/webapp/bookings/upcoming',
   requireSessionAuth,
   asyncHandler(callBookingController.getUpcomingBookings));
 
+const bookingStatusLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ success: false, error: 'Too many requests' }),
+});
+
 // Payment-status poller for Dash checkout flow (must be before /:bookingId catch-all)
 app.get('/api/webapp/bookings/:bookingId/payment-status',
   requireSessionAuth,
+  bookingStatusLimiter,
   asyncHandler(callBookingController.getBookingPaymentStatus));
 
 const callJoinLimiter = rateLimit({

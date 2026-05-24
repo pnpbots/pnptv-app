@@ -210,6 +210,11 @@ async function getBooking(req, res) {
       return res.status(404).json({ success: false, error: 'Booking not found' });
     }
 
+    // Only issue LiveKit tokens for confirmed bookings
+    if (credit.booking_status && credit.booking_status !== 'confirmed') {
+      return res.status(403).json({ success: false, error: 'Booking is not yet confirmed.' });
+    }
+
     const roomName = `booking-${credit.id}`;
     const isModerator = userId === String(credit.creator_id);
     const displayName = (isModerator ? credit.creator_display_name : credit.member_display_name) || userId;
@@ -1001,10 +1006,11 @@ async function getBookingPaymentStatus(req, res) {
     }
     const callerUserId = String(sessionUser.id);
 
-    // bookingId is a UUID (bookings.id)
+    // bookingId is a UUID (bookings.id) or a payment UUID
     const { bookingId } = req.params;
-    if (!bookingId || typeof bookingId !== 'string') {
-      return res.status(400).json({ success: false, error: 'Invalid bookingId' });
+    const UUID_PARAM_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!bookingId || !UUID_PARAM_RE.test(bookingId)) {
+      return res.status(400).json({ success: false, error: 'Invalid booking ID format.' });
     }
 
     // Load booking + join payment + performer user for auth check.

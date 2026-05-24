@@ -6108,7 +6108,7 @@ export interface CallSurveyPayload {
 }
 
 export function submitCallSurvey(
-  bookingId: number,
+  bookingId: string | number,
   data: CallSurveyPayload
 ): Promise<{ success: boolean }> {
   return request(`/api/webapp/bookings/${bookingId}/survey`, {

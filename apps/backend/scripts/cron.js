@@ -665,6 +665,31 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // Every 15 minutes: expire abandoned Stripe awaiting_payment bookings
+    // A booking stays in awaiting_payment when the user abandons the Stripe checkout
+    // without completing payment. After 30 minutes the slot should free up.
+    cron.schedule('*/15 * * * *', async () => {
+      try {
+        const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
+        const result = await pgQuery(`
+          UPDATE bookings SET status = 'expired', updated_at = NOW()
+          WHERE status = 'awaiting_payment'
+            AND payment_id IN (
+              SELECT id FROM payments
+              WHERE provider = 'stripe'
+                AND status = 'pending'
+                AND created_at < NOW() - INTERVAL '30 minutes'
+            )
+          RETURNING id
+        `);
+        if (result.rows.length > 0) {
+          logger.info('[Cron] Expired abandoned Stripe bookings', { count: result.rows.length });
+        }
+      } catch (err) {
+        logger.error('[Cron] Stripe booking expiry error', { error: err.message });
+      }
+    });
+
     // Release expired Meru reservations back to the active pool every 5 minutes
     const meruLinkService = require(path.join(backendPath, 'services/meruLinkService'));
     cron.schedule(process.env.MERU_RESERVATION_CLEANUP_CRON || '*/5 * * * *', async () => {

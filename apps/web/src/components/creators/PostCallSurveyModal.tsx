@@ -4,7 +4,7 @@ import { useI18n } from "@/lib/i18n";
 
 interface PostCallSurveyModalProps {
   open: boolean;
-  bookingId: number;
+  bookingId: string | number;
   creatorName: string;
   onClose: () => void;
 }

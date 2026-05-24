@@ -780,6 +780,46 @@ const handleStripeWebhook = async (req, res) => {
               if (row.stripe_subscription_id) {
                 await PaymentService.deactivateStripeSubscriptionEntitlements(row.stripe_subscription_id);
               }
+              // Revoke any call credits tied to this payment and cancel confirmed bookings
+              try {
+                const { rows: creditRows } = await query(
+                  `UPDATE call_credits
+                   SET status = 'refunded', updated_at = NOW()
+                   WHERE payment_id = $1
+                     AND status IN ('unused', 'partial')
+                   RETURNING id`,
+                  [row.id]
+                );
+                if (creditRows.length > 0) {
+                  const creditIds = creditRows.map(c => c.id);
+                  logger.info('[stripeWebhook] charge.refunded: call credits revoked', {
+                    paymentId: row.id, creditIds,
+                  });
+                  // Cancel any confirmed bookings linked to those credits
+                  const { rows: cancelledBookings } = await query(
+                    `UPDATE bookings
+                     SET status = 'cancelled',
+                         cancel_reason = 'payment_refunded',
+                         cancelled_at = NOW(),
+                         cancelled_by = 'system',
+                         updated_at = NOW()
+                     WHERE credit_id = ANY($1::int[])
+                       AND status = 'confirmed'
+                     RETURNING id`,
+                    [creditIds]
+                  );
+                  if (cancelledBookings.length > 0) {
+                    logger.info('[stripeWebhook] charge.refunded: confirmed bookings cancelled', {
+                      paymentId: row.id,
+                      bookingIds: cancelledBookings.map(b => b.id),
+                    });
+                  }
+                }
+              } catch (creditRevokeErr) {
+                logger.error('[stripeWebhook] charge.refunded: error revoking call credits', {
+                  paymentId: row.id, error: creditRevokeErr.message,
+                });
+              }
             }
           } catch (refundErr) {
             logger.error('[stripeWebhook] charge.refunded: error updating payment row', {
