@@ -108,6 +108,20 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // NOWPayments reconciler — polls NP API for stuck pending/confirming orders
+    // Extracts payment_id from the notes column (written on confirming/sending transitions)
+    // and calls the NP API directly to check if the payment reached 'finished'.
+    cron.schedule(process.env.NOWPAYMENTS_RECONCILE_CRON || '*/15 * * * *', async () => {
+      try {
+        const results = await PaymentRecoveryService.processStuckNowpaymentsOrders();
+        if (results.settled > 0 || results.errors > 0) {
+          logger.info('NOWPayments reconciler completed', results);
+        }
+      } catch (err) {
+        logger.error('NOWPayments reconciler cron failed', { error: err.message });
+      }
+    });
+
     // Meru lifetime100 reconciliation — every 15 min
     // Meru does not deliver webhooks; users must come back and POST /activate
     // after paying. If they don't, the link stays paid forever and we never

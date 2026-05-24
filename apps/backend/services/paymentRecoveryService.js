@@ -214,12 +214,15 @@ class PaymentRecoveryService {
         return results;
       }
 
-      // Find pending Dash/BTCPay invoices older than 10 min and < 7 days old
+      // Find pending Dash/BTCPay invoices older than 10 min and < 7 days old.
+      // NOWPayments orders use a 'pnptv-nowp-' prefix — exclude them here so
+      // BTCPay 404 responses don't falsely expire legitimate NP orders.
       const stuck = await query(`
         SELECT btcpay_invoice_id AS invoice_id, 'dash_subscription_orders' AS source, created_at
         FROM dash_subscription_orders
         WHERE status = 'pending'
           AND btcpay_invoice_id IS NOT NULL
+          AND btcpay_invoice_id NOT LIKE 'pnptv-nowp-%'
           AND created_at < NOW() - INTERVAL '10 minutes'
           AND created_at > NOW() - INTERVAL '7 days'
         UNION ALL
@@ -330,7 +333,13 @@ class PaymentRecoveryService {
             error: invErr.response?.status === 404 ? 'invoice_not_found_in_btcpay' : invErr.message,
           });
           // 404 → BTCPay doesn't know this invoice → mark expired
+          // Guard: NOWPayments orders should never reach here due to the WHERE filter above,
+          // but skip them defensively in case of a concurrent insert race.
           if (invErr.response?.status === 404) {
+            if (row.invoice_id?.startsWith('pnptv-nowp-')) {
+              results.stillPending++;
+              continue;
+            }
             await query(
               `UPDATE dash_subscription_orders SET status = 'expired', notes = 'btcpay_404' WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
               [row.invoice_id]
@@ -844,6 +853,119 @@ class PaymentRecoveryService {
       results.endTime = new Date();
       return results;
     }
+  }
+
+  /**
+   * Reconcile stuck NOWPayments orders.
+   * Polls the NOWPayments API for orders still 'pending', 'confirming', or 'confirmed'
+   * after 15 minutes. If the API reports 'finished', replays the grant.
+   * Uses the payment_id stored in the notes column on transition.
+   */
+  static async processStuckNowpaymentsOrders() {
+    logger.info('Starting NOWPayments reconciliation...');
+    const results = { checked: 0, settled: 0, stillPending: 0, errors: 0 };
+
+    const lockKey = 'nowpayments:reconcile:lock';
+    const lockAcquired = await cache.acquireLock(lockKey, 600);
+    if (!lockAcquired) {
+      logger.warn('NOWPayments reconciliation already running, skipping');
+      return results;
+    }
+
+    try {
+      const apiKey = process.env.NOWPAYMENTS_API_KEY;
+      if (!apiKey) return results;
+
+      const stuck = await query(
+        `SELECT id, btcpay_invoice_id as order_id, user_id, plan_id, status, notes, created_at, creator_id, usd_amount
+         FROM dash_subscription_orders
+         WHERE btcpay_invoice_id LIKE 'pnptv-nowp-%'
+           AND status IN ('pending', 'confirming', 'confirmed')
+           AND created_at < NOW() - INTERVAL '15 minutes'
+           AND created_at > NOW() - INTERVAL '24 hours'
+         ORDER BY created_at ASC LIMIT 50`
+      );
+
+      results.checked = stuck.rows.length;
+
+      for (const row of stuck.rows) {
+        try {
+          // Extract payment_id from notes (stored as 'nowpayments:<payment_id>:...' on transitions)
+          const noteMatch = (row.notes || '').match(/nowpayments:(\d+)/);
+          if (!noteMatch) {
+            results.stillPending++;
+            continue;
+          }
+          const paymentId = noteMatch[1];
+
+          const npEnv = process.env.NOWPAYMENTS_ENVIRONMENT === 'sandbox'
+            ? 'https://api-sandbox.nowpayments.io/v1'
+            : 'https://api.nowpayments.io/v1';
+
+          const axios = require('axios');
+          const resp = await axios.get(`${npEnv}/payment/${paymentId}`, {
+            headers: { 'x-api-key': apiKey },
+            timeout: 10000,
+          });
+
+          const payment = resp.data;
+          if (payment.payment_status === 'finished') {
+            logger.info('NOWPayments reconciler: payment finished, granting', {
+              orderId: row.order_id, paymentId, userId: row.user_id,
+            });
+
+            // Replay the finished IPN grant path using the same atomic lock pattern
+            const lockRes = await query(
+              `UPDATE dash_subscription_orders SET status = 'processing'
+               WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','processing')
+               RETURNING id, user_id, plan_id, usd_amount, creator_id`,
+              [row.order_id]
+            );
+            if (lockRes.rows.length === 0) {
+              results.stillPending++;
+              continue;
+            }
+            const order = lockRes.rows[0];
+            try {
+              const PaymentService = require('./paymentService');
+              const grantResult = await PaymentService.grantEntitlementsForPlan(
+                order.user_id, order.plan_id, 'nowpayments',
+                order.creator_id ? { creatorId: String(order.creator_id) } : null,
+                row.order_id
+              );
+              if (!grantResult || grantResult.granted === 0) throw new Error('grant_zero');
+
+              await query(
+                `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(),
+                 notes = $2 WHERE btcpay_invoice_id = $1`,
+                [row.order_id, `nowpayments:reconciler:${paymentId}`]
+              );
+              results.settled++;
+              logger.info('NOWPayments reconciler: settled', { orderId: row.order_id });
+            } catch (grantErr) {
+              await query(
+                `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+                [row.order_id, `nowpayments:reconciler_failed:${grantErr.message}`.slice(0, 500)]
+              ).catch(() => {});
+              results.errors++;
+              logger.error('NOWPayments reconciler: grant failed', { orderId: row.order_id, error: grantErr.message });
+            }
+          } else {
+            results.stillPending++;
+          }
+        } catch (rowErr) {
+          results.errors++;
+          logger.error('NOWPayments reconciler: row error', { orderId: row.order_id, error: rowErr.message });
+        }
+        await new Promise(r => setTimeout(r, 200));
+      }
+    } finally {
+      await cache.releaseLock(lockKey).catch(() => {});
+    }
+
+    results.endTime = new Date();
+    logger.info('NOWPayments reconciliation complete', results);
+    return results;
   }
 
   /**

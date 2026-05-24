@@ -9095,6 +9095,7 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
 
   if (planId === 'creator_monthly') {
     if (!creatorId) return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
+    if (String(creatorId) === userId) return res.status(400).json({ success: false, error: 'You cannot subscribe to yourself' });
     const creatorRes = await dbQuery(
       'SELECT id, username, first_name, creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
       [String(creatorId), 'active']
@@ -9106,8 +9107,9 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
     usdAmount = price;
     planDisplayName = 'Premium subscription';
   } else {
-    const PlanModel = require('../../models/planModel');
-    const plan = await PlanModel.getById(planId);
+    const { query: planQuery } = require('../../config/postgres');
+    const planRes = await planQuery('SELECT * FROM plans WHERE id = $1 AND active = true', [planId]);
+    const plan = planRes.rows[0];
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
     const basePrice = parseFloat(plan.price);
     const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
@@ -9252,7 +9254,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
   if (payment_status === 'confirming' || payment_status === 'confirmed' || payment_status === 'sending') {
     const internalStatus = payment_status === 'sending' ? 'confirming' : payment_status;
     await dbQuery(
-      `UPDATE dash_subscription_orders SET status = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed',$2)`,
+      `UPDATE dash_subscription_orders SET status = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','confirmed',$2)`,
       [order_id, internalStatus]
     );
     return res.json({ received: true });
@@ -9307,12 +9309,24 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       );
       return res.json({ received: true });
     }
+  } else if (order.usd_amount) {
+    // IPN fields absent — validate against DB authoritative amount as fallback
+    const paid = parseFloat(actually_paid || '0');
+    const expected = parseFloat(order.usd_amount);
+    if (paid > 0 && Number.isFinite(expected) && paid < expected * 0.99) {
+      logger.warn('[NOWPayments] IPN: underpayment (fallback DB check)', { order_id, actually_paid, dbAmount: order.usd_amount });
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
+        [order_id, `nowpayments:${payment_id}:underpaid_fallback:${actually_paid}`]
+      );
+      return res.json({ received: true });
+    }
   }
 
   // Grant FIRST — if this throws, roll back to pending so NOWPayments retries
   try {
     const PaymentServiceGf = require('../../services/paymentService');
-    await PaymentServiceGf.grantEntitlementsForPlan(
+    const grantResult = await PaymentServiceGf.grantEntitlementsForPlan(
       order.user_id,
       order.plan_id,
       'nowpayments',
@@ -9320,11 +9334,20 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       order_id
     );
 
+    // NP-H-03: zero-grant guard — roll back so NOWPayments retries
+    if (!grantResult || grantResult.granted === 0) {
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+        [order_id, `nowpayments:grant_zero:${order.plan_id}`.slice(0, 500)]
+      ).catch(() => {});
+      throw new Error(`grantEntitlementsForPlan returned zero grants for plan ${order.plan_id}`);
+    }
+
     // NP-H-02: wire up creator subscription relationship for creator_monthly orders
     if (order.plan_id === 'creator_monthly' && order.creator_id) {
       try {
         const CreatorService = require('../../services/creatorService');
-        await CreatorService.subscribeToCreator(order.user_id, String(order.creator_id));
+        await CreatorService.subscribeToCreator(order.user_id, String(order.creator_id), order_id);
       } catch (creatorErr) {
         logger.warn('[NOWPayments] IPN: subscribeToCreator failed (non-fatal)', {
           userId: order.user_id, creatorId: order.creator_id, error: creatorErr.message,
@@ -9346,22 +9369,91 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     [order_id, `nowpayments:${payment_id}`]
   );
 
-  // Update users.tier — non-fatal if plan lookup fails
-  const PlanModel = require('../../models/planModel');
-  const plan = await PlanModel.getById(order.plan_id).catch((err) => {
-    logger.error('[NOWPayments] IPN: plan lookup failed, tier not updated', { error: err.message, planId: order.plan_id, order_id });
-    return null;
-  });
-  if (plan) {
-    const expiry = plan.duration_days
-      ? new Date(Date.now() + plan.duration_days * 86400000).toISOString()
-      : null;
-    await dbQuery(
-      `UPDATE users SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW() WHERE id = $1`,
-      [order.user_id, plan.tier || 'prime', plan.id, expiry]
-    );
-  } else {
-    logger.error('[NOWPayments] IPN: plan not found, users.tier not updated', { planId: order.plan_id, order_id });
+  // Update users.tier — skip for creator_monthly (must not clobber buyer's own subscription)
+  if (order.plan_id !== 'creator_monthly') {
+    const PlanModel = require('../../models/planModel');
+    const plan = await PlanModel.getById(order.plan_id).catch((err) => {
+      logger.error('[NOWPayments] IPN: plan lookup failed, tier not updated', { error: err.message, planId: order.plan_id, order_id });
+      return null;
+    });
+    if (plan) {
+      const expiry = plan.duration_days
+        ? new Date(Date.now() + plan.duration_days * 86400000).toISOString()
+        : null;
+      await dbQuery(
+        `UPDATE users SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW() WHERE id = $1`,
+        [order.user_id, plan.tier || 'prime', plan.id, expiry]
+      );
+    } else {
+      logger.error('[NOWPayments] IPN: plan not found, users.tier not updated', { planId: order.plan_id, order_id });
+    }
+  }
+
+  // Invalidate user session cache so tier update is reflected immediately
+  try {
+    const { cache: npCache } = require('../../config/redis');
+    await npCache.del(`user:${order.user_id}`);
+    await npCache.del(`session:user:${order.user_id}`);
+  } catch (cacheErr) {
+    logger.warn('[NOWPayments] IPN: cache invalidation failed (non-fatal)', { userId: order.user_id, error: cacheErr.message });
+  }
+
+  // Send confirmation notifications (non-fatal)
+  try {
+    const { query: pgQuery } = require('../../config/postgres');
+    const userData = await pgQuery('SELECT email, language, telegram FROM users WHERE id = $1', [order.user_id]);
+    const u = userData.rows[0];
+    if (u) {
+      const PlanModelNP = require('../../models/planModel');
+      const planForNotif = await PlanModelNP.getById(order.plan_id).catch(() => null);
+      const planName = planForNotif?.display_name || planForNotif?.name || order.plan_id;
+      const language = u.language || 'es';
+      if (u.telegram) {
+        try {
+          const PaymentNotificationService = require('../../services/paymentNotificationService');
+          await PaymentNotificationService.sendPaymentConfirmation(order.user_id, {
+            planId: order.plan_id,
+            planName,
+            amount: parseFloat(order.usd_amount) || 0,
+            currency: 'USD',
+            provider: 'nowpayments',
+            language,
+          });
+        } catch (dmErr) {
+          logger.warn('[NOWPayments] IPN: Telegram DM failed (non-fatal)', { userId: order.user_id, error: dmErr.message });
+        }
+      }
+      if (u.email) {
+        try {
+          const InvoiceService = require('../../services/invoiceservice');
+          const EmailService = require('../../services/emailservice');
+          const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
+            invoiceNumber: order_id,
+            customerName: u.telegram || order.user_id,
+            customerEmail: u.email,
+            planName,
+            amount: parseFloat(order.usd_amount) || 0,
+            currency: 'USD',
+            paymentDate: new Date(),
+            provider: 'NOWPayments/USDC',
+            language,
+          });
+          await EmailService.sendInvoiceEmail({
+            to: u.email,
+            invoicePdf,
+            invoiceNumber: order_id,
+            customerName: u.telegram || order.user_id,
+            amount: parseFloat(order.usd_amount) || 0,
+            currency: 'USD',
+            planName,
+          });
+        } catch (emailErr) {
+          logger.warn('[NOWPayments] IPN: invoice email failed (non-fatal)', { userId: order.user_id, error: emailErr.message });
+        }
+      }
+    }
+  } catch (notifErr) {
+    logger.warn('[NOWPayments] IPN: notification block failed (non-fatal)', { userId: order.user_id, error: notifErr.message });
   }
 
   logger.info('[NOWPayments] IPN: payment completed', { userId: order.user_id, planId: order.plan_id, order_id });

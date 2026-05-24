@@ -167,10 +167,12 @@ export default function Subscribe() {
     publicKey: string;
     ipnCallbackUrl: string;
     createdAt: number;
+    partiallyPaid?: boolean;
   } | null>(null);
   const [usdcPolling, setUsdcPolling] = useState(false);
   const [usdcPaymentSuccess, setUsdcPaymentSuccess] = useState(false);
   const [usdcOpenWidget, setUsdcOpenWidget] = useState(false);
+  const [nowpScriptReady, setNowpScriptReady] = useState(false);
   const nowpWidgetBtnRef = useRef<HTMLAnchorElement | null>(null);
 
   useEffect(() => {
@@ -227,7 +229,11 @@ export default function Subscribe() {
       script.src = 'https://nowpayments.io/embeds/payment-widget.js';
       script.setAttribute('data-nowpayments-widget', 'true');
       script.async = true;
+      script.onload = () => setNowpScriptReady(true);
       document.head.appendChild(script);
+    } else {
+      // Script already loaded (e.g. page restored from sessionStorage)
+      setNowpScriptReady(true);
     }
 
     // Resume USDC polling after page reload or return from hosted checkout
@@ -353,17 +359,14 @@ export default function Subscribe() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-trigger widget when usdcOpenWidget is set
+  // Auto-trigger widget when usdcOpenWidget is set — wait for script ready
   useEffect(() => {
-    if (!usdcOpenWidget) return;
+    if (!usdcOpenWidget || !nowpScriptReady) return;
     const btn = nowpWidgetBtnRef.current;
     if (!btn) return;
-    const t = setTimeout(() => {
-      btn.click();
-      setUsdcOpenWidget(false);
-    }, 150);
-    return () => clearTimeout(t);
-  }, [usdcOpenWidget]);
+    const id = setTimeout(() => { btn.click(); setUsdcOpenWidget(false); }, 150);
+    return () => clearTimeout(id);
+  }, [usdcOpenWidget, nowpScriptReady]);
 
   // Validate a promo code server-side. For base-plan promos, we lock the
   // selected plan to the promo's base plan so the displayed price matches.
@@ -640,12 +643,19 @@ export default function Subscribe() {
           return;
         }
         if (data.partiallyPaid) {
-          // Partial payment — keep polling (user may top up), but don't count down timer
+          // Keep polling — NOWPayments keeps partially-paid invoices open for top-up
+          // but surface a clear UI signal
+          setUsdcOrder((prev) => prev ? { ...prev, partiallyPaid: true } : prev);
           if (!cancelled) timerId = setTimeout(poll, 10000);
           return;
         }
         if (!cancelled) timerId = setTimeout(poll, 5000);
-      } catch {
+      } catch (pollErr: unknown) {
+        const status = (pollErr as { status?: number })?.status ?? (pollErr as { response?: { status?: number } })?.response?.status;
+        if (status === 401) {
+          setUsdcPolling(false);
+          return;
+        }
         if (!cancelled) timerId = setTimeout(poll, 5000);
       }
     };
@@ -1580,6 +1590,14 @@ export default function Subscribe() {
             <div className="flex flex-wrap gap-2 text-[10px]">
               <span className="text-green-400">USDC · USDT · Base · Solana · Polygon · TRON · ETH</span>
             </div>
+            <div className="flex flex-wrap gap-2 text-[10px]">
+              <a href="https://www.moonpay.com/buy/usdc" target="_blank" rel="noopener noreferrer"
+                className="text-green-400 hover:underline font-semibold">MoonPay ↗</a>
+              <a href="https://www.coinbase.com/price/usd-coin" target="_blank" rel="noopener noreferrer"
+                className="text-green-400 hover:underline font-semibold">Coinbase ↗</a>
+              <a href="https://global.transak.com/?defaultCryptoCurrency=USDC" target="_blank" rel="noopener noreferrer"
+                className="text-green-400 hover:underline font-semibold">Transak ↗</a>
+            </div>
           </div>
         )}
       </div>
@@ -1588,14 +1606,16 @@ export default function Subscribe() {
       {usdcOrder && (
         <a
           ref={nowpWidgetBtnRef}
+          href="#"
           className="nowpayments-button"
           data-key={usdcOrder.publicKey}
           data-amount={String(usdcOrder.usdAmount)}
           data-currency="usd"
+          data-payer-email={user?.email || ''}
           data-description={`${usdcOrder.planName} – PNPtv!`}
           data-order-id={usdcOrder.orderId}
           data-ipn-callback={usdcOrder.ipnCallbackUrl}
-          href="#"
+          data-theme="dark"
           onClick={(e) => e.preventDefault()}
           style={{ position: "fixed", top: -9999, left: -9999, opacity: 0, pointerEvents: "none" }}
           aria-hidden="true"
@@ -1612,6 +1632,11 @@ export default function Subscribe() {
             </span>
           </div>
           <p className="text-xs text-pnp-textSecondary mb-4">{s.usdcWaitingDesc}</p>
+          {usdcOrder.partiallyPaid && (
+            <div className="mt-2 mb-3 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+              <p className="text-xs text-yellow-400 font-medium">Partial payment detected — please send the remaining amount to the same address.</p>
+            </div>
+          )}
           <button
             onClick={() => {
               setUsdcOpenWidget(true);
