@@ -389,13 +389,27 @@ const submit2257 = async (req, res) => {
       return res.status(400).json({ error: 'ID document image is required' });
     }
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || null;
+    // H-07: store relative path so documents are served via the protected admin endpoint
+    const idDocumentPath = `/uploads/creator-2257/${req.file.filename}`;
     const record = await IdentityVerificationService.submit2257Record(req.user.id, {
       legalName,
       dateOfBirth,
       idType,
-      idDocumentPath: req.file.path,
+      idDocumentPath,
       ip,
     });
+    // H-03: notify admin on every new submission
+    const adminId = process.env.ADMIN_ID;
+    if (adminId) {
+      try {
+        const bot = require('../../../bot/core/bot');
+        const displayName = req.user.username || req.user.first_name || req.user.id;
+        await bot.telegram.sendMessage(
+          adminId,
+          `📋 New 2257 record submitted by user ${req.user.id} (${displayName}). Review at /admin/compliance-2257`
+        );
+      } catch (_) {}
+    }
     return res.json({ success: true, record });
   } catch (err) {
     logger.error('submit2257 error', err);
@@ -406,11 +420,18 @@ const submit2257 = async (req, res) => {
 // GET /api/webapp/creator/identity/status
 const get2257Status = async (req, res) => {
   try {
-    const record = await IdentityVerificationService.get2257Record(req.user.id);
+    const userId = req.user.id || req.user.telegram_id;
+    // L-01: always read fresh from DB — session may be stale after admin approval
+    const { rows: statusRows } = await query(
+      'SELECT identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+      [userId]
+    );
+    const freshUser = statusRows[0] || {};
+    const record = await IdentityVerificationService.get2257Record(userId);
     return res.json({
       success: true,
-      identity_verified: req.user.identity_verified || false,
-      identity_verification_required_by: req.user.identity_verification_required_by || null,
+      identity_verified: freshUser.identity_verified || false,
+      identity_verification_required_by: freshUser.identity_verification_required_by || null,
       record: record
         ? {
             verification_status: record.verification_status,

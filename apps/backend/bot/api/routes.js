@@ -690,7 +690,7 @@ app.get('/api/pnp/checkout', (req, res) => {
 // ========== END PAYMENT ROUTES ==========
 
 // Protected paths that require authentication (don't serve static files directly)
-const PROTECTED_PATHS = ['/hangouts', '/live', '/pnplive'];
+const PROTECTED_PATHS = ['/hangouts', '/live', '/pnplive', '/uploads/creator-2257', '/uploads/creator-enrollments'];
 
 // Custom static file middleware with easybots.store blocking and protected path exclusion
 const serveStaticWithBlocking = (staticPath) => {
@@ -2098,6 +2098,10 @@ app.post('/api/webhooks/transak', cashoutRoutes.transakWebhook);
 // Geo-block bypass already covers /^\/api\/webhooks?\b/ so no extra path entry needed.
 app.post('/api/webhooks/persona', webhookLimiter, asyncHandler(async (req, res) => {
   try {
+    if (!process.env.PERSONA_WEBHOOK_SECRET) {
+      // M-04: return 503 so Persona retries instead of silently discarding
+      return res.status(503).json({ error: 'Persona webhook not configured' });
+    }
     const signatureHeader = req.headers['persona-signature'];
     if (!signatureHeader) {
       return res.status(400).json({ error: 'Missing Persona-Signature header' });
@@ -3852,6 +3856,31 @@ app.get('/api/webapp/live/schedule/notify/:slotId', requireSessionAuth, asyncHan
 // Admin: manage Restreamer channel assignments
 app.get('/api/webapp/admin/live/channels', adminGuard, asyncHandler(webappLiveController.listChannels));
 app.post('/api/webapp/admin/live/assign-channel', adminGuard, asyncHandler(webappLiveController.assignChannel));
+
+// ── Admin: 2257 ID document download — protected, admin-only ─────────────────
+// Serves ID documents from creator-2257 and creator-enrollments upload dirs.
+// This route MUST be admin-guarded; PROTECTED_PATHS blocks direct /uploads access.
+app.get('/api/admin/creator-2257/doc/:filename', adminGuard, (req, res) => {
+  const filename = path.basename(req.params.filename);
+  if (!filename || filename.includes('..') || filename === '') {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+  const filePath = path.join(__dirname, '../../../../public/uploads/creator-2257', filename);
+  res.sendFile(filePath, { root: '/' }, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: 'File not found' });
+  });
+});
+
+app.get('/api/admin/creator-enrollment/doc/:filename', adminGuard, (req, res) => {
+  const filename = path.basename(req.params.filename);
+  if (!filename || filename.includes('..') || filename === '') {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+  const filePath = path.join(__dirname, '../../../../public/uploads/creator-enrollments', filename);
+  res.sendFile(filePath, { root: '/' }, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: 'File not found' });
+  });
+});
 
 // Rate limiter for stream health polling — 30 req/min per user (5s poll × 30 = 2.5 min headroom)
 // Declared inline here (not in the rate-limiter block below) so it exists before the route registration.
@@ -9710,6 +9739,22 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
       if (!Number.isFinite(channelId)) return res.status(400).json({ success: false, error: 'Invalid channel id' });
       const { userId, isAdmin } = userCtx(req);
       try {
+        // 2257 compliance gate — enforce for active creators (admins bypass)
+        if (!isAdmin) {
+          const IdentityVerificationService = require('../../services/identityVerificationService');
+          const { rows: compRows } = await query(
+            'SELECT creator_status, identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+            [userId]
+          );
+          const creatorRow = compRows[0];
+          if (creatorRow?.creator_status === 'active' && !IdentityVerificationService.is2257Compliant(creatorRow)) {
+            return res.status(403).json({
+              success: false,
+              error: 'identity_verification_required',
+              message: 'Complete identity verification (18 U.S.C. § 2257) before uploading channel videos.',
+            });
+          }
+        }
         const video = await channelVideoService.uploadVideo({
           channelId, uploaderId: userId, isAdmin,
           file: req.file, title: req.body?.title,

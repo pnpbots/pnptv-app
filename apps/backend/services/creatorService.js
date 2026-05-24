@@ -176,6 +176,15 @@ class CreatorService {
       [userId, tier, price]
     );
 
+    // C-03: ensure every newly-active creator has a 2257 grace deadline
+    await query(
+      `UPDATE users
+         SET identity_verification_required_by = COALESCE(identity_verification_required_by, NOW() + INTERVAL '30 days'),
+             updated_at = NOW()
+       WHERE id = $1 AND identity_verified = false`,
+      [userId]
+    );
+
     // Grant lifetime pnp-member so the creator immediately has full platform access
     await this._grantCreatorMembership(userId);
 
@@ -227,6 +236,15 @@ class CreatorService {
          role = CASE WHEN role IN ('user', 'model') THEN 'model' ELSE role END
        WHERE id = $1`,
       [app.user_id, priceUsd]
+    );
+
+    // C-03: ensure every newly-active creator has a 2257 grace deadline
+    await query(
+      `UPDATE users
+         SET identity_verification_required_by = COALESCE(identity_verification_required_by, NOW() + INTERVAL '30 days'),
+             updated_at = NOW()
+       WHERE id = $1 AND identity_verified = false`,
+      [app.user_id]
     );
 
     // Grant lifetime pnp-member so the approved creator immediately has full access
@@ -1171,6 +1189,15 @@ class CreatorService {
          role = CASE WHEN role = 'user' THEN 'model' ELSE role END
        WHERE id = $1`,
       [enrollment.user_id, enrollment.tier, price]
+    );
+
+    // C-03: ensure every newly-active creator has a 2257 grace deadline
+    await query(
+      `UPDATE users
+         SET identity_verification_required_by = COALESCE(identity_verification_required_by, NOW() + INTERVAL '30 days'),
+             updated_at = NOW()
+       WHERE id = $1 AND identity_verified = false`,
+      [enrollment.user_id]
     );
 
     // Generate subscription code, live channel slug, and set DM policy

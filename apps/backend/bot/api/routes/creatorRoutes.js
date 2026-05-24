@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
 const creatorController = require('../controllers/creatorController');
 const cmsCreatorController = require('../controllers/cmsCreatorController');
 const authGuard = require('../middleware/authGuard');
@@ -9,6 +10,20 @@ const creatorGuard = require('../middleware/creatorGuard');
 const { creatorLockGuard } = require('../middleware/creatorGuard');
 const roleGuard = require('../middleware/roleGuard');
 const { adminGuard } = require('../../../middleware/guards');
+
+// M-03: rate-limit identity submission — 5 attempts per user per hour
+const identitySubmitLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({
+      success: false,
+      error: 'Too many submission attempts. Please wait before resubmitting.',
+    }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const router = express.Router();
 
@@ -141,7 +156,7 @@ router.post('/enrollments/:id/reject', authGuard, roleGuard('admin', 'superadmin
 
 // ── Identity verification (2257) — user-facing ───────────────────────────────
 // IMPORTANT: must come BEFORE /:creatorId/* param routes
-router.post('/identity/submit', authGuard, identity2257Upload.single('idDocument'), creatorController.submit2257);
+router.post('/identity/submit', authGuard, identitySubmitLimiter, identity2257Upload.single('idDocument'), creatorController.submit2257);
 router.get('/identity/status', authGuard, creatorController.get2257Status);
 
 // Persona hosted-flow (automated government-ID verification)

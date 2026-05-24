@@ -204,7 +204,7 @@ export default function Compliance2257() {
         <div className="space-y-3">
           {records.map((rec) => {
             const filename = extractFilename(rec.id_document_path);
-            const docUrl = filename ? `/uploads/creator-2257/${filename}` : null;
+            const docUrl = filename ? `/api/admin/creator-2257/doc/${filename}` : null;
             const displayName = [rec.first_name, rec.last_name].filter(Boolean).join(" ") || rec.username || rec.user_id;
             const isProcessing = processing === rec.user_id;
             const isRejectOpen = rejectingId === rec.user_id;

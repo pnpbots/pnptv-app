@@ -136,6 +136,25 @@ class IdentityVerificationService {
     }
 
     logger.info(`2257: record rejected for user ${userId} by admin ${adminId}, reason: ${notes.trim()}`);
+
+    // H-04: notify the creator via Telegram DM so they know to resubmit
+    try {
+      const { rows: userRows } = await query(
+        'SELECT telegram FROM users WHERE id = $1',
+        [userId]
+      );
+      const telegramId = userRows[0]?.telegram;
+      if (telegramId) {
+        const bot = require('../bot/core/bot');
+        await bot.telegram.sendMessage(
+          telegramId,
+          `⚠️ Your 2257 identity verification was not approved.\n\nReason: ${notes.trim()}\n\nPlease resubmit with corrected documents at pnptv.app/creators/apply`
+        );
+      }
+    } catch (notifyErr) {
+      logger.warn('2257: failed to notify creator of rejection (non-fatal)', { userId, error: notifyErr.message });
+    }
+
     return rows[0];
   }
 
@@ -365,12 +384,18 @@ class IdentityVerificationService {
       throw new Error('Invalid Persona-Signature format — missing t or v1');
     }
 
+    const MAX_DRIFT_SECONDS = 300; // 5 minutes
+    const tsSeconds = parseInt(timestamp, 10);
+    if (isNaN(tsSeconds) || Math.abs(Date.now() / 1000 - tsSeconds) > MAX_DRIFT_SECONDS) {
+      throw new Error('Persona webhook timestamp invalid or too old — possible replay attack');
+    }
+
     const hmac = crypto
       .createHmac('sha256', process.env.PERSONA_WEBHOOK_SECRET)
       .update(`${timestamp}.${rawBody}`)
       .digest('hex');
 
-    if (hmac !== expectedSig) {
+    if (!crypto.timingSafeEqual(Buffer.from(hmac, 'hex'), Buffer.from(expectedSig, 'hex'))) {
       throw new Error('Invalid Persona webhook signature');
     }
 

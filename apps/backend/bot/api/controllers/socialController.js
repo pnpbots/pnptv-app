@@ -18,6 +18,7 @@ const mentionService = require('../../../services/mentionService');
 const { validateTierFresh } = require('../../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
 const { archivePromotedSourceForSocialPost } = require('../utils/promotedPostDeletion');
+const IdentityVerificationService = require('../../../services/identityVerificationService');
 
 async function extractVideoThumbnail(videoPath, thumbPath) {
   try {
@@ -190,6 +191,21 @@ const createPost = async (req, res) => {
   if (content.length > maxLen) return res.status(400).json({ error: `Content too long (max ${maxLen} chars)` });
 
   try {
+    // 2257 compliance gate — enforce for active creators
+    if (user.creator_status === 'active') {
+      const { rows: compRows } = await dbQuery(
+        'SELECT identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+        [user.id]
+      );
+      if (compRows.length > 0 && !IdentityVerificationService.is2257Compliant(compRows[0])) {
+        return res.status(403).json({
+          success: false,
+          error: 'identity_verification_required',
+          message: 'Complete identity verification (18 U.S.C. § 2257) before posting content.',
+        });
+      }
+    }
+
     if (replyToId) {
       const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
       if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
@@ -538,6 +554,22 @@ const createPostWithMedia = async (req, res) => {
   let finalFilePath = null;
 
   try {
+    // 2257 compliance gate — enforce for active creators
+    if (user.creator_status === 'active') {
+      const { rows: compRows } = await dbQuery(
+        'SELECT identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+        [user.id]
+      );
+      if (compRows.length > 0 && !IdentityVerificationService.is2257Compliant(compRows[0])) {
+        if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
+        return res.status(403).json({
+          success: false,
+          error: 'identity_verification_required',
+          message: 'Complete identity verification (18 U.S.C. § 2257) before posting content.',
+        });
+      }
+    }
+
     if (replyToId) {
       const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
       if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
@@ -838,6 +870,22 @@ const createPostWithMultiMedia = async (req, res) => {
   const writtenFilePaths = [];
 
   try {
+    // 2257 compliance gate — enforce for active creators
+    if (user.creator_status === 'active') {
+      const { rows: compRows } = await dbQuery(
+        'SELECT identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+        [user.id]
+      );
+      if (compRows.length > 0 && !IdentityVerificationService.is2257Compliant(compRows[0])) {
+        for (const f of files) await fs.unlink(f.path).catch(() => {});
+        return res.status(403).json({
+          success: false,
+          error: 'identity_verification_required',
+          message: 'Complete identity verification (18 U.S.C. § 2257) before posting content.',
+        });
+      }
+    }
+
     if (replyToId) {
       const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
       if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
@@ -1246,14 +1294,28 @@ const requestWofDeletion = async (req, res) => {
 const bulkCreateVideos = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
 
-  // Verify active creator status
+  // Verify active creator status and 2257 compliance
   try {
-    const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
-    if (creatorCheck.rows[0]?.creator_status !== 'active') {
+    const creatorCheck = await dbQuery(
+      'SELECT creator_status, identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+      [user.id]
+    );
+    const creatorRow = creatorCheck.rows[0];
+    if (creatorRow?.creator_status !== 'active') {
       if (req.files) {
         for (const f of req.files) await fs.unlink(f.path).catch(() => {});
       }
       return res.status(403).json({ error: 'Only active creators can bulk upload videos' });
+    }
+    if (!IdentityVerificationService.is2257Compliant(creatorRow)) {
+      if (req.files) {
+        for (const f of req.files) await fs.unlink(f.path).catch(() => {});
+      }
+      return res.status(403).json({
+        success: false,
+        error: 'identity_verification_required',
+        message: 'Complete identity verification (18 U.S.C. § 2257) before posting content.',
+      });
     }
   } catch (err) {
     logger.error('bulkCreateVideos: creator check failed', err);

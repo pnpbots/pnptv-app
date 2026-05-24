@@ -1859,6 +1859,15 @@ const makeCreator = async (req, res) => {
 
     const updatedUser = updateResult.rows[0];
 
+    // C-03: ensure every newly-active creator has a 2257 grace deadline
+    await query(
+      `UPDATE users
+         SET identity_verification_required_by = COALESCE(identity_verification_required_by, NOW() + INTERVAL '30 days'),
+             updated_at = NOW()
+       WHERE id = $1 AND identity_verified = false`,
+      [userId]
+    );
+
     // Backfill subscription code, live_channel slug, and DM policy if not yet
     // set. Each query is no-op when the column already has a value, so this is
     // safe to call on existing creators too.

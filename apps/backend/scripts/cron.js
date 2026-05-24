@@ -747,6 +747,63 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // ── 18 U.S.C. § 2257 grace-period enforcement — daily at 09:00 UTC ──────
+    // Suspends active creators whose grace deadline has passed and who have not
+    // completed identity verification. Soft-deletes their social posts and
+    // notifies the operator via Telegram.
+    cron.schedule('0 9 * * *', async () => {
+      try {
+        const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
+        const { rows } = await pgQuery(`
+          SELECT id, username, first_name
+          FROM users
+          WHERE creator_status = 'active'
+            AND identity_verified = false
+            AND identity_verification_required_by IS NOT NULL
+            AND identity_verification_required_by < NOW()
+        `);
+
+        if (rows.length === 0) {
+          logger.info('[2257] Grace-period enforcement: no expired creators');
+          return;
+        }
+
+        for (const creator of rows) {
+          try {
+            await pgQuery(
+              `UPDATE users SET creator_status = 'suspended', updated_at = NOW() WHERE id = $1`,
+              [creator.id]
+            );
+            await pgQuery(
+              `UPDATE social_posts SET deleted_at = NOW() WHERE user_id = $1 AND deleted_at IS NULL`,
+              [creator.id]
+            );
+            logger.warn('[2257] Grace period expired — creator suspended', {
+              userId: creator.id,
+              username: creator.username,
+            });
+          } catch (innerErr) {
+            logger.error('[2257] Enforcement error for creator', {
+              userId: creator.id,
+              error: innerErr.message,
+            });
+          }
+        }
+
+        // Notify operator
+        const adminId = process.env.ADMIN_ID;
+        if (adminId && bot) {
+          const names = rows.map((r) => r.username || r.first_name || r.id).join(', ');
+          await bot.telegram.sendMessage(
+            adminId,
+            `⚠️ 2257 ENFORCEMENT: ${rows.length} creator(s) suspended for expired grace period: ${names}`
+          ).catch(() => {});
+        }
+      } catch (err) {
+        logger.error('[2257] Enforcement cron error', { error: err.message });
+      }
+    });
+
     logger.info('✓ Cron jobs started successfully');
     return true;
   } catch (error) {
