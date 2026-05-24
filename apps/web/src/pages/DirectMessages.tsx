@@ -1612,6 +1612,17 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
                       </div>
                     )}
                   </div>
+                  {/* Admin: direct trash on others' messages (hover, desktop) */}
+                  {!msg.is_deleted && isAdmin && !isMe && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteMsg(msg); }}
+                      aria-label="Delete message (admin)"
+                      title="Delete message (admin)"
+                      className={`hidden md:flex items-center justify-center w-7 h-7 rounded-full bg-red-500/10 hover:bg-red-500/25 ring-1 ring-red-500/30 text-red-400 opacity-0 group-hover/msg:opacity-100 transition-all active:scale-90 self-center flex-shrink-0 ${isMe ? "mr-1" : "ml-1"}`}
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  )}
                   {/* Hover kebab — desktop only */}
                   {!msg.is_deleted && (
                     <button
