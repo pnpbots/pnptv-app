@@ -1079,6 +1079,9 @@ export default function Subscribe() {
   const memberPlans = plans.filter((p) => MEMBER_PLAN_IDS.has(p.id));
   const primePlans = plans.filter((p) => !MEMBER_PLAN_IDS.has(p.id));
 
+  const selectedPlanData = plans.find((p) => p.id === selectedPlan);
+  const cryptoDiscountPct = (selectedPlanData && (selectedPlanData.isLifetime || (selectedPlanData.duration_days ?? 0) >= 365)) ? 20 : 5;
+
   return (
     <div className="page-container py-6 px-4 max-w-2xl mx-auto">
       {showTutorial && <TutorialOverlay section="subscribe" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
@@ -1444,7 +1447,7 @@ export default function Subscribe() {
             <div className="text-[10px] text-pnp-textSecondary">{dashAvailable === false ? s.dashComingSoon : s.dashAnonymous}</div>
             {dashAvailable !== false && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#008DE4] text-white px-1.5 py-0.5 rounded-full leading-none">
-                {s.dashAnonBadge}
+                {cryptoDiscountPct}% OFF
               </span>
             )}
           </button>
@@ -1464,7 +1467,7 @@ export default function Subscribe() {
             <div className="text-[10px] text-pnp-textSecondary">{lightningAvailable === false ? s.lightningComingSoon : s.lightningInstant}</div>
             {lightningAvailable !== false && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#F7931A] text-white px-1.5 py-0.5 rounded-full leading-none">
-                {s.lightningBadge}
+                ⚡ {cryptoDiscountPct}% OFF
               </span>
             )}
           </button>
@@ -1484,7 +1487,7 @@ export default function Subscribe() {
             <div className="text-[10px] text-pnp-textSecondary">{usdcAvailable === false ? s.usdcComingSoon : s.usdcDesc}</div>
             {usdcAvailable !== false && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full leading-none">
-                {s.usdcBadge}
+                {cryptoDiscountPct}% OFF
               </span>
             )}
           </button>

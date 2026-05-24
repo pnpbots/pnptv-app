@@ -8671,14 +8671,11 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
     const plan = await PlanModel.getById(planId);
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
     const basePrice = parseFloat(plan.price);
-    if (planId === 'lifetime100') {
+    const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
+    if (isLongTerm) {
       usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
       discountInfo = { originalAmount: basePrice, discountPct: 20 };
-    } else if (planId === 'prime-diamond-pass-365d') {
-      usdAmount = 90.99;
-      discountInfo = { originalAmount: basePrice, discountPct: 9 };
     } else {
-      // 5% crypto discount for all other plans
       usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
       discountInfo = { originalAmount: basePrice, discountPct: 5 };
     }
@@ -8886,14 +8883,11 @@ app.post('/api/webapp/payments/lightning/create', requireSessionAuth, asyncHandl
     const plan = await PlanModel.getById(planId);
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
     const basePrice = parseFloat(plan.price);
-    if (planId === 'lifetime100') {
+    const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
+    if (isLongTerm) {
       usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
       discountInfo = { originalAmount: basePrice, discountPct: 20 };
-    } else if (planId === 'prime-diamond-pass-365d') {
-      usdAmount = 90.99;
-      discountInfo = { originalAmount: basePrice, discountPct: 9 };
     } else {
-      // 5% crypto discount for all other plans
       usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
       discountInfo = { originalAmount: basePrice, discountPct: 5 };
     }
@@ -9095,12 +9089,10 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
     const plan = await PlanModel.getById(planId);
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
     const basePrice = parseFloat(plan.price);
-    if (planId === 'lifetime100') {
+    const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
+    if (isLongTerm) {
       usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
       discountInfo = { originalAmount: basePrice, discountPct: 20 };
-    } else if (planId === 'prime-diamond-pass-365d') {
-      usdAmount = 90.99;
-      discountInfo = { originalAmount: basePrice, discountPct: 9 };
     } else {
       usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
       discountInfo = { originalAmount: basePrice, discountPct: 5 };

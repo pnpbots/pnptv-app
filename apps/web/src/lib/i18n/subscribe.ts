@@ -64,7 +64,7 @@ const strings = {
     dashAnonBadge: "5% OFF",
 
     // ── Dash info panel ───────────────────────────────────────────────────────
-    dashInfoText: "Pay with Dash and save 5% — anonymous, no credit card, no identity required. You'll get a payment address + QR code to send from any Dash wallet.",
+    dashInfoText: "Pay with Dash and save 5–20% (20% on yearly & lifetime plans) — anonymous, no credit card, no identity required. You'll get a payment address + QR code to send from any Dash wallet.",
     getDashWallet: "Get Dash Wallet ↗",
     buyOnKraken: "Buy on Kraken ↗",
     buyOnUphold: "Buy on Uphold ↗",
@@ -75,7 +75,7 @@ const strings = {
     lightning: "Lightning",
     lightningInstant: "Instant · BTC",
     lightningComingSoon: "Coming soon",
-    lightningInfoText: "Pay with Bitcoin Lightning — instant settlement, no bank, 5% off. Need BTC? Buy it on any exchange.",
+    lightningInfoText: "Pay with Bitcoin Lightning — instant settlement, no bank, 5–20% off (20% on yearly & lifetime). Need BTC? Buy it on any exchange.",
     buyOnBinance: "Buy BTC (Binance) ↗",
     lightningOpenWallet: "Open in Lightning Wallet ↗",
     lightningCopyInvoice: "Copy Invoice",
@@ -229,7 +229,7 @@ const strings = {
     dashComingSoon: "Próximamente",
     dashAnonBadge: "5% OFF",
 
-    dashInfoText: "Paga con Dash y ahorra 5% — anónimo, sin tarjeta de crédito, sin identidad requerida. Recibirás una dirección de pago + código QR para enviar desde cualquier billetera Dash.",
+    dashInfoText: "Paga con Dash y ahorra 5–20% (20% en planes anuales y de por vida) — anónimo, sin tarjeta de crédito, sin identidad requerida. Recibirás una dirección de pago + código QR para enviar desde cualquier billetera Dash.",
     getDashWallet: "Obtener billetera Dash ↗",
     buyOnKraken: "Comprar en Kraken ↗",
     buyOnUphold: "Comprar en Uphold ↗",
@@ -239,7 +239,7 @@ const strings = {
     lightning: "Lightning",
     lightningInstant: "Instantáneo · BTC",
     lightningComingSoon: "Próximamente",
-    lightningInfoText: "Paga con Bitcoin Lightning — liquidación instantánea, sin banco, 5% de descuento. ¿Necesitas BTC? Cómpralo en cualquier exchange.",
+    lightningInfoText: "Paga con Bitcoin Lightning — liquidación instantánea, sin banco, 5–20% de descuento (20% en planes anuales y de por vida). ¿Necesitas BTC? Cómpralo en cualquier exchange.",
     buyOnBinance: "Comprar BTC (Binance) ↗",
     lightningOpenWallet: "Abrir en Billetera Lightning ↗",
     lightningCopyInvoice: "Copiar Factura",
