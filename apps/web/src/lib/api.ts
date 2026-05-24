@@ -2896,8 +2896,7 @@ export function prepareUsdcSubscription(
   orderId: string;
   usdAmount: number;
   planName: string;
-  publicKey: string;
-  ipnCallbackUrl: string;
+  invoiceUrl: string;
   originalAmount?: number;
   discountPct?: number;
   error?: string;

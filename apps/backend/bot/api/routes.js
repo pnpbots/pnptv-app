@@ -9076,8 +9076,7 @@ const usdcPrepareLimiter = rateLimit({
 
 // POST /api/webapp/payments/usdc/prepare — create DB order record for widget flow (no NOWPayments API call)
 app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLimiter, asyncHandler(async (req, res) => {
-  const publicKey = process.env.NOWPAYMENTS_PUBLIC_KEY || '';
-  if (!publicKey || !NOWPAYMENTS_API_KEY) {
+  if (!NOWPAYMENTS_API_KEY) {
     return res.status(503).json({ success: false, error: 'USDC payments are not configured.', code: 'NOWPAYMENTS_NOT_CONFIGURED' });
   }
 
@@ -9124,6 +9123,32 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
   }
 
   const orderId = `pnptv-nowp-${userId}-${Date.now()}`;
+  const ipnCallbackUrl = `${webappUrl}/api/webhooks/nowpayments`;
+
+  // Create a hosted invoice via NOWPayments API — returns an invoice_url the
+  // user opens directly. The embedded widget CDN (payment-widget.js) no longer
+  // exists, so hosted checkout is the only reliable path.
+  let invoiceUrl;
+  try {
+    const invoiceResp = await axios.post(`${NOWPAYMENTS_URL}/invoice`, {
+      price_amount: usdAmount,
+      price_currency: 'usd',
+      order_id: orderId,
+      order_description: `${planDisplayName} – PNPtv!`,
+      ipn_callback_url: ipnCallbackUrl,
+      success_url: `${webappUrl}/subscribe?nowpayments=success&order=${encodeURIComponent(orderId)}`,
+      cancel_url: `${webappUrl}/subscribe`,
+      ...(email ? { customer_email: email } : {}),
+    }, {
+      headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
+      timeout: 10000,
+    });
+    invoiceUrl = invoiceResp.data?.invoice_url;
+    if (!invoiceUrl) throw new Error('No invoice_url in response');
+  } catch (err) {
+    logger.error('[NOWPayments] Invoice creation failed', { userId, planId, orderId, error: err.message });
+    return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
+  }
 
   await dbQuery(
     `INSERT INTO dash_subscription_orders
@@ -9137,24 +9162,21 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
       usdAmount,
       orderId,
       creatorId ? String(creatorId) : null,
-      JSON.stringify({ provider: 'nowpayments', flow: 'widget' }),
+      JSON.stringify({ provider: 'nowpayments', flow: 'hosted', invoiceUrl }),
     ]
   );
 
-  logger.info('[NOWPayments] Widget order prepared', { userId, planId, orderId, usdAmount });
+  logger.info('[NOWPayments] Invoice created', { userId, planId, orderId, usdAmount, invoiceUrl });
 
   return res.json({
     success: true,
     orderId,
     usdAmount,
     planName: planDisplayName,
-    publicKey,
-    ipnCallbackUrl: `${webappUrl}/api/webhooks/nowpayments`,
+    invoiceUrl,
     ...(discountInfo || {}),
   });
 }));
-
-// /api/webapp/payments/usdc/create removed — widget flow via /usdc/prepare is the only path.
 
 const usdcStatusLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute

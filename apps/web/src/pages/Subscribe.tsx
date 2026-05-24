@@ -164,16 +164,12 @@ export default function Subscribe() {
     orderId: string;
     planName: string;
     usdAmount: number;
-    publicKey: string;
-    ipnCallbackUrl: string;
+    invoiceUrl: string;
     createdAt: number;
     partiallyPaid?: boolean;
   } | null>(null);
   const [usdcPolling, setUsdcPolling] = useState(false);
   const [usdcPaymentSuccess, setUsdcPaymentSuccess] = useState(false);
-  const [usdcOpenWidget, setUsdcOpenWidget] = useState(false);
-  const [nowpScriptReady, setNowpScriptReady] = useState(false);
-  const nowpWidgetBtnRef = useRef<HTMLAnchorElement | null>(null);
 
   useEffect(() => {
     // Detect country first so we can prefer the pnp-col plan when applicable
@@ -225,28 +221,6 @@ export default function Subscribe() {
 
     // Load NOWPayments widget script. Always-rendered .nowpayments-button
     // in the DOM ensures the script binds its click handler on init.
-    const existingScript = document.querySelector<HTMLScriptElement>('script[data-nowpayments-widget]');
-    if (!existingScript) {
-      const script = document.createElement('script');
-      script.src = 'https://nowpayments.io/embeds/payment-widget.js';
-      script.setAttribute('data-nowpayments-widget', 'true');
-      script.async = true;
-      script.onload = () => { script.dataset.loaded = 'true'; setNowpScriptReady(true); };
-      script.onerror = () => setNowpScriptReady(true); // allow fallback even if CDN fails
-      document.head.appendChild(script);
-    } else if (existingScript.dataset.loaded === 'true') {
-      // Already loaded on a previous render cycle
-      setNowpScriptReady(true);
-    } else {
-      // Script tag exists but hasn't fired load yet — wait for it
-      const onLoad = () => {
-        existingScript.dataset.loaded = 'true';
-        setNowpScriptReady(true);
-      };
-      existingScript.addEventListener('load', onLoad, { once: true });
-      existingScript.addEventListener('error', onLoad, { once: true });
-    }
-
     // Resume USDC polling after page reload or return from hosted checkout
     try {
       const stored = sessionStorage.getItem("pnp_pending_usdc_order");
@@ -262,13 +236,13 @@ export default function Subscribe() {
       }
     } catch {}
 
-    // Handle ?nowpayments=success&order=<id> from hosted checkout fallback
+    // Handle ?nowpayments=success&order=<id> from hosted checkout return
     const nowpResult = searchParams.get("nowpayments");
     const nowpOrderId = searchParams.get("order");
     if (nowpResult === "success" && nowpOrderId && /^pnptv-nowp-[A-Za-z0-9_-]+-\d+$/.test(nowpOrderId)) {
       window.history.replaceState({}, "", window.location.pathname);
       if (!sessionStorage.getItem("pnp_pending_usdc_order")) {
-        setUsdcOrder({ orderId: nowpOrderId, planName: "subscription", usdAmount: 0, publicKey: "", ipnCallbackUrl: "", createdAt: Date.now() });
+        setUsdcOrder({ orderId: nowpOrderId, planName: "subscription", usdAmount: 0, invoiceUrl: "", createdAt: Date.now() });
         setUsdcPolling(true);
       }
     }
@@ -369,15 +343,6 @@ export default function Subscribe() {
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Auto-trigger widget when usdcOpenWidget is set — wait for script ready
-  useEffect(() => {
-    if (!usdcOpenWidget || !nowpScriptReady) return;
-    const btn = nowpWidgetBtnRef.current;
-    if (!btn) return;
-    const id = setTimeout(() => { btn.click(); setUsdcOpenWidget(false); }, 150);
-    return () => clearTimeout(id);
-  }, [usdcOpenWidget, nowpScriptReady]);
 
   // Validate a promo code server-side. For base-plan promos, we lock the
   // selected plan to the promo's base plan so the displayed price matches.
@@ -831,19 +796,19 @@ export default function Subscribe() {
         }
       } else if (provider === "usdc") {
         const result = await prepareUsdcSubscription(selectedPlan);
-        if (result.success && result.orderId) {
+        if (result.success && result.orderId && result.invoiceUrl) {
           const order = {
             orderId: result.orderId,
             planName: result.planName || "subscription",
             usdAmount: result.usdAmount,
-            publicKey: result.publicKey,
-            ipnCallbackUrl: result.ipnCallbackUrl,
+            invoiceUrl: result.invoiceUrl,
             createdAt: Date.now(),
           };
           setUsdcOrder(order);
           setUsdcPolling(true);
-          setUsdcOpenWidget(true);
           try { sessionStorage.setItem("pnp_pending_usdc_order", JSON.stringify(order)); } catch {}
+          // Open the NOWPayments hosted checkout in a new tab
+          window.open(result.invoiceUrl, '_blank', 'noopener,noreferrer');
         } else {
           setError(s.failedToCreateUsdcInvoice);
         }
@@ -1613,27 +1578,7 @@ export default function Subscribe() {
         )}
       </div>
 
-      {/* Hidden NOWPayments widget trigger button — always in DOM so the widget
-          script attaches its click handler on load. Attributes are read at
-          click time, so updating them before btn.click() is sufficient. */}
-      <a
-        ref={nowpWidgetBtnRef}
-        href="#"
-        className="nowpayments-button"
-        data-key={usdcOrder?.publicKey || ''}
-        data-amount={String(usdcOrder?.usdAmount || 0)}
-        data-currency="usd"
-        data-payer-email={user?.email || ''}
-        data-description={usdcOrder ? `${usdcOrder.planName} – PNPtv!` : ''}
-        data-order-id={usdcOrder?.orderId || ''}
-        data-ipn-callback={usdcOrder?.ipnCallbackUrl || ''}
-        data-theme="dark"
-        onClick={(e) => e.preventDefault()}
-        style={{ position: "fixed", top: -9999, left: -9999, opacity: 0, pointerEvents: "none" }}
-        aria-hidden="true"
-      />
-
-      {/* USDC waiting state */}
+      {/* USDC waiting state — payment page is open in a new tab */}
       {usdcOrder && !usdcPaymentSuccess && (
         <div className="mb-6 rounded-xl border border-green-500/40 bg-green-500/5 p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -1648,14 +1593,16 @@ export default function Subscribe() {
               <p className="text-xs text-yellow-400 font-medium">Partial payment detected — please send the remaining amount to the same address.</p>
             </div>
           )}
-          <button
-            onClick={() => {
-              setUsdcOpenWidget(true);
-            }}
-            className="block w-full text-center py-2.5 rounded-xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 transition-colors mb-3"
-          >
-            {s.usdcOpenCheckout}
-          </button>
+          {usdcOrder.invoiceUrl && (
+            <a
+              href={usdcOrder.invoiceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full text-center py-2.5 rounded-xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 transition-colors mb-3"
+            >
+              {s.usdcOpenCheckout}
+            </a>
+          )}
           <button
             onClick={() => {
               setUsdcOrder(null);
