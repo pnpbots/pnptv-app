@@ -48,6 +48,18 @@ const MARQUEE_END_PAD_PX = 12; // ensure the last character clears the edge
 const UPDATE_MESSAGES: RawMessage[] = [
   {
     category: "UPDATE",
+    en: "PNP Live launches June 1st — live cams, tips & real-time fun. Get ready.",
+    es: "PNP Live arranca el 1 de junio — cams en vivo, tips y diversión en tiempo real. Prepárate.",
+    href: "/live",
+  },
+  {
+    category: "UPDATE",
+    en: "PRIME Lifetime Pass is back — $250 one time, forever. Includes $20 tip credit.",
+    es: "El Pase Lifetime PRIME volvió — $250 una vez, para siempre. Incluye $20 en crédito para tips.",
+    href: "/subscribe",
+  },
+  {
+    category: "UPDATE",
     en: "Pay with Dash and save 5% on any plan — private, instant, no banks.",
     es: "Paga con Dash y ahorra 5% en cualquier plan — privado, instantáneo, sin bancos.",
     href: "/subscribe",
@@ -63,12 +75,6 @@ const UPDATE_MESSAGES: RawMessage[] = [
     en: "Set up a passkey for one-tap login — manage in your account settings.",
     es: "Configura un passkey para entrar con un toque — gestiona en ajustes de cuenta.",
     href: "/settings/account",
-  },
-  {
-    category: "UPDATE",
-    en: "Last 12 hours — Lifetime Founder pass closes tonight. Pay with Dash and save 20%.",
-    es: "Últimas 12 horas — El pase Lifetime Founder cierra esta noche. Paga con Dash y ahorra 20%.",
-    href: "/lifetime100",
   },
   {
     category: "UPDATE",

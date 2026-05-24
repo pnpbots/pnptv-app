@@ -3993,7 +3993,8 @@ class PaymentService {
       // Look up what add-ons this plan grants, with per-add-on duration overrides
       const addOnsResult = await query(`
         SELECT pa.add_on_id, pa.is_lifetime, pa.duration_days AS addon_duration_days,
-               p.duration_days AS plan_duration_days, a.name AS add_on_name
+               p.duration_days AS plan_duration_days, a.name AS add_on_name,
+               p.bonus_tokens
         FROM plan_add_ons pa
         JOIN add_ons a ON a.id = pa.add_on_id
         JOIN plans p ON p.id = pa.plan_id
@@ -4151,6 +4152,23 @@ class PaymentService {
         throw txErr;
       } finally {
         txClient.release();
+      }
+
+      // Credit plan bonus tokens (e.g. lifetime-pass ships with $20 tip credit)
+      const bonusTokens = addOnsResult.rows[0]?.bonus_tokens;
+      if (bonusTokens && bonusTokens > 0) {
+        try {
+          await query(`
+            INSERT INTO user_token_wallets (user_id, balance_tokens)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE
+              SET balance_tokens = user_token_wallets.balance_tokens + $2,
+                  updated_at    = NOW()
+          `, [userId, bonusTokens]);
+          logger.info('Bonus tokens credited', { userId, planId, bonusTokens });
+        } catch (tokenErr) {
+          logger.error('Failed to credit bonus tokens (non-fatal)', { userId, planId, bonusTokens, error: tokenErr.message });
+        }
       }
 
       // Auto-join hangout group for channel-access payments
