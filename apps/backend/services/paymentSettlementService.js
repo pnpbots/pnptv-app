@@ -297,11 +297,12 @@ class PaymentSettlementService {
 
       return { type: 'creator_subscription', ok: true, creatorId: order.creator_id };
     } catch (err) {
-      logger.error('BTCPay creator subscription activation failed', {
+      logger.error('BTCPay creator subscription activation failed — rolling back to pending', {
         error: err.message, userId: order.user_id, creatorId: order.creator_id, invoiceId,
       });
+      // Roll back to pending so BTCPay can retry and the user eventually gets access
       await dbQuery(
-        `UPDATE dash_subscription_orders SET notes = $2 WHERE id = $1`,
+        `UPDATE dash_subscription_orders SET status = 'pending', completed_at = NULL, notes = $2 WHERE id = $1`,
         [order.id, `creator_sub_failed: ${err.message}`.slice(0, 500)]
       );
       return { type: 'creator_subscription', error: 'creator_subscription_failed', orderId: order.id };
@@ -440,7 +441,7 @@ class PaymentSettlementService {
             await PaymentNotificationService.sendPaymentConfirmation(order.user_id, {
               planId: order.plan_id,
               planName,
-              amount: order.amount || 0,
+              amount: order.usd_amount || 0,
               currency: 'USD',
               provider: 'btcpay',
               language,
@@ -458,7 +459,7 @@ class PaymentSettlementService {
               customerName: u.telegram || order.user_id,
               customerEmail: u.email,
               planName,
-              amount: order.amount || 0,
+              amount: order.usd_amount || 0,
               currency: 'USD',
               paymentDate: new Date(),
               provider: 'Dash/BTCPay',
@@ -469,7 +470,7 @@ class PaymentSettlementService {
               invoicePdf,
               invoiceNumber: invoiceId,
               customerName: u.telegram || order.user_id,
-              amount: order.amount || 0,
+              amount: order.usd_amount || 0,
               currency: 'USD',
               planName,
             });

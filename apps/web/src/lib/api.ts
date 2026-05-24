@@ -2883,17 +2883,17 @@ export function getLightningPaymentDetails(
   return request(`/api/webapp/payments/lightning/details/${encodeURIComponent(invoiceId)}`);
 }
 
-export function createUsdcSubscription(
+export function prepareUsdcSubscription(
   planId: string,
   email?: string,
   creatorId?: string,
 ): Promise<{
   success: boolean;
   orderId: string;
-  invoiceId: string;
-  invoiceUrl: string;
-  planName?: string;
-  usdAmount?: number;
+  usdAmount: number;
+  planName: string;
+  publicKey: string;
+  ipnCallbackUrl: string;
   originalAmount?: number;
   discountPct?: number;
   error?: string;
@@ -2901,12 +2901,17 @@ export function createUsdcSubscription(
   const body: Record<string, string> = { planId };
   if (email) body.email = email;
   if (creatorId) body.creatorId = creatorId;
-  return request("/api/webapp/payments/usdc/create", { method: "POST", body });
+  return request("/api/webapp/payments/usdc/prepare", { method: "POST", body });
 }
+
 
 export function getUsdcSubscriptionStatus(orderId: string): Promise<{
   success: boolean;
   status: string;
+  completed: boolean;
+  confirming: boolean;
+  failed: boolean;
+  partiallyPaid: boolean;
   error?: string;
 }> {
   return request(`/api/webapp/payments/usdc/status/${encodeURIComponent(orderId)}`);

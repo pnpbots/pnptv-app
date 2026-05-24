@@ -260,6 +260,7 @@ class PaymentRecoveryService {
           // Map BTCPay invoice state → equivalent webhook event for replay
           let eventType = null;
           if (status === 'Settled') { eventType = 'InvoiceSettled'; results.settled++; }
+          else if (status === 'Expired' && inv?.additionalStatus === 'PaidLate') { eventType = 'InvoiceSettled'; results.settled++; }
           else if (status === 'Expired') { eventType = 'InvoiceExpired'; results.expired++; }
           else if (status === 'Invalid') { eventType = 'InvoiceInvalid'; results.invalid++; }
           else { results.stillPending++; }
@@ -297,11 +298,20 @@ class PaymentRecoveryService {
             // concurrent webhook delivery cannot double-grant.
             try {
               const grantResult = await PaymentRecoveryService.settleStuckDashInvoice(row.invoice_id, row.source);
-              logger.info('Dash reconciliation: settled in-process', {
-                invoiceId: row.invoice_id,
-                source: row.source,
-                grantResult,
-              });
+              if (grantResult?.skipped) {
+                logger.error('Dash reconciliation: grant skipped (resource-type order not handled) — operator must investigate', {
+                  invoiceId: row.invoice_id,
+                  source: row.source,
+                  grantResult,
+                });
+                results.errors++;
+              } else {
+                logger.info('Dash reconciliation: settled in-process', {
+                  invoiceId: row.invoice_id,
+                  source: row.source,
+                  grantResult,
+                });
+              }
             } catch (grantErr) {
               logger.error('Dash reconciliation: in-process settlement failed — operator must investigate', {
                 invoiceId: row.invoice_id,

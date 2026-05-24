@@ -8606,8 +8606,26 @@ app.get('/api/invoice/:paymentId', requireSessionAuth, asyncHandler(async (req, 
   res.send(buffer);
 }));
 
+const dashAvailableLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  message: { success: false, error: 'Too many requests. Please wait.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const dashCreateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 5,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  message: { success: false, error: 'Too many payment requests. Please wait a few minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // GET /api/webapp/payments/dash/available — check if Dash/BTCPay is configured & reachable
-app.get('/api/webapp/payments/dash/available', asyncHandler(async (req, res) => {
+app.get('/api/webapp/payments/dash/available', dashAvailableLimiter, asyncHandler(async (req, res) => {
   const { checkBtcpayHealth } = require('../../config/btcpay');
   const health = await checkBtcpayHealth();
   return res.json({ available: health.configured && health.reachable, ...health });
@@ -8617,7 +8635,7 @@ app.get('/api/webapp/payments/dash/available', asyncHandler(async (req, res) => 
 // When planId === 'creator_monthly' AND creatorId is provided, the price is looked up
 // dynamically from users.creator_price_usd (mirrors paymentService.createPayment) and the
 // order carries creator_id so the webhook can credit the right creator with a 70/30 split.
-app.post('/api/webapp/payments/dash/create', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimiter, asyncHandler(async (req, res) => {
   const user = req.session.user;
 
   const { planId, email, creatorId } = req.body;
@@ -9028,17 +9046,24 @@ function validateNowpaymentsIpn(body, signature) {
 
 // GET /api/webapp/payments/usdc/available — check if NOWPayments is configured
 app.get('/api/webapp/payments/usdc/available', asyncHandler(async (req, res) => {
-  return res.json({ available: true, configured: !!NOWPAYMENTS_API_KEY });
+  const configured = !!(NOWPAYMENTS_API_KEY && process.env.NOWPAYMENTS_PUBLIC_KEY);
+  return res.json({ available: configured, configured });
 }));
 
-// POST /api/webapp/payments/usdc/create — create a NOWPayments hosted-checkout invoice
-app.post('/api/webapp/payments/usdc/create', requireSessionAuth, asyncHandler(async (req, res) => {
-  if (!NOWPAYMENTS_API_KEY) {
-    return res.status(503).json({
-      success: false,
-      error: 'USDC payments are not configured. Please use Card or Dash.',
-      code: 'NOWPAYMENTS_NOT_CONFIGURED',
-    });
+const usdcPrepareLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 5,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  message: { success: false, error: 'Too many payment requests. Please wait a few minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// POST /api/webapp/payments/usdc/prepare — create DB order record for widget flow (no NOWPayments API call)
+app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLimiter, asyncHandler(async (req, res) => {
+  const publicKey = process.env.NOWPAYMENTS_PUBLIC_KEY || '';
+  if (!publicKey || !NOWPAYMENTS_API_KEY) {
+    return res.status(503).json({ success: false, error: 'USDC payments are not configured.', code: 'NOWPAYMENTS_NOT_CONFIGURED' });
   }
 
   const user = req.session.user;
@@ -9047,27 +9072,22 @@ app.post('/api/webapp/payments/usdc/create', requireSessionAuth, asyncHandler(as
 
   const userId = String(user.telegram_id || user.id);
   const { query: dbQuery } = require('../../config/postgres');
+  const webappUrl = process.env.WEBAPP_URL || 'https://pnptv.app';
 
   let planDisplayName;
   let usdAmount;
   let discountInfo = null;
 
   if (planId === 'creator_monthly') {
-    if (!creatorId) {
-      return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
-    }
+    if (!creatorId) return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
     const creatorRes = await dbQuery(
       'SELECT id, username, first_name, creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
       [String(creatorId), 'active']
     );
-    if (creatorRes.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Creator not found or not active' });
-    }
+    if (creatorRes.rows.length === 0) return res.status(404).json({ success: false, error: 'Creator not found or not active' });
     const creator = creatorRes.rows[0];
     const price = parseFloat(creator.creator_price_usd);
-    if (!Number.isFinite(price) || price <= 0) {
-      return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
-    }
+    if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
     usdAmount = price;
     planDisplayName = 'Premium subscription';
   } else {
@@ -9089,77 +9109,49 @@ app.post('/api/webapp/payments/usdc/create', requireSessionAuth, asyncHandler(as
   }
 
   const orderId = `pnptv-nowp-${userId}-${Date.now()}`;
-  const webappUrl = process.env.WEBAPP_URL || 'https://pnptv.app';
 
-  try {
-    const resp = await axios.post(`${NOWPAYMENTS_URL}/invoice`, {
-      price_amount: usdAmount,
-      price_currency: 'usd',
-      order_id: orderId,
-      order_description: `${planDisplayName} subscription`,
-      ipn_callback_url: `${webappUrl}/api/webhooks/nowpayments`,
-      success_url: `${webappUrl}/subscribe?nowpayments=success&order=${orderId}`,
-      cancel_url: `${webappUrl}/subscribe`,
-      is_fixed_rate: false,
-      is_fee_paid_by_user: false,
-    }, {
-      headers: { 'x-api-key': NOWPAYMENTS_API_KEY },
-      timeout: 15000,
-    });
-
-    const nowpInvoice = resp.data;
-
-    await dbQuery(
-      `INSERT INTO dash_subscription_orders
-         (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id, metadata)
-       VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)
-       ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
-      [
-        userId,
-        planId,
-        email || null,
-        usdAmount,
-        orderId,
-        creatorId ? String(creatorId) : null,
-        JSON.stringify({ provider: 'nowpayments', nowpayments_invoice_id: String(nowpInvoice.id) }),
-      ]
-    );
-
-    return res.json({
-      success: true,
-      orderId,
-      invoiceId: String(nowpInvoice.id),
-      invoiceUrl: nowpInvoice.invoice_url,
-      planName: planDisplayName,
+  await dbQuery(
+    `INSERT INTO dash_subscription_orders
+       (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id, metadata)
+     VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)
+     ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
+    [
+      userId,
+      planId,
+      email || null,
       usdAmount,
-      ...(discountInfo || {}),
-    });
-  } catch (err) {
-    logger.error('[NOWPayments] Invoice creation failed', { error: err.message, userId, planId });
-    if (err.response) {
-      return res.status(502).json({
-        success: false,
-        error: 'Failed to create USDC invoice. Please try again.',
-        code: 'NOWPAYMENTS_ERROR',
-      });
-    }
-    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED') {
-      return res.status(503).json({
-        success: false,
-        error: 'Payment provider is temporarily unreachable. Please try again later.',
-        code: 'NOWPAYMENTS_UNREACHABLE',
-      });
-    }
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to create USDC invoice. Please try again.',
-      code: 'NOWPAYMENTS_ERROR',
-    });
-  }
+      orderId,
+      creatorId ? String(creatorId) : null,
+      JSON.stringify({ provider: 'nowpayments', flow: 'widget' }),
+    ]
+  );
+
+  logger.info('[NOWPayments] Widget order prepared', { userId, planId, orderId, usdAmount });
+
+  return res.json({
+    success: true,
+    orderId,
+    usdAmount,
+    planName: planDisplayName,
+    publicKey,
+    ipnCallbackUrl: `${webappUrl}/api/webhooks/nowpayments`,
+    ...(discountInfo || {}),
+  });
 }));
 
+// /api/webapp/payments/usdc/create removed — widget flow via /usdc/prepare is the only path.
+
+const usdcStatusLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  message: { success: false, error: 'Too many status requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // GET /api/webapp/payments/usdc/status/:orderId — poll USDC invoice status
-app.get('/api/webapp/payments/usdc/status/:orderId', requireSessionAuth, asyncHandler(async (req, res) => {
+app.get('/api/webapp/payments/usdc/status/:orderId', requireSessionAuth, usdcStatusLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
 
@@ -9188,6 +9180,8 @@ app.get('/api/webapp/payments/usdc/status/:orderId', requireSessionAuth, asyncHa
 }));
 
 // POST /api/webhooks/nowpayments — NOWPayments IPN webhook
+// Processes synchronously so NOWPayments retries on any 5xx (no fire-and-forget).
+// Grant runs BEFORE marking completed so a crash leaves the order retryable.
 app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandler(async (req, res) => {
   const sig = req.headers['x-nowpayments-sig'];
   if (!validateNowpaymentsIpn(req.body, sig)) {
@@ -9195,116 +9189,170 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     return res.status(400).json({ error: 'invalid_signature' });
   }
 
-  const { payment_id, payment_status, order_id, actually_paid, pay_currency } = req.body;
+  const { payment_id, payment_status, order_id, actually_paid, price_amount, pay_currency } = req.body;
+
+  // NP-M-05: reject IPNs missing required fields
+  if (!payment_id || !payment_status || !order_id) {
+    logger.warn('[NOWPayments] IPN: missing required fields', { payment_id, payment_status, order_id });
+    return res.status(400).json({ error: 'missing_fields' });
+  }
+
   logger.info('[NOWPayments] IPN received', { payment_id, payment_status, order_id });
 
-  // Respond immediately — NOWPayments expects fast acknowledgement
-  res.json({ received: true });
+  const { query: dbQuery } = require('../../config/postgres');
 
-  // Map NOWPayments statuses to our internal statuses
-  const STATUS_MAP = {
-    waiting: 'pending',
-    confirming: 'confirming',
-    confirmed: 'confirmed',
-    sending: 'confirming',
-    partially_paid: 'partially_paid',
-    finished: 'completed',
-    failed: 'failed',
-    refunded: 'failed',
-    expired: 'expired',
-  };
-
-  const internalStatus = STATUS_MAP[payment_status];
-  if (!internalStatus) {
-    logger.warn('[NOWPayments] IPN: unknown payment_status', { payment_status, order_id });
-    return;
+  // Intermediate / terminal non-success statuses — update DB and ack immediately
+  if (payment_status === 'wrong_asset_confirmed') {
+    logger.error('[NOWPayments] IPN: wrong asset sent', { order_id, pay_currency, payment_id });
+    await dbQuery(
+      `UPDATE dash_subscription_orders SET status = 'failed', notes = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed')`,
+      [order_id, `nowpayments:${payment_id}:wrong_asset`]
+    );
+    return res.json({ received: true });
   }
 
-  try {
-    const { query: dbQuery } = require('../../config/postgres');
-    const orderRes = await dbQuery(
-      `SELECT id, user_id, plan_id, status, usd_amount, creator_id
-       FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 LIMIT 1`,
+  if (payment_status === 'partially_paid') {
+    logger.warn('[NOWPayments] IPN: partial payment', { order_id, actually_paid, pay_currency });
+    await dbQuery(
+      `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed')`,
+      [order_id, `nowpayments:${payment_id}:partial:${actually_paid}${pay_currency ? ' ' + pay_currency : ''}`]
+    );
+    return res.json({ received: true });
+  }
+
+  if (payment_status === 'failed' || payment_status === 'refunded') {
+    await dbQuery(
+      `UPDATE dash_subscription_orders SET status = 'failed', notes = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed')`,
+      [order_id, `nowpayments:${payment_id}:${payment_status}`]
+    );
+    return res.json({ received: true });
+  }
+
+  if (payment_status === 'expired') {
+    await dbQuery(
+      `UPDATE dash_subscription_orders SET status = 'expired', notes = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','expired')`,
+      [order_id, `nowpayments:${payment_id}:expired`]
+    );
+    return res.json({ received: true });
+  }
+
+  if (payment_status === 'confirming' || payment_status === 'confirmed' || payment_status === 'sending') {
+    const internalStatus = payment_status === 'sending' ? 'confirming' : payment_status;
+    await dbQuery(
+      `UPDATE dash_subscription_orders SET status = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed',$2)`,
+      [order_id, internalStatus]
+    );
+    return res.json({ received: true });
+  }
+
+  if (payment_status === 'waiting') {
+    return res.json({ received: true });
+  }
+
+  if (payment_status !== 'finished') {
+    logger.warn('[NOWPayments] IPN: unknown payment_status', { payment_status, order_id });
+    return res.json({ received: true });
+  }
+
+  // payment_status === 'finished' — grant entitlements synchronously
+  // Respond with 5xx on failure so NOWPayments retries.
+
+  // NP-H-01: atomic processing lock — prevents double-grant on concurrent IPN deliveries
+  const lockRes = await dbQuery(
+    `UPDATE dash_subscription_orders SET status = 'processing'
+     WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','processing')
+     RETURNING id, user_id, plan_id, usd_amount, creator_id`,
+    [order_id]
+  );
+
+  if (lockRes.rows.length === 0) {
+    // Either already completed/failed, or another delivery is processing — idempotent ack
+    const existingRes = await dbQuery(
+      `SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 LIMIT 1`,
       [order_id]
     );
-
-    const order = orderRes.rows[0];
-    if (!order) {
+    const existing = existingRes.rows[0];
+    if (!existing) {
       logger.error('[NOWPayments] IPN: order not found', { order_id });
-      return;
+      return res.status(404).json({ error: 'order_not_found' });
     }
-    if (order.status === 'completed') {
-      logger.info('[NOWPayments] IPN: already completed (idempotent)', { order_id });
-      return;
-    }
+    logger.info('[NOWPayments] IPN: already processed or in-flight', { order_id, status: existing.status });
+    return res.json({ received: true });
+  }
 
-    if (payment_status === 'partially_paid') {
-      logger.warn('[NOWPayments] IPN: partial payment received', { order_id, actually_paid, pay_currency });
+  const order = lockRes.rows[0];
+
+  // NP-M-01: amount validation — reject underpayments > 1%
+  if (actually_paid != null && price_amount != null) {
+    const paid = parseFloat(actually_paid);
+    const expected = parseFloat(price_amount);
+    if (Number.isFinite(paid) && Number.isFinite(expected) && paid < expected * 0.99) {
+      logger.warn('[NOWPayments] IPN: underpayment detected', { order_id, actually_paid, price_amount });
       await dbQuery(
         `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
-        [order_id, `nowpayments:${payment_id}:partial:${actually_paid}${pay_currency ? ' ' + pay_currency : ''}`]
+        [order_id, `nowpayments:${payment_id}:underpaid:${actually_paid}/${price_amount}`]
       );
-      return;
+      return res.json({ received: true });
     }
+  }
 
-    if (payment_status === 'wrong_asset_confirmed') {
-      logger.error('[NOWPayments] IPN: wrong asset sent', { order_id, pay_currency, payment_id });
-      await dbQuery(
-        `UPDATE dash_subscription_orders SET status = 'failed', notes = $2 WHERE btcpay_invoice_id = $1`,
-        [order_id, `nowpayments:${payment_id}:wrong_asset`]
-      );
-      return;
-    }
-
-    if (payment_status === 'failed' || payment_status === 'refunded' || payment_status === 'expired') {
-      await dbQuery(
-        `UPDATE dash_subscription_orders SET status = $2, notes = $3 WHERE btcpay_invoice_id = $1`,
-        [order_id, internalStatus, `nowpayments:${payment_id}:${payment_status}`]
-      );
-      return;
-    }
-
-    if (payment_status === 'confirming' || payment_status === 'confirmed' || payment_status === 'sending') {
-      await dbQuery(
-        `UPDATE dash_subscription_orders SET status = $2 WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
-        [order_id, internalStatus]
-      );
-      return;
-    }
-
-    if (payment_status !== 'finished') return;
-
-    await dbQuery(
-      `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
-      [order_id, `nowpayments:${payment_id}`]
+  // Grant FIRST — if this throws, roll back to pending so NOWPayments retries
+  try {
+    const PaymentServiceGf = require('../../services/paymentService');
+    await PaymentServiceGf.grantEntitlementsForPlan(
+      order.user_id,
+      order.plan_id,
+      'nowpayments',
+      order.creator_id ? { creatorId: String(order.creator_id) } : null,
+      order_id
     );
 
-    try {
-      const PaymentServiceGf = require('../../services/paymentService');
-      await PaymentServiceGf.grantEntitlementsForPlan(order.user_id, order.plan_id, 'nowpayments', null, order_id);
-      logger.info('[NOWPayments] IPN: entitlements granted', { userId: order.user_id, planId: order.plan_id, order_id });
-
-      const PlanModel = require('../../models/planModel');
-      const plan = await PlanModel.getById(order.plan_id).catch(() => null);
-      if (plan) {
-        const expiry = plan.duration_days
-          ? new Date(Date.now() + plan.duration_days * 86400000).toISOString()
-          : null;
-        await dbQuery(
-          `UPDATE users SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW() WHERE id = $1`,
-          [order.user_id, plan.tier || 'prime', plan.id, expiry]
-        );
+    // NP-H-02: wire up creator subscription relationship for creator_monthly orders
+    if (order.plan_id === 'creator_monthly' && order.creator_id) {
+      try {
+        const CreatorService = require('../../services/creatorService');
+        await CreatorService.subscribeToCreator(order.user_id, String(order.creator_id));
+      } catch (creatorErr) {
+        logger.warn('[NOWPayments] IPN: subscribeToCreator failed (non-fatal)', {
+          userId: order.user_id, creatorId: order.creator_id, error: creatorErr.message,
+        });
       }
-    } catch (grantErr) {
-      logger.error('[NOWPayments] IPN: entitlement grant failed', {
-        error: grantErr.message,
-        userId: order.user_id,
-        order_id,
-      });
     }
-  } catch (err) {
-    logger.error('[NOWPayments] IPN: database error', { error: err.message, order_id });
+  } catch (grantErr) {
+    // Roll back lock so this IPN delivery can be retried
+    await dbQuery(
+      `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+      [order_id, `nowpayments:grant_failed:${grantErr.message}`.slice(0, 500)]
+    ).catch(() => {});
+    throw grantErr;
   }
+
+  // Mark completed only after successful grant
+  await dbQuery(
+    `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
+    [order_id, `nowpayments:${payment_id}`]
+  );
+
+  // Update users.tier — non-fatal if plan lookup fails
+  const PlanModel = require('../../models/planModel');
+  const plan = await PlanModel.getById(order.plan_id).catch((err) => {
+    logger.error('[NOWPayments] IPN: plan lookup failed, tier not updated', { error: err.message, planId: order.plan_id, order_id });
+    return null;
+  });
+  if (plan) {
+    const expiry = plan.duration_days
+      ? new Date(Date.now() + plan.duration_days * 86400000).toISOString()
+      : null;
+    await dbQuery(
+      `UPDATE users SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW() WHERE id = $1`,
+      [order.user_id, plan.tier || 'prime', plan.id, expiry]
+    );
+  } else {
+    logger.error('[NOWPayments] IPN: plan not found, users.tier not updated', { planId: order.plan_id, order_id });
+  }
+
+  logger.info('[NOWPayments] IPN: payment completed', { userId: order.user_id, planId: order.plan_id, order_id });
+  return res.json({ received: true });
 }));
 
 // POST /api/webhooks/btcpay — BTCPay Server webhook (Dash payment confirmed)

@@ -684,7 +684,9 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
   let btcpayInvoice;
   try {
     const orderId = `call-${payment.id}`;
-    const redirectUrl = `${process.env.WEBAPP_URL || 'https://pnptv.app'}/booking/${booking.id}/confirm`;
+    const redirectUrl = booking?.id
+      ? `${process.env.WEBAPP_URL || 'https://pnptv.app'}/booking/${booking.id}/confirm`
+      : `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`;
 
     btcpayInvoice = await createInvoice({
       amount: amountUsd,
@@ -705,17 +707,19 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
       paymentMethods: ['DASH'],
     });
   } catch (invoiceErr) {
-    // Expire the booking so the slot is freed
-    await query(
-      `UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`,
-      [booking.id]
-    ).catch(() => {});
+    // Expire the booking so the slot is freed (booking may be null on NOW flow)
+    if (booking?.id) {
+      await query(
+        `UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+        [booking.id]
+      ).catch(() => {});
+    }
     await query(
       `UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1`,
       [payment.id]
     ).catch(() => {});
     logger.error('[callCheckoutService] BTCPay invoice creation failed', {
-      paymentId: payment.id, bookingId: booking.id, error: invoiceErr.message,
+      paymentId: payment.id, bookingId: booking?.id ?? null, error: invoiceErr.message,
     });
     throw invoiceErr;
   }

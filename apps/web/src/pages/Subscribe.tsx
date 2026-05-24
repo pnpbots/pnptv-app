@@ -16,7 +16,7 @@ import {
   getLightningAvailable,
   getLightningSubscriptionStatus,
   getLightningPaymentDetails,
-  createUsdcSubscription,
+  prepareUsdcSubscription,
   getUsdcAvailable,
   getUsdcSubscriptionStatus,
   getLabelColor,
@@ -158,17 +158,20 @@ export default function Subscribe() {
   const [lightningPaymentSuccess, setLightningPaymentSuccess] = useState(false);
   const lightningCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // USDC / USDT stablecoin state (NOWPayments)
+  // USDC / USDT stablecoin state (NOWPayments widget)
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
   const [usdcOrder, setUsdcOrder] = useState<{
     orderId: string;
-    invoiceUrl: string;
     planName: string;
-    usdAmount?: number;
+    usdAmount: number;
+    publicKey: string;
+    ipnCallbackUrl: string;
     createdAt: number;
   } | null>(null);
   const [usdcPolling, setUsdcPolling] = useState(false);
   const [usdcPaymentSuccess, setUsdcPaymentSuccess] = useState(false);
+  const [usdcOpenWidget, setUsdcOpenWidget] = useState(false);
+  const nowpWidgetBtnRef = useRef<HTMLAnchorElement | null>(null);
 
   useEffect(() => {
     // Detect country first so we can prefer the pnp-col plan when applicable
@@ -218,13 +221,79 @@ export default function Subscribe() {
       .then((res) => setUsdcAvailable(res.available === true && res.configured === true))
       .catch(() => setUsdcAvailable(false));
 
-    // Resume USDC polling if returning from NOWPayments checkout (nowpayments=success param)
+    // Load NOWPayments widget script
+    if (!document.querySelector('script[data-nowpayments-widget]')) {
+      const script = document.createElement('script');
+      script.src = 'https://nowpayments.io/embeds/payment-widget.js';
+      script.setAttribute('data-nowpayments-widget', 'true');
+      script.async = true;
+      document.head.appendChild(script);
+    }
+
+    // Resume USDC polling after page reload or return from hosted checkout
     try {
-      const storedOrder = sessionStorage.getItem("pnp_pending_usdc_order");
-      if (storedOrder) {
-        const parsed = JSON.parse(storedOrder);
-        setUsdcOrder(parsed);
+      const stored = sessionStorage.getItem("pnp_pending_usdc_order");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Only resume if order is < 24h old (NOWPayments invoice TTL)
+        if (parsed?.orderId && Date.now() - (parsed.createdAt || 0) < 86400000) {
+          setUsdcOrder(parsed);
+          setUsdcPolling(true);
+        } else {
+          sessionStorage.removeItem("pnp_pending_usdc_order");
+        }
+      }
+    } catch {}
+
+    // Handle ?nowpayments=success&order=<id> from hosted checkout fallback
+    const nowpResult = searchParams.get("nowpayments");
+    const nowpOrderId = searchParams.get("order");
+    if (nowpResult === "success" && nowpOrderId && /^pnptv-nowp-[A-Za-z0-9_-]+-\d+$/.test(nowpOrderId)) {
+      window.history.replaceState({}, "", window.location.pathname);
+      if (!sessionStorage.getItem("pnp_pending_usdc_order")) {
+        setUsdcOrder({ orderId: nowpOrderId, planName: "subscription", usdAmount: 0, publicKey: "", ipnCallbackUrl: "", createdAt: Date.now() });
         setUsdcPolling(true);
+      }
+    }
+
+    // Resume Dash invoice polling after page reload (15-minute invoice window)
+    try {
+      const storedDash = sessionStorage.getItem("pnp_pending_dash_invoice");
+      if (storedDash) {
+        const parsed = JSON.parse(storedDash);
+        if (parsed?.invoiceId && Date.now() - (parsed.createdAt || 0) < 900000) {
+          const elapsed = Math.floor((Date.now() - (parsed.createdAt || Date.now())) / 1000);
+          setDashInvoice({
+            invoiceId: parsed.invoiceId,
+            planName: parsed.planName || "subscription",
+            loadingDetails: true,
+            createdAt: parsed.createdAt || Date.now(),
+          });
+          setDashSecondsLeft(Math.max(0, 900 - elapsed));
+          setDashPolling(true);
+          getDashPaymentDetails(parsed.invoiceId)
+            .then((details) => {
+              if (details.success) {
+                setDashInvoice((prev) => prev ? {
+                  ...prev,
+                  destination: details.destination,
+                  amount: details.amount,
+                  due: details.due,
+                  totalDue: details.totalDue,
+                  rate: details.rate,
+                  invoiceAmount: details.invoiceAmount,
+                  loadingDetails: false,
+                } : prev);
+              } else {
+                setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false } : prev);
+              }
+            })
+            .catch(() => {
+              setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false } : prev);
+            });
+        } else {
+          sessionStorage.removeItem("pnp_pending_dash_invoice");
+        }
       }
     } catch {}
 
@@ -283,30 +352,17 @@ export default function Subscribe() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // If user returns from NOWPayments checkout with ?nowpayments=success, start polling
+  // Auto-trigger widget when usdcOpenWidget is set
   useEffect(() => {
-    const nowpSuccess = searchParams.get("nowpayments");
-    if (nowpSuccess !== "success") return;
-    // Clean up the URL params so refreshes don't re-trigger
-    const orderFromUrl = searchParams.get("order");
-    const next = new URLSearchParams(searchParams);
-    next.delete("nowpayments");
-    next.delete("order");
-    setSearchParams(next, { replace: true });
-    // Restore pending order — prefer sessionStorage, fall back to URL param
-    try {
-      const storedOrder = sessionStorage.getItem("pnp_pending_usdc_order");
-      if (storedOrder) {
-        const parsed = JSON.parse(storedOrder);
-        setUsdcOrder(parsed);
-        setUsdcPolling(true);
-      } else if (orderFromUrl) {
-        setUsdcOrder({ orderId: orderFromUrl });
-        setUsdcPolling(true);
-      }
-    } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!usdcOpenWidget) return;
+    const btn = nowpWidgetBtnRef.current;
+    if (!btn) return;
+    const t = setTimeout(() => {
+      btn.click();
+      setUsdcOpenWidget(false);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [usdcOpenWidget]);
 
   // Validate a promo code server-side. For base-plan promos, we lock the
   // selected plan to the promo's base plan so the displayed price matches.
@@ -572,8 +628,8 @@ export default function Subscribe() {
         }
         if (data.failed) {
           setUsdcPolling(false);
-          setError(s.usdcExpired);
           try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
+          setError(s.usdcExpired);
           return;
         }
         if (data.partiallyPaid) {
@@ -746,23 +802,20 @@ export default function Subscribe() {
           setError(s.failedToCreateLightningInvoice);
         }
       } else if (provider === "usdc") {
-        const result = await createUsdcSubscription(selectedPlan);
-        if (result.success && result.invoiceUrl) {
+        const result = await prepareUsdcSubscription(selectedPlan);
+        if (result.success && result.orderId) {
           const order = {
             orderId: result.orderId,
-            invoiceUrl: result.invoiceUrl,
             planName: result.planName || "subscription",
             usdAmount: result.usdAmount,
+            publicKey: result.publicKey,
+            ipnCallbackUrl: result.ipnCallbackUrl,
             createdAt: Date.now(),
           };
           setUsdcOrder(order);
           setUsdcPolling(true);
-          try {
-            sessionStorage.setItem("pnp_pending_usdc_order", JSON.stringify(order));
-          } catch {}
-          // Redirect to NOWPayments hosted checkout in the current tab.
-          // User returns to /subscribe?nowpayments=success after payment.
-          window.location.href = result.invoiceUrl;
+          setUsdcOpenWidget(true);
+          try { sessionStorage.setItem("pnp_pending_usdc_order", JSON.stringify(order)); } catch {}
         } else {
           setError(s.failedToCreateUsdcInvoice);
         }
@@ -1496,6 +1549,24 @@ export default function Subscribe() {
         )}
       </div>
 
+      {/* Hidden NOWPayments widget trigger button — script turns this into a modal opener */}
+      {usdcOrder && (
+        <a
+          ref={nowpWidgetBtnRef}
+          className="nowpayments-button"
+          data-key={usdcOrder.publicKey}
+          data-amount={String(usdcOrder.usdAmount)}
+          data-currency="usd"
+          data-description={`${usdcOrder.planName} – PNPtv!`}
+          data-order-id={usdcOrder.orderId}
+          data-ipn-callback={usdcOrder.ipnCallbackUrl}
+          href="#"
+          onClick={(e) => e.preventDefault()}
+          style={{ position: "fixed", top: -9999, left: -9999, opacity: 0, pointerEvents: "none" }}
+          aria-hidden="true"
+        />
+      )}
+
       {/* USDC waiting state */}
       {usdcOrder && !usdcPaymentSuccess && (
         <div className="mb-6 rounded-xl border border-green-500/40 bg-green-500/5 p-4">
@@ -1506,14 +1577,14 @@ export default function Subscribe() {
             </span>
           </div>
           <p className="text-xs text-pnp-textSecondary mb-4">{s.usdcWaitingDesc}</p>
-          <a
-            href={usdcOrder.invoiceUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={() => {
+              setUsdcOpenWidget(true);
+            }}
             className="block w-full text-center py-2.5 rounded-xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 transition-colors mb-3"
           >
             {s.usdcOpenCheckout}
-          </a>
+          </button>
           <button
             onClick={() => {
               setUsdcOrder(null);

@@ -190,8 +190,9 @@ class TokenCheckoutService {
       throw btcpayErr;
     }
 
-    // Best-effort: overwrite the placeholder key with the real BTCPay invoice ID.
-    // The webhook uses btcpay_invoice_id for lookup, so this must succeed.
+    // Overwrite the placeholder key with the real BTCPay invoice ID.
+    // The webhook uses btcpay_invoice_id for lookup — if this fails, the webhook
+    // can never route the payment, so we must throw so the caller returns 500.
     await query(
       `UPDATE token_purchases SET btcpay_invoice_id = $1 WHERE purchase_uuid = $2`,
       [invoice.invoiceId, purchaseUuid]
@@ -199,6 +200,7 @@ class TokenCheckoutService {
       logger.error('TokenCheckoutService.createDashCheckout: failed to write real invoiceId', {
         purchaseUuid, invoiceId: invoice.invoiceId, error: updateErr.message,
       });
+      throw updateErr;
     });
 
     logger.info('Token Dash checkout created', {
