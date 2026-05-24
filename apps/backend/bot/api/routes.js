@@ -1862,9 +1862,9 @@ app.post('/api/webapp/payments/stripe/checkout', requireSessionAuth, asyncHandle
     return res.status(400).json({ success: false, error: 'This plan is not available for card payment' });
   }
 
-  // Strip any pnptv_* keys from caller-supplied metadata to prevent privilege escalation
+  const RESERVED_META = new Set(['user_id', 'plan_id', 'sku', 'payment_type', 'payment_id']);
   const safeMetadata = Object.fromEntries(
-    Object.entries(metadata || {}).filter(([k]) => !k.startsWith('pnptv_') && k !== 'payment_type')
+    Object.entries(metadata || {}).filter(([k]) => !RESERVED_META.has(k))
   );
   if (safeMetadata.promo_code) {
     return res.status(400).json({
@@ -1873,9 +1873,10 @@ app.post('/api/webapp/payments/stripe/checkout', requireSessionAuth, asyncHandle
     });
   }
 
+  const _stripeDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
   const returnPath = planId === 'lifetime100' ? '/lifetime100' : '/subscribe';
-  const successUrl = `https://pnptv.app${returnPath}?stripe_paid=1&plan=${encodeURIComponent(planId)}&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `https://pnptv.app${planId === 'lifetime100' ? '/lifetime100' : '/'}`;
+  const successUrl = `${_stripeDomain}${returnPath}?stripe_paid=1&plan=${encodeURIComponent(planId)}&session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `${_stripeDomain}${planId === 'lifetime100' ? '/lifetime100' : '/'}`;
 
   let email;
   try {
@@ -1919,9 +1920,9 @@ app.post('/api/webapp/payments/stripe/subscription', requireSessionAuth, asyncHa
     return res.status(400).json({ success: false, error: 'This plan is not available for card payment' });
   }
 
-  // Strip any pnptv_* keys from caller-supplied metadata to prevent privilege escalation
+  const RESERVED_META2 = new Set(['user_id', 'plan_id', 'sku', 'payment_type', 'payment_id']);
   const safeMetadata = Object.fromEntries(
-    Object.entries(metadata || {}).filter(([k]) => !k.startsWith('pnptv_') && k !== 'payment_type')
+    Object.entries(metadata || {}).filter(([k]) => !RESERVED_META2.has(k))
   );
   if (safeMetadata.promo_code) {
     return res.status(400).json({
@@ -1930,8 +1931,9 @@ app.post('/api/webapp/payments/stripe/subscription', requireSessionAuth, asyncHa
     });
   }
 
-  const successUrl = `https://pnptv.app/subscribe?stripe_paid=1&plan=${encodeURIComponent(planId)}&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `https://pnptv.app/`;
+  const _stripeDomain2 = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
+  const successUrl = `${_stripeDomain2}/subscribe?stripe_paid=1&plan=${encodeURIComponent(planId)}&session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `${_stripeDomain2}/`;
 
   let email;
   try {
@@ -2028,8 +2030,9 @@ app.post('/api/webapp/payments/stripe/creator-subscription', requireSessionAuth,
     email = rows[0]?.email || undefined;
   } catch (_) { /* non-fatal */ }
 
-  const successUrl = `https://pnptv.app/profile/${creatorId}?stripe_sub=1`;
-  const cancelUrl  = `https://pnptv.app/profile/${creatorId}`;
+  const _cdDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
+  const successUrl = `${_cdDomain}/profile/${creatorId}?stripe_sub=1`;
+  const cancelUrl  = `${_cdDomain}/profile/${creatorId}`;
 
   const { sessionId, url } = await stripeService.createSubscriptionCheckout({
     userId,
@@ -5094,8 +5097,8 @@ app.post('/api/webapp/payments/create', requireSessionAuth, asyncHandler(async (
     planId,
     sku: creatorId ? String(creatorId) : planId,
     priceId: plan.stripe_price_id,
-    successUrl: `https://pnptv.app/subscribe?stripe_paid=1&plan=${encodeURIComponent(planId)}&session_id={CHECKOUT_SESSION_ID}`,
-    cancelUrl: 'https://pnptv.app/subscribe',
+    successUrl: `${process.env.CHECKOUT_DOMAIN || 'https://pnptv.app'}/subscribe?stripe_paid=1&plan=${encodeURIComponent(planId)}&session_id={CHECKOUT_SESSION_ID}`,
+    cancelUrl: `${process.env.CHECKOUT_DOMAIN || 'https://pnptv.app'}/subscribe`,
     customerEmail: emailFromDb,
     metadata: creatorId ? { creatorId: String(creatorId) } : {},
   };
@@ -7467,8 +7470,9 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
     },
   });
 
-  const successUrl = `https://pnptv.app/chat/${hangout.id}?stripe_paid=1`;
-  const cancelUrl = `https://pnptv.app/chat/${hangout.id}`;
+  const _hDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
+  const successUrl = `${_hDomain}/chat/${hangout.id}?stripe_paid=1`;
+  const cancelUrl = `${_hDomain}/chat/${hangout.id}`;
   const stripeCheckout = await stripeService.createCustomCheckoutSession({
     userId: String(user.id),
     planId: 'hangout_access',
@@ -7480,7 +7484,7 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
     cancelUrl,
     customerEmail: email || user.email || undefined,
     metadata: {
-      pnptv_payment_id: payment.id,
+      payment_id: payment.id,
       hangoutGroupId: String(hangout.id),
       hangoutName: hangout.name || '',
     },
@@ -7609,8 +7613,9 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
     },
   });
 
-  const successUrl = `https://pnptv.app/chat/${channel.hangout_group_id || ''}?stripe_paid=1`;
-  const cancelUrl = `https://pnptv.app/chat/${channel.hangout_group_id || ''}`;
+  const _chDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
+  const successUrl = `${_chDomain}/chat/${channel.hangout_group_id || ''}?stripe_paid=1`;
+  const cancelUrl = `${_chDomain}/chat/${channel.hangout_group_id || ''}`;
   const stripeCheckout = await stripeService.createCheckoutSession({
     userId: String(user.id),
     planId: 'channel_access',
@@ -7620,8 +7625,8 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
     cancelUrl,
     customerEmail: email || user.email || undefined,
     metadata: {
-      pnptv_payment_id: payment.id,
-      pnptv_type: 'channel_access',
+      payment_id: payment.id,
+      access_type: 'channel_access',
       channelId: String(channel.id),
       hangoutGroupId: channel.hangout_group_id ? String(channel.hangout_group_id) : '',
     },
@@ -8994,6 +8999,252 @@ app.get('/api/webapp/payments/lightning/details/:invoiceId', requireSessionAuth,
     res.status(500).json({ success: false, error: 'Failed to fetch payment details' });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOWPayments — USDC / USDT stablecoin payments
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NOWPAYMENTS_URL = process.env.NOWPAYMENTS_ENVIRONMENT === 'sandbox'
+  ? 'https://api-sandbox.nowpayments.io/v1'
+  : 'https://api.nowpayments.io/v1';
+const NOWPAYMENTS_API_KEY = process.env.NOWPAYMENTS_API_KEY || '';
+
+function validateNowpaymentsIpn(body, signature) {
+  const secret = process.env.NOWPAYMENTS_IPN_SECRET || '';
+  if (!secret || !signature) return false;
+  const sortedBody = Object.keys(body).sort().reduce((acc, key) => {
+    acc[key] = body[key];
+    return acc;
+  }, {});
+  const hmac = crypto.createHmac('sha512', secret)
+    .update(JSON.stringify(sortedBody))
+    .digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(hmac, 'hex'), Buffer.from(signature, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+// GET /api/webapp/payments/usdc/available — check if NOWPayments is configured
+app.get('/api/webapp/payments/usdc/available', asyncHandler(async (req, res) => {
+  return res.json({ available: true, configured: !!NOWPAYMENTS_API_KEY });
+}));
+
+// POST /api/webapp/payments/usdc/create — create a NOWPayments hosted-checkout invoice
+app.post('/api/webapp/payments/usdc/create', requireSessionAuth, asyncHandler(async (req, res) => {
+  if (!NOWPAYMENTS_API_KEY) {
+    return res.status(503).json({
+      success: false,
+      error: 'USDC payments are not configured. Please use Card or Dash.',
+      code: 'NOWPAYMENTS_NOT_CONFIGURED',
+    });
+  }
+
+  const user = req.session.user;
+  const { planId, email, creatorId } = req.body;
+  if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
+
+  const userId = String(user.telegram_id || user.id);
+  const { query: dbQuery } = require('../../config/postgres');
+
+  let planDisplayName;
+  let usdAmount;
+  let discountInfo = null;
+
+  if (planId === 'creator_monthly') {
+    if (!creatorId) {
+      return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
+    }
+    const creatorRes = await dbQuery(
+      'SELECT id, username, first_name, creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
+      [String(creatorId), 'active']
+    );
+    if (creatorRes.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Creator not found or not active' });
+    }
+    const creator = creatorRes.rows[0];
+    const price = parseFloat(creator.creator_price_usd);
+    if (!Number.isFinite(price) || price <= 0) {
+      return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
+    }
+    usdAmount = price;
+    planDisplayName = 'Premium subscription';
+  } else {
+    const PlanModel = require('../../models/planModel');
+    const plan = await PlanModel.getById(planId);
+    if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+    const basePrice = parseFloat(plan.price);
+    if (planId === 'lifetime100') {
+      usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
+      discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    } else if (planId === 'prime-diamond-pass-365d') {
+      usdAmount = 90.99;
+      discountInfo = { originalAmount: basePrice, discountPct: 9 };
+    } else {
+      usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
+      discountInfo = { originalAmount: basePrice, discountPct: 5 };
+    }
+    planDisplayName = plan.display_name || plan.name;
+  }
+
+  const orderId = `pnptv-nowp-${userId}-${Date.now()}`;
+  const webappUrl = process.env.WEBAPP_URL || 'https://pnptv.app';
+
+  try {
+    const resp = await axios.post(`${NOWPAYMENTS_URL}/invoice`, {
+      price_amount: usdAmount,
+      price_currency: 'usd',
+      order_id: orderId,
+      order_description: `${planDisplayName} subscription`,
+      ipn_callback_url: `${webappUrl}/api/webhooks/nowpayments`,
+      success_url: `${webappUrl}/subscribe?nowpayments=success`,
+      cancel_url: `${webappUrl}/subscribe`,
+      is_fixed_rate: false,
+      is_fee_paid_by_user: false,
+    }, {
+      headers: { 'x-api-key': NOWPAYMENTS_API_KEY },
+      timeout: 15000,
+    });
+
+    const nowpInvoice = resp.data;
+
+    await dbQuery(
+      `INSERT INTO dash_subscription_orders
+         (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id, metadata)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)
+       ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
+      [
+        userId,
+        planId,
+        email || null,
+        usdAmount,
+        orderId,
+        creatorId ? String(creatorId) : null,
+        JSON.stringify({ provider: 'nowpayments', nowpayments_invoice_id: String(nowpInvoice.id) }),
+      ]
+    );
+
+    return res.json({
+      success: true,
+      orderId,
+      invoiceId: String(nowpInvoice.id),
+      invoiceUrl: nowpInvoice.invoice_url,
+      planName: planDisplayName,
+      usdAmount,
+      ...(discountInfo || {}),
+    });
+  } catch (err) {
+    logger.error('[NOWPayments] Invoice creation failed', { error: err.message, userId, planId });
+    if (err.response) {
+      return res.status(502).json({
+        success: false,
+        error: 'Failed to create USDC invoice. Please try again.',
+        code: 'NOWPAYMENTS_ERROR',
+      });
+    }
+    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED') {
+      return res.status(503).json({
+        success: false,
+        error: 'Payment provider is temporarily unreachable. Please try again later.',
+        code: 'NOWPAYMENTS_UNREACHABLE',
+      });
+    }
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to create USDC invoice. Please try again.',
+      code: 'NOWPAYMENTS_ERROR',
+    });
+  }
+}));
+
+// GET /api/webapp/payments/usdc/status/:orderId — poll USDC invoice status
+app.get('/api/webapp/payments/usdc/status/:orderId', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { orderId } = req.params;
+  if (!orderId || !/^pnptv-nowp-[A-Za-z0-9_-]+-\d+$/.test(orderId)) {
+    return res.status(400).json({ success: false, error: 'Invalid orderId' });
+  }
+
+  const userId = String(user.telegram_id || user.id);
+  const { query: dbQuery } = require('../../config/postgres');
+  const result = await dbQuery(
+    `SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2 LIMIT 1`,
+    [orderId, userId]
+  );
+
+  if (result.rows.length === 0) return res.status(404).json({ success: false, error: 'Order not found' });
+  return res.json({ success: true, status: result.rows[0].status });
+}));
+
+// POST /api/webhooks/nowpayments — NOWPayments IPN webhook
+app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandler(async (req, res) => {
+  const sig = req.headers['x-nowpayments-sig'];
+  if (!validateNowpaymentsIpn(req.body, sig)) {
+    logger.warn('[NOWPayments] Invalid IPN signature');
+    return res.status(400).json({ error: 'invalid_signature' });
+  }
+
+  const { payment_id, payment_status, order_id } = req.body;
+  logger.info('[NOWPayments] IPN received', { payment_id, payment_status, order_id });
+
+  // Respond immediately — NOWPayments expects fast acknowledgement
+  res.json({ received: true });
+
+  if (payment_status !== 'finished') return;
+
+  try {
+    const { query: dbQuery } = require('../../config/postgres');
+    const orderRes = await dbQuery(
+      `SELECT id, user_id, plan_id, status, usd_amount, creator_id
+       FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 LIMIT 1`,
+      [order_id]
+    );
+
+    const order = orderRes.rows[0];
+    if (!order) {
+      logger.error('[NOWPayments] IPN: order not found', { order_id });
+      return;
+    }
+    if (order.status === 'completed') {
+      logger.info('[NOWPayments] IPN: already completed (idempotent)', { order_id });
+      return;
+    }
+
+    await dbQuery(
+      `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
+      [order_id, `nowpayments:${payment_id}`]
+    );
+
+    try {
+      const PaymentServiceGf = require('../../services/paymentService');
+      await PaymentServiceGf.grantEntitlementsForPlan(order.user_id, order.plan_id, 'nowpayments', null, order_id);
+      logger.info('[NOWPayments] IPN: entitlements granted', { userId: order.user_id, planId: order.plan_id, order_id });
+
+      const PlanModel = require('../../models/planModel');
+      const plan = await PlanModel.getById(order.plan_id).catch(() => null);
+      if (plan) {
+        const expiry = plan.duration_days
+          ? new Date(Date.now() + plan.duration_days * 86400000).toISOString()
+          : null;
+        await dbQuery(
+          `UPDATE users SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW() WHERE id = $1`,
+          [order.user_id, plan.tier || 'prime', plan.id, expiry]
+        );
+      }
+    } catch (grantErr) {
+      logger.error('[NOWPayments] IPN: entitlement grant failed', {
+        error: grantErr.message,
+        userId: order.user_id,
+        order_id,
+      });
+    }
+  } catch (err) {
+    logger.error('[NOWPayments] IPN: database error', { error: err.message, order_id });
+  }
+}));
 
 // POST /api/webhooks/btcpay — BTCPay Server webhook (Dash payment confirmed)
 // Full handler extracted to btcpayWebhookController for maintainability.

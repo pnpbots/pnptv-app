@@ -16,6 +16,9 @@ import {
   getLightningAvailable,
   getLightningSubscriptionStatus,
   getLightningPaymentDetails,
+  createUsdcSubscription,
+  getUsdcAvailable,
+  getUsdcSubscriptionStatus,
   getLabelColor,
   assertPaymentUrl,
   validatePromoCode,
@@ -29,7 +32,7 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
 import { isTelegramContext } from "@/lib/telegram";
 
-type Provider = "stripe" | "dash" | "lightning";
+type Provider = "stripe" | "dash" | "lightning" | "usdc";
 
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
@@ -155,6 +158,18 @@ export default function Subscribe() {
   const [lightningPaymentSuccess, setLightningPaymentSuccess] = useState(false);
   const lightningCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // USDC / USDT stablecoin state (NOWPayments)
+  const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
+  const [usdcOrder, setUsdcOrder] = useState<{
+    orderId: string;
+    invoiceUrl: string;
+    planName: string;
+    usdAmount?: number;
+    createdAt: number;
+  } | null>(null);
+  const [usdcPolling, setUsdcPolling] = useState(false);
+  const [usdcPaymentSuccess, setUsdcPaymentSuccess] = useState(false);
+
   useEffect(() => {
     // Detect country first so we can prefer the pnp-col plan when applicable
     fetch("/api/webapp/geo", { credentials: "include" })
@@ -198,6 +213,20 @@ export default function Subscribe() {
     getLightningAvailable()
       .then((res) => setLightningAvailable(res.available === true && res.configured === true))
       .catch(() => setLightningAvailable(false));
+
+    getUsdcAvailable()
+      .then((res) => setUsdcAvailable(res.available === true && res.configured === true))
+      .catch(() => setUsdcAvailable(false));
+
+    // Resume USDC polling if returning from NOWPayments checkout (nowpayments=success param)
+    try {
+      const storedOrder = sessionStorage.getItem("pnp_pending_usdc_order");
+      if (storedOrder) {
+        const parsed = JSON.parse(storedOrder);
+        setUsdcOrder(parsed);
+        setUsdcPolling(true);
+      }
+    } catch {}
 
     // Resume polling if returning from same-tab Daimo checkout
     try {
@@ -251,6 +280,26 @@ export default function Subscribe() {
 
     verify(1);
     return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // If user returns from NOWPayments checkout with ?nowpayments=success, start polling
+  useEffect(() => {
+    const nowpSuccess = searchParams.get("nowpayments");
+    if (nowpSuccess !== "success") return;
+    // Clean up the URL param so refreshes don't re-trigger
+    const next = new URLSearchParams(searchParams);
+    next.delete("nowpayments");
+    setSearchParams(next, { replace: true });
+    // Restore pending order from session storage and start polling
+    try {
+      const storedOrder = sessionStorage.getItem("pnp_pending_usdc_order");
+      if (storedOrder) {
+        const parsed = JSON.parse(storedOrder);
+        setUsdcOrder(parsed);
+        setUsdcPolling(true);
+      }
+    } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -486,6 +535,54 @@ export default function Subscribe() {
     };
   }, [lightningInvoice, lightningPolling, refreshUser]);
 
+  // Poll USDC invoice status (NOWPayments). Cap at 20 minutes — NOWPayments invoices have a 24h TTL
+  // but we stop polling after 20 min and show a re-open link. User can still complete payment.
+  useEffect(() => {
+    if (!usdcOrder || !usdcPolling) return;
+    let cancelled = false;
+    const maxDurationMs = 20 * 60 * 1000; // 20 min
+    const startedAt = Date.now();
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      if (cancelled) return;
+      if (Date.now() - startedAt >= maxDurationMs) {
+        setUsdcPolling(false);
+        return;
+      }
+      try {
+        const data = await getUsdcSubscriptionStatus(usdcOrder.orderId);
+        if (cancelled) return;
+        if (data.status === "completed") {
+          setUsdcPolling(false);
+          setUsdcPaymentSuccess(true);
+          try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
+          await refreshUser();
+          timerId = setTimeout(() => {
+            setUsdcOrder(null);
+            setUsdcPaymentSuccess(false);
+            setPaymentSuccess(true);
+          }, 2000);
+          return;
+        }
+        if (data.status === "expired" || data.status === "failed") {
+          setUsdcPolling(false);
+          setError(s.usdcExpired);
+          try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
+          return;
+        }
+        if (!cancelled) timerId = setTimeout(poll, 5000);
+      } catch {
+        if (!cancelled) timerId = setTimeout(poll, 5000);
+      }
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [usdcOrder, usdcPolling, refreshUser]);
+
   // Countdown timer for Lightning invoice (10-minute expiry)
   useEffect(() => {
     if (!lightningInvoice || !lightningPolling) {
@@ -638,6 +735,27 @@ export default function Subscribe() {
         } else {
           setError(s.failedToCreateLightningInvoice);
         }
+      } else if (provider === "usdc") {
+        const result = await createUsdcSubscription(selectedPlan);
+        if (result.success && result.invoiceUrl) {
+          const order = {
+            orderId: result.orderId,
+            invoiceUrl: result.invoiceUrl,
+            planName: result.planName || "subscription",
+            usdAmount: result.usdAmount,
+            createdAt: Date.now(),
+          };
+          setUsdcOrder(order);
+          setUsdcPolling(true);
+          try {
+            sessionStorage.setItem("pnp_pending_usdc_order", JSON.stringify(order));
+          } catch {}
+          // Redirect to NOWPayments hosted checkout in the current tab.
+          // User returns to /subscribe?nowpayments=success after payment.
+          window.location.href = result.invoiceUrl;
+        } else {
+          setError(s.failedToCreateUsdcInvoice);
+        }
       } else {
         // Stripe checkout — requires a Stripe Price ID on the plan.
         const plan = plans.find((p) => p.id === selectedPlan);
@@ -691,6 +809,10 @@ export default function Subscribe() {
           setError(s.dashServerUnavailable);
         } else if (err.code === "BTCPAY_ERROR" && provider === "dash") {
           setError(s.failedToCreateDashInvoice);
+        } else if (err.code === "NOWPAYMENTS_NOT_CONFIGURED") {
+          setError(s.usdcNotConfigured);
+        } else if (err.code === "NOWPAYMENTS_UNREACHABLE" || err.code === "NOWPAYMENTS_ERROR") {
+          setError(s.failedToCreateUsdcInvoice);
         } else {
           setError(err.message || s.paymentErrorGeneric);
         }
@@ -1230,7 +1352,7 @@ export default function Subscribe() {
       {/* Payment method */}
       <div className="mb-6">
         <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">{s.paymentMethod}</h3>
-        <div className={`grid ${lightningAvailable !== null ? "grid-cols-3" : "grid-cols-2"} gap-2`}>
+        <div className="grid grid-cols-2 gap-2">
           <button
             onClick={() => setProvider("stripe")}
             className={`rounded-xl p-3 border-2 transition-all text-center ${
@@ -1263,28 +1385,46 @@ export default function Subscribe() {
               </span>
             )}
           </button>
-          {lightningAvailable !== null && (
-            <button
-              onClick={() => lightningAvailable !== false && setProvider("lightning")}
-              disabled={lightningAvailable === false}
-              className={`rounded-xl p-3 border-2 transition-all text-center relative ${
-                lightningAvailable === false
-                  ? "border-white/5 bg-white/3 opacity-50 cursor-not-allowed"
-                  : provider === "lightning"
-                  ? "border-[#F7931A] bg-[#F7931A]/10"
-                  : "border-white/10 bg-white/5 hover:border-white/20"
-              }`}
-            >
-              <div className="text-lg mb-1">⚡</div>
-              <div className="text-xs font-medium text-pnp-textPrimary">{s.lightning}</div>
-              <div className="text-[10px] text-pnp-textSecondary">{lightningAvailable === false ? s.lightningComingSoon : s.lightningInstant}</div>
-              {lightningAvailable !== false && (
-                <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#F7931A] text-white px-1.5 py-0.5 rounded-full leading-none">
-                  {s.lightningBadge}
-                </span>
-              )}
-            </button>
-          )}
+          <button
+            onClick={() => lightningAvailable !== false && setProvider("lightning")}
+            disabled={lightningAvailable === false}
+            className={`rounded-xl p-3 border-2 transition-all text-center relative ${
+              lightningAvailable === false
+                ? "border-white/5 bg-white/3 opacity-50 cursor-not-allowed"
+                : provider === "lightning"
+                ? "border-[#F7931A] bg-[#F7931A]/10"
+                : "border-white/10 bg-white/5 hover:border-white/20"
+            }`}
+          >
+            <div className="text-lg mb-1">⚡</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">{s.lightning}</div>
+            <div className="text-[10px] text-pnp-textSecondary">{lightningAvailable === false ? s.lightningComingSoon : s.lightningInstant}</div>
+            {lightningAvailable !== false && (
+              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#F7931A] text-white px-1.5 py-0.5 rounded-full leading-none">
+                {s.lightningBadge}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => usdcAvailable !== false && setProvider("usdc")}
+            disabled={usdcAvailable === false}
+            className={`rounded-xl p-3 border-2 transition-all text-center relative ${
+              usdcAvailable === false
+                ? "border-white/5 bg-white/3 opacity-50 cursor-not-allowed"
+                : provider === "usdc"
+                ? "border-green-500 bg-green-500/10"
+                : "border-white/10 bg-white/5 hover:border-white/20"
+            }`}
+          >
+            <div className="text-lg mb-1">💲</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">{s.usdcPayment}</div>
+            <div className="text-[10px] text-pnp-textSecondary">{usdcAvailable === false ? s.usdcComingSoon : s.usdcDesc}</div>
+            {usdcAvailable !== false && (
+              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full leading-none">
+                {s.usdcBadge}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* Dash info panel */}
@@ -1334,7 +1474,62 @@ export default function Subscribe() {
             </div>
           </div>
         )}
+
+        {/* USDC info panel */}
+        {provider === "usdc" && (
+          <div className="mt-3 rounded-xl p-3 border border-green-500/30 bg-green-500/5 space-y-2">
+            <p className="text-xs text-pnp-textSecondary">{s.usdcInfoText}</p>
+            <div className="flex flex-wrap gap-2 text-[10px]">
+              <span className="text-green-400">USDC · USDT · Base · Solana · Polygon · TRON · ETH</span>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* USDC waiting state */}
+      {usdcOrder && !usdcPaymentSuccess && (
+        <div className="mb-6 rounded-xl border border-green-500/40 bg-green-500/5 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-sm font-medium text-pnp-textPrimary">
+              {s.usdcWaitingTitle} — {usdcOrder.planName}
+            </span>
+          </div>
+          <p className="text-xs text-pnp-textSecondary mb-4">{s.usdcWaitingDesc}</p>
+          <a
+            href={usdcOrder.invoiceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-full text-center py-2.5 rounded-xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 transition-colors mb-3"
+          >
+            {s.usdcOpenCheckout}
+          </a>
+          <button
+            onClick={() => {
+              setUsdcOrder(null);
+              setUsdcPolling(false);
+              setUsdcPaymentSuccess(false);
+              try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
+            }}
+            className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1"
+          >
+            {s.cancel}
+          </button>
+        </div>
+      )}
+
+      {/* USDC payment confirmed state */}
+      {usdcPaymentSuccess && (
+        <div className="mb-6 flex flex-col items-center gap-3 py-6">
+          <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
+            <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <p className="text-base font-semibold text-green-400">{s.usdcPaymentConfirmed}</p>
+          <p className="text-xs text-pnp-textSecondary">{s.subscriptionNowActive}</p>
+        </div>
+      )}
 
       {/* Dash in-app payment widget */}
       {dashInvoice && (

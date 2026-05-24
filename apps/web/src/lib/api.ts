@@ -2883,6 +2883,42 @@ export function getLightningPaymentDetails(
   return request(`/api/webapp/payments/lightning/details/${encodeURIComponent(invoiceId)}`);
 }
 
+export function createUsdcSubscription(
+  planId: string,
+  email?: string,
+  creatorId?: string,
+): Promise<{
+  success: boolean;
+  orderId: string;
+  invoiceId: string;
+  invoiceUrl: string;
+  planName?: string;
+  usdAmount?: number;
+  originalAmount?: number;
+  discountPct?: number;
+  error?: string;
+}> {
+  const body: Record<string, string> = { planId };
+  if (email) body.email = email;
+  if (creatorId) body.creatorId = creatorId;
+  return request("/api/webapp/payments/usdc/create", { method: "POST", body });
+}
+
+export function getUsdcSubscriptionStatus(orderId: string): Promise<{
+  success: boolean;
+  status: string;
+  error?: string;
+}> {
+  return request(`/api/webapp/payments/usdc/status/${encodeURIComponent(orderId)}`);
+}
+
+export function getUsdcAvailable(): Promise<{
+  available: boolean;
+  configured: boolean;
+}> {
+  return request("/api/webapp/payments/usdc/available");
+}
+
 export function activateMeruCode(
   code: string,
   email: string
