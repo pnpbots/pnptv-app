@@ -223,17 +223,28 @@ export default function Subscribe() {
       .then((res) => setUsdcAvailable(res.available === true && res.configured === true))
       .catch(() => setUsdcAvailable(false));
 
-    // Load NOWPayments widget script
-    if (!document.querySelector('script[data-nowpayments-widget]')) {
+    // Load NOWPayments widget script. Always-rendered .nowpayments-button
+    // in the DOM ensures the script binds its click handler on init.
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-nowpayments-widget]');
+    if (!existingScript) {
       const script = document.createElement('script');
       script.src = 'https://nowpayments.io/embeds/payment-widget.js';
       script.setAttribute('data-nowpayments-widget', 'true');
       script.async = true;
-      script.onload = () => setNowpScriptReady(true);
+      script.onload = () => { script.dataset.loaded = 'true'; setNowpScriptReady(true); };
+      script.onerror = () => setNowpScriptReady(true); // allow fallback even if CDN fails
       document.head.appendChild(script);
-    } else {
-      // Script already loaded (e.g. page restored from sessionStorage)
+    } else if (existingScript.dataset.loaded === 'true') {
+      // Already loaded on a previous render cycle
       setNowpScriptReady(true);
+    } else {
+      // Script tag exists but hasn't fired load yet — wait for it
+      const onLoad = () => {
+        existingScript.dataset.loaded = 'true';
+        setNowpScriptReady(true);
+      };
+      existingScript.addEventListener('load', onLoad, { once: true });
+      existingScript.addEventListener('error', onLoad, { once: true });
     }
 
     // Resume USDC polling after page reload or return from hosted checkout
@@ -1602,25 +1613,25 @@ export default function Subscribe() {
         )}
       </div>
 
-      {/* Hidden NOWPayments widget trigger button — script turns this into a modal opener */}
-      {usdcOrder && (
-        <a
-          ref={nowpWidgetBtnRef}
-          href="#"
-          className="nowpayments-button"
-          data-key={usdcOrder.publicKey}
-          data-amount={String(usdcOrder.usdAmount)}
-          data-currency="usd"
-          data-payer-email={user?.email || ''}
-          data-description={`${usdcOrder.planName} – PNPtv!`}
-          data-order-id={usdcOrder.orderId}
-          data-ipn-callback={usdcOrder.ipnCallbackUrl}
-          data-theme="dark"
-          onClick={(e) => e.preventDefault()}
-          style={{ position: "fixed", top: -9999, left: -9999, opacity: 0, pointerEvents: "none" }}
-          aria-hidden="true"
-        />
-      )}
+      {/* Hidden NOWPayments widget trigger button — always in DOM so the widget
+          script attaches its click handler on load. Attributes are read at
+          click time, so updating them before btn.click() is sufficient. */}
+      <a
+        ref={nowpWidgetBtnRef}
+        href="#"
+        className="nowpayments-button"
+        data-key={usdcOrder?.publicKey || ''}
+        data-amount={String(usdcOrder?.usdAmount || 0)}
+        data-currency="usd"
+        data-payer-email={user?.email || ''}
+        data-description={usdcOrder ? `${usdcOrder.planName} – PNPtv!` : ''}
+        data-order-id={usdcOrder?.orderId || ''}
+        data-ipn-callback={usdcOrder?.ipnCallbackUrl || ''}
+        data-theme="dark"
+        onClick={(e) => e.preventDefault()}
+        style={{ position: "fixed", top: -9999, left: -9999, opacity: 0, pointerEvents: "none" }}
+        aria-hidden="true"
+      />
 
       {/* USDC waiting state */}
       {usdcOrder && !usdcPaymentSuccess && (
