@@ -6,7 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const { v4: uuidv4 } = require('uuid');
-const FileType = require('file-type');
+const FileType = require('../../utils/fileType');
 const ffmpeg = require('fluent-ffmpeg');
 
 /**

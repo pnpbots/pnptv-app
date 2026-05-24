@@ -26,7 +26,7 @@ const fs = require('fs').promises;
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const sharp = require('sharp');
-const FileType = require('file-type');
+const FileType = require('../bot/utils/fileType');
 const logger = require('../utils/logger');
 const { resolveMediaType } = require('./chatMediaService');
 

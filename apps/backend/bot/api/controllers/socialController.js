@@ -1,7 +1,7 @@
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
-const FileType = require('file-type');
+const FileType = require('../../utils/fileType');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);

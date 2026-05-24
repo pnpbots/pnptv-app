@@ -2,7 +2,7 @@ const fs = require('fs');
 const fsPromises = require('fs').promises;
 const path = require('path');
 const multer = require('multer');
-const FileType = require('file-type');
+const FileType = require('../../utils/fileType');
 
 const UPLOAD_DIR = path.join(__dirname, '../../../../public/uploads/podcasts');
 

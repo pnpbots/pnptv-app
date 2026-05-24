@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const sharp = require('sharp');
-const FileType = require('file-type');
+const FileType = require('../../utils/fileType');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 // Lazy-loaded to avoid circular dependency warning (bot.js -> routes -> applyController -> bot.js)

@@ -8,7 +8,7 @@ const { getRedis } = require('../../../config/redis');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
-const FileType = require('file-type');
+const FileType = require('../../utils/fileType');
 
 // ── Enforced follows (shared service) ────────────────────────────────────────
 const { enforceDefaultFollows } = require('../../../services/followService');
