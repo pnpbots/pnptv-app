@@ -266,6 +266,7 @@ export default function Subscribe() {
           setDashInvoice({
             invoiceId: parsed.invoiceId,
             planName: parsed.planName || "subscription",
+            checkoutUrl: parsed.checkoutUrl || '',
             loadingDetails: true,
             createdAt: parsed.createdAt || Date.now(),
           });
@@ -539,7 +540,13 @@ export default function Subscribe() {
           return;
         }
         if (!cancelled) timerId = setTimeout(poll, nextDelay(attempts));
-      } catch {
+      } catch (pollErr: unknown) {
+        if ((pollErr as { status?: number })?.status === 401 || (pollErr as { response?: { status?: number } })?.response?.status === 401) {
+          setDashPolling(false);
+          setDashInvoice(null);
+          // Don't clear sessionStorage — user can re-auth and the invoice may still be valid
+          return;
+        }
         if (!cancelled) timerId = setTimeout(poll, nextDelay(attempts));
       }
     };
@@ -736,7 +743,7 @@ export default function Subscribe() {
           try {
             sessionStorage.setItem(
               "pnp_pending_dash_invoice",
-              JSON.stringify({ invoiceId: result.invoiceId, createdAt: invoice.createdAt, planName: invoice.planName })
+              JSON.stringify({ invoiceId: result.invoiceId, createdAt: invoice.createdAt, planName: invoice.planName, checkoutUrl: result.checkoutUrl })
             );
           } catch {}
           // Fetch payment details for in-app widget

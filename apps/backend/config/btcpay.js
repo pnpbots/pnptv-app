@@ -41,7 +41,7 @@ const btcpayClient = axios.create({
  * @param {string}  [opts.redirectUrl] — URL to redirect after payment
  * @returns {Promise<{success: boolean, invoiceId: string, checkoutUrl: string}>}
  */
-async function createDashInvoice({ usdAmount, userId, orderId, description = 'PNP Tokens', redirectUrl }) {
+async function createDashInvoice({ usdAmount, userId, orderId, description = 'PNP Tokens', redirectUrl, planId = null }) {
   if (!BTCPAY_API_KEY || !BTCPAY_STORE_ID) {
     throw new Error('BTCPay Server not configured (missing BTCPAY_API_KEY or BTCPAY_STORE_ID)');
   }
@@ -54,9 +54,11 @@ async function createDashInvoice({ usdAmount, userId, orderId, description = 'PN
       userId,
       platform: 'pnptv',
       description,
+      ...(planId ? { planId } : {}),
     },
     checkout: {
       paymentMethods: ['DASH'],
+      speedPolicy: 'HighSpeed',
       redirectURL: redirectUrl || `${process.env.WEBAPP_URL || 'https://pnptv.app'}/live`,
       redirectAutomatically: true,
       requiresRefundEmail: false,

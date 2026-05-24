@@ -87,11 +87,11 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
-    // Dash/BTCPay reconciliation — every 30 min
+    // Dash/BTCPay reconciliation — every 10 min
     // Polls BTCPay for stuck pending invoices (missed webhooks) and either
     // marks them terminal (Expired/Invalid) or logs Settled-but-unprocessed
     // for operator replay. Idempotent and respects per-run Redis lock.
-    cron.schedule(process.env.DASH_RECONCILE_CRON || '*/30 * * * *', async () => {
+    cron.schedule(process.env.DASH_RECONCILE_CRON || '*/10 * * * *', async () => {
       try {
         logger.info('Running Dash/BTCPay reconciliation...');
         const results = await PaymentRecoveryService.processStuckDashInvoices();

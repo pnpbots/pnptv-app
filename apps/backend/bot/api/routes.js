@@ -8624,11 +8624,12 @@ const dashCreateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// GET /api/webapp/payments/dash/available — check if Dash/BTCPay is configured & reachable
+// GET /api/webapp/payments/dash/available — check if Dash/BTCPay is configured
+// Uses config-only check (no outbound HTTP) to avoid live BTCPay calls on every page load.
 app.get('/api/webapp/payments/dash/available', dashAvailableLimiter, asyncHandler(async (req, res) => {
-  const { checkBtcpayHealth } = require('../../config/btcpay');
-  const health = await checkBtcpayHealth();
-  return res.json({ available: health.configured && health.reachable, ...health });
+  const { isConfigured } = require('../../config/btcpay');
+  const configured = !!isConfigured;
+  return res.json({ available: configured, configured });
 }));
 
 // POST /api/webapp/payments/dash/create — create a BTCPay Dash invoice for a subscription plan.
@@ -8640,8 +8641,16 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
 
   const { planId, email, creatorId } = req.body;
   if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
+  if (typeof planId !== 'string' || planId.length > 100 || !/^[a-z0-9_-]+$/.test(planId)) {
+    return res.status(400).json({ success: false, error: 'Invalid planId format' });
+  }
 
   const userId = String(user.telegram_id || user.id);
+
+  if (creatorId && String(creatorId) === userId) {
+    return res.status(400).json({ success: false, error: 'You cannot subscribe to yourself' });
+  }
+
   const { query: dbQuery } = require('../../config/postgres');
 
   let planDisplayName;
@@ -8689,6 +8698,7 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
       usdAmount,
       userId,
       orderId,
+      planId,
       description: `${planDisplayName} subscription`,
       redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`,
     });
@@ -8720,8 +8730,17 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
   }
 }));
 
+const dashStatusLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  message: { success: false, error: 'Too many status requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // GET /api/webapp/payments/dash/status/:invoiceId — poll invoice status
-app.get('/api/webapp/payments/dash/status/:invoiceId', requireSessionAuth, asyncHandler(async (req, res) => {
+app.get('/api/webapp/payments/dash/status/:invoiceId', requireSessionAuth, dashStatusLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
 
@@ -8740,7 +8759,7 @@ app.get('/api/webapp/payments/dash/status/:invoiceId', requireSessionAuth, async
 }));
 
 // GET /api/webapp/payments/dash/details/:invoiceId — fetch Dash payment address + amount for a pending invoice
-app.get('/api/webapp/payments/dash/details/:invoiceId', requireSessionAuth, async (req, res) => {
+app.get('/api/webapp/payments/dash/details/:invoiceId', requireSessionAuth, dashStatusLimiter, async (req, res) => {
   try {
     const user = req.session?.user;
     if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -8750,6 +8769,8 @@ app.get('/api/webapp/payments/dash/details/:invoiceId', requireSessionAuth, asyn
     if (!invoiceId || !/^[A-Za-z0-9_-]{5,64}$/.test(invoiceId)) {
       return res.status(400).json({ success: false, error: 'Invalid invoiceId' });
     }
+
+    const pool = getPool();
 
     // Verify ownership — check subscription orders, token purchases, and tips
     const ownerCheck = await pool.query(

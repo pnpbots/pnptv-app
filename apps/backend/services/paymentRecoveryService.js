@@ -193,7 +193,7 @@ class PaymentRecoveryService {
     };
 
     const lockKey = 'dash:reconcile:lock';
-    const lockAcquired = await cache.acquireLock(lockKey, 1800);
+    const lockAcquired = await cache.acquireLock(lockKey, 600);
     if (!lockAcquired) {
       logger.warn('Dash reconciliation already running, skipping');
       return results;

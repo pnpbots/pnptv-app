@@ -199,8 +199,9 @@ class PaymentSettlementService {
    * @returns {Promise<object>}
    */
   static async settleScopedPurchase(order, invoiceId, orderMetadata, dbQuery) {
+    // Atomic lock: flip to 'processing' so concurrent deliveries are blocked
     const settle = await dbQuery(
-      `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW()
+      `UPDATE dash_subscription_orders SET status = 'processing'
        WHERE id = $1 AND status = 'pending' RETURNING id`,
       [order.id]
     );
@@ -216,6 +217,12 @@ class PaymentSettlementService {
         'dash',
         orderMetadata,
         invoiceId
+      );
+
+      // Mark completed AFTER successful grant
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW() WHERE id = $1`,
+        [order.id]
       );
 
       const scope = orderMetadata.hangoutGroupId
@@ -240,11 +247,12 @@ class PaymentSettlementService {
 
       return { type: 'scoped_purchase', ok: true, grantResult };
     } catch (err) {
-      logger.error('BTCPay scoped grant failed', {
+      logger.error('BTCPay scoped grant failed — rolling back to pending for retry', {
         invoiceId, orderId: order.id, planId: order.plan_id, error: err.message,
       });
+      // Roll back so BTCPay webhook retry can re-attempt the grant
       await dbQuery(
-        `UPDATE dash_subscription_orders SET notes = $2 WHERE id = $1`,
+        `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE id = $1`,
         [order.id, `scoped_grant_failed: ${err.message}`.slice(0, 500)]
       );
       return { type: 'scoped_purchase', error: 'scoped_grant_failed', orderId: order.id };

@@ -135,6 +135,23 @@ async function handleBtcpayWebhook(req, res) {
   if (event.type === 'InvoiceExpired' || event.type === 'InvoiceInvalid') {
     const terminalStatus = event.type === 'InvoiceExpired' ? 'expired' : 'invalid';
 
+    // PaidLate: user paid after expiry window — BTCPay still received funds.
+    // Treat as settlement rather than expiry so the user gets their subscription.
+    if (event.type === 'InvoiceExpired' && event.additionalStatus === 'PaidLate') {
+      logger.info('BTCPay InvoiceExpired with PaidLate — routing to settlement', { invoiceId });
+      try {
+        const { settleStuckDashInvoice } = require('../../../services/paymentRecoveryService');
+        const result = await settleStuckDashInvoice(invoiceId, 'subscription', { allowExpired: true });
+        logger.info('BTCPay PaidLate settled in-process', { invoiceId, result });
+        return res.json({ success: true, type: 'paid_late_settled', invoiceId, result });
+      } catch (paidLateErr) {
+        logger.error('BTCPay PaidLate settlement failed — operator must investigate', {
+          invoiceId, error: paidLateErr.message,
+        });
+        return res.status(500).json({ success: false, error: 'paid_late_settlement_failed', invoiceId });
+      }
+    }
+
     const [subUpd, purchUpd] = await Promise.all([
       dbQuery(
         `UPDATE dash_subscription_orders SET status = $2 WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
@@ -322,6 +339,25 @@ async function handleBtcpayWebhook(req, res) {
   const isSettledEvent = event.type === 'InvoiceSettled';
   const isPaymentSettledEvent = event.type === 'InvoicePaymentSettled';
 
+  // InvoiceReceivedPayment: payment broadcast to mempool — fire real-time "payment detected" socket signal
+  if (event.type === 'InvoiceReceivedPayment') {
+    try {
+      let io = null;
+      try { const s = require('../../../services/socketSingleton'); io = s.get ? s.get() : s; } catch {}
+      const subRow = await dbQuery(
+        `SELECT user_id FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 LIMIT 1`,
+        [invoiceId]
+      );
+      if (subRow.rows[0]?.user_id && io) {
+        io.to(`user:${subRow.rows[0].user_id}`).emit('dash:payment_detected', { invoiceId });
+      }
+      logger.info('BTCPay InvoiceReceivedPayment: payment detected signal sent', { invoiceId });
+    } catch (detectedErr) {
+      logger.warn('BTCPay InvoiceReceivedPayment: socket signal failed (non-critical)', { invoiceId, error: detectedErr.message });
+    }
+    return res.json({ success: true, type: 'payment_detected' });
+  }
+
   if (!isSettledEvent && !isPaymentSettledEvent) {
     return res.json({ success: true, ignored: true });
   }
@@ -373,9 +409,18 @@ async function handleBtcpayWebhook(req, res) {
     // Fix 1.1: Verify paid amount against invoice before granting access.
     if (isSettledEvent) {
       try {
-        const invoiceDetails = await getInvoice(invoiceId);
-        const actualPaid = parseFloat(invoiceDetails.paidAmount ?? invoiceDetails.amount ?? '0');
+        const { getInvoicePaymentMethods: _getPaymentMethods } = require('../../../config/btcpay');
+        const [invoiceDetails, paymentMethods] = await Promise.all([
+          getInvoice(invoiceId),
+          _getPaymentMethods(invoiceId).catch(() => []),
+        ]);
+        const totalPaidUsd = paymentMethods.reduce((sum, m) => {
+          const paid = parseFloat(m.totalPaid || m.paymentMethodPaid || '0');
+          const rate = parseFloat(m.rate || '0');
+          return sum + (rate > 0 ? paid * rate : 0);
+        }, 0);
         const expectedAmount = parseFloat(invoiceDetails.amount ?? '0');
+        const actualPaid = totalPaidUsd > 0 ? totalPaidUsd : expectedAmount; // fall back to no-check if rate unavailable
         if (actualPaid > 0 && expectedAmount > 0 && actualPaid < expectedAmount - 0.01) {
           logger.error('BTCPay InvoiceSettled: underpayment detected — aborting entitlement grant', {
             invoiceId,
@@ -607,12 +652,14 @@ async function handleBtcpayWebhook(req, res) {
           };
           socketIo.to(`live:${tipPerformerId}`).emit('live:tip', tipPayload);
         }
+        // Mark processed ONLY after successful confirmation — if confirmTipPayment threw,
+        // BTCPay must retry this delivery rather than losing the tip permanently.
+        await markInvoiceProcessed(invoiceId, { tipId, userId: tipUserId, source: 'dash_tip' });
+        return res.json({ success: true, type: 'dash_tip', tipId });
       } catch (tipErr) {
-        logger.error('BTCPay: Dash tip confirmation failed', { tipId, invoiceId, error: tipErr.message });
+        logger.error('BTCPay: Dash tip confirmation failed — returning 500 for retry', { tipId, invoiceId, error: tipErr.message });
+        return res.status(500).json({ success: false, error: 'tip_confirmation_failed', tipId });
       }
-
-      await markInvoiceProcessed(invoiceId, { tipId, userId: tipUserId, source: 'dash_tip' });
-      return res.json({ success: true, type: 'dash_tip', tipId });
     }
 
     // --- 3. Fall through to token purchase ---
