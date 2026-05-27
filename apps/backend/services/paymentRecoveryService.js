@@ -942,6 +942,38 @@ class PaymentRecoveryService {
               );
               results.settled++;
               logger.info('NOWPayments reconciler: settled', { orderId: row.order_id });
+
+              // Operator alerts — fire-and-forget.
+              try {
+                const PaymentNotificationService = require('./paymentNotificationService');
+                const BusinessNotificationService = require('./businessNotificationService');
+                const PlanModel = require('../models/planModel');
+                const botModule = require('../bot/core/bot');
+                const bot = (typeof botModule.getBotInstance === 'function' ? botModule.getBotInstance() : null)
+                  || new (require('telegraf').Telegraf)(process.env.BOT_TOKEN);
+                const planRec = await PlanModel.getById(order.plan_id);
+                const planName = planRec ? (planRec.display_name || planRec.name) : order.plan_id;
+                await PaymentNotificationService.sendAdminPaymentNotification({
+                  bot,
+                  userId: order.user_id,
+                  planName,
+                  amount: order.usd_amount || 0,
+                  provider: 'nowpayments',
+                  transactionId: paymentId,
+                  customerName: order.user_id,
+                  customerEmail: 'N/A',
+                });
+                await BusinessNotificationService.notifyPayment({
+                  userId: order.user_id,
+                  planName,
+                  amount: order.usd_amount || 0,
+                  provider: 'USDC (NowPayments)',
+                  transactionId: paymentId,
+                  customerName: order.user_id,
+                });
+              } catch (alertErr) {
+                logger.warn('NOWPayments reconciler: operator alert failed (non-critical)', { error: alertErr.message });
+              }
             } catch (grantErr) {
               await query(
                 `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,

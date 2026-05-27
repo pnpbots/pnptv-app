@@ -507,6 +507,36 @@ class PaymentSettlementService {
       logger.warn('BTCPay post-purchase notification block failed', { error: notifErr.message });
     }
 
+    // Operator alerts — fire-and-forget, non-critical.
+    try {
+      const PaymentNotificationService = require('./paymentNotificationService');
+      const BusinessNotificationService = require('./businessNotificationService');
+      const botModule = require('../bot/core/bot');
+      const bot = (typeof botModule.getBotInstance === 'function' ? botModule.getBotInstance() : null)
+        || new (require('telegraf').Telegraf)(process.env.BOT_TOKEN);
+      const planName = plan.display_name || plan.name || order.plan_id;
+      await PaymentNotificationService.sendAdminPaymentNotification({
+        bot,
+        userId: order.user_id,
+        planName,
+        amount: order.usd_amount || 0,
+        provider: 'btcpay',
+        transactionId: invoiceId,
+        customerName: order.user_id,
+        customerEmail: 'N/A',
+      });
+      await BusinessNotificationService.notifyPayment({
+        userId: order.user_id,
+        planName,
+        amount: order.usd_amount || 0,
+        provider: 'Dash (BTCPay)',
+        transactionId: invoiceId,
+        customerName: order.user_id,
+      });
+    } catch (alertErr) {
+      logger.warn('BTCPay: operator alert failed (non-critical)', { error: alertErr.message });
+    }
+
     // Mark invoice as processed in Redis to prevent replay delivery from re-granting.
     const { markInvoiceProcessed } = require('../config/btcpay');
     await markInvoiceProcessed(invoiceId, {

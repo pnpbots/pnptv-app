@@ -133,6 +133,8 @@ const PrimeChannel = lazy(() => import("@/pages/admin/PrimeChannel"));
 const Compliance2257 = lazy(() => import("@/pages/admin/Compliance2257"));
 const AdminInviteLinks = lazy(() => import("@/pages/admin/InviteLinks"));
 const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
+const Lifetime80 = lazy(() => import("@/pages/Lifetime80"));
+const CryptoGuide = lazy(() => import("@/pages/CryptoGuide"));
 const GamificationPage = lazy(() => import("@/pages/GamificationPage"));
 const ReferralCenter = lazy(() => import("@/pages/ReferralCenter"));
 const InvitePage = lazy(() => import("@/pages/InvitePage"));
@@ -938,6 +940,22 @@ export const router = createBrowserRouter([
   },
   { path: "/lifetime100", element: <Navigate to="/subscribe" replace /> },
   { path: "/lifetime100/activate", element: <Navigate to="/subscribe" replace /> },
+  {
+    path: "/lifetime80",
+    element: (
+      <ModuleLoader>
+        <Lifetime80 />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/crypto-guide",
+    element: (
+      <ModuleLoader>
+        <CryptoGuide />
+      </ModuleLoader>
+    ),
+  },
   // Invite page — public, no auth required (handles its own auth check inline)
   {
     path: "/invite/:code",

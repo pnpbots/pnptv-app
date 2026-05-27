@@ -1,5 +1,16 @@
 const promotionalPlans = [
   {
+    id: 'lifetime80',
+    sku: 'PNP-000-P-080',
+    name: 'Lifetime Prime $80 Crypto',
+    display_name: 'Lifetime Prime $80',
+    tier: 'PRIME',
+    price: 80.0,
+    currency: 'USD',
+    isPromo: true,
+    hidden: true,
+  },
+  {
     id: 'pnp_hot_monthly_pass',
     sku: 'EASYBOTS-PNP-PROMO-030',
     name: 'PNP Hot Monthly Pass',

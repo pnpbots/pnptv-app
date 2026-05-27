@@ -3,6 +3,15 @@ const UserModel = require('../models/userModel');
 const PlanModel = require('../models/planModel');
 const ConfirmationTokenService = require('./confirmationTokenService');
 const MessageTemplates = require('./messageTemplates');
+const { Telegraf } = require('telegraf');
+
+function _getBot() {
+  try {
+    const { getBotInstance } = require('../bot/core/bot');
+    if (typeof getBotInstance === 'function') return getBotInstance();
+  } catch (_) {}
+  return new Telegraf(process.env.BOT_TOKEN);
+}
 
 /**
  * Payment Notification Service
@@ -21,15 +30,21 @@ class PaymentNotificationService {
    * @param {Date} params.expiryDate - Subscription expiry date
    * @returns {Promise<boolean>} Success status
    */
-  static async sendPaymentConfirmation({
-    bot,
-    userId,
-    paymentId,
-    planId,
-    provider,
-    amount,
-    expiryDate,
-  }) {
+  // Supports two calling conventions:
+  //   sendPaymentConfirmation({ bot, userId, paymentId, planId, provider, amount, expiryDate })
+  //   sendPaymentConfirmation(userId, { planId, planName, amount, currency, provider, language })
+  static async sendPaymentConfirmation(firstArg, secondArg) {
+    let bot, userId, paymentId, planId, planNameOverride, provider, amount, expiryDate, language;
+    if (secondArg !== undefined) {
+      // Two-arg form: (userId, opts)
+      userId = firstArg;
+      ({ planId, planName: planNameOverride, amount, provider, expiryDate, language } = secondArg);
+      bot = _getBot();
+    } else {
+      // One-arg destructured form: ({ bot, userId, ... })
+      ({ bot, userId, paymentId, planId, provider, amount, expiryDate } = firstArg);
+      if (!bot) bot = _getBot();
+    }
     try {
       // Get user details
       const user = await UserModel.getById(userId);
@@ -47,18 +62,18 @@ class PaymentNotificationService {
 
       // Generate one-time confirmation token
       const token = await ConfirmationTokenService.generateToken({
-        paymentId,
+        paymentId: paymentId || `${provider}-${userId}-${Date.now()}`,
         userId,
         planId,
         provider,
       });
 
       const confirmationLink = ConfirmationTokenService.getConfirmationLink(token);
-      const planName = plan.display_name || plan.name;
+      const planName = planNameOverride || plan.display_name || plan.name;
       const formattedAmount = parseFloat(amount).toFixed(2);
 
       // Determine language (default to Spanish if not set)
-      const lang = user.language || 'es';
+      const lang = language || user.language || 'es';
 
       // Build enhanced confirmation message with all important details
       let message = '';
@@ -182,11 +197,13 @@ class PaymentNotificationService {
    */
   static getProviderName(provider, lang = 'en') {
     const providers = {
-      stripe: { en: 'Stripe', es: 'Stripe' },
+      stripe:      { en: 'Stripe',              es: 'Stripe' },
       // Daimo kept for legacy receipts (in-flight + refund history)
-      daimo: { en: 'Daimo Pay (legacy)', es: 'Daimo Pay (legacy)' },
-      epayco: { en: 'ePayco', es: 'ePayco' },
-      dash:   { en: 'Dash (BTCPay)', es: 'Dash (BTCPay)' },
+      daimo:       { en: 'Daimo Pay (legacy)',   es: 'Daimo Pay (legacy)' },
+      epayco:      { en: 'ePayco',               es: 'ePayco' },
+      dash:        { en: 'Dash (BTCPay)',         es: 'Dash (BTCPay)' },
+      btcpay:      { en: 'Dash (BTCPay)',         es: 'Dash (BTCPay)' },
+      nowpayments: { en: 'USDC (NowPayments)',    es: 'USDC (NowPayments)' },
     };
 
     return providers[provider]?.[lang] || provider.toUpperCase();
@@ -272,11 +289,14 @@ class PaymentNotificationService {
     customerEmail,
   }) {
     try {
-      const adminId = process.env.ADMIN_ID;
+      // Fall back to SUPERADMIN_IDS (comma-separated) when ADMIN_ID is not set.
+      const adminIds = process.env.ADMIN_ID
+        ? [process.env.ADMIN_ID]
+        : (process.env.SUPERADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
       const supportGroupId = process.env.SUPPORT_GROUP_ID;
 
-      if (!adminId && !supportGroupId) {
-        logger.warn('Neither ADMIN_ID nor SUPPORT_GROUP_ID configured, skipping admin notification');
+      if (adminIds.length === 0 && !supportGroupId) {
+        logger.warn('Neither ADMIN_ID/SUPERADMIN_IDS nor SUPPORT_GROUP_ID configured, skipping admin notification');
         return false;
       }
 
@@ -331,28 +351,16 @@ class PaymentNotificationService {
       let sentToAdmin = false;
       let sentToGroup = false;
 
-      // Send to admin user if configured — full message including email
-      if (adminId) {
+      // Send to each admin — full message including email
+      for (const adminId of adminIds) {
         try {
           await bot.telegram.sendMessage(adminId, adminMessage, {
             parse_mode: 'Markdown',
           });
-
-          logger.info('Admin payment notification sent', {
-            adminId,
-            userId,
-            planName,
-            amount,
-            provider,
-          });
-
+          logger.info('Admin payment notification sent', { adminId, userId, planName, amount, provider });
           sentToAdmin = true;
         } catch (sendError) {
-          logger.error('Error sending admin notification:', {
-            adminId,
-            userId,
-            error: sendError.message,
-          });
+          logger.error('Error sending admin notification:', { adminId, userId, error: sendError.message });
         }
       }
 
@@ -411,9 +419,11 @@ class PaymentNotificationService {
    */
   static async sendAdminDailySummary({ bot, totalPayments, totalAmount, payments = [] }) {
     try {
-      const adminId = process.env.ADMIN_ID;
-      if (!adminId) {
-        logger.warn('ADMIN_ID not configured, skipping daily summary');
+      const adminIds = process.env.ADMIN_ID
+        ? [process.env.ADMIN_ID]
+        : (process.env.SUPERADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (adminIds.length === 0) {
+        logger.warn('ADMIN_ID/SUPERADMIN_IDS not configured, skipping daily summary');
         return false;
       }
 
@@ -436,23 +446,17 @@ class PaymentNotificationService {
         });
       }
 
-      try {
-        await bot.telegram.sendMessage(adminId, message, {
-          parse_mode: 'Markdown',
-        });
-
-        logger.info('Admin daily summary sent', {
-          totalPayments,
-          totalAmount,
-        });
-
-        return true;
-      } catch (sendError) {
-        logger.error('Error sending admin daily summary:', {
-          error: sendError.message,
-        });
-        return false;
+      let sent = false;
+      for (const adminId of adminIds) {
+        try {
+          await bot.telegram.sendMessage(adminId, message, { parse_mode: 'Markdown' });
+          sent = true;
+        } catch (sendError) {
+          logger.error('Error sending admin daily summary:', { adminId, error: sendError.message });
+        }
       }
+      logger.info('Admin daily summary sent', { totalPayments, totalAmount });
+      return sent;
     } catch (error) {
       logger.error('Error in admin daily summary:', {
         error: error.message,

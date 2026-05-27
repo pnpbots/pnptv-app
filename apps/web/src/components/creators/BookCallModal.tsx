@@ -12,9 +12,8 @@
  * When `skipPackageStep` is true the SELECT_PACKAGE step is bypassed and
  * `initialDuration` is used as the fixed duration (set by CallPackageCards).
  *
- * For Daimo (USDC) payments the modal closes and the user is navigated to
- * the DaimoCheckout page in the same tab so the embedded Daimo modal can
- * render at full height without popup-blocker interference.
+ * For crypto (USDC) payments the user is redirected to the NowPayments
+ * hosted checkout page.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";

@@ -8709,13 +8709,18 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
     const plan = await PlanModel.getById(planId);
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
     const basePrice = parseFloat(plan.price);
-    const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
-    if (isLongTerm) {
-      usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
-      discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    // crypto payment_method = fixed promo price, no stacking discount
+    if (plan.payment_method === 'crypto') {
+      usdAmount = basePrice;
     } else {
-      usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
-      discountInfo = { originalAmount: basePrice, discountPct: 5 };
+      const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
+      if (isLongTerm) {
+        usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
+        discountInfo = { originalAmount: basePrice, discountPct: 20 };
+      } else {
+        usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
+        discountInfo = { originalAmount: basePrice, discountPct: 5 };
+      }
     }
     planDisplayName = plan.display_name || plan.name;
   }
@@ -8933,13 +8938,18 @@ app.post('/api/webapp/payments/lightning/create', requireSessionAuth, asyncHandl
     const plan = await PlanModel.getById(planId);
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
     const basePrice = parseFloat(plan.price);
-    const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
-    if (isLongTerm) {
-      usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
-      discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    // crypto payment_method = fixed promo price, no stacking discount
+    if (plan.payment_method === 'crypto') {
+      usdAmount = basePrice;
     } else {
-      usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
-      discountInfo = { originalAmount: basePrice, discountPct: 5 };
+      const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
+      if (isLongTerm) {
+        usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
+        discountInfo = { originalAmount: basePrice, discountPct: 20 };
+      } else {
+        usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
+        discountInfo = { originalAmount: basePrice, discountPct: 5 };
+      }
     }
     planDisplayName = plan.display_name || plan.name;
   }
@@ -9140,13 +9150,18 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
     const plan = planRes.rows[0];
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
     const basePrice = parseFloat(plan.price);
-    const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
-    if (isLongTerm) {
-      usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
-      discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    // crypto payment_method = fixed promo price, no stacking discount
+    if (plan.payment_method === 'crypto') {
+      usdAmount = basePrice;
     } else {
-      usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
-      discountInfo = { originalAmount: basePrice, discountPct: 5 };
+      const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
+      if (isLongTerm) {
+        usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
+        discountInfo = { originalAmount: basePrice, discountPct: 20 };
+      } else {
+        usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
+        discountInfo = { originalAmount: basePrice, discountPct: 5 };
+      }
     }
     planDisplayName = plan.display_name || plan.name;
   }
@@ -9505,6 +9520,39 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     }
   } catch (notifErr) {
     logger.warn('[NOWPayments] IPN: notification block failed (non-fatal)', { userId: order.user_id, error: notifErr.message });
+  }
+
+  // Operator alerts — fire-and-forget.
+  try {
+    const PaymentNotificationServiceNP = require('../../services/paymentNotificationService');
+    const BusinessNotificationServiceNP = require('../../services/businessNotificationService');
+    const { getBotInstance: getNPBot } = require('../core/bot');
+    const { query: pgQ2 } = require('../../config/postgres');
+    const PlanModelNP2 = require('../../models/planModel');
+    const planForAlert = await PlanModelNP2.getById(order.plan_id).catch(() => null);
+    const planNameAlert = planForAlert?.display_name || planForAlert?.name || order.plan_id;
+    const uDataAlert = await pgQ2('SELECT first_name FROM users WHERE id = $1', [order.user_id]);
+    const customerNameAlert = uDataAlert.rows[0]?.first_name || order.user_id;
+    await PaymentNotificationServiceNP.sendAdminPaymentNotification({
+      bot: getNPBot(),
+      userId: order.user_id,
+      planName: planNameAlert,
+      amount: parseFloat(order.usd_amount) || 0,
+      provider: 'nowpayments',
+      transactionId: String(payment_id),
+      customerName: customerNameAlert,
+      customerEmail: 'N/A',
+    });
+    await BusinessNotificationServiceNP.notifyPayment({
+      userId: order.user_id,
+      planName: planNameAlert,
+      amount: parseFloat(order.usd_amount) || 0,
+      provider: 'USDC (NowPayments)',
+      transactionId: String(payment_id),
+      customerName: customerNameAlert,
+    });
+  } catch (alertErr) {
+    logger.warn('[NOWPayments] IPN: operator alert failed (non-fatal)', { error: alertErr.message });
   }
 
   logger.info('[NOWPayments] IPN: payment completed', { userId: order.user_id, planId: order.plan_id, order_id });
