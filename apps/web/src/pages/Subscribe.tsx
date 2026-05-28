@@ -650,7 +650,7 @@ export default function Subscribe() {
 
     try {
       if (provider === "epayco") {
-        const result = await createPayment(selectedPlan, "epayco", undefined, promoCode || undefined);
+        const result = await createPayment(selectedPlan, "epayco", undefined, appliedPromo?.code || undefined);
         if (result.success && result.paymentUrl) {
           window.location.href = result.paymentUrl;
         } else {
