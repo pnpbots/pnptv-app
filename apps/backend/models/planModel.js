@@ -225,7 +225,6 @@ class Plan {
       isLifetime: row.is_lifetime || false,
       // is_promo does not exist as a DB column; derive from the plan id convention.
       isPromo: false,
-      stripe_price_id: row.stripe_price_id || null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

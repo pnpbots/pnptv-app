@@ -102,7 +102,7 @@ const registerPNPLiveHandlers = (bot) => {
         // Add payment options
         buttons.push([
           {
-            text: lang === 'es' ? '💳 Pagar con Tarjeta (Stripe)' : '💳 Pay with Card (Stripe)',
+            text: lang === 'es' ? '💳 Pagar con Tarjeta' : '💳 Pay with Card',
             callback_data: 'pnp_show_payment_options'
           },
           {
@@ -270,22 +270,26 @@ Choose a model for your Private Show:`;
       const lang = getLanguage(ctx);
       
       const paymentMessage = lang === 'es'
-        ? `💳 *Opciones de Pago - Stripe*
+        ? `💳 *Opciones de Pago*
 \n` +
           `🏦 *Métodos disponibles:*
 ` +
           `• Tarjetas de crédito/débito
+` +
+          `• Crypto / Dash
 \n` +
           `🔒 *Seguro y discreto*
 ` +
           `• Facturación como: "Servicio de Entretenimiento Digital"
 ` +
           `• Protección de datos garantizada`
-        : `💳 *Payment Options - Stripe*
+        : `💳 *Payment Options*
 \n` +
           `🏦 *Available methods:*
 ` +
           `• Credit/Debit cards
+` +
+          `• Crypto / Dash
 \n` +
           `🔒 *Secure and discreet*
 ` +
@@ -450,7 +454,7 @@ Choose a model for your Private Show:`;
       // Payment options
         buttons.push([
           {
-          text: lang === 'es' ? '💳 Pagar con Tarjeta (Stripe)' : '💳 Pay with Card (Stripe)',
+          text: lang === 'es' ? '💳 Pagar con Tarjeta' : '💳 Pay with Card',
           callback_data: `pnp_pay_epayco_${modelId}_${duration}`
         },
         {
@@ -1150,7 +1154,7 @@ Select your payment method:`;
 
 👇 *Haz clic en el botón para completar tu pago:*
 
-🔒 *Pago seguro con Stripe*
+🔒 *Pago seguro*
 ✅ Encriptación SSL
 ✅ Protección contra fraude
 ✅ Reembolso garantizado
@@ -1163,7 +1167,7 @@ Select your payment method:`;
 
 👇 *Click the button below to complete your payment:*
 
-🔒 *Secure payment with Stripe*
+🔒 *Secure payment*
 ✅ SSL Encryption
 ✅ Fraud Protection
 ✅ Guaranteed Refund

@@ -144,21 +144,6 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
-    // Stripe payment reconciliation — every 30 min
-    // Covers the crash-after-idempotency-mark failure mode: webhook sets Redis key
-    // then dies before granting entitlements, leaving the payments row stuck pending.
-    // processStripeCheckout is idempotent; expired sessions are marked abandoned.
-    cron.schedule(process.env.STRIPE_RECONCILE_CRON || '*/30 * * * *', async () => {
-      try {
-        const results = await PaymentRecoveryService.processStuckStripePayments();
-        if (results.recovered > 0 || results.failed > 0) {
-          logger.info('Stripe reconciliation completed', results);
-        }
-      } catch (error) {
-        logger.error('Error in Stripe reconciliation cron:', error);
-      }
-    });
-
     // Video leak detector — every hour at :17
     // Scans video_fetch_log over the last 60 min and alerts the operator
     // group when an exclusive video URL has been fetched by 3+ distinct
@@ -662,31 +647,6 @@ const startCronJobs = async (bot = null) => {
         await StreamRecordingService.expireOldRecordings(7);
       } catch (error) {
         logger.error('Error in VOD recording retention cron:', error);
-      }
-    });
-
-    // Every 15 minutes: expire abandoned Stripe awaiting_payment bookings
-    // A booking stays in awaiting_payment when the user abandons the Stripe checkout
-    // without completing payment. After 30 minutes the slot should free up.
-    cron.schedule('*/15 * * * *', async () => {
-      try {
-        const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
-        const result = await pgQuery(`
-          UPDATE bookings SET status = 'expired', updated_at = NOW()
-          WHERE status = 'awaiting_payment'
-            AND payment_id IN (
-              SELECT id FROM payments
-              WHERE provider = 'stripe'
-                AND status = 'pending'
-                AND created_at < NOW() - INTERVAL '30 minutes'
-            )
-          RETURNING id
-        `);
-        if (result.rows.length > 0) {
-          logger.info('[Cron] Expired abandoned Stripe bookings', { count: result.rows.length });
-        }
-      } catch (err) {
-        logger.error('[Cron] Stripe booking expiry error', { error: err.message });
       }
     });
 

@@ -472,14 +472,14 @@ export function getSlotTicketStatus(slotId: string): Promise<{
 
 export function buySlotTicket(
   slotId: string,
-  currency: "tokens" | "stripe" | "dash"
+  currency: "tokens" | "dash"
 ): Promise<{
   success: boolean;
   hasTicket?: boolean;
   alreadyOwned?: boolean;
   newBalance?: number;
   error?: string;
-  provider?: "stripe" | "dash";
+  provider?: "dash";
   paymentId?: string;
   checkoutUrl?: string;
   invoiceId?: string;
@@ -726,10 +726,6 @@ export function buyTokens(packageId: string): Promise<{ success: boolean; invoic
   return request("/api/wallet/buy", { method: "POST", body: { packageId } });
 }
 
-export function buyTokensStripe(packageId: string): Promise<{ success: boolean; purchaseId: string; checkoutUrl: string; tokens: number; usd: number }> {
-  return request("/api/wallet/buy-stripe", { method: "POST", body: { packageId } });
-}
-
 export function linkDPNS(dpnsHandle: string): Promise<{ success: boolean; dpnsHandle: string }> {
   return request("/api/wallet/link-dpns", { method: "POST", body: { dpnsHandle } });
 }
@@ -738,9 +734,58 @@ export function getWalletHistory(): Promise<{ success: boolean; history: TokenPu
   return request("/api/wallet/history");
 }
 
+export function buyTokensWithEpayco(packageId: string): Promise<{
+  success: boolean;
+  paymentUrl: string;
+  paymentId: string;
+  tokens?: number;
+  usd?: number;
+  error?: string;
+}> {
+  return request("/api/wallet/buy-card", { method: "POST", body: { packageId } });
+}
+
+/** Alias — same endpoint, preferred name for new call sites. */
+export const buyTokensWithCard = buyTokensWithEpayco;
+
+export function createCallCheckoutEpayco(
+  packageId: number,
+  startTimeUtc?: string,
+  endTimeUtc?: string
+): Promise<{
+  success: boolean;
+  paymentId: string;
+  paymentUrl: string;
+  checkoutUrl: string;
+  amount: number;
+  currency: string;
+  sku: string;
+  bookingId?: string;
+}> {
+  const body: Record<string, unknown> = { packageId, provider: "epayco" };
+  if (startTimeUtc) body.startTimeUtc = startTimeUtc;
+  if (endTimeUtc) body.endTimeUtc = endTimeUtc;
+  return request("/api/webapp/book-call/checkout", {
+    method: "POST",
+    body,
+  }).then((res: {
+    success: boolean;
+    paymentId: string;
+    checkoutUrl?: string;
+    amount: number;
+    currency: string;
+    sku: string;
+    bookingId?: string;
+  }) => ({
+    ...res,
+    paymentUrl: res.checkoutUrl ?? "",
+    checkoutUrl: res.checkoutUrl ?? "",
+  }));
+}
+
 export interface TokenCheckoutData {
   success: boolean;
-  provider: "stripe" | "dash";
+  provider: "dash";
   tokens: number;
   usd: number;
   status: string;
@@ -2541,8 +2586,6 @@ export interface SubscriptionPlan {
   active: boolean;
   tier?: string;
   isLifetime?: boolean;
-  /** Stripe Price ID — required for Stripe checkout */
-  stripe_price_id?: string;
 }
 
 export function getSubscriptionPlans(): Promise<{
@@ -2601,7 +2644,7 @@ export function getMyAccess(): Promise<MyAccessResponse> {
 
 export function createPayment(
   planId: string,
-  provider: "stripe" | "dash",
+  provider: "epayco" | "dash",
   email?: string,
   promoCode?: string
 ): Promise<{
@@ -2618,62 +2661,6 @@ export function createPayment(
   return request("/api/webapp/payments/create", {
     method: "POST",
     body,
-  });
-}
-
-// ─── Stripe payment API ───────────────────────────────────────────────────────
-
-export interface StripeCheckoutPayload {
-  planId: string;
-  priceId: string;
-  sku?: string;
-  metadata?: Record<string, string>;
-}
-
-export interface StripeCheckoutResponse {
-  success: boolean;
-  sessionId?: string;
-  checkoutUrl?: string;
-  error?: string;
-}
-
-/**
- * Create a Stripe Checkout Session for a one-time payment
- * (week pass, lifetime, call booking).
- */
-export function createStripeCheckout(
-  payload: StripeCheckoutPayload
-): Promise<StripeCheckoutResponse> {
-  return request("/api/webapp/payments/stripe/checkout", {
-    method: "POST",
-    body: payload,
-  });
-}
-
-/**
- * Create a Stripe Checkout Session for a recurring subscription
- * (monthly, annual plans).
- */
-export function createStripeSubscription(
-  payload: StripeCheckoutPayload
-): Promise<StripeCheckoutResponse> {
-  return request("/api/webapp/payments/stripe/subscription", {
-    method: "POST",
-    body: payload,
-  });
-}
-
-/**
- * Open a Stripe Customer Portal session for self-service
- * subscription management (cancel, update card, view invoices).
- */
-export function createStripePortalSession(): Promise<{
-  success: boolean;
-  url?: string;
-  error?: string;
-}> {
-  return request("/api/webapp/payments/stripe/portal", {
-    method: "POST",
   });
 }
 
@@ -2713,7 +2700,7 @@ export function validatePromoCode(
 
 export function initiateCreatorSubscriptionPayment(
   creatorId: string,
-  provider: "stripe" | "dash",
+  provider: "epayco" | "dash",
   email: string
 ): Promise<{
   success: boolean;
@@ -2724,18 +2711,6 @@ export function initiateCreatorSubscriptionPayment(
   return request("/api/webapp/payments/create", {
     method: "POST",
     body: { planId: "creator_monthly", provider, email, creatorId },
-  });
-}
-
-export function createCreatorStripeSubscription(creatorId: string): Promise<{
-  success: boolean;
-  checkoutUrl?: string;
-  sessionId?: string;
-  error?: string;
-}> {
-  return request("/api/webapp/payments/stripe/creator-subscription", {
-    method: "POST",
-    body: { creatorId },
   });
 }
 
@@ -2756,7 +2731,7 @@ export function getPaymentStatus(
 
 export function purchaseChannelAccess(
   channelId: number,
-  provider: 'stripe' | 'dash',
+  provider: 'dash',
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/channels/${channelId}/purchase`, {
@@ -2770,7 +2745,7 @@ export function purchaseChannelAccess(
 // channel-access grants cover both the channel and its linked hangout.
 export function purchaseHangoutAccess(
   hangoutGroupId: number,
-  provider: 'stripe' | 'dash',
+  provider: 'dash',
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/hangouts/groups/${hangoutGroupId}/purchase`, {
@@ -5675,7 +5650,6 @@ const ALLOWED_PAYMENT_HOSTS = [
   "app.pnptv.app",
   "btcpay.pnptv.app",
   "checkout.epayco.co",
-  "checkout.stripe.com",
 ];
 
 function isAllowedPaymentHost(hostname: string): boolean {
@@ -6009,15 +5983,12 @@ export interface CreatorCallEarnings {
 
 export interface CallCheckoutPayload {
   packageId: number;
-  // For Dash payments use createCallCheckoutDash() — this endpoint is
-  // card-only and now routes through Stripe Checkout.
-  provider: "stripe";
+  // Card checkout via this endpoint has been retired. Use createCallCheckoutDash()
+  // for Dash (crypto) payments, or the web app at pnptv.app/book-call.
+  provider: "dash";
   email: string;
   quantity?: number;
   selectedSlot?: string | null;
-  // When both are provided the server locks the slot + creates a bookings
-  // row at checkout, mirroring the Dash path so reminders + My Calls work
-  // for Stripe-paid bookings too.
   startTimeUtc?: string;
   endTimeUtc?: string;
 }

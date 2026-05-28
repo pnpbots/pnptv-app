@@ -1606,7 +1606,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     groupId: number;
     groupName?: string;
   } | null>(null);
-  const [pgProvider, setPgProvider] = useState<'stripe' | 'dash'>('stripe');
+  const [pgProvider, setPgProvider] = useState<'dash'>('dash');
   const [pgLoading, setPgLoading] = useState(false);
   const [pgPolling, setPgPolling] = useState(false);
 
@@ -2176,9 +2176,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       const res = channelId
         ? await purchaseChannelAccess(channelId, pgProvider)
         : await purchaseHangoutAccess(groupId, pgProvider);
-      if (pgProvider === 'stripe' && res.paymentUrl) {
-        window.open(res.paymentUrl, '_blank');
-      } else if (pgProvider === 'dash' && res.checkoutUrl) {
+      if (res.checkoutUrl) {
         window.open(res.checkoutUrl, '_blank');
       }
       setPgPolling(true);
@@ -4902,14 +4900,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 ) : (
                   <div className="space-y-2">
                     <p className="text-[10px] text-pnp-textSecondary text-center uppercase tracking-wider font-semibold">Choose payment method</p>
-                    <button
-                      onClick={() => { setPgProvider('stripe'); handlePurchaseChannel(); }}
-                      disabled={pgLoading}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
-                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-                    >
-                      Pay with Card
-                    </button>
                     <button
                       onClick={() => { setPgProvider('dash'); handlePurchaseChannel(); }}
                       disabled={pgLoading}

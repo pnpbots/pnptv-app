@@ -197,7 +197,6 @@ class PaymentNotificationService {
    */
   static getProviderName(provider, lang = 'en') {
     const providers = {
-      stripe:      { en: 'Stripe',              es: 'Stripe' },
       // Daimo kept for legacy receipts (in-flight + refund history)
       daimo:       { en: 'Daimo Pay (legacy)',   es: 'Daimo Pay (legacy)' },
       epayco:      { en: 'ePayco',               es: 'ePayco' },

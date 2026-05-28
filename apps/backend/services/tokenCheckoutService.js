@@ -1,7 +1,7 @@
 /**
  * TokenCheckoutService
  * Single source of truth for all token purchase checkout flows.
- * Handles Stripe and Dash/BTCPay checkout creation, plus unified idempotent
+ * Handles Dash/BTCPay checkout creation, plus unified idempotent
  * crediting used by webhook handlers.
  *
  * Design decisions:
@@ -10,7 +10,7 @@
  *    (migration 120) is added as the external, URL-safe identifier.
  *  - btcpay_invoice_id doubles as a namespaced idempotency key for all providers:
  *      dash   → actual BTCPay invoice ID
- *      stripe → "stripe:<purchaseUuid>"
+ *      dash   → actual BTCPay invoice ID
  *
  * Required migration (apps/backend/migrations/120_token_purchase_uuid.sql):
  *   ALTER TABLE token_purchases
@@ -217,126 +217,11 @@ class TokenCheckoutService {
     };
   }
 
-  // ── Stripe checkout ───────────────────────────────────────────────────────
-
-  /**
-   * Create a Stripe Checkout Session for a token package.
-   * Records a pending purchase in token_purchases and returns the Stripe-hosted checkout URL.
-   *
-   * @param {string} userId
-   * @param {string} packageId  e.g. 'pkg_10'
-   * @returns {Promise<{
-   *   success: boolean,
-   *   purchaseId: string,
-   *   checkoutUrl: string,
-   *   tokens: number,
-   *   usd: number,
-   * }>}
-   */
-  static async createStripeCheckout(userId, packageId) {
-    const pkg = resolvePackage(packageId);
-    if (!pkg) throw Object.assign(new Error('Invalid package ID'), { code: 'INVALID_PACKAGE', status: 400 });
-
-    const purchaseUuid = uuidv4();
-    const invoiceKey = idempotencyKey('stripe', purchaseUuid);
-
-    let userEmail;
-    try {
-      const { rows } = await query('SELECT email FROM users WHERE id = $1', [userId]);
-      userEmail = rows[0]?.email || undefined;
-    } catch (_) {}
-
-    // Persist the pending row BEFORE calling Stripe so the webhook cannot arrive
-    // before the row exists. The webhook resolves the purchase by purchase_uuid in
-    // metadata — stripe_session_id is backfilled below as enrichment only.
-    const client = await getClient();
-    try {
-      await client.query('BEGIN');
-      await insertPendingPurchase(client, {
-        purchaseUuid,
-        userId,
-        tokens: pkg.tokens,
-        usd: pkg.usd,
-        invoiceKey,
-        paymentMethod: 'stripe',
-      });
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      logger.error('TokenCheckoutService.createStripeCheckout DB error', { userId, packageId, error: err.message });
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    const { createStripeClient } = require('../config/stripe');
-    const stripe = createStripeClient();
-
-    const CHECKOUT_DOMAIN = process.env.CHECKOUT_DOMAIN || WEB_APP_URL;
-    let session;
-    try {
-      session = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        payment_method_types: ['card', 'link'],
-        customer_email: userEmail,
-        line_items: [{
-          quantity: 1,
-          price_data: {
-            currency: 'usd',
-            unit_amount: Math.round(pkg.usd * 100),
-            product_data: {
-              name: `${pkg.tokens} Digital Credits`,
-              description: 'Digital credits for online content',
-            },
-          },
-        }],
-        success_url: `${CHECKOUT_DOMAIN}/token-checkout/${purchaseUuid}?stripe=success`,
-        cancel_url: `${CHECKOUT_DOMAIN}/live`,
-        billing_address_collection: 'required',
-        phone_number_collection: { enabled: true },
-        payment_method_options: { card: { request_three_d_secure: 'automatic' } },
-        metadata: {
-          user_id: String(userId),
-          payment_type: 'token_purchase',
-          purchase_uuid: purchaseUuid,
-        },
-      });
-    } catch (stripeErr) {
-      await query(
-        `UPDATE token_purchases SET status = 'failed' WHERE purchase_uuid = $1`,
-        [purchaseUuid]
-      ).catch(() => {});
-      logger.error('TokenCheckoutService.createStripeCheckout Stripe error', { userId, packageId, purchaseUuid, error: stripeErr.message });
-      throw stripeErr;
-    }
-
-    // Best-effort backfill — webhook lookup uses purchase_uuid from metadata, not session ID.
-    await query(
-      `UPDATE token_purchases SET stripe_session_id = $1 WHERE purchase_uuid = $2`,
-      [session.id, purchaseUuid]
-    ).catch((updateErr) => {
-      logger.warn('TokenCheckoutService.createStripeCheckout: failed to backfill stripe_session_id', {
-        purchaseUuid, sessionId: session.id, error: updateErr.message,
-      });
-    });
-
-    logger.info('Token Stripe checkout created', { userId, packageId, purchaseUuid, tokens: pkg.tokens, sessionId: session.id });
-
-    return {
-      success: true,
-      purchaseId: purchaseUuid,
-      checkoutUrl: session.url,
-      tokens: pkg.tokens,
-      usd: pkg.usd,
-    };
-  }
-
   // ── Checkout page data ────────────────────────────────────────────────────
 
   /**
    * Return all data needed to render the /token-checkout/:purchaseId page.
-   * For Stripe: returns base status so the polling loop can detect confirmation.
-   * For Dash:   returns null (BTCPay has its own hosted page).
+   * For Dash: returns null (BTCPay has its own hosted page).
    *
    * @param {string} purchaseUuid  UUID stored in purchase_uuid column
    * @returns {Promise<object|null>}  null if not found or Dash purchase
@@ -385,13 +270,8 @@ class TokenCheckoutService {
       usd: usdAmount,
     };
 
-    // Stripe — no widget needed; return base status so polling works
-    if (provider === 'stripe') {
-      return { ...base, success: true };
-    }
-
     // Dash (BTCPay) — BTCPay has its own checkout page; no internal page needed
-    // Legacy ePayco/Daimo purchases return null so callers surface an error.
+    // Legacy purchases (epayco/daimo) return null so callers surface an error.
     return null;
   }
 
@@ -403,13 +283,11 @@ class TokenCheckoutService {
    * wallet, and marks the purchase as paid — all in a single transaction.
    *
    * Callers:
-   *   Stripe webhook: provider='stripe', referenceId=purchaseUuid
    *   BTCPay webhook: provider='dash',   referenceId=btcpayInvoiceId (raw BTCPay ID)
    *
    * @param {string} referenceId
-   *   For stripe: the purchaseUuid (the UUID, not the namespaced key).
    *   For dash: the raw BTCPay invoice ID string.
-   * @param {'stripe'|'dash'} provider
+   * @param {'dash'} provider
    * @param {object} [txData]  optional extra data to log (txHash, amount, etc.)
    * @returns {Promise<{
    *   success: boolean,
@@ -537,7 +415,7 @@ class TokenCheckoutService {
    * Used for non-success webhook outcomes in non-BTCPay providers.
    *
    * @param {string} referenceId
-   * @param {'stripe'|'dash'} provider
+   * @param {'dash'} provider
    * @param {'expired'|'invalid'} status
    * @param {object} [txData]
    * @returns {Promise<{success: boolean, updated: boolean}>}

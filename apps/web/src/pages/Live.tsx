@@ -21,7 +21,6 @@ import {
   getWalletBalance,
   getTokenPackages,
   buyTokens,
-  buyTokensStripe,
   linkDPNS,
   getWalletHistory,
   assertPaymentUrl,
@@ -97,7 +96,7 @@ export default function Live() {
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
-  const [buyMethod, setBuyMethod] = useState<"card" | "dash">("card");
+  const [buyMethod, setBuyMethod] = useState<"dash">("dash");
   const [showDpnsInput, setShowDpnsInput] = useState(false);
   const [dpnsInput, setDpnsInput] = useState("");
   const [dpnsSaving, setDpnsSaving] = useState(false);
@@ -305,14 +304,6 @@ export default function Live() {
     setBuyError(null);
     try {
       let checkoutUrl: string;
-      if (buyMethod === 'card') {
-        // Stripe Checkout — same-tab redirect (no popup)
-        const result = await buyTokensStripe(pkg.id);
-        checkoutUrl = assertPaymentUrl(result.checkoutUrl);
-        setShowBuyModal(false);
-        window.location.href = checkoutUrl;
-        return;
-      }
       // Dash — BTCPay has its own checkout page
       const result = await buyTokens(pkg.id);
       checkoutUrl = assertPaymentUrl(result.checkoutUrl);

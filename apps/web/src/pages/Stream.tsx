@@ -669,7 +669,7 @@ function StreamInner() {
   }, []);
 
   // ── Ticket purchase handler ────────────────────────────────────────────────
-  const handleBuyTicket = useCallback(async (currency: "tokens" | "stripe" | "dash") => {
+  const handleBuyTicket = useCallback(async (currency: "tokens" | "dash") => {
     if (!streamId) return;
     setTicketBuying(true);
     setTicketError(null);
@@ -687,11 +687,6 @@ function StreamInner() {
           setTicketStatus((prev) => prev ? { ...prev, hasTicket: true } : null);
           if (result.newBalance !== undefined) setTokenBalance(result.newBalance);
         }
-        return;
-      }
-
-      if (currency === "stripe" && result.checkoutUrl) {
-        window.open(assertPaymentUrl(result.checkoutUrl), "_blank", "noopener,noreferrer");
         return;
       }
 
@@ -1342,25 +1337,18 @@ function StreamInner() {
                   {ticketStatus.priceUsd && !dashTicketPollActive && (
                     <>
                       <button
-                        onClick={() => handleBuyTicket("stripe")}
-                        disabled={ticketBuying}
-                        className="w-full px-4 py-2.5 rounded-lg bg-pnp-surface border border-pnp-accent/40 text-pnp-accent text-xs font-bold disabled:opacity-50 active:scale-95 transition-all"
-                      >
-                        {ticketBuying ? (
-                          <span className="flex items-center justify-center gap-2">
-                            <span className="w-3 h-3 border border-pnp-accent/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                            Processing...
-                          </span>
-                        ) : (
-                          `Pay $${ticketStatus.priceUsd} with Card`
-                        )}
-                      </button>
-                      <button
                         onClick={() => handleBuyTicket("dash")}
                         disabled={ticketBuying}
                         className="w-full px-4 py-2.5 rounded-lg bg-pnp-surface border border-white/20 text-pnp-textSecondary text-xs font-bold disabled:opacity-50 active:scale-95 transition-all"
                       >
-                        Pay $${ticketStatus.priceUsd} with Crypto (Dash)
+                        {ticketBuying ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <span className="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                            Processing...
+                          </span>
+                        ) : (
+                          `Pay $${ticketStatus.priceUsd} with Crypto (Dash)`
+                        )}
                       </button>
                     </>
                   )}

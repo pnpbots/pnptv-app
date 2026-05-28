@@ -119,7 +119,7 @@ function registerCallPackageHandlers(bot) {
         `📦 *${pkg.name}*\n\n` +
         `💰 Total: $${pkg.price} USD\n\n` +
         `Package checkout now runs in the web app.\n\n` +
-        `Open the page below to pay with card via Stripe or crypto via Dash.\n\n` +
+        `Open the page below to pay with card or crypto via Dash.\n\n` +
         `After payment, you'll receive ${pkg.calls} call credits!`,
         {
           parse_mode: 'Markdown',

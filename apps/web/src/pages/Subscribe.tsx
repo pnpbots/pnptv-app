@@ -5,9 +5,8 @@ import { Card, Skeleton } from "@pnptv/ui-kit";
 import { QRCodeSVG } from "qrcode.react";
 import {
   getSubscriptionPlans,
-  createStripeCheckout,
-  createStripeSubscription,
   getPaymentStatus,
+  createPayment,
   createDashSubscription,
   getDashSubscriptionStatus,
   getDashAvailable,
@@ -22,7 +21,6 @@ import {
   getLabelColor,
   assertPaymentUrl,
   validatePromoCode,
-  checkAuthStatus,
   ApiError,
   type SubscriptionPlan,
 } from "@/lib/api";
@@ -32,7 +30,7 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
 import { isTelegramContext } from "@/lib/telegram";
 
-type Provider = "stripe" | "dash" | "lightning" | "usdc";
+type Provider = "epayco" | "dash" | "lightning" | "usdc";
 
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
@@ -79,7 +77,7 @@ export default function Subscribe() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
-  const [provider, setProvider] = useState<Provider>("stripe");
+  const [provider, setProvider] = useState<Provider>("epayco");
   const [submitting, setSubmitting] = useState(false);
   const [showCOP, setShowCOP] = useState(false);
   // Per-plan benefits expand state — plans start collapsed (N-06)
@@ -282,50 +280,6 @@ export default function Subscribe() {
     } catch {}
   }, [searchParams]);
 
-  // Stripe redirect: ?stripe_paid=1&plan=<planId>&session_id=<id>
-  // The URL param alone is not proof of payment — anyone can append stripe_paid=1.
-  // We verify server-side via checkAuthStatus, which reads the user's current DB state.
-  // The Stripe webhook updates the user's tier before or shortly after the redirect,
-  // so we retry up to 3 times with exponential backoff to tolerate webhook latency.
-  const [stripeVerifying, setStripeVerifying] = useState(false);
-  useEffect(() => {
-    if (searchParams.get("stripe_paid") !== "1") return;
-    window.history.replaceState({}, "", window.location.pathname);
-
-    let cancelled = false;
-    setStripeVerifying(true);
-
-    const verify = async (attempt: number): Promise<void> => {
-      if (cancelled) return;
-      try {
-        const status = await checkAuthStatus();
-        if (cancelled) return;
-        if (status.authenticated && status.user) {
-          const tier = (status.user.tier ?? "free").toLowerCase();
-          if (tier !== "free") {
-            await refreshUser().catch(() => {});
-            setStripeVerifying(false);
-            setPaymentSuccess(true);
-            return;
-          }
-        }
-      } catch { /* network error — fall through to retry */ }
-
-      if (attempt < 3 && !cancelled) {
-        await new Promise<void>((res) => setTimeout(res, attempt * 2000 + 1500));
-        return verify(attempt + 1);
-      }
-
-      if (!cancelled) {
-        setStripeVerifying(false);
-        setError("Payment could not be verified. If you paid, your access will be activated automatically. Contact support if it does not appear within a few minutes.");
-      }
-    };
-
-    verify(1);
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Validate a promo code server-side. For base-plan promos, we lock the
   // selected plan to the promo's base plan so the displayed price matches.
@@ -695,7 +649,15 @@ export default function Subscribe() {
     setError(null);
 
     try {
-      if (provider === "dash") {
+      if (provider === "epayco") {
+        const result = await createPayment(selectedPlan, "epayco", undefined, promoCode || undefined);
+        if (result.success && result.paymentUrl) {
+          window.location.href = result.paymentUrl;
+        } else {
+          setError(result.error || result.message || s.paymentErrorGeneric);
+        }
+        return;
+      } else if (provider === "dash") {
         const result = await createDashSubscription(selectedPlan);
         if (result.success && result.checkoutUrl) {
           const invoice = {
@@ -797,41 +759,7 @@ export default function Subscribe() {
           setError(s.failedToCreateUsdcInvoice);
         }
       } else {
-        // Stripe checkout — requires a Stripe Price ID on the plan.
-        const plan = plans.find((p) => p.id === selectedPlan);
-        const priceId = plan?.stripe_price_id;
-
-        if (appliedPromo?.code) {
-          setError("Promo codes are not supported with Stripe checkout yet. Please use Dash or remove the promo code.");
-          setSubmitting(false);
-          return;
-        }
-
-        if (!priceId) {
-          setError("This plan is not yet available for card payment. Please use Dash or contact support.");
-          setSubmitting(false);
-          return;
-        }
-
-        const isRecurring = !isLifetimePlan(plan!) && (plan!.duration_days ?? 0) <= 365;
-        const payload = {
-          planId: selectedPlan,
-          priceId,
-          sku: plan?.sku || selectedPlan,
-          metadata: appliedPromo?.code ? { promo_code: appliedPromo.code } : undefined,
-        };
-
-        const result = isRecurring
-          ? await createStripeSubscription(payload)
-          : await createStripeCheckout(payload);
-
-        if (result.success && result.checkoutUrl) {
-          const safeUrl = assertPaymentUrl(result.checkoutUrl);
-          // Stripe redirects to success_url after completion — same-tab is correct.
-          window.location.href = safeUrl;
-        } else {
-          setError(result.error || s.failedToCreatePayment);
-        }
+        setError("Unsupported payment provider. Please select Card (ePayco), Dash, Lightning, or USDC.");
       }
     } catch (err: unknown) {
       // Map BTCPay error codes from the thrown ApiError to translated user copy.
@@ -948,24 +876,6 @@ export default function Subscribe() {
     try { localStorage.setItem("pnp_newsletter_dismissed", "1"); } catch { /* noop */ }
     setNewsletterDismissed(true);
   }, []);
-
-  // Stripe verification in progress
-  if (stripeVerifying) {
-    return (
-      <div className="page-container flex items-center justify-center min-h-[60vh]">
-        <Card className="max-w-md w-full p-6 text-center">
-          <div className="w-12 h-12 rounded-full bg-[#D4007A]/20 flex items-center justify-center mx-auto mb-4">
-            <svg className="animate-spin w-6 h-6" style={{ color: "#D4007A" }} viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          </div>
-          <h2 className="text-lg font-bold text-pnp-textPrimary mb-1">Verifying payment…</h2>
-          <p className="text-sm text-pnp-textSecondary">Please wait while we confirm your payment with the server.</p>
-        </Card>
-      </div>
-    );
-  }
 
   // Loading state
   if (loading) {
@@ -1404,16 +1314,16 @@ export default function Subscribe() {
         <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">{s.paymentMethod}</h3>
         <div className="grid grid-cols-2 gap-2">
           <button
-            onClick={() => setProvider("stripe")}
-            className={`rounded-xl p-3 border-2 transition-all text-center ${
-              provider === "stripe"
+            onClick={() => setProvider("epayco")}
+            className={`rounded-xl p-3 border-2 transition-all text-center relative ${
+              provider === "epayco"
                 ? "border-[#D4007A] bg-[#D4007A]/10"
                 : "border-white/10 bg-white/5 hover:border-white/20"
             }`}
           >
             <div className="text-lg mb-1">💳</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">Card</div>
-            <div className="text-[10px] text-pnp-textSecondary">Credit / Debit</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">{s.cardPse}</div>
+            <div className="text-[10px] text-pnp-textSecondary">{"Visa & Mastercard · ePayco"}</div>
           </button>
           <button
             onClick={() => dashAvailable !== false && setProvider("dash")}

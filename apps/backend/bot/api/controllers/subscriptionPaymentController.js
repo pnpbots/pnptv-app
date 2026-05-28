@@ -1,8 +1,6 @@
 const SubscriptionModel = require('../../../models/subscriptionModel');
-const PaymentModel = require('../../../models/paymentModel');
 const SubscriptionService = require('../../../services/subscriptionService');
 const { query } = require('../../../config/postgres');
-const stripeService = require('../../../services/stripeService');
 const logger = require('../../../utils/logger');
 
 /**
@@ -88,141 +86,15 @@ class SubscriptionPaymentController {
 
   /**
    * Create checkout session for subscription
+   * Card checkout via this controller has been retired. Use the main webapp
+   * /subscribe page which supports ePayco and Dash (BTCPay).
    */
   static async createCheckout(req, res) {
-    try {
-      const userId = req.session?.user?.id;
-      const { planId, paymentMethod = 'stripe' } = req.body;
-
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        });
-      }
-
-      if (!planId) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'INVALID_INPUT',
-            message: 'Plan ID is required',
-          },
-        });
-      }
-
-      // Get plan
-      const plan = await SubscriptionModel.getPlanById(planId);
-      if (!plan) {
-        return res.status(404).json({
-          success: false,
-          error: {
-            code: 'PLAN_NOT_FOUND',
-            message: 'Subscription plan not found',
-          },
-        });
-      }
-
-      if (paymentMethod === 'daimo') {
-        // Daimo retired — refuse to mint a new session and tell the caller to
-        // switch to Card or Dash. The webhook handler stays wired only for
-        // straggler settlements of in-flight (pre-cutover) payments.
-        return res.status(410).json({
-          success: false,
-          error: 'Daimo / USDC checkout has been retired. Please use Card (Stripe) or Dash (BTCPay).',
-          code: 'DAIMO_RETIRED',
-        });
-      }
-
-      if (paymentMethod !== 'stripe') {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'INVALID_PROVIDER',
-            message: 'Only Stripe is supported for card checkout',
-          },
-        });
-      }
-
-      const payment = await PaymentModel.create({
-        userId,
-        planId,
-        amount: plan.priceUsd,
-        currency: 'USD',
-        provider: 'stripe',
-        status: 'pending',
-        metadata: {
-          subscriptionPlanId: planId,
-          planName: plan.name,
-          planRole: plan.role,
-          revenueSplitPercentage: plan.revenueSplitPercentage,
-        },
-      });
-
-      let email;
-      try {
-        const { rows } = await query('SELECT email FROM users WHERE id = $1', [userId]);
-        email = rows[0]?.email || undefined;
-      } catch (_) { /* non-fatal */ }
-
-      const successUrl = `https://pnptv.app/subscribe?stripe_paid=1&plan=${encodeURIComponent(planId)}&session_id={CHECKOUT_SESSION_ID}`;
-      const cancelUrl = 'https://pnptv.app/subscribe';
-
-      const { sessionId, url } = await stripeService.createCustomCheckoutSession({
-        userId,
-        planId,
-        sku: plan.slug || planId,
-        amountUsd: plan.priceUsd,
-        productName: plan.name,
-        description: plan.description || undefined,
-        successUrl,
-        cancelUrl,
-        customerEmail: email,
-        metadata: {
-          pnptv_payment_id: payment.id,
-          payment_type: 'one_time',
-        },
-      });
-
-      await PaymentModel.updateStatus(payment.id, 'pending', {
-        stripe_session_id: sessionId,
-        payment_url: url,
-      });
-
-      logger.info('Subscription checkout created', {
-        paymentId: payment.id,
-        userId,
-        planId,
-        provider: 'stripe',
-      });
-
-      res.status(201).json({
-        success: true,
-        data: {
-          checkout: {
-            paymentId: payment.id,
-            planId,
-            planName: plan.name,
-            amount: plan.priceUsd,
-            currency: 'USD',
-            checkoutUrl: url,
-            redirectUrl: url,
-          },
-        },
-      });
-    } catch (error) {
-      logger.error('Error in createCheckout:', error);
-      res.status(500).json({
-        success: false,
-        error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to create checkout',
-        },
-      });
-    }
+    return res.status(410).json({
+      success: false,
+      error: 'Card checkout via this endpoint has been retired. Please use the web app at https://pnptv.app/subscribe.',
+      code: 'CHECKOUT_RETIRED',
+    });
   }
 
   /**

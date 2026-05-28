@@ -212,7 +212,7 @@ const registerPaymentHandlers = (bot) => {
 
       if (!isLifetime100Promo) {
         paymentButtons.push([Markup.button.url(
-          lang === 'es' ? '💳 Pagar con Tarjeta (Stripe)' : '💳 Pay with Card (Stripe)',
+          lang === 'es' ? '💳 Pagar con Tarjeta' : '💳 Pay with Card',
           `https://app.pnptv.app/subscribe?plan=${encodeURIComponent(planId)}`
         )]);
         paymentButtons.push([Markup.button.url(
@@ -295,12 +295,12 @@ const registerPaymentHandlers = (bot) => {
       }
 
       const subscribeUrl = `https://app.pnptv.app/subscribe?plan=${encodeURIComponent(planId)}`;
-      logger.info('Redirecting legacy card callback to Stripe subscribe flow', { planId, userId });
+      logger.info('Redirecting legacy card callback to subscribe flow', { planId, userId });
 
       await ctx.editMessageText(
         lang === 'es'
-          ? '💳 *Pago con tarjeta*\n\nLa compra con tarjeta ahora se hace en la app web con Stripe.\n\nToca el boton para continuar.'
-          : '💳 *Card payment*\n\nCard checkout now happens in the web app with Stripe.\n\nTap the button below to continue.',
+          ? '💳 *Pago con tarjeta*\n\nLa compra con tarjeta ahora se hace en la app web.\n\nToca el boton para continuar.'
+          : '💳 *Card payment*\n\nCard checkout now happens in the web app.\n\nTap the button below to continue.',
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([

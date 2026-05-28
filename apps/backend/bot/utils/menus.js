@@ -161,12 +161,12 @@ const getPlansMenu = (language = 'en') => {
 const getPaymentMethodMenu = (planId, language = 'en') => {
   const labels = {
     en: {
-      credit: '💳 Credit Card (Stripe)',
+      credit: '💳 Pay with Card',
       crypto: '🥷 Crypto / Dash',
       back: '🔙 Back to Plans',
     },
     es: {
-      credit: '💳 Tarjeta de Crédito (Stripe)',
+      credit: '💳 Pagar con Tarjeta',
       crypto: '🥷 Crypto / Dash',
       back: '🔙 Volver a Planes',
     },

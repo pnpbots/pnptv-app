@@ -5,7 +5,7 @@ import {
   getWalletBalance,
   getTokenPackages,
   buyTokens,
-  buyTokensStripe,
+  buyTokensWithCard,
   getDashPaymentDetails,
   getDashSubscriptionStatus,
   assertPaymentUrl,
@@ -21,7 +21,7 @@ interface BuyTokensModalProps {
 
 export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTokensModalProps) {
   const t = useI18n();
-  const [buyMethod, setBuyMethod] = useState<'select' | 'card' | 'dash'>('select');
+  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'card'>('select');
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
@@ -96,85 +96,76 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
     };
   }, [dashPayment]);
 
+  const handleBuyTokensCard = async (pkg: TokenPackage) => {
+    setBuyingPackage(pkg.id);
+    setBuyError(null);
+    try {
+      const result = await buyTokensWithCard(pkg.id);
+      if (result.success && result.paymentUrl) {
+        window.location.href = result.paymentUrl;
+      } else {
+        setBuyError(result.error || "Failed to start card payment.");
+        setBuyingPackage(null);
+      }
+    } catch (err: unknown) {
+      setBuyError(err instanceof Error ? err.message : "Unexpected error.");
+      setBuyingPackage(null);
+    }
+  };
+
   const handleBuyTokens = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
     setBuyError(null);
     try {
-      let checkoutUrl: string;
-      let openedPopup: Window | null = null;
-      
-      if (buyMethod === 'card') {
-        const result = await buyTokensStripe(pkg.id);
-        checkoutUrl = assertPaymentUrl(result.checkoutUrl);
-        openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
-      } else {
-        // Dash — show in-app payment widget instead of popup
-        const result = await buyTokens(pkg.id);
-        const safeUrl = assertPaymentUrl(result.checkoutUrl);
-        setDashPayment({ invoiceId: result.invoiceId, checkoutUrl: safeUrl, loading: true, createdAt: Date.now() });
-        setDashSecondsLeft(900);
-        setBuyingPackage(null);
+      // Dash — show in-app payment widget instead of popup
+      const result = await buyTokens(pkg.id);
+      const safeUrl = assertPaymentUrl(result.checkoutUrl);
+      setDashPayment({ invoiceId: result.invoiceId, checkoutUrl: safeUrl, loading: true, createdAt: Date.now() });
+      setDashSecondsLeft(900);
+      setBuyingPackage(null);
 
-        // Fetch payment details for in-app widget
-        getDashPaymentDetails(result.invoiceId)
-          .then((details) => {
-            if (details.success) {
-              setDashPayment((prev) => prev ? {
-                ...prev,
-                destination: details.destination,
-                amount: details.amount,
-                invoiceAmount: details.invoiceAmount ?? undefined,
-                loading: false,
-              } : prev);
-            } else {
-              setDashPayment((prev) => prev ? { ...prev, loading: false, error: "Could not load payment details" } : prev);
-            }
-          })
-          .catch(() => {
+      // Fetch payment details for in-app widget
+      getDashPaymentDetails(result.invoiceId)
+        .then((details) => {
+          if (details.success) {
+            setDashPayment((prev) => prev ? {
+              ...prev,
+              destination: details.destination,
+              amount: details.amount,
+              invoiceAmount: details.invoiceAmount ?? undefined,
+              loading: false,
+            } : prev);
+          } else {
             setDashPayment((prev) => prev ? { ...prev, loading: false, error: "Could not load payment details" } : prev);
-          });
+          }
+        })
+        .catch(() => {
+          setDashPayment((prev) => prev ? { ...prev, loading: false, error: "Could not load payment details" } : prev);
+        });
 
-        // Poll for payment confirmation using the invoice status, not wallet balance.
-        // Wallet balance is pre-existing and would produce false positives for users who
-        // already have tokens.
-        const pollInvoiceId = result.invoiceId;
-        dashPollRef.current = setInterval(async () => {
-          try {
-            const statusRes = await getDashSubscriptionStatus(pollInvoiceId);
-            if (statusRes.status === 'completed') {
-              if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
-              setDashPaymentSuccess(true);
-              // Fetch the updated balance to pass to onSuccess.
-              const balRes = await getWalletBalance().catch(() => ({ balance: 0 }));
-              setTimeout(() => {
-                if (onSuccess) onSuccess(balRes.balance);
-                onClose();
-              }, 1500);
-            } else if (statusRes.status === 'expired' || statusRes.status === 'invalid') {
-              if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+      // Poll for payment confirmation using the invoice status, not wallet balance.
+      // Wallet balance is pre-existing and would produce false positives for users who
+      // already have tokens.
+      const pollInvoiceId = result.invoiceId;
+      dashPollRef.current = setInterval(async () => {
+        try {
+          const statusRes = await getDashSubscriptionStatus(pollInvoiceId);
+          if (statusRes.status === 'completed') {
+            if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+            setDashPaymentSuccess(true);
+            // Fetch the updated balance to pass to onSuccess.
+            const balRes = await getWalletBalance().catch(() => ({ balance: 0 }));
+            setTimeout(() => {
+              if (onSuccess) onSuccess(balRes.balance);
+              onClose();
+            }, 1500);
+          } else if (statusRes.status === 'expired' || statusRes.status === 'invalid') {
+            if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
               setDashPayment((prev) => prev ? { ...prev, error: 'Invoice expired. Please try again.' } : prev);
             }
           } catch { /* network hiccup — keep polling */ }
         }, 5000);
 
-        return; // Skip the popup logic below
-      }
-
-      if (!openedPopup) {
-        setBuyError("Your browser blocked the payment popup. Please allow popups for this site and try again.");
-        return;
-      }
-
-      onClose();
-
-      // Fallback balance refresh 15s after checkout opens (in case Socket.IO event is missed)
-      setTimeout(() => {
-        getWalletBalance().then((res) => {
-          if (typeof res.balance === 'number' && onSuccess) {
-            onSuccess(res.balance);
-          }
-        }).catch(() => {});
-      }, 15_000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "";
       if (msg.includes("not available") || msg.includes("not configured")) {
@@ -236,27 +227,26 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               Select how you want to pay for your tokens.
             </p>
 
-            {/* Card */}
+            {/* Card via ePayco */}
             <button
               onClick={() => setBuyMethod('card')}
-              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-green-500/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-pink-500/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
             >
-              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(76,175,80,0.15)" }}>
-                <svg className="w-5 h-5" style={{ color: "#4CAF50" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <rect x="2" y="5" width="20" height="14" rx="2" ry="2" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2 10h20" />
+              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(212,0,122,0.15)" }}>
+                <svg className="w-5 h-5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                 </svg>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-pnp-textPrimary">Buy with Card</p>
-                <p className="text-xs text-pnp-textSecondary truncate">Stripe checkout for Visa, Mastercard, and more</p>
+                <p className="text-sm font-semibold text-pnp-textPrimary">Credit / Debit Card</p>
+                <p className="text-xs text-pnp-textSecondary truncate">Visa &amp; Mastercard via ePayco</p>
               </div>
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
             </button>
 
-            {/* Dash / Privacy */}
+            {/* Dash crypto */}
             <button
               onClick={() => setBuyMethod('dash')}
               className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-sky-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
@@ -412,8 +402,9 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           <>
             {/* Method explanation */}
             <p className="text-xs text-pnp-textSecondary mb-4 leading-relaxed">
-              {buyMethod === 'card' && "Pay instantly with Stripe Checkout. Your card details are processed by Stripe and never stored on our servers."}
-              {buyMethod === 'dash' && "Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed."}
+              {buyMethod === 'card'
+                ? 'Pay with Visa or Mastercard via ePayco. You\'ll be redirected to a secure checkout page.'
+                : 'Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed.'}
             </p>
 
             {buyError && <p className="text-xs text-pnp-error mb-3">{buyError}</p>}
@@ -427,14 +418,14 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 {tokenPackages.map((pkg) => (
                   <button
                     key={pkg.id}
-                    onClick={() => handleBuyTokens(pkg)}
+                    onClick={() => buyMethod === 'card' ? handleBuyTokensCard(pkg) : handleBuyTokens(pkg)}
                     disabled={buyingPackage === pkg.id}
                     className="p-3 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-pnp-accent/50 active:scale-[0.98] transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
                   >
                     <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
                     <p className="text-xs text-pnp-textSecondary">{t.live.tokensLabel}</p>
                     <p className="text-sm font-semibold mt-1" style={{
-                      color: buyMethod === 'card' ? '#4CAF50' : '#008CE7'
+                      color: buyMethod === 'card' ? '#D4007A' : '#008CE7'
                     }}>${pkg.usd}</p>
                     {buyingPackage === pkg.id && (
                       <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.opening}</p>

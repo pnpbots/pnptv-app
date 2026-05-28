@@ -5,12 +5,12 @@ import { useLifetime100Strings, type Lifetime100Strings } from "@/lib/i18n/lifet
 import { useAuth } from "@/hooks/useAuth";
 import { isTelegramContext } from "@/lib/telegram";
 import {
-  createStripeCheckout,
   getPaymentStatus,
   createDashSubscription,
   getDashSubscriptionStatus,
   getDashAvailable,
   getDashPaymentDetails,
+  createPayment,
   assertPaymentUrl,
   ApiError,
 } from "@/lib/api";
@@ -79,7 +79,7 @@ const SHEET_STRINGS: Record<SheetLang, {
       title: "Payments",
       lead: "Multiple ways to pay — pick what works for you.",
       cards: [
-        { e: "💳", t: "Credit & Debit Card", b: "Visa, Mastercard via Stripe. Fast and familiar." },
+        { e: "💳", t: "Credit & Debit Card", b: "Visa, Mastercard via ePayco. Fast and familiar." },
         { e: "⚡", t: "Crypto (Dash)", b: "Pay with Dash via BTCPay. Near-instant, low fees." },
         { e: "🪙", t: "PNP Tokens", b: "Buy tokens inside the app for tips, subscriptions & exclusive content." },
       ],
@@ -147,7 +147,7 @@ const SHEET_STRINGS: Record<SheetLang, {
       title: "Pagos",
       lead: "Varias formas de pagar — elige la que te funcione.",
       cards: [
-        { e: "💳", t: "Tarjeta crédito y débito", b: "Visa, Mastercard vía Stripe. Rápido y familiar." },
+        { e: "💳", t: "Tarjeta crédito y débito", b: "Visa, Mastercard vía ePayco. Rápido y familiar." },
         { e: "⚡", t: "Cripto (Dash)", b: "Paga con Dash vía BTCPay. Casi instantáneo, comisiones bajas." },
         { e: "🪙", t: "PNP Tokens", b: "Compra tokens dentro de la app para propinas, suscripciones y contenido exclusivo." },
       ],
@@ -995,7 +995,7 @@ function ActivateView({ s, initialCode }: ActivateViewProps) {
 // ── Direct-payment types ───────────────────────────────────────────────────────
 
 const PLAN_ID = "lifetime100";
-type PayMethod = "stripe" | "dash";
+type PayMethod = "epayco" | "dash";
 type DashInvoice = {
   invoiceId: string;
   checkoutUrl: string;
@@ -1025,7 +1025,7 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
   const es = lang.startsWith("es");
 
   // Payment method selector
-  const [payMethod, setPayMethod] = useState<PayMethod>("stripe");
+  const [payMethod, setPayMethod] = useState<PayMethod>("dash");
 
   // Direct payment state
   const [submitting, setSubmitting] = useState(false);
@@ -1077,13 +1077,6 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
     poll();
     return () => { cancelled = true; if (timerId) clearTimeout(timerId); };
   }, [pollingPaymentId, refreshUser, es]);
-
-  useEffect(() => {
-    if (searchParams.get("stripe_paid") !== "1") return;
-    window.history.replaceState({}, "", window.location.pathname);
-    setPaymentSuccess(true);
-    refreshUser().catch(() => {});
-  }, [searchParams, refreshUser]);
 
   // Dash invoice polling
   useEffect(() => {
@@ -1150,7 +1143,14 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
     if (submitting || dashInvoice) return;
     setSubmitting(true); setPayError(null);
     try {
-      if (payMethod === "dash") {
+      if (payMethod === "epayco") {
+        const result = await createPayment(PLAN_ID, "epayco");
+        if (result.success && result.paymentUrl) {
+          window.location.href = result.paymentUrl;
+        } else {
+          setPayError(result.error || (es ? "Error al iniciar el pago." : "Failed to start payment."));
+        }
+      } else if (payMethod === "dash") {
         const result = await createDashSubscription(PLAN_ID);
         if (result.success && result.checkoutUrl) {
           const invoice: DashInvoice = { invoiceId: result.invoiceId, checkoutUrl: assertPaymentUrl(result.checkoutUrl), planName: result.planName || "Lifetime Prime", loadingDetails: true, createdAt: Date.now() };
@@ -1166,17 +1166,7 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
           setPayError(es ? "No se pudo crear la factura Dash." : "Failed to create Dash invoice. Please try again.");
         }
       } else {
-        const result = await createStripeCheckout({ planId: PLAN_ID, priceId: "", sku: PLAN_ID });
-        if (result.success && result.checkoutUrl) {
-          const safeUrl = assertPaymentUrl(result.checkoutUrl);
-          if (isTelegramContext()) { window.Telegram!.WebApp.openLink(safeUrl); }
-          else {
-            const win = window.open(safeUrl, "_blank", "noopener,noreferrer");
-            if (win === null) { setPayError(es ? "Popup bloqueado — abriendo en esta pestaña..." : "Popup blocked — opening checkout in this tab…"); window.location.href = safeUrl; }
-          }
-        } else {
-          setPayError(result.error || (es ? "Error al iniciar el pago." : "Failed to create payment."));
-        }
+        setPayError(es ? "Método de pago no soportado." : "Unsupported payment method.");
       }
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -1188,26 +1178,19 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
   }
 
   const handleCtaClick = () => {
-    if (payMethod === "dash" && dashInvoice) { cancelDash(); }
+    if (dashInvoice) { cancelDash(); }
     else { handleDirectPay(); }
   };
 
-  const ctaDisabled = (() => {
-    if (payMethod === "dash") return submitting || dashAvailable === false;
-    return submitting || !!pollingPaymentId;
-  })();
+  const ctaDisabled = submitting || (payMethod === "dash" && dashAvailable === false);
 
   const ctaLabel = (() => {
     if (submitting) return es ? "Procesando…" : "Processing…";
-    if (payMethod === "dash") {
-      if (dashAvailable === false) return es ? "Dash no disponible" : "Dash unavailable";
-      if (dashInvoice) return es ? "Cancelar Dash" : "Cancel Dash";
-      if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
-      return es ? "Pagar con Dash — $79.99 (20% off)" : "Pay with Dash — $79.99 (20% off)";
-    }
-    if (pollingPaymentId) return es ? "Esperando pago…" : "Waiting for payment…";
+    if (payMethod === "epayco") return es ? "Pagar con tarjeta — $99.99" : "Pay by card — $99.99";
+    if (dashAvailable === false) return es ? "Dash no disponible" : "Dash unavailable";
+    if (dashInvoice) return es ? "Cancelar Dash" : "Cancel Dash";
     if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
-    return es ? "Pagar con tarjeta — $99.99" : "Pay with card — $99.99";
+    return es ? "Pagar con Dash — $79.99 (20% off)" : "Pay with Dash — $79.99 (20% off)";
   })();
 
   // Direct-payment success screen
@@ -1450,31 +1433,31 @@ function HeroView({ s, available, availabilityLoading, lang, onLangChange, onOpe
             {es ? "¿Cómo quieres pagar?" : "How do you want to pay?"}
           </p>
           <div style={{ display: "flex", gap: 6 }}>
-            {([
-              { id: "stripe" as PayMethod, emoji: "💳", label: es ? "Tarjeta" : "Card", sublabel: "Visa / Mastercard", disabled: false },
-              { id: "dash" as PayMethod, emoji: "🥷", label: "Crypto", sublabel: es ? "$79.99 · 20% off" : "$79.99 · 20% off", disabled: dashAvailable === false },
-            ]).map(({ id, emoji, label, sublabel, disabled }) => {
-              const sel = payMethod === id;
-              return (
-                <button
-                  key={id}
-                  onClick={() => { if (!disabled) { setPayMethod(id); setPayError(null); } }}
-                  disabled={disabled}
-                  style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, padding: "8px 4px", borderRadius: 12, border: `1.5px solid ${sel ? "rgba(255,153,51,0.75)" : "rgba(255,255,255,0.10)"}`, background: sel ? "rgba(255,153,51,0.13)" : "rgba(255,255,255,0.03)", color: sel ? "#ff9933" : disabled ? "#636366" : "#cfcfd4", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1, position: "relative", boxShadow: sel ? "0 0 16px rgba(255,153,51,0.22)" : "none", transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s" }}
-                >
-                  <span style={{ fontSize: 18, lineHeight: 1, marginBottom: 2 }}>{emoji}</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>{label}</span>
-                  <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.65, lineHeight: 1.3, textAlign: "center", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sublabel}</span>
-                  {id === "dash" && dashAvailable !== false && (
-                    <span style={{ position: "absolute", top: -5, right: -4, fontSize: 7, fontWeight: 800, background: "#ff3377", color: "#fff", padding: "1px 4px", borderRadius: 99, lineHeight: 1.4, letterSpacing: "0.03em" }}>20% OFF</span>
-                  )}
-                </button>
-              );
-            })}
+            <button
+              onClick={() => { setPayMethod("epayco"); setPayError(null); if (dashInvoice) cancelDash(); }}
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, padding: "8px 4px", borderRadius: 12, border: payMethod === "epayco" ? "1.5px solid #D4007A" : "1.5px solid rgba(212,0,122,0.35)", background: payMethod === "epayco" ? "rgba(212,0,122,0.15)" : "rgba(212,0,122,0.06)", color: "#D4007A", cursor: "pointer", transition: "border-color 0.15s, background 0.15s" }}
+            >
+              <span style={{ fontSize: 18, lineHeight: 1, marginBottom: 2 }}>💳</span>
+              <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>{es ? "Tarjeta" : "Card"}</span>
+              <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.65, lineHeight: 1.3, textAlign: "center" }}>$99.99</span>
+            </button>
+            <button
+              onClick={() => { if (dashAvailable !== false) { setPayMethod("dash"); setPayError(null); } }}
+              disabled={dashAvailable === false}
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, padding: "8px 4px", borderRadius: 12, border: payMethod === "dash" ? "1.5px solid rgba(255,153,51,0.75)" : "1.5px solid rgba(255,153,51,0.35)", background: payMethod === "dash" ? "rgba(255,153,51,0.13)" : "rgba(255,153,51,0.06)", color: dashAvailable === false ? "#636366" : "#ff9933", cursor: dashAvailable === false ? "not-allowed" : "pointer", opacity: dashAvailable === false ? 0.45 : 1, position: "relative", transition: "border-color 0.15s, background 0.15s" }}
+            >
+              <span style={{ fontSize: 18, lineHeight: 1, marginBottom: 2 }}>🥷</span>
+              <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>Crypto</span>
+              <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.65, lineHeight: 1.3, textAlign: "center" }}>{es ? "$79.99 · 20% off" : "$79.99 · 20% off"}</span>
+              {dashAvailable !== false && (
+                <span style={{ position: "absolute", top: -5, right: -4, fontSize: 7, fontWeight: 800, background: "#ff3377", color: "#fff", padding: "1px 4px", borderRadius: 99, lineHeight: 1.4, letterSpacing: "0.03em" }}>20% OFF</span>
+              )}
+            </button>
           </div>
           <p style={{ margin: "6px 0 0", fontSize: 10, color: "rgba(207,207,212,0.45)", textAlign: "center", lineHeight: 1.4, minHeight: 14 }}>
-            {payMethod === "stripe" && (es ? "Paga con Visa o Mastercard de forma segura vía Stripe." : "Pay securely with Visa or Mastercard via Stripe.")}
-            {payMethod === "dash" && (es ? "Criptomoneda Dash — rápido, sin nombre, sin banco." : "Dash crypto — fast, no name, no bank required.")}
+            {payMethod === "epayco"
+              ? (es ? "Visa / Mastercard vía ePayco · Pago seguro" : "Visa / Mastercard via ePayco · Secure checkout")
+              : (es ? "Criptomoneda Dash — rápido, sin nombre, sin banco." : "Dash crypto — fast, no name, no bank required.")}
           </p>
         </div>
 

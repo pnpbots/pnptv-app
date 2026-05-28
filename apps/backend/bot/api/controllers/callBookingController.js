@@ -99,9 +99,9 @@ async function resolveBooking(rawId, callerUserId) {
 
 /**
  * Create a payment intent for a call package.
- * Body: { packageId: number, provider: 'stripe', email: string,
+ * Body: { packageId: number, provider: 'epayco', email: string,
  *         startTimeUtc?: string, endTimeUtc?: string }
- * Dash payments use POST /book-call/checkout/dash instead.
+ * Only ePayco (card redirect) is accepted. Dash uses /book-call/checkout/dash.
  */
 async function createCheckout(req, res) {
   try {
@@ -116,10 +116,77 @@ async function createCheckout(req, res) {
     if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
     }
-    if (!provider || !['stripe'].includes(provider)) {
-      // Dash is handled by the dedicated /book-call/checkout/dash endpoint
-      // since it needs startTime/endTime params and a BTCPay invoice flow.
-      return res.status(400).json({ success: false, error: 'provider must be stripe (use /book-call/checkout/dash for crypto)' });
+    if (!provider || provider !== 'epayco') {
+      return res.status(400).json({ success: false, error: 'provider must be epayco. For Dash use /book-call/checkout/dash.' });
+    }
+    if (email != null && (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+      return res.status(400).json({ success: false, error: 'Invalid email address' });
+    }
+
+    const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+    let slotTimes = null;
+    if (startTimeUtc || endTimeUtc) {
+      if (!startTimeUtc || !endTimeUtc || !ISO_RE.test(startTimeUtc) || !ISO_RE.test(endTimeUtc)) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc and endTimeUtc must both be ISO 8601 timestamps with timezone' });
+      }
+      const s = new Date(startTimeUtc);
+      const e = new Date(endTimeUtc);
+      if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc or endTimeUtc is not a valid date' });
+      }
+      if (e <= s) {
+        return res.status(400).json({ success: false, error: 'endTimeUtc must be after startTimeUtc' });
+      }
+      if (s <= new Date()) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc must be in the future' });
+      }
+      slotTimes = { startTimeUtc, endTimeUtc };
+    }
+
+    const result = await callCheckoutService.createCallCheckout(
+      memberId,
+      Number(packageId),
+      'epayco',
+      email ? email.trim().toLowerCase() : null,
+      slotTimes
+    );
+
+    return res.status(201).json({ success: true, ...result });
+  } catch (err) {
+    logger.error('[callBookingController] createCheckout error', { error: err.message, code: err.code });
+
+    if (err.code === 'PACKAGE_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Call package not found or inactive' });
+    }
+    if (err.code === 'INVALID_PROVIDER') {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+    if (err.code === 'SLOT_TAKEN') {
+      return res.status(409).json({ success: false, error: 'That time slot is no longer available. Please choose another.', code: 'SLOT_TAKEN' });
+    }
+    if (err.code === 'PERFORMER_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Creator has no performer profile configured.' });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to create checkout' });
+  }
+}
+
+// eslint-disable-next-line no-unused-vars
+async function _createCheckout_retired(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const memberId = String(sessionUser.id);
+
+    const { packageId, provider, email, startTimeUtc, endTimeUtc } = req.body;
+
+    if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
+      return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
+    }
+    if (!provider || provider !== 'dash') {
+      return res.status(400).json({ success: false, error: 'provider must be dash (use /book-call/checkout/dash)' });
     }
     if (!email || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ success: false, error: 'A valid email is required' });
@@ -174,12 +241,6 @@ async function createCheckout(req, res) {
     }
     if (err.code === 'SLOT_TAKEN') {
       return res.status(409).json({ success: false, error: 'That time slot is no longer available. Please choose another.', code: 'SLOT_TAKEN' });
-    }
-    if (err.code === 'STRIPE_ACCOUNT_NOT_ACTIVATED') {
-      return res.status(503).json({ success: false, error: 'Card payments are temporarily unavailable. Please try Dash or contact support.', code: 'STRIPE_ACCOUNT_NOT_ACTIVATED' });
-    }
-    if (err.code === 'STRIPE_SESSION_FAILED') {
-      return res.status(502).json({ success: false, error: 'Payment provider error. Please try again or use Dash.', code: 'STRIPE_SESSION_FAILED' });
     }
     return res.status(500).json({ success: false, error: 'Failed to create checkout' });
   }

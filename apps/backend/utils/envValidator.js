@@ -30,10 +30,6 @@ const OPTIONAL_ENV_VARS = [
   'EPAYCO_TEST_MODE',
   'DAIMO_API_KEY',
   'DAIMO_WEBHOOK_SECRET',
-  'STRIPE_PUBLISHABLE_KEY',
-  'STRIPE_SECRET_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-  'STRIPE_ALLOW_RESTRICTED_KEY',
   'NOWPAYMENTS_API_KEY',
   'NOWPAYMENTS_PUBLIC_KEY',
   'NOWPAYMENTS_IPN_SECRET',
@@ -45,7 +41,6 @@ const OPTIONAL_ENV_VARS = [
 const ENV_VAR_GROUPS = {
   payment_epayco: ['EPAYCO_PUBLIC_KEY', 'EPAYCO_PRIVATE_KEY'],
   payment_daimo: ['DAIMO_API_KEY', 'DAIMO_WEBHOOK_SECRET'],
-  payment_stripe: ['STRIPE_PUBLISHABLE_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'],
   payment_btcpay: ['BTCPAY_URL', 'BTCPAY_API_KEY', 'BTCPAY_WEBHOOK_SECRET'],
   payment_nowpayments: ['NOWPAYMENTS_API_KEY', 'NOWPAYMENTS_PUBLIC_KEY', 'NOWPAYMENTS_IPN_SECRET'],
   monitoring: ['SENTRY_DSN'],
@@ -138,7 +133,6 @@ function isFeatureEnabled(feature) {
   const featureMap = {
     epayco: ENV_VAR_GROUPS.payment_epayco,
     daimo: ENV_VAR_GROUPS.payment_daimo,
-    stripe: ENV_VAR_GROUPS.payment_stripe,
     sentry: ENV_VAR_GROUPS.monitoring,
     openai: ENV_VAR_GROUPS.ai,
   };
@@ -164,7 +158,6 @@ function printEnvSummary() {
   console.log('\nFeature Configuration:');
   console.log(`  - ePayco Payments: ${isFeatureEnabled('epayco') ? '✓' : '✗'}`);
   console.log(`  - Daimo Payments: ${isFeatureEnabled('daimo') ? '✓' : '✗'}`);
-  console.log(`  - Stripe Payments: ${isFeatureEnabled('stripe') ? '✓' : '✗'}`);
   console.log(`  - Sentry Monitoring: ${isFeatureEnabled('sentry') ? '✓' : '✗'}`);
   console.log(`  - OpenAI Integration: ${isFeatureEnabled('openai') ? '✓' : '✗'}`);
   console.log('================================\n');

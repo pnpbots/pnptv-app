@@ -23,9 +23,8 @@ import { useI18n } from "@/lib/i18n";
 import {
   getCreatorCallPackages,
   getBookingOptions,
-  createCallCheckout,
   createCallCheckoutDash,
-  createStripeCheckout,
+  createCallCheckoutEpayco,
   getBookingPaymentStatus,
   assertPaymentUrl,
   type CallPackage,
@@ -37,7 +36,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "stripe" | "dash";
+type Provider = "epayco" | "dash";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -153,7 +152,7 @@ export function BookCallModal({
   const [isOnline, setIsOnline] = useState(initialIsOnline);
   const [duration, setDuration] = useState<30 | 60>(initialDuration);
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
-  const [provider, setProvider] = useState<Provider>("stripe");
+  const [provider, setProvider] = useState<Provider>("dash");
   const [email, setEmail] = useState("");
 
   // ── Data state ──────────────────────────────────────────────────────────────
@@ -232,7 +231,7 @@ export function BookCallModal({
     setIsOnline(initialIsOnline);
     setDuration(initialDuration);
     setSelectedSlot(null);
-    setProvider("stripe");
+    setProvider("dash");
     setEmail("");
     setCheckoutError(null);
     setConfirmedStartAt(null);
@@ -435,6 +434,21 @@ export function BookCallModal({
     setCheckoutError(null);
 
     try {
+      // ePayco — redirect to hosted card checkout
+      if (provider === "epayco") {
+        const epaycoRes = await createCallCheckoutEpayco(
+          activePackage.id,
+          selectedSlot?.startUtc ?? undefined,
+          selectedSlot?.endUtc ?? undefined
+        );
+        if (epaycoRes.checkoutUrl || epaycoRes.paymentUrl) {
+          window.location.href = epaycoRes.checkoutUrl || epaycoRes.paymentUrl;
+        } else {
+          setCheckoutError(t.creator.checkoutFailed);
+        }
+        return;
+      }
+
       // Dash uses a separate endpoint that creates a BTCPay invoice
       if (provider === "dash") {
         const dashRes = await createCallCheckoutDash(
@@ -510,27 +524,20 @@ export function BookCallModal({
         return;
       }
 
-      // Stripe Checkout — call the backend to create a Checkout Session,
-      // then redirect to the Stripe-hosted page.
-      const callPayload = {
-        packageId: activePackage.id,
-        provider: provider as "stripe",
-        email,
-        quantity: 1,
-        selectedSlot: selectedSlot?.startUtc ?? null,
-        ...(selectedSlot?.startUtc && selectedSlot?.endUtc
-          ? { startTimeUtc: selectedSlot.startUtc, endTimeUtc: selectedSlot.endUtc }
-          : {}),
-      };
-      const res = await createCallCheckout(callPayload);
+      // Dash checkout via dedicated endpoint
+      const res = await createCallCheckoutDash(
+        activePackage.id,
+        selectedSlot?.startUtc,
+        selectedSlot?.endUtc
+      );
 
-      if (provider === "stripe" && res.checkoutUrl) {
-        // Stripe redirects back to success_url after payment — same-tab navigation
-        window.location.href = assertPaymentUrl(res.checkoutUrl);
-        return;
+      if (res.checkoutUrl) {
+        const safeUrl = assertPaymentUrl(res.checkoutUrl);
+        window.open(safeUrl, "_blank", "noopener,noreferrer");
+        setDashPaymentId(res.paymentId);
       }
 
-      setConfirmedStartAt(res.startAt ?? null);
+      setConfirmedStartAt(null);
       setStep("SUCCESS");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t.creator.checkoutFailed;
@@ -1096,32 +1103,30 @@ export function BookCallModal({
         </div>
       </div>
 
-      {/* Payment provider toggle */}
+      {/* Payment method selector */}
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider mb-2.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.paymentMethodLabel}</p>
         <div className="flex gap-2">
-          {(["stripe", "dash"] as Provider[]).map((p) => {
-            const label = p === "stripe" ? t.creator.payMethodCard : "Dash";
-            return (
-              <button
-                key={p}
-                type="button"
-                aria-pressed={provider === p}
-                onClick={() => setProvider(p)}
-                className={clsx(
-                  "flex-1 min-h-[44px] rounded-xl text-sm font-semibold transition-all duration-150 active:scale-[0.97]",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-                )}
-                style={
-                  provider === p
-                    ? { background: "rgba(212,0,122,0.16)", border: "1.5px solid #D4007A", color: "#D4007A" }
-                    : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "var(--pnp-text-secondary, #8E8E93)" }
-                }
-              >
-                {label}
-              </button>
-            );
-          })}
+          <button
+            type="button"
+            onClick={() => setProvider("epayco")}
+            className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+            style={provider === "epayco"
+              ? { background: "rgba(212,0,122,0.16)", border: "1.5px solid #D4007A", color: "#D4007A" }
+              : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+          >
+            💳 Card
+          </button>
+          <button
+            type="button"
+            onClick={() => setProvider("dash")}
+            className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+            style={provider === "dash"
+              ? { background: "rgba(212,0,122,0.16)", border: "1.5px solid #D4007A", color: "#D4007A" }
+              : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+          >
+            🥷 Dash
+          </button>
         </div>
       </div>
 

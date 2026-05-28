@@ -433,8 +433,8 @@ function registerPromoHandlers(bot) {
         : `https://app.pnptv.app/subscribe?promo=${encodeURIComponent(promoCode)}`;
       await ctx.editMessageText(
         lang === 'es'
-          ? '💳 *Pago con tarjeta*\n\nLos pagos con tarjeta ahora se hacen en la app web con Stripe.\n\nAbre el checkout para continuar.'
-          : '💳 *Card payment*\n\nCard checkout now runs in the web app with Stripe.\n\nOpen checkout to continue.',
+          ? '💳 *Pago con tarjeta*\n\nLos pagos con tarjeta ahora se hacen en la app web.\n\nAbre el checkout para continuar.'
+          : '💳 *Card payment*\n\nCard checkout now runs in the web app.\n\nOpen checkout to continue.',
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([

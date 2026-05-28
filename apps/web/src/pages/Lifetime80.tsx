@@ -4,6 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useAuth } from "@/hooks/useAuth";
 import { isTelegramContext } from "@/lib/telegram";
 import {
+  createPayment,
   createDashSubscription,
   getDashSubscriptionStatus,
   getDashAvailable,
@@ -478,7 +479,7 @@ function SheetModal({ sheet, onClose }: { sheet: { title: string; emoji: string;
 
 // ── Payment types ──────────────────────────────────────────────────────────────
 
-type PayMethod = "dash" | "usdc";
+type PayMethod = "epayco" | "dash" | "usdc";
 
 type DashInvoice = {
   invoiceId: string;
@@ -500,7 +501,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
   const s = S[lang];
   const es = lang === "es";
 
-  const [payMethod, setPayMethod] = useState<PayMethod>("dash");
+  const [payMethod, setPayMethod] = useState<PayMethod>("epayco");
   const [submitting, setSubmitting] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
@@ -534,7 +535,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
     } catch { /* ignore */ }
   }, []);
 
-  // Resume Stripe-like USDC polling (order opened in external tab)
+  // Resume USDC polling (order opened in external tab)
   useEffect(() => {
     if (searchParams.get("usdc_paid") !== "1") return;
     window.history.replaceState({}, "", window.location.pathname);
@@ -644,7 +645,15 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
     if (submitting || (payMethod === "dash" && dashInvoice)) return;
     setSubmitting(true); setPayError(null);
     try {
-      if (payMethod === "dash") {
+      if (payMethod === "epayco") {
+        const result = await createPayment("lifetime80", "epayco");
+        if (result.success && result.paymentUrl) {
+          window.location.href = result.paymentUrl;
+        } else {
+          setPayError(result.error || (es ? "No se pudo iniciar el pago." : "Failed to initiate payment."));
+        }
+        return;
+      } else if (payMethod === "dash") {
         const result = await createDashSubscription(PLAN_ID);
         if (result.success && result.checkoutUrl) {
           const invoice: DashInvoice = { invoiceId: result.invoiceId, checkoutUrl: assertPaymentUrl(result.checkoutUrl), planName: result.planName || "Lifetime Prime $80", loadingDetails: true, createdAt: Date.now() };
@@ -695,6 +704,10 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
 
   const ctaLabel = (() => {
     if (submitting) return es ? "Procesando…" : "Processing…";
+    if (payMethod === "epayco") {
+      if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
+      return es ? "Pagar con Tarjeta — $80" : "Pay with Card — $80";
+    }
     if (payMethod === "dash") {
       if (dashUnavailable) return es ? "Dash no disponible" : "Dash unavailable";
       if (dashInvoice) return es ? "Cancelar Dash" : "Cancel Dash";

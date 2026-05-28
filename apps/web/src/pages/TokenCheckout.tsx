@@ -167,13 +167,6 @@ export default function TokenCheckout() {
       return;
     }
 
-    // Stripe redirect — user paid and Stripe sent them back with ?stripe=success
-    if (searchParams.get("stripe") === "success") {
-      setState("pending");
-      startPolling(purchaseId);
-      return;
-    }
-
     getTokenCheckoutData(purchaseId)
       .then((res) => {
         if (!res.success) {
@@ -194,12 +187,7 @@ export default function TokenCheckout() {
           setState("error");
           return;
         }
-        if ((res.provider as string) !== "stripe") {
-          setError("This payment method is no longer available. Please start a new purchase from your wallet.");
-          setState("error");
-          return;
-        }
-        // Stripe purchase still pending — poll until the webhook fires
+        // Pending — poll until webhook fires
         setState("pending");
         startPolling(purchaseId);
       })

@@ -48,7 +48,7 @@ function escapeHtml(str) {
  *
  * @param {string} memberId    - users.id of the purchasing member
  * @param {number} packageId   - call_packages.id
- * @param {string} provider    - 'stripe' (Dash uses createCallCheckoutDash)
+ * @param {string} provider    - reserved, must be 'dash' (use createCallCheckoutDash)
  * @param {string} email       - member email for payment confirmation
  * @param {object|null} slotTimes - optional { startTimeUtc, endTimeUtc } for slot-locked bookings
  * @returns {{ paymentId: string, checkoutUrl: string, amount: number, currency: string, sku: string }}
@@ -66,8 +66,9 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     throw err;
   }
 
-  if (!['stripe'].includes(provider)) {
-    const err = new Error(`Invalid payment provider: ${provider}`);
+  // Only Dash (BTCPay) and ePayco (card) are supported for call checkouts.
+  if (provider !== 'dash' && provider !== 'epayco') {
+    const err = new Error(`Invalid payment provider: ${provider}. Supported: epayco, dash.`);
     err.code = 'INVALID_PROVIDER';
     throw err;
   }
@@ -144,97 +145,13 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     }
   }
 
-  // 3. Build checkout URL
+  // Build the checkout URL based on provider
   let checkoutUrl;
-  if (provider === 'stripe') {
-    // Stripe Checkout Session — one-time payment.
-    // payment_id is threaded into the session metadata so the webhook
-    // handler can call onCallPaymentSuccess(paymentId) after confirmation.
-    const { createStripeClient } = require('../config/stripe');
-    const stripeService = require('./stripeService');
-    const stripe = createStripeClient();
-    const WEB_APP = process.env.WEB_APP_URL || 'https://pnptv.app';
-
-    let userEmail;
-    try {
-      const { rows: userRows } = await query('SELECT email FROM users WHERE id = $1', [memberId]);
-      userEmail = userRows[0]?.email || undefined;
-    } catch (_) { /* non-fatal */ }
-
-    const customerId = await stripeService.getOrCreateCustomer(memberId, userEmail);
-
-    const bookingId = paymentMetadata.bookingId || null;
-    const successPath = bookingId
-      ? `/booking/${bookingId}/confirm`
-      : `/dashboard?stripe=success&session_id={CHECKOUT_SESSION_ID}`;
-
-    let session;
-    try {
-      session = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        payment_method_types: ['card', 'link'],
-        line_items: [{
-          quantity: 1,
-          price_data: {
-            currency: 'usd',
-            unit_amount: Math.round(parseFloat(pkg.price_usd) * 100),
-            product_data: {
-              name: `${pkg.duration_minutes}-min Video Session`,
-              description: 'Online video session',
-            },
-          },
-        }],
-        customer: customerId,
-        success_url: `${WEB_APP}${successPath}`,
-        cancel_url: `${WEB_APP}/`,
-        billing_address_collection: 'required',
-        phone_number_collection: { enabled: true },
-        payment_method_options: { card: { request_three_d_secure: 'automatic' } },
-        metadata: {
-          user_id: String(memberId),
-          payment_id: payment.id,
-          payment_type: 'call_package',
-          package_id: String(pkg.id),
-          package_sku: pkg.sku || '',
-        },
-      });
-    } catch (stripeErr) {
-      // Stripe session failed — expire the pre-created booking and mark payment failed
-      // so the slot is freed and the DB doesn't accumulate orphaned awaiting_payment rows.
-      if (bookingId) {
-        await query(
-          `UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`,
-          [bookingId]
-        ).catch(() => {});
-      }
-      await query(
-        `UPDATE payments SET status = 'failed', updated_at = NOW(),
-         metadata = metadata || $2::jsonb WHERE id = $1`,
-        [payment.id, JSON.stringify({ error_reason: stripeErr.message?.slice(0, 500) })]
-      ).catch(() => {});
-
-      // Surface a clear error code so the controller can return a meaningful response
-      const err = new Error(stripeErr.message || 'Stripe checkout creation failed');
-      err.code = stripeErr.code || 'STRIPE_SESSION_FAILED';
-      err.stripeType = stripeErr.type;
-      if (stripeErr.message?.includes('cannot currently make live charges')) {
-        err.code = 'STRIPE_ACCOUNT_NOT_ACTIVATED';
-      }
-      throw err;
-    }
-
-    checkoutUrl = session.url;
-
-    // Store stripe_session_id on the payment row for idempotency
-    await query(
-      `UPDATE payments
-         SET stripe_session_id = $2,
-             metadata = metadata || $3::jsonb,
-             updated_at = NOW()
-       WHERE id = $1`,
-      [payment.id, session.id, JSON.stringify({ stripe_session_id: session.id, payment_url: session.url })]
-    );
+  if (provider === 'epayco') {
+    checkoutUrl = `${CHECKOUT_DOMAIN}/payment/${payment.id}`;
   }
+  // Dash provider reaches here only via the legacy _createCheckout_retired path;
+  // normal Dash flow uses createCallCheckoutDash() which constructs its own BTCPay URL.
 
   logger.info('[callCheckoutService] checkout created', {
     paymentId: payment.id,
@@ -322,13 +239,12 @@ async function onCallPaymentSuccess(paymentId) {
     );
 
     // Confirm the bookings row that was pre-created at checkout time (Dash flow).
-    // For Stripe without a pre-slot, startTimeUtc/endTimeUtc come from payment metadata.
-    // ON CONFLICT: a booking row may not exist (Stripe path without pre-slot) — that is OK.
+    // ON CONFLICT: a booking row may not exist when times were not provided — that is OK.
     const bookingMeta = meta.startTimeUtc && meta.endTimeUtc ? meta : null;
     let confirmedBookingId = meta.bookingId || null;
 
     if (!confirmedBookingId) {
-      // Stripe path: no pre-created booking row. Create one now if times are provided.
+      // No pre-created booking row. Create one now if times are provided.
       if (bookingMeta) {
         const pkgForBooking = pkgResult.rows[0];
         const performerRes = await client.query(
@@ -652,7 +568,7 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
 
     // 4. Slot-lock + insert booking row only when slot times are provided.
     // When null (creator is online / "NOW" flow), the booking is created later
-    // in onCallPaymentSuccess after BTCPay confirms — same pattern as Stripe.
+    // in onCallPaymentSuccess after BTCPay confirms.
     if (startTimeUtc && endTimeUtc) {
       booking = await _lockSlotAndInsertBooking(client, {
         performerId,

@@ -91,9 +91,10 @@ class InvoiceService {
     doc.fontSize(10).fill(DARK);
     doc.text(planName || 'Subscription', 60, y + 10, { width: 250 });
     const PROVIDER_LABELS = {
-      stripe: 'Stripe',
       dash: 'Dash (BTCPay)',
+      btcpay: 'Dash (BTCPay)',
       epayco: 'ePayco',
+      nowpayments: 'USDC (NowPayments)',
       daimo: 'Daimo Pay (legacy)',
     };
     const providerLabel = PROVIDER_LABELS[provider] || provider || 'Unknown';

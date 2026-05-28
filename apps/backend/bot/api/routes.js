@@ -1830,224 +1830,6 @@ app.post('/api/webhook/epayco', webhookLimiter, webhookController.handleEpaycoWe
 app.post('/checkout/pnp', webhookLimiter, webhookController.handleEpaycoWebhook);
 app.post('/checkout/pnp/confirmation', webhookLimiter, webhookController.handleEpaycoWebhook);
 
-// Stripe webhook — checkout.session.completed, subscription events, invoice events
-// The global express.json() verify callback (line ~291) already stores the raw body
-// buffer in req.rawBody — handleStripeWebhook reads that directly.
-app.post(
-  '/api/webhooks/stripe',
-  webhookLimiter,
-  asyncHandler(webhookController.handleStripeWebhook)
-);
-
-// ── Stripe checkout / portal routes (authenticated) ───────────────────────────
-
-const stripeService = require('../../services/stripeService');
-
-// POST /api/webapp/payments/stripe/checkout — one-time payment checkout
-app.post('/api/webapp/payments/stripe/checkout', requireSessionAuth, asyncHandler(async (req, res) => {
-  const userId = req.user.id;
-  const { planId, sku, metadata } = req.body;
-
-  if (!planId) {
-    return res.status(400).json({ success: false, error: 'planId is required' });
-  }
-
-  const pg = require('../../config/postgres');
-  const { rows: planRows } = await pg.query(
-    'SELECT stripe_price_id FROM plans WHERE id = $1 AND active = true',
-    [planId]
-  );
-  const priceId = planRows[0]?.stripe_price_id;
-  if (!priceId) {
-    return res.status(400).json({ success: false, error: 'This plan is not available for card payment' });
-  }
-
-  const RESERVED_META = new Set(['user_id', 'plan_id', 'sku', 'payment_type', 'payment_id']);
-  const safeMetadata = Object.fromEntries(
-    Object.entries(metadata || {}).filter(([k]) => !RESERVED_META.has(k))
-  );
-  if (safeMetadata.promo_code) {
-    return res.status(400).json({
-      success: false,
-      error: 'Promo codes are not supported on Stripe checkout yet. Please use Dash or the standard checkout flow.',
-    });
-  }
-
-  const _stripeDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
-  const returnPath = planId === 'lifetime100' ? '/lifetime100' : '/subscribe';
-  const successUrl = `${_stripeDomain}${returnPath}?stripe_paid=1&plan=${encodeURIComponent(planId)}&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `${_stripeDomain}${planId === 'lifetime100' ? '/lifetime100' : '/'}`;
-
-  let email;
-  try {
-    const { rows } = await pg.query(
-      'SELECT email FROM users WHERE id = $1',
-      [userId]
-    );
-    email = rows[0]?.email || undefined;
-  } catch (_) { /* non-fatal */ }
-
-  const { sessionId, url } = await stripeService.createCheckoutSession({
-    userId,
-    planId,
-    sku: sku || '',
-    priceId,
-    successUrl,
-    cancelUrl,
-    customerEmail: email,
-    metadata: safeMetadata,
-  });
-
-  return res.json({ success: true, sessionId, checkoutUrl: url });
-}));
-
-// POST /api/webapp/payments/stripe/subscription — recurring subscription checkout
-app.post('/api/webapp/payments/stripe/subscription', requireSessionAuth, asyncHandler(async (req, res) => {
-  const userId = req.user.id;
-  const { planId, sku, metadata } = req.body;
-
-  if (!planId) {
-    return res.status(400).json({ success: false, error: 'planId is required' });
-  }
-
-  const pg = require('../../config/postgres');
-  const { rows: planRows } = await pg.query(
-    'SELECT stripe_price_id FROM plans WHERE id = $1 AND active = true',
-    [planId]
-  );
-  const priceId = planRows[0]?.stripe_price_id;
-  if (!priceId) {
-    return res.status(400).json({ success: false, error: 'This plan is not available for card payment' });
-  }
-
-  const RESERVED_META2 = new Set(['user_id', 'plan_id', 'sku', 'payment_type', 'payment_id']);
-  const safeMetadata = Object.fromEntries(
-    Object.entries(metadata || {}).filter(([k]) => !RESERVED_META2.has(k))
-  );
-  if (safeMetadata.promo_code) {
-    return res.status(400).json({
-      success: false,
-      error: 'Promo codes are not supported on Stripe checkout yet. Please use Dash or the standard checkout flow.',
-    });
-  }
-
-  const _stripeDomain2 = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
-  const successUrl = `${_stripeDomain2}/subscribe?stripe_paid=1&plan=${encodeURIComponent(planId)}&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `${_stripeDomain2}/`;
-
-  let email;
-  try {
-    const { rows } = await pg.query(
-      'SELECT email FROM users WHERE id = $1',
-      [userId]
-    );
-    email = rows[0]?.email || undefined;
-  } catch (_) { /* non-fatal */ }
-
-  const { sessionId, url } = await stripeService.createSubscriptionCheckout({
-    userId,
-    planId,
-    sku: sku || '',
-    priceId,
-    successUrl,
-    cancelUrl,
-    customerEmail: email,
-    metadata: safeMetadata,
-  });
-
-  return res.json({ success: true, sessionId, checkoutUrl: url });
-}));
-
-// POST /api/webapp/payments/stripe/portal — customer portal (manage/cancel subscription)
-app.post('/api/webapp/payments/stripe/portal', requireSessionAuth, asyncHandler(async (req, res) => {
-  const userId = req.user.id;
-  const returnUrl = `https://pnptv.app/settings/payments`;
-
-  // Look up the stripe customer id
-  const { rows } = await require('../../config/postgres').query(
-    'SELECT stripe_customer_id, email FROM users WHERE id = $1',
-    [userId]
-  );
-  const user = rows[0];
-
-  let customerId = user?.stripe_customer_id;
-  if (!customerId) {
-    // Create customer on demand so the portal session can be opened
-    customerId = await stripeService.getOrCreateCustomer(userId, user?.email || undefined);
-  }
-
-  const { url } = await stripeService.createCustomerPortalSession(customerId, returnUrl);
-  return res.json({ success: true, url });
-}));
-
-// POST /api/webapp/payments/stripe/creator-subscription — subscribe to a specific creator
-app.post('/api/webapp/payments/stripe/creator-subscription', requireSessionAuth, asyncHandler(async (req, res) => {
-  const userId = req.user.id;
-  const { creatorId } = req.body;
-  if (!creatorId) return res.status(400).json({ success: false, error: 'creatorId is required' });
-
-  if (String(userId) === String(creatorId)) {
-    return res.status(400).json({ success: false, error: 'Cannot subscribe to yourself' });
-  }
-
-  const pg = require('../../config/postgres');
-  const EntitlementAccessService = require('../../services/entitlementAccessService');
-
-  const hasPrime = await EntitlementAccessService.hasEntitlement(userId, 'prime');
-  if (!hasPrime) {
-    return res.status(403).json({ success: false, error: 'PRIME subscription required to subscribe to creators' });
-  }
-
-  // Resolve creator type to determine pricing tier
-  const { rows: creatorRows } = await pg.query(
-    `SELECT u.creator_type, u.creator_status, u.creator_locked
-       FROM users u
-      WHERE u.id = $1::text AND u.role IN ('creator','model')`,
-    [creatorId]
-  );
-  if (!creatorRows.length) return res.status(404).json({ success: false, error: 'Creator not found' });
-  if (creatorRows[0].creator_status !== 'active') {
-    return res.status(409).json({ success: false, error: 'Creator is not active' });
-  }
-  if (creatorRows[0].creator_locked === true) {
-    return res.status(423).json({ success: false, error: 'This creator is completing onboarding and cannot accept new subscriptions yet.' });
-  }
-
-  const creatorType = creatorRows[0].creator_type;
-  const planMap = { ice: 'creator_ice', crystal: 'creator_crystal', diamond: 'creator_diamond' };
-  const planId = planMap[creatorType] || 'creator_monthly';
-
-  const { rows: planRows } = await pg.query(
-    'SELECT stripe_price_id FROM plans WHERE id = $1 AND active = true',
-    [planId]
-  );
-  const priceId = planRows[0]?.stripe_price_id;
-  if (!priceId) return res.status(400).json({ success: false, error: 'Stripe not configured for this creator tier' });
-
-  let email;
-  try {
-    const { rows } = await pg.query('SELECT email FROM users WHERE id = $1', [userId]);
-    email = rows[0]?.email || undefined;
-  } catch (_) { /* non-fatal */ }
-
-  const _cdDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
-  const successUrl = `${_cdDomain}/profile/${creatorId}?stripe_sub=1`;
-  const cancelUrl  = `${_cdDomain}/profile/${creatorId}`;
-
-  const { sessionId, url } = await stripeService.createSubscriptionCheckout({
-    userId,
-    planId,
-    sku: planId,
-    priceId,
-    successUrl,
-    cancelUrl,
-    customerEmail: email,
-    metadata: { creatorId, payment_type: 'creator_subscription' },
-  });
-
-  return res.json({ success: true, sessionId, checkoutUrl: url });
-}));
-
 // ── Creator subscription user-facing routes ───────────────────────────────────
 
 const creatorController = require('./controllers/creatorController');
@@ -5098,84 +4880,37 @@ app.get('/api/webapp/promos/:code', requireSessionAuth, asyncHandler(async (req,
 
 app.post('/api/webapp/payments/create', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
-  if (!user?.id) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
+  if (!user?.id) return res.status(401).json({ success: false, error: 'Authentication required' });
 
-  const { planId, provider, creatorId, email, promoCode } = req.body;
-  if (!planId) {
+  const { planId, creatorId, email, promoCode } = req.body;
+  if (!planId || typeof planId !== 'string') {
     return res.status(400).json({ success: false, error: 'planId is required' });
   }
-  if (provider && !['stripe'].includes(provider)) {
-    return res.status(400).json({ success: false, error: 'Invalid provider. Must be stripe' });
-  }
-  if (email && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254)) {
+  if (email != null && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254)) {
     return res.status(400).json({ success: false, error: 'Invalid email address' });
   }
-  if (promoCode != null) {
-    if (typeof promoCode !== 'string' || !/^[A-Za-z0-9_-]{3,64}$/.test(promoCode.trim())) {
-      return res.status(400).json({ success: false, error: 'Invalid promo code' });
-    }
+  if (promoCode != null && (typeof promoCode !== 'string' || !/^[A-Za-z0-9_-]{3,64}$/.test(promoCode.trim()))) {
+    return res.status(400).json({ success: false, error: 'Invalid promo code format' });
   }
 
   const userId = String(user.telegramId || user.telegram_id || user.id);
-  const language = user.language || 'es';
-  if (promoCode) {
-    return res.status(400).json({
-      success: false,
-      error: 'Promo codes are no longer supported on this legacy endpoint. Use /subscribe with the promo code in the web app.',
-    });
-  }
 
-  const pg = require('../../config/postgres');
-  const { rows: planRows } = await pg.query(
-    'SELECT stripe_price_id, duration_days FROM plans WHERE id = $1 AND active = true',
-    [planId]
-  );
-  const plan = planRows[0];
-  if (!plan?.stripe_price_id) {
-    return res.status(400).json({ success: false, error: 'This plan is not available for Stripe checkout' });
-  }
+  const extraMetadata = {};
+  if (promoCode) extraMetadata.promoCode = promoCode.trim();
 
-  let emailFromDb;
-  try {
-    const { rows } = await pg.query('SELECT email FROM users WHERE id = $1', [userId]);
-    emailFromDb = rows[0]?.email || undefined;
-  } catch (_) { /* non-fatal */ }
-
-  const stripePayload = {
+  const result = await PaymentService.createPayment({
     userId,
     planId,
-    sku: creatorId ? String(creatorId) : planId,
-    priceId: plan.stripe_price_id,
-    successUrl: `${process.env.CHECKOUT_DOMAIN || 'https://pnptv.app'}/subscribe?stripe_paid=1&plan=${encodeURIComponent(planId)}&session_id={CHECKOUT_SESSION_ID}`,
-    cancelUrl: `${process.env.CHECKOUT_DOMAIN || 'https://pnptv.app'}/subscribe`,
-    customerEmail: emailFromDb,
-    metadata: creatorId ? { creatorId: String(creatorId) } : {},
-  };
+    provider: 'epayco',
+    creatorId: creatorId ? String(creatorId) : undefined,
+    extraMetadata: Object.keys(extraMetadata).length ? extraMetadata : undefined,
+  });
 
-  const result = Number(plan.duration_days || 0) > 0 && Number(plan.duration_days || 0) <= 365
-    ? await stripeService.createSubscriptionCheckout(stripePayload)
-    : await stripeService.createCheckoutSession(stripePayload);
-
-  // Only provision email credentials if email was provided
-  if (email) {
-    try {
-      await ensureEmailCredentials(userId, email.trim(), language);
-      req.session.user = { ...req.session.user, email: email.trim() };
-    } catch (credErr) {
-      if (credErr.message.includes('already associated')) {
-        return res.status(409).json({ success: false, error: credErr.message });
-      }
-      logger.warn('ensureEmailCredentials failed after payment creation (non-critical)', { userId, error: credErr.message });
-    }
+  if (!result.success) {
+    return res.status(400).json(result);
   }
 
-  res.json({
-    success: true,
-    paymentUrl: result.url,
-    paymentId: result.sessionId,
-  });
+  return res.json({ success: true, paymentUrl: result.paymentUrl, paymentId: result.paymentId });
 }));
 
 // Web App Admin Routes (session auth + role check)
@@ -7425,8 +7160,8 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
   if (!Number.isFinite(hangoutId)) {
     return res.status(400).json({ error: 'Invalid hangout ID' });
   }
-  if (!['stripe', 'dash'].includes(provider)) {
-    return res.status(400).json({ error: 'Provider must be stripe or dash' });
+  if (provider !== 'dash') {
+    return res.status(400).json({ error: 'Provider must be dash' });
   }
 
   const { rows: groups } = await getPool().query(
@@ -7497,65 +7232,13 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
     } catch (err) {
       logger.error(`Hangout dash purchase failed: ${err.message}`);
       if (err.message?.includes('not configured')) {
-        return res.status(503).json({ error: 'Crypto payments are not available yet. Please use Card.', code: 'BTCPAY_NOT_CONFIGURED' });
+        return res.status(503).json({ error: 'Crypto payments are not available yet.', code: 'BTCPAY_NOT_CONFIGURED' });
       }
       return res.status(500).json({ error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
     }
   }
 
-  // ── Stripe branch ─────────────────────────────────────────────────────────
-  const PaymentModel = require('../../models/paymentModel');
-  const stripeService = require('../../services/stripeService');
-  const payment = await PaymentModel.create({
-    userId: user.id,
-    planId: 'hangout_access',
-    provider: 'stripe',
-    sku: 'hangout_access',
-    amount: hangoutPrice,
-    currency: 'USD',
-    status: 'pending',
-    metadata: {
-      type: 'hangout_access',
-      payment_type: 'one_time',
-      ...scopeMetadata,
-    },
-  });
-
-  const _hDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
-  const successUrl = `${_hDomain}/chat/${hangout.id}?stripe_paid=1`;
-  const cancelUrl = `${_hDomain}/chat/${hangout.id}`;
-  const stripeCheckout = await stripeService.createCustomCheckoutSession({
-    userId: String(user.id),
-    planId: 'hangout_access',
-    sku: 'hangout_access',
-    amountUsd: hangoutPrice,
-    productName: 'Community Access',
-    description: 'One-time membership access',
-    successUrl,
-    cancelUrl,
-    customerEmail: email || user.email || undefined,
-    metadata: {
-      payment_id: payment.id,
-      hangoutGroupId: String(hangout.id),
-      hangoutName: hangout.name || '',
-    },
-  });
-
-  await getPool().query(
-    `UPDATE payments
-        SET stripe_session_id = $2,
-            metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
-            updated_at = NOW()
-      WHERE id = $1`,
-    [payment.id, stripeCheckout.sessionId, JSON.stringify({ stripe_session_id: stripeCheckout.sessionId, payment_url: stripeCheckout.url })]
-  );
-
-  return res.json({
-    success: true,
-    paymentId: payment.id,
-    paymentUrl: stripeCheckout.url,
-    checkoutUrl: stripeCheckout.url,
-  });
+  return res.status(400).json({ error: 'Unsupported provider' });
 }));
 
 // Purchase access to a paid channel (and its linked hangout).
@@ -7569,8 +7252,8 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
   if (!Number.isFinite(channelId)) {
     return res.status(400).json({ error: 'Invalid channel ID' });
   }
-  if (!['stripe', 'dash'].includes(provider)) {
-    return res.status(400).json({ error: 'Provider must be stripe or dash' });
+  if (provider !== 'dash') {
+    return res.status(400).json({ error: 'Provider must be dash' });
   }
 
   const { rows: channels } = await getPool().query(
@@ -7634,70 +7317,13 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
     } catch (err) {
       logger.error(`Channel dash purchase failed: ${err.message}`);
       if (err.message?.includes('not configured')) {
-        return res.status(503).json({ error: 'Crypto payments are not available yet. Please use Card.', code: 'BTCPAY_NOT_CONFIGURED' });
+        return res.status(503).json({ error: 'Crypto payments are not available yet.', code: 'BTCPAY_NOT_CONFIGURED' });
       }
       return res.status(500).json({ error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
     }
   }
 
-  // ── Stripe branch ─────────────────────────────────────────────────────────
-  const { CHANNEL_PRICE_MAP } = require('../../config/channelPricing');
-  const priceId = CHANNEL_PRICE_MAP[String(channelPrice)];
-  if (!priceId) {
-    return res.status(400).json({ error: 'No payment option available for this channel price', code: 'UNSUPPORTED_PRICE' });
-  }
-
-  const PaymentModel = require('../../models/paymentModel');
-  const stripeService = require('../../services/stripeService');
-  const payment = await PaymentModel.create({
-    userId: user.id,
-    planId: 'channel_access',
-    provider: 'stripe',
-    sku: 'channel_access',
-    amount: channelPrice,
-    currency: 'USD',
-    status: 'pending',
-    metadata: {
-      type: 'channel_access',
-      payment_type: 'one_time',
-      ...scopeMetadata,
-    },
-  });
-
-  const _chDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
-  const successUrl = `${_chDomain}/chat/${channel.hangout_group_id || ''}?stripe_paid=1`;
-  const cancelUrl = `${_chDomain}/chat/${channel.hangout_group_id || ''}`;
-  const stripeCheckout = await stripeService.createCheckoutSession({
-    userId: String(user.id),
-    planId: 'channel_access',
-    sku: 'channel_access',
-    priceId,
-    successUrl,
-    cancelUrl,
-    customerEmail: email || user.email || undefined,
-    metadata: {
-      payment_id: payment.id,
-      access_type: 'channel_access',
-      channelId: String(channel.id),
-      hangoutGroupId: channel.hangout_group_id ? String(channel.hangout_group_id) : '',
-    },
-  });
-
-  await getPool().query(
-    `UPDATE payments
-        SET stripe_session_id = $2,
-            metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
-            updated_at = NOW()
-      WHERE id = $1`,
-    [payment.id, stripeCheckout.sessionId, JSON.stringify({ stripe_session_id: stripeCheckout.sessionId, payment_url: stripeCheckout.url })]
-  );
-
-  return res.json({
-    success: true,
-    paymentId: payment.id,
-    paymentUrl: stripeCheckout.url,
-    checkoutUrl: stripeCheckout.url,
-  });
+  return res.status(400).json({ error: 'Unsupported provider' });
 }));
 
 app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, res) => {
@@ -8499,47 +8125,38 @@ app.post('/api/wallet/buy', requireSessionAuth, asyncHandler(async (req, res) =>
   }
 }));
 
-// POST /api/wallet/buy-card — compatibility endpoint for token card checkout.
-// Card payments now use Stripe Checkout; keep this route so older clients that
-// still call "buy-card" continue to work without exposing ePayco again.
-app.post('/api/wallet/buy-card', requireSessionAuth, (req, res, next) => {
-  res.setHeader('Deprecation', 'true');
-  res.setHeader('Link', '</api/wallet/buy-stripe>; rel="successor-version"');
-  next();
-}, asyncHandler(async (req, res) => {
-  const user = req.session?.user;
-
-  const { packageId } = req.body;
-  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
-
-  const userId = String(user.id);
-
-  try {
-    const result = await TokenCheckoutService.createStripeCheckout(userId, packageId);
-    res.json(result);
-  } catch (err) {
-    logger.error(`Wallet buy-card error: ${err.message}`);
-    if (err.code === 'INVALID_PACKAGE') {
-      return res.status(400).json({ success: false, error: 'Invalid package ID' });
-    }
-    res.status(500).json({ success: false, error: 'Failed to create Stripe checkout. Please try again.' });
-  }
-}));
-
-// POST /api/wallet/buy-stripe — purchase tokens via Stripe Checkout
-app.post('/api/wallet/buy-stripe', requireSessionAuth, asyncHandler(async (req, res) => {
+// POST /api/wallet/buy-card — ePayco card checkout for token purchases
+app.post('/api/wallet/buy-card', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const { packageId } = req.body;
   if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
-  const userId = String(user.id);
-  try {
-    const result = await TokenCheckoutService.createStripeCheckout(userId, packageId);
-    res.json(result);
-  } catch (err) {
-    logger.error(`Wallet buy-stripe error: ${err.message}`);
-    if (err.code === 'INVALID_PACKAGE') return res.status(400).json({ success: false, error: 'Invalid package ID' });
-    res.status(500).json({ success: false, error: 'Failed to create Stripe checkout. Please try again.' });
-  }
+
+  const userId = String(user.telegramId || user.telegram_id || user.id);
+  const pkg = TokenCheckoutService.PACKAGES.find(p => p.id === packageId);
+  if (!pkg) return res.status(400).json({ success: false, error: 'Invalid package ID', code: 'INVALID_PACKAGE' });
+
+  const { v4: uuidv4 } = require('uuid');
+  const PaymentModel = require('../../models/paymentModel');
+  const payment = await PaymentModel.create({
+    id: uuidv4(),
+    userId,
+    planId: 'token_purchase',
+    provider: 'epayco',
+    sku: 'TOKENS',
+    amount: pkg.usd,
+    currency: 'USD',
+    status: 'pending',
+    metadata: {
+      type: 'token_purchase',
+      tokensAmount: pkg.tokens,
+      usdAmount: pkg.usd,
+      packageId: pkg.id,
+    },
+  });
+
+  const checkoutDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
+  const paymentUrl = `${checkoutDomain}/payment/${payment.id}`;
+  return res.json({ success: true, paymentUrl, paymentId: payment.id, tokens: pkg.tokens, usd: pkg.usd });
 }));
 
 // GET /api/token-checkout/:purchaseId — return checkout page data (ePayco widget config)
@@ -8619,7 +8236,6 @@ app.get('/api/invoice/:paymentId', requireSessionAuth, asyncHandler(async (req, 
 
   const row = await query(
     `SELECT p.id, p.reference, p.amount, p.currency, p.provider, p.completed_at,
-            p.stripe_invoice_id,
             u.display_name, u.first_name, u.username,
             pl.display_name AS plan_display_name, pl.name AS plan_name
        FROM payments p
@@ -8639,7 +8255,7 @@ app.get('/api/invoice/:paymentId', requireSessionAuth, asyncHandler(async (req, 
   const InvoiceService = require('../../../services/invoiceservice');
   const customerName = r.display_name || r.first_name || r.username || 'Member';
   const planName = r.plan_display_name || r.plan_name || 'Digital Purchase';
-  const invoiceNumber = r.stripe_invoice_id || `INV-${r.id.slice(0, 8).toUpperCase()}`;
+  const invoiceNumber = `INV-${r.id.slice(0, 8).toUpperCase()}`;
 
   const { buffer } = await InvoiceService.generateInvoice({
     invoiceNumber,
@@ -8647,7 +8263,7 @@ app.get('/api/invoice/:paymentId', requireSessionAuth, asyncHandler(async (req, 
     planName,
     amount: parseFloat(r.amount) || 0,
     currency: r.currency || 'USD',
-    provider: r.provider || 'stripe',
+    provider: r.provider || 'epayco',
     transactionId: r.reference || r.id,
     purchaseDate: r.completed_at ? new Date(r.completed_at) : new Date(),
   });

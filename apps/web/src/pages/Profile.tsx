@@ -21,7 +21,6 @@ import {
   getFollowStatus,
   getCreatorSubscriptionStatus,
   unsubscribeFromCreator,
-  createCreatorStripeSubscription,
   createDashSubscription,
   getDashAvailable,
   getUserLabel,
@@ -187,7 +186,7 @@ export default function Profile() {
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [subscribeEmail, setSubscribeEmail] = useState("");
   const [subscribeEmailError, setSubscribeEmailError] = useState<string | null>(null);
-  const [subscribeProvider, setSubscribeProvider] = useState<"stripe" | "dash">("stripe");
+  const [subscribeProvider, setSubscribeProvider] = useState<"dash">("dash");
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
   const [subscribePaymentLoading, setSubscribePaymentLoading] = useState(false);
   const [subscribePaymentId, setSubscribePaymentId] = useState<string | null>(null);
@@ -323,18 +322,6 @@ export default function Profile() {
     loadProfile();
   }, [loadProfile]);
 
-  // Auto-confirm subscription when Stripe redirects back with ?stripe_sub=1
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has('stripe_sub')) return;
-    // Strip the param from the URL without a reload
-    const clean = window.location.pathname;
-    window.history.replaceState({}, '', clean);
-    const id = window.location.pathname.split('/profile/')[1]?.split('?')[0] ?? '';
-    getCreatorSubscriptionStatus(id).then((res) => {
-      if (res.success && res.subscribed) setIsSubscribed(true);
-    }).catch(() => {});
-  }, []);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -523,7 +510,7 @@ export default function Profile() {
     setSubscribeError(null);
     setSubscribeAwaitingPayment(false);
     setSubscribePaymentId(null);
-    setSubscribeProvider("stripe");
+    setSubscribeProvider("dash");
     setShowSubscribeModal(true);
     // Probe Dash availability lazily — if BTCPay is down we'll hide the Dash tab.
     if (dashAvailable === null) {
@@ -552,30 +539,21 @@ export default function Profile() {
     setSubscribeError(null);
     try {
       const creatorId = profile.id || paramUserId!;
-      if (subscribeProvider === "stripe") {
-        const result = await createCreatorStripeSubscription(creatorId);
-        if (result.success && result.checkoutUrl) {
-          window.location.href = assertPaymentUrl(result.checkoutUrl);
-        } else {
-          setSubscribeError(result.error || p.failedToCreatePayment);
-        }
+      // Dash path — requires email
+      const trimmed = subscribeEmail.trim();
+      if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) || trimmed.length > 254) {
+        setSubscribeEmailError("Please enter a valid email address");
+        setSubscribePaymentLoading(false);
+        return;
+      }
+      setSubscribeEmailError(null);
+      const dashRes = await createDashSubscription("creator_monthly", trimmed, creatorId);
+      if (dashRes.success && dashRes.checkoutUrl) {
+        window.open(assertPaymentUrl(dashRes.checkoutUrl), "_blank", "noopener,noreferrer");
+        setSubscribePaymentId(dashRes.invoiceId);
+        setSubscribeAwaitingPayment(true);
       } else {
-        // Dash path — requires email
-        const trimmed = subscribeEmail.trim();
-        if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) || trimmed.length > 254) {
-          setSubscribeEmailError("Please enter a valid email address");
-          setSubscribePaymentLoading(false);
-          return;
-        }
-        setSubscribeEmailError(null);
-        const dashRes = await createDashSubscription("creator_monthly", trimmed, creatorId);
-        if (dashRes.success && dashRes.checkoutUrl) {
-          window.open(assertPaymentUrl(dashRes.checkoutUrl), "_blank", "noopener,noreferrer");
-          setSubscribePaymentId(dashRes.invoiceId);
-          setSubscribeAwaitingPayment(true);
-        } else {
-          setSubscribeError(dashRes.error || p.failedToCreatePayment);
-        }
+        setSubscribeError(dashRes.error || p.failedToCreatePayment);
       }
     } catch (err) {
       setSubscribeError(err instanceof Error ? err.message : p.paymentError);
@@ -1552,61 +1530,37 @@ export default function Profile() {
 
             {!subscribeAwaitingPayment ? (
               <>
-                {/* Provider selector — Card (Stripe) or Dash (BTCPay) */}
+                {/* Payment method — Dash only */}
                 <div>
                   <p className="text-xs font-medium mb-2" style={{ color: "var(--pnp-text-secondary)" }}>{p.paymentMethod}</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSubscribeProvider("stripe")}
-                      className="py-2.5 rounded-lg text-sm font-medium transition-colors border"
-                      style={subscribeProvider === "stripe"
-                        ? { background: `rgba(${accentRgb},0.15)`, color: accentColor, borderColor: `rgba(${accentRgb},0.4)` }
-                        : { background: "rgba(255,255,255,0.04)", color: "var(--pnp-text-secondary)", borderColor: "rgba(255,255,255,0.08)" }
-                      }
-                    >
-                      💳 Card
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => dashAvailable !== false && setSubscribeProvider("dash")}
-                      disabled={dashAvailable === false}
-                      className="py-2.5 rounded-lg text-sm font-medium transition-colors border"
-                      style={
-                        dashAvailable === false
-                          ? { background: "rgba(255,255,255,0.02)", color: "#555", borderColor: "rgba(255,255,255,0.05)", cursor: "not-allowed" }
-                          : subscribeProvider === "dash"
-                          ? { background: "rgba(0,141,228,0.15)", color: "#008DE4", borderColor: "rgba(0,141,228,0.4)" }
-                          : { background: "rgba(255,255,255,0.04)", color: "var(--pnp-text-secondary)", borderColor: "rgba(255,255,255,0.08)" }
-                      }
-                    >
-                      🥷 Dash
-                    </button>
+                  <div
+                    className="py-2.5 rounded-lg text-sm font-medium text-center border"
+                    style={{ background: "rgba(0,141,228,0.15)", color: "#008DE4", borderColor: "rgba(0,141,228,0.4)" }}
+                  >
+                    🥷 Dash (Crypto)
                   </div>
                 </div>
 
-                {/* Email input — only needed for Dash */}
-                {subscribeProvider === "dash" && (
-                  <div>
-                    <label className="text-xs font-medium block mb-1.5" style={{ color: "var(--pnp-text-secondary)" }}>{p.emailForReceipt}</label>
-                    <input
-                      type="email"
-                      value={subscribeEmail}
-                      onChange={(e) => { setSubscribeEmail(e.target.value); setSubscribeEmailError(null); }}
-                      placeholder={p.emailPlaceholder}
-                      className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none transition-colors"
-                      style={{
-                        background: "rgba(255,255,255,0.06)",
-                        border: subscribeEmailError ? "1px solid #FF453A" : "1px solid rgba(255,255,255,0.1)",
-                      }}
-                      autoComplete="email"
-                      inputMode="email"
-                    />
-                    {subscribeEmailError && (
-                      <p className="text-xs mt-1" style={{ color: "#FF453A" }}>{subscribeEmailError}</p>
-                    )}
-                  </div>
-                )}
+                {/* Email input — required for Dash */}
+                <div>
+                  <label className="text-xs font-medium block mb-1.5" style={{ color: "var(--pnp-text-secondary)" }}>{p.emailForReceipt}</label>
+                  <input
+                    type="email"
+                    value={subscribeEmail}
+                    onChange={(e) => { setSubscribeEmail(e.target.value); setSubscribeEmailError(null); }}
+                    placeholder={p.emailPlaceholder}
+                    className="w-full rounded-lg px-3 py-2.5 text-sm text-white outline-none transition-colors"
+                    style={{
+                      background: "rgba(255,255,255,0.06)",
+                      border: subscribeEmailError ? "1px solid #FF453A" : "1px solid rgba(255,255,255,0.1)",
+                    }}
+                    autoComplete="email"
+                    inputMode="email"
+                  />
+                  {subscribeEmailError && (
+                    <p className="text-xs mt-1" style={{ color: "#FF453A" }}>{subscribeEmailError}</p>
+                  )}
+                </div>
 
                 {subscribeError && (
                   <p className="text-xs text-center" style={{ color: "#FF453A" }}>{subscribeError}</p>

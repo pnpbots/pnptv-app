@@ -1077,11 +1077,10 @@ const getSlotTicketStatus = async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // POST /api/webapp/live/slot/:id/buy-ticket
-// Body: { currency: 'tokens' | 'stripe' | 'dash' }
+// Body: { currency: 'tokens' | 'dash' }
 // tokens  — atomic debit from user_token_wallets + ticket insert.
-// stripe  — create payments row, return Stripe Checkout URL for card flow.
 // dash    — create BTCPay invoice via dash_subscription_orders, return checkoutUrl.
-// Webhook settlement for both USD paths calls handleTicketSettlement() below.
+// Webhook settlement for Dash calls handleTicketSettlement() below.
 // ---------------------------------------------------------------------------
 const buySlotTicket = async (req, res) => {
   if (!req.session?.user) {
@@ -1093,8 +1092,8 @@ const buySlotTicket = async (req, res) => {
   if (!id || typeof id !== 'string') {
     return res.status(400).json({ success: false, error: 'Invalid slot id' });
   }
-  if (currency !== 'tokens' && currency !== 'stripe' && currency !== 'dash') {
-    return res.status(400).json({ success: false, error: "currency must be 'tokens', 'stripe', or 'dash'" });
+  if (currency !== 'tokens' && currency !== 'dash') {
+    return res.status(400).json({ success: false, error: "currency must be 'tokens' or 'dash'" });
   }
 
   const userId = String(req.session.user.id);
@@ -1181,102 +1180,6 @@ const buySlotTicket = async (req, res) => {
       } finally {
         client.release();
       }
-    }
-
-    // ── Stripe card purchase path ────────────────────────────────────────────
-    if (currency === 'stripe') {
-      const priceUsd = parseFloat(slot.ticket_price_usd);
-      if (!priceUsd || priceUsd <= 0) {
-        return res.status(400).json({ success: false, error: 'USD price not configured for this slot' });
-      }
-
-      // HIGH-02: Idempotency guard — return the existing pending checkout URL if the user
-      // already initiated a payment for this slot within the last 15 minutes. This prevents
-      // a double-charge when the user clicks the purchase button multiple times or the
-      // frontend retries. Fail-open on DB error: the existing UNIQUE on live_show_tickets
-      // prevents a double-grant even if two payments complete.
-      try {
-        const { rows: existingPayment } = await getPool().query(
-          `SELECT id, metadata->>'payment_url' AS checkout_url, gateway
-             FROM payments
-            WHERE user_id = $1
-              AND status = 'pending'
-              AND metadata->>'type' = 'live_show_ticket'
-              AND metadata->>'slotId' = $2
-              AND created_at > NOW() - INTERVAL '15 minutes'
-            ORDER BY created_at DESC
-            LIMIT 1`,
-          [userId, id]
-        );
-        if (existingPayment.length > 0 && existingPayment[0].checkout_url) {
-          logger.info('buySlotTicket (stripe): returning existing pending checkout', { userId, slotId: id, paymentId: existingPayment[0].id });
-          return res.json({ success: true, provider: 'stripe', paymentId: existingPayment[0].id, checkoutUrl: existingPayment[0].checkout_url, idempotent: true });
-        }
-      } catch (idempErr) {
-        logger.warn('buySlotTicket (stripe): idempotency check failed, proceeding with new payment', { error: idempErr.message });
-      }
-
-      const PaymentModel = require('../../../models/paymentModel');
-      const { v4: uuidv4 } = require('uuid');
-      const stripeService = require('../../../services/stripeService');
-
-      const paymentId = uuidv4();
-
-      await PaymentModel.create({
-        paymentId,
-        userId,
-        planId: null,
-        provider: 'stripe',
-        sku: `ticket-${id}`,
-        amount: priceUsd,
-        currency: 'USD',
-        status: 'pending',
-        metadata: {
-          type: 'live_show_ticket',
-          resource: 'live_show_ticket',
-          slotId: id,
-          slotTitle: slot.title || null,
-          email: userEmail,
-          payment_type: 'live_show_ticket',
-          amount_usd: priceUsd,
-        },
-      });
-
-      const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
-      const stripeCheckout = await stripeService.createCustomCheckoutSession({
-        userId,
-        sku: `ticket-${id}`,
-        amountUsd: priceUsd,
-        productName: 'Online Event Access',
-        description: 'One-time access to an online event',
-        successUrl: `${WEB_APP_URL}/live/${id}?stripe_paid=1`,
-        cancelUrl: `${WEB_APP_URL}/live/${id}`,
-        customerEmail: userEmail || undefined,
-        metadata: {
-          pnptv_payment_id: paymentId,
-          payment_type: 'live_show_ticket',
-          slotId: String(id),
-          slotTitle: slot.title || '',
-        },
-      });
-
-      await getPool().query(
-        `UPDATE payments
-            SET stripe_session_id = $2,
-                metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
-                updated_at = NOW()
-          WHERE id = $1`,
-        [paymentId, stripeCheckout.sessionId, JSON.stringify({ stripe_session_id: stripeCheckout.sessionId, payment_url: stripeCheckout.url })]
-      );
-
-      logger.info('Live ticket checkout created (stripe)', { userId, slotId: id, paymentId, priceUsd });
-
-      return res.json({
-        success: true,
-        provider: 'stripe',
-        paymentId,
-        checkoutUrl: stripeCheckout.url,
-      });
     }
 
     // ── Dash / BTCPay crypto purchase path ───────────────────────────────────
@@ -1376,7 +1279,7 @@ const buySlotTicket = async (req, res) => {
 //
 // @param {string} userId
 // @param {string} slotId  — UUID of the live_streams row
-// @param {string} provider — 'stripe' | 'dash'
+// @param {string} provider — 'tokens' | 'dash'
 // @param {number} pricePaidUsd
 // ---------------------------------------------------------------------------
 const handleTicketSettlement = async (userId, slotId, provider, pricePaidUsd) => {
