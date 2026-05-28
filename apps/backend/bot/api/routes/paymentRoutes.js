@@ -22,9 +22,10 @@ const paymentStatusLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// C5: getPaymentInfo exposes ePayco keys, signatures, and userId — requires authentication.
-// Only the owner of the payment (or an admin) may load checkout data.
-router.get('/:paymentId', authenticateUser, asyncHandler(paymentController.getPaymentInfo));
+// The payment UUID (128-bit random) is itself the capability — users arrive via a direct
+// link from pnptv.app or a Telegram message without a session on pay.codigosdemujeres.com.
+// Ownership is still enforced when a session IS present (see paymentController.getPaymentInfo).
+router.get('/:paymentId', asyncHandler(paymentController.getPaymentInfo));
 
 // C5: getPaymentStatus is polled by the server-rendered payment-response page which has no
 // session cookies. We protect it with a dedicated rate limiter to prevent payment-ID enumeration.

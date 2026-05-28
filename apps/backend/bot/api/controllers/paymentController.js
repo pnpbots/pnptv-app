@@ -140,12 +140,16 @@ class PaymentController {
         });
       }
 
-      // Ownership check — requesting session must own this payment
+      // Ownership check — only enforce when a session exists.
+      // The UUID itself is the capability (128-bit random); users arriving via
+      // a direct link from Telegram or pay.codigosdemujeres.com have no session.
       const sessionUserId = String(req.session?.user?.id || req.session?.userId || '');
-      const paymentOwner = String(payment.userId || payment.user_id || '');
-      if (!sessionUserId || sessionUserId !== paymentOwner) {
-        logger.warn('getPaymentInfo ownership check failed', { paymentId, sessionUserId, paymentOwner });
-        return res.status(403).json({ success: false, error: 'Forbidden' });
+      if (sessionUserId) {
+        const paymentOwner = String(payment.userId || payment.user_id || '');
+        if (sessionUserId !== paymentOwner) {
+          logger.warn('getPaymentInfo ownership check failed', { paymentId, sessionUserId, paymentOwner });
+          return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
       }
 
       // Check if payment is still pending
