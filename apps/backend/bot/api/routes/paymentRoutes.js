@@ -59,10 +59,12 @@ router.post('/:paymentId/email', authenticateUser, asyncHandler(async (req, res)
 
 // Email-credential provisioning lives inside paymentController.processTokenizedCharge
 // after the response is sent, so a throw in that path can never corrupt a charge result.
-router.post('/tokenized-charge', authenticateUser, asyncHandler(paymentController.processTokenizedCharge));
+// Same cross-domain rationale as GET /:paymentId — session cookie is scoped to pnptv.app,
+// not pay.codigosdemujeres.com. Ownership is enforced via the payment record inside the handler.
+router.post('/tokenized-charge', asyncHandler(paymentController.processTokenizedCharge));
 
-router.post('/verify-2fa', authenticateUser, asyncHandler(paymentController.verify2FA));
-router.post('/complete-3ds-2', authenticateUser, asyncHandler(paymentController.complete3DS2Authentication));
+router.post('/verify-2fa', asyncHandler(paymentController.verify2FA));
+router.post('/complete-3ds-2', asyncHandler(paymentController.complete3DS2Authentication));
 router.get('/confirm-payment/:token', asyncHandler(paymentController.confirmPaymentToken));
 
 // Retry payment webhook (admin only)

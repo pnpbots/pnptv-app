@@ -812,14 +812,16 @@ class PaymentController {
         logger.error('Payment timeout check failed (non-critical)', { error: err.message });
       }
 
-      // Ownership check: session user must own the payment
-      const sessionUserIdForCharge = String(req.session?.user?.id || req.user?.id || '');
+      // Ownership check: enforce only when a session is present.
+      // The payment UUID (128-bit random) is the capability; requests from
+      // pay.codigosdemujeres.com carry no pnptv.app session cookie.
       const paymentForOwnership = await PaymentModel.getById(paymentId);
       if (!paymentForOwnership) {
         return res.status(404).json({ success: false, error: 'Payment not found' });
       }
       const paymentOwnerForCharge = String(paymentForOwnership.user_id || paymentForOwnership.userId || '');
-      if (!sessionUserIdForCharge || sessionUserIdForCharge !== paymentOwnerForCharge) {
+      const sessionUserIdForCharge = String(req.session?.user?.id || req.user?.id || '');
+      if (sessionUserIdForCharge && sessionUserIdForCharge !== paymentOwnerForCharge) {
         logger.warn('processTokenizedCharge ownership check failed', {
           paymentId, sessionUserId: sessionUserIdForCharge, paymentOwner: paymentOwnerForCharge,
         });
@@ -1090,12 +1092,14 @@ class PaymentController {
         });
       }
 
-      // HIGH-02: Ownership check — without this, anyone with a paymentId UUID
-      // could brute-force the 6-digit OTP for someone else's payment.
-      const sessionUserIdOtp = String(req.session?.user?.id || req.user?.id || '');
+      // Ownership check — enforce when session is present; UUID is capability otherwise.
       const paymentForOtp = await PaymentModel.getById(paymentId).catch(() => null);
-      const paymentOwnerOtp = paymentForOtp ? String(paymentForOtp.user_id || paymentForOtp.userId || '') : '';
-      if (!paymentForOtp || !sessionUserIdOtp || sessionUserIdOtp !== paymentOwnerOtp) {
+      if (!paymentForOtp) {
+        return res.status(404).json({ success: false, error: 'Payment not found' });
+      }
+      const paymentOwnerOtp = String(paymentForOtp.user_id || paymentForOtp.userId || '');
+      const sessionUserIdOtp = String(req.session?.user?.id || req.user?.id || '');
+      if (sessionUserIdOtp && sessionUserIdOtp !== paymentOwnerOtp) {
         logger.warn('verify2FA ownership check failed', { paymentId, sessionUserId: sessionUserIdOtp, paymentOwner: paymentOwnerOtp });
         return res.status(403).json({ success: false, error: 'Forbidden' });
       }
@@ -1325,10 +1329,10 @@ class PaymentController {
         });
       }
 
-      // Ownership check — prevent cross-account 3DS completion
+      // Ownership check — enforce when session is present; UUID is capability otherwise.
       const sessionUserId3ds = String(req.session?.user?.id || req.user?.id || '');
       const paymentOwner3ds = String(payment.user_id || payment.userId || '');
-      if (!sessionUserId3ds || sessionUserId3ds !== paymentOwner3ds) {
+      if (sessionUserId3ds && sessionUserId3ds !== paymentOwner3ds) {
         logger.warn('complete3DS2Authentication ownership check failed', { paymentId, sessionUserId: sessionUserId3ds, paymentOwner: paymentOwner3ds });
         return res.status(403).json({ success: false, error: 'Forbidden' });
       }
