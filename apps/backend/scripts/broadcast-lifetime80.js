@@ -383,30 +383,28 @@ async function main() {
     console.log('     [SKIPPED] --skip-email');
   } else if (!DRY_RUN) {
     if (process.env.RESEND_API_KEY) {
-      // Resend API — no rate limits, no SMTP auth headaches
-      console.log('     Using Resend API (10 concurrent)...');
-      const CONCURRENCY = 5; // Resend free/pro limit: 5 req/sec
-      for (let i = 0; i < withEmail.length; i += CONCURRENCY) {
-        const chunk = withEmail.slice(i, i + CONCURRENCY);
-        await Promise.all(chunk.map(async (u) => {
-          const lang = isEn(u.language) ? 'en' : 'es';
-          const name = u.first_name || u.username || (lang === 'en' ? 'Member' : 'Miembro');
-          try {
-            const res = await fetch('https://api.resend.com/emails', {
-              method:  'POST',
-              headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-              body:    JSON.stringify({ from: 'PNPtv! <support@pnptv.app>', to: [u.email], subject: EMAIL_SUBJECT[lang], html: buildEmailHtml(lang, name) }),
-            });
-            if (!res.ok) { const t = await res.text(); throw new Error(`${res.status} ${t}`); }
-            stats.email++;
-          } catch (err) {
-            stats.emailFailed++;
-            if (stats.emailFailed <= 5 || stats.emailFailed % 50 === 0) {
-              console.warn(`     Email err [${u.email}]: ${err.message}`);
-            }
+      // Resend API — 5 req/sec hard limit; send one at a time with 220ms gap
+      console.log('     Using Resend API (1/220ms)...');
+      for (let i = 0; i < withEmail.length; i++) {
+        const u = withEmail[i];
+        const lang = isEn(u.language) ? 'en' : 'es';
+        const name = u.first_name || u.username || (lang === 'en' ? 'Member' : 'Miembro');
+        try {
+          const res = await fetch('https://api.resend.com/emails', {
+            method:  'POST',
+            headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ from: 'PNPtv! <support@pnptv.app>', to: [u.email], subject: EMAIL_SUBJECT[lang], html: buildEmailHtml(lang, name) }),
+          });
+          if (!res.ok) { const t = await res.text(); throw new Error(`${res.status} ${t}`); }
+          stats.email++;
+        } catch (err) {
+          stats.emailFailed++;
+          if (stats.emailFailed <= 5 || stats.emailFailed % 50 === 0) {
+            console.warn(`     Email err [${u.email}]: ${err.message}`);
           }
-        }));
-        const done = Math.min(i + CONCURRENCY, withEmail.length);
+        }
+        await sleep(220);
+        const done = i + 1;
         if (done % 100 === 0 || done === withEmail.length) console.log(`     Email progress: ${done}/${withEmail.length}`);
       }
     } else {

@@ -4092,6 +4092,28 @@ app.post('/api/admin/alert', healthLimiter, asyncHandler(async (req, res) => {
   }
 }));
 
+// POST /api/internal/broadcast/lifetime80 — trigger the lifetime80 promo broadcast.
+// Skips users already notified (entity_id dedup). Skips email (Resend domain unverified).
+// Auth: Bearer token via BROADCAST_SECRET env var.
+app.post('/api/internal/broadcast/lifetime80', healthLimiter, asyncHandler(async (req, res) => {
+  const bearer = req.headers.authorization?.replace(/^Bearer\s+/, '');
+  const expected = process.env.BROADCAST_SECRET;
+  if (!expected || bearer !== expected) {
+    return res.status(401).json({ success: false, error: 'unauthorized' });
+  }
+  const { execFile } = require('child_process');
+  const scriptPath = require('path').resolve(__dirname, '../../scripts/broadcast-lifetime80.js');
+  execFile(process.execPath, [scriptPath, '--skip-email'], { timeout: 5 * 60 * 1000 }, (err, stdout, stderr) => {
+    if (err) {
+      logger.error('lifetime80 broadcast failed', { error: err.message, stderr });
+      return res.status(500).json({ success: false, error: err.message });
+    }
+    const summary = stdout.split('\n').slice(-10).join('\n');
+    logger.info('lifetime80 broadcast complete', { summary });
+    res.json({ success: true, summary });
+  });
+}));
+
 // GET /api/health/webhooks — public ePayco webhook delivery health (7d window).
 // Reports invalid-signature rate (security) + state-code distribution.
 app.get('/api/health/webhooks', healthLimiter, asyncHandler(async (req, res) => {
