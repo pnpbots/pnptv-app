@@ -54,9 +54,9 @@ const startCronJobs = async (bot = null) => {
     // (verified via DB query). To re-enable temporarily during incident
     // response, uncomment and set DAIMO_RECOVERY_CRON in env.
 
-    // ePayco payment recovery - process stuck pending payments every 2 hours
+    // ePayco payment recovery - process stuck pending payments every 15 minutes
     // Checks ePayco API for completed payments and replays webhooks if needed
-    cron.schedule(process.env.PAYMENT_RECOVERY_CRON || '0 */2 * * *', async () => {
+    cron.schedule(process.env.PAYMENT_RECOVERY_CRON || '*/15 * * * *', async () => {
       try {
         logger.info('Running payment recovery process...');
         const results = await PaymentRecoveryService.processStuckPayments();

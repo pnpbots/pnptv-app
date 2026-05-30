@@ -956,6 +956,14 @@ export const router = createBrowserRouter([
       </ModuleLoader>
     ),
   },
+  {
+    path: "/how-to-pay",
+    element: (
+      <ModuleLoader>
+        <CryptoGuide />
+      </ModuleLoader>
+    ),
+  },
   // Invite page — public, no auth required (handles its own auth check inline)
   {
     path: "/invite/:code",

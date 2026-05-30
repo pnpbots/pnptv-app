@@ -22,11 +22,11 @@ type Lang = "en" | "es";
 
 const S = {
   en: {
-    pageTitle: "Lifetime PRIME — $80 Crypto — PNPtv!",
+    pageTitle: "Lifetime PRIME — $80 — PNPtv!",
     heroTitle: "Lifetime PRIME",
-    heroSubtitle: "Pay once. Full PRIME forever. Crypto only.",
+    heroSubtitle: "Pay once. Full PRIME forever.",
     oldPrice: "$250",
-    badge: "CRYPTO EXCLUSIVE · $80 FLAT",
+    badge: "$80 ONE-TIME · CARD OR CRYPTO",
     benefits: [
       "Pay once — full PRIME access forever, no renewals ever.",
       "PRIME unlocked permanently — all exclusive content from day one.",
@@ -35,7 +35,7 @@ const S = {
       "Priority support, always.",
     ],
     noticeTitle: "Good to know",
-    noticeCryptoOnly: "This offer is exclusively available via Dash or USDC crypto.",
+    noticeCryptoOnly: "Pay with your card (ePayco) or crypto — Dash or USDC.",
     noticeEarlyAccess: "You lock in lifetime PRIME — permanent, no renewals, ever.",
     noticeInProgress: "Some screens still in progress — we're moving fast.",
     alreadyPaid: "Need help?",
@@ -43,11 +43,11 @@ const S = {
     fineprint: "🔒 Encrypted · Discreet · No personal info required · Price in USD",
   },
   es: {
-    pageTitle: "Lifetime PRIME — $80 Cripto — PNPtv!",
+    pageTitle: "Lifetime PRIME — $80 — PNPtv!",
     heroTitle: "Lifetime PRIME",
-    heroSubtitle: "Paga una vez. PRIME completo para siempre. Solo cripto.",
+    heroSubtitle: "Paga una vez. PRIME completo para siempre.",
     oldPrice: "$250",
-    badge: "EXCLUSIVO CRIPTO · $80 FIJO",
+    badge: "$80 PAGO ÚNICO · TARJETA O CRIPTO",
     benefits: [
       "Paga una vez — acceso PRIME completo para siempre, sin renovaciones.",
       "PRIME desbloqueado permanentemente — todo el contenido exclusivo desde el primer día.",
@@ -56,7 +56,7 @@ const S = {
       "Soporte prioritario, siempre.",
     ],
     noticeTitle: "Bueno saber",
-    noticeCryptoOnly: "Esta oferta está disponible exclusivamente vía Dash o USDC cripto.",
+    noticeCryptoOnly: "Paga con tarjeta (ePayco) o cripto — Dash o USDC.",
     noticeEarlyAccess: "Aseguras PRIME de por vida — permanente, sin renovaciones, nunca.",
     noticeInProgress: "Algunas pantallas aún en progreso — avanzando rápido.",
     alreadyPaid: "¿Necesitas ayuda?",
@@ -126,8 +126,9 @@ const SHEET_STRINGS: Record<Lang, SheetStrings> = {
     },
     payments: {
       title: "Payments",
-      lead: "Two crypto options — both at $80 flat.",
+      lead: "Three ways to pay — all at $80 flat.",
       cards: [
+        { e: "💳", t: "Card (ePayco)", b: "Credit or debit card. Safe, discreet checkout. No card stored on our servers." },
         { e: "🥷", t: "Dash (BTCPay)", b: "Send Dash from your wallet. Near-instant, no name, no bank." },
         { e: "🪙", t: "USDC (NowPayments)", b: "Pay with USDC stablecoin. Hosted checkout, auto-confirmed." },
       ],
@@ -193,8 +194,9 @@ const SHEET_STRINGS: Record<Lang, SheetStrings> = {
     },
     payments: {
       title: "Pagos",
-      lead: "Dos opciones cripto — ambas a $80 fijo.",
+      lead: "Tres formas de pagar — todas a $80 fijo.",
       cards: [
+        { e: "💳", t: "Tarjeta (ePayco)", b: "Tarjeta de crédito o débito. Checkout seguro y discreto. No guardamos tu tarjeta." },
         { e: "🥷", t: "Dash (BTCPay)", b: "Envía Dash desde tu wallet. Casi instantáneo, sin nombre, sin banco." },
         { e: "🪙", t: "USDC (NowPayments)", b: "Paga con USDC stablecoin. Checkout alojado, confirmación automática." },
       ],
@@ -783,7 +785,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
               <span style={{ fontSize: "0.36em", marginTop: "0.55em", opacity: 0.8 }}>$</span>
               <span>80</span>
             </div>
-            <span style={{ fontSize: 13, color: "#26a17b", fontWeight: 600, marginTop: 4 }}>🪙 {es ? "Cripto únicamente" : "Crypto only"}</span>
+            <span style={{ fontSize: 13, color: "#26a17b", fontWeight: 600, marginTop: 4 }}>💳 {es ? "Tarjeta o cripto" : "Card or crypto"}</span>
           </div>
           <ul style={{ listStyle: "none", padding: 0, margin: 0, textAlign: "left" }}>
             {s.benefits.map((benefit, i) => (
@@ -885,6 +887,16 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
         )}
 
         {/* Info boxes */}
+        {payMethod === "epayco" && (
+          <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(212,0,122,0.30)", background: "rgba(212,0,122,0.06)" }}>
+            <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 700, color: "#D4007A" }}>
+              {es ? "💳 Pago seguro con tarjeta" : "💳 Secure card payment"}
+            </p>
+            <p style={{ margin: 0, fontSize: 12, color: "var(--pnp-text-secondary)" }}>
+              {es ? "Tarjeta de crédito o débito. Checkout discreto vía ePayco — tu info de tarjeta nunca toca nuestros servidores." : "Credit or debit card. Discreet checkout via ePayco — your card info never touches our servers."}
+            </p>
+          </div>
+        )}
         {payMethod === "dash" && !dashUnavailable && !dashInvoice && (
           <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(0,141,228,0.30)", background: "rgba(0,141,228,0.06)" }}>
             <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 700, color: "#008DE4" }}>
@@ -967,6 +979,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           </p>
           <div style={{ display: "flex", gap: 6 }}>
             {([
+              { id: "epayco" as PayMethod, emoji: "💳", label: es ? "Tarjeta" : "Card", sublabel: "$80 · ePayco", disabled: false },
               { id: "dash" as PayMethod, emoji: "🥷", label: "Dash", sublabel: "$80 · BTCPay", disabled: dashUnavailable },
               { id: "usdc" as PayMethod, emoji: "🪙", label: "USDC", sublabel: "$80 · NowPayments", disabled: usdcUnavailable },
             ]).map(({ id, emoji, label, sublabel, disabled }) => {
@@ -985,6 +998,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
             })}
           </div>
           <p style={{ margin: "6px 0 0", fontSize: 10, color: "rgba(207,207,212,0.45)", textAlign: "center", lineHeight: 1.4, minHeight: 14 }}>
+            {payMethod === "epayco" && (es ? "Tarjeta de crédito o débito — checkout seguro y discreto." : "Credit or debit card — safe, discreet checkout.")}
             {payMethod === "dash" && (es ? "Criptomoneda Dash — rápido, sin nombre, sin banco." : "Dash crypto — fast, no name, no bank required.")}
             {payMethod === "usdc" && (es ? "USDC stablecoin vía NowPayments — múltiples redes." : "USDC stablecoin via NowPayments — multiple networks.")}
           </p>

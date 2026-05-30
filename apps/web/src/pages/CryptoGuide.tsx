@@ -34,10 +34,10 @@ function CheckIcon() {
 
 const S = {
   en: {
-    pageTitle: "How to Pay with Crypto — PNPtv!",
-    heroEyebrow: "CRYPTO PAYMENT GUIDE",
-    heroTitle: "How to Pay with Crypto on PNPtv",
-    heroSubtitle: "No experience needed. Pick your method, follow the steps — done in 10 minutes.",
+    pageTitle: "How to Pay — PNPtv!",
+    heroEyebrow: "PAYMENT GUIDE",
+    heroTitle: "How to Pay on PNPtv",
+    heroSubtitle: "Credit card, crypto, or Dash — pick what works for you.",
     whyTitle: "Why pay with crypto?",
     why: [
       { e: "🔒", t: "100% private", b: "No bank statement. No name attached to the transaction. Your business stays yours." },
@@ -45,7 +45,40 @@ const S = {
       { e: "💰", t: "Save 20% on most plans", b: "Yearly and lifetime plans get an automatic 20% discount when you pay with crypto." },
       { e: "⚡", t: "Fast & reliable", b: "Payments settle in minutes. No chargebacks, no reversals." },
     ],
-    usdcTitle: "Option 1 — USDC (recommended for beginners)",
+    cardTitle: "Option 1 — Credit or Debit Card (fastest)",
+    cardWhat: "Pay directly with your Visa or Mastercard. Most cards from any country are accepted. Checkout is handled by ePayco — a PCI-certified payment processor.",
+    cardWhy: "Best for: anyone who wants to pay right now. No crypto needed.",
+    cardSteps: [
+      {
+        n: "1",
+        title: "Go to the Subscribe page and pick a plan",
+        body: "Go to pnptv.app/subscribe (or /lifetime80 for the $80 Lifetime deal). Choose your plan — Weekly, Monthly, Yearly, or Lifetime — and click \"Pay with Card\".",
+        links: [
+          { label: "Subscribe ↗", href: "/subscribe" },
+          { label: "Lifetime $80 ↗", href: "/lifetime80" },
+        ],
+      },
+      {
+        n: "2",
+        title: "Enter your card details",
+        body: "Fill in your full name, card number, expiry date, and CVV. Make sure the billing name matches your card exactly.",
+        links: [],
+      },
+      {
+        n: "3",
+        title: "⏳ Wait for the 3D Secure verification popup",
+        body: "After submitting your card, your bank will trigger a security check. A popup or redirect may appear asking you to confirm the payment — either in your banking app, by SMS code, or via a security question. THIS CAN TAKE 20–30 SECONDS TO APPEAR. Do NOT close the tab, press Back, or refresh the page while waiting. If nothing appears after 60 seconds, your bank may have approved it silently — keep waiting.",
+        links: [],
+        warning: "💡 Tip: Check your phone — your bank may send a push notification or SMS to approve the payment.",
+      },
+      {
+        n: "4",
+        title: "Your PRIME access activates instantly",
+        body: "Once approved, you'll see a confirmation screen and receive a notification inside PNPtv. Your PRIME access is live immediately — no waiting.",
+        links: [],
+      },
+    ],
+    usdcTitle: "Option 2 — USDC (recommended for beginners)",
     usdcWhat: "USDC is a digital dollar. 1 USDC = $1 USD, always. It doesn't go up or down in value like Bitcoin. You buy exactly what you need and spend it.",
     usdcWhy: "Best for: anyone new to crypto. Stable value, easy to buy, works everywhere.",
     usdcSteps: [
@@ -84,7 +117,7 @@ const S = {
         links: [],
       },
     ],
-    dashTitle: "Option 2 — Dash (most private)",
+    dashTitle: "Option 3 — Dash (most private)",
     dashWhat: "Dash is a cryptocurrency built for fast, private payments. Unlike USDC, the price can fluctuate — but invoices are fixed in USD so you always pay the right amount.",
     dashWhy: "Best for: users who already have Dash or want maximum privacy. No account needed on our end — just scan and send.",
     dashSteps: [
@@ -126,7 +159,19 @@ const S = {
     faqTitle: "Common questions",
     faq: [
       {
-        q: "What if my payment doesn't confirm?",
+        q: "My card was charged but my account wasn't activated.",
+        a: "This happens sometimes when our system doesn't receive the payment confirmation in time. Your access will activate automatically within 15 minutes. If it hasn't after 15 minutes, contact support and we'll fix it manually.",
+      },
+      {
+        q: "Why does the 3D Secure popup take so long?",
+        a: "The delay is on your bank's side — they're running fraud checks before showing you the verification screen. This is normal. The longest wait we've seen is about 45 seconds. Just keep the page open.",
+      },
+      {
+        q: "My card was declined. What do I do?",
+        a: "Try a different card, or use USDC — it works from any country without declines. You can also contact your bank to authorize international online payments.",
+      },
+      {
+        q: "What if my crypto payment doesn't confirm?",
         a: "If you sent the payment but your account wasn't activated, contact us at pnptv.app/contact. We can recover it manually with your transaction ID.",
       },
       {
@@ -143,16 +188,17 @@ const S = {
       },
     ],
     ctaTitle: "Ready to pay?",
+    ctaCard: "Pay with Card →",
     ctaSubscribe: "Go to Subscribe →",
     ctaLifetime: "Lifetime PRIME $80 →",
     backHome: "← Back to PNPtv",
     needHelp: "Still stuck? Contact support →",
   },
   es: {
-    pageTitle: "Cómo Pagar con Cripto — PNPtv!",
-    heroEyebrow: "GUÍA DE PAGO CON CRIPTO",
-    heroTitle: "Cómo Pagar con Cripto en PNPtv",
-    heroSubtitle: "No necesitas experiencia. Elige tu método, sigue los pasos — listo en 10 minutos.",
+    pageTitle: "Cómo Pagar — PNPtv!",
+    heroEyebrow: "GUÍA DE PAGOS",
+    heroTitle: "Cómo Pagar en PNPtv",
+    heroSubtitle: "Tarjeta, cripto o Dash — elige lo que más te convenga.",
     whyTitle: "¿Por qué pagar con cripto?",
     why: [
       { e: "🔒", t: "100% privado", b: "Sin estado de cuenta. Sin nombre asociado a la transacción. Tu privacidad es lo primero." },
@@ -160,7 +206,40 @@ const S = {
       { e: "💰", t: "Ahorra 20% en la mayoría de planes", b: "Los planes anuales y lifetime obtienen un 20% de descuento automático al pagar con cripto." },
       { e: "⚡", t: "Rápido y confiable", b: "Los pagos se confirman en minutos. Sin contracargos, sin reversiones." },
     ],
-    usdcTitle: "Opción 1 — USDC (recomendado para principiantes)",
+    cardTitle: "Opción 1 — Tarjeta de Crédito o Débito (más rápido)",
+    cardWhat: "Paga directamente con tu Visa o Mastercard. Se aceptan tarjetas de la mayoría de países. El cobro lo procesa ePayco — un procesador de pagos certificado PCI.",
+    cardWhy: "Ideal para: quienes quieren pagar ahora mismo. Sin cripto.",
+    cardSteps: [
+      {
+        n: "1",
+        title: "Ve a Suscripciones y elige un plan",
+        body: "Ve a pnptv.app/subscribe (o /lifetime80 para la oferta Lifetime de $80). Elige tu plan — Semanal, Mensual, Anual o Lifetime — y haz clic en \"Pagar con Tarjeta\".",
+        links: [
+          { label: "Suscripciones ↗", href: "/subscribe" },
+          { label: "Lifetime $80 ↗", href: "/lifetime80" },
+        ],
+      },
+      {
+        n: "2",
+        title: "Ingresa los datos de tu tarjeta",
+        body: "Completa tu nombre completo, número de tarjeta, fecha de vencimiento y CVV. Asegúrate de que el nombre coincida exactamente con el de tu tarjeta.",
+        links: [],
+      },
+      {
+        n: "3",
+        title: "⏳ Espera la verificación 3D Secure",
+        body: "Después de enviar tu tarjeta, tu banco iniciará una verificación de seguridad. Puede aparecer una ventana emergente o redirigirte para confirmar el pago — ya sea en tu app bancaria, por código SMS o con una pregunta de seguridad. ESTO PUEDE TARDAR 20 A 30 SEGUNDOS EN APARECER. No cierres la pestaña, no presiones Atrás ni recargues la página mientras esperas. Si no aparece nada después de 60 segundos, tu banco puede haberlo aprobado de forma silenciosa — sigue esperando.",
+        links: [],
+        warning: "💡 Consejo: Revisa tu teléfono — tu banco puede enviar una notificación push o SMS para aprobar el pago.",
+      },
+      {
+        n: "4",
+        title: "Tu acceso PRIME se activa al instante",
+        body: "Una vez aprobado, verás una pantalla de confirmación y recibirás una notificación dentro de PNPtv. Tu acceso PRIME está activo de inmediato — sin esperas.",
+        links: [],
+      },
+    ],
+    usdcTitle: "Opción 2 — USDC (recomendado para principiantes)",
     usdcWhat: "USDC es un dólar digital. 1 USDC = $1 USD, siempre. No sube ni baja de valor como el Bitcoin. Compras exactamente lo que necesitas y lo gastas.",
     usdcWhy: "Ideal para: quienes son nuevos en cripto. Valor estable, fácil de comprar, funciona en todas partes.",
     usdcSteps: [
@@ -199,7 +278,7 @@ const S = {
         links: [],
       },
     ],
-    dashTitle: "Opción 2 — Dash (más privado)",
+    dashTitle: "Opción 3 — Dash (más privado)",
     dashWhat: "Dash es una criptomoneda creada para pagos rápidos y privados. A diferencia del USDC, el precio puede fluctuar — pero las facturas se fijan en USD para que siempre pagues el monto correcto.",
     dashWhy: "Ideal para: usuarios que ya tienen Dash o quieren máxima privacidad. No necesitas cuenta en nuestro lado — solo escanea y envía.",
     dashSteps: [
@@ -241,7 +320,19 @@ const S = {
     faqTitle: "Preguntas frecuentes",
     faq: [
       {
-        q: "¿Qué pasa si mi pago no se confirma?",
+        q: "Mi tarjeta fue cobrada pero mi cuenta no se activó.",
+        a: "Esto ocurre a veces cuando nuestro sistema no recibe la confirmación del pago a tiempo. Tu acceso se activará automáticamente en 15 minutos. Si no es así, contáctanos y lo resolvemos manualmente.",
+      },
+      {
+        q: "¿Por qué tarda tanto el popup de 3D Secure?",
+        a: "El retraso es del lado de tu banco — están ejecutando verificaciones antifraude antes de mostrarte la pantalla de verificación. Esto es normal. La espera más larga que hemos visto es de unos 45 segundos. Solo mantén la página abierta.",
+      },
+      {
+        q: "Mi tarjeta fue rechazada. ¿Qué hago?",
+        a: "Prueba con otra tarjeta, o usa USDC — funciona desde cualquier país sin rechazos. También puedes contactar a tu banco para autorizar pagos internacionales en línea.",
+      },
+      {
+        q: "¿Qué pasa si mi pago en cripto no se confirma?",
         a: "Si enviaste el pago pero tu cuenta no se activó, contáctanos en pnptv.app/contact. Podemos recuperarlo manualmente con tu ID de transacción.",
       },
       {
@@ -258,6 +349,7 @@ const S = {
       },
     ],
     ctaTitle: "¿Listo para pagar?",
+    ctaCard: "Pagar con Tarjeta →",
     ctaSubscribe: "Ir a Suscripciones →",
     ctaLifetime: "Lifetime PRIME $80 →",
     backHome: "← Volver a PNPtv",
@@ -265,13 +357,20 @@ const S = {
   },
 };
 
-function Step({ n, title, body, links, color }: { n: string; title: string; body: string; links: { label: string; href: string }[]; color: string }) {
+function Step({ n, title, body, links, color, warning }: { n: string; title: string; body: string; links: { label: string; href: string }[]; color: string; warning?: string }) {
+  const isWarningStep = !!warning;
+  const bubbleColor = isWarningStep ? "#f59e0b" : color;
   return (
     <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
-      <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", background: color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: "#fff" }}>{n}</div>
+      <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", background: bubbleColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: "#fff" }}>{n}</div>
       <div style={{ flex: 1 }}>
         <p style={{ margin: "0 0 6px", fontSize: 15, fontWeight: 700, color: "#ffffff", lineHeight: 1.3 }}>{title}</p>
         <p style={{ margin: "0 0 10px", fontSize: 13, color: "#9ca3af", lineHeight: 1.6 }}>{body}</p>
+        {warning && (
+          <div style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#fbbf24", marginBottom: 10 }}>
+            {warning}
+          </div>
+        )}
         {links.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {links.map((l) => (
@@ -315,10 +414,22 @@ export default function CryptoGuide() {
       <div style={{ position: "relative", zIndex: 1, maxWidth: 680, margin: "0 auto", padding: "0 20px 80px" }}>
 
         {/* Hero */}
-        <section style={{ textAlign: "center", padding: "8px 0 32px" }}>
+        <section style={{ textAlign: "center", padding: "8px 0 28px" }}>
           <p style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase", color: "#26a17b" }}>{s.heroEyebrow}</p>
           <h1 style={{ margin: "0 0 12px", fontSize: "clamp(22px, 5vw, 30px)", fontWeight: 900, lineHeight: 1.15 }}>{s.heroTitle}</h1>
-          <p style={{ margin: 0, fontSize: 15, color: "#9ca3af" }}>{s.heroSubtitle}</p>
+          <p style={{ margin: "0 0 24px", fontSize: 15, color: "#9ca3af" }}>{s.heroSubtitle}</p>
+          {/* Method picker strip */}
+          <div style={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: 10 }}>
+            <a href="#card" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 24, background: "rgba(212,0,122,0.12)", border: "1px solid rgba(212,0,122,0.35)", color: "#f472b6", fontSize: 13, fontWeight: 700, textDecoration: "none" }}>
+              💳 {lang === "en" ? "Credit/Debit Card" : "Tarjeta"}
+            </a>
+            <a href="#usdc" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 24, background: "rgba(38,161,123,0.12)", border: "1px solid rgba(38,161,123,0.35)", color: "#26a17b", fontSize: 13, fontWeight: 700, textDecoration: "none" }}>
+              🪙 USDC
+            </a>
+            <a href="#dash" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 24, background: "rgba(0,141,228,0.12)", border: "1px solid rgba(0,141,228,0.35)", color: "#008DE4", fontSize: 13, fontWeight: 700, textDecoration: "none" }}>
+              🥷 Dash
+            </a>
+          </div>
         </section>
 
         {/* Why crypto */}
@@ -335,8 +446,26 @@ export default function CryptoGuide() {
           </div>
         </section>
 
+        {/* Card Section */}
+        <section id="card" style={{ marginBottom: 48 }}>
+          <div style={{ padding: "20px 20px 24px", background: "rgba(212,0,122,0.06)", border: "1px solid rgba(212,0,122,0.25)", borderRadius: 20, marginBottom: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 28 }}>💳</span>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#D4007A" }}>{s.cardTitle}</h2>
+            </div>
+            <p style={{ margin: "0 0 8px", fontSize: 14, color: "#d1d5db", lineHeight: 1.6 }}>{s.cardWhat}</p>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <CheckIcon />
+              <p style={{ margin: 0, fontSize: 13, color: "#D4007A", fontWeight: 600 }}>{s.cardWhy}</p>
+            </div>
+          </div>
+          {s.cardSteps.map((step) => (
+            <Step key={step.n} {...step} color="#D4007A" />
+          ))}
+        </section>
+
         {/* USDC Section */}
-        <section style={{ marginBottom: 48 }}>
+        <section id="usdc" style={{ marginBottom: 48 }}>
           <div style={{ padding: "20px 20px 24px", background: "rgba(38,161,123,0.06)", border: "1px solid rgba(38,161,123,0.25)", borderRadius: 20, marginBottom: 24 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <span style={{ fontSize: 28 }}>🪙</span>
@@ -354,7 +483,7 @@ export default function CryptoGuide() {
         </section>
 
         {/* Dash Section */}
-        <section style={{ marginBottom: 48 }}>
+        <section id="dash" style={{ marginBottom: 48 }}>
           <div style={{ padding: "20px 20px 24px", background: "rgba(0,141,228,0.06)", border: "1px solid rgba(0,141,228,0.25)", borderRadius: 20, marginBottom: 24 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <span style={{ fontSize: 28 }}>🥷</span>
@@ -391,6 +520,9 @@ export default function CryptoGuide() {
         <section style={{ textAlign: "center", padding: "32px 0" }}>
           <h2 style={{ margin: "0 0 20px", fontSize: 20, fontWeight: 800 }}>{s.ctaTitle}</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
+            <Link to="/subscribe" style={{ display: "block", width: "100%", maxWidth: 320, padding: "16px 24px", background: "#D4007A", color: "#ffffff", fontSize: 15, fontWeight: 800, textDecoration: "none", borderRadius: 14, textAlign: "center", letterSpacing: "0.03em" }}>
+              {s.ctaCard}
+            </Link>
             <Link to="/subscribe" style={{ display: "block", width: "100%", maxWidth: 320, padding: "16px 24px", background: "linear-gradient(90deg, #D4007A, #ff9933)", color: "#ffffff", fontSize: 15, fontWeight: 800, textDecoration: "none", borderRadius: 14, textAlign: "center", letterSpacing: "0.03em" }}>
               {s.ctaSubscribe}
             </Link>
