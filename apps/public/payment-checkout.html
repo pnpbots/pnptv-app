@@ -604,26 +604,9 @@
             };
         }
 
-        // ── Show doc fields only for Colombian IPs ─────────────────
-        async function detectColombiaAndToggleDocs() {
-            try {
-                const ctrl = new AbortController();
-                const t = setTimeout(() => ctrl.abort(), 3000);
-                const res = await fetch('https://ipapi.co/country/', { signal: ctrl.signal });
-                clearTimeout(t);
-                const country = (await res.text()).trim();
-                if (country === 'CO') {
-                    document.getElementById('docFields').style.display = 'flex';
-                }
-            } catch (e) {
-                // Geo lookup failed — keep doc fields hidden (safe default for international users)
-            }
-        }
-
         // ── Initialize ────────────────────────────────────────────
         async function init() {
             populateYears();
-            detectColombiaAndToggleDocs();
 
             document.getElementById('cardNumber').addEventListener('input', function() {
                 formatCardNumber(this);
@@ -651,6 +634,9 @@
 
                 paymentData = data.payment;
                 renderPlanSummary();
+                if (paymentData.showDocFields) {
+                    document.getElementById('docFields').style.display = 'flex';
+                }
                 showState('form');
             } catch (err) {
                 showState('fatal');

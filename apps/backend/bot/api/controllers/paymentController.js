@@ -1,3 +1,4 @@
+const geoip = require('geoip-lite');
 const PaymentModel = require('../../../models/paymentModel');
 const PlanModel = require('../../../models/planModel');
 const ConfirmationTokenService = require('../../../services/confirmationTokenService');
@@ -254,6 +255,10 @@ class PaymentController {
           }
         }
 
+        const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+        const geo = geoip.lookup(clientIp);
+        tokenPaymentData.showDocFields = geo?.country === 'CO';
+
         logger.info('Token purchase payment info retrieved', { paymentId, userId, tokenAmount });
         return res.json({ success: true, payment: tokenPaymentData });
       }
@@ -382,6 +387,10 @@ class PaymentController {
           });
         }
       }
+
+      const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+      const geo = geoip.lookup(clientIp);
+      basePaymentData.showDocFields = geo?.country === 'CO';
 
       const responseData = {
         success: true,
