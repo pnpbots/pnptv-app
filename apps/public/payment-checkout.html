@@ -327,19 +327,19 @@
                         <label for="email">Email</label>
                         <input type="email" id="email" name="email" autocomplete="email" required placeholder="john@example.com">
                     </div>
-                    <div class="field-row" id="docFields">
+                    <div class="field-row" id="docFields" style="display:none;">
                         <div class="field">
-                            <label for="docType">Doc Type <span style="font-size:11px;color:#9ca3af;font-weight:400;">(Colombia only)</span></label>
+                            <label for="docType">Doc Type</label>
                             <select id="docType" name="docType" onchange="updateDocNumberField(this.value)">
-                                <option value="PP">PP (Passport / Other)</option>
                                 <option value="CC">CC (Cédula)</option>
                                 <option value="CE">CE (Foreign ID)</option>
                                 <option value="NIT">NIT (Tax ID)</option>
+                                <option value="PP">PP (Passport)</option>
                             </select>
                         </div>
                         <div class="field">
-                            <label for="docNumber">Doc Number <span style="font-size:11px;color:#9ca3af;font-weight:400;">(Colombia only)</span></label>
-                            <input type="text" id="docNumber" name="docNumber" placeholder="Leave blank if outside Colombia" inputmode="text" pattern="[A-Za-z0-9]*" title="Colombian users: enter your document number. Others: leave blank.">
+                            <label for="docNumber">Doc Number</label>
+                            <input type="text" id="docNumber" name="docNumber" placeholder="Ej: 1234567890" inputmode="numeric" pattern="[A-Za-z0-9]*">
                         </div>
                     </div>
                     <div class="field">
@@ -604,9 +604,26 @@
             };
         }
 
+        // ── Show doc fields only for Colombian IPs ─────────────────
+        async function detectColombiaAndToggleDocs() {
+            try {
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 3000);
+                const res = await fetch('https://ipapi.co/country/', { signal: ctrl.signal });
+                clearTimeout(t);
+                const country = (await res.text()).trim();
+                if (country === 'CO') {
+                    document.getElementById('docFields').style.display = 'flex';
+                }
+            } catch (e) {
+                // Geo lookup failed — keep doc fields hidden (safe default for international users)
+            }
+        }
+
         // ── Initialize ────────────────────────────────────────────
         async function init() {
             populateYears();
+            detectColombiaAndToggleDocs();
 
             document.getElementById('cardNumber').addEventListener('input', function() {
                 formatCardNumber(this);
@@ -1086,16 +1103,13 @@
             showState('form');
         }
 
-        // ── F4: Update docNumber placeholder based on selected document type ──
         function updateDocNumberField(docType) {
             var input = document.getElementById('docNumber');
             if (!input) return;
             if (docType === 'PP') {
-                // Passport — alphanumeric
                 input.placeholder = 'Ej: AB1234567';
                 input.setAttribute('inputmode', 'text');
             } else {
-                // CC, CE, NIT, TI — numeric digits only
                 input.placeholder = 'Ej: 1234567890';
                 input.setAttribute('inputmode', 'numeric');
             }
