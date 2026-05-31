@@ -327,19 +327,19 @@
                         <label for="email">Email</label>
                         <input type="email" id="email" name="email" autocomplete="email" required placeholder="john@example.com">
                     </div>
-                    <div class="field-row">
+                    <div class="field-row" id="docFields">
                         <div class="field">
-                            <label for="docType">Doc Type</label>
+                            <label for="docType">Doc Type <span style="font-size:11px;color:#9ca3af;font-weight:400;">(Colombia only)</span></label>
                             <select id="docType" name="docType" onchange="updateDocNumberField(this.value)">
-                                <option value="CC">CC (Citizenship)</option>
+                                <option value="PP">PP (Passport / Other)</option>
+                                <option value="CC">CC (Cédula)</option>
                                 <option value="CE">CE (Foreign ID)</option>
                                 <option value="NIT">NIT (Tax ID)</option>
-                                <option value="PP">PP (Passport)</option>
                             </select>
                         </div>
                         <div class="field">
-                            <label for="docNumber">Doc Number</label>
-                            <input type="text" id="docNumber" name="docNumber" required placeholder="Ej: 1234567890" inputmode="text" pattern="[A-Za-z0-9]+" title="Digits only for CC/CE/NIT/TI; letters and digits allowed for Passport (PP)">
+                            <label for="docNumber">Doc Number <span style="font-size:11px;color:#9ca3af;font-weight:400;">(Colombia only)</span></label>
+                            <input type="text" id="docNumber" name="docNumber" placeholder="Leave blank if outside Colombia" inputmode="text" pattern="[A-Za-z0-9]*" title="Colombian users: enter your document number. Others: leave blank.">
                         </div>
                     </div>
                     <div class="field">
@@ -702,7 +702,7 @@
             const dues = document.getElementById('dues').value;
 
             // Validate
-            if (!name || !email || !docNumber || !cardNumber || !expMonth || !expYear || !cvc) {
+            if (!name || !email || !cardNumber || !expMonth || !expYear || !cvc) {
                 formError.textContent = 'Please fill in all required fields.';
                 formError.style.display = 'block';
                 return;
@@ -748,8 +748,8 @@
                     name: name,
                     lastName: lastName,
                     email: email,
-                    docType: docType,
-                    docNumber: docNumber,
+                    docType: docNumber ? docType : 'PP',
+                    docNumber: docNumber || '0000000000',
                     phone: phone || '0000000000',
                     city: 'Bogota',
                     address: 'N/A',
