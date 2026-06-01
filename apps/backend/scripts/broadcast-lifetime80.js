@@ -43,18 +43,18 @@ const isEn  = (lang) => typeof lang === 'string' && lang.toLowerCase().startsWit
 // ── Messages ──────────────────────────────────────────────────────────────────
 
 const NOTIFICATION_MSG = {
-  en: `🔥 Lifetime PRIME — $80 one-time with crypto, yours forever. No renewals, ever. Also: monthly & yearly plans at pnptv.app/subscribe →`,
-  es: `🔥 Lifetime PRIME — $80 pago único con cripto, tuyo para siempre. Sin renovaciones. También: planes mensuales y anuales en pnptv.app/subscribe →`,
+  en: `🔥 Lifetime PRIME — $80 one-time. Pay with card, Dash, or USDC. Full PRIME forever. No renewals, ever. Also: monthly & yearly plans at pnptv.app/subscribe →`,
+  es: `🔥 Lifetime PRIME — $80 pago único. Paga con tarjeta, Dash o USDC. PRIME completo para siempre. Sin renovaciones. También: planes mensuales y anuales en pnptv.app/subscribe →`,
 };
 
 const PUSH = {
   en: {
-    title: '🔥 Lifetime PRIME — $80 one-time, crypto only',
-    body:  'Pay once with Dash or USDC. Full PRIME forever. No renewals, ever. Monthly & yearly plans also available.',
+    title: '🔥 Lifetime PRIME — $80 one-time',
+    body:  'Pay with card, Dash, or USDC. Full PRIME forever. No renewals, ever. Monthly & yearly plans also available.',
   },
   es: {
-    title: '🔥 Lifetime PRIME — $80 único pago, solo cripto',
-    body:  'Paga una vez con Dash o USDC. PRIME completo para siempre. Sin renovaciones. También hay planes mensuales y anuales.',
+    title: '🔥 Lifetime PRIME — $80 único pago',
+    body:  'Paga con tarjeta, Dash o USDC. PRIME completo para siempre. Sin renovaciones. También hay planes mensuales y anuales.',
   },
 };
 
@@ -62,11 +62,11 @@ const TG = {
   en:
 `🔥 <b>Lifetime PRIME — $80. One payment. Forever.</b>
 
-We just launched an exclusive offer for the community:
+An exclusive offer for the community:
 
-<b>Lifetime PRIME for $80</b> — paid once, with crypto.
+<b>Lifetime PRIME for $80</b> — pay once, access forever.
 
-No monthly fees. No renewals. No card required. <b>Just $80 and it's yours forever.</b>
+No monthly fees. No renewals. <b>Just $80 and it's yours for life.</b>
 
 <b>What you get:</b>
 💎 Full PRIME access — permanently
@@ -75,13 +75,12 @@ No monthly fees. No renewals. No card required. <b>Just $80 and it's yours forev
 📣 Full feed, DMs, Hangouts, Nearby — everything
 🛡️ Priority support, always
 
-<b>Two ways to pay — both $80 flat:</b>
-🥷 <b>Dash</b> — send from your Dash wallet. Anonymous. No name, no bank.
+<b>Three ways to pay — all $80 flat:</b>
+💳 <b>Card</b> — Visa or Mastercard via ePayco. Safe &amp; discreet checkout.
+🥷 <b>Dash</b> — from your Dash wallet. Anonymous. No name, no bank.
 🪙 <b>USDC</b> — stable digital dollar. Easy checkout via NOWPayments.
 
 👉 <a href="${PAGE_URL}">${PAGE_URL}</a>
-
-<i>This offer is crypto-only. It will not appear on the regular subscription page.</i>
 
 💡 <b>Not ready for a lifetime deal?</b> We also offer monthly and yearly plans:
 👉 <a href="${SUBSCRIBE_URL}">${SUBSCRIBE_URL}</a>`,
@@ -89,11 +88,11 @@ No monthly fees. No renewals. No card required. <b>Just $80 and it's yours forev
   es:
 `🔥 <b>Lifetime PRIME — $80. Un pago. Para siempre.</b>
 
-Acabamos de lanzar una oferta exclusiva para la comunidad:
+Una oferta exclusiva para la comunidad:
 
-<b>Lifetime PRIME por $80</b> — pago único, con cripto.
+<b>Lifetime PRIME por $80</b> — paga una vez, acceso para siempre.
 
-Sin cuotas mensuales. Sin renovaciones. Sin tarjeta. <b>Solo $80 y es tuyo para siempre.</b>
+Sin cuotas mensuales. Sin renovaciones. <b>Solo $80 y es tuyo de por vida.</b>
 
 <b>Lo que obtienes:</b>
 💎 Acceso PRIME completo — permanente
@@ -102,21 +101,20 @@ Sin cuotas mensuales. Sin renovaciones. Sin tarjeta. <b>Solo $80 y es tuyo para 
 📣 Feed completo, DMs, Hangouts, Nearby — todo
 🛡️ Soporte prioritario, siempre
 
-<b>Dos formas de pagar — ambas a $80 fijo:</b>
-🥷 <b>Dash</b> — envía desde tu wallet Dash. Anónimo. Sin nombre, sin banco.
+<b>Tres formas de pagar — todas a $80 fijo:</b>
+💳 <b>Tarjeta</b> — Visa o Mastercard vía ePayco. Checkout seguro y discreto.
+🥷 <b>Dash</b> — desde tu wallet Dash. Anónimo. Sin nombre, sin banco.
 🪙 <b>USDC</b> — dólar digital estable. Checkout fácil vía NOWPayments.
 
 👉 <a href="${PAGE_URL}">${PAGE_URL}</a>
-
-<i>Esta oferta es solo cripto. No aparece en la página de suscripción regular.</i>
 
 💡 <b>¿No estás listo para el lifetime?</b> También tenemos planes mensuales y anuales:
 👉 <a href="${SUBSCRIBE_URL}">${SUBSCRIBE_URL}</a>`,
 };
 
 const EMAIL_SUBJECT = {
-  en: '🔥 Lifetime PRIME — $80 one-time, crypto only — pay once, yours forever',
-  es: '🔥 Lifetime PRIME — $80 pago único, solo cripto — paga una vez, tuyo para siempre',
+  en: '🔥 Lifetime PRIME — $80 one-time — pay with card, Dash, or USDC. Yours forever.',
+  es: '🔥 Lifetime PRIME — $80 pago único — paga con tarjeta, Dash o USDC. Tuyo para siempre.',
 };
 
 function buildEmailHtml(lang, name) {
@@ -128,7 +126,7 @@ function buildEmailHtml(lang, name) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>${en ? 'Lifetime PRIME — $80 Crypto' : 'Lifetime PRIME — $80 Cripto'}</title>
+  <title>${en ? 'Lifetime PRIME — $80 One-Time' : 'Lifetime PRIME — $80 Pago Único'}</title>
 </head>
 <body style="margin:0;padding:0;background:#0a0a0a;font-family:Arial,Helvetica,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0a;">
@@ -152,15 +150,15 @@ function buildEmailHtml(lang, name) {
           </h1>
           <p style="margin:0 0 24px;font-size:15px;color:#9ca3af;line-height:1.5;">
             ${en
-              ? 'No renewals. No card. No monthly fees. Just $80 with crypto — and PRIME is yours for life.'
-              : 'Sin renovaciones. Sin tarjeta. Sin cuotas mensuales. Solo $80 con cripto — y PRIME es tuyo de por vida.'}
+              ? 'No renewals. No monthly fees. Pay once with card, Dash, or USDC — and PRIME is yours for life.'
+              : 'Sin renovaciones. Sin cuotas mensuales. Paga una vez con tarjeta, Dash o USDC — y PRIME es tuyo de por vida.'}
           </p>
 
           <!-- Price block -->
           <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
             <tr><td style="padding:24px;background:rgba(38,161,123,0.08);border:1px solid rgba(38,161,123,0.30);border-radius:16px;text-align:center;">
               <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#26a17b;">
-                ${en ? 'CRYPTO EXCLUSIVE · ONE-TIME PAYMENT' : 'EXCLUSIVO CRIPTO · PAGO ÚNICO'}
+                ${en ? 'EXCLUSIVE OFFER · ONE-TIME PAYMENT' : 'OFERTA EXCLUSIVA · PAGO ÚNICO'}
               </p>
               <p style="margin:0 0 2px;font-size:16px;color:#636366;text-decoration:line-through;font-weight:600;">$250</p>
               <p style="margin:0;font-size:56px;font-weight:900;color:#26a17b;line-height:1;text-shadow:0 0 30px rgba(38,161,123,0.4);">$80</p>
@@ -193,36 +191,32 @@ function buildEmailHtml(lang, name) {
 
           <!-- Payment methods -->
           <p style="margin:0 0 12px;font-size:15px;font-weight:800;color:#ffffff;">
-            ${en ? 'Two ways to pay — both $80 flat:' : 'Dos formas de pagar — ambas a $80 fijo:'}
+            ${en ? 'Three ways to pay — all $80 flat:' : 'Tres formas de pagar — todas a $80 fijo:'}
           </p>
           <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
             <tr>
-              <td width="50%" style="padding:0 6px 0 0;">
-                <div style="padding:16px;background:rgba(0,141,228,0.08);border:1px solid rgba(0,141,228,0.30);border-radius:12px;text-align:center;">
-                  <p style="margin:0 0 6px;font-size:22px;">🥷</p>
-                  <p style="margin:0 0 3px;font-size:13px;font-weight:800;color:#008DE4;">Dash</p>
-                  <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.4;">${en ? 'From your Dash wallet. Anonymous. No name, no bank.' : 'Desde tu wallet Dash. Anónimo. Sin nombre, sin banco.'}</p>
+              <td width="33%" style="padding:0 4px 0 0;">
+                <div style="padding:14px 10px;background:rgba(212,0,122,0.08);border:1px solid rgba(212,0,122,0.30);border-radius:12px;text-align:center;">
+                  <p style="margin:0 0 6px;font-size:22px;">💳</p>
+                  <p style="margin:0 0 3px;font-size:12px;font-weight:800;color:#D4007A;">${en ? 'Card' : 'Tarjeta'}</p>
+                  <p style="margin:0;font-size:10px;color:#9ca3af;line-height:1.4;">${en ? 'Visa or Mastercard via ePayco. Safe &amp; discreet.' : 'Visa o Mastercard vía ePayco. Seguro y discreto.'}</p>
                 </div>
               </td>
-              <td width="50%" style="padding:0 0 0 6px;">
-                <div style="padding:16px;background:rgba(38,161,123,0.08);border:1px solid rgba(38,161,123,0.30);border-radius:12px;text-align:center;">
+              <td width="33%" style="padding:0 2px;">
+                <div style="padding:14px 10px;background:rgba(0,141,228,0.08);border:1px solid rgba(0,141,228,0.30);border-radius:12px;text-align:center;">
+                  <p style="margin:0 0 6px;font-size:22px;">🥷</p>
+                  <p style="margin:0 0 3px;font-size:12px;font-weight:800;color:#008DE4;">Dash</p>
+                  <p style="margin:0;font-size:10px;color:#9ca3af;line-height:1.4;">${en ? 'Anonymous. No name, no bank.' : 'Anónimo. Sin nombre, sin banco.'}</p>
+                </div>
+              </td>
+              <td width="33%" style="padding:0 0 0 4px;">
+                <div style="padding:14px 10px;background:rgba(38,161,123,0.08);border:1px solid rgba(38,161,123,0.30);border-radius:12px;text-align:center;">
                   <p style="margin:0 0 6px;font-size:22px;">🪙</p>
-                  <p style="margin:0 0 3px;font-size:13px;font-weight:800;color:#26a17b;">USDC</p>
-                  <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.4;">${en ? 'Stable digital dollar. Easy checkout via NowPayments.' : 'Dólar digital estable. Checkout fácil vía NowPayments.'}</p>
+                  <p style="margin:0 0 3px;font-size:12px;font-weight:800;color:#26a17b;">USDC</p>
+                  <p style="margin:0;font-size:10px;color:#9ca3af;line-height:1.4;">${en ? 'Stable digital dollar via NowPayments.' : 'Dólar digital estable vía NowPayments.'}</p>
                 </div>
               </td>
             </tr>
-          </table>
-
-          <!-- Notice -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
-            <tr><td style="padding:14px 16px;background:rgba(255,153,51,0.06);border:1px solid rgba(255,153,51,0.20);border-radius:10px;">
-              <p style="margin:0;font-size:12px;color:#d1d5db;line-height:1.5;">
-                ⚠️ ${en
-                  ? '<b>Crypto-only offer.</b> This deal is not available on the regular subscription page — it\'s exclusive to /lifetime80.'
-                  : '<b>Oferta solo cripto.</b> Esta oferta no está disponible en la página de suscripción regular — es exclusiva de /lifetime80.'}
-              </p>
-            </td></tr>
           </table>
 
           <!-- CTA -->
