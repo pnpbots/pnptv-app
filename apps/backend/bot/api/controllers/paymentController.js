@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const geoip = require('geoip-lite');
 const PaymentModel = require('../../../models/paymentModel');
 const PlanModel = require('../../../models/planModel');
@@ -974,6 +975,14 @@ class PaymentController {
         }
       }
 
+      // For non-Colombian users the doc fields are hidden and the frontend sends the
+      // generic fallback '1000000000'. Replace it with a deterministic per-user value
+      // so each user has their own ePayco rate-limit bucket instead of all sharing one.
+      const GENERIC_DOC_FALLBACK = '1000000000';
+      const effectiveDocNumber = String(docNumber) === GENERIC_DOC_FALLBACK
+        ? String(100000000 + (parseInt(crypto.createHash('md5').update(userId).digest('hex').slice(0, 8), 16) % 899999999))
+        : String(docNumber);
+
       const chargeParams = {
         paymentId,
         customer: {
@@ -981,7 +990,7 @@ class PaymentController {
           last_name: lastName || name,
           email: sanitizedEmail,
           doc_type: docType,
-          doc_number: String(docNumber),
+          doc_number: effectiveDocNumber,
           city: city || 'Bogota',
           address: address || 'N/A',
           phone: phone || '0000000000',
