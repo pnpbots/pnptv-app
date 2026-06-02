@@ -3810,6 +3810,16 @@ class PaymentService {
         }
       }
 
+      const terminalRejected = ['Rechazada', 'Fallida', 'Abandonada', 'Cancelada', 'Reversada'];
+      if (terminalRejected.includes(statusCheck.currentStatus)) {
+        await PaymentModel.updateStatus(paymentId, 'failed', { epayco_terminal_status: statusCheck.currentStatus });
+        logger.info('Recovery: marked pending payment as failed (ePayco terminal status)', {
+          paymentId,
+          refPayco,
+          epaycoStatus: statusCheck.currentStatus,
+        });
+      }
+
       return {
         success: true,
         recovered: false,
