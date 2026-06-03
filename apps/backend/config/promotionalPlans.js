@@ -1,11 +1,11 @@
 const promotionalPlans = [
   {
     id: 'lifetime80',
-    sku: 'PNP-000-P-080',
-    name: 'Lifetime Prime $80 Crypto',
-    display_name: 'Lifetime Prime $80',
+    sku: 'PNP-000-P-100',
+    name: 'Lifetime Prime $100 Crypto',
+    display_name: 'Lifetime Prime $100',
     tier: 'PRIME',
-    price: 80.0,
+    price: 100.0,
     currency: 'USD',
     isPromo: true,
     hidden: true,

@@ -22,11 +22,11 @@ type Lang = "en" | "es";
 
 const S = {
   en: {
-    pageTitle: "Lifetime PRIME — $80 — PNPtv!",
+    pageTitle: "Lifetime PRIME — $100 — PNPtv!",
     heroTitle: "Lifetime PRIME",
     heroSubtitle: "Pay once. Full PRIME forever.",
     oldPrice: "$250",
-    badge: "$80 ONE-TIME · CARD OR CRYPTO",
+    badge: "$100 ONE-TIME · CARD OR CRYPTO",
     benefits: [
       "Pay once — full PRIME access forever, no renewals ever.",
       "PRIME unlocked permanently — all exclusive content from day one.",
@@ -43,11 +43,11 @@ const S = {
     fineprint: "🔒 Encrypted · Discreet · No personal info required · Price in USD",
   },
   es: {
-    pageTitle: "Lifetime PRIME — $80 — PNPtv!",
+    pageTitle: "Lifetime PRIME — $100 — PNPtv!",
     heroTitle: "Lifetime PRIME",
     heroSubtitle: "Paga una vez. PRIME completo para siempre.",
     oldPrice: "$250",
-    badge: "$80 PAGO ÚNICO · TARJETA O CRIPTO",
+    badge: "$100 PAGO ÚNICO · TARJETA O CRIPTO",
     benefits: [
       "Paga una vez — acceso PRIME completo para siempre, sin renovaciones.",
       "PRIME desbloqueado permanentemente — todo el contenido exclusivo desde el primer día.",
@@ -126,7 +126,7 @@ const SHEET_STRINGS: Record<Lang, SheetStrings> = {
     },
     payments: {
       title: "Payments",
-      lead: "Three ways to pay — all at $80 flat.",
+      lead: "Three ways to pay — all at $100 flat.",
       cards: [
         { e: "💳", t: "Card (ePayco)", b: "Credit or debit card. Safe, discreet checkout. No card stored on our servers." },
         { e: "🥷", t: "Dash (BTCPay)", b: "Send Dash from your wallet. Near-instant, no name, no bank." },
@@ -194,7 +194,7 @@ const SHEET_STRINGS: Record<Lang, SheetStrings> = {
     },
     payments: {
       title: "Pagos",
-      lead: "Tres formas de pagar — todas a $80 fijo.",
+      lead: "Tres formas de pagar — todas a $100 fijo.",
       cards: [
         { e: "💳", t: "Tarjeta (ePayco)", b: "Tarjeta de crédito o débito. Checkout seguro y discreto. No guardamos tu tarjeta." },
         { e: "🥷", t: "Dash (BTCPay)", b: "Envía Dash desde tu wallet. Casi instantáneo, sin nombre, sin banco." },
@@ -658,7 +658,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
       } else if (payMethod === "dash") {
         const result = await createDashSubscription(PLAN_ID);
         if (result.success && result.checkoutUrl) {
-          const invoice: DashInvoice = { invoiceId: result.invoiceId, checkoutUrl: assertPaymentUrl(result.checkoutUrl), planName: result.planName || "Lifetime Prime $80", loadingDetails: true, createdAt: Date.now() };
+          const invoice: DashInvoice = { invoiceId: result.invoiceId, checkoutUrl: assertPaymentUrl(result.checkoutUrl), planName: result.planName || "Lifetime Prime $100", loadingDetails: true, createdAt: Date.now() };
           setDashInvoice(invoice); setDashSecondsLeft(900); setDashPolling(true);
           try { sessionStorage.setItem("pnp_pending_dash_invoice_lt80", JSON.stringify({ invoiceId: result.invoiceId, createdAt: invoice.createdAt })); } catch { /* ignore */ }
           getDashPaymentDetails(result.invoiceId)
@@ -708,18 +708,18 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
     if (submitting) return es ? "Procesando…" : "Processing…";
     if (payMethod === "epayco") {
       if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
-      return es ? "Pagar con Tarjeta — $80" : "Pay with Card — $80";
+      return es ? "Pagar con Tarjeta — $100" : "Pay with Card — $100";
     }
     if (payMethod === "dash") {
       if (dashUnavailable) return es ? "Dash no disponible" : "Dash unavailable";
       if (dashInvoice) return es ? "Cancelar Dash" : "Cancel Dash";
       if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
-      return es ? "Pagar con Dash — $80" : "Pay with Dash — $80";
+      return es ? "Pagar con Dash — $100" : "Pay with Dash — $100";
     }
     if (pollingUsdcOrderId) return usdcConfirming ? (es ? "Confirmando pago…" : "Confirming payment…") : (es ? "Esperando confirmación…" : "Waiting for confirmation…");
     if (usdcUnavailable) return es ? "USDC no disponible" : "USDC unavailable";
     if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
-    return es ? "Pagar con USDC — $80" : "Pay with USDC — $80";
+    return es ? "Pagar con USDC — $100" : "Pay with USDC — $100";
   })();
 
   // Success screen
@@ -783,7 +783,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
             <span style={{ fontSize: 20, color: "#636366", textDecoration: "line-through", fontWeight: 600, marginBottom: 4 }}>{s.oldPrice}</span>
             <div style={{ fontSize: "clamp(56px, 15vw, 72px)", fontWeight: 900, lineHeight: 1, color: "#26a17b", textShadow: "0 0 30px rgba(38,161,123,0.4)", display: "flex", alignItems: "flex-start" }}>
               <span style={{ fontSize: "0.36em", marginTop: "0.55em", opacity: 0.8 }}>$</span>
-              <span>80</span>
+              <span>100</span>
             </div>
             <span style={{ fontSize: 13, color: "#26a17b", fontWeight: 600, marginTop: 4 }}>💳 {es ? "Tarjeta o cripto" : "Card or crypto"}</span>
           </div>
@@ -979,9 +979,9 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           </p>
           <div style={{ display: "flex", gap: 6 }}>
             {([
-              { id: "epayco" as PayMethod, emoji: "💳", label: es ? "Tarjeta" : "Card", sublabel: "$80 · ePayco", disabled: false },
-              { id: "dash" as PayMethod, emoji: "🥷", label: "Dash", sublabel: "$80 · BTCPay", disabled: dashUnavailable },
-              { id: "usdc" as PayMethod, emoji: "🪙", label: "USDC", sublabel: "$80 · NowPayments", disabled: usdcUnavailable },
+              { id: "epayco" as PayMethod, emoji: "💳", label: es ? "Tarjeta" : "Card", sublabel: "$100 · ePayco", disabled: false },
+              { id: "dash" as PayMethod, emoji: "🥷", label: "Dash", sublabel: "$100 · BTCPay", disabled: dashUnavailable },
+              { id: "usdc" as PayMethod, emoji: "🪙", label: "USDC", sublabel: "$100 · NowPayments", disabled: usdcUnavailable },
             ]).map(({ id, emoji, label, sublabel, disabled }) => {
               const sel = payMethod === id;
               return (

@@ -938,10 +938,9 @@ export const router = createBrowserRouter([
     path: "/become-model",
     element: <Navigate to="/become-a-model" replace />,
   },
-  { path: "/lifetime100", element: <Navigate to="/subscribe" replace /> },
-  { path: "/lifetime100/activate", element: <Navigate to="/subscribe" replace /> },
+  { path: "/lifetime80", element: <Navigate to="/lifetime100" replace /> },
   {
-    path: "/lifetime80",
+    path: "/lifetime100",
     element: (
       <ModuleLoader>
         <Lifetime80 />
