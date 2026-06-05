@@ -1383,12 +1383,13 @@ const listCreatorRecordings = async (req, res) => {
       id: String(r.id),
       startedAt: r.started_at,
       endedAt: r.ended_at,
-      durationSeconds: r.duration_seconds,
-      sizeBytes: r.size_bytes ? Number(r.size_bytes) : null,
+      // M-4: Null sensitive metadata for non-subscribers — only id + startedAt exposed publicly
+      durationSeconds: canSeeManifest ? r.duration_seconds : null,
+      sizeBytes: canSeeManifest ? (r.size_bytes ? Number(r.size_bytes) : null) : null,
       manifestUrl: canSeeManifest ? r.manifest_url : null,
       thumbUrl: canSeeManifest ? (r.thumb_path || null) : null,
-      title: r.title || null,
-      description: r.description || null,
+      title: canSeeManifest ? (r.title || null) : null,
+      description: canSeeManifest ? (r.description || null) : null,
       requiresSubscription: !canSeeManifest,
     }));
 
@@ -1823,6 +1824,33 @@ const uploadLocalRecording = (req, res) => {
 
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
+
+    // H-3: Magic bytes check — verify the file is actually a video (MP4 or WebM)
+    // regardless of the declared MIME type. Read first 12 bytes from disk.
+    try {
+      const fd = fs.openSync(req.file.path, 'r');
+      const header = Buffer.alloc(12);
+      fs.readSync(fd, header, 0, 12, 0);
+      fs.closeSync(fd);
+      // WebM: starts with \x1a\x45\xdf\xa3
+      const isWebM = header[0] === 0x1a && header[1] === 0x45 && header[2] === 0xdf && header[3] === 0xa3;
+      // MP4/MOV: bytes 4–7 are 'ftyp' (0x66 0x74 0x79 0x70)
+      const isMp4 = header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70;
+      if (!isWebM && !isMp4) {
+        try { fs.unlinkSync(req.file.path); } catch { /* ok */ }
+        logger.warn('uploadLocalRecording: magic bytes mismatch — file rejected', {
+          userId: req.user?.id,
+          originalname: req.file.originalname,
+          mimetype: req.file.mimetype,
+          headerHex: header.toString('hex'),
+        });
+        return res.status(400).json({ success: false, error: 'File type does not match its contents. Only mp4 and webm videos are accepted.' });
+      }
+    } catch (magicErr) {
+      try { fs.unlinkSync(req.file.path); } catch { /* ok */ }
+      logger.error('uploadLocalRecording: magic bytes read error', { err: magicErr.message });
+      return res.status(500).json({ success: false, error: 'File verification failed' });
     }
 
     const userId = BigInt(req.user.id);

@@ -1453,6 +1453,7 @@ const getPost = async (req, res) => {
     const viewerId = req.session?.user?.id || null;
     const { rows } = await dbQuery(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url,
+              sp.video_title, sp.video_description,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count,
               sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.is_promoted, sp.created_at,
@@ -1491,7 +1492,30 @@ const getPost = async (req, res) => {
       req.session.user.tier = viewerTier;
     }
     const viewerHasAccess = viewerIsAdmin || isAuthor || viewerTier === 'prime';
-    const contentLocked = isExclusivePost && !viewerHasAccess;
+    let contentLocked = isExclusivePost && !viewerHasAccess;
+
+    // M-2: For exclusive posts where the viewer IS prime, also verify they have an active
+    // creator subscription for this post's author — prime alone is not enough.
+    if (isExclusivePost && !contentLocked && viewerTier === 'prime' && viewerId && !isAuthor && !viewerIsAdmin) {
+      try {
+        const postAuthorId = String(row.author_id);
+        const { rows: subCheck } = await dbQuery(
+          `SELECT 1 FROM creator_subscriptions
+           WHERE subscriber_id = $1
+             AND creator_id = $2
+             AND status = 'active'
+             AND (expires_at IS NULL OR expires_at > NOW())
+           LIMIT 1`,
+          [String(viewerId), postAuthorId]
+        );
+        if (!subCheck.length) {
+          contentLocked = true;
+        }
+      } catch (subErr) {
+        logger.error('getPost: creator subscription check failed', { viewerId, err: subErr.message });
+        // Fail open — do not lock content on check error to avoid breaking access for valid subscribers
+      }
+    }
 
     const post = {
       ...row,
@@ -1502,6 +1526,10 @@ const getPost = async (req, res) => {
       content: contentLocked ? null : row.content,
       media_url: contentLocked ? null : row.media_url,
       media_urls: contentLocked ? null : row.media_urls,
+      // M-3: Null video metadata fields so locked posts don't leak title/thumbnail
+      video_thumbnail_url: contentLocked ? null : row.video_thumbnail_url,
+      video_title: contentLocked ? null : (row.video_title || null),
+      video_description: contentLocked ? null : (row.video_description || null),
     };
     return res.json({ success: true, post });
   } catch (err) {

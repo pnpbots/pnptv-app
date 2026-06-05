@@ -257,6 +257,11 @@ async function getNearbyUsers(req, res) {
             sin(radians($2)) * sin(radians(ul.latitude))
           )
         ) <= $4
+        AND ul.user_id NOT IN (
+          SELECT blocked_user_id FROM blocked_users WHERE user_id = $1
+          UNION
+          SELECT user_id FROM blocked_users WHERE blocked_user_id = $1
+        )
       ORDER BY distance ASC
       LIMIT $5`,
       [userId, userLat, userLon, radius, limit]

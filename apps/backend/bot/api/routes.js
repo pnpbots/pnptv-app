@@ -114,9 +114,20 @@ const EntitlementAccessService = require('../../services/entitlementAccessServic
  * Use this before multer on upload routes to reject unauthenticated
  * requests before any file processing begins.
  */
-const requireSessionAuth = (req, res, next) => {
+const requireSessionAuth = async (req, res, next) => {
   if (!req.session?.user?.id) return res.status(401).json({ error: 'Not authenticated' });
   req.user = req.session.user;
+  const userId = req.session.user.id;
+  try {
+    const banKey = `user:banned:${userId}`;
+    const cachedBan = await cache.get(banKey);
+    if (cachedBan === 'true') return res.status(403).json({ success: false, error: 'Account suspended.', code: 'BANNED' });
+    const { rows } = await getPool().query('SELECT role FROM users WHERE id = $1', [userId]);
+    if (rows[0]?.role === 'banned') {
+      await cache.set(banKey, 'true', 120);
+      return res.status(403).json({ success: false, error: 'Account suspended.', code: 'BANNED' });
+    }
+  } catch (_) { /* fail open — don't block on ban-check error */ }
   next();
 };
 
@@ -1306,6 +1317,42 @@ const verifyMagicBytes = (allowedMimes) => async (req, res, next) => {
 
 const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heif', 'image/heic', 'image/avif']);
 
+// Magic bytes verification for disk-stored uploads (post media, large files).
+// file.buffer is empty for diskStorage — read first 12 bytes from the saved path instead.
+const verifyDiskFileType = async (req, res, next) => {
+  const files = req.files || (req.file ? [req.file] : []);
+  if (!files.length) return next();
+  try {
+    for (const file of files) {
+      const buf = Buffer.alloc(12);
+      const fd = fs.openSync(file.path, 'r');
+      fs.readSync(fd, buf, 0, 12, 0);
+      fs.closeSync(fd);
+
+      const isJpeg = buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
+      const isPng  = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47;
+      const isGif  = buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38;
+      const isWebp = buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46; // RIFF
+      const isWebm = buf[0] === 0x1A && buf[1] === 0x45 && buf[2] === 0xDF && buf[3] === 0xA3;
+      const isFtyp = buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70; // mp4/mov/hevc
+
+      if (!(isJpeg || isPng || isGif || isWebp || isWebm || isFtyp)) {
+        try { fs.unlinkSync(file.path); } catch {}
+        logger.warn('Disk upload rejected: magic bytes mismatch', {
+          claimed: file.mimetype,
+          originalname: file.originalname,
+          userId: req.session?.user?.id,
+        });
+        return res.status(400).json({ error: 'File type does not match its contents. Upload rejected.' });
+      }
+    }
+  } catch (err) {
+    logger.error('Disk file type verification error:', err);
+    return res.status(500).json({ error: 'File verification failed' });
+  }
+  return next();
+};
+
 // ── Tiered upload limits: 512 MB for regular users, 3 GB for active creators ──
 const UPLOAD_LIMIT_REGULAR = 512 * 1024 * 1024;   // 512 MB
 const UPLOAD_LIMIT_CREATOR = 3 * 1024 * 1024 * 1024; // 3 GB
@@ -2120,7 +2167,7 @@ app.get('/api/media/playlists', asyncHandler(async (req, res) => {
 }));
 
 // Get single media item
-app.get('/api/media/:mediaId', asyncHandler(async (req, res) => {
+app.get('/api/media/:mediaId', softAuth, asyncHandler(async (req, res) => {
   const { mediaId } = req.params;
 
   try {
@@ -2131,6 +2178,20 @@ app.get('/api/media/:mediaId', asyncHandler(async (req, res) => {
         success: false,
         message: 'Media not found'
       });
+    }
+
+    // H-1: gate prime-flagged items
+    if (media.is_prime) {
+      const sessionUserId = req.session?.user?.id;
+      if (!sessionUserId) {
+        return res.status(401).json({ success: false, error: 'PRIME membership required' });
+      }
+      // Check active prime entitlement
+      const EntitlementAccessService = require('../../services/entitlementAccessService');
+      const hasPrime = await EntitlementAccessService.hasEntitlement(sessionUserId, 'prime');
+      if (!hasPrime) {
+        return res.status(403).json({ success: false, error: 'PRIME membership required', code: 'PRIME_REQUIRED' });
+      }
     }
 
     res.json({
@@ -4166,6 +4227,23 @@ app.post('/api/webapp/admin/overlay-assets/upload', adminGuard, uploadLimiter, u
   if (!req.file) {
     return res.status(400).json({ success: false, error: 'No file uploaded' });
   }
+
+  // SVG sanitization — strip script tags, event handlers, javascript: URIs, and foreignObject
+  if (req.file.mimetype === 'image/svg+xml') {
+    try {
+      let svgContent = fs.readFileSync(req.file.path, 'utf8');
+      svgContent = svgContent.replace(/<script[\s\S]*?<\/script>/gi, '');
+      svgContent = svgContent.replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '');
+      svgContent = svgContent.replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, '');
+      svgContent = svgContent.replace(/\s+(href|xlink:href)\s*=\s*["']javascript:[^"']*["']/gi, '');
+      fs.writeFileSync(req.file.path, svgContent, 'utf8');
+    } catch (sanitizeErr) {
+      logger.warn('SVG sanitization failed, rejecting upload', { error: sanitizeErr.message });
+      try { fs.unlinkSync(req.file.path); } catch {}
+      return res.status(400).json({ success: false, error: 'SVG file could not be validated.' });
+    }
+  }
+
   const dir = type === 'logo' ? 'logos' : 'banners';
   const url = `/uploads/overlays/${dir}/${req.file.filename}`;
   return res.json({ success: true, url, name: req.file.originalname, type, filename: req.file.filename });
@@ -6046,18 +6124,42 @@ app.delete('/api/webapp/dm/messages/:msgId', requireSessionAuth, asyncHandler(dm
 
 // Social feed, wall, posts
 // Public home-feed — no auth required, returns latest posts for the home page preview
-app.get('/api/webapp/social/home-feed', asyncHandler(socialController.getHomeFeed));
+app.get('/api/webapp/social/home-feed', pageLimiter, asyncHandler(socialController.getHomeFeed));
 // Authenticated feed — full paginated feed with liked_by_me per viewer
 app.get('/api/webapp/social/feed', requireSessionAuth, asyncHandler(socialController.getFeed));
 // Wall of Fame sub-feed — WoF-only posts
-app.get('/api/webapp/social/wof-feed', asyncHandler(socialController.getWofFeed));
+app.get('/api/webapp/social/wof-feed', pageLimiter, asyncHandler(socialController.getWofFeed));
 // Hashtag feed — posts containing a specific #tag (?tag=pnp)
 app.get('/api/webapp/social/hashtag-feed', requireSessionAuth, asyncHandler(socialController.getHashtagFeed));
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));
 app.post('/api/webapp/social/posts', requireSessionAuth, asyncHandler(socialController.createPost));
-app.post('/api/webapp/social/posts/with-media', requireSessionAuth, uploadLimiter, attachCreatorStatus, postMediaUploadMiddleware, asyncHandler(socialController.createPostWithMedia));
-app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, uploadLimiter, attachCreatorStatus, postMultiMediaUploadMiddleware, asyncHandler(socialController.createPostWithMultiMedia));
+// M-10: 2257 compliance check middleware — enforced for active creators only
+const require2257ForCreators = asyncHandler(async (req, res, next) => {
+  const userId = req.session?.user?.id;
+  const role = req.session?.user?.role || '';
+  // Admins bypass the gate
+  if (role === 'admin' || role === 'superadmin') return next();
+  if (!userId) return next();
+  const IdentityVerificationService = require('../../services/identityVerificationService');
+  const { query: dbQ2257 } = require('../../config/postgres');
+  const { rows: creatorRows } = await dbQ2257(
+    'SELECT creator_status, identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+    [userId]
+  );
+  const creatorRow = creatorRows[0];
+  if (creatorRow?.creator_status === 'active' && !IdentityVerificationService.is2257Compliant(creatorRow)) {
+    return res.status(403).json({
+      success: false,
+      error: 'Identity verification required before posting media.',
+      code: '2257_REQUIRED',
+    });
+  }
+  return next();
+});
+
+app.post('/api/webapp/social/posts/with-media', requireSessionAuth, uploadLimiter, attachCreatorStatus, postMediaUploadMiddleware, verifyDiskFileType, require2257ForCreators, asyncHandler(socialController.createPostWithMedia));
+app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, uploadLimiter, attachCreatorStatus, postMultiMediaUploadMiddleware, verifyDiskFileType, require2257ForCreators, asyncHandler(socialController.createPostWithMultiMedia));
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));
 app.post('/api/webapp/social/posts/:postId/like', requireSessionAuth, socialActionLimiter, asyncHandler(socialController.toggleLike));
 
@@ -8526,14 +8628,14 @@ app.get('/api/webapp/payments/dash/details/:invoiceId', requireSessionAuth, dash
 });
 
 // GET /api/webapp/payments/lightning/available — check if Lightning is configured & enabled in BTCPay store
-app.get('/api/webapp/payments/lightning/available', asyncHandler(async (req, res) => {
+app.get('/api/webapp/payments/lightning/available', healthLimiter, asyncHandler(async (req, res) => {
   const { checkLightningHealth } = require('../../config/btcpay');
   const health = await checkLightningHealth();
   return res.json({ available: health.configured && health.reachable, ...health });
 }));
 
 // POST /api/webapp/payments/lightning/create — create a BTCPay Lightning invoice for a subscription plan.
-app.post('/api/webapp/payments/lightning/create', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/webapp/payments/lightning/create', requireSessionAuth, paymentCreateLimiter, asyncHandler(async (req, res) => {
   const user = req.session.user;
 
   const { planId, email, creatorId } = req.body;
@@ -8601,6 +8703,27 @@ app.post('/api/webapp/payments/lightning/create', requireSessionAuth, asyncHandl
       }
     }
     planDisplayName = plan.display_name || plan.name;
+  }
+
+  // M-8: deduplicate — return existing pending invoice for same user+plan within 15 minutes
+  const { rows: existingOrders } = await dbQuery(
+    `SELECT id, btcpay_invoice_id FROM dash_subscription_orders
+     WHERE user_id = $1 AND plan_id = $2 AND status = 'pending'
+       AND created_at > NOW() - INTERVAL '15 minutes'
+     LIMIT 1`,
+    [userId, planId]
+  );
+  if (existingOrders.length) {
+    const existingInvoiceId = existingOrders[0].btcpay_invoice_id;
+    const btcpayBase = (process.env.BTCPAY_URL || 'https://btcpay.pnptv.app').replace(/\/$/, '');
+    return res.json({
+      success: true,
+      invoiceId: existingInvoiceId,
+      checkoutUrl: `${btcpayBase}/i/${existingInvoiceId}`,
+      planName: planDisplayName,
+      usdAmount,
+      deduplicated: true,
+    });
   }
 
   const orderId = `pnptv-ln-${userId}-${Date.now()}`;
