@@ -705,19 +705,59 @@ class PaymentRecoveryService {
   /**
    * Mark stuck pending payments older than 24h as 'abandoned'.
    * Covers both ePayco (3DS timeout) and any straggler Daimo rows from before retirement.
+   *
+   * Step 0 (runs first): expire truly abandoned checkouts — ePayco payments that are
+   * pending for > 2 hours with no tokenization attempt (token_card_prefix IS NULL).
+   * These are sessions where the user opened the checkout page but never entered card
+   * details. We expire them faster (2h vs 24h) so the user can start a fresh checkout
+   * without confusion from multiple pending records.
    */
   static async cleanupAbandonedPayments() {
     logger.info('Starting abandoned payment cleanup...');
 
     const results = {
       cleaned: 0,
+      earlyExpired: 0,
       errors: 0,
       startTime: new Date(),
       endTime: null,
     };
 
     try {
-      // Update payments pending > 24 hours to 'abandoned' (ePayco and Daimo)
+      // --- Step 0: Auto-expire no-tokenization-attempt checkouts after 2 hours ---
+      const now = new Date().toISOString();
+      const earlyExpireResult = await query(`
+        UPDATE payments
+        SET status = 'abandoned',
+            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+              'abandoned_at', $1::text,
+              'auto_expired', true,
+              'reason', 'no_tokenization_attempt'
+            )
+        WHERE status = 'pending'
+          AND provider = 'epayco'
+          AND metadata->>'token_card_prefix' IS NULL
+          AND created_at < NOW() - INTERVAL '2 hours'
+        RETURNING id, user_id, reference
+      `, [now]);
+
+      results.earlyExpired = earlyExpireResult.rowCount;
+
+      if (results.earlyExpired > 0) {
+        logger.info(`Auto-expired ${results.earlyExpired} no-tokenization-attempt payments (2h threshold)`, {
+          count: results.earlyExpired,
+          paymentIds: earlyExpireResult.rows.map(r => r.id),
+        });
+        earlyExpireResult.rows.forEach(row => {
+          logger.info('Payment auto-expired (no_tokenization_attempt)', {
+            paymentId: row.id,
+            userId: row.user_id,
+            reference: row.reference,
+          });
+        });
+      }
+
+      // --- Step 1: Mark remaining pending > 24 hours as 'abandoned' (ePayco) ---
       const cleanupResult = await query(`
         UPDATE payments
         SET status = 'abandoned',
@@ -726,7 +766,7 @@ class PaymentRecoveryService {
           AND provider = 'epayco'
           AND created_at < NOW() - INTERVAL '24 hours'
         RETURNING id, user_id, reference, provider
-      `, [new Date().toISOString()]);
+      `, [now]);
 
       results.cleaned = cleanupResult.rowCount;
 
@@ -751,6 +791,7 @@ class PaymentRecoveryService {
       logger.info('Abandoned payment cleanup completed', {
         duration: `${duration}s`,
         cleaned: results.cleaned,
+        earlyExpired: results.earlyExpired,
       });
 
       return results;

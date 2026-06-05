@@ -18,6 +18,26 @@ const BusinessNotificationService = require('../../../services/businessNotificat
 const { ensureEmailCredentials } = require('../../../services/userService');
 
 /**
+ * Maps vague ePayco tokenization error messages to user-friendly Spanish strings.
+ * @param {string|null} rawMsg - raw message from ePayco API or SDK
+ * @returns {string}
+ */
+function mapEpaycoTokenError(rawMsg) {
+  const m = (rawMsg || '').toLowerCase();
+  if (m.includes('validando datos') || m.includes('datos inval'))
+    return 'Los datos de la tarjeta no son válidos. Verifica el número, fecha de vencimiento y CVV.';
+  if (m.includes('numero') || m.includes('número') || m.includes('card number'))
+    return 'Número de tarjeta inválido.';
+  if (m.includes('cvv') || m.includes('cvc') || m.includes('security'))
+    return 'El CVV/CVC no es válido.';
+  if (m.includes('expir') || m.includes('vencimiento') || m.includes('fecha'))
+    return 'La fecha de vencimiento no es válida.';
+  if (m.includes('fondos') || m.includes('funds') || m.includes('insufficient'))
+    return 'Fondos insuficientes. Intenta con otra tarjeta.';
+  return rawMsg || 'No se pudo tokenizar la tarjeta. Verifica los datos e intenta de nuevo.';
+}
+
+/**
  * Payment Controller - Handles payment-related API endpoints
  */
 class PaymentController {
@@ -945,7 +965,7 @@ class PaymentController {
             });
             return res.status(400).json({
               success: false,
-              error: epaycoMsg || 'No se pudo tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+              error: mapEpaycoTokenError(epaycoMsg),
             });
           }
           logger.info('Server-side card tokenization succeeded', {
@@ -959,7 +979,7 @@ class PaymentController {
           });
           return res.status(400).json({
             success: false,
-            error: 'Error al tokenizar la tarjeta. Verifica los datos e intenta de nuevo.',
+            error: mapEpaycoTokenError(tokenError.message),
           });
         } finally {
           // Scrub raw card data from the request body so downstream code and any
@@ -1482,6 +1502,16 @@ class PaymentController {
             logger.error('grantEntitlementsForPlan threw during 3DS2 completion', {
               error: entitlementErr.message, userId, planId, paymentId,
             });
+            // Mark completed so recovery doesn't replay on a user who already has subscription access
+            await PaymentModel.updateStatus(paymentId, 'completed', {
+              transaction_id: refPayco || payment.transactionId,
+              reference: refPayco || payment.reference,
+              epayco_ref: refPayco,
+              payment_method: 'tokenized_card',
+              three_ds_authenticated: true,
+              entitlement_grant_failed: true,
+              webhook_processed_at: new Date().toISOString(),
+            }).catch((e) => logger.error('3DS2: failed to mark completed after entitlement error', { error: e.message, paymentId }));
             return res.status(500).json({
               success: false,
               error: 'Subscription activated but entitlement grant failed — please contact support',
@@ -1493,6 +1523,17 @@ class PaymentController {
             logger.error('grantEntitlementsForPlan returned 0 grants after 3DS2 completion', {
               userId, planId, paymentId, threeDS2GrantResult,
             });
+            // Same: mark completed to prevent replay
+            await PaymentModel.updateStatus(paymentId, 'completed', {
+              transaction_id: refPayco || payment.transactionId,
+              reference: refPayco || payment.reference,
+              epayco_ref: refPayco,
+              payment_method: 'tokenized_card',
+              three_ds_authenticated: true,
+              entitlement_grant_failed: true,
+              entitlement_grant_count: 0,
+              webhook_processed_at: new Date().toISOString(),
+            }).catch((e) => logger.error('3DS2: failed to mark completed after zero-grant error', { error: e.message, paymentId }));
             return res.status(500).json({
               success: false,
               error: 'Subscription activated but no entitlements were granted — please contact support',

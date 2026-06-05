@@ -1727,6 +1727,7 @@ app.get('/api/auth-status', authStatusLimiter, (req, res, next) => {
 // Uses adminGuard which queries DB — never trusts the stale session role.
 // adminGuard returns 403 for non-admins; frontend treats any non-200 as isAdmin: false.
 const adminCheckLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, keyGenerator: (req) => req.ip, standardHeaders: true, legacyHeaders: false });
+const paymentCreateLimiter = rateLimit({ windowMs: 60 * 1000, max: 8, keyGenerator: (req) => req.session?.user?.id || req.ip, handler: (req, res) => res.status(429).json({ success: false, error: 'Demasiados intentos. Espera un minuto antes de intentar nuevamente.' }), standardHeaders: true, legacyHeaders: false });
 app.get('/api/admin/check', adminCheckLimiter, adminGuard, (req, res) => {
   res.json({ isAdmin: true });
 });
@@ -4878,7 +4879,7 @@ app.get('/api/webapp/promos/:code', requireSessionAuth, asyncHandler(async (req,
   });
 }));
 
-app.post('/api/webapp/payments/create', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/webapp/payments/create', requireSessionAuth, paymentCreateLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user?.id) return res.status(401).json({ success: false, error: 'Authentication required' });
 
@@ -4894,6 +4895,16 @@ app.post('/api/webapp/payments/create', requireSessionAuth, asyncHandler(async (
   }
 
   const userId = String(user.telegramId || user.telegram_id || user.id);
+
+  // Guard against stale sessions pointing at deleted users (FK crash prevention)
+  {
+    const { query: _userExistQuery } = require('../../config/postgres');
+    const { rows: userCheck } = await _userExistQuery('SELECT id FROM users WHERE id = $1', [user.id]);
+    if (!userCheck.length) {
+      if (req.session) req.session.destroy(() => {});
+      return res.status(401).json({ success: false, error: 'Session expired. Please log in again.', code: 'USER_NOT_FOUND' });
+    }
+  }
 
   const extraMetadata = {};
   if (promoCode) extraMetadata.promoCode = promoCode.trim();

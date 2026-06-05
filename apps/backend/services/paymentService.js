@@ -846,6 +846,12 @@ class PaymentService {
       return { success: true, paymentUrl, paymentId: payment.id };
     } catch (error) {
       logger.error('Error creating payment:', { error: error.message, planId, provider });
+
+      // FK violation: stale session references a deleted user
+      if (error.message?.includes('payments_user_id_fkey') || error.constraint === 'payments_user_id_fkey') {
+        throw Object.assign(new Error('USER_NOT_FOUND'), { code: 'USER_NOT_FOUND', statusCode: 401 });
+      }
+
       // Normalize error messages for tests (case-insensitive check)
       const msg = error && error.message ? error.message.toLowerCase() : '';
 
@@ -1652,6 +1658,8 @@ class PaymentService {
               paymentId: paymentIdOrType,
               refPayco: x_ref_payco,
             });
+            // Return failure so ePayco retries delivery — do NOT fall through to success
+            return { success: false, code: 'CALL_CREDIT_FAILED', error: callErr.message };
           }
           return { success: true, type: 'call_package' };
         }
@@ -1701,6 +1709,8 @@ class PaymentService {
               paymentId: paymentIdOrType,
               refPayco: x_ref_payco,
             });
+            // Return failure so ePayco retries delivery — do NOT fall through to success
+            return { success: false, code: 'TICKET_SETTLEMENT_FAILED', error: ticketErr.message };
           }
           return { success: true, type: 'live_show_ticket' };
         }
