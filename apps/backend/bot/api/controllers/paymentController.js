@@ -1301,8 +1301,7 @@ class PaymentController {
 
       res.status(500).json({
         success: false,
-        error: 'Error retrying webhook',
-        message: error.message,
+        error: 'Error retrying webhook. Check server logs.',
       });
     }
   }
@@ -1740,7 +1739,6 @@ class PaymentController {
       res.status(500).json({
         success: false,
         error: 'Error processing 3DS 2.0 authentication',
-        message: error.message,
       });
     }
   }

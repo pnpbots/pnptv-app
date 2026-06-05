@@ -416,7 +416,7 @@ const deletePost = async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     logger.error('deletePost error', err);
-    return res.status(err.statusCode || 500).json({ error: err.message || 'Failed to delete post' });
+    return res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Failed to delete post' });
   }
 };
 

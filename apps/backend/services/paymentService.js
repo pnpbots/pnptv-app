@@ -3222,7 +3222,7 @@ class PaymentService {
         stackTrace: error.stack,
       }).catch(() => {});
 
-      return { success: false, error: `Error procesando el pago: ${error.message}` };
+      return { success: false, error: 'Error procesando el pago. Intenta nuevamente.' };
     } finally {
       await cache.releaseLock(chargeLockKey);
     }
@@ -3712,8 +3712,7 @@ class PaymentService {
       });
       return {
         success: false,
-        error: error.message,
-        message: 'Failed to check transaction status at ePayco',
+        error: 'Failed to check transaction status',
       };
     }
   }

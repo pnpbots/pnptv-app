@@ -63,8 +63,17 @@ router.post('/:paymentId/email', authenticateUser, asyncHandler(async (req, res)
 // not pay.codigosdemujeres.com. Ownership is enforced via the payment record inside the handler.
 router.post('/tokenized-charge', asyncHandler(paymentController.processTokenizedCharge));
 
-router.post('/verify-2fa', asyncHandler(paymentController.verify2FA));
-router.post('/complete-3ds-2', asyncHandler(paymentController.complete3DS2Authentication));
+const paymentActionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.ip,
+  handler: (req, res) => res.status(429).json({ success: false, error: 'Too many attempts. Please wait.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post('/verify-2fa', paymentActionLimiter, asyncHandler(paymentController.verify2FA));
+router.post('/complete-3ds-2', paymentActionLimiter, asyncHandler(paymentController.complete3DS2Authentication));
 router.get('/confirm-payment/:token', asyncHandler(paymentController.confirmPaymentToken));
 
 // Retry payment webhook (admin only)

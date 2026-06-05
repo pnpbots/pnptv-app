@@ -1952,9 +1952,9 @@ app.post('/api/webhooks/persona', webhookLimiter, asyncHandler(async (req, res) 
     // All other errors → 200 to prevent Persona from retrying transient failures
     // that may have already been partially applied (e.g. DB error after partial write).
     if (err.message && err.message.includes('signature')) {
-      return res.status(400).json({ error: err.message });
+      return res.status(400).json({ error: 'Invalid webhook signature' });
     }
-    return res.status(200).json({ error: err.message });
+    return res.status(200).json({ received: false });
   }
 }));
 
@@ -3950,7 +3950,7 @@ app.post('/api/internal/broadcast/lifetime80', healthLimiter, asyncHandler(async
   execFile(process.execPath, [scriptPath, '--skip-email'], { timeout: 5 * 60 * 1000 }, (err, stdout, stderr) => {
     if (err) {
       logger.error('lifetime80 broadcast failed', { error: err.message, stderr });
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'Broadcast script failed. Check server logs.' });
     }
     const summary = stdout.split('\n').slice(-10).join('\n');
     logger.info('lifetime80 broadcast complete', { summary });
