@@ -9089,13 +9089,30 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     return res.json({ received: true });
   }
 
-  if (payment_status === 'confirming' || payment_status === 'confirmed' || payment_status === 'sending') {
-    const internalStatus = payment_status === 'sending' ? 'confirming' : payment_status;
+  if (payment_status === 'confirming' || payment_status === 'sending') {
+    const internalStatus = 'confirming';
     await dbQuery(
       `UPDATE dash_subscription_orders SET status = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','confirmed',$2)`,
       [order_id, internalStatus]
     );
     return res.json({ received: true });
+  }
+
+  // For stablecoins (USDC/USDT), 'confirmed' = on-chain confirmed = settlement guaranteed.
+  // Treat as 'finished' immediately — no conversion risk, no need to wait for the payout leg.
+  // For volatile assets, just record the status and wait for 'finished'.
+  const STABLECOIN_CURRENCIES = new Set(['usdcerc20', 'usdcmatic', 'usdcbase', 'usdcsol', 'usdtbsc', 'usdterc20', 'usdtmatic', 'usdtsol', 'usdcbsc']);
+  if (payment_status === 'confirmed') {
+    const isStablecoin = pay_currency && STABLECOIN_CURRENCIES.has(pay_currency.toLowerCase());
+    if (!isStablecoin) {
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'confirmed' WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','confirmed')`,
+        [order_id]
+      );
+      return res.json({ received: true });
+    }
+    logger.info('[NOWPayments] IPN: stablecoin confirmed — treating as finished', { order_id, pay_currency });
+    // Fall through to the 'finished' grant logic below
   }
 
   if (payment_status === 'waiting') {
