@@ -743,8 +743,9 @@ class PaymentService {
           'SELECT creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
           [creatorId, 'active']
         );
-        if (creatorRes.rows[0]) {
-          paymentAmount = parseFloat(creatorRes.rows[0].creator_price_usd);
+        const creatorPrice = parseFloat(creatorRes.rows[0]?.creator_price_usd);
+        if (Number.isFinite(creatorPrice) && creatorPrice > 0) {
+          paymentAmount = creatorPrice;
         }
       } else if (planId === 'channel_access' && creatorId) {
         // creatorId in this context is the channel id (route-level convention).
