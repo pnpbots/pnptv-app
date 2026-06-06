@@ -974,7 +974,7 @@ export const router = createBrowserRouter([
   },
   // Public alias — /lifetime → /subscribe (offer closed)
   { path: "/lifetime", element: <Navigate to="/subscribe" replace /> },
-  { path: "/lifetime100b", element: <Navigate to="/subscribe" replace /> },
+  { path: "/lifetime100b", element: <Navigate to="/lifetime100" replace /> },
   {
     path: "/page/:slug",
     element: (
