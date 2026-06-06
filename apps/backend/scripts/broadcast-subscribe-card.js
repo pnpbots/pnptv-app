@@ -5,7 +5,7 @@
  * broadcast-subscribe-card.js
  *
  * Announces card (ePayco) payment on the subscription page to all active members.
- * Covers monthly ($19.99), weekly ($9.99), and yearly ($99.99) plans.
+ * Covers monthly ($25.00), weekly ($15.00), and yearly ($99.99) plans.
  *
  * Usage:
  *   docker exec pnptv-bot node apps/backend/scripts/broadcast-subscribe-card.js --dry-run
@@ -41,18 +41,18 @@ const isEn  = (lang) => typeof lang === 'string' && lang.toLowerCase().startsWit
 // ── Messages ──────────────────────────────────────────────────────────────────
 
 const NOTIFICATION_MSG = {
-  en: `💳 Now you can subscribe with your credit or debit card — plans from $9.99/week. Full PRIME access, no crypto needed. pnptv.app/subscribe →`,
-  es: `💳 Ahora puedes suscribirte con tarjeta de crédito o débito — planes desde $9.99/semana. Acceso PRIME completo, sin cripto. pnptv.app/subscribe →`,
+  en: `💳 Now you can subscribe with your credit or debit card — plans from $15.00/week. Full PRIME access, no crypto needed. pnptv.app/subscribe →`,
+  es: `💳 Ahora puedes suscribirte con tarjeta de crédito o débito — planes desde $15.00/semana. Acceso PRIME completo, sin cripto. pnptv.app/subscribe →`,
 };
 
 const PUSH = {
   en: {
-    title: '💳 Subscribe with your card — from $9.99',
-    body:  'Full PRIME access. Week ($9.99), Month ($19.99), or Year ($99.99). Pay now with any credit or debit card.',
+    title: '💳 Subscribe with your card — from $15.00',
+    body:  'Full PRIME access. Week ($15.00), Month ($25.00), or Year ($99.99). Pay now with any credit or debit card.',
   },
   es: {
-    title: '💳 Suscríbete con tu tarjeta — desde $9.99',
-    body:  'Acceso PRIME completo. Semana ($9.99), Mes ($19.99) o Año ($99.99). Paga ahora con cualquier tarjeta.',
+    title: '💳 Suscríbete con tu tarjeta — desde $15.00',
+    body:  'Acceso PRIME completo. Semana ($15.00), Mes ($25.00) o Año ($99.99). Paga ahora con cualquier tarjeta.',
   },
 };
 
@@ -63,8 +63,8 @@ const TG = {
 Full PRIME access — no crypto, no Telegram bot, no tricks. Just your card and you're in.
 
 <b>Choose what works for you:</b>
-🗓️ <b>Week Pass</b> — $9.99 / 7 days
-📅 <b>Monthly Pass</b> — $19.99 / 30 days
+🗓️ <b>Week Pass</b> — $15.00 / 7 days
+📅 <b>Monthly Pass</b> — $25.00 / 30 days
 💎 <b>Diamond (Yearly)</b> — $99.99 / 365 days — best value
 
 <b>What PRIME gets you:</b>
@@ -83,8 +83,8 @@ Full PRIME access — no crypto, no Telegram bot, no tricks. Just your card and 
 Acceso PRIME completo — sin cripto, sin bot de Telegram, sin complicaciones. Solo tu tarjeta y ya estás adentro.
 
 <b>Elige el plan que te convenga:</b>
-🗓️ <b>Week Pass</b> — $9.99 / 7 días
-📅 <b>Monthly Pass</b> — $19.99 / 30 días
+🗓️ <b>Week Pass</b> — $15.00 / 7 días
+📅 <b>Monthly Pass</b> — $25.00 / 30 días
 💎 <b>Diamond (Anual)</b> — $99.99 / 365 días — mejor valor
 
 <b>Lo que tienes con PRIME:</b>
@@ -99,8 +99,8 @@ Acceso PRIME completo — sin cripto, sin bot de Telegram, sin complicaciones. S
 };
 
 const EMAIL_SUBJECT = {
-  en: '💳 Subscribe with your card — PRIME from $9.99/week',
-  es: '💳 Suscríbete con tu tarjeta — PRIME desde $9.99/semana',
+  en: '💳 Subscribe with your card — PRIME from $15.00/week',
+  es: '💳 Suscríbete con tu tarjeta — PRIME desde $15.00/semana',
 };
 
 function buildEmailHtml(lang, name) {
@@ -152,7 +152,7 @@ function buildEmailHtml(lang, name) {
                   <p style="margin:0 0 2px;font-size:14px;font-weight:800;color:#ffffff;">🗓️ ${en ? 'Week Pass' : 'Week Pass'}</p>
                   <p style="margin:0;font-size:12px;color:#9ca3af;">${en ? '7 days of full PRIME access' : '7 días de acceso PRIME completo'}</p>
                 </div>
-                <p style="margin:0;font-size:22px;font-weight:900;color:#D4007A;">$9.99</p>
+                <p style="margin:0;font-size:22px;font-weight:900;color:#D4007A;">$15.00</p>
               </div>
             </td></tr>
             <!-- Monthly -->
@@ -163,7 +163,7 @@ function buildEmailHtml(lang, name) {
                     <p style="margin:0 0 2px;font-size:14px;font-weight:800;color:#ffffff;">📅 ${en ? 'Monthly Pass' : 'Monthly Pass'}</p>
                     <p style="margin:0;font-size:12px;color:#9ca3af;">${en ? '30 days of full PRIME access' : '30 días de acceso PRIME completo'}</p>
                   </div>
-                  <p style="margin:0;font-size:22px;font-weight:900;color:#D4007A;">$19.99</p>
+                  <p style="margin:0;font-size:22px;font-weight:900;color:#D4007A;">$25.00</p>
                 </div>
               </div>
             </td></tr>

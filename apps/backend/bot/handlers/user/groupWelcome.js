@@ -218,7 +218,7 @@ Aquí la vuelta es simple: gente real, buena vibra, cero filtro.
 • Nearby ilimitado
 • Canal PRIME exclusivo
 
-💰 $14.99/semana
+💰 $15.00/semana
 🔥 HOT PNP LIFETIME: $100 → pnptv.app/lifetime100
 
 📸 Comparte fotos para competir por títulos del culto diarios:
@@ -244,7 +244,7 @@ This place is simple: real people, real vibes, no filters.
 • Unlimited Nearby Members
 • Exclusive PRIME Channel
 
-💰 $14.99/week
+💰 $15.00/week
 🔥 HOT PNP LIFETIME: $100 → pnptv.app/lifetime100
 
 📸 Share pics to compete for daily cult titles:

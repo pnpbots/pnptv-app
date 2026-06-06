@@ -95,11 +95,11 @@ async function handlePlansTutorial(ctx) {
 ├ Descubrimiento Nearby
 └ Perfil verificado
 
-⭐ *PRIME Trial* — $14.99 USD / 7 dias
+⭐ *PRIME Trial* — $15.00 USD / 7 dias
 ├ Acceso PRIME completo por 1 semana
 └ Ideal para probar todas las funciones
 
-⭐ *Monthly PRIME* — $24.99 USD / mes
+⭐ *Monthly PRIME* — $25.00 USD / mes
 ├ Todo lo de Member +
 ├ Mensajes directos ilimitados
 ├ Videollamadas privadas
@@ -121,7 +121,7 @@ async function handlePlansTutorial(ctx) {
 └ Nunca mas pagues por PNPtv
 
 💱 *Precios en COP:* Multiplica x 4,000
-Ejemplo: $24.99 USD = ~$99,960 COP`
+Ejemplo: $25.00 USD = ~$99,960 COP`
       : `📋 *Plans & Pricing*
 
 🟢 *PNP Member* — $9.99 USD / month
@@ -130,11 +130,11 @@ Ejemplo: $24.99 USD = ~$99,960 COP`
 ├ Nearby discovery
 └ Verified profile
 
-⭐ *PRIME Trial* — $14.99 USD / 7 days
+⭐ *PRIME Trial* — $15.00 USD / 7 days
 ├ Full PRIME access for 1 week
 └ Perfect to try all features
 
-⭐ *Monthly PRIME* — $24.99 USD / month
+⭐ *Monthly PRIME* — $25.00 USD / month
 ├ Everything in Member +
 ├ Unlimited direct messages
 ├ Private video calls
@@ -156,7 +156,7 @@ Ejemplo: $24.99 USD = ~$99,960 COP`
 └ Never pay for PNPtv again
 
 💱 *COP Pricing:* Multiply x 4,000
-Example: $24.99 USD = ~$99,960 COP`;
+Example: $25.00 USD = ~$99,960 COP`;
 
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',

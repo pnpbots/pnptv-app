@@ -52,7 +52,7 @@ Hey {username}, you're on the FREE version.
 
 **Go PRIME now and enjoy everything!**
 
-\`Passes starting at just $14.99 USD\``,
+\`Passes starting at just $15.00 USD\``,
     subscribe: `Subscribe to PNPtv PRIME\n----------------------------------\n\nJoin the most intense PNP content platform created by and for the community.\n\nPRIME gives you full access to:\n• Full-length PNP videos with real latinos smoking and slamming  \n• Exclusive releases starring Santino (x.com/pnpmethdaddy)  \n• Live streams and Call Rooms.\n• Unlimited Nearby to explore users around you  \n• Complete music and podcast library  \n\nChoose the plan that fits you best and complete your payment.\nYour membership will be activated automatically.\n\nPayment methods available: debit/credit card, Crypto, and most popular payment apps.`,
     upgradeToPrime: '💎 Upgrade to PRIME',
     exploreFeatures: '✨ Explore Premium Features',
@@ -86,7 +86,7 @@ Tap a plan below to activate your membership instantly. 💜`,
       planDiamondDesc: 'One full year of the PNPtv! experience with all premium features included. Includes:\n\n• Unlimited access to every PNPtv! channel and group\n• Complete videography of Santino plus Latino smoking/slamming videos\n• Long-session videos and weekly exclusive releases\n• Invitations to Call rooms, private streams, and community events\n• Unlimited Nearby access\n• Ability to host and schedule your own Call sessions\n• VIP support and special member badges',
       planLifetime: '♾️ Lifetime Pass - $249.99',
       planLifetimeDesc: 'The ultimate PNPtv! pass with permanent, unlimited access. Includes:\n\n• Lifetime access to all PNPtv! channels, groups, and community features\n• Full videography of Santino plus all future videos and releases\n• Long-duration sessions with new uploads every week\n• Invitations to Call rooms, private shows, and exclusive events\n• Unlimited Nearby access\n• Ability to host and schedule Call sessions anytime\n• Permanent VIP support and lifetime member status',
-    planMonthly: '🗓️ Monthly Pass - $24.99/30 days',
+    planMonthly: '🗓️ Monthly Pass - $25.00/30 days',
     planMonthlyDesc: 'Our most popular plan with full access and no limits. Includes:\n\n• Unlimited access to all PNPtv! channels and group\n• Full videography of Santino plus sexy Latinos smoking and slamming\n• Long-session videos with weekly new releases\n• Invites to Call rooms and Live Stream PNP shows\n• Unlimited Nearby access\n• Profile card with photo, badges and bio',
     planTrial: '⭐ Trial Week',
 
@@ -463,7 +463,7 @@ Enjoy PNP LATINO! 🔥`,
 
     // Main Menu
     mainMenuIntro: '🎬 Bienvenido a PNPtv - ¡Tu Centro de Entretenimiento!\n\n¿Qué te gustaría hacer?',
-    mainMenuIntroFree: '`🔒 DESBLOQUEA TODO EL CONTENIDO`\n\nHola {username}, estás usando la versión FREE.\n\n**Con PRIME obtienes acceso ilimitado a:**\n\n🎬 Videos completos y shows exclusivos\n📍 Encuentra papis cerca de ti (Nearby)\n🎥 Salas de video en vivo 24/7\n💬 Chat y soporte prioritario\n\n**¡Hazte PRIME ahora y disfruta todo!**\n\n`Pases desde solo $14.99 USD`',
+    mainMenuIntroFree: '`🔒 DESBLOQUEA TODO EL CONTENIDO`\n\nHola {username}, estás usando la versión FREE.\n\n**Con PRIME obtienes acceso ilimitado a:**\n\n🎬 Videos completos y shows exclusivos\n📍 Encuentra papis cerca de ti (Nearby)\n🎥 Salas de video en vivo 24/7\n💬 Chat y soporte prioritario\n\n**¡Hazte PRIME ahora y disfruta todo!**\n\n`Pases desde solo $15.00 USD`',
     subscribe: `Suscríbete a PNPtv PRIME\n----------------------------------\n\nÚnete a la plataforma de contenido PNP más intensa, creada por y para la comunidad.\n\nPRIME te da acceso total a:\n• Videos PNP completos con latinos reales fumando y slameando  \n• Estrenos exclusivos protagonizados por Santino (x.com/pnpmethdaddy)  \n• Transmisiones en vivo y Salas de Video.\n• Nearby ilimitado para explorar usuarios cerca de ti  \n• Biblioteca completa de música y podcasts  \n\nElige el plan que mejor se adapte a ti y completa tu pago.\nTu membresía se activará automáticamente.\n\nMétodos de pago disponibles: tarjeta débito/crédito, Crypto y las apps de pago más populares.`,
     upgradeToPrime: '💎 Actualizar a PRIME',
     exploreFeatures: '✨ Explorar Funciones Premium',
@@ -498,7 +498,7 @@ Toca un plan para activar tu membresía al instante. 💜`,
       planDiamondDesc: 'Un año completo de experiencia PNPtv! con todas las funciones premium incluidas. Incluye:\n\n• Acceso ilimitado a todos los canales y grupos de PNPtv!\n• Videografía completa de Santino y videos latinos de smoking/slamming\n• Videos de larga duración y estrenos exclusivos semanales\n• Invitaciones a salas de video, transmisiones privadas y eventos comunitarios\n• Acceso ilimitado a Cercanos\n• Capacidad para organizar y programar tus propias sesiones de video\n• Soporte VIP y badges especiales de miembro',
       planLifetime: '♾️ Pase Lifetime - $249.99',
       planLifetimeDesc: 'El pase definitivo de PNPtv! con acceso permanente e ilimitado. Incluye:\n\n• Acceso de por vida a todos los canales, grupos y funciones comunitarias de PNPtv!\n• Videografía completa de Santino y todos los futuros videos y estrenos\n• Sesiones de larga duración con nuevas subidas cada semana\n• Invitaciones a salas de video, shows privados y eventos exclusivos\n• Acceso ilimitado a Cercanos\n• Capacidad para organizar y programar sesiones de video en cualquier momento\n• Soporte VIP permanente y estatus de miembro de por vida',
-    planMonthly: '🗓️ Pase Mensual - $24.99/30 días',
+    planMonthly: '🗓️ Pase Mensual - $25.00/30 días',
     planMonthlyDesc: 'Nuestro plan más popular con acceso total y sin límites. Incluye:\n\n• Acceso ilimitado a todos los canales y grupo de PNPtv!\n• Videografía completa de Santino y latinos sexys fumando y slameando\n• Videos largos con estrenos semanales\n• Invitaciones a salas de video y shows en vivo de PNP\n• Acceso ilimitado a Cercanos\n• Tarjeta de perfil con foto, badges y bio',
     planTrial: '⭐ Semana de Prueba',
 

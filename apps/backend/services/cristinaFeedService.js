@@ -64,11 +64,11 @@ const CATEGORIES = {
   prime_promo: {
     label: 'prime_promo',
     prompts: [
-      'Write a short promotional post inviting users to upgrade to PRIME membership on pnptv.app. Mention key benefits: unlimited DMs, exclusive content, priority in Nearby, access to all live streams. Price: $24.99/month. Enthusiastic but not pushy.',
-      'Write a short post highlighting what PRIME members get on pnptv.app: exclusive creator content, unlimited video calls, priority placement, ad-free experience. Invite them to upgrade. $24.99/month or Lifetime at $100.',
+      'Write a short promotional post inviting users to upgrade to PRIME membership on pnptv.app. Mention key benefits: unlimited DMs, exclusive content, priority in Nearby, access to all live streams. Price: $25.00/month. Enthusiastic but not pushy.',
+      'Write a short post highlighting what PRIME members get on pnptv.app: exclusive creator content, unlimited video calls, priority placement, ad-free experience. Invite them to upgrade. $25.00/month or Lifetime at $100.',
       'Write a short post about the Lifetime membership deal on pnptv.app — one payment of $100, access forever. Mention it includes all PRIME benefits for life. Create urgency without being aggressive.',
-      'Write a short post comparing FREE vs PRIME on pnptv.app. FREE gets you basic access. PRIME unlocks everything: exclusive streams, unlimited DMs, Hangout priority, creator content. Worth the upgrade at $24.99/month.',
-      'Write a short promotional post about PRIME membership. Focus on the community aspect — being PRIME means supporting creators and getting closer to the community. $24.99/month, cancel anytime.',
+      'Write a short post comparing FREE vs PRIME on pnptv.app. FREE gets you basic access. PRIME unlocks everything: exclusive streams, unlimited DMs, Hangout priority, creator content. Worth the upgrade at $25.00/month.',
+      'Write a short promotional post about PRIME membership. Focus on the community aspect — being PRIME means supporting creators and getting closer to the community. $25.00/month, cancel anytime.',
     ],
   },
 };

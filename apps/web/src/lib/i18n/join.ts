@@ -25,7 +25,7 @@ const strings = {
     heroStatsJoinedTemplate: "{count}+ joined this month",
 
     // Hero CTAs
-    getPrimeCta: "Get PRIME \u2014 $24.99/mo",
+    getPrimeCta: "Get PRIME \u2014 $25.00/mo",
     joinFreeCta: "Join Free",
     noCreditCard: "No credit card required to join free. Cancel anytime.",
 
@@ -56,7 +56,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/mo",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/mo",
 
     // Comparison rows (12 rows)
@@ -107,7 +107,7 @@ const strings = {
     // PRIME plan card
     primePlanName: "PRIME",
     primePlanBestValue: "BEST VALUE",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/mo",
     primePlanPeriod: "billed monthly \u00b7 cancel anytime",
     primePlanFeatures: [
@@ -166,7 +166,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ miembros",
     heroStatsJoinedTemplate: "{count}+ se unieron este mes",
 
-    getPrimeCta: "Hazte PRIME \u2014 $24.99/mes",
+    getPrimeCta: "Hazte PRIME \u2014 $25.00/mes",
     joinFreeCta: "Unirse Gratis",
     noCreditCard: "No se requiere tarjeta de crédito para unirse gratis. Cancela cuando quieras.",
 
@@ -194,7 +194,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/mes",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/mes",
 
     comparisonRows: [
@@ -240,7 +240,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "MEJOR VALOR",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/mes",
     primePlanPeriod: "facturado mensualmente \u00b7 cancela cuando quieras",
     primePlanFeatures: [
@@ -294,7 +294,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ membros",
     heroStatsJoinedTemplate: "{count}+ entraram este mês",
 
-    getPrimeCta: "Seja PRIME \u2014 $24.99/mês",
+    getPrimeCta: "Seja PRIME \u2014 $25.00/mês",
     joinFreeCta: "Entrar Grátis",
     noCreditCard: "Não é necessário cartão de crédito para entrar grátis. Cancele quando quiser.",
 
@@ -322,7 +322,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/mês",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/mês",
 
     comparisonRows: [
@@ -368,7 +368,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "MELHOR CUSTO-BENEFÍCIO",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/mês",
     primePlanPeriod: "cobrado mensalmente \u00b7 cancele quando quiser",
     primePlanFeatures: [
@@ -422,7 +422,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ 位会员",
     heroStatsJoinedTemplate: "本月新增 {count}+ 位",
 
-    getPrimeCta: "成为 PRIME \u2014 $24.99/月",
+    getPrimeCta: "成为 PRIME \u2014 $25.00/月",
     joinFreeCta: "免费加入",
     noCreditCard: "免费加入无需信用卡。随时取消。",
 
@@ -450,7 +450,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/月",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/月",
 
     comparisonRows: [
@@ -496,7 +496,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "最超值",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/月",
     primePlanPeriod: "按月计费 \u00b7 随时取消",
     primePlanFeatures: [
@@ -550,7 +550,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ 位會員",
     heroStatsJoinedTemplate: "本月新增 {count}+ 位",
 
-    getPrimeCta: "成為 PRIME \u2014 $24.99/月",
+    getPrimeCta: "成為 PRIME \u2014 $25.00/月",
     joinFreeCta: "免費加入",
     noCreditCard: "免費加入無需信用卡。隨時取消。",
 
@@ -578,7 +578,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/月",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/月",
 
     comparisonRows: [
@@ -624,7 +624,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "最超值",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/月",
     primePlanPeriod: "按月計費 \u00b7 隨時取消",
     primePlanFeatures: [
@@ -678,7 +678,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ membres",
     heroStatsJoinedTemplate: "{count}+ ont rejoint ce mois-ci",
 
-    getPrimeCta: "Devenir PRIME \u2014 $24.99/mois",
+    getPrimeCta: "Devenir PRIME \u2014 $25.00/mois",
     joinFreeCta: "Rejoindre Gratuitement",
     noCreditCard: "Aucune carte de crédit requise pour rejoindre gratuitement. Annulez à tout moment.",
 
@@ -706,7 +706,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/mois",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/mois",
 
     comparisonRows: [
@@ -752,7 +752,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "MEILLEURE VALEUR",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/mois",
     primePlanPeriod: "facturé mensuellement \u00b7 annulez à tout moment",
     primePlanFeatures: [
@@ -806,7 +806,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ Mitglieder",
     heroStatsJoinedTemplate: "{count}+ beigetreten diesen Monat",
 
-    getPrimeCta: "PRIME werden \u2014 $24.99/Monat",
+    getPrimeCta: "PRIME werden \u2014 $25.00/Monat",
     joinFreeCta: "Kostenlos beitreten",
     noCreditCard: "Keine Kreditkarte für den kostenlosen Beitritt erforderlich. Jederzeit kündigen.",
 
@@ -834,7 +834,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/Monat",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/Monat",
 
     comparisonRows: [
@@ -880,7 +880,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "BESTES ANGEBOT",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/Monat",
     primePlanPeriod: "monatlich abgerechnet \u00b7 jederzeit kündigen",
     primePlanFeatures: [
@@ -934,7 +934,7 @@ const strings = {
     heroStatsMembersTemplate: "สมาชิก {count}+ คน",
     heroStatsJoinedTemplate: "เข้าร่วมเดือนนี้ {count}+ คน",
 
-    getPrimeCta: "เป็น PRIME \u2014 $24.99/เดือน",
+    getPrimeCta: "เป็น PRIME \u2014 $25.00/เดือน",
     joinFreeCta: "เข้าร่วมฟรี",
     noCreditCard: "ไม่ต้องใช้บัตรเครดิตสำหรับการเข้าร่วมฟรี ยกเลิกได้ทุกเมื่อ",
 
@@ -962,7 +962,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/เดือน",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/เดือน",
 
     comparisonRows: [
@@ -1008,7 +1008,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "คุ้มที่สุด",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/เดือน",
     primePlanPeriod: "เรียกเก็บรายเดือน \u00b7 ยกเลิกได้ทุกเมื่อ",
     primePlanFeatures: [
@@ -1062,7 +1062,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ membri",
     heroStatsJoinedTemplate: "{count}+ iscritti questo mese",
 
-    getPrimeCta: "Diventa PRIME \u2014 $24.99/mese",
+    getPrimeCta: "Diventa PRIME \u2014 $25.00/mese",
     joinFreeCta: "Unisciti Gratis",
     noCreditCard: "Nessuna carta di credito richiesta per iscriversi gratis. Cancella in qualsiasi momento.",
 
@@ -1090,7 +1090,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/mese",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/mese",
 
     comparisonRows: [
@@ -1136,7 +1136,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "MIGLIOR VALORE",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/mese",
     primePlanPeriod: "fatturato mensilmente \u00b7 cancella in qualsiasi momento",
     primePlanFeatures: [
@@ -1190,7 +1190,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ üye",
     heroStatsJoinedTemplate: "Bu ay {count}+ katıldı",
 
-    getPrimeCta: "PRIME Ol \u2014 $24.99/ay",
+    getPrimeCta: "PRIME Ol \u2014 $25.00/ay",
     joinFreeCta: "Ücretsiz Katıl",
     noCreditCard: "Ücretsiz katılmak için kredi kartı gerekmez. İstediğin zaman iptal et.",
 
@@ -1218,7 +1218,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/ay",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/ay",
 
     comparisonRows: [
@@ -1264,7 +1264,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "EN İYİ DEĞER",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/ay",
     primePlanPeriod: "aylık faturalandırılır \u00b7 istediğin zaman iptal et",
     primePlanFeatures: [
@@ -1318,7 +1318,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ участников",
     heroStatsJoinedTemplate: "{count}+ вступили в этом месяце",
 
-    getPrimeCta: "Стать PRIME \u2014 $24.99/мес",
+    getPrimeCta: "Стать PRIME \u2014 $25.00/мес",
     joinFreeCta: "Вступить бесплатно",
     noCreditCard: "Для бесплатного входа карта не нужна. Отмените в любой момент.",
 
@@ -1346,7 +1346,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/мес",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/мес",
 
     comparisonRows: [
@@ -1392,7 +1392,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "ЛУЧШАЯ ЦЕНА",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/мес",
     primePlanPeriod: "оплата ежемесячно \u00b7 отмена в любой момент",
     primePlanFeatures: [
@@ -1446,7 +1446,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ leden",
     heroStatsJoinedTemplate: "{count}+ deze maand toegetreden",
 
-    getPrimeCta: "Word PRIME \u2014 $24.99/mnd",
+    getPrimeCta: "Word PRIME \u2014 $25.00/mnd",
     joinFreeCta: "Gratis Lid Worden",
     noCreditCard: "Geen creditcard nodig om gratis lid te worden. Op elk moment opzegbaar.",
 
@@ -1474,7 +1474,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/mnd",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/mnd",
 
     comparisonRows: [
@@ -1520,7 +1520,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "BESTE WAARDE",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/mnd",
     primePlanPeriod: "maandelijks gefactureerd \u00b7 op elk moment opzegbaar",
     primePlanFeatures: [
@@ -1574,7 +1574,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ thành viên",
     heroStatsJoinedTemplate: "{count}+ đã tham gia tháng này",
 
-    getPrimeCta: "Trở thành PRIME \u2014 $24.99/tháng",
+    getPrimeCta: "Trở thành PRIME \u2014 $25.00/tháng",
     joinFreeCta: "Tham Gia Miễn Phí",
     noCreditCard: "Không cần thẻ tín dụng để tham gia miễn phí. Hủy bất cứ lúc nào.",
 
@@ -1602,7 +1602,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/tháng",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/tháng",
 
     comparisonRows: [
@@ -1648,7 +1648,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "GIÁ TRỊ NHẤT",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/tháng",
     primePlanPeriod: "thanh toán hàng tháng \u00b7 hủy bất cứ lúc nào",
     primePlanFeatures: [
@@ -1702,7 +1702,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}人以上のメンバー",
     heroStatsJoinedTemplate: "今月{count}人以上が参加",
 
-    getPrimeCta: "PRIME になる \u2014 $24.99/月",
+    getPrimeCta: "PRIME になる \u2014 $25.00/月",
     joinFreeCta: "無料で参加",
     noCreditCard: "無料参加にクレジットカード不要。いつでもキャンセル可能。",
 
@@ -1730,7 +1730,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/月",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/月",
 
     comparisonRows: [
@@ -1776,7 +1776,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "最もお得",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/月",
     primePlanPeriod: "月額課金 \u00b7 いつでもキャンセル可能",
     primePlanFeatures: [
@@ -1830,7 +1830,7 @@ const strings = {
     heroStatsMembersTemplate: "{count}+ anggota",
     heroStatsJoinedTemplate: "{count}+ bergabung bulan ini",
 
-    getPrimeCta: "Jadi PRIME \u2014 $24.99/bln",
+    getPrimeCta: "Jadi PRIME \u2014 $25.00/bln",
     joinFreeCta: "Bergabung Gratis",
     noCreditCard: "Tidak perlu kartu kredit untuk bergabung gratis. Batalkan kapan saja.",
 
@@ -1858,7 +1858,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/bln",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/bln",
 
     comparisonRows: [
@@ -1904,7 +1904,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "NILAI TERBAIK",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/bln",
     primePlanPeriod: "ditagih bulanan \u00b7 batalkan kapan saja",
     primePlanFeatures: [
@@ -1958,7 +1958,7 @@ const strings = {
     heroStatsMembersTemplate: "أكثر من {count} عضو",
     heroStatsJoinedTemplate: "انضم {count}+ هذا الشهر",
 
-    getPrimeCta: "احصل على PRIME \u2014 $24.99/شهر",
+    getPrimeCta: "احصل على PRIME \u2014 $25.00/شهر",
     joinFreeCta: "انضم مجاناً",
     noCreditCard: "لا حاجة لبطاقة ائتمان للانضمام مجاناً. يمكنك الإلغاء في أي وقت.",
 
@@ -1986,7 +1986,7 @@ const strings = {
     colMemberPrice: "$9.99",
     colMemberPriceSuffix: "/شهر",
     colPrime: "PRIME",
-    colPrimePrice: "$24.99",
+    colPrimePrice: "$25.00",
     colPrimePriceSuffix: "/شهر",
 
     comparisonRows: [
@@ -2032,7 +2032,7 @@ const strings = {
 
     primePlanName: "PRIME",
     primePlanBestValue: "أفضل قيمة",
-    primePlanPrice: "$24.99",
+    primePlanPrice: "$25.00",
     primePlanPriceSuffix: "/شهر",
     primePlanPeriod: "يُحسب شهرياً \u00b7 ألغِ في أي وقت",
     primePlanFeatures: [

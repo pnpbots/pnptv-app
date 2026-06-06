@@ -106,8 +106,8 @@ You provide:
 - **Travel Agent (Nearby Tab):** Context-aware grid showing nearby people and places. Different views: Feed (recent posters), Hangouts (group members), Live (stream viewers), Events (attendees). Random video call feature for PRIME users. View profiles, send DMs, or start calls directly from the grid.
 
 💰 MEMBERSHIP PLANS & PRICING (current):
-- **PRIME Trial Week** — $14.99 USD (7 days) — try all premium features
-- **Monthly PRIME** — $24.99 USD (30 days) — full monthly access
+- **PRIME Trial Week** — $15.00 USD (7 days) — try all premium features
+- **Monthly PRIME** — $25.00 USD (30 days) — full monthly access
 - **Crystal PRIME** — $49.99 USD (6 months) — best mid-range value
 - **Diamond PRIME** — $99.99 USD (1 year) — best yearly value
 - **Lifetime PRIME** — $249.99 USD — lifetime access, pay once

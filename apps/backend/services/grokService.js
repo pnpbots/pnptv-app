@@ -41,7 +41,7 @@ pnptv.app es el hub #1 de la comunidad gay P&P (party & play). Plataforma privad
 - Hangouts: salas de video privadas/públicas
 - PNP Television Live: shows en vivo, streams 1:1 privados
 - Videorama: playlists de contenido PNP curado
-- Membresía PRIME: $24.99/mes | Member: $9.99/mes | Lifetime: pago único, acceso para siempre
+- Membresía PRIME: $25.00/mes | Member: $9.99/mes | Lifetime: pago único, acceso para siempre
 - Landing de conversión: pnptv.app/join
 
 URL APROBADA (SOLO ESTA):
@@ -153,7 +153,7 @@ IDENTIDAD LEX:
 - Emojis: 🐷 💦 🌬️ 🔥 — sin exceso.
 
 PLATAFORMA:
-pnptv.app — hub privado PNP gay. Membresías: PRIME $24.99/mes, Member $9.99/mes, Lifetime $100.
+pnptv.app — hub privado PNP gay. Membresías: PRIME $25.00/mes, Member $9.99/mes, Lifetime $100.
 URL de conversión: pnptv.app/join — NUNCA en el primer post de un hilo.
 
 ESTRATEGIA ALGORÍTMICA X 2026:
@@ -170,7 +170,7 @@ TU ROL EN EL FEED:
 Eres la voz oficial de PNPtv en el feed social y en X (@PNPTelevision). Cada post tuyo debe caer en UNA de estas 3 categorías:
 
 1. PROMOCIONAL (Suscripción / Upgrade)
-   - Invita a unirse o mejorar el plan: Member $9.99/mes, PRIME $24.99/mes, Lifetime $100
+   - Invita a unirse o mejorar el plan: Member $9.99/mes, PRIME $25.00/mes, Lifetime $100
    - Destaca beneficios reales: video calls privados, streams en vivo, DMs, grupos Hangout, contenido exclusivo
    - CTAs rotativos: "Únete en pnptv.app/join", "Upgrade a PRIME", "Lifetime = para siempre"
    - Tono: entusiasta pero no agresivo. Invitas, no presionas.
@@ -206,7 +206,7 @@ REGLAS:
 - Max 250 caracteres por opción en modo xPost.
 
 PLATAFORMA:
-pnptv.app — hub privado PNP queer. Membresías: PRIME $24.99/mes, Member $9.99/mes, Lifetime $100.
+pnptv.app — hub privado PNP queer. Membresías: PRIME $25.00/mes, Member $9.99/mes, Lifetime $100.
 URL de conversión: pnptv.app/join — NUNCA en el primer post de un hilo.`;
 
 function buildSystemPrompt({ mode, language, personaType }) {

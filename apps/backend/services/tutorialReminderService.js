@@ -129,7 +129,7 @@ class TutorialReminderService {
 • Nearby ilimitado
 • Canal PRIME exclusivo
 
-💰 $14.99/semana
+💰 $15.00/semana
 🔥 HOT PNP LIFETIME: $100 → pnptv.app/lifetime100
 
 📸 Comparte fotos para competir por títulos del culto diarios:
@@ -207,7 +207,7 @@ Ready to unlock all the cloudy fun? Here's how:
 *Step 3:* Pay securely via Meru or crypto
 *Step 4:* Get instant PRIME access!
 
-💰 *Plans start at just $14.99/week*
+💰 *Plans start at just $15.00/week*
 
 🔒 All payments are secure and private.`,
         button: { text: '💎 View Plans', url: `https://t.me/${BOT_USERNAME}?start=plans` }
@@ -276,7 +276,7 @@ Los miembros PRIME disfrutan:
 *Paso 3:* Paga de forma segura via Meru o cripto
 *Paso 4:* ¡Obtén acceso PRIME instantáneo!
 
-💰 *Los planes empiezan en solo $14.99/semana*
+💰 *Los planes empiezan en solo $15.00/semana*
 
 🔒 Todos los pagos son seguros y privados.`,
         button: { text: '💎 Ver Planes', url: `https://t.me/${BOT_USERNAME}?start=plans` }

@@ -54,7 +54,7 @@ Pay once. PRIME access forever. No renewals.
 ━━━━━━━━━━━━━━━
 💎 MONTHLY & YEARLY PLANS
 ━━━━━━━━━━━━━━━
-Flexible options starting at $9.99/week.
+Flexible options starting at $15.00/week.
 
 👉 ${SUBSCRIBE_URL}
 
@@ -90,7 +90,7 @@ Pagas una vez. Acceso PRIME para siempre. Sin renovaciones.
 ━━━━━━━━━━━━━━━
 💎 PLANES MENSUALES Y ANUALES
 ━━━━━━━━━━━━━━━
-Opciones flexibles desde $9.99/semana.
+Opciones flexibles desde $15.00/semana.
 
 👉 ${SUBSCRIBE_URL}
 
