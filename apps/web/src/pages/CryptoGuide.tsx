@@ -52,10 +52,10 @@ const S = {
       {
         n: "1",
         title: "Go to the Subscribe page and pick a plan",
-        body: "Go to pnptv.app/subscribe (or /lifetime80 for the $80 Lifetime deal). Choose your plan — Weekly, Monthly, Yearly, or Lifetime — and click \"Pay with Card\".",
+        body: "Go to pnptv.app/subscribe (or /lifetime100 for the $100 Lifetime deal). Choose your plan — Weekly, Monthly, Yearly, or Lifetime — and click \"Pay with Card\".",
         links: [
           { label: "Subscribe ↗", href: "/subscribe" },
-          { label: "Lifetime $80 ↗", href: "/lifetime80" },
+          { label: "Lifetime $100 ↗", href: "/lifetime100" },
         ],
       },
       {
@@ -104,10 +104,10 @@ const S = {
       {
         n: "3",
         title: "Go to PNPtv and pick a plan",
-        body: "Go to pnptv.app/subscribe (or /lifetime80 for the Lifetime PRIME deal). Choose your plan and select \"USDC\" as the payment method.",
+        body: "Go to pnptv.app/subscribe (or /lifetime100 for the Lifetime PRIME deal). Choose your plan and select \"USDC\" as the payment method.",
         links: [
           { label: "Subscribe page ↗", href: "/subscribe" },
-          { label: "Lifetime PRIME $80 ↗", href: "/lifetime80" },
+          { label: "Lifetime PRIME $100 ↗", href: "/lifetime100" },
         ],
       },
       {
@@ -143,10 +143,10 @@ const S = {
       {
         n: "3",
         title: "Go to PNPtv and pick a plan",
-        body: "Go to pnptv.app/subscribe or /lifetime80. Select your plan and tap \"Dash\" as the payment method.",
+        body: "Go to pnptv.app/subscribe or /lifetime100. Select your plan and tap \"Dash\" as the payment method.",
         links: [
           { label: "Subscribe page ↗", href: "/subscribe" },
-          { label: "Lifetime PRIME $80 ↗", href: "/lifetime80" },
+          { label: "Lifetime PRIME $100 ↗", href: "/lifetime100" },
         ],
       },
       {
