@@ -8469,8 +8469,7 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
         usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
         discountInfo = { originalAmount: basePrice, discountPct: 20 };
       } else {
-        usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
-        discountInfo = { originalAmount: basePrice, discountPct: 5 };
+        usdAmount = basePrice;
       }
     }
     planDisplayName = plan.display_name || plan.name;
@@ -8698,8 +8697,7 @@ app.post('/api/webapp/payments/lightning/create', requireSessionAuth, paymentCre
         usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
         discountInfo = { originalAmount: basePrice, discountPct: 20 };
       } else {
-        usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
-        discountInfo = { originalAmount: basePrice, discountPct: 5 };
+        usdAmount = basePrice;
       }
     }
     planDisplayName = plan.display_name || plan.name;
@@ -8931,8 +8929,7 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
         usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
         discountInfo = { originalAmount: basePrice, discountPct: 20 };
       } else {
-        usdAmount = Math.round(basePrice * 0.95 * 100) / 100;
-        discountInfo = { originalAmount: basePrice, discountPct: 5 };
+        usdAmount = basePrice;
       }
     }
     planDisplayName = plan.display_name || plan.name;
