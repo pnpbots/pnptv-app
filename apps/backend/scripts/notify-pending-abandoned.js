@@ -30,7 +30,7 @@ const SUBSCRIBE  = 'https://pnptv.app/subscribe';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const PLAN_LABELS = {
-  'lifetime80':              'Lifetime Access — $80',
+  'lifetime80':              'Lifetime Access — $100',
   'lifetime-pass':           'Lifetime Access — $249.99',
   'prime-diamond-pass-365d': 'PRIME Diamond (1 year) — $99.99',
   'monthly-pass':            'Monthly Pass — $25.00',

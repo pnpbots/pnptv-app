@@ -45,8 +45,8 @@ https://pnptv.app/how-to-pay
 🔗 Subscribe:
 https://pnptv.app/subscribe
 
-⭐ Lifetime PRIME $80 (one-time):
-https://pnptv.app/lifetime80
+⭐ Lifetime PRIME $100 (one-time):
+https://pnptv.app/lifetime100
 
 Any issues? Just reply here and we'll sort it out. 🙌`,
 
@@ -66,8 +66,8 @@ https://pnptv.app/how-to-pay
 🔗 Suscripciones:
 https://pnptv.app/subscribe
 
-⭐ Lifetime PRIME $80 (pago único):
-https://pnptv.app/lifetime80
+⭐ Lifetime PRIME $100 (pago único):
+https://pnptv.app/lifetime100
 
 ¿Algún problema? Responde aquí y lo resolvemos. 🙌`,
 };

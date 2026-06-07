@@ -6,7 +6,7 @@
  *
  * Targeted broadcast to all users who attempted a payment with any method
  * (ePayco, NOWPayments, BTCPay/Dash, Meru) — regardless of outcome.
- * Links: /how-to-pay  /subscribe  /lifetime80
+ * Links: /how-to-pay  /subscribe  /lifetime100
  *
  * Usage:
  *   docker exec pnptv-bot node apps/backend/scripts/broadcast-payment-retry.js --dry-run
@@ -33,7 +33,7 @@ const FORCE         = process.argv.includes('--force');
 const ENTITY_ID      = 'payment-retry-guide-2026-05';
 const HOW_TO_PAY_URL = 'https://pnptv.app/how-to-pay';
 const SUBSCRIBE_URL  = 'https://pnptv.app/subscribe';
-const LIFETIME_URL   = 'https://pnptv.app/lifetime80';
+const LIFETIME_URL   = 'https://pnptv.app/lifetime100';
 const TG_DELAY_MS    = 80;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -70,7 +70,7 @@ No bank, no name. Just scan and send.
 
 ──────────────────
 Subscribe: <a href="${SUBSCRIBE_URL}">pnptv.app/subscribe</a>
-Lifetime PRIME $80: <a href="${LIFETIME_URL}">pnptv.app/lifetime80</a>`,
+Lifetime PRIME $100: <a href="${LIFETIME_URL}">pnptv.app/lifetime80</a>`,
 
   es:
 `💳 <b>¿Tuviste problemas para pagar en PNPtv?</b>
@@ -90,7 +90,7 @@ Sin banco, sin nombre. Solo escanea y envía.
 
 ──────────────────
 Suscripciones: <a href="${SUBSCRIBE_URL}">pnptv.app/subscribe</a>
-Lifetime PRIME $80: <a href="${LIFETIME_URL}">pnptv.app/lifetime80</a>`,
+Lifetime PRIME $100: <a href="${LIFETIME_URL}">pnptv.app/lifetime80</a>`,
 };
 
 const EMAIL_SUBJECT = {
@@ -165,7 +165,7 @@ function buildEmailHtml(lang, name) {
             </td>
             <td align="center" style="padding:0 4px;">
               <a href="${LIFETIME_URL}" style="display:inline-block;padding:12px 20px;background:rgba(38,161,123,0.1);color:#26a17b;font-size:13px;font-weight:700;text-decoration:none;border-radius:10px;border:1px solid rgba(38,161,123,0.3);">
-                ${en ? 'Lifetime PRIME $80 →' : 'Lifetime PRIME $80 →'}
+                ${en ? 'Lifetime PRIME $100 →' : 'Lifetime PRIME $100 →'}
               </a>
             </td>
           </tr>

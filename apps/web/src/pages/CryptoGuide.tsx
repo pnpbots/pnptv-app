@@ -180,7 +180,7 @@ const S = {
       },
       {
         q: "Is the discount applied automatically?",
-        a: "Yes. For most yearly and lifetime plans, the 20% crypto discount is applied automatically when you select Dash or USDC as your payment method. The Lifetime PRIME $80 offer is already at its fixed crypto price.",
+        a: "Yes. For most yearly and lifetime plans, the 20% crypto discount is applied automatically when you select Dash or USDC as your payment method. The Lifetime PRIME $100 offer is already at its fixed crypto price.",
       },
       {
         q: "Is it safe?",
@@ -190,7 +190,7 @@ const S = {
     ctaTitle: "Ready to pay?",
     ctaCard: "Pay with Card →",
     ctaSubscribe: "Go to Subscribe →",
-    ctaLifetime: "Lifetime PRIME $80 →",
+    ctaLifetime: "Lifetime PRIME $100 →",
     backHome: "← Back to PNPtv",
     needHelp: "Still stuck? Contact support →",
   },
@@ -213,10 +213,10 @@ const S = {
       {
         n: "1",
         title: "Ve a Suscripciones y elige un plan",
-        body: "Ve a pnptv.app/subscribe (o /lifetime80 para la oferta Lifetime de $80). Elige tu plan — Semanal, Mensual, Anual o Lifetime — y haz clic en \"Pagar con Tarjeta\".",
+        body: "Ve a pnptv.app/subscribe (o /lifetime100 para la oferta Lifetime de $100). Elige tu plan — Semanal, Mensual, Anual o Lifetime — y haz clic en \"Pagar con Tarjeta\".",
         links: [
           { label: "Suscripciones ↗", href: "/subscribe" },
-          { label: "Lifetime $80 ↗", href: "/lifetime80" },
+          { label: "Lifetime $100 ↗", href: "/lifetime100" },
         ],
       },
       {
@@ -265,10 +265,10 @@ const S = {
       {
         n: "3",
         title: "Ve a PNPtv y elige un plan",
-        body: "Ve a pnptv.app/subscribe (o /lifetime80 para la oferta Lifetime PRIME). Elige tu plan y selecciona \"USDC\" como método de pago.",
+        body: "Ve a pnptv.app/subscribe (o /lifetime100 para la oferta Lifetime PRIME). Elige tu plan y selecciona \"USDC\" como método de pago.",
         links: [
           { label: "Página de suscripción ↗", href: "/subscribe" },
-          { label: "Lifetime PRIME $80 ↗", href: "/lifetime80" },
+          { label: "Lifetime PRIME $100 ↗", href: "/lifetime100" },
         ],
       },
       {
@@ -304,10 +304,10 @@ const S = {
       {
         n: "3",
         title: "Ve a PNPtv y elige un plan",
-        body: "Ve a pnptv.app/subscribe o /lifetime80. Elige tu plan y toca \"Dash\" como método de pago.",
+        body: "Ve a pnptv.app/subscribe o /lifetime100. Elige tu plan y toca \"Dash\" como método de pago.",
         links: [
           { label: "Página de suscripción ↗", href: "/subscribe" },
-          { label: "Lifetime PRIME $80 ↗", href: "/lifetime80" },
+          { label: "Lifetime PRIME $100 ↗", href: "/lifetime100" },
         ],
       },
       {
@@ -341,7 +341,7 @@ const S = {
       },
       {
         q: "¿El descuento se aplica automáticamente?",
-        a: "Sí. En la mayoría de planes anuales y lifetime, el 20% de descuento cripto se aplica automáticamente al seleccionar Dash o USDC. La oferta Lifetime PRIME $80 ya está a su precio cripto fijo.",
+        a: "Sí. En la mayoría de planes anuales y lifetime, el 20% de descuento cripto se aplica automáticamente al seleccionar Dash o USDC. La oferta Lifetime PRIME $100 ya está a su precio cripto fijo.",
       },
       {
         q: "¿Es seguro?",
@@ -351,7 +351,7 @@ const S = {
     ctaTitle: "¿Listo para pagar?",
     ctaCard: "Pagar con Tarjeta →",
     ctaSubscribe: "Ir a Suscripciones →",
-    ctaLifetime: "Lifetime PRIME $80 →",
+    ctaLifetime: "Lifetime PRIME $100 →",
     backHome: "← Volver a PNPtv",
     needHelp: "¿Aún con dudas? Contacta soporte →",
   },
@@ -526,7 +526,7 @@ export default function CryptoGuide() {
             <Link to="/subscribe" style={{ display: "block", width: "100%", maxWidth: 320, padding: "16px 24px", background: "linear-gradient(90deg, #D4007A, #ff9933)", color: "#ffffff", fontSize: 15, fontWeight: 800, textDecoration: "none", borderRadius: 14, textAlign: "center", letterSpacing: "0.03em" }}>
               {s.ctaSubscribe}
             </Link>
-            <Link to="/lifetime80" style={{ display: "block", width: "100%", maxWidth: 320, padding: "16px 24px", background: "linear-gradient(90deg, #26a17b, #008DE4)", color: "#ffffff", fontSize: 15, fontWeight: 800, textDecoration: "none", borderRadius: 14, textAlign: "center", letterSpacing: "0.03em" }}>
+            <Link to="/lifetime100" style={{ display: "block", width: "100%", maxWidth: 320, padding: "16px 24px", background: "linear-gradient(90deg, #26a17b, #008DE4)", color: "#ffffff", fontSize: 15, fontWeight: 800, textDecoration: "none", borderRadius: 14, textAlign: "center", letterSpacing: "0.03em" }}>
               {s.ctaLifetime}
             </Link>
             <a href="/contact" style={{ marginTop: 8, fontSize: 13, color: "#9ca3af", textDecoration: "underline" }}>{s.needHelp}</a>
