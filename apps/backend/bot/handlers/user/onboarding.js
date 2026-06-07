@@ -11,7 +11,9 @@ const paymentHandlers = require('../payments');
 const { showNearbyMenu } = require('./nearbyUnified');
 const supportRoutingService = require('../../../services/supportRoutingService');
 const { handlePromoDeepLink } = require('../promo/promoHandler');
-const { getPrimeInviteLink, activateMembership, fetchActivationCode, markCodeUsed, logActivation } = require('../payments/activation');
+const { activateMembership, fetchActivationCode, markCodeUsed, logActivation } = require('../payments/activation');
+
+const WEBAPP_URL = process.env.WEBAPP_URL || 'https://pnptv.app';
 const SubscriptionService = require('../../../services/subscriptionService');
 const MessageTemplates = require('../../../services/messageTemplates');
 const BusinessNotificationService = require('../../../services/businessNotificationService');
@@ -26,7 +28,7 @@ const activationStrings = {
     promptCode: "Please send your payment confirmation code:",
     invalidCodeFormat: "❌ Invalid code format. Please send the code as plain text.",
     codeNotFound: "❌ Code not found or invalid. Please check your code and try again.",
-    paymentExpiredOrPaid: "✅ Your Lifetime Pass has been activated! Welcome to PRIME!\n\n🌟 Access the PRIME channel:\n👉 {inviteLink}",
+    paymentExpiredOrPaid: "✅ Your Lifetime Pass has been activated! Welcome to PRIME!\n\n🌟 Your full access is ready — open the app:\n👉 {webappUrl}",
     paymentNotCompleted: "⚠️ We could not confirm your payment. Please ensure your payment is complete and try again. If you forgot your code, please use the 'Recover my Code' option in /support and send a screenshot of your bank statement showing the amount, date, and hour of payment.",
     errorActivating: "❌ An error occurred during activation. Please try again later.",
     receiptReceived: "✅ Receipt received. Our team will review and activate your account soon."
@@ -37,7 +39,7 @@ const activationStrings = {
     promptCode: "Por favor, envía tu código de confirmación de pago:",
     invalidCodeFormat: "❌ Formato de código inválido. Por favor, envía el código como texto simple.",
     codeNotFound: "❌ Código no encontrado o inválido. Si olvidaste tu código, por favor usa la opción 'Recuperar mi Código' en /support y envía un screenshot de tu movimiento bancario donde se vea monto, fecha y hora.",
-    paymentExpiredOrPaid: "✅ ¡Tu Lifetime Pass ha sido activado! ¡Bienvenido a PRIME!\n\n🌟 Accede al canal PRIME:\n👉 {inviteLink}",
+    paymentExpiredOrPaid: "✅ ¡Tu Lifetime Pass ha sido activado! ¡Bienvenido a PRIME!\n\n🌟 Tu acceso completo está listo — abre la app:\n👉 {webappUrl}",
     paymentNotCompleted: "⚠️ No pudimos confirmar tu pago. Asegúrate de que el pago esté completo. Si olvidaste tu código, usa 'Recuperar mi Código' en /support con un screenshot de tu movimiento bancario.",
     errorActivating: "❌ Ocurrió un error durante la activación. Por favor, inténtalo de nuevo más tarde.",
     receiptReceived: "✅ Recibo recibido. Nuestro equipo revisará y activará tu cuenta pronto."
@@ -724,9 +726,8 @@ const registerOnboardingHandlers = (bot) => {
           await logActivation({ userId, username: ctx.from.username, code: matchingLinkCode, product, success: true });
           BusinessNotificationService.notifyCodeActivation({ userId, username: ctx.from.username, code: matchingLinkCode, product });
 
-          const inviteLink = await getPrimeInviteLink(ctx, userId);
           await ctx.reply(
-            activationStrings[lang].paymentExpiredOrPaid.replace('{inviteLink}', inviteLink),
+            activationStrings[lang].paymentExpiredOrPaid.replace('{webappUrl}', WEBAPP_URL),
             { parse_mode: 'Markdown', disable_web_page_preview: true }
           );
           await showMainMenu(ctx); // Show main menu after activation

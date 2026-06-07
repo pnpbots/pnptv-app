@@ -5,8 +5,9 @@ const SupportTicketMessageModel = require('../../../models/supportTicketMessageM
 const UserModel = require('../../../models/userModel');
 const { getLanguage } = require('../../utils/helpers');
 const { addReaction } = require('../../utils/telegramReactions');
-const { createChatInviteLink } = require('../../utils/telegramAdmin');
 const socketSingleton = require('../../../services/socketSingleton');
+
+const WEBAPP_URL = process.env.WEBAPP_URL || 'https://pnptv.app';
 
 /**
  * Support Routing Handlers
@@ -213,11 +214,9 @@ const registerSupportRoutingHandlers = (bot) => {
       const adminName = ctx.from.first_name || 'Soporte';
       const userLang = user.language || 'es';
 
-      const primeChannelLink = await createChatInviteLink(ctx, process.env.PRIME_CHANNEL_ID, `support_activation_${targetUserId}`, 1);
-
       const notificationMessage = userLang === 'en'
-      ? `🎉 *Membership Activated!*\n\n✅ Your *${planName}* membership has been activated by ${adminName}.\n\n${isLifetime ? '♾️ This is a lifetime membership - enjoy forever!' : `📅 Expires: ${expiryDate.toLocaleDateString()}`}\n\nYou now have full access to:\n📍 Nearby\n🎥 Hangouts\n📺 PNP Live\n\n- PNP Latino TV PRIME content: ${primeChannelLink}\n- PNP Live: Latinos streaming on webcam.\n- PNP Hangouts: video call rooms.\n\nEnjoy! 🎊`
-      : `🎉 *¡Membresía Activada!*\n\n✅ Tu membresía *${planName}* ha sido activada por ${adminName}.\n\n${isLifetime ? '♾️ Esta es una membresía de por vida - ¡disfruta para siempre!' : `📅 Expira: ${expiryDate.toLocaleDateString()}`}\n\nAhora tienes acceso completo a:\n📍 Nearby (Quién está cerca)\n🎥 Hangouts\n📺 PNP Live\n\n- Contenido PRIME de PNP Latino TV: ${primeChannelLink}\n- PNP Live: Latinos transmitiendo en vivo por webcam.\n- PNP Hangouts: salas de videollamadas.\n\n¡Disfruta! 🎊`;
+      ? `🎉 *Membership Activated!*\n\n✅ Your *${planName}* membership has been activated by ${adminName}.\n\n${isLifetime ? '♾️ This is a lifetime membership - enjoy forever!' : `📅 Expires: ${expiryDate.toLocaleDateString()}`}\n\nYou now have full access to:\n📍 Nearby\n🎥 Hangouts\n📺 PNP Live\n\nOpen the app to enjoy everything:\n👉 ${WEBAPP_URL}\n\nEnjoy! 🎊`
+      : `🎉 *¡Membresía Activada!*\n\n✅ Tu membresía *${planName}* ha sido activada por ${adminName}.\n\n${isLifetime ? '♾️ Esta es una membresía de por vida - ¡disfruta para siempre!' : `📅 Expira: ${expiryDate.toLocaleDateString()}`}\n\nAhora tienes acceso completo a:\n📍 Nearby (Quién está cerca)\n🎥 Hangouts\n📺 PNP Live\n\nAbre la app para disfrutar todo:\n👉 ${WEBAPP_URL}\n\n¡Disfruta! 🎊`;
 
 
       try {

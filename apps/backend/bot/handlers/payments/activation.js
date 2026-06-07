@@ -6,13 +6,12 @@ const PermissionService = require('../../../services/permissionService');
 const MessageTemplates = require('../../../services/messageTemplates');
 const supportRoutingService = require('../../../services/supportRoutingService');
 const UserModel = require('../../../models/userModel');
-const { createChatInviteLink } = require('../../utils/telegramAdmin');
 const BusinessNotificationService = require('../../../services/businessNotificationService');
 const PaymentHistoryService = require('../../../services/paymentHistoryService');
 const { cache } = require('../../../config/redis');
 const PlatformBanService = require('../../../services/platformBanService');
 
-const PRIME_FALLBACK_LINK = 'https://t.me/PNPTV_PRIME';
+const WEBAPP_URL = process.env.WEBAPP_URL || 'https://pnptv.app';
 
 const normalizeCode = (raw) => (raw || '').trim().toUpperCase().replace(/\s+/g, '');
 
@@ -23,24 +22,6 @@ const isExpired = (expiresAt) => {
   const expires = new Date(expiresAt);
   if (Number.isNaN(expires.getTime())) return false;
   return expires.getTime() < Date.now();
-};
-
-const getPrimeInviteLink = async (ctx, userId) => {
-  const primeChannelId = process.env.PRIME_CHANNEL_ID;
-  if (!primeChannelId) return PRIME_FALLBACK_LINK;
-
-  try {
-    const inviteLink = await createChatInviteLink(
-      ctx,
-      primeChannelId,
-      `activation_${userId}_${Date.now()}`,
-      1
-    );
-    return inviteLink || PRIME_FALLBACK_LINK;
-  } catch (error) {
-    logger.warn('Failed to create PRIME invite link, using fallback', { userId, error: error.message });
-    return PRIME_FALLBACK_LINK;
-  }
 };
 
 const fetchActivationCode = async (code) => {
@@ -236,11 +217,10 @@ const registerActivationHandlers = (bot) => {
           product,
         }).catch(() => {});
 
-        const inviteLink = await getPrimeInviteLink(ctx, ctx.from.id);
         await ctx.reply(
           lang === 'es'
-            ? `🌟 Accede al canal PRIME:\n👉 ${inviteLink}`
-            : `🌟 Access the PRIME channel:\n👉 ${inviteLink}`,
+            ? `🌟 ¡Tu acceso PRIME está listo! Ve a la app:\n👉 ${WEBAPP_URL}`
+            : `🌟 Your PRIME access is ready! Go to the app:\n👉 ${WEBAPP_URL}`,
           { disable_web_page_preview: true }
         );
       } finally {
@@ -509,12 +489,11 @@ const registerActivationHandlers = (bot) => {
           product,
         }).catch(() => {});
 
-        const inviteLink = await getPrimeInviteLink(ctx, targetUserId);
         await ctx.telegram.sendMessage(
           targetUserId,
           lang === 'es'
-            ? `🌟 Accede al canal PRIME:\n👉 ${inviteLink}`
-            : `🌟 Access the PRIME channel:\n👉 ${inviteLink}`,
+            ? `🌟 ¡Tu acceso PRIME está listo! Ve a la app:\n👉 ${WEBAPP_URL}`
+            : `🌟 Your PRIME access is ready! Go to the app:\n👉 ${WEBAPP_URL}`,
           { disable_web_page_preview: true }
         ).catch(() => {});
 
@@ -533,7 +512,6 @@ const registerActivationHandlers = (bot) => {
 
 module.exports = registerActivationHandlers;
 module.exports.activateMembership = activateMembership;
-module.exports.getPrimeInviteLink = getPrimeInviteLink;
 module.exports.fetchActivationCode = fetchActivationCode;
 module.exports.markCodeUsed = markCodeUsed;
 module.exports.logActivation = logActivation;
