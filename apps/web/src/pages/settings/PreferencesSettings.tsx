@@ -49,9 +49,7 @@ function readStoredTheme(): ThemeChoice {
 function applyTheme(choice: ThemeChoice) {
   const root = document.documentElement;
   const effective: "dark" | "light" =
-    choice === "system"
-      ? (window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark")
-      : choice;
+    choice === "light" ? "light" : "dark";
   root.classList.add("theme-transition");
   if (effective === "light") root.setAttribute("data-theme", "light");
   else root.removeAttribute("data-theme");

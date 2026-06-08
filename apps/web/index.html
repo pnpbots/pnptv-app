@@ -107,22 +107,15 @@
 
     <!-- Theme bootstrap — runs synchronously before React paints to avoid a
          dark→light flash. Reads localStorage["pnptv:theme"] (values: "dark"
-         | "light" | "system"); falls back to OS preference; default dark. -->
+         | "light" | "system"); default is always dark. -->
     <script>
       (function () {
         try {
           var stored = localStorage.getItem("pnptv:theme");
-          var theme;
-          if (stored === "light" || stored === "dark") {
-            theme = stored;
-          } else {
-            // "system" or no preference — follow OS
-            theme = (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches)
-              ? "light" : "dark";
-          }
-          if (theme === "light") {
+          if (stored === "light") {
             document.documentElement.setAttribute("data-theme", "light");
           }
+          // "system", "dark", or no preference → dark (no attribute needed)
         } catch (_) { /* localStorage unavailable — use default dark */ }
       })();
     </script>
