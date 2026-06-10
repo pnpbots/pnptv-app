@@ -41,6 +41,14 @@ const OIDC_JWKS_ENDPOINT = `${OIDC_ISSUER}jwks/`;
 // Scopes requested — openid + profile (name, preferred_username) + email
 const OIDC_SCOPE = 'openid profile email';
 
+// When calling Authentik's flow executor via the internal Docker hostname, we must
+// pass Host: auth.pnptv.app so Authentik uses the correct brand and WebAuthn rpId.
+// Without this, Authentik sets rpId to "authentik-server" (the internal hostname),
+// which breaks all passkey challenges since credentials were registered against auth.pnptv.app.
+const AUTHENTIK_PUBLIC_HOST = (() => {
+  try { return new URL(OIDC_ISSUER).host; } catch { return 'auth.pnptv.app'; }
+})();
+
 function normalizeRole(role) {
   return String(role || 'user').toLowerCase();
 }
@@ -1043,12 +1051,15 @@ class AuthentikService {
     }
 
     // Dedicated axios instance so cookies stay isolated to this flow session.
+    // Host header overrides the internal Docker hostname so Authentik uses the
+    // auth.pnptv.app brand — critical for correct WebAuthn rpId in challenges.
     const flowClient = axios.create({
       baseURL: AUTHENTIK_URL,
       timeout: 15000,
       maxRedirects: 0,
       validateStatus: (s) => s < 500,
       withCredentials: false,
+      headers: { Host: AUTHENTIK_PUBLIC_HOST },
     });
 
     const executorUrl = `/api/v3/flows/executor/${PASSKEY_FLOW_SLUG}/?query=`;
@@ -1217,6 +1228,7 @@ class AuthentikService {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
+          Host: AUTHENTIK_PUBLIC_HOST,
           ...(cookieJar ? { Cookie: cookieJar } : {}),
         },
         timeout: 20000,
