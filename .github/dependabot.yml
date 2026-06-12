@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # joi 18.x is a breaking major version bump; we don't use link() schemas
+      # so GHSA-q7cg-457f-vx79 does not affect this codebase.
+      - dependency-name: "joi"
+        versions: [">=18.0.0"]
