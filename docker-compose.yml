@@ -173,7 +173,7 @@ services:
       start_period: 30s
 
   authentik-server:
-    image: ghcr.io/goauthentik/server:latest
+    image: ghcr.io/goauthentik/server:2025.2.4
     container_name: authentik-server
     restart: unless-stopped
     command: server
@@ -215,7 +215,7 @@ services:
       start_period: 60s
 
   authentik-worker:
-    image: ghcr.io/goauthentik/server:latest
+    image: ghcr.io/goauthentik/server:2025.2.4
     container_name: authentik-worker
     restart: unless-stopped
     command: worker
