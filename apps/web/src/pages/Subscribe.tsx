@@ -741,7 +741,7 @@ export default function Subscribe() {
           setError(s.failedToCreateLightningInvoice);
         }
       } else if (provider === "usdc") {
-        const result = await prepareUsdcSubscription(selectedPlan);
+        const result = await prepareUsdcSubscription(selectedPlan, user?.email || undefined);
         if (result.success && result.orderId && result.invoiceUrl) {
           const order = {
             orderId: result.orderId,
@@ -967,7 +967,7 @@ export default function Subscribe() {
   const primePlans = plans.filter((p) => !MEMBER_PLAN_IDS.has(p.id));
 
   const selectedPlanData = plans.find((p) => p.id === selectedPlan);
-  const cryptoDiscountPct = (selectedPlanData && (selectedPlanData.isLifetime || (selectedPlanData.duration_days ?? 0) >= 365)) ? 20 : 5;
+  const cryptoDiscountPct = (selectedPlanData && (selectedPlanData.isLifetime || (selectedPlanData.duration_days ?? 0) >= 365)) ? 20 : 0;
   const isCrypto = provider === "dash" || provider === "lightning" || provider === "usdc";
 
   return (
@@ -1084,9 +1084,9 @@ export default function Subscribe() {
           const planLabel = getPlanLabel(plan, true);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
           const planIsLongTerm = plan.isLifetime || (plan.duration_days ?? plan.duration ?? 0) >= 365;
-          const planDiscountPct = planIsLongTerm ? 20 : 5;
-          const cryptoPriceUSD = Math.round(plan.priceUSD * (1 - planDiscountPct / 100) * 100) / 100;
-          const cryptoPriceCOP = Math.round(plan.priceCOP * (1 - planDiscountPct / 100));
+          const planDiscountPct = planIsLongTerm ? 20 : 0;
+          const cryptoPriceUSD = planDiscountPct > 0 ? Math.round(plan.priceUSD * (1 - planDiscountPct / 100) * 100) / 100 : plan.priceUSD;
+          const cryptoPriceCOP = planDiscountPct > 0 ? Math.round(plan.priceCOP * (1 - planDiscountPct / 100)) : plan.priceCOP;
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
           return (
@@ -1121,7 +1121,7 @@ export default function Subscribe() {
                 </div>
                 {isCrypto ? (
                   <span className="flex flex-col items-end">
-                    <del className="text-xs text-pnp-textSecondary/50 leading-none">{displayPrice}</del>
+                    {planDiscountPct > 0 && <del className="text-xs text-pnp-textSecondary/50 leading-none">{displayPrice}</del>}
                     <span className="text-lg font-bold text-green-400 leading-tight">{cryptoDisplayPrice}</span>
                   </span>
                 ) : (
@@ -1194,9 +1194,9 @@ export default function Subscribe() {
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
           const planDays = plan.duration_days || plan.duration || 30;
           const planIsLongTerm = plan.isLifetime || planDays >= 365;
-          const planDiscountPct = planIsLongTerm ? 20 : 5;
-          const cryptoPriceUSD = Math.round(plan.priceUSD * (1 - planDiscountPct / 100) * 100) / 100;
-          const cryptoPriceCOP = Math.round(plan.priceCOP * (1 - planDiscountPct / 100));
+          const planDiscountPct = planIsLongTerm ? 20 : 0;
+          const cryptoPriceUSD = planDiscountPct > 0 ? Math.round(plan.priceUSD * (1 - planDiscountPct / 100) * 100) / 100 : plan.priceUSD;
+          const cryptoPriceCOP = planDiscountPct > 0 ? Math.round(plan.priceCOP * (1 - planDiscountPct / 100)) : plan.priceCOP;
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
           return (
@@ -1239,7 +1239,7 @@ export default function Subscribe() {
                 <div className="text-right">
                   {isCrypto ? (
                     <div className="flex flex-col items-end">
-                      <del className="text-xs text-pnp-textSecondary/50 leading-none">{displayPrice}</del>
+                      {planDiscountPct > 0 && <del className="text-xs text-pnp-textSecondary/50 leading-none">{displayPrice}</del>}
                       <span className="text-lg font-bold text-green-400 leading-tight">{cryptoDisplayPrice}</span>
                     </div>
                   ) : (
@@ -1339,7 +1339,7 @@ export default function Subscribe() {
             <div className="text-lg mb-1">🥷</div>
             <div className="text-xs font-medium text-pnp-textPrimary">{s.dash}</div>
             <div className="text-[10px] text-pnp-textSecondary">{dashAvailable === false ? s.dashComingSoon : s.dashAnonymous}</div>
-            {dashAvailable !== false && (
+            {dashAvailable !== false && cryptoDiscountPct > 0 && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#008DE4] text-white px-1.5 py-0.5 rounded-full leading-none">
                 {cryptoDiscountPct}% OFF
               </span>
@@ -1359,7 +1359,7 @@ export default function Subscribe() {
             <div className="text-lg mb-1">⚡</div>
             <div className="text-xs font-medium text-pnp-textPrimary">{s.lightning}</div>
             <div className="text-[10px] text-pnp-textSecondary">{lightningAvailable === false ? s.lightningComingSoon : s.lightningInstant}</div>
-            {lightningAvailable !== false && (
+            {lightningAvailable !== false && cryptoDiscountPct > 0 && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#F7931A] text-white px-1.5 py-0.5 rounded-full leading-none">
                 ⚡ {cryptoDiscountPct}% OFF
               </span>
@@ -1379,7 +1379,7 @@ export default function Subscribe() {
             <div className="text-lg mb-1">💲</div>
             <div className="text-xs font-medium text-pnp-textPrimary">{s.usdcPayment}</div>
             <div className="text-[10px] text-pnp-textSecondary">{usdcAvailable === false ? s.usdcComingSoon : s.usdcDesc}</div>
-            {usdcAvailable !== false && (
+            {usdcAvailable !== false && cryptoDiscountPct > 0 && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full leading-none">
                 {cryptoDiscountPct}% OFF
               </span>

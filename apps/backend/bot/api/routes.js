@@ -9039,7 +9039,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     return res.status(400).json({ error: 'invalid_signature' });
   }
 
-  const { payment_id, payment_status, order_id, actually_paid, price_amount, pay_currency } = req.body;
+  const { payment_id, payment_status, order_id, actually_paid, pay_amount, price_amount, price_currency, pay_currency } = req.body;
 
   // NP-M-05: reject IPNs missing required fields
   if (!payment_id || !payment_status || !order_id) {
@@ -9150,22 +9150,28 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
   const order = lockRes.rows[0];
 
   // NP-M-01: amount validation — reject underpayments > 1%
-  if (actually_paid != null && price_amount != null) {
+  // For cross-currency payments (e.g. BTC paying a USD invoice) compare actually_paid
+  // against pay_amount (both in pay_currency). Comparing BTC to USD directly was causing
+  // false underpayment detection and blocking legitimate finished payments.
+  if (actually_paid != null) {
     const paid = parseFloat(actually_paid);
-    const expected = parseFloat(price_amount);
-    if (Number.isFinite(paid) && Number.isFinite(expected) && paid < expected * 0.99) {
-      logger.warn('[NOWPayments] IPN: underpayment detected', { order_id, actually_paid, price_amount });
+    const isCrossCurrency = pay_currency && (price_currency || 'usd').toLowerCase() !== pay_currency.toLowerCase();
+    const referenceAmount = (isCrossCurrency && pay_amount != null)
+      ? parseFloat(pay_amount)
+      : (price_amount != null ? parseFloat(price_amount) : null);
+    if (referenceAmount != null && Number.isFinite(paid) && Number.isFinite(referenceAmount) && referenceAmount > 0 && paid < referenceAmount * 0.99) {
+      logger.warn('[NOWPayments] IPN: underpayment detected', { order_id, actually_paid, pay_amount, price_amount, pay_currency, isCrossCurrency });
       await dbQuery(
         `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
-        [order_id, `nowpayments:${payment_id}:underpaid:${actually_paid}/${price_amount}`]
+        [order_id, `nowpayments:${payment_id}:underpaid:${actually_paid}/${referenceAmount}`]
       );
       return res.json({ received: true });
     }
   } else if (order.usd_amount) {
-    // IPN fields absent — validate against DB authoritative amount as fallback
+    // IPN fields absent — validate against DB authoritative amount as fallback (same-currency only)
     const paid = parseFloat(actually_paid || '0');
     const expected = parseFloat(order.usd_amount);
-    if (paid > 0 && Number.isFinite(expected) && paid < expected * 0.99) {
+    if (paid > 0 && Number.isFinite(expected) && !pay_currency && paid < expected * 0.99) {
       logger.warn('[NOWPayments] IPN: underpayment (fallback DB check)', { order_id, actually_paid, dbAmount: order.usd_amount });
       await dbQuery(
         `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
@@ -9339,6 +9345,26 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     });
   } catch (alertErr) {
     logger.warn('[NOWPayments] IPN: operator alert failed (non-fatal)', { error: alertErr.message });
+  }
+
+  // Record in payment_history for admin visibility
+  try {
+    const PaymentHistoryService = require('../../services/paymentHistoryService');
+    await PaymentHistoryService.recordPayment({
+      userId: order.user_id,
+      paymentMethod: 'nowpayments',
+      amount: parseFloat(order.usd_amount) || 0,
+      currency: 'USD',
+      planId: order.plan_id,
+      product: order.plan_id,
+      paymentReference: order_id,
+      providerTransactionId: String(payment_id),
+      providerPaymentId: String(payment_id),
+      webhookData: req.body,
+      status: 'completed',
+    });
+  } catch (histErr) {
+    logger.warn('[NOWPayments] IPN: payment_history write failed (non-fatal)', { error: histErr.message });
   }
 
   logger.info('[NOWPayments] IPN: payment completed', { userId: order.user_id, planId: order.plan_id, order_id });

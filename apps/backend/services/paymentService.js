@@ -1320,6 +1320,27 @@ class PaymentService {
         payment = await PaymentModel.getById(String(x_ref_payco));
       }
 
+      // 3) fallback by metadata->>'epayco_ref' — catches payments where x_extra fields were
+      // empty and x_ref_payco is a numeric ePayco ID rather than our PAY-XXXXXXXX reference.
+      if (!payment && x_ref_payco) {
+        try {
+          const metaResult = await query(
+            `SELECT * FROM payments WHERE metadata->>'epayco_ref' = $1 AND status NOT IN ('completed','refunded','success') ORDER BY created_at DESC LIMIT 1`,
+            [String(x_ref_payco)]
+          );
+          if (metaResult.rows.length > 0) {
+            payment = PaymentModel._formatPayment(metaResult.rows[0]);
+            paymentIdOrType = payment.id;
+            logger.info('ePayco webhook: resolved payment via metadata epayco_ref fallback', {
+              refPayco: x_ref_payco,
+              paymentId: payment.id,
+            });
+          }
+        } catch (metaErr) {
+          logger.warn('ePayco webhook: metadata epayco_ref lookup failed', { error: metaErr.message });
+        }
+      }
+
       if (payment && (payment.status === 'completed' || payment.status === 'success')) {
         logger.info('ePayco webhook for already completed payment, ignoring', {
           paymentId: payment.id,

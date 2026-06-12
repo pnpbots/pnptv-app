@@ -836,21 +836,54 @@ class PaymentRecoveryService {
 
       results.checked = stuck.rows.length;
 
+      // Reset stuck 'processing' orders older than 30 min (bot crash mid-grant)
+      await query(
+        `UPDATE dash_subscription_orders SET status = 'pending', notes = COALESCE(notes || ' ', '') || '[reset_from_processing]'
+         WHERE btcpay_invoice_id LIKE 'pnptv-nowp-%'
+           AND status = 'processing'
+           AND completed_at IS NULL
+           AND created_at < NOW() - INTERVAL '30 minutes'
+           AND created_at > NOW() - INTERVAL '24 hours'`
+      ).catch((err) => logger.warn('NOWPayments reconciler: processing reset failed', { error: err.message }));
+
       for (const row of stuck.rows) {
         try {
           // Extract payment_id from notes (stored as 'nowpayments:<payment_id>:...' on transitions)
           const noteMatch = (row.notes || '').match(/nowpayments:(\d+)/);
-          if (!noteMatch) {
-            results.stillPending++;
-            continue;
-          }
-          const paymentId = noteMatch[1];
+          let paymentId = noteMatch ? noteMatch[1] : null;
 
           const npEnv = process.env.NOWPAYMENTS_ENVIRONMENT === 'sandbox'
             ? 'https://api-sandbox.nowpayments.io/v1'
             : 'https://api.nowpayments.io/v1';
 
           const axios = require('axios');
+
+          // If no payment_id in notes, query NowPayments API by order_id
+          if (!paymentId) {
+            try {
+              const searchResp = await axios.get(`${npEnv}/payment/`, {
+                params: { order_id: row.order_id, limit: 1 },
+                headers: { 'x-api-key': apiKey },
+                timeout: 10000,
+              });
+              const data = searchResp.data?.data?.[0] || searchResp.data?.payments?.[0];
+              if (data?.payment_id) {
+                paymentId = String(data.payment_id);
+                // Update notes with discovered payment_id for future reconciliation
+                await query(
+                  `UPDATE dash_subscription_orders SET notes = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed')`,
+                  [row.order_id, `nowpayments:${paymentId}:reconciler_lookup`]
+                ).catch(() => {});
+              }
+            } catch (lookupErr) {
+              logger.warn('NOWPayments reconciler: payment lookup by order_id failed', { orderId: row.order_id, error: lookupErr.message });
+            }
+            if (!paymentId) {
+              results.stillPending++;
+              continue;
+            }
+          }
+
           const resp = await axios.get(`${npEnv}/payment/${paymentId}`, {
             headers: { 'x-api-key': apiKey },
             timeout: 10000,
@@ -890,6 +923,47 @@ class PaymentRecoveryService {
               );
               results.settled++;
               logger.info('NOWPayments reconciler: settled', { orderId: row.order_id });
+
+              // Update users.tier so access is immediate
+              if (order.plan_id !== 'creator_monthly') {
+                try {
+                  const PlanModelRec = require('../models/planModel');
+                  const planRec = await PlanModelRec.getById(order.plan_id).catch(() => null);
+                  if (planRec) {
+                    const expiry = planRec.duration_days
+                      ? new Date(Date.now() + planRec.duration_days * 86400000).toISOString()
+                      : null;
+                    await query(
+                      `UPDATE users SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW() WHERE id = $1`,
+                      [order.user_id, planRec.tier || 'prime', planRec.id, expiry]
+                    );
+                  }
+                  const { cache: recCache } = require('../config/redis');
+                  await recCache.del(`user:${order.user_id}`).catch(() => {});
+                  await recCache.del(`session:user:${order.user_id}`).catch(() => {});
+                } catch (tierErr) {
+                  logger.warn('NOWPayments reconciler: tier update failed (non-critical)', { error: tierErr.message });
+                }
+              }
+
+              // Record in payment_history for admin visibility
+              try {
+                const PaymentHistoryService = require('./paymentHistoryService');
+                await PaymentHistoryService.recordPayment({
+                  userId: order.user_id,
+                  paymentMethod: 'nowpayments',
+                  amount: parseFloat(order.usd_amount) || 0,
+                  currency: 'USD',
+                  planId: order.plan_id,
+                  product: order.plan_id,
+                  paymentReference: row.order_id,
+                  providerTransactionId: paymentId,
+                  providerPaymentId: paymentId,
+                  status: 'completed',
+                });
+              } catch (histErr) {
+                logger.warn('NOWPayments reconciler: payment_history write failed (non-critical)', { error: histErr.message });
+              }
 
               // Operator alerts — fire-and-forget.
               try {
