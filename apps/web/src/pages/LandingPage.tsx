@@ -27,8 +27,6 @@ function bufferToB64url(buf: ArrayBuffer | null | undefined): string | undefined
 }
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://pnptv.app";
-const AUTHENTIK_URL = import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app";
-const ENROLLMENT_FLOW_URL = `${AUTHENTIK_URL}/if/flow/pnptv-enrollment/`;
 
 // ── Spinner ───────────────────────────────────────────────────────────────────
 
@@ -765,10 +763,10 @@ export function LandingPage() {
             </a>
           )}
 
-          {/* No account → Authentik enrollment flow */}
+          {/* No account → OIDC prompt=create (routes through enrollment and back to pnptv.app) */}
           <p className="text-xs text-pnp-textSecondary">
             No account?{" "}
-            <a href={ENROLLMENT_FLOW_URL} className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all">
+            <a href="/api/webapp/auth/oidc/login?method=register" className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all">
               Create one
             </a>
           </p>
