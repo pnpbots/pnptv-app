@@ -858,25 +858,46 @@ class PaymentRecoveryService {
 
           const axios = require('axios');
 
-          // If no payment_id in notes, query NowPayments API by order_id
+          // If no payment_id in notes, query NowPayments API by order_id.
+          // The payment list endpoint requires a JWT Bearer token (not just the API key).
+          // We obtain it once per reconciler run using NOWPAYMENTS_EMAIL + NOWPAYMENTS_PASSWORD.
           if (!paymentId) {
             try {
+              // Lazily obtain JWT token (cached on the results object for this run)
+              if (!results._jwtToken) {
+                const npEmail = process.env.NOWPAYMENTS_EMAIL;
+                const npPass  = process.env.NOWPAYMENTS_PASSWORD;
+                if (npEmail && npPass) {
+                  try {
+                    const authResp = await axios.post(`${npEnv}/auth`, { email: npEmail, password: npPass }, { timeout: 10000 });
+                    results._jwtToken = authResp.data?.token || null;
+                    if (results._jwtToken) logger.info('NOWPayments reconciler: JWT token obtained');
+                  } catch (authErr) {
+                    logger.warn('NOWPayments reconciler: JWT auth failed', { error: authErr.response?.data || authErr.message });
+                  }
+                }
+              }
+
+              // Payment list requires both JWT Bearer AND x-api-key headers
+              const searchHeaders = results._jwtToken
+                ? { Authorization: `Bearer ${results._jwtToken}`, 'x-api-key': apiKey }
+                : { 'x-api-key': apiKey };
+
               const searchResp = await axios.get(`${npEnv}/payment/`, {
-                params: { order_id: row.order_id, limit: 1 },
-                headers: { 'x-api-key': apiKey },
+                params: { order_id: row.order_id, limit: 1, orderBy: 'DESC' },
+                headers: searchHeaders,
                 timeout: 10000,
               });
               const data = searchResp.data?.data?.[0] || searchResp.data?.payments?.[0];
               if (data?.payment_id) {
                 paymentId = String(data.payment_id);
-                // Update notes with discovered payment_id for future reconciliation
                 await query(
                   `UPDATE dash_subscription_orders SET notes = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed')`,
                   [row.order_id, `nowpayments:${paymentId}:reconciler_lookup`]
                 ).catch(() => {});
               }
             } catch (lookupErr) {
-              logger.warn('NOWPayments reconciler: payment lookup by order_id failed', { orderId: row.order_id, error: lookupErr.message });
+              logger.warn('NOWPayments reconciler: payment lookup by order_id failed', { orderId: row.order_id, error: lookupErr.response?.status || lookupErr.message });
             }
             if (!paymentId) {
               results.stillPending++;
