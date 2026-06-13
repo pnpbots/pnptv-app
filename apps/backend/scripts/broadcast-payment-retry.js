@@ -60,17 +60,14 @@ We noticed you tried to subscribe. Here's everything you need to complete your p
 <b>💳 Option 1 — Credit or Debit Card (fastest)</b>
 Pay with Visa or Mastercard. After entering your card, <b>wait 20–30 seconds</b> for your bank's 3D Secure verification — do NOT close the tab.
 
-<b>🪙 Option 2 — USDC (stable, works from any country)</b>
-1 USDC = $1 USD. Buy on Coinbase or Binance and pay at checkout.
-
-<b>🥷 Option 3 — Dash (most private)</b>
-No bank, no name. Just scan and send.
+<b>🪙 Option 2 — Crypto via NowPayments (works from any country)</b>
+Pay with BTC, ETH, USDC, LTC and 100+ coins. No bank, no hassle — checkout opens directly.
 
 👉 <a href="${HOW_TO_PAY_URL}">Full step-by-step guide → pnptv.app/how-to-pay</a>
 
 ──────────────────
 Subscribe: <a href="${SUBSCRIBE_URL}">pnptv.app/subscribe</a>
-Lifetime PRIME $100: <a href="${LIFETIME_URL}">pnptv.app/lifetime80</a>`,
+Lifetime PRIME $100: <a href="${LIFETIME_URL}">pnptv.app/lifetime100</a>`,
 
   es:
 `💳 <b>¿Tuviste problemas para pagar en PNPtv?</b>
@@ -80,17 +77,14 @@ Vimos que intentaste suscribirte. Aquí tienes todo lo que necesitas para comple
 <b>💳 Opción 1 — Tarjeta de Crédito o Débito (más rápido)</b>
 Paga con Visa o Mastercard. Después de ingresar tu tarjeta, <b>espera 20–30 segundos</b> a que aparezca la verificación 3D Secure de tu banco — no cierres la pestaña.
 
-<b>🪙 Opción 2 — USDC (estable, funciona desde cualquier país)</b>
-1 USDC = $1 USD. Compra en Coinbase o Binance y paga en el checkout.
-
-<b>🥷 Opción 3 — Dash (más privado)</b>
-Sin banco, sin nombre. Solo escanea y envía.
+<b>🪙 Opción 2 — Cripto vía NowPayments (funciona desde cualquier país)</b>
+Paga con BTC, ETH, USDC, LTC y +100 monedas. Sin banco, sin complicaciones — el checkout se abre directamente.
 
 👉 <a href="${HOW_TO_PAY_URL}">Guía paso a paso completa → pnptv.app/how-to-pay</a>
 
 ──────────────────
 Suscripciones: <a href="${SUBSCRIBE_URL}">pnptv.app/subscribe</a>
-Lifetime PRIME $100: <a href="${LIFETIME_URL}">pnptv.app/lifetime80</a>`,
+Lifetime PRIME $100: <a href="${LIFETIME_URL}">pnptv.app/lifetime100</a>`,
 };
 
 const EMAIL_SUBJECT = {

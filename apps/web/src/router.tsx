@@ -133,7 +133,6 @@ const PrimeChannel = lazy(() => import("@/pages/admin/PrimeChannel"));
 const Compliance2257 = lazy(() => import("@/pages/admin/Compliance2257"));
 const AdminInviteLinks = lazy(() => import("@/pages/admin/InviteLinks"));
 const Lifetime100 = lazy(() => import("@/pages/Lifetime100"));
-const Lifetime80 = lazy(() => import("@/pages/Lifetime80"));
 const CryptoGuide = lazy(() => import("@/pages/CryptoGuide"));
 const GamificationPage = lazy(() => import("@/pages/GamificationPage"));
 const ReferralCenter = lazy(() => import("@/pages/ReferralCenter"));
@@ -943,7 +942,7 @@ export const router = createBrowserRouter([
     path: "/lifetime100",
     element: (
       <ModuleLoader>
-        <Lifetime80 />
+        <Lifetime100 />
       </ModuleLoader>
     ),
   },
