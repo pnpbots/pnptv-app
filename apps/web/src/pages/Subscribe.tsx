@@ -536,12 +536,12 @@ export default function Subscribe() {
     };
   }, [lightningInvoice, lightningPolling, refreshUser]);
 
-  // Poll USDC invoice status (NOWPayments). Cap at 20 minutes — NOWPayments invoices have a 24h TTL
-  // but we stop polling after 20 min and show a re-open link. User can still complete payment.
+  // Poll USDC invoice status (NOWPayments). Cap at 60 minutes — NOWPayments invoices have a 24h TTL
+  // but we stop polling after 60 min and show a re-open link. User can still complete payment.
   useEffect(() => {
     if (!usdcOrder || !usdcPolling) return;
     let cancelled = false;
-    const maxDurationMs = 20 * 60 * 1000; // 20 min
+    const maxDurationMs = 60 * 60 * 1000; // 60 min
     const startedAt = Date.now();
     let timerId: ReturnType<typeof setTimeout> | null = null;
 
@@ -769,8 +769,6 @@ export default function Subscribe() {
           setUsdcOrder(order);
           setUsdcPolling(true);
           try { sessionStorage.setItem("pnp_pending_usdc_order", JSON.stringify(order)); } catch {}
-          // Open the NOWPayments hosted checkout in a new tab
-          window.open(result.invoiceUrl, '_blank', 'noopener,noreferrer');
         } else {
           setError(s.failedToCreateUsdcInvoice);
         }
@@ -984,6 +982,7 @@ export default function Subscribe() {
 
   const selectedPlanData = plans.find((p) => p.id === selectedPlan);
   const cryptoDiscountPct = (selectedPlanData && (selectedPlanData.isLifetime || (selectedPlanData.duration_days ?? 0) >= 365)) ? 20 : 0;
+  const cryptoSavingsUSD = cryptoDiscountPct > 0 && selectedPlanData ? Math.round(selectedPlanData.priceUSD * cryptoDiscountPct / 100 * 100) / 100 : 0;
   const isCrypto = provider === "dash" || provider === "lightning" || provider === "usdc";
 
   return (
@@ -1139,9 +1138,13 @@ export default function Subscribe() {
                   <span className="flex flex-col items-end">
                     {planDiscountPct > 0 && <del className="text-xs text-pnp-textSecondary/50 leading-none">{displayPrice}</del>}
                     <span className="text-lg font-bold text-green-400 leading-tight">{cryptoDisplayPrice}</span>
+                    <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(cryptoPriceUSD, "USD") : formatPrice(cryptoPriceCOP, "COP")}</span>
                   </span>
                 ) : (
-                  <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
+                  <span className="flex flex-col items-end">
+                    <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
+                    <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(plan.priceUSD, "USD") : formatPrice(plan.priceCOP, "COP")}</span>
+                  </span>
                 )}
               </div>
               <span
@@ -1257,16 +1260,17 @@ export default function Subscribe() {
                     <div className="flex flex-col items-end">
                       {planDiscountPct > 0 && <del className="text-xs text-pnp-textSecondary/50 leading-none">{displayPrice}</del>}
                       <span className="text-lg font-bold text-green-400 leading-tight">{cryptoDisplayPrice}</span>
+                      <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(cryptoPriceUSD, "USD") : formatPrice(cryptoPriceCOP, "COP")}</span>
                     </div>
                   ) : (
-                    <span className="text-lg font-bold text-pnp-textPrimary">{displayPrice}</span>
+                    <div className="flex flex-col items-end">
+                      <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
+                      <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(plan.priceUSD, "USD") : formatPrice(plan.priceCOP, "COP")}</span>
+                    </div>
                   )}
                   {planDays >= 30 && planDays < 36500 && (
                     <div className="text-[10px] text-pnp-textSecondary">
-                      {showCOP
-                        ? formatPrice((isCrypto ? cryptoPriceCOP : plan.priceCOP) / Math.max(1, Math.round(planDays / 30)), "COP")
-                        : formatPrice((isCrypto ? cryptoPriceUSD : plan.priceUSD) / Math.max(1, Math.round(planDays / 30)), "USD")
-                      }{s.perMonth}
+                      {formatPrice((isCrypto ? cryptoPriceUSD : plan.priceUSD) / Math.max(1, Math.round(planDays / 30)), "USD")}{s.perMonth}
                     </div>
                   )}
                 </div>
@@ -1342,22 +1346,22 @@ export default function Subscribe() {
             <div className="text-[10px] text-pnp-textSecondary">{"Visa & Mastercard · ePayco"}</div>
           </button>
           <button
-            onClick={() => dashAvailable !== false && setProvider("dash")}
-            disabled={dashAvailable === false}
+            onClick={() => usdcAvailable !== false && setProvider("usdc")}
+            disabled={usdcAvailable === false}
             className={`rounded-xl p-3 border-2 transition-all text-center relative ${
-              dashAvailable === false
+              usdcAvailable === false
                 ? "border-white/5 bg-white/3 opacity-50 cursor-not-allowed"
-                : provider === "dash"
-                ? "border-[#008DE4] bg-[#008DE4]/10"
+                : provider === "usdc"
+                ? "border-green-500 bg-green-500/10"
                 : "border-white/10 bg-white/5 hover:border-white/20"
             }`}
           >
-            <div className="text-lg mb-1">🥷</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">{s.dash}</div>
-            <div className="text-[10px] text-pnp-textSecondary">{dashAvailable === false ? s.dashComingSoon : s.dashAnonymous}</div>
-            {dashAvailable !== false && cryptoDiscountPct > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#008DE4] text-white px-1.5 py-0.5 rounded-full leading-none">
-                {cryptoDiscountPct}% OFF
+            <div className="text-lg mb-1">💲</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">{s.usdcPayment}</div>
+            <div className="text-[10px] text-pnp-textSecondary">{usdcAvailable === false ? s.usdcComingSoon : s.usdcDesc}</div>
+            {usdcAvailable !== false && cryptoDiscountPct > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full leading-none">
+                Save {cryptoDiscountPct}%
               </span>
             )}
           </button>
@@ -1377,27 +1381,27 @@ export default function Subscribe() {
             <div className="text-[10px] text-pnp-textSecondary">{lightningAvailable === false ? s.lightningComingSoon : s.lightningInstant}</div>
             {lightningAvailable !== false && cryptoDiscountPct > 0 && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#F7931A] text-white px-1.5 py-0.5 rounded-full leading-none">
-                ⚡ {cryptoDiscountPct}% OFF
+                Save {cryptoDiscountPct}%
               </span>
             )}
           </button>
           <button
-            onClick={() => usdcAvailable !== false && setProvider("usdc")}
-            disabled={usdcAvailable === false}
+            onClick={() => dashAvailable !== false && setProvider("dash")}
+            disabled={dashAvailable === false}
             className={`rounded-xl p-3 border-2 transition-all text-center relative ${
-              usdcAvailable === false
+              dashAvailable === false
                 ? "border-white/5 bg-white/3 opacity-50 cursor-not-allowed"
-                : provider === "usdc"
-                ? "border-green-500 bg-green-500/10"
+                : provider === "dash"
+                ? "border-[#008DE4] bg-[#008DE4]/10"
                 : "border-white/10 bg-white/5 hover:border-white/20"
             }`}
           >
-            <div className="text-lg mb-1">💲</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">{s.usdcPayment}</div>
-            <div className="text-[10px] text-pnp-textSecondary">{usdcAvailable === false ? s.usdcComingSoon : s.usdcDesc}</div>
-            {usdcAvailable !== false && cryptoDiscountPct > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full leading-none">
-                {cryptoDiscountPct}% OFF
+            <div className="text-lg mb-1">🥷</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">{s.dash}</div>
+            <div className="text-[10px] text-pnp-textSecondary">{dashAvailable === false ? s.dashComingSoon : s.dashAnonymous}</div>
+            {dashAvailable !== false && cryptoDiscountPct > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#008DE4] text-white px-1.5 py-0.5 rounded-full leading-none">
+                Save {cryptoDiscountPct}%
               </span>
             )}
           </button>
@@ -1406,6 +1410,11 @@ export default function Subscribe() {
         {/* Dash info panel */}
         {provider === "dash" && (
           <div className="mt-3 rounded-xl p-3 border border-[#008DE4]/30 bg-[#008DE4]/5 space-y-2">
+            {cryptoSavingsUSD > 0 && (
+              <div className="text-xs font-semibold text-[#008DE4] text-center py-1 px-2 rounded-lg bg-[#008DE4]/10">
+                Save ${cryptoSavingsUSD.toFixed(2)} vs card on this plan
+              </div>
+            )}
             <p className="text-xs text-pnp-textSecondary">{s.dashInfoText}</p>
             <div className="flex flex-wrap gap-2 text-[10px]">
               <a href="https://www.moonpay.com/buy/dash" target="_blank" rel="noopener noreferrer"
@@ -1434,6 +1443,11 @@ export default function Subscribe() {
         {/* Lightning info panel */}
         {provider === "lightning" && (
           <div className="mt-3 rounded-xl p-3 border border-[#F7931A]/30 bg-[#F7931A]/5 space-y-2">
+            {cryptoSavingsUSD > 0 && (
+              <div className="text-xs font-semibold text-[#F7931A] text-center py-1 px-2 rounded-lg bg-[#F7931A]/10">
+                Save ${cryptoSavingsUSD.toFixed(2)} vs card on this plan
+              </div>
+            )}
             <p className="text-xs text-pnp-textSecondary">{s.lightningInfoText}</p>
             <div className="flex flex-wrap gap-2 text-[10px]">
               <a href="https://phoenix.acinq.co/" target="_blank" rel="noopener noreferrer"
@@ -1454,6 +1468,11 @@ export default function Subscribe() {
         {/* USDC info panel */}
         {provider === "usdc" && (
           <div className="mt-3 rounded-xl p-3 border border-green-500/30 bg-green-500/5 space-y-2">
+            {cryptoSavingsUSD > 0 && (
+              <div className="text-xs font-semibold text-green-400 text-center py-1 px-2 rounded-lg bg-green-500/10">
+                Save ${cryptoSavingsUSD.toFixed(2)} vs card on this plan
+              </div>
+            )}
             <p className="text-xs text-pnp-textSecondary">{s.usdcInfoText}</p>
             <div className="flex flex-wrap gap-2 text-[10px]">
               <span className="text-green-400">USDC · USDT · Base · Solana · Polygon · TRON · ETH</span>
@@ -1495,14 +1514,26 @@ export default function Subscribe() {
             </div>
           )}
           {usdcOrder.invoiceUrl && (
-            <a
-              href={usdcOrder.invoiceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block w-full text-center py-2.5 rounded-xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 transition-colors mb-3"
-            >
-              {s.usdcOpenCheckout}
-            </a>
+            <div className="mb-3 rounded-xl overflow-hidden border border-green-500/20">
+              <iframe
+                src={usdcOrder.invoiceUrl}
+                title="USDC Payment"
+                className="w-full"
+                style={{ height: 620, border: 'none', display: 'block' }}
+                allow="payment"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
+              />
+              <div className="px-3 py-2 bg-black/30 text-center">
+                <a
+                  href={usdcOrder.invoiceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-green-400 hover:text-green-300 underline"
+                >
+                  {s.usdcOpenCheckout}
+                </a>
+              </div>
+            </div>
           )}
           <button
             onClick={() => {

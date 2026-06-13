@@ -317,7 +317,7 @@ const handlePaymentResponse = async (req, res) => {
   try {
     const {
       ref_payco, x_ref_payco, x_transaction_state,
-      status, x_extra3,
+      status, x_extra2, x_extra3,
     } = req.query;
 
     const refPayco = ref_payco || x_ref_payco || null;
@@ -329,6 +329,10 @@ const handlePaymentResponse = async (req, res) => {
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const rawExtra3 = x_extra3 || null;
     const paymentIdFromQuery = rawExtra3 && UUID_RE.test(rawExtra3.trim()) ? rawExtra3.trim() : null;
+
+    // x_extra2 carries the planId — sanitize to alphanumeric/hyphens only (no HTML/JS injection risk)
+    const rawExtra2 = x_extra2 || null;
+    const planIdFromQuery = rawExtra2 ? rawExtra2.trim().replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64) : null;
 
     logger.info('Payment response page hit', {
       refPayco,
@@ -518,7 +522,8 @@ const handlePaymentResponse = async (req, res) => {
         document.getElementById('msg').innerHTML = displayMsg.replace(/\n/g, '<br>');
         document.getElementById('actions').style.display = 'block';
         document.getElementById('mainBtn').textContent = 'Intentar de nuevo / Try Again';
-        document.getElementById('mainBtn').href = 'https://pnptv.app/subscribe';
+        var retryPlan = ${planIdFromQuery ? `'${planIdFromQuery}'` : 'null'};
+        document.getElementById('mainBtn').href = 'https://pnptv.app/subscribe' + (retryPlan ? '?plan=' + encodeURIComponent(retryPlan) : '');
       }
 
       function showProcessing() {
