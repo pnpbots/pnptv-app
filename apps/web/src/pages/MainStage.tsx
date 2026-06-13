@@ -267,7 +267,10 @@ export default function MainStage() {
   // Auth state — used to detect non-PRIME users and switch them to viewer mode.
   const { user, isLoading: isAuthLoading } = useAuth();
   // Viewer mode: not a guest, auth resolved, user is not PRIME (includes unauthenticated).
-  const isViewerMode = !isGuestMode && !isAuthLoading && user?.tier !== "PRIME";
+  const canParticipate = user !== null && (
+    user.tier === 'PRIME' || user.tier === 'member' || user.role === 'admin' || user.role === 'superadmin'
+  );
+  const isViewerMode = !isGuestMode && !isAuthLoading && !canParticipate;
 
   // Viewer-mode state
   const [viewerLkToken, setViewerLkToken] = useState<string | null>(null);

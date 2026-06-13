@@ -98,7 +98,7 @@ class AuthController {
 
       // Get latest user data
       const result = await query(
-        `SELECT id, email, username, role, subscription_status FROM users WHERE id = $1`,
+        `SELECT id, email, username, role, subscription_status, tier FROM users WHERE id = $1`,
         [user.id]
       );
 
@@ -114,6 +114,7 @@ class AuthController {
             username: latestUser.username,
             role: latestUser.role,
             subscriptionStatus: latestUser.subscription_status,
+            tier: latestUser.tier || 'free',
           },
         },
       });
