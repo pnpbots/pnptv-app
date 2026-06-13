@@ -209,27 +209,7 @@ const token = asyncHandler(async (req, res) => {
     }
   }
 
-  // Entitlement gate — Main Stage requires pnp-member (admins bypass)
-  if (!adminUser) {
-    try {
-      const hasAccess = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
-      if (!hasAccess) {
-        return res.status(403).json({
-          success: false,
-          error: 'Main Stage requires an active membership.',
-          code: 'MEMBERSHIP_REQUIRED',
-        });
-      }
-    } catch (entErr) {
-      logger.error('[MainStage] token: entitlement check failed', { error: entErr.message });
-      return res.status(503).json({
-        success: false,
-        error: 'Service temporarily unavailable.',
-        code: 'SESSION_BACKEND_UNAVAILABLE',
-      });
-    }
-  }
-
+  // Main Stage is open to all authenticated users — no entitlement gate.
   // Main Stage is a publish-first room: every authenticated entrant is added
   // to the stage rotation/visibility queue. Admins bypass the cap so they can
   // always join and moderate a full room — addCammerForce skips the cap check

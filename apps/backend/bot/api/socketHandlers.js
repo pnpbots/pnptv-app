@@ -444,24 +444,14 @@ function initSocketIO(io) {
     });
 
     // mainstage:join-cammer — called by cammers who want to publish video.
-    // The slot is normally already reserved by POST /api/main-stage/token
-    // (addCammer is atomic + idempotent), so this path either confirms the
-    // existing reservation or serves as a fallback for clients that skipped
-    // the REST mint. Guards: pnp-member entitlement + kicked-set check.
+    // Main Stage is open to all authenticated users. Only the kicked-set
+    // is enforced here; the slot reservation is addCammer (atomic + idempotent).
     socket.on('mainstage:join-cammer', async () => {
       const ms2 = getMainStageService();
       if (!ms2) return;
 
-      // Entitlement + kicked-set guard — must hold pnp-member and not be kicked.
+      // Kicked-set guard — kicked users may not rejoin via socket either.
       try {
-        const hasMembership = await getCachedEntitlement(socket, String(user.id), 'pnp-member');
-        if (!hasMembership) {
-          socket.emit('mainstage:error', {
-            code: 'MEMBERSHIP_REQUIRED',
-            message: 'An active membership is required to join as a cammer.',
-          });
-          return;
-        }
         const isKicked = await getRedis().get(`mainstage:kicked:${String(user.id)}`);
         if (isKicked) {
           socket.emit('mainstage:error', {

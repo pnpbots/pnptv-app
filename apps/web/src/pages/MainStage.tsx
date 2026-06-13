@@ -269,13 +269,10 @@ export default function MainStage() {
   // with the guest token.
   const { room, isJoined, join } = useMainStageRoom();
 
-  // Auth state — used to detect non-PRIME users and switch them to viewer mode.
+  // Auth state — viewer mode only applies to unauthenticated users.
   const { user, isLoading: isAuthLoading } = useAuth();
-  // Viewer mode: not a guest, auth resolved, user is not PRIME (includes unauthenticated).
-  const canParticipate = user !== null && (
-    user.tier === 'PRIME' || user.tier === 'member' || user.tier === 'creator' ||
-    user.role === 'admin' || user.role === 'superadmin'
-  );
+  // Any logged-in user is a cammer. Viewer mode is for unauthenticated visitors only.
+  const canParticipate = user !== null;
   const isViewerMode = !isGuestMode && !isAuthLoading && !canParticipate;
 
   // Viewer-mode state
@@ -1200,12 +1197,12 @@ export default function MainStage() {
             />
           </LiveKitRoom>
 
-          {/* PRIME upsell bar — replaces participant controls for viewers */}
+          {/* Login CTA — viewers are unauthenticated, prompt them to sign in and join */}
           <div
             className="flex-shrink-0 flex items-center gap-3 px-4 py-3"
             style={{
               background: "rgba(10,10,15,0.97)",
-              borderTop: "1px solid rgba(212,0,122,0.25)",
+              borderTop: "1px solid rgba(255,255,255,0.08)",
               paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
             }}
           >
@@ -1221,17 +1218,17 @@ export default function MainStage() {
             </button>
             <div className="flex-1 min-w-0">
               <p className="text-white font-semibold text-sm leading-tight">
-                {liveParticipants > 0 ? `${liveParticipants} members live` : "Members are live"}
+                {liveParticipants > 0 ? `${liveParticipants} on camera` : "Join the show"}
               </p>
-              <p className="text-white/45 text-xs leading-tight mt-0.5">Turn your camera on · Be part of the show</p>
+              <p className="text-white/45 text-xs leading-tight mt-0.5">Create a free account to turn your camera on</p>
             </div>
             <button
               type="button"
-              onClick={() => navigate("/subscribe")}
+              onClick={() => navigate("/login?return_to=/main-stage")}
               className="flex-shrink-0 min-h-[40px] px-4 rounded-2xl text-xs font-bold text-white transition-all active:scale-[0.97] whitespace-nowrap"
               style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)", boxShadow: "0 4px 16px rgba(212,0,122,0.45)" }}
             >
-              ⭐ Go PRIME
+              Sign in
             </button>
           </div>
         </>
