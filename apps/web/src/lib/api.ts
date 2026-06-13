@@ -6730,6 +6730,10 @@ export function getMainStageToken(): Promise<MainStageTokenResponse> {
   return request("/api/main-stage/token", { method: "POST" });
 }
 
+export function getMainStageViewerToken(): Promise<MainStageTokenResponse> {
+  return request("/api/main-stage/viewer-token");
+}
+
 export function getMainStageJoinCheck(): Promise<MainStageJoinCheck> {
   return request<{ success: boolean } & MainStageJoinCheck>("/api/main-stage/join-check");
 }

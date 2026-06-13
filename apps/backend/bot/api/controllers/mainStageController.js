@@ -7,6 +7,7 @@
  * All admin writes are audit-logged and rate-limited at the route level.
  */
 
+const crypto            = require('crypto');
 const logger            = require('../../../utils/logger');
 const { asyncHandler }  = require('../middleware/errorHandler');
 const { getPool }       = require('../../../config/postgres');
@@ -472,8 +473,33 @@ const shuffle = asyncHandler(async (req, res) => {
   return res.json({ success: true });
 });
 
+/**
+ * GET /api/main-stage/viewer-token
+ * No auth required. Issues a subscribe-only LiveKit token for passive viewers.
+ * Rate-limited at the route level by IP.
+ */
+const viewerToken = asyncHandler(async (req, res) => {
+  const viewerId = `viewer_${crypto.randomBytes(6).toString('hex')}`;
+  const lkToken = await livekitService.generateToken(
+    ROOM_NAME,
+    viewerId,
+    'Viewer',
+    false,
+    { canPublishVideo: false, canPublishAudio: false, canPublishData: false, ttlSeconds: 2 * 3600 }
+  );
+  logger.info('[MainStage] viewer token issued', { ip: req.ip });
+  return res.json({
+    success: true,
+    token: lkToken,
+    livekitUrl: livekitService.LIVEKIT_WS_URL,
+    roomName: ROOM_NAME,
+    identity: viewerId,
+  });
+});
+
 module.exports = {
   token,
+  viewerToken,
   getState,
   getJoinCheck,
   acceptConsents,

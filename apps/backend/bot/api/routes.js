@@ -10696,6 +10696,18 @@ const mainStageStateLimiter = rateLimit({
 });
 app.get('/api/main-stage/state', mainStageStateLimiter, mainStageController.getState);
 
+// Viewer token — no auth, IP-only rate-limited (5/min to prevent identity flood)
+const mainStageViewerTokenLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({ success: false, error: 'Too many viewer token requests.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.get('/api/main-stage/viewer-token', mainStageViewerTokenLimiter, mainStageController.viewerToken);
+
 app.get(
   '/api/main-stage/join-check',
   authenticateUser,

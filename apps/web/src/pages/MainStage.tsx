@@ -7,7 +7,8 @@ import {
 import { ConnectionState, RoomEvent } from "livekit-client";
 import { useMainStage, type MainStageState } from "@/hooks/useMainStage";
 import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
-import { getMainStageJoinCheck, acceptMainStageConsents, getWalletBalance, type MainStageJoinCheck } from "@/lib/api";
+import { getMainStageJoinCheck, acceptMainStageConsents, getWalletBalance, getMainStageViewerToken, type MainStageJoinCheck } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -263,6 +264,19 @@ export default function MainStage() {
   // with the guest token.
   const { room, isJoined, join } = useMainStageRoom();
 
+  // Auth state — used to detect non-PRIME users and switch them to viewer mode.
+  const { user, isLoading: isAuthLoading } = useAuth();
+  // Viewer mode: not a guest, auth resolved, user is not PRIME (includes unauthenticated).
+  const isViewerMode = !isGuestMode && !isAuthLoading && user?.tier !== "PRIME";
+
+  // Viewer-mode state
+  const [viewerLkToken, setViewerLkToken] = useState<string | null>(null);
+  const [viewerLkUrl, setViewerLkUrl] = useState<string | null>(null);
+  const [viewerAgeConfirmed, setViewerAgeConfirmed] = useState(false);
+  const [viewerConnecting, setViewerConnecting] = useState(false);
+  const [viewerConnState, setViewerConnState] = useState<ConnectionState>(ConnectionState.Disconnected);
+  const [viewerError, setViewerError] = useState<string | null>(null);
+
   // Resolve effective values: guest path overrides everything from the hook.
   const state       = hookedState;
   const role        = isGuestMode ? ("guest" as const) : hookedRole;
@@ -300,7 +314,7 @@ export default function MainStage() {
   }, [isParticipant]);
 
   useEffect(() => {
-    if (isGuestMode) return;
+    if (isGuestMode || isViewerMode || isAuthLoading) return;
     let cancelled = false;
     getMainStageJoinCheck()
       .then((check) => {
@@ -317,10 +331,10 @@ export default function MainStage() {
     return () => {
       cancelled = true;
     };
-  }, [isGuestMode]);
+  }, [isGuestMode, isViewerMode, isAuthLoading]);
 
   useEffect(() => {
-    if (isGuestMode) return;
+    if (isGuestMode || isViewerMode) return;
     if (!joinCheck?.canJoin) {
       setJoining(false);
       return;
@@ -363,7 +377,7 @@ export default function MainStage() {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [isGuestMode, join, joinCheck?.canJoin, room]);
+  }, [isGuestMode, isViewerMode, join, joinCheck?.canJoin, room]);
 
   useEffect(() => {
     if (connState === ConnectionState.Connected) {
@@ -425,9 +439,23 @@ export default function MainStage() {
   }, []);
 
   const handleLeave = useCallback(() => {
-    if (!isGuestMode) leave();
+    if (!isGuestMode && !isViewerMode) leave();
     navigate(-1);
-  }, [isGuestMode, leave, navigate]);
+  }, [isGuestMode, isViewerMode, leave, navigate]);
+
+  const handleViewerWatch = useCallback(async () => {
+    setViewerConnecting(true);
+    setViewerError(null);
+    try {
+      const res = await getMainStageViewerToken();
+      setViewerLkToken(res.token);
+      setViewerLkUrl(res.livekitUrl);
+    } catch {
+      setViewerError("Couldn't connect to Main Stage. Please try again.");
+    } finally {
+      setViewerConnecting(false);
+    }
+  }, []);
 
   const handleAcceptConsents = useCallback(async () => {
     setConsentError(null);
@@ -467,17 +495,106 @@ export default function MainStage() {
     shuffle();
   }, [shuffle]);
 
-  // Show the skeleton only while the join-check fetch is in flight. Once
-  // joinCheck arrives, <LiveKitRoom> must stay mounted for the entire join
-  // lifecycle — unmounting it while the room is connecting and remounting
-  // it afterwards causes LiveKitRoom's internal connect={false} effect to
-  // call room.disconnect() on an already-connected room (CLIENT_INITIATED).
-  // ConnectionOverlay handles the connecting/reconnecting visual instead.
-  if (
-    !isGuestMode &&
-    !error &&
-    (!joinCheck && !consentError)
-  ) {
+  // Show the skeleton while auth is resolving (can't determine viewer vs member yet).
+  if (!isGuestMode && isAuthLoading) {
+    return (
+      <div
+        className="fixed inset-0 flex flex-col bg-pnp-background"
+        role="status"
+        aria-label={t.live.mainStageLoading}
+      >
+        <div
+          className="flex-shrink-0 flex items-center justify-between px-4 h-14"
+          style={{
+            background: "rgba(10,10,15,0.9)",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+            paddingTop: "env(safe-area-inset-top, 0px)",
+          }}
+        >
+          <div className="w-20 h-4 rounded animate-pulse bg-white/[0.08]" />
+          <div className="w-24 h-5 rounded animate-pulse bg-white/[0.06]" />
+          <div className="w-8 h-8 rounded-full animate-pulse bg-white/[0.08]" />
+        </div>
+        <div className="flex-1 animate-pulse bg-white/[0.03]">
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div
+              className="w-10 h-10 rounded-full border-2 animate-spin"
+              style={{ borderColor: "rgba(212,0,122,0.2)", borderTopColor: "#D4007A" }}
+            />
+          </div>
+        </div>
+        <div
+          className="flex-shrink-0 h-16 animate-pulse"
+          style={{ background: "rgba(10,10,15,0.9)", borderTop: "1px solid rgba(255,255,255,0.06)" }}
+        />
+      </div>
+    );
+  }
+
+  // Viewer age gate — shown before the viewer fetches a LiveKit token.
+  if (isViewerMode && !viewerLkToken) {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-center gap-6 px-6 text-center bg-pnp-background">
+        <img src="/logo-login.png" alt="PNPtv!" className="h-10 w-auto object-contain brightness-110 mb-2" />
+        <div
+          className="w-20 h-20 rounded-3xl flex items-center justify-center"
+          style={{ background: "linear-gradient(135deg,rgba(212,0,122,0.18),rgba(123,97,255,0.18))", border: "1px solid rgba(212,0,122,0.3)" }}
+        >
+          <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#D4007A" }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
+          </svg>
+        </div>
+        <div>
+          <p className="text-white font-bold text-xl mb-1">Main Stage · Live Now</p>
+          <p className="text-white/55 text-sm max-w-xs mx-auto">
+            Watch the room live — free. Go PRIME to turn your camera on and be part of the show.
+          </p>
+          <p className="text-white/35 text-xs mt-2 max-w-xs mx-auto">
+            Ver la sala en vivo — gratis. Únete a PRIME para encender tu cámara.
+          </p>
+        </div>
+        <label className="flex items-center gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={viewerAgeConfirmed}
+            onChange={(e) => setViewerAgeConfirmed(e.target.checked)}
+            className="w-4 h-4 accent-pink-500"
+          />
+          <span className="text-sm text-white/80">I confirm I'm 18+ / Confirmo que tengo 18+</span>
+        </label>
+        {viewerError && <p className="text-sm text-red-400">{viewerError}</p>}
+        <div className="flex flex-col gap-3 w-full max-w-xs">
+          <button
+            type="button"
+            onClick={handleViewerWatch}
+            disabled={!viewerAgeConfirmed || viewerConnecting}
+            className="min-h-[50px] w-full rounded-2xl text-sm font-bold text-white transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+          >
+            {viewerConnecting ? "Connecting…" : "Watch Live"}
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate("/subscribe")}
+            className="min-h-[44px] w-full rounded-2xl text-sm font-semibold text-white transition-all active:scale-[0.97]"
+            style={{ background: "rgba(212,0,122,0.12)", border: "1px solid rgba(212,0,122,0.35)" }}
+          >
+            ⭐ Go PRIME — Join & Turn Your Cam On
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="min-h-[40px] w-full rounded-xl text-xs font-semibold text-white/40 transition-all active:scale-[0.97]"
+          >
+            {t.live.mainStageGoBack}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Member skeleton — PRIME user waiting for join-check to resolve.
+  if (!isGuestMode && !isViewerMode && !error && (!joinCheck && !consentError)) {
     return (
       <div
         className="fixed inset-0 flex flex-col bg-pnp-background"
@@ -513,44 +630,6 @@ export default function MainStage() {
   }
 
   if (error) {
-    const isMembershipRequired = /membership/i.test(error);
-
-    if (isMembershipRequired) {
-      return (
-        <div className="fixed inset-0 flex flex-col items-center justify-center gap-6 px-6 text-center bg-pnp-background">
-          <div
-            className="w-20 h-20 rounded-3xl flex items-center justify-center"
-            style={{ background: "linear-gradient(135deg,rgba(212,0,122,0.18),rgba(123,97,255,0.18))", border: "1px solid rgba(212,0,122,0.3)" }}
-          >
-            <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#D4007A" }}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-pnp-text-primary font-bold text-lg mb-2">Members Only</p>
-            <p className="text-white/55 text-sm max-w-xs mx-auto">Main Stage is exclusive to PNPtv! members. Subscribe to join the room and hang out live.</p>
-          </div>
-          <div className="flex flex-col gap-3 w-full max-w-xs">
-            <button
-              type="button"
-              onClick={() => navigate("/subscribe")}
-              className="min-h-[48px] w-full rounded-2xl text-sm font-bold text-white transition-all active:scale-[0.97]"
-              style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
-            >
-              Subscribe to Join
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate(-1)}
-              className="min-h-[44px] w-full rounded-2xl text-sm font-semibold text-white/60 transition-all active:scale-[0.97] bg-white/[0.06] border border-white/10"
-            >
-              {t.live.mainStageGoBack}
-            </button>
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center bg-pnp-background">
         <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-pnp-error/[0.12] border border-pnp-error/25">
@@ -678,7 +757,7 @@ export default function MainStage() {
     );
   }
 
-  if (!state) {
+  if (!state && !isViewerMode) {
     return (
       <div className="fixed inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center bg-pnp-background">
         <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-pnp-purple/[0.12] border border-pnp-purple/25">
@@ -714,7 +793,7 @@ export default function MainStage() {
   // Effective mode: per-user local override wins over the server's
   // shared mode. Everything downstream uses this.
   const mode: ModeId =
-    (localViewMode ?? (state.mode as ModeId | undefined) ?? "spotlight");
+    (localViewMode ?? (state?.mode as ModeId | undefined) ?? "spotlight");
   const liveParticipants = state?.counts?.participants ?? state?.counts?.cammers ?? 0;
 
   // i18n mode label lookup — used in header and toolbar aria-labels.
@@ -770,7 +849,19 @@ export default function MainStage() {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          {!isGuestMode && tokenBalance !== null && (
+          {isViewerMode && (
+            <span
+              className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+              style={{
+                background: "rgba(212,0,122,0.12)",
+                border:     "1px solid rgba(212,0,122,0.35)",
+                color:      "#D4007A",
+              }}
+            >
+              Viewer
+            </span>
+          )}
+          {!isGuestMode && !isViewerMode && tokenBalance !== null && (
             <button
               onClick={() => setShowBuyTokens(true)}
               className="relative flex items-center gap-1 px-2 py-1 rounded-full bg-white/[0.06] border border-white/10 hover:bg-white/10 active:scale-95 transition-all"
@@ -1001,10 +1092,10 @@ export default function MainStage() {
           <ForceCamMicEnforcer active />
           <MainStageInner
             mode={mode as ModeId}
-            spotlightCammer={state?.spotlight?.cammer}
-            spotlightNextAt={state?.spotlight?.nextAt}
+            spotlightCammer={state?.spotlight?.cammer ?? null}
+            spotlightNextAt={state?.spotlight?.nextAt ?? null}
             mediaKind={state?.media?.kind || "off"}
-            mediaSrc={state?.media?.src}
+            mediaSrc={state?.media?.src ?? null}
             mediaPlaying={state?.media?.playing ?? true}
             mediaVolume={state?.media?.volume ?? 70}
             isParticipant={isParticipant}
@@ -1017,6 +1108,98 @@ export default function MainStage() {
             showTips={!adminOpen}
           />
         </LiveKitRoom>
+      ) : isViewerMode ? (
+        /* ── Viewer: subscribe-only LiveKit connection ── */
+        <>
+          <LiveKitRoom
+            key="main-stage-viewer"
+            token={viewerLkToken!}
+            serverUrl={viewerLkUrl!}
+            connect
+            audio={false}
+            video={false}
+            className="contents"
+          >
+            <ForceCamMicEnforcer active={false} />
+            <ParticipantCollector onCammersChange={handleCammersChange} />
+            <RoomListener onConnectionStateChange={setViewerConnState} />
+            <div className="flex-1 min-h-0 relative overflow-hidden">
+              {mode === "spotlight" && (
+                <SpotlightGrid focusIdentity={state?.spotlight?.cammer ?? null} nextAt={state?.spotlight?.nextAt ?? null} />
+              )}
+              {mode === "cinema" && (
+                <CinemaGrid
+                  mediaIdentity={MEDIA_IDENTITY}
+                  mediaKind={state?.media?.kind || "off"}
+                  mediaSrc={state?.media?.src ?? null}
+                  mediaPlaying={state?.media?.playing ?? true}
+                  mediaVolume={state?.media?.volume ?? 70}
+                />
+              )}
+              {mode === "theater" && (
+                <div className="relative h-full w-full">
+                  <CinemaGrid
+                    mediaIdentity={MEDIA_IDENTITY}
+                    mediaKind={state?.media?.kind || "off"}
+                    mediaSrc={state?.media?.src ?? null}
+                    mediaPlaying={state?.media?.playing ?? true}
+                    mediaVolume={state?.media?.volume ?? 70}
+                  />
+                  <TheaterCurtains />
+                </div>
+              )}
+              {mode === "karaoke" && (
+                <>
+                  <CinemaGrid
+                    mediaIdentity={MEDIA_IDENTITY}
+                    mediaKind={state?.media?.kind || "off"}
+                    mediaSrc={state?.media?.src ?? null}
+                    mediaPlaying={state?.media?.playing ?? true}
+                    mediaVolume={state?.media?.volume ?? 70}
+                    hideCammerStrip
+                  />
+                  <KaraokeCammerOverlay spotlightIdentity={state?.spotlight?.cammer ?? null} />
+                </>
+              )}
+              {mode === "equal" && <EqualGrid />}
+            </div>
+          </LiveKitRoom>
+
+          {/* PRIME upsell bar — replaces participant controls for viewers */}
+          <div
+            className="flex-shrink-0 flex items-center gap-3 px-4 py-3"
+            style={{
+              background: "rgba(10,10,15,0.97)",
+              borderTop: "1px solid rgba(212,0,122,0.25)",
+              paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+            }}
+          >
+            <button
+              type="button"
+              onClick={handleLeave}
+              aria-label={t.live.mainStageAriaLeave}
+              className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center rounded-full bg-pnp-error/15 border border-pnp-error/30 text-pnp-error hover:bg-white/10 active:scale-[0.96] transition-all"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+              </svg>
+            </button>
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-semibold text-sm leading-tight">
+                {liveParticipants > 0 ? `${liveParticipants} members live` : "Members are live"}
+              </p>
+              <p className="text-white/45 text-xs leading-tight mt-0.5">Turn your camera on · Be part of the show</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate("/subscribe")}
+              className="flex-shrink-0 min-h-[40px] px-4 rounded-2xl text-xs font-bold text-white transition-all active:scale-[0.97] whitespace-nowrap"
+              style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)", boxShadow: "0 4px 16px rgba(212,0,122,0.45)" }}
+            >
+              ⭐ Go PRIME
+            </button>
+          </div>
+        </>
       ) : (
         <LiveKitRoom
           key="main-stage-prime"
@@ -1041,10 +1224,10 @@ export default function MainStage() {
           <ForceCamMicEnforcer active={false} />
           <MainStageInner
             mode={mode as ModeId}
-            spotlightCammer={state?.spotlight?.cammer}
-            spotlightNextAt={state?.spotlight?.nextAt}
+            spotlightCammer={state?.spotlight?.cammer ?? null}
+            spotlightNextAt={state?.spotlight?.nextAt ?? null}
             mediaKind={state?.media?.kind || "off"}
-            mediaSrc={state?.media?.src}
+            mediaSrc={state?.media?.src ?? null}
             mediaPlaying={state?.media?.playing ?? true}
             mediaVolume={state?.media?.volume ?? 70}
             isParticipant={isParticipant}
@@ -1060,8 +1243,8 @@ export default function MainStage() {
       )}
 
       <ConnectionOverlay
-        connState={connState}
-        errorMessage={camError || error}
+        connState={isViewerMode ? viewerConnState : connState}
+        errorMessage={isViewerMode ? null : (camError || error)}
         hasEverConnected={hasEverConnected}
       />
 
@@ -1069,7 +1252,7 @@ export default function MainStage() {
         <NowPlayingChip title={state.media.title} />
       )}
 
-      {adminOpen && (
+      {adminOpen && state && (
         <AdminDrawer
           state={state}
           admin={admin}
