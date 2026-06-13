@@ -7,19 +7,10 @@ import {
   getSubscriptionPlans,
   getPaymentStatus,
   createPayment,
-  createDashSubscription,
-  getDashSubscriptionStatus,
-  getDashAvailable,
-  getDashPaymentDetails,
-  createLightningSubscription,
-  getLightningAvailable,
-  getLightningSubscriptionStatus,
-  getLightningPaymentDetails,
   prepareUsdcSubscription,
   getUsdcAvailable,
   getUsdcSubscriptionStatus,
   getLabelColor,
-  assertPaymentUrl,
   validatePromoCode,
   ApiError,
   type SubscriptionPlan,
@@ -30,7 +21,7 @@ import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
 import { isTelegramContext } from "@/lib/telegram";
 
-type Provider = "epayco" | "dash" | "lightning" | "usdc";
+type Provider = "epayco" | "usdc";
 
 const EPAYCO_ERROR_MESSAGES: Record<string, string> = {
   "Error validando datos": "Los datos de tu tarjeta son incorrectos. Verifica el número, fecha y CVV, e intenta con otra tarjeta.\n\nThe card details you entered are incorrect. Please check the number, expiry date and CVV, and try a different card.",
@@ -137,51 +128,6 @@ export default function Subscribe() {
   const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
-  // Dash availability
-  const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
-
-  // Dash invoice state
-  const [dashInvoice, setDashInvoice] = useState<{
-    invoiceId: string;
-    checkoutUrl: string;
-    planName: string;
-    destination?: string;
-    amount?: string;
-    due?: string;
-    totalDue?: string;
-    rate?: string | null;
-    loadingDetails?: boolean;
-    detailsError?: string;
-    invoiceAmount?: number | null;
-    createdAt: number;
-  } | null>(null);
-  const [dashPolling, setDashPolling] = useState(false);
-  const [dashCopied, setDashCopied] = useState(false);
-  const [dashSecondsLeft, setDashSecondsLeft] = useState(900);
-  const [dashPaymentSuccess, setDashPaymentSuccess] = useState(false);
-  const dashCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Lightning state
-  const [lightningAvailable, setLightningAvailable] = useState<boolean | null>(null);
-  const [lightningInvoice, setLightningInvoice] = useState<{
-    invoiceId: string;
-    checkoutUrl: string;
-    planName: string;
-    bolt11?: string;
-    amount?: string;
-    due?: string;
-    rate?: string | null;
-    loadingDetails?: boolean;
-    detailsError?: string;
-    invoiceAmount?: number | null;
-    createdAt: number;
-  } | null>(null);
-  const [lightningPolling, setLightningPolling] = useState(false);
-  const [lightningCopied, setLightningCopied] = useState(false);
-  const [lightningSecondsLeft, setLightningSecondsLeft] = useState(600);
-  const [lightningPaymentSuccess, setLightningPaymentSuccess] = useState(false);
-  const lightningCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   // USDC / USDT stablecoin state (NOWPayments widget)
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
   const [usdcOrder, setUsdcOrder] = useState<{
@@ -217,14 +163,6 @@ export default function Subscribe() {
       .catch((err) => setError(err.message || s.failedToLoadPlans))
       .finally(() => setLoading(false));
 
-    getDashAvailable()
-      .then((res) => setDashAvailable(res.available === true && res.configured === true))
-      .catch(() => setDashAvailable(false));
-
-    getLightningAvailable()
-      .then((res) => setLightningAvailable(res.available === true && res.configured === true))
-      .catch(() => setLightningAvailable(false));
-
     getUsdcAvailable()
       .then((res) => setUsdcAvailable(res.available === true && res.configured === true))
       .catch(() => setUsdcAvailable(false));
@@ -256,48 +194,6 @@ export default function Subscribe() {
         setUsdcPolling(true);
       }
     }
-
-    // Resume Dash invoice polling after page reload (15-minute invoice window)
-    try {
-      const storedDash = sessionStorage.getItem("pnp_pending_dash_invoice");
-      if (storedDash) {
-        const parsed = JSON.parse(storedDash);
-        if (parsed?.invoiceId && Date.now() - (parsed.createdAt || 0) < 900000) {
-          const elapsed = Math.floor((Date.now() - (parsed.createdAt || Date.now())) / 1000);
-          setDashInvoice({
-            invoiceId: parsed.invoiceId,
-            planName: parsed.planName || "subscription",
-            checkoutUrl: parsed.checkoutUrl || '',
-            loadingDetails: true,
-            createdAt: parsed.createdAt || Date.now(),
-          });
-          setDashSecondsLeft(Math.max(0, 900 - elapsed));
-          setDashPolling(true);
-          getDashPaymentDetails(parsed.invoiceId)
-            .then((details) => {
-              if (details.success) {
-                setDashInvoice((prev) => prev ? {
-                  ...prev,
-                  destination: details.destination,
-                  amount: details.amount,
-                  due: details.due,
-                  totalDue: details.totalDue,
-                  rate: details.rate,
-                  invoiceAmount: details.invoiceAmount,
-                  loadingDetails: false,
-                } : prev);
-              } else {
-                setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false } : prev);
-              }
-            })
-            .catch(() => {
-              setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false } : prev);
-            });
-        } else {
-          sessionStorage.removeItem("pnp_pending_dash_invoice");
-        }
-      }
-    } catch {}
 
     // Resume polling if returning from crypto checkout
     try {
@@ -443,112 +339,6 @@ export default function Subscribe() {
     };
   }, [pollingPaymentId, refreshUser]);
 
-  // Poll Dash invoice status after showing checkout.
-  // Cap matches the BTCPay 15-minute invoice TTL so the polling outlives the
-  // backend timer (avoiding the prior 10-min stop window where late confirms
-  // left the UI stuck). Backoff: 5s → 8s → 12s, capped at 12s, to ease load.
-  useEffect(() => {
-    if (!dashInvoice || !dashPolling) return;
-    let cancelled = false;
-    let attempts = 0;
-    const maxDurationMs = 15 * 60 * 1000; // 15 min, matches BTCPay TTL
-    const startedAt = Date.now();
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-
-    const nextDelay = (n: number) => Math.min(5000 + Math.floor(n / 5) * 3000, 12000);
-
-    const poll = async () => {
-      if (cancelled) return;
-      if (Date.now() - startedAt >= maxDurationMs) {
-        setDashPolling(false);
-        return;
-      }
-      attempts++;
-      try {
-        const data = await getDashSubscriptionStatus(dashInvoice.invoiceId);
-        if (cancelled) return;
-        if (data.status === "completed") {
-          setDashPolling(false);
-          setDashPaymentSuccess(true);
-          try { sessionStorage.removeItem("pnp_pending_dash_invoice"); } catch {}
-          await refreshUser();
-          timerId = setTimeout(() => {
-            setDashInvoice(null);
-            setDashPaymentSuccess(false);
-            setPaymentSuccess(true);
-          }, 2000);
-          return;
-        }
-        if (data.status === "expired" || data.status === "invalid") {
-          setDashPolling(false);
-          setError(s.dashExpired);
-          try { sessionStorage.removeItem("pnp_pending_dash_invoice"); } catch {}
-          return;
-        }
-        if (!cancelled) timerId = setTimeout(poll, nextDelay(attempts));
-      } catch (pollErr: unknown) {
-        if ((pollErr as { status?: number })?.status === 401 || (pollErr as { response?: { status?: number } })?.response?.status === 401) {
-          setDashPolling(false);
-          setDashInvoice(null);
-          // Don't clear sessionStorage — user can re-auth and the invoice may still be valid
-          return;
-        }
-        if (!cancelled) timerId = setTimeout(poll, nextDelay(attempts));
-      }
-    };
-    poll();
-    return () => {
-      cancelled = true;
-      if (timerId) clearTimeout(timerId);
-    };
-  }, [dashInvoice, dashPolling, refreshUser]);
-
-  // Poll Lightning invoice status after showing checkout.
-  // Cap matches the BTCPay 10-minute Lightning invoice TTL. Poll every 2s because Lightning settles in seconds.
-  useEffect(() => {
-    if (!lightningInvoice || !lightningPolling) return;
-    let cancelled = false;
-    const maxDurationMs = 10 * 60 * 1000; // 10 min, matches Lightning invoice TTL
-    const startedAt = Date.now();
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      if (cancelled) return;
-      if (Date.now() - startedAt >= maxDurationMs) {
-        setLightningPolling(false);
-        return;
-      }
-      try {
-        const data = await getLightningSubscriptionStatus(lightningInvoice.invoiceId);
-        if (cancelled) return;
-        if (data.status === "completed") {
-          setLightningPolling(false);
-          setLightningPaymentSuccess(true);
-          await refreshUser();
-          timerId = setTimeout(() => {
-            setLightningInvoice(null);
-            setLightningPaymentSuccess(false);
-            setPaymentSuccess(true);
-          }, 2000);
-          return;
-        }
-        if (data.status === "expired" || data.status === "invalid") {
-          setLightningPolling(false);
-          setError(s.lightningExpired);
-          return;
-        }
-        if (!cancelled) timerId = setTimeout(poll, 2000);
-      } catch {
-        if (!cancelled) timerId = setTimeout(poll, 2000);
-      }
-    };
-    poll();
-    return () => {
-      cancelled = true;
-      if (timerId) clearTimeout(timerId);
-    };
-  }, [lightningInvoice, lightningPolling, refreshUser]);
-
   // Poll USDC invoice status (NOWPayments). Cap at 60 minutes — NOWPayments invoices have a 24h TTL
   // but we stop polling after 60 min and show a re-open link. User can still complete payment.
   useEffect(() => {
@@ -609,68 +399,6 @@ export default function Subscribe() {
     };
   }, [usdcOrder, usdcPolling, refreshUser]);
 
-  // Countdown timer for Lightning invoice (10-minute expiry)
-  useEffect(() => {
-    if (!lightningInvoice || !lightningPolling) {
-      if (lightningCountdownRef.current) {
-        clearInterval(lightningCountdownRef.current);
-        lightningCountdownRef.current = null;
-      }
-      return;
-    }
-    const tick = () => {
-      const elapsed = Math.floor((Date.now() - lightningInvoice.createdAt) / 1000);
-      const remaining = Math.max(0, 600 - elapsed);
-      setLightningSecondsLeft(remaining);
-      if (remaining === 0) {
-        if (lightningCountdownRef.current) {
-          clearInterval(lightningCountdownRef.current);
-          lightningCountdownRef.current = null;
-        }
-        setLightningPolling(false);
-      }
-    };
-    tick();
-    lightningCountdownRef.current = setInterval(tick, 1000);
-    return () => {
-      if (lightningCountdownRef.current) {
-        clearInterval(lightningCountdownRef.current);
-        lightningCountdownRef.current = null;
-      }
-    };
-  }, [lightningInvoice, lightningPolling]);
-
-  // Countdown timer for Dash invoice (15-minute expiry)
-  useEffect(() => {
-    if (!dashInvoice || !dashPolling) {
-      if (dashCountdownRef.current) {
-        clearInterval(dashCountdownRef.current);
-        dashCountdownRef.current = null;
-      }
-      return;
-    }
-    const tick = () => {
-      const elapsed = Math.floor((Date.now() - dashInvoice.createdAt) / 1000);
-      const remaining = Math.max(0, 900 - elapsed);
-      setDashSecondsLeft(remaining);
-      if (remaining === 0) {
-        if (dashCountdownRef.current) {
-          clearInterval(dashCountdownRef.current);
-          dashCountdownRef.current = null;
-        }
-        setDashPolling(false);
-      }
-    };
-    tick();
-    dashCountdownRef.current = setInterval(tick, 1000);
-    return () => {
-      if (dashCountdownRef.current) {
-        clearInterval(dashCountdownRef.current);
-        dashCountdownRef.current = null;
-      }
-    };
-  }, [dashInvoice, dashPolling]);
-
   async function handleSubscribe() {
     if (!selectedPlan || submitting) return;
 
@@ -686,89 +414,6 @@ export default function Subscribe() {
           setError(result.error || result.message || s.paymentErrorGeneric);
         }
         return;
-      } else if (provider === "dash") {
-        const result = await createDashSubscription(selectedPlan);
-        if (result.success && result.checkoutUrl) {
-          const invoice = {
-            invoiceId: result.invoiceId,
-            checkoutUrl: assertPaymentUrl(result.checkoutUrl),
-            planName: result.planName || "subscription",
-            loadingDetails: true,
-            createdAt: Date.now(),
-          };
-          setDashInvoice(invoice);
-          setDashSecondsLeft(900);
-          setDashPolling(true);
-          // Persist invoice id so a same-tab navigation / accidental reload can
-          // resume polling on mount instead of orphaning the in-flight payment.
-          try {
-            sessionStorage.setItem(
-              "pnp_pending_dash_invoice",
-              JSON.stringify({ invoiceId: result.invoiceId, createdAt: invoice.createdAt, planName: invoice.planName, checkoutUrl: result.checkoutUrl })
-            );
-          } catch {}
-          // Fetch payment details for in-app widget
-          getDashPaymentDetails(result.invoiceId)
-            .then((details) => {
-              if (details.success) {
-                setDashInvoice((prev) => prev ? {
-                  ...prev,
-                  destination: details.destination,
-                  amount: details.amount,
-                  due: details.due,
-                  totalDue: details.totalDue,
-                  rate: details.rate,
-                  invoiceAmount: details.invoiceAmount,
-                  loadingDetails: false,
-                } : prev);
-              } else {
-                setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: "Could not load payment details" } : prev);
-              }
-            })
-            .catch(() => {
-              setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: "Could not load payment details" } : prev);
-            });
-        } else {
-          // Defensive: request() throws on non-2xx, so this branch is unreachable
-          // for typical BTCPay errors. Keep as a safety net for future success:false
-          // 200-OK shapes.
-          setError(s.failedToCreateDashInvoice);
-        }
-      } else if (provider === "lightning") {
-        const result = await createLightningSubscription(selectedPlan);
-        if (result.success && result.checkoutUrl) {
-          const invoice = {
-            invoiceId: result.invoiceId,
-            checkoutUrl: assertPaymentUrl(result.checkoutUrl),
-            planName: result.planName || "subscription",
-            loadingDetails: true,
-            createdAt: Date.now(),
-          };
-          setLightningInvoice(invoice);
-          setLightningSecondsLeft(600);
-          setLightningPolling(true);
-          getLightningPaymentDetails(result.invoiceId)
-            .then((details) => {
-              if (details.success) {
-                setLightningInvoice((prev) => prev ? {
-                  ...prev,
-                  bolt11: details.bolt11,
-                  amount: details.amount,
-                  due: details.due,
-                  rate: details.rate,
-                  invoiceAmount: details.invoiceAmount,
-                  loadingDetails: false,
-                } : prev);
-              } else {
-                setLightningInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: "Could not load invoice" } : prev);
-              }
-            })
-            .catch(() => {
-              setLightningInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: "Could not load invoice" } : prev);
-            });
-        } else {
-          setError(s.failedToCreateLightningInvoice);
-        }
       } else if (provider === "usdc") {
         const result = await prepareUsdcSubscription(selectedPlan, user?.email || undefined);
         if (result.success && result.orderId && result.invoiceUrl) {
@@ -791,25 +436,11 @@ export default function Subscribe() {
           setError(s.failedToCreateUsdcInvoice);
         }
       } else {
-        setError("Unsupported payment provider. Please select Card (ePayco), Dash, Lightning, or USDC.");
+        setError("Unsupported payment provider. Please select Card (ePayco) or Crypto (NowPayments).");
       }
     } catch (err: unknown) {
-      // Map BTCPay error codes from the thrown ApiError to translated user copy.
-      // request() throws ApiError on any non-2xx, so the create-dash error
-      // codes (BTCPAY_NOT_CONFIGURED / BTCPAY_UNREACHABLE / BTCPAY_ERROR) only
-      // ever land here, never in the result.success === false branch above.
       if (err instanceof ApiError) {
-        if (err.code === "LIGHTNING_NOT_CONFIGURED") {
-          setError(s.lightningNotConfigured);
-        } else if (err.code === "LIGHTNING_ERROR") {
-          setError(s.failedToCreateLightningInvoice);
-        } else if (err.code === "BTCPAY_NOT_CONFIGURED") {
-          setError(s.dashNotConfigured);
-        } else if (err.code === "BTCPAY_UNREACHABLE") {
-          setError(s.dashServerUnavailable);
-        } else if (err.code === "BTCPAY_ERROR" && provider === "dash") {
-          setError(s.failedToCreateDashInvoice);
-        } else if (err.code === "NOWPAYMENTS_NOT_CONFIGURED") {
+        if (err.code === "NOWPAYMENTS_NOT_CONFIGURED") {
           setError(s.usdcNotConfigured);
         } else if (err.code === "NOWPAYMENTS_UNREACHABLE" || err.code === "NOWPAYMENTS_ERROR") {
           setError(s.failedToCreateUsdcInvoice);
@@ -1001,7 +632,7 @@ export default function Subscribe() {
   const selectedPlanData = plans.find((p) => p.id === selectedPlan);
   const cryptoDiscountPct = (selectedPlanData && (selectedPlanData.isLifetime || (selectedPlanData.duration_days ?? 0) >= 365)) ? 20 : 0;
   const cryptoSavingsUSD = cryptoDiscountPct > 0 && selectedPlanData ? Math.round(selectedPlanData.priceUSD * cryptoDiscountPct / 100 * 100) / 100 : 0;
-  const isCrypto = provider === "dash" || provider === "lightning" || provider === "usdc";
+  const isCrypto = provider === "usdc";
 
   return (
     <div className="page-container py-6 px-4 max-w-2xl mx-auto">
@@ -1374,116 +1005,22 @@ export default function Subscribe() {
                 : "border-white/10 bg-white/5 hover:border-white/20"
             }`}
           >
-            <div className="text-lg mb-1">💲</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">{s.usdcPayment}</div>
-            <div className="text-[10px] text-pnp-textSecondary">{usdcAvailable === false ? s.usdcComingSoon : s.usdcDesc}</div>
+            <div className="text-lg mb-1">🪙</div>
+            <div className="text-xs font-medium text-pnp-textPrimary">
+              {t.lang === "es" ? "Cripto" : "Crypto"}
+            </div>
+            <div className="text-[10px] text-pnp-textSecondary">
+              {usdcAvailable === false ? s.usdcComingSoon : "BTC · ETH · USDC +100"}
+            </div>
             {usdcAvailable !== false && cryptoDiscountPct > 0 && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full leading-none">
                 Save {cryptoDiscountPct}%
               </span>
             )}
           </button>
-          <button
-            onClick={() => lightningAvailable !== false && setProvider("lightning")}
-            disabled={lightningAvailable === false}
-            className={`rounded-xl p-3 border-2 transition-all text-center relative ${
-              lightningAvailable === false
-                ? "border-white/5 bg-white/3 opacity-50 cursor-not-allowed"
-                : provider === "lightning"
-                ? "border-[#F7931A] bg-[#F7931A]/10"
-                : "border-white/10 bg-white/5 hover:border-white/20"
-            }`}
-          >
-            <div className="text-lg mb-1">⚡</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">{s.lightning}</div>
-            <div className="text-[10px] text-pnp-textSecondary">{lightningAvailable === false ? s.lightningComingSoon : s.lightningInstant}</div>
-            {lightningAvailable !== false && cryptoDiscountPct > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#F7931A] text-white px-1.5 py-0.5 rounded-full leading-none">
-                Save {cryptoDiscountPct}%
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => dashAvailable !== false && setProvider("dash")}
-            disabled={dashAvailable === false}
-            className={`rounded-xl p-3 border-2 transition-all text-center relative ${
-              dashAvailable === false
-                ? "border-white/5 bg-white/3 opacity-50 cursor-not-allowed"
-                : provider === "dash"
-                ? "border-[#008DE4] bg-[#008DE4]/10"
-                : "border-white/10 bg-white/5 hover:border-white/20"
-            }`}
-          >
-            <div className="text-lg mb-1">🥷</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">{s.dash}</div>
-            <div className="text-[10px] text-pnp-textSecondary">{dashAvailable === false ? s.dashComingSoon : s.dashAnonymous}</div>
-            {dashAvailable !== false && cryptoDiscountPct > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-[#008DE4] text-white px-1.5 py-0.5 rounded-full leading-none">
-                Save {cryptoDiscountPct}%
-              </span>
-            )}
-          </button>
         </div>
 
-        {/* Dash info panel */}
-        {provider === "dash" && (
-          <div className="mt-3 rounded-xl p-3 border border-[#008DE4]/30 bg-[#008DE4]/5 space-y-2">
-            {cryptoSavingsUSD > 0 && (
-              <div className="text-xs font-semibold text-[#008DE4] text-center py-1 px-2 rounded-lg bg-[#008DE4]/10">
-                Save ${cryptoSavingsUSD.toFixed(2)} vs card on this plan
-              </div>
-            )}
-            <p className="text-xs text-pnp-textSecondary">{s.dashInfoText}</p>
-            <div className="flex flex-wrap gap-2 text-[10px]">
-              <a href="https://www.moonpay.com/buy/dash" target="_blank" rel="noopener noreferrer"
-                className="text-[#008DE4] hover:underline font-semibold">
-                {s.buyOnMoonPay}
-              </a>
-              <span className="text-pnp-textSecondary/40">·</span>
-              <a href="https://www.dash.org/downloads/" target="_blank" rel="noopener noreferrer"
-                className="text-[#008DE4] hover:underline">
-                {s.getDashWallet}
-              </a>
-              <span className="text-pnp-textSecondary/40">·</span>
-              <a href="https://www.kraken.com/learn/buy-dash-coin" target="_blank" rel="noopener noreferrer"
-                className="text-[#008DE4] hover:underline">
-                {s.buyOnKraken}
-              </a>
-              <span className="text-pnp-textSecondary/40">·</span>
-              <a href="https://uphold.com/en/assets/crypto/buy-dash" target="_blank" rel="noopener noreferrer"
-                className="text-[#008DE4] hover:underline">
-                {s.buyOnUphold}
-              </a>
-            </div>
-          </div>
-        )}
-
-        {/* Lightning info panel */}
-        {provider === "lightning" && (
-          <div className="mt-3 rounded-xl p-3 border border-[#F7931A]/30 bg-[#F7931A]/5 space-y-2">
-            {cryptoSavingsUSD > 0 && (
-              <div className="text-xs font-semibold text-[#F7931A] text-center py-1 px-2 rounded-lg bg-[#F7931A]/10">
-                Save ${cryptoSavingsUSD.toFixed(2)} vs card on this plan
-              </div>
-            )}
-            <p className="text-xs text-pnp-textSecondary">{s.lightningInfoText}</p>
-            <div className="flex flex-wrap gap-2 text-[10px]">
-              <a href="https://phoenix.acinq.co/" target="_blank" rel="noopener noreferrer"
-                className="text-[#F7931A] hover:underline font-semibold">Phoenix ↗</a>
-              <span className="text-pnp-textSecondary/40">·</span>
-              <a href="https://muun.com/" target="_blank" rel="noopener noreferrer"
-                className="text-[#F7931A] hover:underline">Muun ↗</a>
-              <span className="text-pnp-textSecondary/40">·</span>
-              <a href="https://strike.me/" target="_blank" rel="noopener noreferrer"
-                className="text-[#F7931A] hover:underline">Strike ↗</a>
-              <span className="text-pnp-textSecondary/40">·</span>
-              <a href="https://www.binance.com/en/buy-sell-crypto" target="_blank" rel="noopener noreferrer"
-                className="text-[#F7931A] hover:underline">{s.buyOnBinance}</a>
-            </div>
-          </div>
-        )}
-
-        {/* USDC info panel */}
+        {/* Crypto (NowPayments) info panel */}
         {provider === "usdc" && (
           <div className="mt-3 rounded-xl p-3 border border-green-500/30 bg-green-500/5 space-y-2">
             {cryptoSavingsUSD > 0 && (
@@ -1506,8 +1043,8 @@ export default function Subscribe() {
           </div>
         )}
 
-        {/* Crypto guide nudge — shown when any crypto method is selected */}
-        {(provider === "usdc" || provider === "dash") && (
+        {/* Crypto guide nudge — shown when crypto method is selected */}
+        {provider === "usdc" && (
           <div className="mt-3 text-center">
             <a href="/crypto-guide" className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors underline decoration-dotted">
               {t.lang === "es" ? "¿No sabes cómo pagar con cripto? Aprende aquí →" : "Don't know how to pay with crypto? Learn how →"}
@@ -1593,282 +1130,6 @@ export default function Subscribe() {
           </div>
           <p className="text-base font-semibold text-green-400">{s.usdcPaymentConfirmed}</p>
           <p className="text-xs text-pnp-textSecondary">{s.subscriptionNowActive}</p>
-        </div>
-      )}
-
-      {/* Dash in-app payment widget */}
-      {dashInvoice && (
-        <div className="mb-6 rounded-xl border border-[#008DE4]/40 bg-[#008DE4]/5 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-2 h-2 rounded-full bg-[#008DE4] animate-pulse" />
-            <span className="text-sm font-medium text-pnp-textPrimary">
-              {s.waitingForDashPayment} {dashInvoice.planName}
-            </span>
-          </div>
-
-          {dashInvoice.loadingDetails ? (
-            <div className="flex flex-col items-center py-6 gap-3">
-              <svg className="animate-spin h-6 w-6 text-[#008DE4]" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              <p className="text-xs text-pnp-textSecondary">{s.dashLoadingDetails}</p>
-            </div>
-          ) : dashPaymentSuccess ? (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
-                <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <p className="text-base font-semibold text-green-400">{s.dashPaymentConfirmed}</p>
-              <p className="text-xs text-pnp-textSecondary">{s.subscriptionNowActive}</p>
-            </div>
-          ) : dashSecondsLeft === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <p className="text-sm font-medium text-red-400">{s.dashExpired}</p>
-              <button
-                onClick={() => { setDashInvoice(null); setDashPolling(false); setDashCopied(false); setDashSecondsLeft(900); }}
-                className="mt-1 px-4 py-2 rounded-lg bg-[#008DE4] text-white text-xs font-semibold hover:bg-[#0070b8] transition-colors"
-              >
-                {s.retry}
-              </button>
-            </div>
-          ) : dashInvoice.destination && dashInvoice.amount ? (
-            <div className="flex flex-col items-center gap-4">
-              {/* QR Code */}
-              <div className="bg-white p-3 rounded-xl">
-                <QRCodeSVG
-                  value={`dash:${dashInvoice.destination}?amount=${dashInvoice.amount}`}
-                  size={180}
-                  level="M"
-                />
-              </div>
-              <p className="text-[10px] text-pnp-textSecondary">{s.dashScanQr}</p>
-
-              {/* Amount */}
-              <div className="text-center">
-                <p className="text-xs text-pnp-textSecondary mb-1">{s.dashAmountDue}</p>
-                <p className="text-xl font-bold text-white">{dashInvoice.amount} DASH</p>
-                {dashInvoice.invoiceAmount != null && (
-                  <p className="text-xs text-pnp-textSecondary mt-0.5">
-                    ~${dashInvoice.invoiceAmount.toFixed(2)} USD
-                  </p>
-                )}
-              </div>
-
-              {/* Countdown timer */}
-              <p className={`text-xs font-mono tabular-nums ${
-                dashSecondsLeft <= 60
-                  ? "text-red-400"
-                  : dashSecondsLeft <= 300
-                  ? "text-orange-400"
-                  : "text-pnp-textSecondary"
-              }`}>
-                {String(Math.floor(dashSecondsLeft / 60)).padStart(2, "0")}:{String(dashSecondsLeft % 60).padStart(2, "0")} remaining
-              </p>
-
-              {/* Address + Copy */}
-              <div className="w-full">
-                <p className="text-[10px] text-pnp-textSecondary mb-1">{s.dashToAddress}</p>
-                <div className="flex items-center gap-2 rounded-lg px-3 py-2 bg-white/5 border border-white/10">
-                  <code className="flex-1 text-xs text-white/80 break-all font-mono">
-                    {dashInvoice.destination}
-                  </code>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(dashInvoice.destination!).catch(() => {});
-                      setDashCopied(true);
-                      setTimeout(() => setDashCopied(false), 2000);
-                    }}
-                    className={`flex-shrink-0 text-xs font-semibold px-2 py-1 rounded transition-colors ${dashCopied ? "text-green-400" : "text-[#008DE4]"}`}
-                  >
-                    {dashCopied ? s.dashCopied : s.dashCopyAddress}
-                  </button>
-                </div>
-              </div>
-
-              <p className="text-xs text-pnp-textSecondary text-center">
-                {s.dashInvoiceDesc}
-              </p>
-
-              {/* Open in Dash wallet (mobile deep-link) */}
-              <a
-                href={`dash:${dashInvoice.destination}?amount=${dashInvoice.amount}`}
-                className="block w-full text-center py-3 rounded-xl bg-[#008DE4] text-white text-sm font-bold hover:bg-[#0070b8] transition-colors"
-              >
-                {t.lang === "es" ? "Abrir en wallet Dash →" : "Open in Dash wallet →"}
-              </a>
-
-              {/* Fallback external link */}
-              <a
-                href={dashInvoice.checkoutUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-[#008DE4] hover:underline transition-colors"
-              >
-                {s.dashOpenExternal}
-              </a>
-            </div>
-          ) : (
-            /* Fallback if details failed to load — show original external link */
-            <>
-              <p className="text-xs text-pnp-textSecondary mb-3">
-                {dashInvoice.detailsError || s.dashInvoiceDesc}
-              </p>
-              <a
-                href={dashInvoice.checkoutUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full text-center py-2.5 rounded-xl bg-[#008DE4] text-white text-sm font-semibold hover:bg-[#0070b8] transition-colors mb-2"
-              >
-                {s.openDashCheckout}
-              </a>
-            </>
-          )}
-
-          <button
-            onClick={() => { setDashInvoice(null); setDashPolling(false); setDashCopied(false); setDashSecondsLeft(900); setDashPaymentSuccess(false); }}
-            className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1 mt-2"
-          >
-            {s.cancel}
-          </button>
-        </div>
-      )}
-
-      {/* Lightning in-app payment widget */}
-      {lightningInvoice && (
-        <div className="mb-6 rounded-xl border border-[#F7931A]/40 bg-[#F7931A]/5 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-2 h-2 rounded-full bg-[#F7931A] animate-pulse" />
-            <span className="text-sm font-medium text-pnp-textPrimary">
-              {s.waitingForLightningPayment} {lightningInvoice.planName}
-            </span>
-          </div>
-
-          {lightningInvoice.loadingDetails ? (
-            <div className="flex flex-col items-center py-6 gap-3">
-              <svg className="animate-spin h-6 w-6 text-[#F7931A]" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              <p className="text-xs text-pnp-textSecondary">{s.lightningLoadingDetails}</p>
-            </div>
-          ) : lightningPaymentSuccess ? (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
-                <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <p className="text-base font-semibold text-green-400">{s.lightningPaymentConfirmed}</p>
-              <p className="text-xs text-pnp-textSecondary">{s.subscriptionNowActive}</p>
-            </div>
-          ) : lightningSecondsLeft === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <p className="text-sm font-medium text-red-400">{s.lightningExpired}</p>
-              <button
-                onClick={() => { setLightningInvoice(null); setLightningPolling(false); setLightningCopied(false); setLightningSecondsLeft(600); setLightningPaymentSuccess(false); }}
-                className="mt-1 px-4 py-2 rounded-lg bg-[#F7931A] text-white text-xs font-semibold hover:bg-[#d97d0f] transition-colors"
-              >
-                {s.retry}
-              </button>
-            </div>
-          ) : lightningInvoice.bolt11 && lightningInvoice.amount ? (
-            <div className="flex flex-col items-center gap-4">
-              {/* QR Code — bolt11 uppercase for QR efficiency */}
-              <div className="bg-white p-3 rounded-xl">
-                <QRCodeSVG
-                  value={lightningInvoice.bolt11.toUpperCase()}
-                  size={180}
-                  level="M"
-                />
-              </div>
-              <p className="text-[10px] text-pnp-textSecondary">{s.lightningInvoiceDesc}</p>
-
-              {/* Amount */}
-              <div className="text-center">
-                <p className="text-xs text-pnp-textSecondary mb-1">{s.lightningAmountDue}</p>
-                <p className="text-xl font-bold text-white">{lightningInvoice.amount} BTC</p>
-                {lightningInvoice.invoiceAmount != null && (
-                  <p className="text-xs text-pnp-textSecondary mt-0.5">
-                    ~${lightningInvoice.invoiceAmount.toFixed(2)} USD
-                  </p>
-                )}
-              </div>
-
-              {/* Countdown timer */}
-              <p className={`text-xs font-mono tabular-nums ${
-                lightningSecondsLeft <= 60
-                  ? "text-red-400"
-                  : lightningSecondsLeft <= 120
-                  ? "text-orange-400"
-                  : "text-pnp-textSecondary"
-              }`}>
-                {String(Math.floor(lightningSecondsLeft / 60)).padStart(2, "0")}:{String(lightningSecondsLeft % 60).padStart(2, "0")} remaining
-              </p>
-
-              {/* Bolt11 display (truncated) + Copy */}
-              <div className="w-full">
-                <p className="text-[10px] text-pnp-textSecondary mb-1">Lightning invoice</p>
-                <div className="flex items-center gap-2 rounded-lg px-3 py-2 bg-white/5 border border-white/10">
-                  <code className="flex-1 text-xs text-white/80 font-mono truncate">
-                    {lightningInvoice.bolt11.slice(0, 20)}...{lightningInvoice.bolt11.slice(-8)}
-                  </code>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(lightningInvoice.bolt11!).catch(() => {});
-                      setLightningCopied(true);
-                      setTimeout(() => setLightningCopied(false), 2000);
-                    }}
-                    className={`flex-shrink-0 text-xs font-semibold px-2 py-1 rounded transition-colors ${lightningCopied ? "text-green-400" : "text-[#F7931A]"}`}
-                  >
-                    {lightningCopied ? s.lightningCopied : s.lightningCopyInvoice}
-                  </button>
-                </div>
-              </div>
-
-              {/* Open in wallet link */}
-              <a
-                href={`lightning:${lightningInvoice.bolt11}`}
-                className="text-xs text-[#F7931A] hover:underline transition-colors"
-              >
-                {s.lightningOpenWallet}
-              </a>
-
-              {/* Fallback external BTCPay link */}
-              <a
-                href={lightningInvoice.checkoutUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-              >
-                {s.openLightningCheckout}
-              </a>
-            </div>
-          ) : (
-            /* Fallback if details failed to load — show original external link */
-            <>
-              <p className="text-xs text-pnp-textSecondary mb-3">
-                {lightningInvoice.detailsError || s.lightningInvoiceDesc}
-              </p>
-              <a
-                href={lightningInvoice.checkoutUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full text-center py-2.5 rounded-xl bg-[#F7931A] text-white text-sm font-semibold hover:bg-[#d97d0f] transition-colors mb-2"
-              >
-                {s.openLightningCheckout}
-              </a>
-            </>
-          )}
-
-          <button
-            onClick={() => { setLightningInvoice(null); setLightningPolling(false); setLightningCopied(false); setLightningSecondsLeft(600); setLightningPaymentSuccess(false); }}
-            className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1 mt-2"
-          >
-            {s.cancel}
-          </button>
         </div>
       )}
 

@@ -1,14 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { useAuth } from "@/hooks/useAuth";
 import { isTelegramContext } from "@/lib/telegram";
 import {
   createPayment,
-  createDashSubscription,
-  getDashSubscriptionStatus,
-  getDashAvailable,
-  getDashPaymentDetails,
   prepareUsdcSubscription,
   getUsdcSubscriptionStatus,
   getUsdcAvailable,
@@ -35,7 +31,7 @@ const S = {
       "Priority support, always.",
     ],
     noticeTitle: "Good to know",
-    noticeCryptoOnly: "Pay with your card (ePayco) or crypto — Dash or USDC.",
+    noticeCryptoOnly: "Pay with your card (ePayco) or crypto — BTC, ETH, USDC and 100+ coins via NowPayments.",
     noticeEarlyAccess: "You lock in lifetime PRIME — permanent, no renewals, ever.",
     noticeInProgress: "Some screens still in progress — we're moving fast.",
     alreadyPaid: "Need help?",
@@ -56,7 +52,7 @@ const S = {
       "Soporte prioritario, siempre.",
     ],
     noticeTitle: "Bueno saber",
-    noticeCryptoOnly: "Paga con tarjeta (ePayco) o cripto — Dash o USDC.",
+    noticeCryptoOnly: "Paga con tarjeta (ePayco) o cripto — BTC, ETH, USDC y +100 monedas vía NowPayments.",
     noticeEarlyAccess: "Aseguras PRIME de por vida — permanente, sin renovaciones, nunca.",
     noticeInProgress: "Algunas pantallas aún en progreso — avanzando rápido.",
     alreadyPaid: "¿Necesitas ayuda?",
@@ -126,11 +122,10 @@ const SHEET_STRINGS: Record<Lang, SheetStrings> = {
     },
     payments: {
       title: "Payments",
-      lead: "Three ways to pay — all at $100 flat.",
+      lead: "Two ways to pay — both at $100 flat.",
       cards: [
         { e: "💳", t: "Card (ePayco)", b: "Credit or debit card. Safe, discreet checkout. No card stored on our servers." },
-        { e: "🥷", t: "Dash (BTCPay)", b: "Send Dash from your wallet. Near-instant, no name, no bank." },
-        { e: "🪙", t: "USDC (NowPayments)", b: "Pay with USDC stablecoin. Hosted checkout, auto-confirmed." },
+        { e: "🪙", t: "Crypto (NowPayments)", b: "Pay with BTC, ETH, USDC and 100+ more coins. Hosted checkout, auto-confirmed." },
       ],
       fineprint: "🔒 Encrypted · Discreet · No card stored",
     },
@@ -194,11 +189,10 @@ const SHEET_STRINGS: Record<Lang, SheetStrings> = {
     },
     payments: {
       title: "Pagos",
-      lead: "Tres formas de pagar — todas a $100 fijo.",
+      lead: "Dos formas de pagar — ambas a $100 fijo.",
       cards: [
         { e: "💳", t: "Tarjeta (ePayco)", b: "Tarjeta de crédito o débito. Checkout seguro y discreto. No guardamos tu tarjeta." },
-        { e: "🥷", t: "Dash (BTCPay)", b: "Envía Dash desde tu wallet. Casi instantáneo, sin nombre, sin banco." },
-        { e: "🪙", t: "USDC (NowPayments)", b: "Paga con USDC stablecoin. Checkout alojado, confirmación automática." },
+        { e: "🪙", t: "Cripto (NowPayments)", b: "Paga con BTC, ETH, USDC y +100 criptos. Checkout alojado, confirmación automática." },
       ],
       fineprint: "🔒 Encriptado · Discreto · No guardamos tarjeta",
     },
@@ -493,19 +487,7 @@ function SheetModal({ sheet, onClose }: { sheet: { title: string; emoji: string;
 
 // ── Payment types ──────────────────────────────────────────────────────────────
 
-type PayMethod = "epayco" | "dash" | "usdc";
-
-type DashInvoice = {
-  invoiceId: string;
-  checkoutUrl: string;
-  planName: string;
-  destination?: string;
-  amount?: string;
-  invoiceAmount?: number | null;
-  loadingDetails?: boolean;
-  detailsError?: string;
-  createdAt: number;
-};
+type PayMethod = "epayco" | "usdc";
 
 // ── Hero view ──────────────────────────────────────────────────────────────────
 
@@ -520,16 +502,6 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
   const [payError, setPayError] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
-  // Dash state
-  const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
-  const [dashInvoice, setDashInvoice] = useState<DashInvoice | null>(null);
-  const [dashPolling, setDashPolling] = useState(false);
-  const [dashCopied, setDashCopied] = useState(false);
-  const [dashSecondsLeft, setDashSecondsLeft] = useState(900);
-  const [dashPaymentSuccess, setDashPaymentSuccess] = useState(false);
-  const dashCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const invoiceRef = useRef<HTMLDivElement>(null);
-
   // USDC state
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
   const [pollingUsdcOrderId, setPollingUsdcOrderId] = useState<string | null>(null);
@@ -539,9 +511,6 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
 
   // Init: check availability + resume pending USDC order
   useEffect(() => {
-    getDashAvailable()
-      .then((r) => setDashAvailable(r.available === true && r.configured === true))
-      .catch(() => setDashAvailable(false));
     getUsdcAvailable()
       .then((r) => setUsdcAvailable(r.available === true && r.configured === true))
       .catch(() => setUsdcAvailable(false));
@@ -600,68 +569,9 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
     return () => { cancelled = true; if (timerId) clearTimeout(timerId); };
   }, [pollingUsdcOrderId, refreshUser, es]);
 
-  // Dash invoice polling
-  useEffect(() => {
-    if (!dashInvoice || !dashPolling) return;
-    let cancelled = false;
-    let attempts = 0;
-    const startedAt = Date.now();
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-    const nextDelay = (n: number) => Math.min(5000 + Math.floor(n / 5) * 3000, 12000);
-    const poll = async () => {
-      if (cancelled) return;
-      if (Date.now() - startedAt >= 15 * 60 * 1000) { setDashPolling(false); return; }
-      attempts++;
-      try {
-        const data = await getDashSubscriptionStatus(dashInvoice.invoiceId);
-        if (cancelled) return;
-        if (data.status === "completed") {
-          setDashPolling(false); setDashPaymentSuccess(true);
-          try { sessionStorage.removeItem("pnp_pending_dash_invoice_lt80"); } catch { /* ignore */ }
-          await refreshUser();
-          timerId = setTimeout(() => { setDashInvoice(null); setDashPaymentSuccess(false); setPaymentSuccess(true); }, 2000);
-          return;
-        }
-        if (data.status === "expired" || data.status === "invalid") {
-          setDashPolling(false);
-          try { sessionStorage.removeItem("pnp_pending_dash_invoice_lt80"); } catch { /* ignore */ }
-          setPayError(es ? "Factura Dash expirada. Intenta de nuevo." : "Dash invoice expired. Please try again.");
-          return;
-        }
-        if (!cancelled) timerId = setTimeout(poll, nextDelay(attempts));
-      } catch { if (!cancelled) timerId = setTimeout(poll, nextDelay(attempts)); }
-    };
-    poll();
-    return () => { cancelled = true; if (timerId) clearTimeout(timerId); };
-  }, [dashInvoice, dashPolling, refreshUser, es]);
-
-  // Dash countdown
-  useEffect(() => {
-    if (!dashInvoice || !dashPolling) {
-      if (dashCountdownRef.current) { clearInterval(dashCountdownRef.current); dashCountdownRef.current = null; }
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, 900 - Math.floor((Date.now() - dashInvoice.createdAt) / 1000));
-      setDashSecondsLeft(remaining);
-      if (remaining === 0) { if (dashCountdownRef.current) { clearInterval(dashCountdownRef.current); dashCountdownRef.current = null; } setDashPolling(false); }
-    };
-    tick();
-    dashCountdownRef.current = setInterval(tick, 1000);
-    return () => { if (dashCountdownRef.current) { clearInterval(dashCountdownRef.current); dashCountdownRef.current = null; } };
-  }, [dashInvoice, dashPolling]);
-
-  useEffect(() => {
-    if (dashInvoice) setTimeout(() => invoiceRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
-  }, [!!dashInvoice]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function cancelDash() {
-    setDashInvoice(null); setDashPolling(false); setDashCopied(false); setDashSecondsLeft(900); setDashPaymentSuccess(false);
-  }
-
   const handlePay = useCallback(async () => {
     if (!user) { window.location.href = `/login?returnTo=${encodeURIComponent("/lifetime80")}`; return; }
-    if (submitting || (payMethod === "dash" && dashInvoice)) return;
+    if (submitting) return;
     setSubmitting(true); setPayError(null);
     try {
       if (payMethod === "epayco") {
@@ -672,21 +582,6 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           setPayError(result.error || (es ? "No se pudo iniciar el pago." : "Failed to initiate payment."));
         }
         return;
-      } else if (payMethod === "dash") {
-        const result = await createDashSubscription(PLAN_ID);
-        if (result.success && result.checkoutUrl) {
-          const invoice: DashInvoice = { invoiceId: result.invoiceId, checkoutUrl: assertPaymentUrl(result.checkoutUrl), planName: result.planName || "Lifetime Prime $100", loadingDetails: true, createdAt: Date.now() };
-          setDashInvoice(invoice); setDashSecondsLeft(900); setDashPolling(true);
-          try { sessionStorage.setItem("pnp_pending_dash_invoice_lt80", JSON.stringify({ invoiceId: result.invoiceId, createdAt: invoice.createdAt })); } catch { /* ignore */ }
-          getDashPaymentDetails(result.invoiceId)
-            .then((d) => {
-              if (d.success) setDashInvoice((prev) => prev ? { ...prev, destination: d.destination, amount: d.amount, invoiceAmount: d.invoiceAmount, loadingDetails: false } : prev);
-              else setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: es ? "No se pudieron cargar los detalles." : "Could not load payment details." } : prev);
-            })
-            .catch(() => setDashInvoice((prev) => prev ? { ...prev, loadingDetails: false, detailsError: es ? "No se pudieron cargar los detalles." : "Could not load payment details." } : prev));
-        } else {
-          setPayError(es ? "No se pudo crear la factura Dash." : "Failed to create Dash invoice. Please try again.");
-        }
       } else {
         // USDC: open hosted NowPayments checkout in a new tab, show waiting panel here
         const result = await prepareUsdcSubscription(PLAN_ID);
@@ -702,26 +597,22 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
             window.open(safeUrl, "_blank", "noopener,noreferrer");
           }
         } else {
-          setPayError(result.error || (es ? "No se pudo iniciar el pago USDC." : "Failed to create USDC payment."));
+          setPayError(result.error || (es ? "No se pudo iniciar el pago crypto." : "Failed to create crypto payment."));
         }
       }
     } catch (err: unknown) {
       if (err instanceof ApiError) {
-        if (err.code === "BTCPAY_NOT_CONFIGURED") setPayError(es ? "Pagos Dash no configurados." : "Dash payments not configured.");
-        else if (err.code === "BTCPAY_UNREACHABLE") setPayError(es ? "Servidor Dash no disponible." : "Dash payment server unavailable.");
-        else setPayError(err.message || (es ? "Error de pago." : "Payment error."));
+        setPayError(err.message || (es ? "Error de pago." : "Payment error."));
       } else { setPayError(err instanceof Error ? err.message : (es ? "Error inesperado." : "Unexpected error.")); }
     } finally { setSubmitting(false); }
-  }, [user, submitting, payMethod, dashInvoice, es]);
+  }, [user, submitting, payMethod, es]);
 
   const handleCtaClick = () => {
-    if (payMethod === "dash" && dashInvoice) { cancelDash(); return; }
     handlePay();
   };
 
-  const dashUnavailable = dashAvailable === false;
   const usdcUnavailable = usdcAvailable === false;
-  const ctaDisabled = submitting || (payMethod === "dash" && dashUnavailable) || (payMethod === "usdc" && usdcUnavailable) || !!pollingUsdcOrderId;
+  const ctaDisabled = submitting || (payMethod === "usdc" && usdcUnavailable) || !!pollingUsdcOrderId;
 
   const ctaLabel = (() => {
     if (submitting) return es ? "Procesando…" : "Processing…";
@@ -729,16 +620,10 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
       if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
       return es ? "Pagar con Tarjeta — $100" : "Pay with Card — $100";
     }
-    if (payMethod === "dash") {
-      if (dashUnavailable) return es ? "Dash no disponible" : "Dash unavailable";
-      if (dashInvoice) return es ? "Cancelar Dash" : "Cancel Dash";
-      if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
-      return es ? "Pagar con Dash — $100" : "Pay with Dash — $100";
-    }
     if (pollingUsdcOrderId) return usdcConfirming ? (es ? "Confirmando pago…" : "Confirming payment…") : (es ? "Esperando confirmación…" : "Waiting for confirmation…");
-    if (usdcUnavailable) return es ? "USDC no disponible" : "USDC unavailable";
+    if (usdcUnavailable) return es ? "Crypto no disponible" : "Crypto unavailable";
     if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
-    return es ? "Pagar con USDC — $100" : "Pay with USDC — $100";
+    return es ? "Pagar con Crypto — $100" : "Pay with Crypto — $100";
   })();
 
   // Success screen
@@ -833,71 +718,6 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           <span style={{ color: "#008DE4" }}>⬥</span>
         </div>
 
-        {/* Dash invoice widget */}
-        {dashInvoice && (
-          <div ref={invoiceRef} style={{ marginBottom: 20, padding: "20px 16px", borderRadius: 20, border: "1px solid rgba(0,141,228,0.40)", background: "rgba(0,141,228,0.06)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#008DE4", animation: "lt80-pulse 1.5s ease-in-out infinite" }} />
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }}>{es ? "Esperando pago Dash…" : "Waiting for Dash payment…"}</span>
-            </div>
-            {dashInvoice.loadingDetails ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 0", gap: 10 }}>
-                <Spinner size={24} />
-                <p style={{ margin: 0, fontSize: 12, color: "var(--pnp-text-secondary)" }}>{es ? "Cargando detalles…" : "Loading details…"}</p>
-              </div>
-            ) : dashPaymentSuccess ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "24px 0" }}>
-                <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(52,199,89,0.20)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#34C759" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                </div>
-                <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#34C759" }}>{es ? "¡Pago recibido!" : "Payment received!"}</p>
-              </div>
-            ) : dashSecondsLeft === 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "20px 0" }}>
-                <p style={{ margin: 0, fontSize: 14, color: "#FF453A", fontWeight: 600 }}>{es ? "Factura expirada." : "Invoice expired."}</p>
-                <button onClick={cancelDash} style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: "#008DE4", color: "#ffffff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{es ? "Reintentar" : "Try again"}</button>
-              </div>
-            ) : dashInvoice.destination && dashInvoice.amount ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-                <div style={{ background: "#ffffff", padding: 12, borderRadius: 16 }}>
-                  <QRCodeSVG value={`dash:${dashInvoice.destination}?amount=${dashInvoice.amount}`} size={176} level="M" />
-                </div>
-                <p style={{ margin: 0, fontSize: 11, color: "var(--pnp-text-secondary)" }}>{es ? "Escanea con tu wallet Dash" : "Scan with your Dash wallet"}</p>
-                <div style={{ textAlign: "center" }}>
-                  <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--pnp-text-secondary)" }}>{es ? "Monto a pagar" : "Amount due"}</p>
-                  <p style={{ margin: 0, fontSize: 24, fontWeight: 900, color: "#ffffff" }}>{dashInvoice.amount} DASH</p>
-                  {dashInvoice.invoiceAmount != null && <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--pnp-text-secondary)" }}>~${dashInvoice.invoiceAmount.toFixed(2)} USD</p>}
-                </div>
-                <p style={{ margin: 0, fontSize: 13, fontFamily: "monospace", fontWeight: 600, color: dashSecondsLeft <= 60 ? "#FF453A" : dashSecondsLeft <= 300 ? "#FF9F0A" : "var(--pnp-text-secondary)" }}>
-                  {String(Math.floor(dashSecondsLeft / 60)).padStart(2, "0")}:{String(dashSecondsLeft % 60).padStart(2, "0")} {es ? "restantes" : "remaining"}
-                </p>
-                <div style={{ width: "100%" }}>
-                  <p style={{ margin: "0 0 6px", fontSize: 11, color: "var(--pnp-text-secondary)" }}>{es ? "Enviar a" : "Send to"}</p>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
-                    <code style={{ flex: 1, fontSize: 11, color: "rgba(255,255,255,0.80)", wordBreak: "break-all", fontFamily: "monospace" }}>{dashInvoice.destination}</code>
-                    <button onClick={() => { navigator.clipboard.writeText(dashInvoice.destination!).catch(() => {}); setDashCopied(true); setTimeout(() => setDashCopied(false), 2000); }} style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: dashCopied ? "#34C759" : "#008DE4", background: "none", border: "none", cursor: "pointer", padding: "4px 6px" }}>
-                      {dashCopied ? (es ? "Copiado" : "Copied") : (es ? "Copiar" : "Copy")}
-                    </button>
-                  </div>
-                </div>
-                <a
-                  href={`dash:${dashInvoice.destination}?amount=${dashInvoice.amount}`}
-                  style={{ display: "block", width: "100%", padding: "11px 16px", borderRadius: 12, background: "#008DE4", color: "#ffffff", fontSize: 13, fontWeight: 700, textDecoration: "none", textAlign: "center", boxSizing: "border-box" }}
-                >
-                  {es ? "Abrir en wallet Dash →" : "Open in Dash wallet →"}
-                </a>
-                <a href={dashInvoice.checkoutUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "#008DE4", textDecoration: "underline", textAlign: "center" }}>{es ? "Abrir en BTCPay →" : "Open in BTCPay →"}</a>
-              </div>
-            ) : (
-              <div style={{ textAlign: "center" }}>
-                <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--pnp-text-secondary)" }}>{dashInvoice.detailsError || (es ? "Abre el checkout externo para completar el pago." : "Open the external checkout to complete payment.")}</p>
-                <a href={dashInvoice.checkoutUrl} target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: "12px 20px", borderRadius: 12, background: "#008DE4", color: "#ffffff", fontSize: 14, fontWeight: 600, textDecoration: "none" }}>{es ? "Abrir checkout Dash" : "Open Dash checkout"}</a>
-              </div>
-            )}
-            <button onClick={cancelDash} style={{ display: "block", width: "100%", marginTop: 14, padding: "8px", background: "none", border: "none", color: "var(--pnp-text-secondary)", fontSize: 12, cursor: "pointer" }}>{es ? "Cancelar" : "Cancel"}</button>
-          </div>
-        )}
-
         {/* USDC waiting panel */}
         {pollingUsdcOrderId && !paymentSuccess && (
           <div style={{ marginBottom: 16, padding: "20px 16px", borderRadius: 20, border: "1px solid rgba(38,161,123,0.40)", background: "rgba(38,161,123,0.06)" }}>
@@ -980,27 +800,10 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
             </p>
           </div>
         )}
-        {payMethod === "dash" && !dashUnavailable && !dashInvoice && (
-          <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(0,141,228,0.30)", background: "rgba(0,141,228,0.06)" }}>
-            <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 700, color: "#008DE4" }}>
-              {es ? "🥷 Anónimo, sin banco, sin nombre" : "🥷 Anonymous, no bank, no name"}
-            </p>
-            <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--pnp-text-secondary)" }}>
-              {es ? "Desde tu wallet Dash. Confirmación en minutos." : "From your Dash wallet. Confirms in minutes."}
-            </p>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11 }}>
-              <a href="https://www.dash.org/downloads/" target="_blank" rel="noopener noreferrer" style={{ color: "#008DE4" }}>{es ? "Obtener wallet" : "Get wallet"}</a>
-              <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
-              <a href="https://www.kraken.com/learn/buy-dash-coin" target="_blank" rel="noopener noreferrer" style={{ color: "#008DE4" }}>Kraken</a>
-              <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
-              <a href="https://uphold.com/en/assets/crypto/buy-dash" target="_blank" rel="noopener noreferrer" style={{ color: "#008DE4" }}>Uphold</a>
-            </div>
-          </div>
-        )}
         {payMethod === "usdc" && !usdcUnavailable && !pollingUsdcOrderId && (
           <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(38,161,123,0.30)", background: "rgba(38,161,123,0.06)" }}>
             <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 700, color: "#26a17b" }}>
-              {es ? "🪙 USDC, BTC, ETH, LTC y +100 monedas" : "🪙 USDC, BTC, ETH, LTC + 100 more coins"}
+              {es ? "🪙 BTC, ETH, USDC y +100 criptos" : "🪙 BTC, ETH, USDC + 100 more coins"}
             </p>
             <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--pnp-text-secondary)" }}>
               {es ? "Elige tu moneda favorita — el checkout se abre aquí mismo en la página. Sin registro extra." : "Choose your preferred coin — checkout opens right here on the page. No extra signup needed."}
@@ -1063,8 +866,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           <div style={{ display: "flex", gap: 6 }}>
             {([
               { id: "epayco" as PayMethod, emoji: "💳", label: es ? "Tarjeta" : "Card", sublabel: "$100 · ePayco", disabled: false },
-              { id: "dash" as PayMethod, emoji: "🥷", label: "Dash", sublabel: "$100 · BTCPay", disabled: dashUnavailable },
-              { id: "usdc" as PayMethod, emoji: "🪙", label: "USDC", sublabel: "$100 · NowPayments", disabled: usdcUnavailable },
+              { id: "usdc" as PayMethod, emoji: "🪙", label: es ? "Cripto" : "Crypto", sublabel: "BTC · ETH · USDC +100", disabled: usdcUnavailable },
             ]).map(({ id, emoji, label, sublabel, disabled }) => {
               const sel = payMethod === id;
               return (
@@ -1082,8 +884,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           </div>
           <p style={{ margin: "6px 0 0", fontSize: 10, color: "rgba(207,207,212,0.45)", textAlign: "center", lineHeight: 1.4, minHeight: 14 }}>
             {payMethod === "epayco" && (es ? "Tarjeta de crédito o débito — checkout seguro y discreto." : "Credit or debit card — safe, discreet checkout.")}
-            {payMethod === "dash" && (es ? "Criptomoneda Dash — rápido, sin nombre, sin banco." : "Dash crypto — fast, no name, no bank required.")}
-            {payMethod === "usdc" && (es ? "USDC stablecoin vía NowPayments — múltiples redes." : "USDC stablecoin via NowPayments — multiple networks.")}
+            {payMethod === "usdc" && (es ? "BTC, ETH, USDC y +100 criptos vía NowPayments." : "BTC, ETH, USDC and 100+ coins via NowPayments.")}
           </p>
           <p style={{ margin: "8px 0 0", textAlign: "center" }}>
             <a href="/crypto-guide" style={{ fontSize: 10, color: "rgba(207,207,212,0.50)", textDecoration: "underline", textDecorationStyle: "dotted" }}>
