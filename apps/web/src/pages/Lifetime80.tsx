@@ -522,6 +522,8 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
   const [pollingUsdcOrderId, setPollingUsdcOrderId] = useState<string | null>(null);
   const [usdcConfirming, setUsdcConfirming] = useState(false);
+  const [usdcInvoiceUrl, setUsdcInvoiceUrl] = useState<string | null>(null);
+  const [usdcPartiallyPaid, setUsdcPartiallyPaid] = useState(false);
 
   // Init: check availability + resume pending USDC order
   useEffect(() => {
@@ -566,13 +568,16 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
         if (cancelled) return;
         if (data.completed) {
           setPollingUsdcOrderId(null);
+          setUsdcInvoiceUrl(null);
           setPaymentSuccess(true);
           await refreshUser();
           return;
         }
         if (data.confirming) setUsdcConfirming(true);
+        if (data.partiallyPaid) setUsdcPartiallyPaid(true);
         if (data.failed) {
           setPollingUsdcOrderId(null);
+          setUsdcInvoiceUrl(null);
           setPayError(es ? "Pago USDC fallido. Intenta de nuevo." : "USDC payment failed. Please try again.");
           return;
         }
@@ -671,16 +676,18 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           setPayError(es ? "No se pudo crear la factura Dash." : "Failed to create Dash invoice. Please try again.");
         }
       } else {
-        // USDC: open hosted NowPayments checkout
+        // USDC: show NowPayments checkout in an embedded iframe
         const result = await prepareUsdcSubscription(PLAN_ID);
         if (result.success && result.invoiceUrl) {
           const safeUrl = assertPaymentUrl(result.invoiceUrl);
           try { sessionStorage.setItem("pnp_pending_usdc_order_lt80", result.orderId); } catch { /* ignore */ }
           setPollingUsdcOrderId(result.orderId);
-          if (isTelegramContext()) { window.Telegram!.WebApp.openLink(safeUrl); }
-          else {
-            const win = window.open(safeUrl, "_blank", "noopener,noreferrer");
-            if (win === null) { setPayError(es ? "Popup bloqueado — abriendo en esta pestaña..." : "Popup blocked — opening checkout in this tab…"); window.location.href = safeUrl; }
+          setUsdcPartiallyPaid(false);
+          if (isTelegramContext()) {
+            // Telegram WebApp can't embed iframes — open externally
+            window.Telegram!.WebApp.openLink(safeUrl);
+          } else {
+            setUsdcInvoiceUrl(safeUrl);
           }
         } else {
           setPayError(result.error || (es ? "No se pudo iniciar el pago USDC." : "Failed to create USDC payment."));
@@ -861,7 +868,13 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
                     </button>
                   </div>
                 </div>
-                <a href={dashInvoice.checkoutUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "#008DE4", textDecoration: "underline" }}>{es ? "Abrir en BTCPay →" : "Open in BTCPay →"}</a>
+                <a
+                  href={`dash:${dashInvoice.destination}?amount=${dashInvoice.amount}`}
+                  style={{ display: "block", width: "100%", padding: "11px 16px", borderRadius: 12, background: "#008DE4", color: "#ffffff", fontSize: 13, fontWeight: 700, textDecoration: "none", textAlign: "center", boxSizing: "border-box" }}
+                >
+                  {es ? "Abrir en wallet Dash →" : "Open in Dash wallet →"}
+                </a>
+                <a href={dashInvoice.checkoutUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "#008DE4", textDecoration: "underline", textAlign: "center" }}>{es ? "Abrir en BTCPay →" : "Open in BTCPay →"}</a>
               </div>
             ) : (
               <div style={{ textAlign: "center" }}>
@@ -873,16 +886,53 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           </div>
         )}
 
-        {/* USDC polling indicator */}
+        {/* USDC checkout widget */}
         {pollingUsdcOrderId && !paymentSuccess && (
-          <div style={{ marginBottom: 16, padding: "14px 16px", borderRadius: 14, background: "rgba(38,161,123,0.10)", border: "1px solid rgba(38,161,123,0.25)", textAlign: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 4 }}>
-              <Spinner size={14} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#ffffff" }}>
-                {usdcConfirming ? (es ? "Confirmando pago USDC…" : "Confirming USDC payment…") : (es ? "Esperando pago USDC…" : "Waiting for USDC payment…")}
+          <div style={{ marginBottom: 16, borderRadius: 20, border: "1px solid rgba(38,161,123,0.40)", background: "rgba(38,161,123,0.06)", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 16px 0" }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#26a17b", animation: "lt80-pulse 1.5s ease-in-out infinite" }} />
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }}>
+                {usdcConfirming ? (es ? "Confirmando pago…" : "Confirming payment…") : (es ? "Esperando pago crypto…" : "Waiting for crypto payment…")}
               </span>
             </div>
-            <p style={{ margin: 0, fontSize: 12, color: "var(--pnp-text-secondary)" }}>{es ? "Completa el pago en la ventana que se abrió." : "Complete the payment in the window that opened."}</p>
+            {usdcPartiallyPaid && (
+              <div style={{ margin: "10px 16px 0", padding: "8px 12px", borderRadius: 10, background: "rgba(255,159,10,0.10)", border: "1px solid rgba(255,159,10,0.30)" }}>
+                <p style={{ margin: 0, fontSize: 12, color: "#FF9F0A", fontWeight: 600 }}>
+                  {es ? "Pago parcial detectado — envía el monto restante a la misma dirección." : "Partial payment detected — please send the remaining amount to the same address."}
+                </p>
+              </div>
+            )}
+            {usdcInvoiceUrl ? (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ borderTop: "1px solid rgba(38,161,123,0.20)" }}>
+                  <iframe
+                    src={usdcInvoiceUrl}
+                    title={es ? "Pago crypto" : "Crypto Payment"}
+                    style={{ width: "100%", height: 620, border: "none", display: "block" }}
+                    allow="payment"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
+                  />
+                </div>
+                <div style={{ padding: "8px 16px", background: "rgba(0,0,0,0.30)", textAlign: "center" }}>
+                  <a href={usdcInvoiceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "#26a17b", textDecoration: "underline" }}>
+                    {es ? "Abrir checkout en nueva pestaña →" : "Open checkout in new tab →"}
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "16px", marginTop: 4 }}>
+                <Spinner size={14} />
+                <p style={{ margin: 0, fontSize: 12, color: "var(--pnp-text-secondary)" }}>
+                  {es ? "Esperando confirmación de pago…" : "Waiting for payment confirmation…"}
+                </p>
+              </div>
+            )}
+            <button
+              onClick={() => { setPollingUsdcOrderId(null); setUsdcInvoiceUrl(null); setUsdcConfirming(false); setUsdcPartiallyPaid(false); try { sessionStorage.removeItem("pnp_pending_usdc_order_lt80"); } catch {} }}
+              style={{ display: "block", width: "100%", padding: "10px", background: "none", border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary)", fontSize: 12, cursor: "pointer" }}
+            >
+              {es ? "Cancelar" : "Cancel"}
+            </button>
           </div>
         )}
 
@@ -917,10 +967,10 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
         {payMethod === "usdc" && !usdcUnavailable && !pollingUsdcOrderId && (
           <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(38,161,123,0.30)", background: "rgba(38,161,123,0.06)" }}>
             <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 700, color: "#26a17b" }}>
-              {es ? "🪙 USDC en múltiples redes" : "🪙 USDC on multiple networks"}
+              {es ? "🪙 USDC, BTC, ETH, LTC y +100 monedas" : "🪙 USDC, BTC, ETH, LTC + 100 more coins"}
             </p>
             <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--pnp-text-secondary)" }}>
-              {es ? "Paga con USDC en Ethereum, BSC, Polygon, Tron y más. Checkout externo seguro." : "Pay with USDC on Ethereum, BSC, Polygon, Tron & more. Secure external checkout."}
+              {es ? "Elige tu moneda favorita — el checkout se abre aquí mismo en la página. Sin registro extra." : "Choose your preferred coin — checkout opens right here on the page. No extra signup needed."}
             </p>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11 }}>
               <a href="https://www.coinbase.com/how-to-buy/usdc" target="_blank" rel="noopener noreferrer" style={{ color: "#26a17b" }}>Coinbase</a>

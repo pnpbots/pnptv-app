@@ -20,9 +20,11 @@ try { require('dotenv').config({ path: path.join(BACKEND, '../../.env.production
 
 const { query, initializePostgres } = require(path.join(BACKEND, 'config/postgres'));
 const nodemailer = require('nodemailer');
+const { Telegram } = require('telegraf');
 
 const DRY_RUN     = process.argv.includes('--dry-run');
 const DELAY_MS    = 1200; // ~50 emails/min, well within Hostinger limits
+const TG_DELAY_MS = 300;
 const BATCH_ID    = `abandoned-epayco-${new Date().toISOString().slice(0, 10)}`;
 const SUBSCRIBE   = 'https://pnptv.app/subscribe';
 
@@ -102,6 +104,23 @@ function emailHtml(name, planId, lang) {
 </body></html>`;
 }
 
+function tgMsg(name, planId, lang) {
+  const plan = planLabel(planId);
+  const es = isEs(lang);
+  if (es) {
+    return `<b>PNPtv!</b> — Tu pago no se completó\n\n` +
+      `Hola ${name}, intentaste pagar <b>${plan}</b> pero el proceso no terminó.\n\n` +
+      `Esto suele pasar por la verificación 3D Secure del banco. No te preocupes — puedes intentarlo de nuevo:\n\n` +
+      `👉 <a href="${SUBSCRIBE}">pnptv.app/subscribe</a>\n\n` +
+      `También aceptamos <b>USDC</b> y <b>Dash</b> si la tarjeta sigue fallando.`;
+  }
+  return `<b>PNPtv!</b> — Your payment didn't complete\n\n` +
+    `Hi ${name}, you tried to get <b>${plan}</b> but the payment didn't go through.\n\n` +
+    `This is usually a 3D Secure bank timeout — not your fault. You can try again anytime:\n\n` +
+    `👉 <a href="${SUBSCRIBE}">pnptv.app/subscribe</a>\n\n` +
+    `We also accept <b>USDC</b> and <b>Dash</b> if your card keeps failing.`;
+}
+
 async function main() {
   await initializePostgres();
   console.log(`[${BATCH_ID}] Starting${DRY_RUN ? ' (DRY RUN)' : ''}...`);
@@ -113,9 +132,10 @@ async function main() {
     auth:   { user: process.env.EASYBOTS_SMTP_USER, pass: process.env.EASYBOTS_SMTP_PASS },
   });
 
-  // Fetch recently abandoned ePayco payments (1–7 days old) with real email
-  // Deduplicate by user — pick highest-value abandoned payment per user
-  const { rows: targets } = await query(`
+  const tg = process.env.BOT_TOKEN ? new Telegram(process.env.BOT_TOKEN) : null;
+
+  // ── Email outreach: users with real email, abandoned 1–7 days ago ────────────
+  const { rows: emailTargets } = await query(`
     SELECT DISTINCT ON (p.user_id)
       p.id as payment_id,
       p.user_id,
@@ -143,11 +163,10 @@ async function main() {
     ORDER BY p.user_id, p.amount DESC
   `);
 
-  console.log(`Found ${targets.length} users to contact`);
+  console.log(`\n── EMAIL outreach: ${emailTargets.length} users ──`);
+  let emailSent = 0, emailFailed = 0, emailSkipped = 0;
 
-  let sent = 0, failed = 0, skipped = 0;
-
-  for (const row of targets) {
+  for (const row of emailTargets) {
     const name = row.username || 'there';
     const lang = row.language || 'en';
     const subject = isEs(lang)
@@ -156,10 +175,7 @@ async function main() {
 
     console.log(`[${row.email}] ${row.plan_id} $${row.amount} (${lang}) ${DRY_RUN ? '[DRY]' : ''}`);
 
-    if (DRY_RUN) {
-      skipped++;
-      continue;
-    }
+    if (DRY_RUN) { emailSkipped++; continue; }
 
     try {
       const result = await transporter.sendMail({
@@ -181,11 +197,11 @@ async function main() {
         ]
       );
 
-      sent++;
-      console.log(`  ✓ sent (messageId: ${result?.messageId})`);
+      emailSent++;
+      console.log(`  ✓ email sent (messageId: ${result?.messageId})`);
     } catch (err) {
-      failed++;
-      console.error(`  ✗ failed: ${err.message}`);
+      emailFailed++;
+      console.error(`  ✗ email failed: ${err.message}`);
       try {
         await query(
           `INSERT INTO payment_recovery_log (payment_id, action, status, error_message, created_by)
@@ -198,7 +214,88 @@ async function main() {
     await sleep(DELAY_MS);
   }
 
-  console.log(`\nDone. sent=${sent} failed=${failed} skipped=${skipped}`);
+  // ── Telegram outreach: users WITHOUT real email, abandoned 1–7 days ago ──────
+  const { rows: tgTargets } = await query(`
+    SELECT DISTINCT ON (p.user_id)
+      p.id as payment_id,
+      p.user_id,
+      p.amount,
+      p.plan_id,
+      p.created_at,
+      u.username,
+      u.telegram,
+      u.language
+    FROM payments p
+    JOIN users u ON p.user_id = u.id
+    WHERE p.status = 'abandoned'
+      AND p.provider = 'epayco'
+      AND p.created_at >= NOW() - INTERVAL '7 days'
+      AND p.created_at < NOW() - INTERVAL '1 day'
+      AND u.telegram IS NOT NULL
+      AND (u.email IS NULL OR u.email LIKE '%@telegram.pnptv.app' OR u.email LIKE '%@example.com')
+      AND NOT EXISTS (
+        SELECT 1 FROM payment_recovery_log prl
+        WHERE prl.payment_id = p.id
+          AND prl.action LIKE 'abandoned_outreach%'
+          AND prl.status = 'success'
+      )
+    ORDER BY p.user_id, p.amount DESC
+  `);
+
+  console.log(`\n── TELEGRAM outreach: ${tgTargets.length} users ──`);
+  let tgSent = 0, tgFailed = 0, tgSkipped = 0;
+
+  if (!tg) {
+    console.log('BOT_TOKEN not set — skipping Telegram outreach');
+    tgSkipped = tgTargets.length;
+  } else {
+    for (const row of tgTargets) {
+      const name = row.username || 'there';
+      const lang = row.language || 'en';
+
+      console.log(`[TG:${row.telegram}] @${row.username} ${row.plan_id} $${row.amount} ${DRY_RUN ? '[DRY]' : ''}`);
+
+      if (DRY_RUN) { tgSkipped++; continue; }
+
+      try {
+        await tg.sendMessage(row.telegram, tgMsg(name, row.plan_id, lang), {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        });
+
+        await query(
+          `INSERT INTO payment_recovery_log (payment_id, action, status, result, created_by)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            row.payment_id,
+            'abandoned_outreach_telegram',
+            'success',
+            JSON.stringify({ telegram: row.telegram, batchId: BATCH_ID }),
+            BATCH_ID,
+          ]
+        );
+
+        tgSent++;
+        console.log(`  ✓ TG sent`);
+      } catch (err) {
+        tgFailed++;
+        console.error(`  ✗ TG failed: ${err.message}`);
+        try {
+          await query(
+            `INSERT INTO payment_recovery_log (payment_id, action, status, error_message, created_by)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [row.payment_id, 'abandoned_outreach_telegram', 'failed', err.message, BATCH_ID]
+          );
+        } catch {}
+      }
+
+      await sleep(TG_DELAY_MS);
+    }
+  }
+
+  console.log(`\nDone.`);
+  console.log(`  Email: sent=${emailSent} failed=${emailFailed} skipped=${emailSkipped}`);
+  console.log(`  Telegram: sent=${tgSent} failed=${tgFailed} skipped=${tgSkipped}`);
   process.exit(0);
 }
 

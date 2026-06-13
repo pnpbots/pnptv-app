@@ -1658,6 +1658,14 @@ export default function Subscribe() {
                 {s.dashInvoiceDesc}
               </p>
 
+              {/* Open in Dash wallet (mobile deep-link) */}
+              <a
+                href={`dash:${dashInvoice.destination}?amount=${dashInvoice.amount}`}
+                className="block w-full text-center py-3 rounded-xl bg-[#008DE4] text-white text-sm font-bold hover:bg-[#0070b8] transition-colors"
+              >
+                {t.lang === "es" ? "Abrir en wallet Dash →" : "Open in Dash wallet →"}
+              </a>
+
               {/* Fallback external link */}
               <a
                 href={dashInvoice.checkoutUrl}

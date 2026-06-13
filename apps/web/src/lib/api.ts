@@ -5655,6 +5655,7 @@ const ALLOWED_PAYMENT_HOSTS = [
   "app.pnptv.app",
   "btcpay.pnptv.app",
   "checkout.epayco.co",
+  "nowpayments.io",
 ];
 
 function isAllowedPaymentHost(hostname: string): boolean {
