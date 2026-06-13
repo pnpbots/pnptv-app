@@ -46,7 +46,6 @@ const MEDIA_DEFAULTS = {
   playing:     false,
   volume:      70,
   startedAt:   null,
-  playbackRate: 1.25,
   adminLocked: false,
   modeLocked:  false,
 };
@@ -140,7 +139,6 @@ async function getState() {
     playing: false,
     volume: 70,
     startedAt: null,
-    playbackRate: 1.25,   // Anti-capture speed applied by the frontend player
     adminLocked: false,   // If true, autoRotateMedia skips until admin unlocks
   };
   if (mediaRaw) {
@@ -292,6 +290,25 @@ return 'added'
 
 const QUEUE_TS_KEY = 'mainstage:spotlight:queue:timestamps';
 
+// Like ADD_CAMMER_LUA but skips the cap check — admin bypass.
+// KEYS[1] = mainstage:spotlight:queue
+// KEYS[2] = mainstage:spotlight:queue:timestamps
+// ARGV[1] = identity
+// ARGV[2] = now (ms since epoch as string)
+const ADD_CAMMER_FORCE_LUA = `
+local key   = KEYS[1]
+local tsKey = KEYS[2]
+local id    = ARGV[1]
+local now   = ARGV[2]
+local list  = redis.call('LRANGE', key, 0, -1)
+for i = 1, #list do
+  if list[i] == id then return 'duplicate' end
+end
+redis.call('RPUSH', key, id)
+redis.call('HSET', tsKey, id, now)
+return 'added'
+`;
+
 async function addCammer(identity) {
   if (!identity) return 'invalid';
   const redis    = getRedis();
@@ -389,16 +406,23 @@ async function shuffleCammers() {
 
 // Force-add a cammer bypassing the cap check (used for admin users).
 // Dedup check still applies — calling twice for the same identity is a no-op.
+// Uses a Lua script for atomicity, eliminating the TOCTOU race in the old
+// JS-side LRANGE + RPUSH pattern.
 async function addCammerForce(identity) {
   if (!identity) return 'invalid';
   const redis    = getRedis();
   const queueKey = 'mainstage:spotlight:queue';
 
-  const existing = await redis.lrange(queueKey, 0, -1);
-  if (existing.includes(String(identity))) return 'duplicate';
+  const result = await redis.eval(
+    ADD_CAMMER_FORCE_LUA, 2, queueKey, QUEUE_TS_KEY,
+    String(identity), String(Date.now()),
+  );
 
-  await redis.rpush(queueKey, String(identity));
-  await redis.hset(QUEUE_TS_KEY, String(identity), String(Date.now()));
+  if (result === 'duplicate') {
+    logger.debug('[MainStage] addCammerForce: already in queue', { identity });
+    return 'duplicate';
+  }
+
   await redis.expire(queueKey, STATE_CACHE_TTL_S);
 
   const current = await redis.get('mainstage:spotlight:cammer');
@@ -804,12 +828,15 @@ async function logAdminAction(userId, action, payload = null) {
 
 async function upsertCammerStats(identity) {
   try {
+    const identityStr = String(identity);
+    const userId = (identityStr.startsWith('guest_') || identityStr.startsWith('viewer_'))
+      ? null : identityStr;
     const pool = getPool();
     await pool.query(
       `INSERT INTO mainstage_cammer_stats (identity, user_id, last_seen_at)
-       VALUES ($1, NULL, NOW())
-       ON CONFLICT (identity) DO UPDATE SET last_seen_at = NOW()`,
-      [String(identity)]
+       VALUES ($1, $2::text, NOW())
+       ON CONFLICT (identity) DO UPDATE SET last_seen_at = NOW(), user_id = COALESCE(mainstage_cammer_stats.user_id, EXCLUDED.user_id)`,
+      [identityStr, userId]
     );
   } catch (err) {
     logger.warn('[MainStage] upsertCammerStats failed', { error: err.message });
@@ -818,14 +845,18 @@ async function upsertCammerStats(identity) {
 
 async function updateCammerSpotlightStats(identity) {
   try {
+    const identityStr = String(identity);
+    const userId = (identityStr.startsWith('guest_') || identityStr.startsWith('viewer_'))
+      ? null : identityStr;
     const pool = getPool();
     await pool.query(
       `INSERT INTO mainstage_cammer_stats (identity, user_id, last_spotlight_at, total_seconds)
-       VALUES ($1, NULL, NOW(), $2)
+       VALUES ($1, $2::text, NOW(), $3)
        ON CONFLICT (identity) DO UPDATE
          SET last_spotlight_at = NOW(),
-             total_seconds = mainstage_cammer_stats.total_seconds + $2`,
-      [String(identity), Math.floor(ROTATE_INTERVAL_MS / 1000)]
+             total_seconds = mainstage_cammer_stats.total_seconds + $3,
+             user_id = COALESCE(mainstage_cammer_stats.user_id, EXCLUDED.user_id)`,
+      [identityStr, userId, Math.floor(ROTATE_INTERVAL_MS / 1000)]
     );
   } catch (err) {
     logger.warn('[MainStage] updateCammerSpotlightStats failed', { error: err.message });

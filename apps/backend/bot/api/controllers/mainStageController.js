@@ -16,7 +16,7 @@ const mainStageService  = require('../../../services/mainStageService');
 const livekitService    = require('../../../services/livekitService');
 const mainStageConsentService = require('../../../services/mainStageConsentService');
 const EntitlementAccessService = require('../../../services/entitlementAccessService');
-const { RoomServiceClient } = require('livekit-server-sdk');
+// RoomServiceClient is accessed via livekitService.getRoomClient() — no local import needed.
 
 // ── Media source allowlist / SSRF guard ───────────────────────────────────────
 
@@ -34,6 +34,11 @@ const BLOCKED_HOSTNAMES = [
 // Hostnames that resolve to RFC1918 are not blocked here (DNS rebinding is a
 // separate concern gated by the infra; this stops obvious direct hits).
 const BLOCKED_CIDR_RE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/;
+
+// Only Directus CMS assets are valid media sources. Prevents an admin (or
+// a compromised admin account) from broadcasting arbitrary third-party URLs
+// to all room viewers.
+const ALLOWED_MEDIA_DOMAINS = new Set(['cms.pnptv.app']);
 
 function validateMediaSrc(src) {
   if (!src) return null; // null / undefined = no src, allowed
@@ -59,6 +64,10 @@ function validateMediaSrc(src) {
     return `Blocked RFC1918/link-local address: ${hostname}`;
   }
 
+  if (!ALLOWED_MEDIA_DOMAINS.has(hostname)) {
+    return `Domain not in allowlist: ${hostname}. Only cms.pnptv.app is permitted.`;
+  }
+
   // Reject shell metacharacters that could escape ffmpeg arg handling (defence in depth)
   // spawnFfmpeg already uses spawn() not shell=true, but belt-and-suspenders.
   if (/[`$;&|><\n\r\t\\]/.test(src)) {
@@ -71,20 +80,9 @@ function validateMediaSrc(src) {
 const ROOM_NAME   = mainStageService.ROOM_NAME;
 const MAX_CAMMERS = mainStageService.MAX_CAMMERS;
 
-// ── LiveKit RoomServiceClient (lazy singleton) ────────────────────────────────
-
-let _roomClient = null;
-function getRoomClient() {
-  if (_roomClient) return _roomClient;
-  const host   = (process.env.LIVEKIT_WS_URL || 'wss://livekit.pnptv.app')
-    .replace(/^wss?:\/\//, 'https://');
-  _roomClient = new RoomServiceClient(
-    host,
-    process.env.LIVEKIT_API_KEY,
-    process.env.LIVEKIT_API_SECRET
-  );
-  return _roomClient;
-}
+// ── LiveKit RoomServiceClient — use the singleton from livekitService ─────────
+// livekitService already exports a lazy singleton getRoomClient(); do not
+// instantiate a second RoomServiceClient here (Fix 5 — eliminates duplicate).
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -292,10 +290,15 @@ const token = asyncHandler(async (req, res) => {
 /**
  * GET /api/main-stage/state
  * Public. Cached 2s.
+ * Strip media.src for unauthenticated callers — Prime Video URLs are behind
+ * a paywall and must not be exposed without a valid session.
  */
 const getState = asyncHandler(async (req, res) => {
   const state = await getCachedState();
-  return res.json({ success: true, state });
+  const safeState = req.session?.user
+    ? state
+    : { ...state, media: { ...state.media, src: null } };
+  return res.json({ success: true, state: safeState });
 });
 
 /**
@@ -401,7 +404,7 @@ const moderate = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, error: 'identity must be a string ≤255 chars' });
   }
 
-  const roomClient = getRoomClient();
+  const roomClient = livekitService.getRoomClient();
 
   switch (action) {
     case 'skip': {
@@ -438,6 +441,15 @@ const moderate = asyncHandler(async (req, res) => {
       }
     }
     case 'kick': {
+      try {
+        // Revoke publish rights so the existing token cannot be used to reconnect.
+        await roomClient.updateParticipant(ROOM_NAME, String(identity), undefined, {
+          canPublish: false, canPublishAudio: false, canPublishVideo: false,
+          canPublishData: false, canSubscribe: false,
+        });
+      } catch (err) {
+        logger.warn('[MainStage] kick: updateParticipant failed', { error: err.message, identity });
+      }
       try {
         await roomClient.removeParticipant(ROOM_NAME, String(identity));
       } catch (err) {

@@ -7,7 +7,8 @@ import {
 import { ConnectionState, RoomEvent } from "livekit-client";
 import { useMainStage, type MainStageState } from "@/hooks/useMainStage";
 import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
-import { getMainStageJoinCheck, acceptMainStageConsents, getWalletBalance, getMainStageViewerToken, type MainStageJoinCheck } from "@/lib/api";
+import { getMainStageJoinCheck, acceptMainStageConsents, getWalletBalance, getMainStageViewerToken, getMainStageState, type MainStageJoinCheck } from "@/lib/api";
+import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/hooks/useAuth";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -151,6 +152,7 @@ interface MainStageInnerProps {
   onLeave: () => void;
   spotlight?: MainStageState["spotlight"];
   showTips: boolean;
+  showBottomBar?: boolean;
 }
 
 function MainStageInner({
@@ -169,6 +171,7 @@ function MainStageInner({
   onLeave,
   spotlight,
   showTips,
+  showBottomBar = true,
 }: MainStageInnerProps) {
   return (
     <>
@@ -224,12 +227,14 @@ function MainStageInner({
           so it is never in front of cammer video tiles. */}
       {showTips && <WellnessTipsOverlay />}
 
-      <BottomBarInner
-        isParticipant={isParticipant}
-        isAdmin={isAdmin}
-        onLeave={onLeave}
-        spotlight={spotlight}
-      />
+      {showBottomBar && (
+        <BottomBarInner
+          isParticipant={isParticipant}
+          isAdmin={isAdmin}
+          onLeave={onLeave}
+          spotlight={spotlight}
+        />
+      )}
     </>
   );
 }
@@ -268,7 +273,8 @@ export default function MainStage() {
   const { user, isLoading: isAuthLoading } = useAuth();
   // Viewer mode: not a guest, auth resolved, user is not PRIME (includes unauthenticated).
   const canParticipate = user !== null && (
-    user.tier === 'PRIME' || user.tier === 'member' || user.role === 'admin' || user.role === 'superadmin'
+    user.tier === 'PRIME' || user.tier === 'member' || user.tier === 'creator' ||
+    user.role === 'admin' || user.role === 'superadmin'
   );
   const isViewerMode = !isGuestMode && !isAuthLoading && !canParticipate;
 
@@ -279,6 +285,10 @@ export default function MainStage() {
   const [viewerConnecting, setViewerConnecting] = useState(false);
   const [viewerConnState, setViewerConnState] = useState<ConnectionState>(ConnectionState.Disconnected);
   const [viewerError, setViewerError] = useState<string | null>(null);
+  // Viewer REST state override — unauthenticated viewers don't receive socket state updates.
+  const [viewerStateOverride, setViewerStateOverride] = useState<MainStageState | null>(null);
+  // Viewer token refresh timer (2h TTL — refresh 15 min early).
+  const viewerRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Resolve effective values: guest path overrides everything from the hook.
   const state       = hookedState;
@@ -453,12 +463,56 @@ export default function MainStage() {
       const res = await getMainStageViewerToken();
       setViewerLkToken(res.token);
       setViewerLkUrl(res.livekitUrl);
+      // Clear any previous refresh timer and schedule refresh 15 min before 2h expiry.
+      if (viewerRefreshRef.current) clearTimeout(viewerRefreshRef.current);
+      viewerRefreshRef.current = setTimeout(async () => {
+        try {
+          const refreshed = await getMainStageViewerToken();
+          setViewerLkToken(refreshed.token);
+          setViewerLkUrl(refreshed.livekitUrl);
+        } catch {
+          // On failure, let the connection expire naturally.
+        }
+      }, (2 * 60 - 15) * 60 * 1000);
     } catch {
       setViewerError("Couldn't connect to Main Stage. Please try again.");
     } finally {
       setViewerConnecting(false);
     }
   }, []);
+
+  // Cleanup viewer refresh timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (viewerRefreshRef.current) clearTimeout(viewerRefreshRef.current);
+    };
+  }, []);
+
+  // Fix 1-D: Poll state via REST for viewers (unauthenticated viewers don't
+  // receive socket state updates from the provider).
+  useEffect(() => {
+    if (!isViewerMode || !viewerLkToken) return;
+    // Fetch initial state immediately.
+    getMainStageState().then(s => setViewerStateOverride(s)).catch(() => {});
+    const id = setInterval(() => {
+      getMainStageState().then(s => setViewerStateOverride(s)).catch(() => {});
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [isViewerMode, viewerLkToken]);
+
+  // Fix 1-F: Mid-session tier upgrade — reload to promote viewer to participant.
+  useEffect(() => {
+    if (!isViewerMode) return;
+    const socket = getSocket();
+    const onEntitlementChange = () => {
+      // User's entitlements changed — reload so the new tier is picked up.
+      window.location.reload();
+    };
+    socket.on('user:entitlement-change', onEntitlementChange);
+    return () => {
+      socket.off('user:entitlement-change', onEntitlementChange);
+    };
+  }, [isViewerMode]);
 
   const handleAcceptConsents = useCallback(async () => {
     setConsentError(null);
@@ -797,7 +851,9 @@ export default function MainStage() {
   // shared mode. Everything downstream uses this.
   const mode: ModeId =
     (localViewMode ?? (state?.mode as ModeId | undefined) ?? "spotlight");
-  const liveParticipants = state?.counts?.participants ?? state?.counts?.cammers ?? 0;
+  // In viewer mode, prefer the REST-polled state override (socket state not delivered to unauthed viewers).
+  const effectiveState = (isViewerMode && viewerStateOverride) ? viewerStateOverride : state;
+  const liveParticipants = effectiveState?.counts?.participants ?? effectiveState?.counts?.cammers ?? 0;
 
   // i18n mode label lookup — used in header and toolbar aria-labels.
   const modeLabels: Record<ModeId, string> = {
@@ -1124,48 +1180,24 @@ export default function MainStage() {
             className="contents"
           >
             <ForceCamMicEnforcer active={false} />
-            <ParticipantCollector onCammersChange={handleCammersChange} />
-            <RoomListener onConnectionStateChange={setViewerConnState} />
-            <div className="flex-1 min-h-0 relative overflow-hidden">
-              {mode === "spotlight" && (
-                <SpotlightGrid focusIdentity={state?.spotlight?.cammer ?? null} nextAt={state?.spotlight?.nextAt ?? null} />
-              )}
-              {mode === "cinema" && (
-                <CinemaGrid
-                  mediaIdentity={MEDIA_IDENTITY}
-                  mediaKind={state?.media?.kind || "off"}
-                  mediaSrc={state?.media?.src ?? null}
-                  mediaPlaying={state?.media?.playing ?? true}
-                  mediaVolume={state?.media?.volume ?? 70}
-                />
-              )}
-              {mode === "theater" && (
-                <div className="relative h-full w-full">
-                  <CinemaGrid
-                    mediaIdentity={MEDIA_IDENTITY}
-                    mediaKind={state?.media?.kind || "off"}
-                    mediaSrc={state?.media?.src ?? null}
-                    mediaPlaying={state?.media?.playing ?? true}
-                    mediaVolume={state?.media?.volume ?? 70}
-                  />
-                  <TheaterCurtains />
-                </div>
-              )}
-              {mode === "karaoke" && (
-                <>
-                  <CinemaGrid
-                    mediaIdentity={MEDIA_IDENTITY}
-                    mediaKind={state?.media?.kind || "off"}
-                    mediaSrc={state?.media?.src ?? null}
-                    mediaPlaying={state?.media?.playing ?? true}
-                    mediaVolume={state?.media?.volume ?? 70}
-                    hideCammerStrip
-                  />
-                  <KaraokeCammerOverlay spotlightIdentity={state?.spotlight?.cammer ?? null} />
-                </>
-              )}
-              {mode === "equal" && <EqualGrid />}
-            </div>
+            <MainStageInner
+              mode={mode as ModeId}
+              spotlightCammer={(viewerStateOverride ?? state)?.spotlight?.cammer ?? null}
+              spotlightNextAt={(viewerStateOverride ?? state)?.spotlight?.nextAt ?? null}
+              mediaKind={(viewerStateOverride ?? state)?.media?.kind || "off"}
+              mediaSrc={(viewerStateOverride ?? state)?.media?.src ?? null}
+              mediaPlaying={(viewerStateOverride ?? state)?.media?.playing ?? true}
+              mediaVolume={(viewerStateOverride ?? state)?.media?.volume ?? 70}
+              isParticipant={false}
+              isAdmin={false}
+              onSpotlightPick={() => {}}
+              onConnectionStateChange={setViewerConnState}
+              onCammersChange={handleCammersChange}
+              onLeave={handleLeave}
+              spotlight={(viewerStateOverride ?? state)?.spotlight}
+              showTips={false}
+              showBottomBar={false}
+            />
           </LiveKitRoom>
 
           {/* PRIME upsell bar — replaces participant controls for viewers */}
@@ -1247,7 +1279,7 @@ export default function MainStage() {
 
       <ConnectionOverlay
         connState={isViewerMode ? viewerConnState : connState}
-        errorMessage={isViewerMode ? null : (camError || error)}
+        errorMessage={isViewerMode ? (viewerError ?? null) : (camError || error)}
         hasEverConnected={hasEverConnected}
       />
 

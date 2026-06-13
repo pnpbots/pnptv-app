@@ -447,11 +447,34 @@ function initSocketIO(io) {
     // The slot is normally already reserved by POST /api/main-stage/token
     // (addCammer is atomic + idempotent), so this path either confirms the
     // existing reservation or serves as a fallback for clients that skipped
-    // the REST mint. No pre-check — trust the Lua script's return value so
-    // we never false-reject on a stale read of the queue.
+    // the REST mint. Guards: pnp-member entitlement + kicked-set check.
     socket.on('mainstage:join-cammer', async () => {
       const ms2 = getMainStageService();
       if (!ms2) return;
+
+      // Entitlement + kicked-set guard — must hold pnp-member and not be kicked.
+      try {
+        const hasMembership = await getCachedEntitlement(socket, String(user.id), 'pnp-member');
+        if (!hasMembership) {
+          socket.emit('mainstage:error', {
+            code: 'MEMBERSHIP_REQUIRED',
+            message: 'An active membership is required to join as a cammer.',
+          });
+          return;
+        }
+        const isKicked = await getRedis().get(`mainstage:kicked:${String(user.id)}`);
+        if (isKicked) {
+          socket.emit('mainstage:error', {
+            code: 'MAIN_STAGE_KICKED',
+            message: 'You have been removed from Main Stage.',
+          });
+          return;
+        }
+      } catch (guardErr) {
+        logger.error('mainstage:join-cammer guard error', { userId: user.id, error: guardErr.message });
+        socket.emit('mainstage:error', { code: 'SERVER_ERROR', message: 'Failed to verify access. Please try again.' });
+        return;
+      }
 
       try {
         const result = await ms2.addCammer(String(user.id));

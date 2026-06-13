@@ -209,7 +209,7 @@ const guestToken = asyncHandler(async (req, res) => {
     {
       canPublishVideo: true,
       canPublishAudio: false,
-      ttlSeconds:      6 * 3600,
+      ttlSeconds:      2 * 3600,
     }
   );
 

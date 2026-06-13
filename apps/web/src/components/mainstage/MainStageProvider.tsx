@@ -195,9 +195,18 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
           await sharedRoom.connect(res.livekitUrl, res.token);
         }
         scheduleTokenRefresh();
-      } catch {
-        // Retry in 5 min on refresh failure.
-        refreshTimerRef.current = setTimeout(scheduleTokenRefresh, 5 * 60 * 1000);
+      } catch (err: unknown) {
+        // 403 = entitlement expired — disconnect cleanly instead of retrying.
+        const is403 =
+          (err instanceof Error && err.message.includes('403')) ||
+          (typeof (err as { status?: number }).status === 'number' && (err as { status?: number }).status === 403);
+        if (is403 && mountedRef.current) {
+          setError('Your membership has expired. Please renew to continue.');
+          leave('entitlement-expired');
+        } else {
+          // Network error — retry in 5 min.
+          refreshTimerRef.current = setTimeout(scheduleTokenRefresh, 5 * 60 * 1000);
+        }
       }
     }, REFRESH_MS);
   }, []);
@@ -443,6 +452,23 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("pnptv:sw-update-status", onSwUpdateStatus as EventListener);
     };
   }, [emitDiagnostic, isJoined]);
+
+  // ── REST state polling for unauthenticated viewers ───────────────────────
+  // Authenticated users get state via socket; unauthenticated users are skipped
+  // by the socket subscription below, so we poll REST for them instead.
+
+  useEffect(() => {
+    if (isAuthenticated) return; // authenticated users get state via socket
+    getMainStageState()
+      .then(s => { if (mountedRef.current) setState(s); })
+      .catch(() => {});
+    const id = setInterval(() => {
+      getMainStageState()
+        .then(s => { if (mountedRef.current) setState(s); })
+        .catch(() => {});
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [isAuthenticated]);
 
   // ── Socket state subscription ────────────────────────────────────────────
 
