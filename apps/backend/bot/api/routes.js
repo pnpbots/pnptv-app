@@ -2665,21 +2665,30 @@ app.get('/api/webapp/auth/oidc/login', oidcLoginLimiter, asyncHandler(async (req
   // Build Authentik authorization URL (PKCE S256, no client_secret in URL)
   let authUrl;
   try {
-    authUrl = AuthentikService.generateAuthUrl(
-      state,
-      codeVerifier,
-      {
-        ...(methodHint ? { method: methodHint } : {}),
-        ...(loginHint ? { loginHint } : {}),
-      }
-    );
+    if (methodHint === 'register') {
+      // Route directly to enrollment flow; ?next= brings user back to the
+      // authorize endpoint after enrollment, which then fires our callback.
+      authUrl = AuthentikService.generateEnrollmentUrl(state, codeVerifier);
+    } else {
+      authUrl = AuthentikService.generateAuthUrl(
+        state,
+        codeVerifier,
+        {
+          ...(methodHint ? { method: methodHint } : {}),
+          ...(loginHint ? { loginHint } : {}),
+        }
+      );
+    }
   } catch (err) {
     logger.error('[OIDC] Failed to generate auth URL:', err.message);
     await redis.del(pkceKey);
     return res.status(500).json({ error: 'Failed to initiate OIDC login' });
   }
 
-  logger.info('[OIDC] Redirecting to Authentik', { state: state.slice(0, 8) + '...' });
+  logger.info('[OIDC] Redirecting to Authentik', {
+    state: state.slice(0, 8) + '...',
+    flow: methodHint === 'register' ? 'enrollment' : 'login',
+  });
   res.redirect(authUrl);
 }));
 

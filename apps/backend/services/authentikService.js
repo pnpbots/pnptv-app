@@ -468,6 +468,31 @@ class AuthentikService {
   }
 
   /**
+   * Build a URL that sends the browser directly to the enrollment flow, then
+   * returns to the OIDC authorize endpoint after completion. Authentik follows
+   * the ?next= redirect once enrollment is done; since the user is now logged
+   * in, the authorize endpoint auto-completes and fires our callback.
+   */
+  static generateEnrollmentUrl(state, codeVerifier) {
+    if (!OIDC_CLIENT_ID) {
+      throw new Error('AUTHENTIK_OIDC_CLIENT_ID is not configured');
+    }
+    const codeChallenge = deriveCodeChallenge(codeVerifier);
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: OIDC_CLIENT_ID,
+      redirect_uri: OIDC_REDIRECT_URI,
+      scope: OIDC_SCOPE,
+      state,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
+    });
+    const authorizeUrl = `${OIDC_AUTH_ENDPOINT}?${params.toString()}`;
+    const authentikPublicOrigin = new URL(OIDC_ISSUER).origin;
+    return `${authentikPublicOrigin}/if/flow/pnptv-enrollment/?next=${encodeURIComponent(authorizeUrl)}`;
+  }
+
+  /**
    * Exchange an authorization code for tokens.
    * Validates the id_token (issuer, expiry, sub claim) and fetches userinfo.
    *
