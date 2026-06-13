@@ -32,6 +32,22 @@ import { isTelegramContext } from "@/lib/telegram";
 
 type Provider = "epayco" | "dash" | "lightning" | "usdc";
 
+const EPAYCO_ERROR_MESSAGES: Record<string, string> = {
+  "Error validando datos": "Los datos de tu tarjeta son incorrectos. Verifica el número, fecha y CVV, e intenta con otra tarjeta.\n\nThe card details you entered are incorrect. Please check the number, expiry date and CVV, and try a different card.",
+  "Payment was rejected or failed": "Tu banco rechazó el pago. Intenta con otra tarjeta o pídele a tu banco que autorice pagos internacionales.\n\nYour bank declined the payment. Try a different card or contact your bank to authorize international transactions.",
+  "BANK_URL_MISSING": "Tu banco no soporta pagos 3D Secure. Prueba con otra tarjeta Visa o Mastercard.\n\nYour bank does not support 3D Secure payments. Please try a different Visa or Mastercard.",
+  "Rechazada eControl": "Superaste el límite de tarjetas por documento por hoy. Intenta mañana o usa otra tarjeta.\n\nYou have reached the card limit per ID for today. Try again tomorrow or use a different card.",
+  "3DS timeout": "La verificación del banco expiró. Por favor intenta de nuevo y completa la verificación rápidamente.\n\nThe 3D Secure verification timed out. Please try again and complete the bank verification promptly.",
+};
+
+function mapEpaycoError(epaycoError?: string | null): string | null {
+  if (!epaycoError) return null;
+  for (const [key, msg] of Object.entries(EPAYCO_ERROR_MESSAGES)) {
+    if (epaycoError.includes(key)) return msg;
+  }
+  return null;
+}
+
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
 const RECOMMENDED_PLAN = "prime-diamond-pass-365d";
@@ -398,7 +414,7 @@ export default function Subscribe() {
         if (data.status === "failed" || data.status === "refunded") {
           setPollingPaymentId(null);
           try { sessionStorage.removeItem("pnp_pending_payment"); } catch {}
-          setError(data.message || s.paymentNotSuccessful);
+          setError(mapEpaycoError(data.epaycoError) || data.message || s.paymentNotSuccessful);
           return;
         }
         if (!cancelled) timerId = setTimeout(poll, interval);
@@ -1801,7 +1817,7 @@ export default function Subscribe() {
 
       {/* Error banner */}
       {error && (
-        <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-400 text-center">
+        <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-400 text-center whitespace-pre-line">
           {error}
         </div>
       )}

@@ -493,14 +493,32 @@ const handlePaymentResponse = async (req, res) => {
         document.getElementById('footer').textContent = 'You can close this page safely.';
       }
 
-      function showError(msg) {
+      var EPAYCO_ERROR_MESSAGES = {
+        'Error validando datos': 'Los datos de tu tarjeta son incorrectos (número, fecha de vencimiento o CVV). Verifica e intenta de nuevo con otra tarjeta.\n\nThe card details you entered are incorrect (number, expiry date or CVV). Please try again with another card.',
+        'Payment was rejected or failed': 'Tu banco rechazó el pago. Intenta con otra tarjeta o contacta a tu banco para autorizar pagos internacionales.\n\nYour bank declined the payment. Try a different card or contact your bank to authorize international transactions.',
+        'BANK_URL_MISSING': 'Tu banco no soporta pagos 3D Secure. Intenta con una tarjeta Visa o Mastercard de otro banco.\n\nYour bank does not support 3D Secure payments. Please try a Visa or Mastercard from a different bank.',
+        'Rechazada eControl': 'Has superado el límite de tarjetas permitidas por documento hoy. Intenta mañana o usa otra tarjeta.\n\nYou have exceeded the card limit per document for today. Try again tomorrow or use a different card.',
+        '3DS timeout': 'La sesión de verificación 3D Secure expiró. Por favor intenta de nuevo y completa la verificación del banco rápidamente.\n\nThe 3D Secure verification session expired. Please try again and complete the bank verification promptly.',
+      };
+      function getEpaycoMessage(epaycoError) {
+        if (!epaycoError) return null;
+        for (var key in EPAYCO_ERROR_MESSAGES) {
+          if (epaycoError.indexOf(key) !== -1) return EPAYCO_ERROR_MESSAGES[key];
+        }
+        return null;
+      }
+      function showError(msg, epaycoError) {
         document.getElementById('spinner').style.display = 'none';
         document.getElementById('errorIcon').style.display = 'block';
         document.getElementById('subtitle').textContent = 'Payment issue';
         document.getElementById('title').textContent = 'Payment Not Completed';
-        document.getElementById('msg').textContent = msg || 'There was an issue with your payment. Please try again or contact support.';
+        var mappedMsg = getEpaycoMessage(epaycoError);
+        var displayMsg = mappedMsg || msg || 'There was an issue with your payment. Please try again or contact support.';
+        // Render newlines as line breaks
+        document.getElementById('msg').innerHTML = displayMsg.replace(/\n/g, '<br>');
         document.getElementById('actions').style.display = 'block';
-        document.getElementById('mainBtn').textContent = 'Return to PNPtv!';
+        document.getElementById('mainBtn').textContent = 'Intentar de nuevo / Try Again';
+        document.getElementById('mainBtn').href = 'https://pnptv.app/subscribe';
       }
 
       function showProcessing() {
@@ -527,7 +545,7 @@ const handlePaymentResponse = async (req, res) => {
             if (data.status === 'completed') {
               showConfirmation(data);
             } else if (data.status === 'failed' || data.status === 'refunded') {
-              showError(data.message || 'Your payment was not successful. Please try again.');
+              showError(data.message || 'Your payment was not successful. Please try again.', data.epaycoError);
             } else if (attempts >= maxAttempts) {
               // C4: On timeout we show the neutral processing message — we cannot claim success
               // without a confirmed status response from the server.

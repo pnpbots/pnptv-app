@@ -590,6 +590,13 @@ class PaymentController {
           message: `Payment is ${payment.status}`,
         };
 
+        // Include ePayco error code for failed payments so the UI can show actionable messages
+        if (payment.status === 'failed') {
+          const meta = payment.metadata || {};
+          response.epaycoError = meta.error || null;
+          response.epaycoDeclineCode = meta.decline_code || null;
+        }
+
         // Include plan details for completed payments (used by confirmation page)
         if (payment.status === 'completed' && payment.planId) {
           try {

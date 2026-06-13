@@ -2725,6 +2725,8 @@ export function getPaymentStatus(
   transactionId?: string;
   message?: string;
   error?: string;
+  epaycoError?: string | null;
+  epaycoDeclineCode?: string | null;
 }> {
   return request(`/api/payment/${encodeURIComponent(paymentId)}/status`);
 }
