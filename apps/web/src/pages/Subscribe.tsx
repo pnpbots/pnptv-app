@@ -52,6 +52,19 @@ const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
 const RECOMMENDED_PLAN = "prime-diamond-pass-365d";
 
+function SubscribeUsdcCopyLink({ url, lang }: { url: string; lang: string }) {
+  const [copied, setCopied] = React.useState(false);
+  const es = lang === "es";
+  return (
+    <button
+      onClick={() => { navigator.clipboard.writeText(url).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+      className={`w-full py-2 rounded-lg text-xs font-medium transition-colors border ${copied ? "text-green-400 border-green-500/30 bg-green-500/5" : "text-pnp-textSecondary border-white/10 bg-white/5 hover:text-pnp-textPrimary"}`}
+    >
+      {copied ? (es ? "¡Link copiado!" : "Link copied!") : (es ? "Copiar link de pago" : "Copy payment link")}
+    </button>
+  );
+}
+
 function formatPrice(amount: number, currency: string): string {
   if (currency === "COP") {
     return new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 0 }).format(amount);
@@ -769,6 +782,11 @@ export default function Subscribe() {
           setUsdcOrder(order);
           setUsdcPolling(true);
           try { sessionStorage.setItem("pnp_pending_usdc_order", JSON.stringify(order)); } catch {}
+          if (isTelegramContext()) {
+            window.Telegram!.WebApp.openLink(result.invoiceUrl);
+          } else {
+            window.open(result.invoiceUrl, "_blank", "noopener,noreferrer");
+          }
         } else {
           setError(s.failedToCreateUsdcInvoice);
         }
@@ -1498,43 +1516,59 @@ export default function Subscribe() {
         )}
       </div>
 
-      {/* USDC waiting state — payment page is open in a new tab */}
+      {/* USDC waiting panel — checkout opened in new tab */}
       {usdcOrder && !usdcPaymentSuccess && (
         <div className="mb-6 rounded-xl border border-green-500/40 bg-green-500/5 p-4">
           <div className="flex items-center gap-2 mb-3">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            <div className={`w-2 h-2 rounded-full animate-pulse ${usdcOrder.partiallyPaid ? "bg-yellow-400" : "bg-green-500"}`} />
             <span className="text-sm font-medium text-pnp-textPrimary">
               {s.usdcWaitingTitle} — {usdcOrder.planName}
             </span>
           </div>
-          <p className="text-xs text-pnp-textSecondary mb-4">{s.usdcWaitingDesc}</p>
+
           {usdcOrder.partiallyPaid && (
-            <div className="mt-2 mb-3 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
-              <p className="text-xs text-yellow-400 font-medium">Partial payment detected — please send the remaining amount to the same address.</p>
+            <div className="mb-3 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+              <p className="text-xs text-yellow-400 font-medium">
+                {t.lang === "es" ? "Pago parcial detectado — envía el monto restante a la misma dirección." : "Partial payment detected — please send the remaining amount to the same address."}
+              </p>
             </div>
           )}
+
+          {/* Coin chips */}
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {["USDC", "BTC", "ETH", "LTC", "SOL", "XRP", "+100"].map((coin) => (
+              <span key={coin} className="px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/30 text-[11px] font-semibold text-green-400">{coin}</span>
+            ))}
+          </div>
+
           {usdcOrder.invoiceUrl && (
-            <div className="mb-3 rounded-xl overflow-hidden border border-green-500/20">
-              <iframe
-                src={usdcOrder.invoiceUrl}
-                title="USDC Payment"
-                className="w-full"
-                style={{ height: 620, border: 'none', display: 'block' }}
-                allow="payment"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
-              />
-              <div className="px-3 py-2 bg-black/30 text-center">
-                <a
-                  href={usdcOrder.invoiceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-green-400 hover:text-green-300 underline"
-                >
-                  {s.usdcOpenCheckout}
-                </a>
+            <>
+              {/* QR code */}
+              <div className="flex flex-col items-center gap-2 mb-4">
+                <div className="bg-white p-3 rounded-xl">
+                  <QRCodeSVG value={usdcOrder.invoiceUrl} size={160} level="M" />
+                </div>
+                <p className="text-[11px] text-pnp-textSecondary">
+                  {t.lang === "es" ? "Escanea con tu wallet o abre el link" : "Scan with your wallet or open the link"}
+                </p>
               </div>
-            </div>
+
+              {/* Open checkout button */}
+              <a
+                href={usdcOrder.invoiceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full text-center py-3 rounded-xl font-bold text-sm text-white mb-2"
+                style={{ background: "linear-gradient(90deg, #26a17b, #00c896)" }}
+              >
+                {s.usdcOpenCheckout} →
+              </a>
+
+              {/* Copy link */}
+              <SubscribeUsdcCopyLink url={usdcOrder.invoiceUrl} lang={t.lang} />
+            </>
           )}
+
           <button
             onClick={() => {
               setUsdcOrder(null);
@@ -1542,7 +1576,7 @@ export default function Subscribe() {
               setUsdcPaymentSuccess(false);
               try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
             }}
-            className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1"
+            className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1 mt-3"
           >
             {s.cancel}
           </button>

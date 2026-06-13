@@ -390,6 +390,18 @@ function DiamondIcon({ color }: { color: string }) {
   );
 }
 
+function UsdcCopyLink({ url, es }: { url: string; es: boolean }) {
+  const [copied, setCopied] = React.useState(false);
+  return (
+    <button
+      onClick={() => { navigator.clipboard.writeText(url).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+      style={{ display: "block", width: "100%", padding: "9px", borderRadius: 10, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: copied ? "#34C759" : "var(--pnp-text-secondary)", fontSize: 12, fontWeight: copied ? 700 : 400, cursor: "pointer", boxSizing: "border-box" }}
+    >
+      {copied ? (es ? "¡Link copiado!" : "Link copied!") : (es ? "Copiar link de pago" : "Copy payment link")}
+    </button>
+  );
+}
+
 function LangToggle({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => void }) {
   const isEn = lang === "en";
   const btnBase: React.CSSProperties = { background: "none", border: "none", padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", borderRadius: 18, transition: "all 0.2s ease", minHeight: 36, minWidth: 44 };
@@ -676,18 +688,18 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           setPayError(es ? "No se pudo crear la factura Dash." : "Failed to create Dash invoice. Please try again.");
         }
       } else {
-        // USDC: show NowPayments checkout in an embedded iframe
+        // USDC: open hosted NowPayments checkout in a new tab, show waiting panel here
         const result = await prepareUsdcSubscription(PLAN_ID);
         if (result.success && result.invoiceUrl) {
           const safeUrl = assertPaymentUrl(result.invoiceUrl);
           try { sessionStorage.setItem("pnp_pending_usdc_order_lt80", result.orderId); } catch { /* ignore */ }
           setPollingUsdcOrderId(result.orderId);
+          setUsdcInvoiceUrl(safeUrl);
           setUsdcPartiallyPaid(false);
           if (isTelegramContext()) {
-            // Telegram WebApp can't embed iframes — open externally
             window.Telegram!.WebApp.openLink(safeUrl);
           } else {
-            setUsdcInvoiceUrl(safeUrl);
+            window.open(safeUrl, "_blank", "noopener,noreferrer");
           }
         } else {
           setPayError(result.error || (es ? "No se pudo iniciar el pago USDC." : "Failed to create USDC payment."));
@@ -886,50 +898,71 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           </div>
         )}
 
-        {/* USDC checkout widget */}
+        {/* USDC waiting panel */}
         {pollingUsdcOrderId && !paymentSuccess && (
-          <div style={{ marginBottom: 16, borderRadius: 20, border: "1px solid rgba(38,161,123,0.40)", background: "rgba(38,161,123,0.06)", overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 16px 0" }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#26a17b", animation: "lt80-pulse 1.5s ease-in-out infinite" }} />
+          <div style={{ marginBottom: 16, padding: "20px 16px", borderRadius: 20, border: "1px solid rgba(38,161,123,0.40)", background: "rgba(38,161,123,0.06)" }}>
+            {/* Status header */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: usdcConfirming ? "#FF9F0A" : "#26a17b", animation: "lt80-pulse 1.5s ease-in-out infinite" }} />
               <span style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }}>
                 {usdcConfirming ? (es ? "Confirmando pago…" : "Confirming payment…") : (es ? "Esperando pago crypto…" : "Waiting for crypto payment…")}
               </span>
             </div>
+
             {usdcPartiallyPaid && (
-              <div style={{ margin: "10px 16px 0", padding: "8px 12px", borderRadius: 10, background: "rgba(255,159,10,0.10)", border: "1px solid rgba(255,159,10,0.30)" }}>
+              <div style={{ marginBottom: 14, padding: "8px 12px", borderRadius: 10, background: "rgba(255,159,10,0.10)", border: "1px solid rgba(255,159,10,0.30)" }}>
                 <p style={{ margin: 0, fontSize: 12, color: "#FF9F0A", fontWeight: 600 }}>
                   {es ? "Pago parcial detectado — envía el monto restante a la misma dirección." : "Partial payment detected — please send the remaining amount to the same address."}
                 </p>
               </div>
             )}
-            {usdcInvoiceUrl ? (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ borderTop: "1px solid rgba(38,161,123,0.20)" }}>
-                  <iframe
-                    src={usdcInvoiceUrl}
-                    title={es ? "Pago crypto" : "Crypto Payment"}
-                    style={{ width: "100%", height: 620, border: "none", display: "block" }}
-                    allow="payment"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
-                  />
+
+            {/* Coin chips */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+              {["USDC", "BTC", "ETH", "LTC", "SOL", "XRP", "+100"].map((coin) => (
+                <span key={coin} style={{ padding: "3px 8px", borderRadius: 20, background: "rgba(38,161,123,0.12)", border: "1px solid rgba(38,161,123,0.30)", fontSize: 11, fontWeight: 600, color: "#26a17b" }}>{coin}</span>
+              ))}
+            </div>
+
+            {usdcInvoiceUrl && (
+              <>
+                {/* QR code */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                  <div style={{ background: "#ffffff", padding: 12, borderRadius: 16 }}>
+                    <QRCodeSVG value={usdcInvoiceUrl} size={160} level="M" />
+                  </div>
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--pnp-text-secondary)" }}>
+                    {es ? "Escanea con tu wallet o abre el link" : "Scan with your wallet or open the link"}
+                  </p>
                 </div>
-                <div style={{ padding: "8px 16px", background: "rgba(0,0,0,0.30)", textAlign: "center" }}>
-                  <a href={usdcInvoiceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "#26a17b", textDecoration: "underline" }}>
-                    {es ? "Abrir checkout en nueva pestaña →" : "Open checkout in new tab →"}
-                  </a>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "16px", marginTop: 4 }}>
+
+                {/* Open checkout button */}
+                <a
+                  href={usdcInvoiceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: "block", width: "100%", padding: "13px 16px", borderRadius: 14, background: "linear-gradient(90deg, #26a17b, #00c896)", color: "#ffffff", fontSize: 14, fontWeight: 700, textDecoration: "none", textAlign: "center", boxSizing: "border-box", marginBottom: 10 }}
+                >
+                  {es ? "Abrir checkout →" : "Open checkout →"}
+                </a>
+
+                {/* Copy link */}
+                <UsdcCopyLink url={usdcInvoiceUrl} es={es} />
+              </>
+            )}
+
+            {!usdcInvoiceUrl && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 0" }}>
                 <Spinner size={14} />
                 <p style={{ margin: 0, fontSize: 12, color: "var(--pnp-text-secondary)" }}>
                   {es ? "Esperando confirmación de pago…" : "Waiting for payment confirmation…"}
                 </p>
               </div>
             )}
+
             <button
               onClick={() => { setPollingUsdcOrderId(null); setUsdcInvoiceUrl(null); setUsdcConfirming(false); setUsdcPartiallyPaid(false); try { sessionStorage.removeItem("pnp_pending_usdc_order_lt80"); } catch {} }}
-              style={{ display: "block", width: "100%", padding: "10px", background: "none", border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary)", fontSize: 12, cursor: "pointer" }}
+              style={{ display: "block", width: "100%", marginTop: 14, padding: "8px", background: "none", border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary)", fontSize: 12, cursor: "pointer" }}
             >
               {es ? "Cancelar" : "Cancel"}
             </button>
