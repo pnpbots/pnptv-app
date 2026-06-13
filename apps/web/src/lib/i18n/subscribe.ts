@@ -358,6 +358,7 @@ const strings = {
     perMonth: "/mês",
 
     bestValue: "Melhor Custo-Benefício",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Tudo do plano Membro, mais:",
     showBenefits: "Ver benefícios",
@@ -457,6 +458,13 @@ const strings = {
     activationError: "Erro na ativação",
     pleaseEnterValidEmailAbove: "Por favor, insira um endereço de e-mail válido acima",
 
+    promoHaveCode: "Tem um código de desconto?",
+    promoCodePlaceholder: "Insira seu código",
+    promoApply: "Aplicar",
+    promoApplied: "Desconto aplicado",
+    promoRemove: "Remover",
+    promoInvalid: "Este código não é válido ou expirou.",
+
     waitingForPayment: "Processando seu pagamento...",
     completePaymentInWindow: "Complete o pagamento na página de checkout. Esta página será atualizada automaticamente.",
 
@@ -507,6 +515,7 @@ const strings = {
     perMonth: "/月",
 
     bestValue: "最超值",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "包含会员所有功能，另外还有：",
     showBenefits: "查看权益",
@@ -605,6 +614,13 @@ const strings = {
     activationError: "激活错误",
     pleaseEnterValidEmailAbove: "请在上方输入有效的电子邮件地址",
 
+    promoHaveCode: "有优惠码？",
+    promoCodePlaceholder: "输入你的优惠码",
+    promoApply: "应用",
+    promoApplied: "折扣已应用",
+    promoRemove: "移除",
+    promoInvalid: "该优惠码无效或已过期。",
+
     waitingForPayment: "正在处理您的付款...",
     completePaymentInWindow: "在结账页面完成付款。此页面将自动更新。",
 
@@ -655,6 +671,7 @@ const strings = {
     perMonth: "/月",
 
     bestValue: "最超值",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "包含會員所有功能，另外還有：",
     showBenefits: "查看權益",
@@ -753,6 +770,13 @@ const strings = {
     activationError: "啟用錯誤",
     pleaseEnterValidEmailAbove: "請在上方輸入有效的電子郵件地址",
 
+    promoHaveCode: "有優惠碼？",
+    promoCodePlaceholder: "輸入你的優惠碼",
+    promoApply: "套用",
+    promoApplied: "折扣已套用",
+    promoRemove: "移除",
+    promoInvalid: "此優惠碼無效或已過期。",
+
     waitingForPayment: "正在處理您的付款...",
     completePaymentInWindow: "在結帳頁面完成付款。此頁面將自動更新。",
 
@@ -803,6 +827,7 @@ const strings = {
     perMonth: "/mois",
 
     bestValue: "Meilleur Rapport Qualité-Prix",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Tout du plan Membre, plus :",
     showBenefits: "Voir les avantages",
@@ -901,6 +926,13 @@ const strings = {
     activationError: "Erreur d'activation",
     pleaseEnterValidEmailAbove: "Veuillez saisir une adresse e-mail valide ci-dessus",
 
+    promoHaveCode: "Vous avez un code de réduction ?",
+    promoCodePlaceholder: "Entrez votre code",
+    promoApply: "Appliquer",
+    promoApplied: "Réduction appliquée",
+    promoRemove: "Supprimer",
+    promoInvalid: "Ce code n'est pas valide ou a expiré.",
+
     waitingForPayment: "Traitement de votre paiement...",
     completePaymentInWindow: "Complétez le paiement sur la page de paiement. Cette page se mettra à jour automatiquement.",
 
@@ -951,6 +983,7 @@ const strings = {
     perMonth: "/Monat",
 
     bestValue: "Bestes Angebot",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Alles aus dem Mitglied-Plan, plus:",
     showBenefits: "Vorteile anzeigen",
@@ -1049,6 +1082,13 @@ const strings = {
     activationError: "Aktivierungsfehler",
     pleaseEnterValidEmailAbove: "Bitte gib oben eine gültige E-Mail-Adresse ein",
 
+    promoHaveCode: "Hast du einen Rabattcode?",
+    promoCodePlaceholder: "Code eingeben",
+    promoApply: "Anwenden",
+    promoApplied: "Rabatt angewendet",
+    promoRemove: "Entfernen",
+    promoInvalid: "Dieser Code ist ungültig oder abgelaufen.",
+
     waitingForPayment: "Zahlung wird verarbeitet...",
     completePaymentInWindow: "Schließe die Zahlung auf der Checkout-Seite ab. Diese Seite wird automatisch aktualisiert.",
 
@@ -1099,6 +1139,7 @@ const strings = {
     perMonth: "/เดือน",
 
     bestValue: "คุ้มที่สุด",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Everything in Member, plus:",
     showBenefits: "Show benefits",
@@ -1197,6 +1238,13 @@ const strings = {
     activationError: "ข้อผิดพลาดในการเปิดใช้งาน",
     pleaseEnterValidEmailAbove: "กรุณากรอกที่อยู่อีเมลที่ถูกต้องด้านบน",
 
+    promoHaveCode: "มีรหัสส่วนลด?",
+    promoCodePlaceholder: "ใส่รหัสของคุณ",
+    promoApply: "ใช้",
+    promoApplied: "ใช้ส่วนลดแล้ว",
+    promoRemove: "ลบออก",
+    promoInvalid: "รหัสนี้ไม่ถูกต้องหรือหมดอายุแล้ว",
+
     waitingForPayment: "กำลังประมวลผลการชำระเงิน...",
     completePaymentInWindow: "ชำระเงินให้เสร็จในหน้าชำระเงิน หน้านี้จะอัปเดตโดยอัตโนมัติ",
 
@@ -1247,6 +1295,7 @@ const strings = {
     perMonth: "/mese",
 
     bestValue: "Miglior Rapporto Qualità-Prezzo",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Tutto del piano Membro, più:",
     showBenefits: "Mostra i vantaggi",
@@ -1345,6 +1394,13 @@ const strings = {
     activationError: "Errore di attivazione",
     pleaseEnterValidEmailAbove: "Per favore inserisci un indirizzo e-mail valido sopra",
 
+    promoHaveCode: "Hai un codice sconto?",
+    promoCodePlaceholder: "Inserisci il tuo codice",
+    promoApply: "Applica",
+    promoApplied: "Sconto applicato",
+    promoRemove: "Rimuovi",
+    promoInvalid: "Questo codice non è valido o è scaduto.",
+
     waitingForPayment: "Elaborazione del pagamento...",
     completePaymentInWindow: "Completa il pagamento nella pagina di checkout. Questa pagina si aggiornerà automaticamente.",
 
@@ -1395,6 +1451,7 @@ const strings = {
     perMonth: "/ay",
 
     bestValue: "En İyi Değer",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Üye planındaki her şey, artı:",
     showBenefits: "Faydaları göster",
@@ -1493,6 +1550,13 @@ const strings = {
     activationError: "Etkinleştirme hatası",
     pleaseEnterValidEmailAbove: "Lütfen yukarıya geçerli bir e-posta adresi gir",
 
+    promoHaveCode: "İndirim kodun var mı?",
+    promoCodePlaceholder: "Kodunu gir",
+    promoApply: "Uygula",
+    promoApplied: "İndirim uygulandı",
+    promoRemove: "Kaldır",
+    promoInvalid: "Bu kod geçersiz veya süresi dolmuş.",
+
     waitingForPayment: "Ödemeniz işleniyor...",
     completePaymentInWindow: "Ödeme sayfasında ödemeyi tamamla. Bu sayfa otomatik olarak güncellenecek.",
 
@@ -1543,6 +1607,7 @@ const strings = {
     perMonth: "/мес",
 
     bestValue: "Лучшая Цена",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Всё из плана Участник, плюс:",
     showBenefits: "Показать преимущества",
@@ -1641,6 +1706,13 @@ const strings = {
     activationError: "Ошибка активации",
     pleaseEnterValidEmailAbove: "Пожалуйста, введи корректный адрес электронной почты выше",
 
+    promoHaveCode: "Есть промокод?",
+    promoCodePlaceholder: "Введи свой код",
+    promoApply: "Применить",
+    promoApplied: "Скидка применена",
+    promoRemove: "Удалить",
+    promoInvalid: "Этот код недействителен или истёк срок его действия.",
+
     waitingForPayment: "Обработка платежа...",
     completePaymentInWindow: "Завершите оплату на странице оформления. Эта страница обновится автоматически.",
 
@@ -1691,6 +1763,7 @@ const strings = {
     perMonth: "/mnd",
 
     bestValue: "Beste Prijs-Kwaliteit",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Alles van het Lid-plan, plus:",
     showBenefits: "Voordelen tonen",
@@ -1789,6 +1862,13 @@ const strings = {
     activationError: "Activeringsfout",
     pleaseEnterValidEmailAbove: "Vul hierboven een geldig e-mailadres in",
 
+    promoHaveCode: "Heb je een kortingscode?",
+    promoCodePlaceholder: "Voer je code in",
+    promoApply: "Toepassen",
+    promoApplied: "Korting toegepast",
+    promoRemove: "Verwijderen",
+    promoInvalid: "Deze code is ongeldig of verlopen.",
+
     waitingForPayment: "Betaling wordt verwerkt...",
     completePaymentInWindow: "Voltooi de betaling op de afrekenpagina. Deze pagina wordt automatisch bijgewerkt.",
 
@@ -1839,6 +1919,7 @@ const strings = {
     perMonth: "/tháng",
 
     bestValue: "Giá Trị Nhất",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Tất cả gói Thành viên, cộng thêm:",
     showBenefits: "Xem lợi ích",
@@ -1937,6 +2018,13 @@ const strings = {
     activationError: "Lỗi kích hoạt",
     pleaseEnterValidEmailAbove: "Vui lòng nhập địa chỉ email hợp lệ ở trên",
 
+    promoHaveCode: "Bạn có mã giảm giá không?",
+    promoCodePlaceholder: "Nhập mã của bạn",
+    promoApply: "Áp dụng",
+    promoApplied: "Đã áp dụng giảm giá",
+    promoRemove: "Xóa",
+    promoInvalid: "Mã này không hợp lệ hoặc đã hết hạn.",
+
     waitingForPayment: "Đang xử lý thanh toán...",
     completePaymentInWindow: "Hoàn tất thanh toán trên trang thanh toán. Trang này sẽ tự động cập nhật.",
 
@@ -1987,6 +2075,7 @@ const strings = {
     perMonth: "/月",
 
     bestValue: "最もお得",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "メンバープランの全て、さらに：",
     showBenefits: "特典を表示",
@@ -2085,6 +2174,13 @@ const strings = {
     activationError: "有効化エラー",
     pleaseEnterValidEmailAbove: "上に有効なメールアドレスを入力してください",
 
+    promoHaveCode: "割引コードをお持ちですか？",
+    promoCodePlaceholder: "コードを入力",
+    promoApply: "適用",
+    promoApplied: "割引が適用されました",
+    promoRemove: "削除",
+    promoInvalid: "このコードは無効か期限切れです。",
+
     waitingForPayment: "支払いを処理中...",
     completePaymentInWindow: "チェックアウトページで支払いを完了してください。このページは自動的に更新されます。",
 
@@ -2135,6 +2231,7 @@ const strings = {
     perMonth: "/bln",
 
     bestValue: "Nilai Terbaik",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "Semua dari paket Anggota, plus:",
     showBenefits: "Lihat manfaat",
@@ -2233,6 +2330,13 @@ const strings = {
     activationError: "Kesalahan aktivasi",
     pleaseEnterValidEmailAbove: "Masukkan alamat email yang valid di atas",
 
+    promoHaveCode: "Punya kode diskon?",
+    promoCodePlaceholder: "Masukkan kode kamu",
+    promoApply: "Terapkan",
+    promoApplied: "Diskon diterapkan",
+    promoRemove: "Hapus",
+    promoInvalid: "Kode ini tidak valid atau telah kedaluwarsa.",
+
     waitingForPayment: "Memproses pembayaran...",
     completePaymentInWindow: "Selesaikan pembayaran di halaman checkout. Halaman ini akan diperbarui secara otomatis.",
 
@@ -2283,6 +2387,7 @@ const strings = {
     perMonth: "/شهر",
 
     bestValue: "أفضل قيمة",
+    launchRate: "✦ Intro",
 
     everythingInMemberPlus: "كل ما في خطة العضو، بالإضافة إلى:",
     showBenefits: "عرض المزايا",
@@ -2380,6 +2485,13 @@ const strings = {
     activationFailed: "فشل التفعيل",
     activationError: "خطأ في التفعيل",
     pleaseEnterValidEmailAbove: "يرجى إدخال عنوان بريد إلكتروني صالح أعلاه",
+
+    promoHaveCode: "لديك كود خصم؟",
+    promoCodePlaceholder: "أدخل الكود",
+    promoApply: "تطبيق",
+    promoApplied: "تم تطبيق الخصم",
+    promoRemove: "إزالة",
+    promoInvalid: "هذا الكود غير صالح أو انتهت صلاحيته.",
 
     waitingForPayment: "جارٍ معالجة الدفع...",
     completePaymentInWindow: "أكمل الدفع في صفحة الدفع. ستتحدث هذه الصفحة تلقائياً.",
