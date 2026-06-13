@@ -41,28 +41,42 @@ function buildInviteUrl(code) {
  * @param {object} opts
  * @param {string} opts.creatorUserId   - ID of the admin creating the invite.
  * @param {string} [opts.label]         - Human-readable note (optional, max 200 chars).
- * @param {number} [opts.expiresInSeconds=86400] - TTL in seconds. Capped at 7 days.
+ * @param {number|null} [opts.expiresInSeconds=86400] - TTL in seconds. Capped at 7 days. null = permanent.
  * @param {number} [opts.maxUses=1]     - 0 = unlimited.
- * @returns {Promise<{id: bigint, code: string, url: string, expiresAt: string, maxUses: number}>}
+ * @param {boolean} [opts.permanent]    - Shorthand: no expiry + unlimited uses.
+ * @returns {Promise<{id: bigint, code: string, url: string, expiresAt: string|null, maxUses: number}>}
  */
-async function createInvite({ creatorUserId, label, expiresInSeconds, maxUses }) {
+async function createInvite({ creatorUserId, label, expiresInSeconds, maxUses, permanent }) {
   const pool = getPool();
 
-  const ttl  = Math.min(Math.max(Number(expiresInSeconds) || 86400, 60), 7 * 24 * 3600);
-  const uses = Number.isInteger(Number(maxUses)) && Number(maxUses) >= 0 ? Number(maxUses) : 1;
+  const isPermanent = permanent === true || expiresInSeconds === null;
+  const ttl  = isPermanent ? null : Math.min(Math.max(Number(expiresInSeconds) || 86400, 60), 7 * 24 * 3600);
+  const uses = isPermanent ? 0 : (Number.isInteger(Number(maxUses)) && Number(maxUses) >= 0 ? Number(maxUses) : 1);
   const code = generateCode();
   const labelSafe = label ? String(label).slice(0, 200) : null;
 
-  const { rows } = await pool.query(
-    `INSERT INTO main_stage_invites
-       (code, created_by, label, expires_at, max_uses, used_count)
-     VALUES ($1, $2::text, $3, NOW() + ($4 || ' seconds')::interval, $5, 0)
-     RETURNING id, code, expires_at, max_uses`,
-    [code, String(creatorUserId), labelSafe, ttl, uses]
-  );
+  let row;
+  if (isPermanent) {
+    const { rows } = await pool.query(
+      `INSERT INTO main_stage_invites
+         (code, created_by, label, expires_at, max_uses, used_count)
+       VALUES ($1, $2::text, $3, NULL, $4, 0)
+       RETURNING id, code, expires_at, max_uses`,
+      [code, String(creatorUserId), labelSafe, uses]
+    );
+    row = rows[0];
+  } else {
+    const { rows } = await pool.query(
+      `INSERT INTO main_stage_invites
+         (code, created_by, label, expires_at, max_uses, used_count)
+       VALUES ($1, $2::text, $3, NOW() + ($4 || ' seconds')::interval, $5, 0)
+       RETURNING id, code, expires_at, max_uses`,
+      [code, String(creatorUserId), labelSafe, String(ttl), uses]
+    );
+    row = rows[0];
+  }
 
-  const row = rows[0];
-  logger.info('[mainStageInvite] created', { id: row.id, creatorUserId, maxUses: row.max_uses });
+  logger.info('[mainStageInvite] created', { id: row.id, creatorUserId, maxUses: row.max_uses, isPermanent });
 
   return {
     id:        row.id,
@@ -70,6 +84,7 @@ async function createInvite({ creatorUserId, label, expiresInSeconds, maxUses })
     url:       buildInviteUrl(row.code),
     expiresAt: row.expires_at,
     maxUses:   row.max_uses,
+    permanent: isPermanent,
   };
 }
 
@@ -85,7 +100,7 @@ async function listInvites({ creatorUserId }) {
   const { rows } = await pool.query(
     `SELECT id, code, label, expires_at, max_uses, used_count,
             revoked_at, created_at,
-            (expires_at < NOW() AND revoked_at IS NULL) AS is_expired
+            (expires_at IS NOT NULL AND expires_at < NOW() AND revoked_at IS NULL) AS is_expired
      FROM main_stage_invites
      WHERE created_by = $1::text
      ORDER BY created_at DESC
@@ -104,6 +119,7 @@ async function listInvites({ creatorUserId }) {
     isExpired:  r.is_expired,
     isRevoked:  r.revoked_at !== null,
     createdAt:  r.created_at,
+    permanent:  r.expires_at === null,
   }));
 }
 
@@ -155,13 +171,13 @@ async function previewInvite(code) {
 
   const r = rows[0];
   const isRevoked  = r.revoked_at !== null;
-  const isExpired  = new Date(r.expires_at) < new Date();
+  const isExpired  = r.expires_at !== null && new Date(r.expires_at) < new Date();
   const isExhausted = r.max_uses > 0 && r.used_count >= r.max_uses;
 
   const valid = !isRevoked && !isExpired && !isExhausted;
   const hostName = r.first_name || r.username || null;
 
-  return { valid, hostName, expiresAt: r.expires_at };
+  return { valid, hostName, expiresAt: r.expires_at, permanent: r.expires_at === null };
 }
 
 /**
@@ -204,7 +220,7 @@ async function redeemInvite({ code, displayName, fingerprint }) {
       return { success: false, errorCode: 'INVITE_REVOKED' };
     }
 
-    if (new Date(r.expires_at) < new Date()) {
+    if (r.expires_at !== null && new Date(r.expires_at) < new Date()) {
       await client.query('ROLLBACK');
       await _logUse(pool, r.id, displayName, fingerprint, null, 'INVITE_EXPIRED');
       return { success: false, errorCode: 'INVITE_EXPIRED' };

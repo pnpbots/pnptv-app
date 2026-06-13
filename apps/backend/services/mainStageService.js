@@ -27,7 +27,7 @@ const MEDIA_BOT_IDENTITY   = 'mainstage-media';
 const LOCK_KEY             = 'mainstage:rotator:lock';
 const LOCK_TTL_S           = 60;      // lock expires in 60s
 const LOCK_RENEW_MS        = 20_000;  // renew every 20s
-const MAX_CAMMERS          = 12;
+const MAX_CAMMERS          = 100;
 const VALID_MODES          = new Set(['spotlight', 'cinema', 'equal', 'theater', 'karaoke']);
 const VALID_MEDIA_KINDS    = new Set(['video', 'music', 'off']);
 

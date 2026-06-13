@@ -36,11 +36,13 @@ import { BuyTokensModal } from "@/components/BuyTokensModal";
 // ── Guest credential shape (written by MainStageGuestJoin, consumed once here) ─
 
 interface GuestCredentials {
-  token:       string;
-  livekitUrl:  string;
-  roomName:    string;
-  displayName: string;
-  identity:    string;
+  token:               string;
+  livekitUrl:          string;
+  roomName:            string;
+  displayName:         string;
+  identity:            string;
+  sessionStartedAt?:   number;
+  sessionLimitSeconds?: number;
 }
 
 function readAndClearGuestCredentials(): GuestCredentials | null {
@@ -239,6 +241,12 @@ function MainStageInner({
   );
 }
 
+function fmtMmSs(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 export default function MainStage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -267,7 +275,7 @@ export default function MainStage() {
   // provider-managed connection (persistent across route changes). Guests
   // bypass the provider entirely and use their own short-lived <LiveKitRoom>
   // with the guest token.
-  const { room, isJoined, join } = useMainStageRoom();
+  const { room, isJoined, join, cooldownSeconds, clearCooldown, sessionStartedAt, sessionLimitSeconds } = useMainStageRoom();
 
   // Auth state — viewer mode only applies to unauthenticated users.
   const { user, isLoading: isAuthLoading } = useAuth();
@@ -313,6 +321,58 @@ export default function MainStage() {
     if (isGuestMode) return;
     getWalletBalance().then((res) => { if (typeof res.balance === "number") setTokenBalance(res.balance); }).catch(() => {});
   }, [isGuestMode]);
+
+  // ── Countdown timers ────────────────────────────────────────────────────────
+  // For authenticated free users: remaining seconds of their 1h session.
+  const [sessionSecsLeft, setSessionSecsLeft] = useState<number | null>(null);
+  useEffect(() => {
+    if (!sessionStartedAt || !sessionLimitSeconds) { setSessionSecsLeft(null); return; }
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - sessionStartedAt) / 1000);
+      const left = Math.max(0, sessionLimitSeconds - elapsed);
+      setSessionSecsLeft(left);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [sessionStartedAt, sessionLimitSeconds]);
+
+  // For guest mode: remaining seconds of their 15-min session.
+  const guestSessionLimit = guestCredsRef.current?.sessionLimitSeconds ?? 900;
+  const guestSessionStart = guestCredsRef.current?.sessionStartedAt ?? 0;
+  const [guestSecsLeft, setGuestSecsLeft] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isGuestMode || !guestSessionStart) return;
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - guestSessionStart) / 1000);
+      const left = Math.max(0, guestSessionLimit - elapsed);
+      setGuestSecsLeft(left);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isGuestMode, guestSessionStart, guestSessionLimit]);
+
+  // Cooldown countdown (ticks down from cooldownSeconds)
+  const [cooldownLeft, setCooldownLeft] = useState<number | null>(null);
+  useEffect(() => {
+    if (cooldownSeconds === null) { setCooldownLeft(null); return; }
+    setCooldownLeft(cooldownSeconds);
+    const id = setInterval(() => {
+      setCooldownLeft((prev) => {
+        if (prev === null || prev <= 1) { clearInterval(id); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [cooldownSeconds]);
+
+  // When guest timer hits 0, redirect to /register with a prompt.
+  useEffect(() => {
+    if (guestSecsLeft === 0 && isGuestMode) {
+      navigate("/register?from=mainstage-guest", { replace: true });
+    }
+  }, [guestSecsLeft, isGuestMode, navigate]);
 
   // Refs so effect closures always read current values without stale captures.
   const hasEverConnectedRef = useRef(hasEverConnected);
@@ -548,6 +608,54 @@ export default function MainStage() {
   const handleShuffle = useCallback(() => {
     shuffle();
   }, [shuffle]);
+
+  // ── Free-user cooldown screen ────────────────────────────────────────────────
+  if (!isGuestMode && cooldownSeconds !== null) {
+    const mins = cooldownLeft !== null ? Math.ceil(cooldownLeft / 60) : Math.ceil(cooldownSeconds / 60);
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-center gap-6 px-6 text-center bg-pnp-background">
+        <img src="/logo-login.png" alt="PNPtv!" className="h-10 w-auto object-contain brightness-110 mb-2" />
+        <div
+          className="w-20 h-20 rounded-3xl flex items-center justify-center"
+          style={{ background: "linear-gradient(135deg,rgba(212,0,122,0.18),rgba(123,97,255,0.18))", border: "1px solid rgba(212,0,122,0.3)" }}
+        >
+          <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#D4007A" }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div>
+          <p className="text-white font-bold text-xl mb-1">Take a break!</p>
+          <p className="text-white/70 text-sm max-w-xs mx-auto">
+            Free accounts get 1 hour of cam time. Come back in{" "}
+            <span className="text-pink-400 font-bold tabular-nums">
+              {cooldownLeft !== null ? fmtMmSs(cooldownLeft) : `${mins} min`}
+            </span>{" "}
+            to cam again.
+          </p>
+          <p className="text-white/35 text-xs mt-1 max-w-xs mx-auto">
+            Cuentas gratuitas: 1 hora de cámara. Vuelve en {mins} min.
+          </p>
+        </div>
+        <div className="flex flex-col gap-3 w-full max-w-xs">
+          <button
+            type="button"
+            onClick={() => navigate("/subscribe")}
+            className="min-h-[50px] w-full rounded-2xl text-sm font-bold text-white transition-all active:scale-[0.97]"
+            style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+          >
+            ⭐ Go PRIME — Unlimited Cam Time
+          </button>
+          <button
+            type="button"
+            onClick={() => { clearCooldown(); navigate(-1); }}
+            className="min-h-[40px] w-full rounded-xl text-xs font-semibold text-white/40 transition-all active:scale-[0.97]"
+          >
+            Leave Main Stage
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Show the skeleton while auth is resolving (can't determine viewer vs member yet).
   if (!isGuestMode && isAuthLoading) {
@@ -932,9 +1040,10 @@ export default function MainStage() {
               <span className="text-[11px] font-semibold text-white/80 tabular-nums">{tokenBalance}</span>
             </button>
           )}
+          {/* Guest badge + 15-min countdown */}
           {isGuestMode && (
             <span
-              className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
               style={{
                 background: "rgba(123,97,255,0.18)",
                 border:     "1px solid rgba(123,97,255,0.40)",
@@ -945,6 +1054,34 @@ export default function MainStage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
               </svg>
               Guest
+              {guestSecsLeft !== null && guestSecsLeft > 0 && (
+                <span className="tabular-nums ml-1">{fmtMmSs(guestSecsLeft)}</span>
+              )}
+              {guestSecsLeft === 0 && (
+                <button
+                  onClick={() => navigate("/register")}
+                  className="ml-1 underline"
+                >
+                  Join!
+                </button>
+              )}
+            </span>
+          )}
+          {/* Free-user session countdown */}
+          {!isGuestMode && sessionSecsLeft !== null && sessionSecsLeft > 0 && (
+            <span
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+              style={{
+                background: sessionSecsLeft < 300 ? "rgba(212,0,122,0.20)" : "rgba(123,97,255,0.18)",
+                border:     `1px solid ${sessionSecsLeft < 300 ? "rgba(212,0,122,0.5)" : "rgba(123,97,255,0.40)"}`,
+                color:      sessionSecsLeft < 300 ? "#FF6BB0" : "#A990FF",
+              }}
+              title="Cam time remaining (free tier)"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {fmtMmSs(sessionSecsLeft)}
             </span>
           )}
           <button

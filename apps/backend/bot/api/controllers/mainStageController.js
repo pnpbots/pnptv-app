@@ -93,7 +93,7 @@ const MAX_CAMMERS = mainStageService.MAX_CAMMERS;
 async function fetchUserRow(userId) {
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT id, first_name, username, role
+    `SELECT id, first_name, username, role, tier
      FROM users
      WHERE id = $1::varchar
      LIMIT 1`,
@@ -187,6 +187,13 @@ const token = asyncHandler(async (req, res) => {
   const adminUser = isAdminRole(userRow.role);
   const role = adminUser ? 'admin' : 'member';
 
+  // Premium = admin, PRIME tier, member tier, or creator tier.
+  // Free users get a capped 1h session + 30min cooldown.
+  const isPremium = adminUser || ['PRIME', 'member', 'creator'].includes(userRow.tier);
+
+  // Screen sharing (broadcasting video) is PRIME/member/creator only.
+  const canScreenShare = isPremium;
+
   // Kicked-set check — admins bypass
   if (!adminUser) {
     try {
@@ -209,11 +216,62 @@ const token = asyncHandler(async (req, res) => {
     }
   }
 
+  // Free-user session tracking: 1h cam session, 30min cooldown.
+  // Redis key: mainstage:session:start:<userId> = ms timestamp, TTL = 90min.
+  // Layout: first 60min → active session; min 60–90 → cooldown.
+  let tokenTtlSeconds = isPremium ? 6 * 3600 : 3600; // 6h for premium, 1h for free
+  let sessionStartedAt = null;
+  let sessionLimitSeconds = null;
+  let cooldownSeconds = null;
+
+  if (!adminUser && !isPremium) {
+    try {
+      const SESSION_KEY = `mainstage:session:start:${String(userId)}`;
+      const SESSION_TTL_S = 90 * 60; // 90-min window (1h session + 30min cooldown)
+      const redis = getRedis();
+      const startRaw = await redis.get(SESSION_KEY);
+
+      if (startRaw === null) {
+        // New session — record start time, grant 1h token
+        const nowMs = Date.now();
+        await redis.set(SESSION_KEY, String(nowMs), 'EX', SESSION_TTL_S);
+        sessionStartedAt = nowMs;
+        sessionLimitSeconds = 3600;
+        tokenTtlSeconds = 3600;
+      } else {
+        const startMs = parseInt(startRaw, 10);
+        const elapsedMs = Date.now() - startMs;
+        const elapsedS = Math.floor(elapsedMs / 1000);
+
+        if (elapsedS < 3600) {
+          // Still within the 1h active window — issue remaining time
+          sessionStartedAt = startMs;
+          sessionLimitSeconds = 3600;
+          tokenTtlSeconds = Math.max(60, 3600 - elapsedS);
+        } else {
+          // In cooldown (60–90 min elapsed) — reject with countdown
+          const cooldownRemainingS = Math.max(0, SESSION_TTL_S - elapsedS);
+          return res.status(429).json({
+            success: false,
+            error: 'Free users get 1 hour of cammed time. Take a 30-minute break and come back!',
+            code: 'FREE_USER_COOLDOWN',
+            cooldownSeconds: cooldownRemainingS,
+          });
+        }
+      }
+    } catch (redisErr) {
+      logger.error('[MainStage] token: Redis unavailable (session tracking)', { error: redisErr.message });
+      return res.status(503).json({
+        success: false,
+        error: 'Service temporarily unavailable.',
+        code: 'SESSION_BACKEND_UNAVAILABLE',
+      });
+    }
+  }
+
   // Main Stage is open to all authenticated users — no entitlement gate.
-  // Main Stage is a publish-first room: every authenticated entrant is added
-  // to the stage rotation/visibility queue. Admins bypass the cap so they can
-  // always join and moderate a full room — addCammerForce skips the cap check
-  // but still deduplicates, so calling it twice for the same admin is a no-op.
+  // Every authenticated entrant joins the stage rotation/visibility queue.
+  // Admins bypass the cap (addCammerForce skips cap but still deduplicates).
   let addResult;
   try {
     addResult = adminUser
@@ -246,25 +304,35 @@ const token = asyncHandler(async (req, res) => {
     {
       canPublishVideo: true,
       canPublishAudio: isModerator,
-      ttlSeconds: 6 * 3600, // 6h for all roles — matches the provider's refresh schedule (5.5h)
+      ttlSeconds: tokenTtlSeconds,
     }
   );
 
   logger.info('[MainStage] token issued', {
     userId,
     role,
+    isPremium,
+    tokenTtlSeconds,
     ip: req.ip || req.headers['x-forwarded-for'] || null,
     userAgent: req.get('user-agent') || null,
   });
 
-  return res.json({
-    success:     true,
-    token:       lkToken,
-    livekitUrl:  livekitService.LIVEKIT_WS_URL,
-    roomName:    ROOM_NAME,
+  const responseBody = {
+    success:        true,
+    token:          lkToken,
+    livekitUrl:     livekitService.LIVEKIT_WS_URL,
+    roomName:       ROOM_NAME,
     role,
     displayName,
-  });
+    canScreenShare,
+  };
+
+  if (sessionStartedAt !== null) {
+    responseBody.sessionStartedAt   = sessionStartedAt;
+    responseBody.sessionLimitSeconds = sessionLimitSeconds;
+  }
+
+  return res.json(responseBody);
 });
 
 /**

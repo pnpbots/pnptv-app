@@ -10837,6 +10837,14 @@ app.post(
   mainStageInvitesController.createInvite
 );
 
+app.post(
+  '/api/main-stage/invites/permanent',
+  authenticateUser,
+  roleGuard('admin', 'superadmin'),
+  mainStageAdminLimiter,
+  mainStageInvitesController.createPermanentInvite
+);
+
 app.get(
   '/api/main-stage/invites',
   authenticateUser,

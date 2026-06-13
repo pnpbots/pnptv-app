@@ -98,6 +98,34 @@ const revokeInvite = asyncHandler(async (req, res) => {
   return res.json({ success: true });
 });
 
+/**
+ * POST /api/main-stage/invites/permanent
+ * Admin only. Creates a permanent invite: no expiry, unlimited uses.
+ * Body: { label? }
+ */
+const createPermanentInvite = asyncHandler(async (req, res) => {
+  const { label } = req.body || {};
+
+  const invite = await mainStageInviteService.createInvite({
+    creatorUserId: req.user.id,
+    label:         label || 'Permanent invite',
+    permanent:     true,
+  });
+
+  return res.status(201).json({
+    success: true,
+    invite: {
+      id:        invite.id,
+      code:      invite.code,
+      url:       invite.url,
+      expiresAt: null,
+      maxUses:   0,
+      permanent: true,
+      label:     invite.label || label || 'Permanent invite',
+    },
+  });
+});
+
 // ── Public endpoints ──────────────────────────────────────────────────────────
 
 /**
@@ -209,7 +237,7 @@ const guestToken = asyncHandler(async (req, res) => {
     {
       canPublishVideo: true,
       canPublishAudio: false,
-      ttlSeconds:      2 * 3600,
+      ttlSeconds:      15 * 60, // 15-minute guest session
     }
   );
 
@@ -238,17 +266,21 @@ const guestToken = asyncHandler(async (req, res) => {
   }
 
   return res.json({
-    success:    true,
-    token:      lkToken,
-    livekitUrl: livekitService.LIVEKIT_WS_URL,
-    roomName:   ROOM_NAME,
-    role:       'guest',
-    identity:   redeem.lkIdentity,
+    success:          true,
+    token:            lkToken,
+    livekitUrl:       livekitService.LIVEKIT_WS_URL,
+    roomName:         ROOM_NAME,
+    role:             'guest',
+    identity:         redeem.lkIdentity,
+    canScreenShare:   false,
+    sessionLimitSeconds: 15 * 60,
+    sessionStartedAt: Date.now(),
   });
 });
 
 module.exports = {
   createInvite,
+  createPermanentInvite,
   listInvites,
   revokeInvite,
   previewInvite,

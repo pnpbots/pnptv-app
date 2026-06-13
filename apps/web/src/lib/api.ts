@@ -32,6 +32,8 @@ export interface ApiAccessDetails {
   creatorId?: string;
   priceUsd?: number;
   upgradeUrl?: string;
+  /** Seconds remaining in a rate-limit cooldown (e.g. FREE_USER_COOLDOWN) */
+  cooldownSeconds?: number;
 }
 
 export class ApiError extends Error {
@@ -120,6 +122,7 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
           creatorId: typeof error.creatorId === "string" ? error.creatorId : undefined,
           priceUsd: typeof error.priceUsd === "number" ? error.priceUsd : undefined,
           upgradeUrl: typeof error.upgradeUrl === "string" ? error.upgradeUrl : undefined,
+          cooldownSeconds: typeof error.cooldownSeconds === "number" ? error.cooldownSeconds : undefined,
         };
         throw new ApiError(errorMessage, res.status, errorCode, details);
       }
@@ -6705,7 +6708,19 @@ export interface MainStageTokenResponse {
   token: string;
   livekitUrl: string;
   roomName: string;
-  role: "admin" | "member";
+  role: "admin" | "member" | "guest";
+  canScreenShare?: boolean;
+  /** ms timestamp — only present for free (non-premium) users */
+  sessionStartedAt?: number;
+  /** seconds — only present for free (non-premium) users */
+  sessionLimitSeconds?: number;
+}
+
+export interface MainStageCooldownError {
+  success: false;
+  code: "FREE_USER_COOLDOWN";
+  cooldownSeconds: number;
+  error: string;
 }
 
 export interface MainStageJoinCheck {

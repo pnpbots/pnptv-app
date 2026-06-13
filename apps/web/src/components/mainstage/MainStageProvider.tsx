@@ -37,6 +37,7 @@ import {
 import {
   getMainStageState,
   getMainStageToken,
+  ApiError,
   type MainStageState,
   type MainStageTokenResponse,
 } from "@/lib/api";
@@ -90,6 +91,18 @@ export interface MainStageProviderValue {
   /** UI flag for whether the local camera tile should be active/visible */
   isCammerActive: boolean;
   setIsCammerActive: (active: boolean) => void;
+
+  /** True when this user is allowed to share their screen (PRIME / member / creator) */
+  canScreenShare: boolean;
+
+  /** ms epoch when the current free-user session started (null for premium users) */
+  sessionStartedAt: number | null;
+  /** seconds — total allowed session length for free users (3600), null for premium */
+  sessionLimitSeconds: number | null;
+
+  /** When the user hits their free-user cooldown: seconds remaining (null otherwise) */
+  cooldownSeconds: number | null;
+  clearCooldown: () => void;
 }
 
 // ─── Room singleton ────────────────────────────────────────────────────────
@@ -135,6 +148,10 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [isJoined, setIsJoined] = useState(false);
   const [isCammerActive, setIsCammerActive] = useState(false);
+  const [canScreenShare, setCanScreenShare] = useState(false);
+  const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
+  const [sessionLimitSeconds, setSessionLimitSeconds] = useState<number | null>(null);
+  const [cooldownSeconds, setCooldownSeconds] = useState<number | null>(null);
   const roleRef = useRef<MainStageRole>(null);
   const roomNameRef = useRef("main-stage-prime");
   const userIdRef = useRef<string | null>(null);
@@ -173,10 +190,13 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   // ── Token refresh timer ──────────────────────────────────────────────────
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const scheduleTokenRefresh = useCallback(() => {
+  // tokenTtlSeconds — how long until the current token expires.
+  // Refresh 30s before expiry (minimum 30s ahead to avoid races).
+  // For free users (1h TTL), this fires at ~59:30 and issues a new token
+  // or a 429 cooldown response.
+  const scheduleTokenRefresh = useCallback((tokenTtlSeconds = 6 * 3600) => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    // Refresh 30 min before the 6h token expires.
-    const REFRESH_MS = (6 * 60 - 30) * 60 * 1000;
+    const refreshInMs = Math.max(30_000, (tokenTtlSeconds - 30) * 1000);
     refreshTimerRef.current = setTimeout(async () => {
       if (!mountedRef.current) return;
       try {
@@ -186,29 +206,32 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
         setLivekitUrl(res.livekitUrl);
         setRoomName(res.roomName);
         setRole(res.role);
-        // Only reconnect if the room has fully disconnected. Calling connect()
-        // on an already-connected room forces a full reconnect cycle, dropping
-        // all published tracks for every viewer for ~1-2s. LiveKit handles
-        // token refresh internally when the room is still connected — we just
-        // need to store the new token so it's available for the next reconnect.
+        if (res.canScreenShare !== undefined) setCanScreenShare(res.canScreenShare);
+        if (res.sessionStartedAt !== undefined) setSessionStartedAt(res.sessionStartedAt);
+        if (res.sessionLimitSeconds !== undefined) setSessionLimitSeconds(res.sessionLimitSeconds);
         if (intentConnectedRef.current && sharedRoom.state === "disconnected") {
           await sharedRoom.connect(res.livekitUrl, res.token);
         }
-        scheduleTokenRefresh();
+        scheduleTokenRefresh(res.sessionLimitSeconds ?? 6 * 3600);
       } catch (err: unknown) {
-        // 403 = entitlement expired — disconnect cleanly instead of retrying.
-        const is403 =
-          (err instanceof Error && err.message.includes('403')) ||
-          (typeof (err as { status?: number }).status === 'number' && (err as { status?: number }).status === 403);
+        if (err instanceof ApiError && err.status === 429 && err.code === 'FREE_USER_COOLDOWN') {
+          if (mountedRef.current) {
+            setCooldownSeconds(err.details.cooldownSeconds ?? 1800);
+            leave('free-user-cooldown');
+          }
+          return;
+        }
+        const is403 = err instanceof ApiError && err.status === 403;
         if (is403 && mountedRef.current) {
           setError('Your membership has expired. Please renew to continue.');
           leave('entitlement-expired');
         } else {
-          // Network error — retry in 5 min.
-          refreshTimerRef.current = setTimeout(scheduleTokenRefresh, 5 * 60 * 1000);
+          refreshTimerRef.current = setTimeout(() => scheduleTokenRefresh(tokenTtlSeconds), 5 * 60 * 1000);
         }
       }
-    }, REFRESH_MS);
+    }, refreshInMs);
+  // leave is stable (defined below with useCallback). Add to deps when hoisting.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -545,13 +568,29 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
           emitDiagnostic("join-short-circuit", { reason: "already-connected" });
           return;
         }
-        const [stateRes, res] = await Promise.all([getMainStageState(), getMainStageToken()]);
+        let stateRes: MainStageState;
+        let res: MainStageTokenResponse;
+        try {
+          [stateRes, res] = await Promise.all([getMainStageState(), getMainStageToken()]);
+        } catch (tokenErr: unknown) {
+          if (!mountedRef.current) return;
+          if (tokenErr instanceof ApiError && tokenErr.status === 429 && tokenErr.code === 'FREE_USER_COOLDOWN') {
+            setCooldownSeconds(tokenErr.details.cooldownSeconds ?? 1800);
+            setLoading(false);
+            return;
+          }
+          throw tokenErr;
+        }
         if (!mountedRef.current) return;
 
         tokenRef.current = res.token;
         setLivekitUrl(res.livekitUrl);
         setRoomName(res.roomName);
         setRole(res.role);
+        setCanScreenShare(res.canScreenShare ?? false);
+        if (res.sessionStartedAt !== undefined) setSessionStartedAt(res.sessionStartedAt);
+        if (res.sessionLimitSeconds !== undefined) setSessionLimitSeconds(res.sessionLimitSeconds);
+        setCooldownSeconds(null);
         setState(stateRes);
         emitDiagnostic("token-minted", { tokenRole: res.role });
 
@@ -600,7 +639,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
         if (mountedRef.current) setIsCammerActive(true);
         emitDiagnostic("join-connected");
 
-        scheduleTokenRefresh();
+        scheduleTokenRefresh(res.sessionLimitSeconds ?? 6 * 3600);
       } catch (err) {
         if (mountedRef.current) {
           setError(err instanceof Error ? err.message : "Failed to join Main Stage");
@@ -634,6 +673,9 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
     setIsJoined(false);
     setIsCammerActive(false);
+    setCanScreenShare(false);
+    setSessionStartedAt(null);
+    setSessionLimitSeconds(null);
 
     // Notify server before disconnecting.
     try {
@@ -647,6 +689,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   }, [emitDiagnostic]);
 
   const clearError = useCallback(() => setError(null), []);
+  const clearCooldown = useCallback(() => setCooldownSeconds(null), []);
 
   const value = useMemo<MainStageProviderValue>(
     () => ({
@@ -663,6 +706,11 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       clearError,
       isCammerActive,
       setIsCammerActive,
+      canScreenShare,
+      sessionStartedAt,
+      sessionLimitSeconds,
+      cooldownSeconds,
+      clearCooldown,
     }),
     [
       role,
@@ -676,6 +724,11 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       leave,
       clearError,
       isCammerActive,
+      canScreenShare,
+      sessionStartedAt,
+      sessionLimitSeconds,
+      cooldownSeconds,
+      clearCooldown,
     ]
   );
 

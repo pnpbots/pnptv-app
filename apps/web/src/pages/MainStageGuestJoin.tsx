@@ -159,11 +159,13 @@ export default function MainStageGuestJoin() {
       // sessionStorage is cleared by MainStage immediately after reading.
       try {
         sessionStorage.setItem(SESSION_KEY, JSON.stringify({
-          token:       result.token,
-          livekitUrl:  result.livekitUrl,
-          roomName:    result.roomName,
-          displayName: name,
-          identity:    result.identity,
+          token:              result.token,
+          livekitUrl:         result.livekitUrl,
+          roomName:           result.roomName,
+          displayName:        name,
+          identity:           result.identity,
+          sessionStartedAt:   result.sessionStartedAt ?? Date.now(),
+          sessionLimitSeconds: result.sessionLimitSeconds ?? 900,
         }));
       } catch {
         // sessionStorage full / blocked — proceed anyway (MainStage reads it
