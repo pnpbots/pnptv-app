@@ -39,13 +39,10 @@ const startCronJobs = async (bot = null) => {
     // Initialize services with bot if provided
     if (bot) {
       MembershipCleanupService.initialize(bot);
-      TutorialReminderService.initialize(bot);
+      // TutorialReminderService — DISABLED (spam prevention per admin request)
     }
 
-    // Initialize Telegram subscription reminder service
-    if (bot) {
-      TelegramSubscriptionReminderService.initialize(bot);
-    }
+    // TelegramSubscriptionReminderService — DISABLED (spam prevention per admin request)
 
     // Daimo payment recovery — DISABLED (Daimo retired, all checkout surfaces
     // moved to Dash/BTCPay). Webhook handler at /api/webhooks/daimo stays
@@ -569,20 +566,7 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
-    // Telegram subscription reminders — daily at 9 AM UTC
-    // Sends 3-day and 1-day warnings before subscription expiry via private DM
-    if (bot) {
-      cron.schedule(process.env.SUB_REMINDER_TELEGRAM_CRON || '0 9 * * *', async () => {
-        try {
-          logger.info('Running Telegram subscription reminders...');
-          const sent3d = await TelegramSubscriptionReminderService.send3DayReminders();
-          const sent1d = await TelegramSubscriptionReminderService.send1DayReminders();
-          logger.info(`Telegram subscription reminders sent — 3-day: ${sent3d}, 1-day: ${sent1d}`);
-        } catch (error) {
-          logger.error('Error in Telegram subscription reminder cron:', error);
-        }
-      });
-    }
+    // Telegram subscription reminders — DISABLED (spam prevention per admin request)
 
     // Daily notification digest email — runs at 10 AM UTC
     // Sends an HTML summary of unread notifications to inactive users with verified emails

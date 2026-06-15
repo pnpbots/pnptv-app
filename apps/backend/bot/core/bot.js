@@ -1766,43 +1766,19 @@ const startBot = async () => {
     // Initialize group cleanup service
     const groupCleanup = new GroupCleanupService(bot);
     groupCleanup.initialize();
-    // Initialize broadcast scheduler service
-    try {
-      broadcastScheduler.initialize(bot);
-      broadcastScheduler.start();
-      logger.info('✓ Broadcast scheduler initialized and started');
-    } catch (error) {
-      logger.warn(`Broadcast scheduler initialization failed, continuing without scheduler: ${error.message}`);
-    }
+    // Broadcast scheduler — DISABLED (spam prevention per admin request)
+    logger.info('• Broadcast scheduler skipped (disabled)');
     // Initialize broadcast buttons tables (presets/custom CTAs)
     try {
       await BroadcastButtonModel.initializeTables();
     } catch (error) {
       logger.warn(`Broadcast button tables initialization failed (broadcasts will run without presets until fixed): ${error.message}`);
     }
-    // Media popularity scheduler (removed in X integration purge)
-    // Initialize async broadcast queue
-    try {
-      const queueIntegration = await initializeAsyncBroadcastQueue(bot, {
-        concurrency: 2,
-        maxAttempts: 3,
-        autoStart: true,
-      });
-      global.broadcastQueueIntegration = queueIntegration;
-      logger.info('✓ Async broadcast queue initialized and started');
-    } catch (error) {
-      logger.warn(`Async broadcast queue initialization failed, continuing without async processing: ${error.message}`);
-    }
+    // Async broadcast queue — DISABLED (spam prevention per admin request)
+    logger.info('• Async broadcast queue skipped (disabled)');
 
-    // Initialize community post scheduler
-    try {
-      const communityPostScheduler = new CommunityPostScheduler(bot);
-      communityPostScheduler.start();
-      global.communityPostScheduler = communityPostScheduler;
-      logger.info('✓ Community post scheduler initialized and started');
-    } catch (error) {
-      logger.warn(`Community post scheduler initialization failed, continuing without community posts: ${error.message}`);
-    }
+    // Community post scheduler — DISABLED (spam prevention per admin request)
+    logger.info('• Community post scheduler skipped (disabled)');
 
     // Initialize X post scheduler
     try {
@@ -1855,14 +1831,8 @@ const startBot = async () => {
       logger.warn(`Bogota analysis scheduler initialization failed: ${error.message}`);
     }
 
-    // Initialize daily migration nudge scheduler (18:00 America/Bogota)
-    try {
-      const { startMigrationNudgeScheduler } = require('./schedulers/migrationNudgeScheduler');
-      startMigrationNudgeScheduler();
-      logger.info('✓ Migration nudge scheduler initialized');
-    } catch (error) {
-      logger.warn(`Migration nudge scheduler initialization failed: ${error.message}`);
-    }
+    // Migration nudge scheduler — DISABLED (spam prevention per admin request)
+    logger.info('• Migration nudge scheduler skipped (disabled)');
 
     // Initialize X post analytics ingestion scheduler (every 6h)
     try {
@@ -1875,27 +1845,8 @@ const startBot = async () => {
       logger.warn(`X analytics ingestion scheduler initialization failed: ${error.message}`);
     }
 
-    // Initialize onboarding reminder scheduler — daily DM nudge to users who
-    // haven't finished /start. Only sends private messages, never to groups.
-    try {
-      const OnboardingReminderService = require('../../services/onboardingReminderService');
-      OnboardingReminderService.initialize(bot);
-      const ONBOARDING_REMINDER_INTERVAL_MS = 24 * 60 * 60 * 1000;
-      // Stagger the first run by 5 minutes so it doesn't pile on top of startup
-      setTimeout(() => {
-        OnboardingReminderService.sendIncompleteOnboardingReminders().catch((err) => {
-          logger.warn('Onboarding reminder run failed', { error: err.message });
-        });
-        setInterval(() => {
-          OnboardingReminderService.sendIncompleteOnboardingReminders().catch((err) => {
-            logger.warn('Onboarding reminder run failed', { error: err.message });
-          });
-        }, ONBOARDING_REMINDER_INTERVAL_MS);
-      }, 5 * 60 * 1000);
-      logger.info('✓ Onboarding reminder scheduler initialized (daily, +5m delay)');
-    } catch (error) {
-      logger.warn(`Onboarding reminder scheduler initialization failed: ${error.message}`);
-    }
+    // Onboarding reminder scheduler — DISABLED (spam prevention per admin request)
+    logger.info('• Onboarding reminder scheduler skipped (disabled)');
 
     // Initialize proactive reminder service
     try {
@@ -1928,27 +1879,11 @@ const startBot = async () => {
     // loop is no longer needed.
     logger.info('• Daimo payment recovery scheduler skipped (Daimo retired)');
 
-    // Initialize Cristina proactive ticket worker
-    try {
-      cristinaTicketWorker.initialize(bot);
-      logger.info('✓ Cristina ticket worker initialized');
-    } catch (error) {
-      logger.warn(`Cristina ticket worker initialization failed: ${error.message}`);
-    }
+    // Cristina ticket worker — DISABLED (spam prevention per admin request)
+    logger.info('• Cristina ticket worker skipped (disabled)');
 
-    // Initialize Cristina onboarding reminders (every 30 min)
-    try {
-      setInterval(() => CristinaOnboardingReminders.process().catch(err =>
-        logger.error('Cristina onboarding reminders error:', err)
-      ), 30 * 60 * 1000);
-      // Run once on startup after a short delay
-      setTimeout(() => CristinaOnboardingReminders.process().catch(err =>
-        logger.error('Cristina onboarding reminders error:', err)
-      ), 10 * 1000);
-      logger.info('✓ Cristina onboarding reminders scheduled (30min interval)');
-    } catch (error) {
-      logger.warn(`Cristina onboarding reminders setup failed: ${error.message}`);
-    }
+    // Cristina onboarding reminders — DISABLED (spam prevention per admin request)
+    logger.info('• Cristina onboarding reminders skipped (disabled)');
 
 
     // Initialize orphaned media cleanup worker (every 6h, 10-min startup delay)
