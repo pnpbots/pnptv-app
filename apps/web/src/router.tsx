@@ -250,6 +250,10 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "mainstage",
+        element: <Navigate to="/main-stage" replace />,
+      },
+      {
         path: "main-stage",
         element: (
           <ModuleLoader>

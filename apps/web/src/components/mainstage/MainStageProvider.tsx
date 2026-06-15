@@ -782,7 +782,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     const onNav = () => {
       const p = window.location.pathname;
       setMiniPathname(p);
-      if (!p.startsWith("/mainstage")) setMiniDismissed(false);
+      if (!p.startsWith("/main-stage")) setMiniDismissed(false);
     };
     window.addEventListener("pnptv:navigation", onNav);
     window.addEventListener("popstate", onNav);
@@ -791,7 +791,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("popstate", onNav);
     };
   }, []);
-  const isOnMainStage = miniPathname.startsWith("/mainstage");
+  const isOnMainStage = miniPathname.startsWith("/main-stage");
   const hasActiveMiniMedia =
     state?.media?.kind === "video" && Boolean(state?.media?.playing) && Boolean(state?.media?.src);
   const showMiniPlayer = isAuthenticated && !isOnMainStage && !miniDismissed && (isJoined || hasActiveMiniMedia);
@@ -884,7 +884,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
             </span>
             <div className="flex items-center gap-2" data-no-drag>
               <a
-                href="/mainstage"
+                href="/main-stage"
                 className="text-white/35 hover:text-white/75 transition-colors"
                 aria-label="Open Main Stage"
                 style={{ lineHeight: 0 }}
