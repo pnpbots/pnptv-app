@@ -1,4 +1,5 @@
 const PrivateCallBookingService = require('../services/privateCallBookingService');
+const PNPLiveAvailabilityService = require('../services/pnpLiveAvailabilityService');
 const logger = require('../utils/logger');
 
 /**
@@ -84,7 +85,18 @@ class PrivateCallsWorker {
       }, 5 * 60 * 1000) // 5 minutes
     );
 
-    logger.info('Private calls worker started with 4 jobs');
+    // Job 5: Prune model status history older than 90 days (daily)
+    this.intervals.push(
+      setInterval(async () => {
+        try {
+          await PNPLiveAvailabilityService.pruneModelStatusHistory();
+        } catch (error) {
+          logger.error('Private calls worker: error pruning model status history', { error: error.message });
+        }
+      }, 24 * 60 * 60 * 1000) // 24 hours
+    );
+
+    logger.info('Private calls worker started with 5 jobs');
   }
 
   /**

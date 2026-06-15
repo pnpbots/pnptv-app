@@ -659,6 +659,23 @@ function shapeForApi(row, channel, extra = {}) {
   };
 }
 
+// ── Maintenance ──────────────────────────────────────────────────────────────
+
+async function failStuckVideoUploads() {
+  const result = await query(
+    `UPDATE channel_videos
+     SET status = 'failed', updated_at = NOW()
+     WHERE status = 'processing'
+       AND created_at < NOW() - INTERVAL '1 hour'
+     RETURNING id`
+  );
+  const count = result.rowCount || 0;
+  if (count > 0) {
+    logger.warn('channel_videos: flipped stuck processing rows to failed', { count, ids: result.rows.map(r => r.id) });
+  }
+  return count;
+}
+
 module.exports = {
   uploadVideo,
   aiTitle,
@@ -668,5 +685,6 @@ module.exports = {
   publishVideo,
   deleteVideo,
   listChannelVideos,
+  failStuckVideoUploads,
   TAG_TAXONOMY,
 };

@@ -185,15 +185,16 @@ const listStreams = async (req, res) => {
           const safeHostedRef = sanitizeRefId(hostedRef);
           if (!safeHostedRef) return enriched;
           const target = baseStreams.find((t) => t.id === safeHostedRef);
-          // LOW-04 TODO: hostedChannelName is resolved from the in-memory baseStreams list
-          // fetched at the start of listStreams. If a host sets a new hosted channel after
-          // this list was cached (24h TTL in Redis), the name will be stale until cache
-          // expiry. Acceptable — UX-only label. Refresh on next host-set to fix immediately.
+          if (!target) {
+            // Hosted channel no longer exists in Restreamer — clear the stale key
+            await redis.del(`live:host:${s.id}`).catch(() => {});
+            return enriched;
+          }
           return {
             ...enriched,
             hostedChannelRef: safeHostedRef,
-            hostedChannelName: target?.name || safeHostedRef,
-            hostedHlsUrl: target?.hlsUrl || `${publicUrl}/memfs/${safeHostedRef}.m3u8`,
+            hostedChannelName: target.name,
+            hostedHlsUrl: target.hlsUrl,
           };
         } catch {
           return enriched;

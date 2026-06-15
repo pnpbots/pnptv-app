@@ -417,9 +417,8 @@ class PNPLiveAvailabilityService {
           const slotEnd = new Date(slotStart);
           slotEnd.setMinutes(slotEnd.getMinutes() + durationMinutes);
 
-          // Skip if slot ends after operating hours
-          if (slotEnd.getHours() > OPERATING_HOURS.end ||
-              (slotEnd.getHours() === OPERATING_HOURS.end && slotEnd.getMinutes() > 0)) {
+          // Skip if slot ends after operating hours (minute-based to handle midnight wrapping)
+          if (slotEnd.getHours() * 60 + slotEnd.getMinutes() > OPERATING_HOURS.end * 60) {
             continue;
           }
 
@@ -673,16 +672,34 @@ class PNPLiveAvailabilityService {
       );
 
       if (!result.rows || result.rows.length === 0) {
-        // Slot already exists for this model + start time — idempotent no-op
+        // Slot already exists — fetch it so caller can distinguish created vs existing
+        const existing = await query(
+          `SELECT * FROM pnp_availability WHERE model_id = $1 AND available_from = $2`,
+          [modelId, from]
+        );
         logger.info('Manual slot already exists (idempotent)', { modelId, from });
-        return null;
+        return { created: false, slot: existing.rows[0] || null };
       }
 
       logger.info('Manual slot added', { modelId, from, to });
-      return result.rows[0];
+      return { created: true, slot: result.rows[0] };
     } catch (error) {
       logger.error('Error adding manual slot:', error);
       throw error;
+    }
+  }
+
+  static async pruneModelStatusHistory() {
+    try {
+      const result = await query(
+        `DELETE FROM pnp_model_status_history WHERE created_at < NOW() - INTERVAL '90 days'`
+      );
+      const count = result.rowCount || 0;
+      if (count > 0) logger.info('Pruned old model status history rows', { count });
+      return count;
+    } catch (error) {
+      logger.error('Error pruning model status history:', error);
+      return 0;
     }
   }
 

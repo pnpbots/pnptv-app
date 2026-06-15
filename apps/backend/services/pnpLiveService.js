@@ -996,14 +996,17 @@ class PNPLiveService {
         [bookingId]
       );
 
-      // Send notification to model
+      // Send notification to model in their preferred language
       if (modelInfo.rows?.[0]?.user_id) {
+        const modelUserId = modelInfo.rows[0].user_id;
+        const langRes = await query('SELECT language FROM users WHERE id = $1', [modelUserId]);
+        const modelLang = langRes.rows[0]?.language || 'es';
         await PNPLiveNotificationService.sendFeedbackToModel(
           bookingId,
-          modelInfo.rows[0].user_id,
+          modelUserId,
           rating,
           comments,
-          'es'
+          modelLang
         );
       }
 

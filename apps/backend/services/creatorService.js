@@ -5,6 +5,9 @@ const NotificationEmitter = require('./notificationEmitter');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
 
 const TEASER_SECRET = process.env.TEASER_SECRET || 'pnptv-teaser-salt-2026';
+if (!process.env.TEASER_SECRET) {
+  logger.warn('TEASER_SECRET env var not set — using hardcoded fallback. Set it in .env.production to silence this warning.');
+}
 
 function isTeaserPost(postId, viewerId) {
   const hash = crypto.createHmac('sha256', TEASER_SECRET)
@@ -553,7 +556,7 @@ class CreatorService {
   // ── Dashboard ──────────────────────────────────────────────────────────────
 
   static async getCreatorDashboard(creatorId) {
-    const [subscriberRes, earningsRes, exclusiveRes, applicationRes] = await Promise.all([
+    const [subscriberRes, earningsRes, exclusiveRes, applicationRes, enrollmentRes] = await Promise.all([
       query(
         'SELECT creator_subscriber_count, creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_dash_address, stream_rules FROM users WHERE id = $1',
         [creatorId]
@@ -573,6 +576,10 @@ class CreatorService {
         'SELECT id, status, call_scheduled, call_scheduled_at, created_at FROM model_applications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
         [creatorId]
       ),
+      query(
+        'SELECT id, tier, status, admin_notes, created_at, reviewed_at FROM creator_enrollments WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
+        [creatorId]
+      ),
     ]);
 
     const user = subscriberRes.rows[0] || {};
@@ -587,6 +594,7 @@ class CreatorService {
       monthlyEarnings: parseFloat(earningsRes.rows[0]?.monthly_earnings) || 0,
       exclusivePostCount: exclusiveRes.rows[0]?.count || 0,
       application: applicationRes.rows[0] || null,
+      enrollment: enrollmentRes.rows[0] || null,
       walletAddress: user.creator_dash_address || null,
       streamRules: user.stream_rules || null,
     };
