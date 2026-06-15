@@ -41,6 +41,8 @@ function mapEpaycoError(epaycoError?: string | null): string | null {
 
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
+const RECURRING_PLANS = new Set(["prime-week-pass-7d", "monthly-pass", "prime-diamond-pass-365d"]);
+
 const RECOMMENDED_PLAN = "prime-diamond-pass-365d";
 
 function SubscribeUsdcCopyLink({ url, lang }: { url: string; lang: string }) {
@@ -443,6 +445,35 @@ export default function Subscribe() {
       } else {
         setError(err instanceof Error ? err.message : s.paymentErrorGeneric);
       }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCryptoSubscribe(planId: string) {
+    if (submitting) return;
+    setSelectedPlan(planId);
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/webapp/payments/usdc/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ planId, email: user?.email || undefined }),
+      });
+      const data = await res.json();
+      if (data.success && data.paymentLink) {
+        if (isTelegramContext()) {
+          window.Telegram!.WebApp.openLink(data.paymentLink);
+        } else {
+          window.open(data.paymentLink, "_blank", "noopener,noreferrer");
+        }
+      } else {
+        setError(data.error || (t.lang === "es" ? "No se pudo crear la suscripción. Intenta de nuevo." : "Failed to create subscription. Please try again."));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (t.lang === "es" ? "No se pudo crear la suscripción. Intenta de nuevo." : "Failed to create subscription. Please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -1051,13 +1082,23 @@ export default function Subscribe() {
                   <span>💳</span> {t.lang === "es" ? "Pagar con Tarjeta" : "Pay with Card"}
                 </button>
                 {usdcAvailable !== false && (
-                  <button
-                    disabled={submitting}
-                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdc"); }}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-green-300 border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
-                  >
-                    <span>🪙</span> {t.lang === "es" ? "Cripto −20%" : "Crypto −20%"}
-                  </button>
+                  RECURRING_PLANS.has(plan.id) ? (
+                    <button
+                      disabled={submitting}
+                      onClick={(e) => { e.stopPropagation(); handleCryptoSubscribe(plan.id); }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-green-300 border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                    >
+                      <span>🔄</span> {t.lang === "es" ? "Cripto Auto-renov." : "Auto-renew Crypto"}
+                    </button>
+                  ) : (
+                    <button
+                      disabled={submitting}
+                      onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdc"); }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-green-300 border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                    >
+                      <span>🪙</span> {t.lang === "es" ? "Cripto −20%" : "Crypto −20%"}
+                    </button>
+                  )
                 )}
               </div>
             </button>

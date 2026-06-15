@@ -9450,6 +9450,124 @@ const usdcPrepareLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Subscribable (recurring) plan IDs → NOWPayments subscription plan ID env var names
+const NOWPAYMENTS_SUBSCRIPTION_PLAN_MAP = {
+  'prime-week-pass-7d': 'NOWPAYMENTS_PLAN_WEEKLY',
+  'monthly-pass': 'NOWPAYMENTS_PLAN_MONTHLY',
+  'prime-diamond-pass-365d': 'NOWPAYMENTS_PLAN_YEARLY',
+};
+
+const usdcSubscribeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 3,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  message: { success: false, error: 'Too many subscription requests. Please wait a few minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// POST /api/webapp/payments/usdc/subscribe — create NOWPayments recurring subscription
+app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscribeLimiter, asyncHandler(async (req, res) => {
+  if (!NOWPAYMENTS_API_KEY) {
+    return res.status(503).json({ success: false, error: 'USDC payments are not configured.', code: 'NOWPAYMENTS_NOT_CONFIGURED' });
+  }
+
+  const user = req.session.user;
+  const { planId, email } = req.body;
+  if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
+
+  const envVarName = NOWPAYMENTS_SUBSCRIPTION_PLAN_MAP[planId];
+  if (!envVarName) {
+    return res.status(400).json({ success: false, error: 'This plan does not support auto-renewing subscriptions. Use one-time crypto payment instead.' });
+  }
+  const nowpaymentsPlanId = process.env[envVarName];
+  if (!nowpaymentsPlanId) {
+    return res.status(503).json({ success: false, error: 'Subscription plan not configured.', code: 'NOWPAYMENTS_NOT_CONFIGURED' });
+  }
+
+  const userId = String(user.telegram_id || user.id);
+  const { query: dbQuery } = require('../../config/postgres');
+  const webappUrl = process.env.WEBAPP_URL || 'https://pnptv.app';
+
+  // Fetch plan details for display
+  const planRes = await dbQuery('SELECT * FROM plans WHERE id = $1 AND active = true', [planId]);
+  const plan = planRes.rows[0];
+  if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+  const usdAmount = parseFloat(plan.price);
+  const planDisplayName = plan.display_name || plan.name;
+
+  // Return existing pending subscription if created within the last 23 hours
+  const existingRes = await dbQuery(
+    `SELECT id, metadata FROM dash_subscription_orders
+     WHERE user_id = $1 AND plan_id = $2 AND status = 'pending'
+       AND metadata->>'flow' = 'subscription'
+       AND created_at > NOW() - INTERVAL '23 hours'
+     ORDER BY created_at DESC LIMIT 1`,
+    [userId, planId]
+  );
+  if (existingRes.rows.length > 0) {
+    const existing = existingRes.rows[0];
+    const meta = existing.metadata || {};
+    if (meta.paymentLink) {
+      logger.info('[NOWPayments] Subscribe: resuming existing subscription order', { userId, planId, orderId: existing.id });
+      return res.json({
+        success: true,
+        paymentLink: meta.paymentLink,
+        subscriptionId: meta.subscriptionId || null,
+        planName: planDisplayName,
+        usdAmount,
+        resumed: true,
+      });
+    }
+  }
+
+  // Create NOWPayments subscription
+  const customerEmail = email || user.email || null;
+  let subscriptionId, paymentLink;
+  try {
+    const subResp = await axios.post(`${NOWPAYMENTS_URL}/subscriptions`, {
+      subscription_plan_id: parseInt(nowpaymentsPlanId, 10),
+      ...(customerEmail ? { customer_email: customerEmail } : {}),
+    }, {
+      headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
+      timeout: 10000,
+    });
+    subscriptionId = subResp.data?.result?.id;
+    paymentLink = subResp.data?.result?.payment_link;
+    if (!paymentLink) throw new Error('No payment_link in response');
+  } catch (err) {
+    logger.error('[NOWPayments] Subscription creation failed', { userId, planId, error: err.message });
+    return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
+  }
+
+  const orderId = `pnptv-nowp-sub-${userId}-${Date.now()}`;
+
+  await dbQuery(
+    `INSERT INTO dash_subscription_orders
+       (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
+     VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+     ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
+    [
+      userId,
+      planId,
+      customerEmail,
+      usdAmount,
+      orderId,
+      JSON.stringify({ provider: 'nowpayments', flow: 'subscription', subscriptionId, paymentLink, nowpaymentsPlanId }),
+    ]
+  );
+
+  logger.info('[NOWPayments] Subscription created', { userId, planId, orderId, subscriptionId, usdAmount });
+
+  return res.json({
+    success: true,
+    paymentLink,
+    subscriptionId,
+    planName: planDisplayName,
+    usdAmount,
+  });
+}));
+
 // POST /api/webapp/payments/usdc/prepare — create DB order record for widget flow (no NOWPayments API call)
 app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLimiter, asyncHandler(async (req, res) => {
   if (!NOWPAYMENTS_API_KEY) {
@@ -9463,6 +9581,35 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
   const userId = String(user.telegram_id || user.id);
   const { query: dbQuery } = require('../../config/postgres');
   const webappUrl = process.env.WEBAPP_URL || 'https://pnptv.app';
+
+  // Return existing pending invoice if created within the last 23 hours — avoids duplicate invoices
+  if (planId !== 'creator_monthly') {
+    const resumeRes = await dbQuery(
+      `SELECT id, btcpay_invoice_id, usd_amount, plan_id, metadata FROM dash_subscription_orders
+       WHERE user_id = $1 AND plan_id = $2 AND status = 'pending'
+         AND metadata->>'flow' = 'hosted'
+         AND created_at > NOW() - INTERVAL '23 hours'
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId, planId]
+    );
+    if (resumeRes.rows.length > 0) {
+      const resumable = resumeRes.rows[0];
+      const meta = resumable.metadata || {};
+      if (meta.invoiceUrl) {
+        logger.info('[NOWPayments] Prepare: resuming existing pending order', { userId, planId, orderId: resumable.btcpay_invoice_id });
+        const resumePlan = await dbQuery('SELECT display_name, name FROM plans WHERE id = $1', [planId]).catch(() => ({ rows: [] }));
+        const resumePlanName = resumePlan.rows[0]?.display_name || resumePlan.rows[0]?.name || planId;
+        return res.json({
+          success: true,
+          orderId: resumable.btcpay_invoice_id,
+          usdAmount: parseFloat(resumable.usd_amount),
+          planName: resumePlanName,
+          invoiceUrl: meta.invoiceUrl,
+          resumed: true,
+        });
+      }
+    }
+  }
 
   let planDisplayName;
   let usdAmount;
@@ -9697,7 +9844,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
   if (lockRes.rows.length === 0) {
     // Either already completed/failed, or another delivery is processing — idempotent ack
     const existingRes = await dbQuery(
-      `SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 LIMIT 1`,
+      `SELECT id, status, user_id, plan_id, usd_amount, creator_id FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 LIMIT 1`,
       [order_id]
     );
     const existing = existingRes.rows[0];
@@ -9705,6 +9852,72 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       logger.error('[NOWPayments] IPN: order not found', { order_id });
       return res.status(404).json({ error: 'order_not_found' });
     }
+
+    // Subscription renewal: the original order is already completed but NOWPayments fires a new
+    // IPN with the same order_id for each billing cycle. Create a renewal order and re-grant.
+    if (existing.status === 'completed' && req.body.subscription_id) {
+      const renewalOrderId = `${order_id}:renewal:${payment_id}`;
+      const renewalCheck = await dbQuery(
+        `SELECT id FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 LIMIT 1`,
+        [renewalOrderId]
+      );
+      if (renewalCheck.rows.length > 0) {
+        logger.info('[NOWPayments] IPN: renewal already processed', { order_id, renewalOrderId });
+        return res.json({ received: true });
+      }
+
+      logger.info('[NOWPayments] IPN: subscription renewal detected', { order_id, renewalOrderId, subscriptionId: req.body.subscription_id });
+      await dbQuery(
+        `INSERT INTO dash_subscription_orders
+           (user_id, plan_id, usd_amount, btcpay_invoice_id, status, metadata)
+         VALUES ($1, $2, $3, $4, 'processing', $5)`,
+        [
+          existing.user_id,
+          existing.plan_id,
+          existing.usd_amount,
+          renewalOrderId,
+          JSON.stringify({ provider: 'nowpayments', flow: 'subscription_renewal', subscriptionId: req.body.subscription_id, originalOrderId: order_id, paymentId: String(payment_id) }),
+        ]
+      );
+
+      try {
+        const PaymentServiceRenewal = require('../../services/paymentService');
+        const renewalGrantResult = await PaymentServiceRenewal.grantEntitlementsForPlan(
+          existing.user_id,
+          existing.plan_id,
+          'nowpayments',
+          existing.creator_id ? { creatorId: String(existing.creator_id) } : null,
+          renewalOrderId
+        );
+        if (!renewalGrantResult || renewalGrantResult.granted === 0) {
+          await dbQuery(
+            `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+            [renewalOrderId, `renewal:grant_zero:${existing.plan_id}`]
+          ).catch(() => {});
+          throw new Error(`grantEntitlementsForPlan returned zero grants for renewal plan ${existing.plan_id}`);
+        }
+      } catch (renewalGrantErr) {
+        await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+          [renewalOrderId, `renewal:grant_failed:${renewalGrantErr.message}`.slice(0, 500)]
+        ).catch(() => {});
+        throw renewalGrantErr;
+      }
+
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
+        [renewalOrderId, `nowpayments:renewal:${payment_id}`]
+      );
+      try {
+        const { cache: renewalCache } = require('../../config/redis');
+        await renewalCache.del(`user:${existing.user_id}`);
+        await renewalCache.del(`session:user:${existing.user_id}`);
+      } catch {}
+
+      logger.info('[NOWPayments] IPN: subscription renewal completed', { userId: existing.user_id, planId: existing.plan_id, renewalOrderId });
+      return res.json({ received: true });
+    }
+
     logger.info('[NOWPayments] IPN: already processed or in-flight', { order_id, status: existing.status });
     return res.json({ received: true });
   }
@@ -9721,7 +9934,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     const referenceAmount = (isCrossCurrency && pay_amount != null)
       ? parseFloat(pay_amount)
       : (price_amount != null ? parseFloat(price_amount) : null);
-    if (referenceAmount != null && Number.isFinite(paid) && Number.isFinite(referenceAmount) && referenceAmount > 0 && paid < referenceAmount * 0.99) {
+    if (referenceAmount != null && Number.isFinite(paid) && Number.isFinite(referenceAmount) && referenceAmount > 0 && paid < referenceAmount * 0.98) {
       logger.warn('[NOWPayments] IPN: underpayment detected', { order_id, actually_paid, pay_amount, price_amount, pay_currency, isCrossCurrency });
       await dbQuery(
         `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
@@ -9733,7 +9946,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     // IPN fields absent — validate against DB authoritative amount as fallback (same-currency only)
     const paid = parseFloat(actually_paid || '0');
     const expected = parseFloat(order.usd_amount);
-    if (paid > 0 && Number.isFinite(expected) && !pay_currency && paid < expected * 0.99) {
+    if (paid > 0 && Number.isFinite(expected) && !pay_currency && paid < expected * 0.98) {
       logger.warn('[NOWPayments] IPN: underpayment (fallback DB check)', { order_id, actually_paid, dbAmount: order.usd_amount });
       await dbQuery(
         `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
