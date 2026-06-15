@@ -9836,8 +9836,22 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     return res.json({ received: true });
   }
 
-  // payment_status === 'finished' — grant entitlements synchronously
-  // Respond with 5xx on failure so NOWPayments retries.
+  // payment_status === 'finished' — verify payment exists in NowPayments API before granting.
+  // Guards against test IPNs sent from the merchant dashboard (they pass HMAC but have fake payment IDs).
+  try {
+    const verifyRes = await fetch(`${NOWPAYMENTS_URL}/payment/${payment_id}`, {
+      headers: { 'x-api-key': NOWPAYMENTS_API_KEY },
+    });
+    if (verifyRes.status === 404) {
+      logger.error('[NOWPayments] IPN: payment_id not found in NowPayments API — likely test IPN, rejecting', { payment_id, order_id });
+      return res.status(400).json({ error: 'payment_not_found' });
+    }
+    if (!verifyRes.ok) {
+      logger.warn('[NOWPayments] IPN: could not verify payment via API (non-404), proceeding', { payment_id, status: verifyRes.status });
+    }
+  } catch (verifyErr) {
+    logger.warn('[NOWPayments] IPN: payment verification request failed, proceeding', { payment_id, error: verifyErr.message });
+  }
 
   // NP-H-01: atomic processing lock — prevents double-grant on concurrent IPN deliveries
   const lockRes = await dbQuery(
