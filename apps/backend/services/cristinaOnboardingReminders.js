@@ -142,86 +142,9 @@ const REMINDERS = [
   },
 ];
 
+// Disabled — Cristina onboarding DMs removed per admin request.
 class CristinaOnboardingReminders {
-  /**
-   * Process all pending onboarding reminders.
-   * Called by the scheduler (e.g. every 30 minutes).
-   */
-  static async process() {
-    const redis = getRedis();
-    if (!redis) {
-      logger.warn('CristinaOnboardingReminders: Redis not available, skipping');
-      return { sent: 0, skipped: 0 };
-    }
-
-    let sent = 0;
-    let skipped = 0;
-
-    // Find users who completed onboarding in the last 7 days
-    const { rows: users } = await db.query(`
-      SELECT id, first_name, username, language, created_at
-      FROM users
-      WHERE onboarding_complete = true
-        AND terms_accepted = true
-        AND is_active = true
-        AND tier != 'banned'
-        AND created_at > NOW() - INTERVAL '8 days'
-      ORDER BY created_at DESC
-      LIMIT 500
-    `);
-
-    if (!users.length) return { sent: 0, skipped: 0 };
-
-    const now = Date.now();
-
-    for (const user of users) {
-      const name = user.first_name || user.username || 'there';
-      const lang = (user.language || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
-      const createdAt = new Date(user.created_at).getTime();
-      const daysSinceCreation = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
-
-      for (const reminder of REMINDERS) {
-        if (daysSinceCreation < reminder.day) continue;
-
-        const redisKey = `${REDIS_PREFIX}${user.id}:${reminder.key}`;
-        const alreadySent = await redis.get(redisKey);
-        if (alreadySent) {
-          skipped++;
-          continue;
-        }
-
-        const message = reminder[lang](name);
-
-        try {
-          await sendSystemDM(CRISTINA_ID, user.id, message, db.query);
-          await redis.set(redisKey, '1', 'EX', REDIS_TTL);
-          sent++;
-
-          logger.info('Cristina onboarding reminder sent', {
-            userId: user.id,
-            reminder: reminder.key,
-            day: reminder.day,
-            lang,
-          });
-
-          // Small delay to avoid hammering DB
-          await new Promise((r) => setTimeout(r, 50));
-        } catch (err) {
-          logger.error('Failed to send Cristina onboarding reminder', {
-            userId: user.id,
-            reminder: reminder.key,
-            error: err.message,
-          });
-        }
-      }
-    }
-
-    if (sent > 0) {
-      logger.info('CristinaOnboardingReminders batch complete', { sent, skipped });
-    }
-
-    return { sent, skipped };
-  }
+  static async process() { return { sent: 0, skipped: 0 }; }
 }
 
 module.exports = CristinaOnboardingReminders;
