@@ -9929,6 +9929,34 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     logger.warn('[NOWPayments] IPN: payment_history write failed (non-fatal)', { error: histErr.message });
   }
 
+  // Insert canonical payments row — required for admin panel, reconciliation, and refund tracking
+  try {
+    const { query: pgInsert } = require('../../config/postgres');
+    const PlanModelNP3 = require('../../models/planModel');
+    const planForPayment = await PlanModelNP3.getById(order.plan_id).catch(() => null);
+    const planNameForPayment = planForPayment?.display_name || planForPayment?.name || order.plan_id;
+    await pgInsert(
+      `INSERT INTO payments (
+         user_id, plan_id, plan_name, amount, currency, provider, payment_method,
+         status, payment_id, reference, transaction_id, completed_at, completed_by,
+         manual_completion, metadata, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,'USD','nowpayments','usdc','completed',$5,$6,$7,NOW(),'nowpayments_webhook',false,$8::jsonb,NOW(),NOW())
+       ON CONFLICT (provider, transaction_id) WHERE transaction_id IS NOT NULL DO NOTHING`,
+      [
+        order.user_id,
+        order.plan_id,
+        planNameForPayment,
+        parseFloat(order.usd_amount) || 0,
+        order_id,
+        order_id,
+        String(payment_id),
+        JSON.stringify({ nowpayments_payment_id: String(payment_id), pay_currency, actually_paid }),
+      ]
+    );
+  } catch (paymentsErr) {
+    logger.warn('[NOWPayments] IPN: payments table insert failed (non-fatal)', { error: paymentsErr.message });
+  }
+
   logger.info('[NOWPayments] IPN: payment completed', { userId: order.user_id, planId: order.plan_id, order_id });
   return res.json({ received: true });
 }));
