@@ -127,8 +127,13 @@ function UrlMediaPlayer({ src, kind, playing, volume, startedAt }: UrlMediaPlaye
     } else {
       el.pause();
     }
+    // Only pause in cleanup when the video was actually playing. Unconditionally
+    // pausing here caused a stutter flicker whenever volume, muted, or startedAt
+    // changed while the video was mid-play, because React runs the old cleanup
+    // before re-running the effect body.
+    const wasPlaying = playing;
     return () => {
-      el.pause();
+      if (wasPlaying) el.pause();
     };
   }, [playing, volume, muted, canPlay, kind, startedAt]);
 

@@ -606,9 +606,11 @@ async function autoRotateMedia() {
       logger.warn('[MainStage] autoRotateMedia skipped: invalid Directus fileId', { fileId: pick?.fileId });
       return;
     }
-    // Use internal Directus URL so the LiveKit ingress pulls via Docker-internal
-    // network rather than the public nginx proxy (which throttles large MP4 downloads).
-    const src  = `${DIRECTUS_INTERNAL_URL}/assets/${pick.fileId}`;
+    // Public URL goes into Redis state so browser clients can load the file directly.
+    // The internal URL is passed only to the broadcaster so the LiveKit ingress can
+    // pull from the Docker-internal network (avoids nginx throttling large MP4s).
+    const publicSrc   = `${DIRECTUS_PUBLIC_URL}/assets/${pick.fileId}`;
+    const internalSrc = `${DIRECTUS_INTERNAL_URL}/assets/${pick.fileId}`;
 
     // Only CinemaGrid/Theater/Karaoke render URL-backed media. If the room is
     // in equal/spotlight mode, the video would be set in state but invisible
@@ -619,14 +621,14 @@ async function autoRotateMedia() {
     }
 
     // _fromAutoRotate bypasses the admin-lock auto-set; the lock stays false.
-    await setMedia({ kind: 'video', src, title: pick.title, playing: true, _fromAutoRotate: true });
+    await setMedia({ kind: 'video', src: publicSrc, title: pick.title, playing: true, _fromAutoRotate: true });
     logger.info('[MainStage] auto-rotated Prime Video', { fileId: pick.fileId, title: pick.title });
 
-    // Sync the broadcaster so the LiveKit ingress reflects the new source.
-    // Without this, the ingress keeps serving the previous video.
+    // Sync the broadcaster with the internal URL so the LiveKit ingress pulls
+    // from the Docker-internal network rather than the public proxy.
     try {
       const broadcaster = require('../workers/mainStageMediaBroadcaster');
-      await broadcaster.updateSource(src);
+      await broadcaster.updateSource(internalSrc);
       await broadcaster.setPlaying(true);
     } catch (bcErr) {
       logger.warn('[MainStage] autoRotateMedia: broadcaster sync failed (non-fatal)', { error: bcErr.message });
