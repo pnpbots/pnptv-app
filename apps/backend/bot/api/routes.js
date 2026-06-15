@@ -9435,8 +9435,16 @@ function validateNowpaymentsIpn(body, signature) {
   }
 }
 
+const usdcAvailableLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // GET /api/webapp/payments/usdc/available — check if NOWPayments is configured
-app.get('/api/webapp/payments/usdc/available', asyncHandler(async (req, res) => {
+app.get('/api/webapp/payments/usdc/available', usdcAvailableLimiter, asyncHandler(async (req, res) => {
   const configured = !!(NOWPAYMENTS_API_KEY && process.env.NOWPAYMENTS_PUBLIC_KEY);
   return res.json({ available: configured, configured });
 }));
@@ -9466,19 +9474,25 @@ const usdcSubscribeLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// POST /api/webapp/payments/usdc/subscribe — create NOWPayments recurring subscription
+// POST /api/webapp/payments/usdc/subscribe — create NOWPayments invoice for recurring plans
 app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscribeLimiter, asyncHandler(async (req, res) => {
   if (!NOWPAYMENTS_API_KEY) {
     return res.status(503).json({ success: false, error: 'USDC payments are not configured.', code: 'NOWPAYMENTS_NOT_CONFIGURED' });
   }
 
   const user = req.session.user;
-  const { planId, email } = req.body;
+  const { planId, email: rawEmail } = req.body;
   if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
+
+  // NP-H-02: validate email if provided
+  if (rawEmail != null && (typeof rawEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail.trim()) || rawEmail.trim().length > 254)) {
+    return res.status(400).json({ success: false, error: 'Invalid email address' });
+  }
+  const email = rawEmail?.trim() || null;
 
   const envVarName = NOWPAYMENTS_SUBSCRIPTION_PLAN_MAP[planId];
   if (!envVarName) {
-    return res.status(400).json({ success: false, error: 'This plan does not support auto-renewing subscriptions. Use one-time crypto payment instead.' });
+    return res.status(400).json({ success: false, error: 'This plan does not support auto-renewing subscriptions.' });
   }
   const nowpaymentsPlanId = process.env[envVarName];
   if (!nowpaymentsPlanId) {
@@ -9489,16 +9503,20 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
   const { query: dbQuery } = require('../../config/postgres');
   const webappUrl = process.env.WEBAPP_URL || 'https://pnptv.app';
 
-  // Fetch plan details for display
   const planRes = await dbQuery('SELECT * FROM plans WHERE id = $1 AND active = true', [planId]);
   const plan = planRes.rows[0];
   if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
-  const usdAmount = parseFloat(plan.price);
+
+  // Apply 20% crypto discount for non-crypto-fixed plans
+  const basePrice = parseFloat(plan.price);
+  const usdAmount = plan.payment_method === 'crypto'
+    ? basePrice
+    : Math.round(basePrice * 0.80 * 100) / 100;
   const planDisplayName = plan.display_name || plan.name;
 
-  // Return existing pending subscription if created within the last 23 hours
+  // Resume existing pending subscription invoice (within 23 hours)
   const existingRes = await dbQuery(
-    `SELECT id, metadata FROM dash_subscription_orders
+    `SELECT id, btcpay_invoice_id, metadata FROM dash_subscription_orders
      WHERE user_id = $1 AND plan_id = $2 AND status = 'pending'
        AND metadata->>'flow' = 'subscription'
        AND created_at > NOW() - INTERVAL '23 hours'
@@ -9506,100 +9524,50 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
     [userId, planId]
   );
   if (existingRes.rows.length > 0) {
-    const existing = existingRes.rows[0];
-    const meta = existing.metadata || {};
-    if (meta.paymentLink) {
-      logger.info('[NOWPayments] Subscribe: resuming existing subscription order', { userId, planId, orderId: existing.id });
-      return res.json({
-        success: true,
-        paymentLink: meta.paymentLink,
-        subscriptionId: meta.subscriptionId || null,
-        planName: planDisplayName,
-        usdAmount,
-        resumed: true,
-      });
-    }
-  }
-
-  // Create NOWPayments subscription — requires JWT Bearer + x-api-key
-  const customerEmail = email || user.email || null;
-  let subscriptionId, paymentLink;
-  try {
-    // Obtain JWT (cached in-process for up to 4 min; token TTL is 5 min)
-    const NP_JWT_CACHE_MS = 4 * 60 * 1000;
-    if (!global._npJwt || !global._npJwtAt || (Date.now() - global._npJwtAt) > NP_JWT_CACHE_MS) {
-      const authResp = await axios.post(`${NOWPAYMENTS_URL}/auth`, {
-        email: process.env.NOWPAYMENTS_EMAIL,
-        password: process.env.NOWPAYMENTS_PASSWORD,
-      }, { timeout: 8000 });
-      global._npJwt = authResp.data?.token;
-      global._npJwtAt = Date.now();
-      if (!global._npJwt) throw new Error('NOWPayments JWT auth failed');
-    }
-    const subBody = {
-      subscription_plan_id: parseInt(nowpaymentsPlanId, 10),
-      email: customerEmail || `${userId}@pnptv.app`,
-    };
-    const subResp = await axios.post(`${NOWPAYMENTS_URL}/subscriptions`, subBody, {
-      headers: {
-        'x-api-key': NOWPAYMENTS_API_KEY,
-        'Authorization': `Bearer ${global._npJwt}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 10000,
-    });
-    const resultData = Array.isArray(subResp.data?.result) ? subResp.data.result[0] : subResp.data?.result;
-    subscriptionId = resultData?.id ?? subResp.data?.id;
-    if (!subscriptionId) throw new Error('No subscription id in response: ' + JSON.stringify(subResp.data));
-    paymentLink = `https://nowpayments.io/payment/?sub_id=${subscriptionId}`;
-  } catch (err) {
-    const npErr = err.response?.data;
-    // "already subscribed" — fetch the existing subscription from NP and resume
-    if (npErr?.message?.includes('already subscribed')) {
-      try {
-        const listResp = await axios.get(`${NOWPAYMENTS_URL}/subscriptions?limit=5`, {
-          headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Authorization': `Bearer ${global._npJwt}` },
-          timeout: 8000,
-        });
-        const existing = (listResp.data?.result || []).find(s => String(s.subscription_plan_id) === String(nowpaymentsPlanId));
-        if (existing?.id) {
-          subscriptionId = existing.id;
-          paymentLink = `https://nowpayments.io/payment/?sub_id=${subscriptionId}`;
-        }
-      } catch (_) { /* fall through to generic error */ }
-    }
-    if (!paymentLink) {
-      logger.error('[NOWPayments] Subscription creation failed', { userId, planId, error: npErr || err.message });
-      return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
+    const meta = existingRes.rows[0].metadata || {};
+    if (meta.invoiceUrl) {
+      logger.info('[NOWPayments] Subscribe: resuming existing subscription invoice', { userId, planId });
+      return res.json({ success: true, orderId: existingRes.rows[0].btcpay_invoice_id, invoiceUrl: meta.invoiceUrl, planName: planDisplayName, usdAmount, resumed: true });
     }
   }
 
   const orderId = `pnptv-nowp-sub-${userId}-${Date.now()}`;
+  const customerEmail = email || user.email || null;
+
+  let invoiceUrl;
+  try {
+    const invoiceResp = await axios.post(`${NOWPAYMENTS_URL}/invoice`, {
+      price_amount: usdAmount,
+      price_currency: 'usd',
+      order_id: orderId,
+      order_description: `${planDisplayName} – PNPtv!`,
+      ipn_callback_url: `${webappUrl}/api/webhooks/nowpayments`,
+      success_url: `${webappUrl}/subscribe?nowpayments=success&order=${encodeURIComponent(orderId)}`,
+      cancel_url: `${webappUrl}/subscribe`,
+      ...(customerEmail ? { customer_email: customerEmail } : {}),
+    }, {
+      headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
+      timeout: 10000,
+    });
+    invoiceUrl = invoiceResp.data?.invoice_url;
+    if (!invoiceUrl) throw new Error('No invoice_url in response');
+  } catch (err) {
+    logger.error('[NOWPayments] Subscription invoice creation failed', { userId, planId, error: err.response?.data || err.message });
+    return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
+  }
 
   await dbQuery(
     `INSERT INTO dash_subscription_orders
        (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
      VALUES ($1, $2, $3, $4, $5, 'pending', $6)
      ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
-    [
-      userId,
-      planId,
-      customerEmail,
-      usdAmount,
-      orderId,
-      JSON.stringify({ provider: 'nowpayments', flow: 'subscription', subscriptionId, paymentLink, nowpaymentsPlanId }),
-    ]
+    [userId, planId, customerEmail, usdAmount, orderId,
+     JSON.stringify({ provider: 'nowpayments', flow: 'subscription', invoiceUrl, nowpaymentsPlanId })]
   );
 
-  logger.info('[NOWPayments] Subscription created', { userId, planId, orderId, subscriptionId, usdAmount });
+  logger.info('[NOWPayments] Subscription invoice created', { userId, planId, orderId, usdAmount });
 
-  return res.json({
-    success: true,
-    paymentLink,
-    subscriptionId,
-    planName: planDisplayName,
-    usdAmount,
-  });
+  return res.json({ success: true, orderId, invoiceUrl, planName: planDisplayName, usdAmount });
 }));
 
 // POST /api/webapp/payments/usdc/prepare — create DB order record for widget flow (no NOWPayments API call)
@@ -9611,6 +9579,10 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
   const user = req.session.user;
   const { planId, email, creatorId } = req.body;
   if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
+
+  if (email != null && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254)) {
+    return res.status(400).json({ success: false, error: 'Invalid email address' });
+  }
 
   const userId = String(user.telegram_id || user.id);
   const { query: dbQuery } = require('../../config/postgres');
@@ -9904,7 +9876,8 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       await dbQuery(
         `INSERT INTO dash_subscription_orders
            (user_id, plan_id, usd_amount, btcpay_invoice_id, status, metadata)
-         VALUES ($1, $2, $3, $4, 'processing', $5)`,
+         VALUES ($1, $2, $3, $4, 'processing', $5)
+         ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
         [
           existing.user_id,
           existing.plan_id,

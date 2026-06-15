@@ -63,6 +63,13 @@ async function runOnce() {
   let deleted = 0;
 
   try {
+    await fs.access(HANGOUTS_UPLOAD_ROOT);
+  } catch {
+    logger.error('[OrphanedMediaCleanup] Upload root inaccessible — aborting run', { path: HANGOUTS_UPLOAD_ROOT });
+    return 0;
+  }
+
+  try {
     const { rows } = await query(
       // chat_messages has no updated_at column — use edited_at (set when the
       // message was last mutated, including the soft-delete edit) with a
