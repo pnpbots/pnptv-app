@@ -68,7 +68,7 @@ async function runOnce() {
       // message was last mutated, including the soft-delete edit) with a
       // created_at fallback so rows deleted before edit tracking existed
       // still get collected after the full retention window.
-      `SELECT id, media_url FROM chat_messages
+      `SELECT id, media_url, content FROM chat_messages
        WHERE is_deleted = TRUE
          AND media_url IS NOT NULL
          AND COALESCE(edited_at, created_at) < NOW() - INTERVAL '30 days'
@@ -87,12 +87,17 @@ async function runOnce() {
       const filePath = resolveHangoutPath(row.media_url);
 
       if (!filePath) {
-        // Path is outside hangouts root — NULL it out so we stop retrying it
+        // Path is outside hangouts root — stop retrying it
         await query(
-          'UPDATE chat_messages SET media_url = NULL WHERE id = $1',
+          `UPDATE chat_messages SET media_url = NULL WHERE id = $1 AND (content IS NOT NULL AND content <> '')`,
+          [row.id]
+        ).catch(() => {});
+        // If content is also empty the UPDATE above matched 0 rows; hard-delete to satisfy the constraint
+        await query(
+          `DELETE FROM chat_messages WHERE id = $1 AND (content IS NULL OR content = '')`,
           [row.id]
         ).catch((err) => {
-          logger.error('[OrphanedMediaCleanup] Failed to null media_url (non-hangout)', { id: row.id, error: err.message });
+          logger.error('[OrphanedMediaCleanup] Failed to clean non-hangout row', { id: row.id, error: err.message });
         });
         continue;
       }
@@ -102,24 +107,28 @@ async function runOnce() {
         deleted += 1;
       } catch (unlinkErr) {
         if (unlinkErr.code === 'ENOENT') {
-          // File already gone — still NULL the column so we don't retry
-          logger.debug('[OrphanedMediaCleanup] File already absent, nulling column', { id: row.id, filePath });
+          // File already gone — still clear the row so we don't retry
+          logger.debug('[OrphanedMediaCleanup] File already absent, clearing row', { id: row.id, filePath });
         } else {
           logger.warn('[OrphanedMediaCleanup] Could not unlink file — skipping row', {
             id: row.id,
             filePath,
             error: unlinkErr.message,
           });
-          continue; // Don't null media_url; will retry next run when the I/O issue resolves
+          continue; // Don't clear; will retry next run when the I/O issue resolves
         }
       }
 
-      // NULL media_url so this row is never reprocessed
+      // Clear the row: null media_url if content exists, otherwise delete the row entirely
       await query(
-        'UPDATE chat_messages SET media_url = NULL WHERE id = $1',
+        `UPDATE chat_messages SET media_url = NULL WHERE id = $1 AND (content IS NOT NULL AND content <> '')`,
+        [row.id]
+      ).catch(() => {});
+      await query(
+        `DELETE FROM chat_messages WHERE id = $1 AND (content IS NULL OR content = '')`,
         [row.id]
       ).catch((err) => {
-        logger.error('[OrphanedMediaCleanup] Failed to null media_url after delete', { id: row.id, error: err.message });
+        logger.error('[OrphanedMediaCleanup] Failed to clear row after delete', { id: row.id, error: err.message });
       });
     }
   } catch (err) {

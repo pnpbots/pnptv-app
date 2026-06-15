@@ -1039,7 +1039,8 @@ class PaymentRecoveryService {
     }
 
     results.endTime = new Date();
-    logger.info('NOWPayments reconciliation complete', results);
+    const { _jwtToken: _omit, ...logSafeResults } = results;
+    logger.info('NOWPayments reconciliation complete', logSafeResults);
     return results;
   }
 
