@@ -130,8 +130,8 @@ export default function Subscribe() {
   const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
-  // NowPayments in-app modal state
-  const [paymentModal, setPaymentModal] = useState<{ invoiceUrl: string } | null>(null);
+  // NowPayments in-app popup handle
+  const paymentPopupRef = React.useRef<Window | null>(null);
 
   // USDC / USDT stablecoin state (NOWPayments widget)
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
@@ -364,7 +364,8 @@ export default function Subscribe() {
         if (cancelled) return;
         if (data.completed) {
           setUsdcPolling(false);
-          setPaymentModal(null);
+          paymentPopupRef.current?.close();
+          paymentPopupRef.current = null;
           setUsdcPaymentSuccess(true);
           try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
           await refreshUser();
@@ -435,7 +436,9 @@ export default function Subscribe() {
           if (isTelegramContext()) {
             window.Telegram!.WebApp.openLink(result.invoiceUrl);
           } else {
-            setPaymentModal({ invoiceUrl: result.invoiceUrl });
+            const w = window.screen.width, h = window.screen.height;
+            const pw = Math.min(500, w), ph = Math.min(720, h);
+            paymentPopupRef.current = window.open(result.invoiceUrl, "nowpayments_checkout", `width=${pw},height=${ph},left=${Math.round((w-pw)/2)},top=${Math.round((h-ph)/2)},resizable=yes,scrollbars=yes`);
           }
         } else {
           setError(s.failedToCreateUsdcInvoice);
@@ -481,7 +484,9 @@ export default function Subscribe() {
         if (isTelegramContext()) {
           window.Telegram!.WebApp.openLink(data.invoiceUrl);
         } else {
-          setPaymentModal({ invoiceUrl: data.invoiceUrl });
+            const w = window.screen.width, h = window.screen.height;
+            const pw = Math.min(500, w), ph = Math.min(720, h);
+            paymentPopupRef.current = window.open(data.invoiceUrl, "nowpayments_checkout", `width=${pw},height=${ph},left=${Math.round((w-pw)/2)},top=${Math.round((h-ph)/2)},resizable=yes,scrollbars=yes`);
         }
       } else {
         setError(data.error || (t.lang === "es" ? "No se pudo crear la suscripción. Intenta de nuevo." : "Failed to create subscription. Please try again."));
@@ -524,7 +529,9 @@ export default function Subscribe() {
           if (isTelegramContext()) {
             window.Telegram!.WebApp.openLink(result.invoiceUrl);
           } else {
-            setPaymentModal({ invoiceUrl: result.invoiceUrl });
+            const w = window.screen.width, h = window.screen.height;
+            const pw = Math.min(500, w), ph = Math.min(720, h);
+            paymentPopupRef.current = window.open(result.invoiceUrl, "nowpayments_checkout", `width=${pw},height=${ph},left=${Math.round((w-pw)/2)},top=${Math.round((h-ph)/2)},resizable=yes,scrollbars=yes`);
           }
         } else {
           setError(s.failedToCreateUsdcInvoice);
@@ -1325,40 +1332,6 @@ export default function Subscribe() {
         {s.goBack}
       </button>
 
-      {/* NowPayments in-app payment modal */}
-      {paymentModal && (
-        <div className="fixed inset-0 z-[9999] flex flex-col bg-black/90 backdrop-blur-sm">
-          {/* Header bar */}
-          <div className="flex items-center justify-between px-4 py-3 bg-[#0a0a0a] border-b border-white/10 shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="text-green-400 text-sm font-semibold">🪙 Crypto Payment</span>
-              <span className="text-xs text-pnp-textSecondary">Powered by NOWPayments</span>
-            </div>
-            <button
-              onClick={() => setPaymentModal(null)}
-              className="text-pnp-textSecondary hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10"
-              aria-label="Close payment"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          {/* Iframe */}
-          <iframe
-            src={paymentModal.invoiceUrl}
-            className="flex-1 w-full border-0"
-            sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-            title="Complete your crypto payment"
-            allow="payment"
-          />
-          {/* Footer */}
-          <div className="px-4 py-2 bg-[#0a0a0a] border-t border-white/10 shrink-0 flex items-center justify-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-            <span className="text-xs text-pnp-textSecondary">Waiting for payment confirmation…</span>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
