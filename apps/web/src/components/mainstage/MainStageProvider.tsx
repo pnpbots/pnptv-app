@@ -105,6 +105,85 @@ export interface MainStageProviderValue {
   clearCooldown: () => void;
 }
 
+// ─── Mini Stage Player helpers ─────────────────────────────────────────────
+
+const MINI_MEDIA_IDENTITY = "mainstage-media";
+type MiniView = "stage" | "mycam" | "others";
+
+interface MiniTrackInfo {
+  identity: string;
+  isLocal: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  track: any;
+}
+
+function useMiniTracks(room: Room, enabled: boolean): MiniTrackInfo[] {
+  const [tracks, setTracks] = useState<MiniTrackInfo[]>([]);
+  useEffect(() => {
+    if (!enabled) { setTracks([]); return; }
+    const collect = () => {
+      const result: MiniTrackInfo[] = [];
+      room.remoteParticipants.forEach((p) => {
+        p.trackPublications.forEach((pub) => {
+          if (pub.kind === Track.Kind.Video && pub.track) {
+            result.push({ identity: p.identity, isLocal: false, track: pub.track });
+          }
+        });
+      });
+      if (room.localParticipant) {
+        room.localParticipant.trackPublications.forEach((pub) => {
+          if (pub.kind === Track.Kind.Video && pub.track && pub.source !== Track.Source.ScreenShare) {
+            result.push({ identity: room.localParticipant.identity, isLocal: true, track: pub.track });
+          }
+        });
+      }
+      setTracks(result);
+    };
+    collect();
+    room.on(RoomEvent.TrackSubscribed, collect);
+    room.on(RoomEvent.TrackUnsubscribed, collect);
+    room.on(RoomEvent.LocalTrackPublished, collect);
+    room.on(RoomEvent.LocalTrackUnpublished, collect);
+    room.on(RoomEvent.ParticipantConnected, collect);
+    room.on(RoomEvent.ParticipantDisconnected, collect);
+    return () => {
+      room.off(RoomEvent.TrackSubscribed, collect);
+      room.off(RoomEvent.TrackUnsubscribed, collect);
+      room.off(RoomEvent.LocalTrackPublished, collect);
+      room.off(RoomEvent.LocalTrackUnpublished, collect);
+      room.off(RoomEvent.ParticipantConnected, collect);
+      room.off(RoomEvent.ParticipantDisconnected, collect);
+    };
+  }, [room, enabled]);
+  return tracks;
+}
+
+function MiniVideoElement({ track }: { track: unknown }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !track) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const t = track as any;
+    if (typeof t.attach === "function") t.attach(el);
+    return () => { try { if (typeof t.detach === "function") t.detach(el); } catch { /* noop */ } };
+  }, [track]);
+  return <video ref={ref} autoPlay playsInline muted className="w-full h-full object-cover" />;
+}
+
+function MiniUrlVideo({ src, playing }: { src: string; playing: boolean }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !src) return;
+    el.src = src;
+    el.load();
+    if (playing) el.play().catch(() => {});
+    return () => { el.pause(); el.src = ""; };
+  }, [src, playing]);
+  return <video ref={ref} playsInline muted loop className="w-full h-full object-cover" />;
+}
+
 // ─── Room singleton ────────────────────────────────────────────────────────
 
 const ROOM_OPTIONS: RoomOptions = {
@@ -691,6 +770,36 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   const clearError = useCallback(() => setError(null), []);
   const clearCooldown = useCallback(() => setCooldownSeconds(null), []);
 
+  // ── Mini player state ──────────────────────────────────────────────────────
+  const [miniDismissed, setMiniDismissed] = useState(false);
+  const [miniView, setMiniView] = useState<MiniView>("stage");
+  const [miniPos, setMiniPos] = useState({ x: 0, y: 0 });
+  const miniDragOrigin = useRef<{ px: number; py: number; ox: number; oy: number } | null>(null);
+  const [miniPathname, setMiniPathname] = useState(() =>
+    typeof window !== "undefined" ? window.location.pathname : "/"
+  );
+  useEffect(() => {
+    const onNav = () => {
+      const p = window.location.pathname;
+      setMiniPathname(p);
+      if (!p.startsWith("/mainstage")) setMiniDismissed(false);
+    };
+    window.addEventListener("pnptv:navigation", onNav);
+    window.addEventListener("popstate", onNav);
+    return () => {
+      window.removeEventListener("pnptv:navigation", onNav);
+      window.removeEventListener("popstate", onNav);
+    };
+  }, []);
+  const isOnMainStage = miniPathname.startsWith("/mainstage");
+  const hasActiveMiniMedia =
+    state?.media?.kind === "video" && Boolean(state?.media?.playing) && Boolean(state?.media?.src);
+  const showMiniPlayer = isAuthenticated && !isOnMainStage && !miniDismissed && (isJoined || hasActiveMiniMedia);
+  const miniTracks = useMiniTracks(sharedRoom, showMiniPlayer && isJoined);
+  const miniMediaTrack = miniTracks.find((t) => t.identity === MINI_MEDIA_IDENTITY);
+  const miniLocalTrack = miniTracks.find((t) => t.isLocal);
+  const miniOtherTracks = miniTracks.filter((t) => !t.isLocal && t.identity !== MINI_MEDIA_IDENTITY);
+
   const value = useMemo<MainStageProviderValue>(
     () => ({
       room: sharedRoom,
@@ -735,6 +844,133 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   return (
     <MainStageContext.Provider value={value}>
       {children}
+
+      {/* ── Persistent mini player — survives route changes ── */}
+      {showMiniPlayer && (
+        <div
+          className="fixed z-[200] select-none touch-none"
+          style={{
+            bottom: 88,
+            right: 16,
+            transform: `translate(${miniPos.x}px, ${miniPos.y}px)`,
+            width: 210,
+            borderRadius: 14,
+            overflow: "hidden",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.09)",
+            background: "#0d0d0f",
+            cursor: miniDragOrigin.current ? "grabbing" : "grab",
+          }}
+          onPointerDown={(e) => {
+            if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
+            miniDragOrigin.current = { px: e.clientX, py: e.clientY, ox: miniPos.x, oy: miniPos.y };
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          }}
+          onPointerMove={(e) => {
+            if (!miniDragOrigin.current) return;
+            setMiniPos({
+              x: miniDragOrigin.current.ox + (e.clientX - miniDragOrigin.current.px),
+              y: miniDragOrigin.current.oy + (e.clientY - miniDragOrigin.current.py),
+            });
+          }}
+          onPointerUp={() => { miniDragOrigin.current = null; }}
+        >
+          {/* Header */}
+          <div
+            className="flex items-center justify-between px-2.5 py-1.5"
+            style={{ background: "rgba(0,0,0,0.88)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}
+          >
+            <span className="text-[11px] font-bold tracking-wide" style={{ color: "#D4007A" }}>
+              Main Stage
+            </span>
+            <div className="flex items-center gap-2" data-no-drag>
+              <a
+                href="/mainstage"
+                className="text-white/35 hover:text-white/75 transition-colors"
+                aria-label="Open Main Stage"
+                style={{ lineHeight: 0 }}
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+              <button
+                onClick={() => setMiniDismissed(true)}
+                className="text-white/35 hover:text-white/75 transition-colors"
+                aria-label="Close mini player"
+                style={{ lineHeight: 0 }}
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Video area — 16:9 */}
+          <div className="relative bg-black" style={{ paddingTop: "56.25%" }}>
+            <div className="absolute inset-0">
+              {miniView === "stage" && (
+                miniMediaTrack ? (
+                  <MiniVideoElement track={miniMediaTrack.track} />
+                ) : hasActiveMiniMedia && state?.media?.src ? (
+                  <MiniUrlVideo src={state.media.src} playing={Boolean(state.media.playing)} />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <svg className="w-6 h-6 text-white/12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2} aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-3.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-1.5A1.125 1.125 0 0118 18.375M20.625 4.5H3.375m17.25 0c.621 0 1.125.504 1.125 1.125M20.625 4.5h-1.5C18.504 4.5 18 5.004 18 5.625m3.75 0v1.5c0 .621-.504 1.125-1.125 1.125M3.375 4.5c-.621 0-1.125.504-1.125 1.125M3.375 4.5h1.5C5.496 4.5 6 5.004 6 5.625m-3.75 0v1.5c0 .621.504 1.125 1.125 1.125m0 0h1.5m-1.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m1.5-3.75C5.496 8.25 6 8.754 6 9.375v1.5m0-5.25v5.25m0-5.25C6 5.004 6.504 4.5 7.125 4.5h9.75c.621 0 1.125.504 1.125 1.125m1.125 2.625h1.5m-1.5 0A1.125 1.125 0 0118 9.375v1.5m1.5-3.75C19.496 8.25 20 8.754 20 9.375v1.5m0-5.25v5.25m0-5.25C20 5.004 19.496 4.5 18.875 4.5M9 11.25v1.5M12 9v3.75m3-6v6" />
+                    </svg>
+                  </div>
+                )
+              )}
+              {miniView === "mycam" && (
+                miniLocalTrack ? (
+                  <MiniVideoElement track={miniLocalTrack.track} />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-white/25 text-[10px]">
+                    Camera off
+                  </div>
+                )
+              )}
+              {miniView === "others" && (
+                miniOtherTracks.length > 0 ? (
+                  <div className="w-full h-full flex">
+                    {miniOtherTracks.slice(0, 2).map((t) => (
+                      <div key={t.identity} className="flex-1 h-full overflow-hidden">
+                        <MiniVideoElement track={t.track} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-white/25 text-[10px]">
+                    No cammers yet
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+
+          {/* View tabs */}
+          <div
+            className="flex"
+            style={{ background: "rgba(0,0,0,0.90)", borderTop: "1px solid rgba(255,255,255,0.06)" }}
+            data-no-drag
+          >
+            {(["stage", "mycam", "others"] as MiniView[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setMiniView(v)}
+                className="flex-1 py-1.5 text-[10px] font-semibold transition-colors"
+                style={{
+                  color: miniView === v ? "#D4007A" : "rgba(255,255,255,0.32)",
+                  borderBottom: miniView === v ? "2px solid #D4007A" : "2px solid transparent",
+                }}
+              >
+                {v === "stage" ? "Stage" : v === "mycam" ? "My Cam" : "Others"}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </MainStageContext.Provider>
   );
 }

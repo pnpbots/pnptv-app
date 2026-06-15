@@ -194,6 +194,8 @@ function UrlMediaPlayer({ src, kind, playing, volume, startedAt }: UrlMediaPlaye
         preload="auto"
         muted={muted}
         controls={false}
+        loop
+        onEnded={() => { videoRef.current?.play().catch(() => {}); }}
       />
       <PrimeWatermark />
       {!canPlay && (
@@ -282,7 +284,7 @@ function PrimeWatermark() {
     <>
       {/* Layer 1 — repeating diagonal watermark across the whole video */}
       <div
-        className="absolute inset-0 pointer-events-none z-[11] mix-blend-screen"
+        className="absolute inset-0 pointer-events-none z-[11]"
         aria-hidden
         style={{
           backgroundImage: `url("data:image/svg+xml;charset=utf-8,${encoded}")`,
@@ -290,7 +292,7 @@ function PrimeWatermark() {
           backgroundSize: "320px 180px",
           backgroundPosition: `${patternOffset}px ${patternOffset}px`,
           transition: "background-position 12s linear",
-          willChange: "background-position",
+          opacity: 0.9,
         }}
       />
 

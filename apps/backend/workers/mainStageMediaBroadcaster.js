@@ -39,12 +39,13 @@ const MAX_BACKOFF_MS     = 5 * 60_000;
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
-let stopping        = false;
-let backoffMs       = MIN_BACKOFF_MS;
-let currentSrc      = null;
-let isPlaying       = false;
-let ingressId       = null;
-let retryTimer      = null;
+let stopping          = false;
+let backoffMs         = MIN_BACKOFF_MS;
+let currentSrc        = null;
+let lastReconciledSrc = null; // tracks which src was last successfully created
+let isPlaying         = false;
+let ingressId         = null;
+let retryTimer        = null;
 // If the LiveKit server's ingress service is not provisioned (no ingress
 // binary / no Redis), createIngress returns "ingress not connected". Retrying
 // won't help until infra is fixed, so we latch here and skip further attempts.
@@ -189,10 +190,30 @@ async function reconcile() {
   }
 
   try {
-    // Always recreate so a source change is reflected. LiveKit's URL_INPUT
-    // doesn't support updating the URL in-place.
+    // Idempotency: if we already have an ingress for this exact source, verify
+    // it's still alive before killing and recreating it. This prevents bot-restart
+    // blackouts when the source hasn't changed.
+    if (ingressId && lastReconciledSrc === currentSrc) {
+      try {
+        const client = getClient();
+        const existing = await client.listIngress({ roomName: ROOM_NAME });
+        const alive = existing.find(
+          (i) => i.ingressId === ingressId && i.participantIdentity === MEDIA_BOT_IDENTITY
+        );
+        if (alive) {
+          logger.info('[MainStageMedia] ingress already serving same src — skipping recreate', { ingressId });
+          backoffMs = MIN_BACKOFF_MS;
+          return;
+        }
+      } catch (checkErr) {
+        logger.warn('[MainStageMedia] ingress health-check failed — will recreate', { error: checkErr.message });
+      }
+    }
+
+    // Source changed or ingress gone — delete existing and create new.
     await deleteExistingIngresses();
     await createUrlIngress(currentSrc);
+    lastReconciledSrc = currentSrc;
     backoffMs = MIN_BACKOFF_MS;
   } catch (err) {
     if (isIngressInfraError(err)) {
