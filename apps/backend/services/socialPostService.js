@@ -92,58 +92,10 @@ class SocialPostService {
     if (viewerTier !== undefined) {
       posts = SocialPostService._applyContentTierBlur(posts, viewerTier, isAdmin);
     }
-    // Reorder within the page for category variety + engagement boost
+    // Interleave by author so every user gets seen before prolific posters dominate
     posts = SocialPostService._diversifyFeed(posts);
     const page = posts.slice(0, lim);
     const nextCursor = posts.length > lim ? String(page[page.length - 1].id) : null;
-
-    // Pin latest promoted post at top of first page only (no cursor = first page)
-    if (!cursorId) {
-      const pinnedIds = new Set(page.filter(p => p.is_promoted).map(p => p.id));
-      const { rows: promotedRows } = await query(
-        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
-                sp.source_channel,
-                sp.reply_to_id, sp.repost_of_id,
-                sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
-                sp.is_promoted, sp.promoted_link, sp.promoted_link_label, sp.promoted_thumbnail,
-                sp.promoted_link2, sp.promoted_link2_label,
-                COALESCE(sp.content_tier, 'free') as content_tier,
-                u.id as author_id, u.username as author_username,
-                u.first_name as author_first_name, u.photo_file_id as author_photo,
-                u.creator_status as author_creator_status, u.creator_type as author_creator_type,
-                u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
-                EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,
-                NULL as repost_content, NULL as repost_created_at,
-                NULL as repost_author_username, NULL as repost_author_first_name
-         FROM social_posts sp
-         JOIN users u ON sp.user_id = u.id
-         WHERE sp.is_promoted = true AND sp.is_deleted = false
-           AND sp.channel_id IS NULL
-           AND sp.user_id != ALL($2::text[])
-         ORDER BY sp.id DESC
-         LIMIT 1`,
-        [userId, blockedParam]
-      );
-
-      // Auto-generate "New on PRIME" carousel post (latest 10 published videos)
-      const carouselPost = await SocialPostService._buildPrimeCarouselPost();
-
-      let injected = page;
-      if (promotedRows.length > 0) {
-        let promoted = sanitizePostRows(promotedRows)[0];
-        // Apply the same tier gate as the rest of the feed (CRIT-01)
-        [promoted] = SocialPostService._applyContentTierBlur([promoted], viewerTier, isAdmin);
-        // Remove duplicate if it already appears in the page
-        const filtered = pinnedIds.has(promoted.id)
-          ? page.filter(p => p.id !== promoted.id)
-          : page;
-        injected = [promoted, ...filtered];
-      }
-      if (carouselPost) {
-        injected = [injected[0], carouselPost, ...injected.slice(1)].filter(Boolean);
-      }
-      return { posts: injected, nextCursor };
-    }
 
     return { posts: page, nextCursor };
   }
@@ -309,36 +261,29 @@ class SocialPostService {
   static _diversifyFeed(posts) {
     if (posts.length <= 4) return posts;
 
-    const now = Date.now();
-    const scored = posts.map(p => {
-      const ageHours = Math.max(0, (now - new Date(p.created_at).getTime()) / 3600000);
-      const engagement = (p.likes_count || 0) * 3 + (p.reposts_count || 0) * 2 + (p.replies_count || 0);
-      // Small engagement boost decays over 48h; keeps recent content relevant even at 0 engagement
-      return { ...p, _score: engagement + Math.exp(-ageHours / 48) };
-    });
+    // Group by author — posts already arrive newest-first from the DB query
+    const byAuthor = new Map();
+    for (const p of posts) {
+      const key = p.author_id;
+      if (!byAuthor.has(key)) byAuthor.set(key, []);
+      byAuthor.get(key).push(p);
+    }
 
-    // Group by category, sort each group by score desc
-    const byCategory = {};
-    scored.forEach(p => {
-      const cat = p.category || 'social';
-      if (!byCategory[cat]) byCategory[cat] = [];
-      byCategory[cat].push(p);
-    });
-    Object.values(byCategory).forEach(arr => arr.sort((a, b) => b._score - a._score));
+    // Order authors by their most recent post so the overall feed stays recency-first
+    const authorKeys = [...byAuthor.keys()].sort(
+      (a, b) => (byAuthor.get(b)[0].id - byAuthor.get(a)[0].id)
+    );
 
-    // Round-robin interleave across categories (sorted for determinism)
-    const cats = Object.keys(byCategory).sort();
-    const idx = {};
-    cats.forEach(c => { idx[c] = 0; });
-
+    // Round-robin: 1 post per author before anyone gets a second slot
+    const indices = {};
+    authorKeys.forEach(k => { indices[k] = 0; });
     const result = [];
     while (result.length < posts.length) {
       let added = false;
-      for (const cat of cats) {
-        if (idx[cat] < byCategory[cat].length) {
-          const p = byCategory[cat][idx[cat]++];
-          delete p._score;
-          result.push(p);
+      for (const key of authorKeys) {
+        const arr = byAuthor.get(key);
+        if (indices[key] < arr.length) {
+          result.push(arr[indices[key]++]);
           added = true;
         }
       }
