@@ -279,7 +279,7 @@ function PrimeWatermark() {
       <text x='160' y='30' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='32' font-weight='900' fill='rgba(255,255,255,0.32)' stroke='rgba(0,0,0,0.55)' stroke-width='1.1' letter-spacing='2'>PNPtv! PRIME</text>
       <text x='160' y='62' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='16' font-weight='800' fill='rgba(255,255,255,0.26)' stroke='rgba(0,0,0,0.45)' stroke-width='0.7' letter-spacing='2'>SUBSCRIBE TO WATCH</text>
       <text x='160' y='92' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='32' font-weight='900' fill='rgba(229,255,0,0.30)' stroke='rgba(0,0,0,0.55)' stroke-width='1.1' letter-spacing='2'>PNPtv! PRIME</text>
-      <text x='160' y='124' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.22)' stroke='rgba(0,0,0,0.42)' stroke-width='0.6'>app.pnptv.app/subscribe</text>
+      <text x='160' y='124' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.22)' stroke='rgba(0,0,0,0.42)' stroke-width='0.6'>pnptv.app/subscribe</text>
       <text x='160' y='156' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.22)' stroke='rgba(0,0,0,0.42)' stroke-width='0.6' letter-spacing='1'>MEMBERS ONLY · DO NOT RECORD</text>
     </g>
   </svg>`;

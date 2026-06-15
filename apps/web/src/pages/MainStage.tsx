@@ -156,6 +156,8 @@ interface MainStageInnerProps {
   spotlight?: MainStageState["spotlight"];
   showTips: boolean;
   showBottomBar?: boolean;
+  onSendReaction?: (emoji: string) => void;
+  canScreenShare?: boolean;
 }
 
 function MainStageInner({
@@ -176,6 +178,8 @@ function MainStageInner({
   spotlight,
   showTips,
   showBottomBar = true,
+  onSendReaction,
+  canScreenShare,
 }: MainStageInnerProps) {
   return (
     <>
@@ -240,11 +244,16 @@ function MainStageInner({
           isAdmin={isAdmin}
           onLeave={onLeave}
           spotlight={spotlight}
+          onSendReaction={onSendReaction}
+          canScreenShare={canScreenShare}
         />
       )}
     </>
   );
 }
+
+interface ChatMessage { id: string; userId: string | number; displayName: string; text: string; timestamp: number; }
+interface FloatingReaction { id: string; emoji: string; x: number; }
 
 function fmtMmSs(secs: number): string {
   const m = Math.floor(secs / 60);
@@ -280,7 +289,7 @@ export default function MainStage() {
   // provider-managed connection (persistent across route changes). Guests
   // bypass the provider entirely and use their own short-lived <LiveKitRoom>
   // with the guest token.
-  const { room, isJoined, join, cooldownSeconds, clearCooldown, sessionStartedAt, sessionLimitSeconds } = useMainStageRoom();
+  const { room, isJoined, join, cooldownSeconds, clearCooldown, sessionStartedAt, sessionLimitSeconds, canScreenShare } = useMainStageRoom();
 
   // Auth state — viewer mode only applies to unauthenticated users.
   const { user, isLoading: isAuthLoading } = useAuth();
@@ -326,6 +335,74 @@ export default function MainStage() {
     if (isGuestMode) return;
     getWalletBalance().then((res) => { if (typeof res.balance === "number") setTokenBalance(res.balance); }).catch(() => {});
   }, [isGuestMode]);
+
+  // ── In-room chat ─────────────────────────────────────────────────────────────
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [unreadChat, setUnreadChat] = useState(0);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const onChatMessage = (msg: ChatMessage) => {
+      setChatMessages((prev) => {
+        const next = [...prev, msg];
+        return next.length > 100 ? next.slice(next.length - 100) : next;
+      });
+      setChatOpen((open) => {
+        if (!open) setUnreadChat((n) => n + 1);
+        return open;
+      });
+    };
+    socket.on('mainstage:chat-message', onChatMessage);
+    return () => { socket.off('mainstage:chat-message', onChatMessage); };
+  }, []);
+
+  // Auto-scroll to bottom when chat opens or new message arrives
+  useEffect(() => {
+    if (chatOpen && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages, chatOpen]);
+
+  // Focus input when chat opens
+  useEffect(() => {
+    if (chatOpen && chatInputRef.current) {
+      chatInputRef.current.focus();
+      setUnreadChat(0);
+    }
+  }, [chatOpen]);
+
+  const handleChatSend = useCallback(() => {
+    const text = chatInput.trim();
+    if (!text) return;
+    getSocket().emit('mainstage:chat-send', { text });
+    setChatInput("");
+  }, [chatInput]);
+
+  // ── Floating emoji reactions ──────────────────────────────────────────────────
+  const [reactions, setReactions] = useState<FloatingReaction[]>([]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const onReaction = (payload: { id: string; emoji: string; userId: string | number }) => {
+      const x = 20 + Math.random() * 60; // 20-80% of screen width
+      setReactions((prev) => [...prev, { id: payload.id, emoji: payload.emoji, x }]);
+      setTimeout(() => {
+        setReactions((prev) => prev.filter((r) => r.id !== payload.id));
+      }, 3000);
+    };
+    socket.on('mainstage:reaction', onReaction);
+    return () => { socket.off('mainstage:reaction', onReaction); };
+  }, []);
+
+  const handleSendReaction = useCallback((emoji: string) => {
+    getSocket().emit('mainstage:reaction-send', { emoji });
+  }, []);
+
+  // canScreenShare is already destructured from useMainStageRoom() above
 
   // ── Countdown timers ────────────────────────────────────────────────────────
   // For authenticated free users: remaining seconds of their 1h session.
@@ -1181,6 +1258,32 @@ export default function MainStage() {
           </button>
         )}
         <FullscreenToggle targetRef={stageRootRef} />
+        {/* Chat toggle button */}
+        <button
+          type="button"
+          aria-label="Toggle chat"
+          title="Chat"
+          onClick={() => { setChatOpen((o) => !o); if (!chatOpen) setUnreadChat(0); }}
+          className="relative min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+          style={{
+            background: chatOpen ? "linear-gradient(135deg,#D4007A,#7B61FF)" : "rgba(20,20,30,0.85)",
+            border: chatOpen ? "1px solid rgba(212,0,122,0.60)" : "1px solid rgba(212,0,122,0.35)",
+            backdropFilter: "blur(6px)",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+          }}
+        >
+          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+          </svg>
+          {!chatOpen && unreadChat > 0 && (
+            <span
+              className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-0.5 flex items-center justify-center rounded-full text-[9px] font-bold text-white"
+              style={{ background: "#D4007A" }}
+            >
+              {unreadChat > 9 ? "9+" : unreadChat}
+            </span>
+          )}
+        </button>
         <button
           type="button"
           aria-label={isAdmin ? t.live.mainStageAriaOpenAdmin : t.live.mainStageSettingsTitle}
@@ -1305,6 +1408,8 @@ export default function MainStage() {
             onLeave={handleLeave}
             spotlight={state?.spotlight}
             showTips={!adminOpen}
+            onSendReaction={handleSendReaction}
+            canScreenShare={canScreenShare}
           />
         </LiveKitRoom>
       ) : isViewerMode ? (
@@ -1415,6 +1520,8 @@ export default function MainStage() {
             onLeave={handleLeave}
             spotlight={state?.spotlight}
             showTips={!adminOpen}
+            onSendReaction={handleSendReaction}
+            canScreenShare={canScreenShare}
           />
         </LiveKitRoom>
       )}
@@ -1448,6 +1555,139 @@ export default function MainStage() {
         onSuccess={(newBalance) => setTokenBalance(newBalance)}
         dpnsHandle={null}
       />
+
+      {/* ── In-room chat panel ─────────────────────────────────────────────── */}
+      <style>{`
+        @keyframes mainstage-float-up {
+          0%   { transform: translateY(0) scale(1);   opacity: 1; }
+          80%  { transform: translateY(-60vh) scale(1.2); opacity: 0.9; }
+          100% { transform: translateY(-80vh) scale(0.8); opacity: 0; }
+        }
+      `}</style>
+
+      {chatOpen && (
+        <div
+          className="fixed top-0 right-0 bottom-0 flex flex-col"
+          style={{
+            width: "min(320px, 100vw)",
+            zIndex: 45,
+            background: "rgba(8,8,14,0.97)",
+            borderLeft: "1px solid rgba(255,255,255,0.08)",
+            backdropFilter: "blur(20px)",
+            paddingTop: "env(safe-area-inset-top, 0px)",
+            paddingBottom: "env(safe-area-inset-bottom, 0px)",
+          }}
+        >
+          {/* Chat header */}
+          <div
+            className="flex-shrink-0 flex items-center justify-between px-4 py-3"
+            style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+              </svg>
+              <span className="text-white font-semibold text-sm">Chat</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setChatOpen(false)}
+              aria-label="Close chat"
+              className="min-h-[32px] min-w-[32px] flex items-center justify-center rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-all"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}>
+            {chatMessages.length === 0 && (
+              <p className="text-white/30 text-xs text-center py-8">No messages yet. Say hi!</p>
+            )}
+            {chatMessages.map((msg) => {
+              const ts = new Date(msg.timestamp);
+              const hhmm = `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}`;
+              const isMe = user && String(msg.userId) === String(user.id);
+              return (
+                <div key={msg.id} className={`flex flex-col gap-0.5 ${isMe ? "items-end" : "items-start"}`}>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="text-[10px] font-semibold"
+                      style={{ background: "linear-gradient(90deg,#D4007A,#7B61FF)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}
+                    >
+                      {msg.displayName}
+                    </span>
+                    <span className="text-white/25 text-[9px] tabular-nums">{hhmm}</span>
+                  </div>
+                  <div
+                    className="max-w-[240px] px-3 py-1.5 rounded-2xl text-xs text-white/90 break-words"
+                    style={{
+                      background: isMe ? "linear-gradient(135deg,rgba(212,0,122,0.25),rgba(123,97,255,0.20))" : "rgba(255,255,255,0.07)",
+                      border: isMe ? "1px solid rgba(212,0,122,0.25)" : "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    {msg.text}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Input */}
+          <div
+            className="flex-shrink-0 flex items-center gap-2 px-3 py-2"
+            style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}
+          >
+            <input
+              ref={chatInputRef}
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
+              placeholder={user ? "Say something…" : "Sign in to chat"}
+              disabled={!user}
+              maxLength={300}
+              className="flex-1 min-h-[36px] px-3 rounded-xl text-sm text-white placeholder-white/30 bg-white/[0.06] border border-white/10 focus:outline-none focus:border-pnp-accent/50 disabled:opacity-40"
+            />
+            <button
+              type="button"
+              onClick={handleChatSend}
+              disabled={!user || !chatInput.trim()}
+              aria-label="Send message"
+              className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl transition-all active:scale-[0.94] disabled:opacity-30 disabled:cursor-not-allowed"
+              style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+            >
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Floating reaction emojis ────────────────────────────────────────── */}
+      {reactions.map((r) => (
+        <div
+          key={r.id}
+          aria-hidden
+          style={{
+            position: "fixed",
+            left: `${r.x}%`,
+            bottom: "80px",
+            fontSize: "2rem",
+            lineHeight: 1,
+            pointerEvents: "none",
+            userSelect: "none",
+            animation: "mainstage-float-up 3s ease-out forwards",
+            zIndex: 44,
+          }}
+        >
+          {r.emoji}
+        </div>
+      ))}
     </div>
   );
 }

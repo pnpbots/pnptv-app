@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocalParticipant } from "@livekit/components-react";
 import { useI18n } from "@/lib/i18n";
+import { getSocket } from "@/lib/socket";
 import type { MainStageState } from "@/hooks/useMainStage";
+
+const REACTION_EMOJIS = ['❤️', '🔥', '🎉', '👏', '🤩', '😍', '💊'] as const;
 
 interface BottomBarProps {
   isParticipant: boolean;
   isAdmin: boolean;
   onLeave: () => void;
   spotlight?: MainStageState["spotlight"];
+  onSendReaction?: (emoji: string) => void;
+  canScreenShare?: boolean;
 }
 
 export function BottomBarInner({
@@ -15,9 +20,49 @@ export function BottomBarInner({
   isAdmin,
   onLeave,
   spotlight,
+  onSendReaction,
+  canScreenShare,
 }: BottomBarProps) {
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
   const t = useI18n();
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const reactionPickerRef = useRef<HTMLDivElement>(null);
+
+  // Close reaction picker on outside click
+  useEffect(() => {
+    if (!reactionPickerOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (reactionPickerRef.current && !reactionPickerRef.current.contains(e.target as Node)) {
+        setReactionPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [reactionPickerOpen]);
+
+  const handleReactionClick = useCallback((emoji: string) => {
+    setReactionPickerOpen(false);
+    if (onSendReaction) {
+      onSendReaction(emoji);
+    } else {
+      getSocket().emit('mainstage:reaction-send', { emoji });
+    }
+  }, [onSendReaction]);
+
+  const handleScreenShare = useCallback(async () => {
+    if (isScreenSharing) {
+      await localParticipant.setScreenShareEnabled(false);
+      setIsScreenSharing(false);
+    } else {
+      try {
+        await localParticipant.setScreenShareEnabled(true);
+        setIsScreenSharing(true);
+      } catch {
+        // User cancelled or permission denied
+      }
+    }
+  }, [isScreenSharing, localParticipant]);
 
   // Queue-position indicator for cammers: shows "Position X / Y" or "Live now".
   // Re-renders every second when nextAt is set so the countdown stays current.
@@ -98,6 +143,79 @@ export function BottomBarInner({
       </button>
 
       {queueChip}
+
+      {/* Reaction picker — visible to all participants including guests */}
+      {isParticipant && (
+        <div ref={reactionPickerRef} className="relative flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setReactionPickerOpen((p) => !p)}
+            aria-label="Send reaction"
+            title="Send reaction"
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+            style={{
+              background: reactionPickerOpen ? "linear-gradient(135deg,#D4007A,#7B61FF)" : "rgba(255,255,255,0.06)",
+              border: reactionPickerOpen ? "1px solid rgba(212,0,122,0.60)" : "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <span className="text-base leading-none">❤️</span>
+          </button>
+          {reactionPickerOpen && (
+            <div
+              className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2.5 py-2 rounded-2xl shadow-xl"
+              style={{
+                background: "rgba(12,12,20,0.97)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                backdropFilter: "blur(16px)",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+                zIndex: 46,
+              }}
+            >
+              {REACTION_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => handleReactionClick(emoji)}
+                  className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl text-xl transition-all hover:bg-white/10 active:scale-[0.92]"
+                  title={emoji}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Screen share — admin participants only when canScreenShare is true */}
+      {isParticipant && canScreenShare && (
+        <button
+          type="button"
+          onClick={handleScreenShare}
+          aria-label={isScreenSharing ? "Stop screen share" : "Share screen"}
+          title={isScreenSharing ? "Stop sharing" : "Share screen"}
+          aria-pressed={isScreenSharing}
+          className="min-h-[40px] flex-shrink-0 flex items-center gap-1.5 px-3 rounded-full text-xs font-bold text-white transition-all hover:bg-white/10 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+          style={{
+            background: isScreenSharing
+              ? "linear-gradient(135deg,#D4007A,#7B61FF)"
+              : "rgba(255,255,255,0.06)",
+            border: isScreenSharing
+              ? "1px solid rgba(212,0,122,0.60)"
+              : "1px solid rgba(255,255,255,0.12)",
+            boxShadow: isScreenSharing ? "0 4px 16px rgba(212,0,122,0.45)" : undefined,
+          }}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <rect x="2" y="4" width="20" height="14" rx="2" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 20h8M12 18v2" />
+            {isScreenSharing && (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 10l2 2 4-4" />
+            )}
+          </svg>
+          <span className="hidden sm:inline">{isScreenSharing ? "Stop sharing" : "Share"}</span>
+        </button>
+      )}
 
       {isParticipant && isAdmin && (
         <button

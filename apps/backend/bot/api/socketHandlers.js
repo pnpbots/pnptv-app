@@ -134,6 +134,12 @@ async function getCachedEntitlement(socket, userId, entitlementKey) {
   return value;
 }
 
+// ── Main Stage chat rate-limit map ───────────────────────────────────────────
+// userId → last message timestamp (ms). Cleaned up on disconnect.
+const mainStageChatLastSent = new Map();
+// userId → last reaction timestamp (ms). Cleaned up on disconnect.
+const mainStageReactionLastSent = new Map();
+
 // ── Global online presence ────────────────────────────────────────────────────
 
 // Track online users: userId → { name, photoUrl, hangoutGroupIds: Set<number>, socketIds: Set<string> }
@@ -498,6 +504,50 @@ function initSocketIO(io) {
       } catch (err) {
         logger.warn('mainstage:leave-cammer error', { userId: user.id, error: err.message });
       }
+    });
+
+    // mainstage:chat-send — in-room text chat, 1 msg/s rate limit per user
+    socket.on('mainstage:chat-send', (payload = {}) => {
+      if (!user) return;
+      const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+      if (!text || text.length > 300) return;
+      const now = Date.now();
+      const lastSent = mainStageChatLastSent.get(String(user.id)) || 0;
+      if (now - lastSent < 1000) return; // rate limit: 1/s
+      mainStageChatLastSent.set(String(user.id), now);
+      const { randomUUID } = require('crypto');
+      const msg = {
+        id: randomUUID(),
+        userId: user.id,
+        displayName: user.display_name || user.username || 'Member',
+        text,
+        timestamp: now,
+      };
+      io.to('mainstage').emit('mainstage:chat-message', msg);
+    });
+
+    // mainstage:reaction-send — emoji reaction, 1/2s rate limit per user
+    const ALLOWED_REACTIONS = ['❤️', '🔥', '🎉', '👏', '🤩', '😍', '💊'];
+    socket.on('mainstage:reaction-send', (payload = {}) => {
+      if (!user) return;
+      const emoji = typeof payload.emoji === 'string' ? payload.emoji : '';
+      if (!ALLOWED_REACTIONS.includes(emoji)) return;
+      const now = Date.now();
+      const lastSent = mainStageReactionLastSent.get(String(user.id)) || 0;
+      if (now - lastSent < 2000) return; // rate limit: 1/2s
+      mainStageReactionLastSent.set(String(user.id), now);
+      const { randomUUID } = require('crypto');
+      io.to('mainstage').emit('mainstage:reaction', {
+        id: randomUUID(),
+        emoji,
+        userId: user.id,
+      });
+    });
+
+    // Clean up rate-limit map entries on disconnect
+    socket.once('disconnect', () => {
+      mainStageChatLastSent.delete(String(user.id));
+      mainStageReactionLastSent.delete(String(user.id));
     });
 
     socket.on('mainstage:client-lifecycle', (payload = {}) => {
