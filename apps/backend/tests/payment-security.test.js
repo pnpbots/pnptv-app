@@ -698,6 +698,7 @@ describe('PaymentRecoveryService', () => {
 
   describe('cleanupAbandonedPayments', () => {
     it('marks old pending payments as abandoned', async () => {
+      mockQuery.mockResolvedValueOnce({ rowCount: 0, rows: [] }); // Step 0: earlyExpire
       mockQuery.mockResolvedValueOnce({ rowCount: 3, rows: [
         { id: 'p1', user_id: 'u1', reference: 'r1' },
         { id: 'p2', user_id: 'u2', reference: 'r2' },
@@ -708,7 +709,8 @@ describe('PaymentRecoveryService', () => {
     });
 
     it('handles zero abandoned payments', async () => {
-      mockQuery.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+      mockQuery.mockResolvedValueOnce({ rowCount: 0, rows: [] }); // Step 0
+      mockQuery.mockResolvedValueOnce({ rowCount: 0, rows: [] }); // Step 1
       const results = await PaymentRecoveryService.cleanupAbandonedPayments();
       expect(results.cleaned).toBe(0);
     });

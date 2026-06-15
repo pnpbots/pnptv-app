@@ -38,7 +38,7 @@ const BLOCKED_CIDR_RE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)
 // Only Directus CMS assets are valid media sources. Prevents an admin (or
 // a compromised admin account) from broadcasting arbitrary third-party URLs
 // to all room viewers.
-const ALLOWED_MEDIA_DOMAINS = new Set(['cms.pnptv.app']);
+const ALLOWED_MEDIA_DOMAINS = new Set(['cms.pnptv.app', 'cdn.pnptv.app']);
 
 function validateMediaSrc(src) {
   if (!src) return null; // null / undefined = no src, allowed
@@ -65,7 +65,7 @@ function validateMediaSrc(src) {
   }
 
   if (!ALLOWED_MEDIA_DOMAINS.has(hostname)) {
-    return `Domain not in allowlist: ${hostname}. Only cms.pnptv.app is permitted.`;
+    return `Domain not in allowlist: ${hostname}. Only cms.pnptv.app and cdn.pnptv.app are permitted.`;
   }
 
   // Reject shell metacharacters that could escape ffmpeg arg handling (defence in depth)
@@ -208,6 +208,27 @@ const token = asyncHandler(async (req, res) => {
       }
     } catch (redisErr) {
       logger.error('[MainStage] token: Redis unavailable (kicked-set check)', { error: redisErr.message });
+      return res.status(503).json({
+        success: false,
+        error: 'Service temporarily unavailable.',
+        code: 'SESSION_BACKEND_UNAVAILABLE',
+      });
+    }
+  }
+
+  // Entitlement gate — members must have pnp-member entitlement to join.
+  if (!adminUser) {
+    try {
+      const hasMembership = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
+      if (!hasMembership) {
+        return res.status(403).json({
+          success: false,
+          error: 'PNP membership is required to join the Main Stage.',
+          code: 'MEMBERSHIP_REQUIRED',
+        });
+      }
+    } catch (entErr) {
+      logger.error('[MainStage] token: entitlement check failed', { error: entErr.message });
       return res.status(503).json({
         success: false,
         error: 'Service temporarily unavailable.',

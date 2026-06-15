@@ -420,7 +420,10 @@ async function handleBtcpayWebhook(req, res) {
           return sum + (rate > 0 ? paid * rate : 0);
         }, 0);
         const expectedAmount = parseFloat(invoiceDetails.amount ?? '0');
-        const actualPaid = totalPaidUsd > 0 ? totalPaidUsd : expectedAmount; // fall back to no-check if rate unavailable
+        const invoicePaidAmount = parseFloat(invoiceDetails.paidAmount ?? '0');
+        const actualPaid = totalPaidUsd > 0 ? totalPaidUsd
+          : invoicePaidAmount > 0 ? invoicePaidAmount
+          : expectedAmount; // last resort: no-check if no paid amount available
         if (actualPaid > 0 && expectedAmount > 0 && actualPaid < expectedAmount - 0.01) {
           logger.error('BTCPay InvoiceSettled: underpayment detected — aborting entitlement grant', {
             invoiceId,

@@ -107,6 +107,12 @@ jest.mock('../services/livekitService', () => ({
     };
     return Buffer.from(JSON.stringify({ identity, isModerator, grants })).toString('base64');
   }),
+  getRoomClient: jest.fn(() => ({
+    updateParticipant: jest.fn(async () => {}),
+    removeParticipant: jest.fn(async () => {}),
+    getParticipant: jest.fn(async () => ({ tracks: [] })),
+    mutePublishedTrack: jest.fn(async () => {}),
+  })),
 }));
 
 // Main Stage Service — partial real impl backed by mocked Redis

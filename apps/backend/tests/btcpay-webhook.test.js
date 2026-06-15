@@ -25,6 +25,7 @@ jest.mock('../config/btcpay', () => ({
   checkInvoiceProcessed: (...args) => mockCheckInvoiceProcessed(...args),
   markInvoiceProcessed: (...args) => mockMarkInvoiceProcessed(...args),
   getInvoice: (...args) => mockGetInvoice(...args),
+  getInvoicePaymentMethods: jest.fn(async () => []),
 }));
 
 const mockQuery = jest.fn();

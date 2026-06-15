@@ -236,16 +236,16 @@ describe('addCammer — cammer cap', () => {
     expect(redisMem['mainstage:spotlight:queue']).toContain('alice');
   });
 
-  it('should reject the 13th cammer (cap=12)', async () => {
+  it('should reject a cammer when queue is at cap', async () => {
     mockDbQuery.mockResolvedValue({ rows: [] });
-    const full = Array.from({ length: 12 }, (_, i) => `c${i}`);
+    const full = Array.from({ length: svc.MAX_CAMMERS }, (_, i) => `c${i}`);
     seedQueue(full);
 
     await svc.addCammer('newcomer');
 
     // newcomer should NOT be in the queue
     expect(redisMem['mainstage:spotlight:queue']).not.toContain('newcomer');
-    expect(redisMem['mainstage:spotlight:queue'].length).toBe(12);
+    expect(redisMem['mainstage:spotlight:queue'].length).toBe(svc.MAX_CAMMERS);
   });
 
   it('should allow adding up to exactly 12 cammers', async () => {
