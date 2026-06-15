@@ -2,26 +2,22 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card, Skeleton } from "@pnptv/ui-kit";
-import { QRCodeSVG } from "qrcode.react";
 import {
   getSubscriptionPlans,
   getPaymentStatus,
   createPayment,
-  prepareUsdcSubscription,
   getUsdcAvailable,
-  getUsdcSubscriptionStatus,
   getLabelColor,
   validatePromoCode,
-  ApiError,
   type SubscriptionPlan,
 } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useI18n } from "@/lib/i18n";
-import { isTelegramContext } from "@/lib/telegram";
 
-type Provider = "epayco" | "usdc";
+import { useNowPayments } from "@/hooks/useNowPayments";
+import { NowPaymentsWaitingPanel } from "@/components/payments/NowPaymentsWaitingPanel";
 
 const EPAYCO_ERROR_MESSAGES: Record<string, string> = {
   "Error validando datos": "Los datos de tu tarjeta son incorrectos. Verifica el número, fecha y CVV, e intenta con otra tarjeta.\n\nThe card details you entered are incorrect. Please check the number, expiry date and CVV, and try a different card.",
@@ -44,19 +40,6 @@ const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 const RECURRING_PLANS = new Set(["prime-week-pass-7d", "monthly-pass", "prime-diamond-pass-365d"]);
 
 const RECOMMENDED_PLAN = "prime-diamond-pass-365d";
-
-function SubscribeUsdcCopyLink({ url, lang }: { url: string; lang: string }) {
-  const [copied, setCopied] = React.useState(false);
-  const es = lang === "es";
-  return (
-    <button
-      onClick={() => { navigator.clipboard.writeText(url).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-      className={`w-full py-2 rounded-lg text-xs font-medium transition-colors border ${copied ? "text-green-400 border-green-500/30 bg-green-500/5" : "text-pnp-textSecondary border-white/10 bg-white/5 hover:text-pnp-textPrimary"}`}
-    >
-      {copied ? (es ? "¡Link copiado!" : "Link copied!") : (es ? "Copiar link de pago" : "Copy payment link")}
-    </button>
-  );
-}
 
 function formatPrice(amount: number, currency: string): string {
   if (currency === "COP") {
@@ -99,7 +82,6 @@ export default function Subscribe() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
-  const [provider, setProvider] = useState<Provider>("epayco");
   const [submitting, setSubmitting] = useState(false);
   const [showCOP, setShowCOP] = useState(false);
   // Per-plan benefits expand state — plans start collapsed (N-06)
@@ -126,25 +108,30 @@ export default function Subscribe() {
   const [promoError, setPromoError] = useState<string | null>(null);
   const [promoValidating, setPromoValidating] = useState(false);
 
-  // Payment polling state
+  // Polling payment ID (legacy/epayco)
   const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
-  // NowPayments in-app popup handle
-  const paymentPopupRef = React.useRef<Window | null>(null);
-
-  // USDC / USDT stablecoin state (NOWPayments widget)
+  // USDC / USDT stablecoin state (NOWPayments hook)
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
-  const [usdcOrder, setUsdcOrder] = useState<{
-    orderId: string;
-    planName: string;
-    usdAmount: number;
-    invoiceUrl: string;
-    createdAt: number;
-    partiallyPaid?: boolean;
-  } | null>(null);
-  const [usdcPolling, setUsdcPolling] = useState(false);
-  const [usdcPaymentSuccess, setUsdcPaymentSuccess] = useState(false);
+  const {
+    order: usdcOrder,
+    isPolling: usdcPolling,
+    isSuccess: usdcPaymentSuccess,
+    startPayment: startNowPayments,
+    cancelOrder: cancelNowPayments,
+    error: nowpaymentsError,
+    setError: setNowpaymentsError,
+  } = useNowPayments({
+    storageKey: "pnp_pending_usdc_order",
+    returnUrl: "/subscribe",
+    onSuccess: async () => {
+      await refreshUser();
+      setTimeout(() => {
+        setPaymentSuccess(true);
+      }, 500);
+    },
+  });
 
   useEffect(() => {
     getSubscriptionPlans()
@@ -172,32 +159,14 @@ export default function Subscribe() {
       .then((res) => setUsdcAvailable(res.available === true && res.configured === true))
       .catch(() => setUsdcAvailable(false));
 
-    // Load NOWPayments widget script. Always-rendered .nowpayments-button
-    // in the DOM ensures the script binds its click handler on init.
-    // Resume USDC polling after page reload or return from hosted checkout
-    try {
-      const stored = sessionStorage.getItem("pnp_pending_usdc_order");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Only resume if order is < 24h old (NOWPayments invoice TTL)
-        if (parsed?.orderId && Date.now() - (parsed.createdAt || 0) < 86400000) {
-          setUsdcOrder(parsed);
-          setUsdcPolling(true);
-        } else {
-          sessionStorage.removeItem("pnp_pending_usdc_order");
-        }
-      }
-    } catch {}
-
     // Handle ?nowpayments=success&order=<id> from hosted checkout return
     const nowpResult = searchParams.get("nowpayments");
     const nowpOrderId = searchParams.get("order");
     if (nowpResult === "success" && nowpOrderId && /^pnptv-nowp-[A-Za-z0-9_-]+-\d+$/.test(nowpOrderId)) {
       window.history.replaceState({}, "", window.location.pathname);
-      if (!sessionStorage.getItem("pnp_pending_usdc_order")) {
-        setUsdcOrder({ orderId: nowpOrderId, planName: "subscription", usdAmount: 0, invoiceUrl: "", createdAt: Date.now() });
-        setUsdcPolling(true);
-      }
+      // The hook will pick up the pending order from sessionStorage if it exists,
+      // but if the user is returning from a redirect, we might need to trigger polling
+      // if it wasn't already in storage (though it should be).
     }
 
     // Resume polling if returning from crypto checkout
@@ -269,6 +238,7 @@ export default function Subscribe() {
 
   // Auto-apply promo from URL once plans load — need plans first so we can lock selection
   const autoAppliedRef = useRef(false);
+  const orderPanelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (autoAppliedRef.current) return;
     const urlPromo = searchParams.get("promo");
@@ -284,6 +254,15 @@ export default function Subscribe() {
     applyPromo(appliedPromo.code, selectedPlan);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlan]);
+
+  // Auto-scroll to inline crypto panel when a new order is created
+  useEffect(() => {
+    if (usdcOrder?.orderId && orderPanelRef.current) {
+      setTimeout(() => {
+        orderPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }, 100);
+    }
+  }, [usdcOrder?.orderId]);
 
 
   function clearPromo() {
@@ -344,72 +323,9 @@ export default function Subscribe() {
     };
   }, [pollingPaymentId, refreshUser]);
 
-  // Poll USDC invoice status (NOWPayments). Cap at 60 minutes — NOWPayments invoices have a 24h TTL
-  // but we stop polling after 60 min and show a re-open link. User can still complete payment.
-  useEffect(() => {
-    if (!usdcOrder || !usdcPolling) return;
-    let cancelled = false;
-    const maxDurationMs = 60 * 60 * 1000; // 60 min
-    const startedAt = Date.now();
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      if (cancelled) return;
-      if (Date.now() - startedAt >= maxDurationMs) {
-        setUsdcPolling(false);
-        return;
-      }
-      try {
-        const data = await getUsdcSubscriptionStatus(usdcOrder.orderId);
-        if (cancelled) return;
-        if (data.completed) {
-          setUsdcPolling(false);
-          paymentPopupRef.current?.close();
-          paymentPopupRef.current = null;
-          setUsdcPaymentSuccess(true);
-          try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
-          await refreshUser();
-          timerId = setTimeout(() => {
-            setUsdcOrder(null);
-            setUsdcPaymentSuccess(false);
-            setPaymentSuccess(true);
-          }, 2000);
-          return;
-        }
-        if (data.failed) {
-          setUsdcPolling(false);
-          try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
-          setError(s.usdcExpired);
-          return;
-        }
-        if (data.partiallyPaid) {
-          // Keep polling — NOWPayments keeps partially-paid invoices open for top-up
-          // but surface a clear UI signal
-          setUsdcOrder((prev) => prev ? { ...prev, partiallyPaid: true } : prev);
-          if (!cancelled) timerId = setTimeout(poll, 10000);
-          return;
-        }
-        if (!cancelled) timerId = setTimeout(poll, 5000);
-      } catch (pollErr: unknown) {
-        const status = (pollErr as { status?: number })?.status ?? (pollErr as { response?: { status?: number } })?.response?.status;
-        if (status === 401) {
-          setUsdcPolling(false);
-          return;
-        }
-        if (!cancelled) timerId = setTimeout(poll, 5000);
-      }
-    };
-    poll();
-    return () => {
-      cancelled = true;
-      if (timerId) clearTimeout(timerId);
-    };
-  }, [usdcOrder, usdcPolling, refreshUser]);
-
-  async function handleQuickCheckout(planId: string, chosenProvider: Provider) {
+  async function handleQuickCheckout(planId: string, chosenProvider: "epayco" | "usdc") {
     if (submitting) return;
     setSelectedPlan(planId);
-    setProvider(chosenProvider);
     setError(null);
     setSubmitting(true);
     try {
@@ -421,37 +337,13 @@ export default function Subscribe() {
           setError(result.error || result.message || s.paymentErrorGeneric);
         }
       } else if (chosenProvider === "usdc") {
-        const result = await prepareUsdcSubscription(planId, user?.email || undefined);
-        if (result.success && result.orderId && result.invoiceUrl) {
-          const order = {
-            orderId: result.orderId,
-            planName: result.planName || "subscription",
-            usdAmount: result.usdAmount,
-            invoiceUrl: result.invoiceUrl,
-            createdAt: Date.now(),
-          };
-          setUsdcOrder(order);
-          setUsdcPolling(true);
-          try { sessionStorage.setItem("pnp_pending_usdc_order", JSON.stringify(order)); } catch {}
-          if (isTelegramContext()) {
-            window.Telegram!.WebApp.openLink(result.invoiceUrl);
-          } else {
-            const w = window.screen.width, h = window.screen.height;
-            const pw = Math.min(500, w), ph = Math.min(720, h);
-            paymentPopupRef.current = window.open(result.invoiceUrl, "nowpayments_checkout", `width=${pw},height=${ph},left=${Math.round((w-pw)/2)},top=${Math.round((h-ph)/2)},resizable=yes,scrollbars=yes`);
-          }
-        } else {
-          setError(s.failedToCreateUsdcInvoice);
+        const result = await startNowPayments(planId, user?.email || undefined);
+        if (!result.success) {
+          setError(result.error || s.failedToCreateUsdcInvoice);
         }
       }
     } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        if (err.code === "NOWPAYMENTS_NOT_CONFIGURED") setError(s.usdcNotConfigured);
-        else if (err.code === "NOWPAYMENTS_UNREACHABLE" || err.code === "NOWPAYMENTS_ERROR") setError(s.failedToCreateUsdcInvoice);
-        else setError(err.message || s.paymentErrorGeneric);
-      } else {
-        setError(err instanceof Error ? err.message : s.paymentErrorGeneric);
-      }
+      setError(err instanceof Error ? err.message : s.paymentErrorGeneric);
     } finally {
       setSubmitting(false);
     }
@@ -463,95 +355,12 @@ export default function Subscribe() {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch("/api/webapp/payments/usdc/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ planId, email: user?.email || undefined }),
-      });
-      const data = await res.json();
-      if (data.success && data.orderId && data.invoiceUrl) {
-        const order = {
-          orderId: data.orderId,
-          planName: data.planName || planId,
-          usdAmount: data.usdAmount,
-          invoiceUrl: data.invoiceUrl,
-          createdAt: Date.now(),
-        };
-        setUsdcOrder(order);
-        setUsdcPolling(true);
-        try { sessionStorage.setItem("pnp_pending_usdc_order", JSON.stringify(order)); } catch {}
-        if (isTelegramContext()) {
-          window.Telegram!.WebApp.openLink(data.invoiceUrl);
-        } else {
-            const w = window.screen.width, h = window.screen.height;
-            const pw = Math.min(500, w), ph = Math.min(720, h);
-            paymentPopupRef.current = window.open(data.invoiceUrl, "nowpayments_checkout", `width=${pw},height=${ph},left=${Math.round((w-pw)/2)},top=${Math.round((h-ph)/2)},resizable=yes,scrollbars=yes`);
-        }
-      } else {
-        setError(data.error || (t.lang === "es" ? "No se pudo crear la suscripción. Intenta de nuevo." : "Failed to create subscription. Please try again."));
+      const result = await startNowPayments(planId, user?.email || undefined, undefined, true);
+      if (!result.success) {
+        setError(result.error || (t.lang === "es" ? "No se pudo crear la suscripción. Intenta de nuevo." : "Failed to create subscription. Please try again."));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : (t.lang === "es" ? "No se pudo crear la suscripción. Intenta de nuevo." : "Failed to create subscription. Please try again."));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleSubscribe() {
-    if (!selectedPlan || submitting) return;
-
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      if (provider === "epayco") {
-        const result = await createPayment(selectedPlan, "epayco", undefined, appliedPromo?.code || undefined);
-        if (result.success && result.paymentUrl) {
-          window.location.href = result.paymentUrl;
-        } else {
-          setError(result.error || result.message || s.paymentErrorGeneric);
-        }
-        return;
-      } else if (provider === "usdc") {
-        const result = await prepareUsdcSubscription(selectedPlan, user?.email || undefined);
-        if (result.success && result.orderId && result.invoiceUrl) {
-          const order = {
-            orderId: result.orderId,
-            planName: result.planName || "subscription",
-            usdAmount: result.usdAmount,
-            invoiceUrl: result.invoiceUrl,
-            createdAt: Date.now(),
-          };
-          setUsdcOrder(order);
-          setUsdcPolling(true);
-          try { sessionStorage.setItem("pnp_pending_usdc_order", JSON.stringify(order)); } catch {}
-          if (isTelegramContext()) {
-            window.Telegram!.WebApp.openLink(result.invoiceUrl);
-          } else {
-            const w = window.screen.width, h = window.screen.height;
-            const pw = Math.min(500, w), ph = Math.min(720, h);
-            paymentPopupRef.current = window.open(result.invoiceUrl, "nowpayments_checkout", `width=${pw},height=${ph},left=${Math.round((w-pw)/2)},top=${Math.round((h-ph)/2)},resizable=yes,scrollbars=yes`);
-          }
-        } else {
-          setError(s.failedToCreateUsdcInvoice);
-        }
-      } else {
-        setError("Unsupported payment provider. Please select Card (ePayco) or Crypto (NowPayments).");
-      }
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        if (err.code === "NOWPAYMENTS_NOT_CONFIGURED") {
-          setError(s.usdcNotConfigured);
-        } else if (err.code === "NOWPAYMENTS_UNREACHABLE" || err.code === "NOWPAYMENTS_ERROR") {
-          setError(s.failedToCreateUsdcInvoice);
-        } else {
-          setError(err.message || s.paymentErrorGeneric);
-        }
-      } else {
-        const message = err instanceof Error ? err.message : s.paymentErrorGeneric;
-        setError(message);
-      }
     } finally {
       setSubmitting(false);
     }
@@ -730,11 +539,6 @@ export default function Subscribe() {
   const memberPlans = plans.filter((p) => MEMBER_PLAN_IDS.has(p.id));
   const primePlans = plans.filter((p) => !MEMBER_PLAN_IDS.has(p.id));
 
-  const selectedPlanData = plans.find((p) => p.id === selectedPlan);
-  const cryptoDiscountPct = selectedPlanData ? 20 : 0;
-  const cryptoSavingsUSD = cryptoDiscountPct > 0 && selectedPlanData ? Math.round(selectedPlanData.priceUSD * cryptoDiscountPct / 100 * 100) / 100 : 0;
-  const isCrypto = provider === "usdc";
-
   return (
     <div className="page-container py-6 px-4 max-w-2xl mx-auto">
       {showTutorial && <TutorialOverlay section="subscribe" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
@@ -751,6 +555,24 @@ export default function Subscribe() {
 
       {/* Current tier status banner */}
       {renderTierBanner()}
+
+      {/* Crypto 20% discount callout */}
+      {usdcAvailable !== false && (
+        <div className="mb-4 rounded-xl px-4 py-3 border border-green-500/40 bg-green-500/8 flex items-center gap-3">
+          <span className="text-2xl leading-none">🪙</span>
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-green-400">
+              {t.lang === "es" ? "Ahorra 20% pagando con cripto" : "Save 20% when you pay with crypto"}
+            </p>
+            <p className="text-xs text-pnp-textSecondary">
+              {t.lang === "es"
+                ? "BTC, ETH, USDC y +100 monedas. El descuento se aplica automáticamente."
+                : "BTC, ETH, USDC + 100 coins. Discount applied automatically."}
+            </p>
+          </div>
+          <span className="ml-auto shrink-0 text-xl font-black text-green-400 leading-none">−20%</span>
+        </div>
+      )}
 
       {/* Promo code banner — applied state */}
       {appliedPromo && (
@@ -853,13 +675,17 @@ export default function Subscribe() {
           const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
+          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id);
+          const isDimmed = !!(usdcOrder && !usdcPaymentSuccess && selectedPlan !== plan.id);
           return (
+            <div key={plan.id} className={`transition-all duration-200 ${isDimmed ? "opacity-50 pointer-events-none" : ""}`}>
             <button
-              key={plan.id}
               onClick={() => setSelectedPlan(plan.id)}
-              className={`w-full text-left rounded-xl p-4 border-2 transition-all duration-200 ${
+              className={`w-full text-left p-4 border-2 transition-all duration-200 ${
+                isPanelActive ? "rounded-t-xl rounded-b-none" : "rounded-xl"
+              } ${
                 isSelected
-                  ? "border-[#D4007A] bg-[#D4007A]/10"
+                  ? `border-[#D4007A] bg-[#D4007A]/10${isPanelActive ? " border-b-transparent" : ""}`
                   : "border-white/10 bg-white/5 hover:border-white/20"
               }`}
             >
@@ -883,18 +709,10 @@ export default function Subscribe() {
                   </div>
                   <div className="text-xs text-pnp-textSecondary">{s.monthly}</div>
                 </div>
-                {isCrypto ? (
-                  <span className="flex flex-col items-end">
-                    {planDiscountPct > 0 && <del className="text-xs text-pnp-textSecondary/50 leading-none">{displayPrice}</del>}
-                    <span className="text-lg font-bold text-green-400 leading-tight">{cryptoDisplayPrice}</span>
-                    <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(cryptoPriceUSD, "USD") : formatPrice(cryptoPriceCOP, "COP")}</span>
-                  </span>
-                ) : (
-                  <span className="flex flex-col items-end">
-                    <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
-                    <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(plan.priceUSD, "USD") : formatPrice(plan.priceCOP, "COP")}</span>
-                  </span>
-                )}
+                <span className="flex flex-col items-end">
+                  <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
+                  <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(plan.priceUSD, "USD") : formatPrice(plan.priceCOP, "COP")}</span>
+                </span>
               </div>
               <span
                 role="button"
@@ -944,7 +762,7 @@ export default function Subscribe() {
                 <button
                   disabled={submitting}
                   onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "epayco"); }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-white bg-[#D4007A] hover:bg-[#B8006A] disabled:opacity-50 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold text-white bg-[#D4007A] hover:bg-[#B8006A] disabled:opacity-50 transition-colors"
                 >
                   <span>💳</span> {t.lang === "es" ? "Pagar con Tarjeta" : "Pay with Card"}
                 </button>
@@ -952,13 +770,30 @@ export default function Subscribe() {
                   <button
                     disabled={submitting}
                     onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdc"); }}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-green-300 border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                    className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
                   >
-                    <span>🪙</span> {t.lang === "es" ? "Cripto −20%" : "Crypto −20%"}
+                    <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
+                      <span>🪙</span>
+                      <span>{t.lang === "es" ? "Cripto" : "Crypto"}</span>
+                      <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
               </div>
             </button>
+            {isPanelActive && (
+              <div ref={orderPanelRef}>
+                <NowPaymentsWaitingPanel
+                  order={usdcOrder!}
+                  isSuccess={usdcPaymentSuccess}
+                  onCancel={cancelNowPayments}
+                  lang={t.lang}
+                  wrapperClassName="rounded-t-none border-t-0"
+                />
+              </div>
+            )}
+            </div>
           );
         })}
 
@@ -986,13 +821,17 @@ export default function Subscribe() {
           const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
+          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id);
+          const isDimmed = !!(usdcOrder && !usdcPaymentSuccess && selectedPlan !== plan.id);
           return (
+            <div key={plan.id} className={`transition-all duration-200 ${isDimmed ? "opacity-50 pointer-events-none" : ""}`}>
             <button
-              key={plan.id}
               onClick={() => setSelectedPlan(plan.id)}
-              className={`w-full text-left rounded-xl p-4 border-2 transition-all duration-200 ${
+              className={`w-full text-left p-4 border-2 transition-all duration-200 ${
+                isPanelActive ? "rounded-t-xl rounded-b-none" : "rounded-xl"
+              } ${
                 isSelected
-                  ? "border-[#D4007A] bg-[#D4007A]/10"
+                  ? `border-[#D4007A] bg-[#D4007A]/10${isPanelActive ? " border-b-transparent" : ""}`
                   : "border-white/10 bg-white/5 hover:border-white/20"
               } ${isRecommended ? "ring-1 ring-[#FFB454]/40" : ""}`}
             >
@@ -1024,21 +863,13 @@ export default function Subscribe() {
                   </span>
                 </div>
                 <div className="text-right">
-                  {isCrypto ? (
-                    <div className="flex flex-col items-end">
-                      {planDiscountPct > 0 && <del className="text-xs text-pnp-textSecondary/50 leading-none">{displayPrice}</del>}
-                      <span className="text-lg font-bold text-green-400 leading-tight">{cryptoDisplayPrice}</span>
-                      <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(cryptoPriceUSD, "USD") : formatPrice(cryptoPriceCOP, "COP")}</span>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-end">
-                      <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
-                      <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(plan.priceUSD, "USD") : formatPrice(plan.priceCOP, "COP")}</span>
-                    </div>
-                  )}
+                  <div className="flex flex-col items-end">
+                    <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
+                    <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(plan.priceUSD, "USD") : formatPrice(plan.priceCOP, "COP")}</span>
+                  </div>
                   {planDays >= 30 && planDays < 36500 && (
                     <div className="text-[10px] text-pnp-textSecondary">
-                      {formatPrice((isCrypto ? cryptoPriceUSD : plan.priceUSD) / Math.max(1, Math.round(planDays / 30)), "USD")}{s.perMonth}
+                      {formatPrice(plan.priceUSD / Math.max(1, Math.round(planDays / 30)), "USD")}{s.perMonth}
                     </div>
                   )}
                 </div>
@@ -1098,7 +929,7 @@ export default function Subscribe() {
                 <button
                   disabled={submitting}
                   onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "epayco"); }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-white bg-[#D4007A] hover:bg-[#B8006A] disabled:opacity-50 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold text-white bg-[#D4007A] hover:bg-[#B8006A] disabled:opacity-50 transition-colors"
                 >
                   <span>💳</span> {t.lang === "es" ? "Pagar con Tarjeta" : "Pay with Card"}
                 </button>
@@ -1107,178 +938,54 @@ export default function Subscribe() {
                     <button
                       disabled={submitting}
                       onClick={(e) => { e.stopPropagation(); handleCryptoSubscribe(plan.id); }}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-green-300 border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                      className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
                     >
-                      <span>🔄</span> {t.lang === "es" ? "Cripto (Recurrente)" : "Crypto (Recurring)"}
+                      <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
+                        <span>🔄</span>
+                        <span>{t.lang === "es" ? "Cripto" : "Crypto"}</span>
+                        <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>
+                      </span>
+                      <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
                     </button>
                   ) : (
                     <button
                       disabled={submitting}
                       onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdc"); }}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-green-300 border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                      className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
                     >
-                      <span>🪙</span> {t.lang === "es" ? "Cripto −20%" : "Crypto −20%"}
+                      <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
+                        <span>🪙</span>
+                        <span>{t.lang === "es" ? "Cripto" : "Crypto"}</span>
+                        <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>
+                      </span>
+                      <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
                     </button>
                   )
                 )}
               </div>
             </button>
+            {isPanelActive && (
+              <div ref={orderPanelRef}>
+                <NowPaymentsWaitingPanel
+                  order={usdcOrder!}
+                  isSuccess={usdcPaymentSuccess}
+                  onCancel={cancelNowPayments}
+                  lang={t.lang}
+                  wrapperClassName="rounded-t-none border-t-0"
+                />
+              </div>
+            )}
+            </div>
           );
         })}
       </div>
 
-      {/* Payment method */}
-      <div className="mb-6">
-        <h3 className="text-sm font-medium text-pnp-textPrimary mb-3">{s.paymentMethod}</h3>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={() => setProvider("epayco")}
-            className={`rounded-xl p-3 border-2 transition-all text-center relative ${
-              provider === "epayco"
-                ? "border-[#D4007A] bg-[#D4007A]/10"
-                : "border-white/10 bg-white/5 hover:border-white/20"
-            }`}
-          >
-            <div className="text-lg mb-1">💳</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">{s.cardPse}</div>
-            <div className="text-[10px] text-pnp-textSecondary">{"Visa & Mastercard · ePayco"}</div>
-          </button>
-          <button
-            onClick={() => usdcAvailable !== false && setProvider("usdc")}
-            disabled={usdcAvailable === false}
-            className={`rounded-xl p-3 border-2 transition-all text-center relative ${
-              usdcAvailable === false
-                ? "border-white/5 bg-white/3 opacity-50 cursor-not-allowed"
-                : provider === "usdc"
-                ? "border-green-500 bg-green-500/10"
-                : "border-white/10 bg-white/5 hover:border-white/20"
-            }`}
-          >
-            <div className="text-lg mb-1">🪙</div>
-            <div className="text-xs font-medium text-pnp-textPrimary">
-              {t.lang === "es" ? "Cripto" : "Crypto"}
-            </div>
-            <div className="text-[10px] text-pnp-textSecondary">
-              {usdcAvailable === false ? s.usdcComingSoon : "BTC · ETH · USDC +100"}
-            </div>
-            {usdcAvailable !== false && cryptoDiscountPct > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-green-500 text-white px-1.5 py-0.5 rounded-full leading-none">
-                Save {cryptoDiscountPct}%
-              </span>
-            )}
-          </button>
-        </div>
-
-        {/* Crypto (NowPayments) info panel */}
-        {provider === "usdc" && (
-          <div className="mt-3 rounded-xl p-3 border border-green-500/30 bg-green-500/5 space-y-2">
-            {cryptoSavingsUSD > 0 && (
-              <div className="text-xs font-semibold text-green-400 text-center py-1 px-2 rounded-lg bg-green-500/10">
-                Save ${cryptoSavingsUSD.toFixed(2)} vs card on this plan
-              </div>
-            )}
-            <p className="text-xs text-pnp-textSecondary">{s.usdcInfoText}</p>
-            <div className="flex flex-wrap gap-2 text-[10px]">
-              <span className="text-green-400">USDC · USDT · Base · Solana · Polygon · TRON · ETH</span>
-            </div>
-            <div className="flex flex-wrap gap-2 text-[10px]">
-              <a href="https://www.moonpay.com/buy/usdc" target="_blank" rel="noopener noreferrer"
-                className="text-green-400 hover:underline font-semibold">MoonPay ↗</a>
-              <a href="https://www.coinbase.com/price/usd-coin" target="_blank" rel="noopener noreferrer"
-                className="text-green-400 hover:underline font-semibold">Coinbase ↗</a>
-              <a href="https://global.transak.com/?defaultCryptoCurrency=USDC" target="_blank" rel="noopener noreferrer"
-                className="text-green-400 hover:underline font-semibold">Transak ↗</a>
-            </div>
-          </div>
-        )}
-
-        {/* Crypto guide nudge — shown when crypto method is selected */}
-        {provider === "usdc" && (
-          <div className="mt-3 text-center">
-            <a href="/crypto-guide" className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors underline decoration-dotted">
-              {t.lang === "es" ? "¿No sabes cómo pagar con cripto? Aprende aquí →" : "Don't know how to pay with crypto? Learn how →"}
-            </a>
-          </div>
-        )}
-      </div>
-
-      {/* USDC waiting panel — checkout opened in new tab */}
-      {usdcOrder && !usdcPaymentSuccess && (
-        <div className="mb-6 rounded-xl border border-green-500/40 bg-green-500/5 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <div className={`w-2 h-2 rounded-full animate-pulse ${usdcOrder.partiallyPaid ? "bg-yellow-400" : "bg-green-500"}`} />
-            <span className="text-sm font-medium text-pnp-textPrimary">
-              {s.usdcWaitingTitle} — {usdcOrder.planName}
-            </span>
-          </div>
-
-          {usdcOrder.partiallyPaid && (
-            <div className="mb-3 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
-              <p className="text-xs text-yellow-400 font-medium">
-                {t.lang === "es" ? "Pago parcial detectado — envía el monto restante a la misma dirección." : "Partial payment detected — please send the remaining amount to the same address."}
-              </p>
-            </div>
-          )}
-
-          {/* Coin chips */}
-          <div className="flex flex-wrap gap-1.5 mb-4">
-            {["USDC", "BTC", "ETH", "LTC", "SOL", "XRP", "+100"].map((coin) => (
-              <span key={coin} className="px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/30 text-[11px] font-semibold text-green-400">{coin}</span>
-            ))}
-          </div>
-
-          {usdcOrder.invoiceUrl && (
-            <>
-              {/* QR code */}
-              <div className="flex flex-col items-center gap-2 mb-4">
-                <div className="bg-white p-3 rounded-xl">
-                  <QRCodeSVG value={usdcOrder.invoiceUrl} size={160} level="M" />
-                </div>
-                <p className="text-[11px] text-pnp-textSecondary">
-                  {t.lang === "es" ? "Escanea con tu wallet o abre el link" : "Scan with your wallet or open the link"}
-                </p>
-              </div>
-
-              {/* Open checkout button */}
-              <a
-                href={usdcOrder.invoiceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full text-center py-3 rounded-xl font-bold text-sm text-white mb-2"
-                style={{ background: "linear-gradient(90deg, #26a17b, #00c896)" }}
-              >
-                {s.usdcOpenCheckout} →
-              </a>
-
-              {/* Copy link */}
-              <SubscribeUsdcCopyLink url={usdcOrder.invoiceUrl} lang={t.lang} />
-            </>
-          )}
-
-          <button
-            onClick={() => {
-              setUsdcOrder(null);
-              setUsdcPolling(false);
-              setUsdcPaymentSuccess(false);
-              try { sessionStorage.removeItem("pnp_pending_usdc_order"); } catch {}
-            }}
-            className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors py-1 mt-3"
-          >
-            {s.cancel}
-          </button>
-        </div>
-      )}
-
-      {/* USDC payment confirmed state */}
-      {usdcPaymentSuccess && (
-        <div className="mb-6 flex flex-col items-center gap-3 py-6">
-          <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
-            <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <p className="text-base font-semibold text-green-400">{s.usdcPaymentConfirmed}</p>
-          <p className="text-xs text-pnp-textSecondary">{s.subscriptionNowActive}</p>
+      {/* Crypto guide link */}
+      {usdcAvailable !== false && (
+        <div className="mb-5 text-center">
+          <a href="/crypto-guide" className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors underline decoration-dotted">
+            {t.lang === "es" ? "¿No sabes cómo pagar con cripto? Aprende aquí →" : "New to crypto? Learn how to pay →"}
+          </a>
         </div>
       )}
 
@@ -1299,30 +1006,11 @@ export default function Subscribe() {
       )}
 
       {/* Error banner */}
-      {error && (
+      {(error || nowpaymentsError) && (
         <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-400 text-center whitespace-pre-line">
-          {error}
+          {error || nowpaymentsError}
         </div>
       )}
-
-      {/* Subscribe button */}
-      <button
-        onClick={handleSubscribe}
-        disabled={!selectedPlan || submitting}
-        className="btn-gradient w-full py-3.5 rounded-xl font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {submitting ? (
-          <span className="flex items-center justify-center gap-2">
-            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            {s.processingPayment}
-          </span>
-        ) : (
-          s.subscribeNow
-        )}
-      </button>
 
       {/* Back link */}
       <button

@@ -9481,7 +9481,7 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
   }
 
   const user = req.session.user;
-  const { planId, email: rawEmail } = req.body;
+  const { planId, email: rawEmail, returnUrl: rawReturnUrl } = req.body;
   if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
 
   // NP-H-02: validate email if provided
@@ -9489,6 +9489,11 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
     return res.status(400).json({ success: false, error: 'Invalid email address' });
   }
   const email = rawEmail?.trim() || null;
+
+  const ALLOWED_RETURN_PATHS = new Set(['/subscribe', '/lifetime100']);
+  const returnPath = (typeof rawReturnUrl === 'string' && ALLOWED_RETURN_PATHS.has(rawReturnUrl))
+    ? rawReturnUrl
+    : '/subscribe';
 
   const envVarName = NOWPAYMENTS_SUBSCRIPTION_PLAN_MAP[planId];
   if (!envVarName) {
@@ -9542,8 +9547,8 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
       order_id: orderId,
       order_description: `${planDisplayName} – PNPtv!`,
       ipn_callback_url: `${webappUrl}/api/webhooks/nowpayments`,
-      success_url: `${webappUrl}/subscribe?nowpayments=success&order=${encodeURIComponent(orderId)}`,
-      cancel_url: `${webappUrl}/subscribe`,
+      success_url: `${webappUrl}${returnPath}?nowpayments=success&order=${encodeURIComponent(orderId)}`,
+      cancel_url: `${webappUrl}${returnPath}`,
       ...(customerEmail ? { customer_email: customerEmail } : {}),
     }, {
       headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
@@ -9577,12 +9582,17 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
   }
 
   const user = req.session.user;
-  const { planId, email, creatorId } = req.body;
+  const { planId, email, creatorId, returnUrl: rawReturnUrl } = req.body;
   if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
 
   if (email != null && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254)) {
     return res.status(400).json({ success: false, error: 'Invalid email address' });
   }
+
+  const ALLOWED_RETURN_PATHS_PREPARE = new Set(['/subscribe', '/lifetime100']);
+  const returnPath = (typeof rawReturnUrl === 'string' && ALLOWED_RETURN_PATHS_PREPARE.has(rawReturnUrl))
+    ? rawReturnUrl
+    : '/subscribe';
 
   const userId = String(user.telegram_id || user.id);
   const { query: dbQuery } = require('../../config/postgres');
@@ -9664,8 +9674,8 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
       order_id: orderId,
       order_description: `${planDisplayName} – PNPtv!`,
       ipn_callback_url: ipnCallbackUrl,
-      success_url: `${webappUrl}/subscribe?nowpayments=success&order=${encodeURIComponent(orderId)}`,
-      cancel_url: `${webappUrl}/subscribe`,
+      success_url: `${webappUrl}${returnPath}?nowpayments=success&order=${encodeURIComponent(orderId)}`,
+      cancel_url: `${webappUrl}${returnPath}`,
       ...(email ? { customer_email: email } : {}),
     }, {
       headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
@@ -9814,6 +9824,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
   // Treat as 'finished' immediately — no conversion risk, no need to wait for the payout leg.
   // For volatile assets, just record the status and wait for 'finished'.
   const STABLECOIN_CURRENCIES = new Set(['usdcerc20', 'usdcmatic', 'usdcbase', 'usdcsol', 'usdtbsc', 'usdterc20', 'usdtmatic', 'usdtsol', 'usdcbsc']);
+  let isStablecoinConfirmed = false;
   if (payment_status === 'confirmed') {
     const isStablecoin = pay_currency && STABLECOIN_CURRENCIES.has(pay_currency.toLowerCase());
     if (!isStablecoin) {
@@ -9824,19 +9835,20 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       return res.json({ received: true });
     }
     logger.info('[NOWPayments] IPN: stablecoin confirmed — treating as finished', { order_id, pay_currency });
-    // Fall through to the 'finished' grant logic below
+    isStablecoinConfirmed = true;
+    // Fall through to the grant logic below (the payment_status !== 'finished' guard is bypassed by the flag)
   }
 
   if (payment_status === 'waiting') {
     return res.json({ received: true });
   }
 
-  if (payment_status !== 'finished') {
+  if (payment_status !== 'finished' && !isStablecoinConfirmed) {
     logger.warn('[NOWPayments] IPN: unknown payment_status', { payment_status, order_id });
     return res.json({ received: true });
   }
 
-  // payment_status === 'finished' — verify payment exists in NowPayments API before granting.
+  // Verify payment exists in NowPayments API before granting (covers both 'finished' and stablecoin 'confirmed').
   // Guards against test IPNs sent from the merchant dashboard (they pass HMAC but have fake payment IDs).
   try {
     const verifyRes = await fetch(`${NOWPAYMENTS_URL}/payment/${payment_id}`, {
@@ -9887,6 +9899,23 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       }
 
       logger.info('[NOWPayments] IPN: subscription renewal detected', { order_id, renewalOrderId, subscriptionId: req.body.subscription_id });
+
+      // Verify renewal payment exists (same test-IPN guard as the primary grant path)
+      try {
+        const renewalVerifyRes = await fetch(`${NOWPAYMENTS_URL}/payment/${payment_id}`, {
+          headers: { 'x-api-key': NOWPAYMENTS_API_KEY },
+        });
+        if (renewalVerifyRes.status === 404) {
+          logger.error('[NOWPayments] IPN: renewal payment_id not found in API — likely test IPN, rejecting', { payment_id, renewalOrderId });
+          return res.status(400).json({ error: 'payment_not_found' });
+        }
+        if (!renewalVerifyRes.ok) {
+          logger.warn('[NOWPayments] IPN: renewal payment verification non-404, proceeding', { payment_id, status: renewalVerifyRes.status });
+        }
+      } catch (renewalVerifyErr) {
+        logger.warn('[NOWPayments] IPN: renewal payment verification failed, proceeding', { payment_id, error: renewalVerifyErr.message });
+      }
+
       await dbQuery(
         `INSERT INTO dash_subscription_orders
            (user_id, plan_id, usd_amount, btcpay_invoice_id, status, metadata)

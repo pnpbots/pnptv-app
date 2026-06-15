@@ -325,8 +325,8 @@ export function AnnouncementStrip() {
     return () => clearTimeout(id);
   }, [entry?.text, reducedMotion]);
 
-  // Hide when on /main-stage entirely — the page itself is the announcement.
-  if (location.pathname === "/main-stage") return null;
+  // Hide on /main-stage and payment pages — no distractions during checkout.
+  if (location.pathname === "/main-stage" || location.pathname === "/subscribe" || location.pathname === "/lifetime100") return null;
   if (!entry) return null;
 
   const style = CATEGORY_STYLES[entry.category];

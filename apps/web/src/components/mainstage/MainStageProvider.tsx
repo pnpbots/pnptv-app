@@ -791,7 +791,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("popstate", onNav);
     };
   }, []);
-  const isOnMainStage = miniPathname.startsWith("/main-stage");
+  const isOnMainStage = miniPathname.startsWith("/main-stage") || miniPathname === "/subscribe" || miniPathname === "/lifetime100";
   const hasActiveMiniMedia =
     state?.media?.kind === "video" && Boolean(state?.media?.playing) && Boolean(state?.media?.src);
   const showMiniPlayer = isAuthenticated && !isOnMainStage && !miniDismissed && (isJoined || hasActiveMiniMedia);
