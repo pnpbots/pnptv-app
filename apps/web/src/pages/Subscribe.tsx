@@ -630,7 +630,7 @@ export default function Subscribe() {
   const primePlans = plans.filter((p) => !MEMBER_PLAN_IDS.has(p.id));
 
   const selectedPlanData = plans.find((p) => p.id === selectedPlan);
-  const cryptoDiscountPct = (selectedPlanData && (selectedPlanData.isLifetime || (selectedPlanData.duration_days ?? 0) >= 365)) ? 20 : 0;
+  const cryptoDiscountPct = selectedPlanData ? 20 : 0;
   const cryptoSavingsUSD = cryptoDiscountPct > 0 && selectedPlanData ? Math.round(selectedPlanData.priceUSD * cryptoDiscountPct / 100 * 100) / 100 : 0;
   const isCrypto = provider === "usdc";
 
@@ -747,10 +747,9 @@ export default function Subscribe() {
           const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
           const planLabel = getPlanLabel(plan, true);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
-          const planIsLongTerm = plan.isLifetime || (plan.duration_days ?? plan.duration ?? 0) >= 365;
-          const planDiscountPct = planIsLongTerm ? 20 : 0;
-          const cryptoPriceUSD = planDiscountPct > 0 ? Math.round(plan.priceUSD * (1 - planDiscountPct / 100) * 100) / 100 : plan.priceUSD;
-          const cryptoPriceCOP = planDiscountPct > 0 ? Math.round(plan.priceCOP * (1 - planDiscountPct / 100)) : plan.priceCOP;
+          const planDiscountPct = 20;
+          const cryptoPriceUSD = Math.round(plan.priceUSD * 0.80 * 100) / 100;
+          const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
           return (
@@ -861,10 +860,9 @@ export default function Subscribe() {
           const planLabel = getPlanLabel(plan, false);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
           const planDays = plan.duration_days || plan.duration || 30;
-          const planIsLongTerm = plan.isLifetime || planDays >= 365;
-          const planDiscountPct = planIsLongTerm ? 20 : 0;
-          const cryptoPriceUSD = planDiscountPct > 0 ? Math.round(plan.priceUSD * (1 - planDiscountPct / 100) * 100) / 100 : plan.priceUSD;
-          const cryptoPriceCOP = planDiscountPct > 0 ? Math.round(plan.priceCOP * (1 - planDiscountPct / 100)) : plan.priceCOP;
+          const planDiscountPct = 20;
+          const cryptoPriceUSD = Math.round(plan.priceUSD * 0.80 * 100) / 100;
+          const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
           return (

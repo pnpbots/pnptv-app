@@ -105,11 +105,12 @@ export default function PostDetail() {
   const shareUrl = `${APP_BASE}/social/post/${postId}`;
 
   const metaTitle = post
-    ? `${post.author_first_name || post.author_username || "PNPtv"} on PNPtv!`
+    ? (post.video_title || `${post.author_first_name || post.author_username || "PNPtv"} on PNPtv!`)
     : "Post — PNPtv!";
-  const metaDescription = post?.content
-    ? post.content.slice(0, 160)
+  const metaDescription = post
+    ? (post.video_description || post.content || "View this post on PNPtv! — the queer PNP community.").slice(0, 160)
     : "View this post on PNPtv! — the queer PNP community.";
+  const metaImage = post?.video_thumbnail_url || (post?.media_type !== "video" ? post?.media_url : null);
 
   return (
     <div className="max-w-xl mx-auto px-4 py-6">
@@ -118,11 +119,10 @@ export default function PostDetail() {
         <meta name="description" content={metaDescription} />
         <meta property="og:title" content={metaTitle} />
         <meta property="og:description" content={metaDescription} />
-        {post?.media_url && post.media_type !== "video" && (
-          <meta property="og:image" content={post.media_url} />
-        )}
+        {metaImage && <meta property="og:image" content={metaImage.startsWith("/") ? `https://pnptv.app${metaImage}` : metaImage} />}
         <meta property="og:url" content={shareUrl} />
         <meta name="twitter:card" content="summary_large_image" />
+        {metaImage && <meta name="twitter:image" content={metaImage.startsWith("/") ? `https://pnptv.app${metaImage}` : metaImage} />}
       </Helmet>
 
       {/* Back button */}

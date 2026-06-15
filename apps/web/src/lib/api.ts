@@ -808,6 +808,7 @@ export function getRtmpKey(): Promise<{
   success: boolean;
   rtmpUrl?: string;
   streamKey?: string;
+  channelRef?: string;
   error?: string;
 }> {
   return request("/api/webapp/live/rtmp-key");
@@ -7281,3 +7282,57 @@ export const PRIME_TAG_TAXONOMY: { key: string; label: string }[] = [
   { key: "threesome", label: "Threesome" },
   { key: "golden-rain", label: "Golden Rain" },
 ];
+
+// ── Live tip goal, tip menu, leaderboard ──────────────────────────────────────
+
+export interface TipGoal {
+  goalAmount: number | null;
+  goalLabel: string | null;
+  progress: number;
+  completed: boolean;
+}
+
+export interface TipMenuItem {
+  id: number;
+  tokensAmount: number;
+  label: string;
+  sortOrder: number;
+}
+
+export function getLiveGoal(channelRef: string): Promise<TipGoal> {
+  return request(`/api/proxy/live/goal/${encodeURIComponent(channelRef)}`);
+}
+
+export function setLiveGoal(amount: number, label: string): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/goal", { method: "POST", body: { amount, label } });
+}
+
+export function clearLiveGoal(): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/goal", { method: "DELETE" });
+}
+
+export function getTipMenu(performerId: string): Promise<{ items: TipMenuItem[] }> {
+  return request(`/api/webapp/live/tip-menu/${encodeURIComponent(performerId)}`);
+}
+
+export function saveTipMenu(
+  items: { tokensAmount: number; label: string; sortOrder: number }[]
+): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/tip-menu", { method: "POST", body: { items } });
+}
+
+export function getTipLeaderboard(
+  channelRef: string,
+  period: "today" | "week"
+): Promise<{ entries: { username: string; total: number; tip_count: number }[] }> {
+  return request(
+    `/api/proxy/live/tips/leaderboard?channelRef=${encodeURIComponent(channelRef)}&period=${period}`
+  );
+}
+
+export function getCreatorRecordings(creatorId: string): Promise<{
+  success: boolean;
+  recordings: { id: string; title: string; hlsUrl: string; createdAt: string; durationSeconds: number | null }[];
+}> {
+  return request(`/api/webapp/creators/${encodeURIComponent(creatorId)}/recordings`);
+}

@@ -32,6 +32,7 @@ import {
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import LiveKitCallPanel from "@/components/hangouts/LiveKitCallDock";
+import { SharedPostCard } from "@/components/social/SharedPostCard";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -1501,69 +1502,9 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
                               </div>
                             </>
                           );
-                        })() : msg.message_type === "post_card" && msg.meta?.postId ? (() => {
-                          const snap = msg.meta.snapshot || {};
-                          const handleName = snap.authorUsername
-                            ? `@${snap.authorUsername}`
-                            : (snap.authorFirstName || "User");
-                          const preview = snap.content || "";
-                          const isVideo = snap.mediaType === "video";
-                          const authorPath = snap.authorUsername ? `/profile/${snap.authorUsername}` : null;
-                          return (
-                            <>
-                              {snap.note && <p className="mb-1.5 text-sm">{snap.note}</p>}
-                              <div className="w-full rounded-lg overflow-hidden border border-white/15 hover:border-white/25 bg-black/20 transition-colors">
-                                {(snap.videoThumbnailUrl || snap.mediaUrl) && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); navigate(`/post/${msg.meta!.postId}`); }}
-                                    className="w-full text-left"
-                                    aria-label="View post"
-                                  >
-                                    <div className="relative w-full bg-black/40" style={{ aspectRatio: "16/9" }}>
-                                      <img src={snap.videoThumbnailUrl || snap.mediaUrl} alt="" className="w-full h-full object-cover" />
-                                      {isVideo && (
-                                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                          <span className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
-                                            <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                                          </span>
-                                        </span>
-                                      )}
-                                    </div>
-                                  </button>
-                                )}
-                                <div className="px-2.5 py-2">
-                                  {authorPath ? (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => { e.stopPropagation(); navigate(authorPath); }}
-                                      className="text-[11px] font-semibold hover:underline"
-                                      style={{ color: isMe ? "rgba(255,255,255,0.95)" : "#5ED1C4" }}
-                                    >
-                                      📎 {handleName}
-                                    </button>
-                                  ) : (
-                                    <div className="text-[11px] font-semibold" style={{ color: isMe ? "rgba(255,255,255,0.95)" : "#5ED1C4" }}>
-                                      📎 {handleName}
-                                    </div>
-                                  )}
-                                  {preview && (
-                                    <div className={`text-xs mt-0.5 line-clamp-3 ${isMe ? "text-white/85" : "text-white/80"}`}>
-                                      {preview}
-                                    </div>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); navigate(`/post/${msg.meta!.postId}`); }}
-                                    className={`text-[10px] mt-1 hover:underline ${isMe ? "text-white/70" : "text-pnp-accent"}`}
-                                  >
-                                    Tap to view post →
-                                  </button>
-                                </div>
-                              </div>
-                            </>
-                          );
-                        })() : renderMessageContent(msg.content)}
+                        })() : msg.message_type === "post_card" && msg.meta?.postId ? (
+                          <SharedPostCard postId={msg.meta.postId} snapshot={msg.meta.snapshot || {}} isMe={isMe} />
+                        ) : renderMessageContent(msg.content)}
                         <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
                           {msg.id === pinnedMessageId && (
                             <svg className={`w-2.5 h-2.5 ${isMe ? "text-white/50" : "text-pnp-textSecondary/60"}`} fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v3.586l1.707 1.707a1 1 0 01.293.707V13a1 1 0 01-1 1h-2v4a1 1 0 11-2 0v-4H6a1 1 0 01-1-1V9a1 1 0 01.293-.707L7 6.586V3a1 1 0 011-1h2z" /></svg>

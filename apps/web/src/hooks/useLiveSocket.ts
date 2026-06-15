@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { connectSocket } from "@/lib/socket";
+import type { TipGoal } from "@/lib/api";
 
 export interface LiveChatMessage {
   id: number;
   streamId: string;
-  userId: string;
+  userId?: string;
   username: string;
   content: string;
   createdAt: string;
@@ -29,6 +30,12 @@ export interface LiveRaidEvent {
   raidedBy: string | number;
 }
 
+export interface LiveTipAlert {
+  amount: number;
+  username: string;
+  message: string;
+}
+
 interface UseLiveSocketResult {
   messages: LiveChatMessage[];
   viewerCount: number;
@@ -48,6 +55,12 @@ interface UseLiveSocketResult {
   dismissRaid: () => void;
   /** Emit a live:raid:initiate event as the stream owner. */
   emitRaid: (streamId: string, targetChannelRef: string) => void;
+  /** Current tip goal state — updated via live:goal_update socket event. */
+  tipGoal: TipGoal | null;
+  /** Latest tip alert — auto-clears after 4 seconds. */
+  tipAlert: LiveTipAlert | null;
+  /** True when the server has banned this socket from the stream chat. */
+  chatBanned: boolean;
 }
 
 export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
@@ -59,6 +72,10 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [socketError, setSocketError] = useState<string | null>(null);
   const [raidEvent, setRaidEvent] = useState<LiveRaidEvent | null>(null);
+  const [tipGoal, setTipGoal] = useState<TipGoal | null>(null);
+  const [tipAlert, setTipAlert] = useState<LiveTipAlert | null>(null);
+  const [chatBanned, setChatBanned] = useState(false);
+  const tipAlertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Tracks the currently joined streamId so we can emit live:leave on change/unmount
   const joinedStreamRef = useRef<string | null>(null);
@@ -96,10 +113,27 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     const onError = () => {
       setIsConnected(false);
     };
-    const onLiveError = (data: { message: string }) => {
+    const onLiveError = (data: { message: string; code?: string }) => {
+      if (data.code === "CHAT_BANNED") {
+        setChatBanned(true);
+        return;
+      }
       setSocketError(data.message);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
       errorTimerRef.current = setTimeout(() => setSocketError(null), 5000);
+    };
+
+    const onGoalUpdate = (data: TipGoal) => {
+      setTipGoal(data);
+    };
+
+    const onTipAlert = (data: LiveTipAlert) => {
+      setTipAlert(data);
+      if (tipAlertTimerRef.current) clearTimeout(tipAlertTimerRef.current);
+      tipAlertTimerRef.current = setTimeout(() => {
+        setTipAlert(null);
+        tipAlertTimerRef.current = null;
+      }, 4000);
     };
 
     if (socket.connected) {
@@ -112,15 +146,20 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     socket.on("connect_error", onError);
     socket.on("wallet:updated", onWalletUpdated);
     socket.on("live:error", onLiveError);
+    socket.on("live:goal_update", onGoalUpdate);
+    socket.on("live:tip_alert", onTipAlert);
 
     return () => {
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+      if (tipAlertTimerRef.current) clearTimeout(tipAlertTimerRef.current);
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("reconnect_attempt", onReconnectAttempt);
       socket.off("connect_error", onError);
       socket.off("wallet:updated", onWalletUpdated);
       socket.off("live:error", onLiveError);
+      socket.off("live:goal_update", onGoalUpdate);
+      socket.off("live:tip_alert", onTipAlert);
     };
   }, []);
 
@@ -264,5 +303,8 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     raidEvent,
     dismissRaid,
     emitRaid,
+    tipGoal,
+    tipAlert,
+    chatBanned,
   };
 }

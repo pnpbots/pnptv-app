@@ -2096,6 +2096,29 @@ function initSocketIO(io) {
         socket.emit('live:error', { message: 'You must join the stream before sending messages' });
         return;
       }
+
+      // Chat ban/mute check — streamId doubles as channel_ref for these streams
+      try {
+        const { rows: banRows } = await query(
+          `SELECT action, mute_until FROM stream_chat_bans
+            WHERE channel_ref = $1 AND banned_user_id = $2
+              AND (mute_until IS NULL OR mute_until > NOW())`,
+          [String(streamId), String(user.id)]
+        );
+        if (banRows.length > 0) {
+          const ban = banRows[0];
+          const banMsg = ban.action === 'mute'
+            ? 'You are muted in this stream'
+            : 'You are banned from this stream chat';
+          socket.emit('live:error', { code: 'CHAT_BANNED', message: banMsg });
+          return;
+        }
+      } catch (banCheckErr) {
+        // Fail-open: Redis rate-limit is still in place; ban-check DB failure
+        // should not silence all chat during an outage.
+        logger.warn('live:message ban check failed (non-fatal)', { streamId, userId: user.id, error: banCheckErr.message });
+      }
+
       try {
         const username = user.username || user.firstName || user.first_name || 'Viewer';
         const trimmedContent = String(content).trim();
@@ -2128,6 +2151,96 @@ function initSocketIO(io) {
       } catch (err) {
         logger.error('live:message error', { streamId, userId: user.id, error: err.message });
         socket.emit('live:error', { message: 'Failed to send message' });
+      }
+    });
+
+    // ── Live Chat Moderation ─────────────────────────────────────────────────
+    // Only the stream owner can ban or mute viewers from chat.
+    // data: { targetUserId, channelRef, action: 'ban'|'mute'|'unban', durationMinutes? }
+    socket.on('live:mod_action', async (data) => {
+      const { targetUserId, channelRef, action, durationMinutes } = data || {};
+
+      if (!targetUserId || !channelRef || !action) {
+        socket.emit('live:error', { code: 'MOD_INVALID', message: 'targetUserId, channelRef, and action are required' });
+        return;
+      }
+      if (!['ban', 'mute', 'unban'].includes(action)) {
+        socket.emit('live:error', { code: 'MOD_INVALID', message: 'action must be ban, mute, or unban' });
+        return;
+      }
+      if (!/^[a-zA-Z0-9-]+$/.test(String(channelRef))) {
+        socket.emit('live:error', { code: 'MOD_INVALID', message: 'Invalid channelRef' });
+        return;
+      }
+
+      try {
+        // Verify the socket user is the owner of this channel
+        const { rows: ownerRows } = await query(
+          'SELECT live_channel, role FROM users WHERE id = $1',
+          [String(user.id)]
+        );
+        const ownerUser = ownerRows[0];
+        const isAdmin = ownerUser?.role === 'admin' || ownerUser?.role === 'superadmin';
+        if (!isAdmin && ownerUser?.live_channel !== String(channelRef)) {
+          socket.emit('live:error', { code: 'MOD_FORBIDDEN', message: 'You do not own this channel' });
+          return;
+        }
+
+        // Prevent self-moderation
+        if (String(targetUserId) === String(user.id)) {
+          socket.emit('live:error', { code: 'MOD_INVALID', message: 'Cannot moderate yourself' });
+          return;
+        }
+
+        if (action === 'unban') {
+          await query(
+            'DELETE FROM stream_chat_bans WHERE channel_ref = $1 AND banned_user_id = $2',
+            [String(channelRef), String(targetUserId)]
+          );
+          socket.emit('live:mod_applied', { channelRef, targetUserId, action: 'unban' });
+          logger.info('live:mod_action unban', { channelRef, targetUserId, byUserId: user.id });
+          return;
+        }
+
+        let muteUntil = null;
+        if (action === 'mute') {
+          const minutes = parseInt(durationMinutes, 10);
+          muteUntil = Number.isInteger(minutes) && minutes > 0
+            ? new Date(Date.now() + minutes * 60 * 1000)
+            : null; // null = permanent mute (treated like ban from chat)
+        }
+
+        await query(
+          `INSERT INTO stream_chat_bans (channel_ref, banned_user_id, banned_by_user_id, action, mute_until)
+               VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (channel_ref, banned_user_id)
+           DO UPDATE SET action = EXCLUDED.action,
+                         mute_until = EXCLUDED.mute_until,
+                         banned_by_user_id = EXCLUDED.banned_by_user_id,
+                         created_at = NOW()`,
+          [String(channelRef), String(targetUserId), String(user.id), action, muteUntil]
+        );
+
+        // Notify the moderated user
+        try {
+          io.to(`user:${targetUserId}`).emit('live:mod_applied', {
+            channelRef,
+            action,
+            muteUntil: muteUntil ? muteUntil.toISOString() : null,
+            message: action === 'mute'
+              ? `You have been muted in this stream${muteUntil ? ` until ${muteUntil.toUTCString()}` : ''}`
+              : 'You have been banned from this stream chat',
+          });
+        } catch (emitErr) {
+          logger.warn('live:mod_action: failed to notify target user', { targetUserId, error: emitErr.message });
+        }
+
+        // Confirm to the moderator
+        socket.emit('live:mod_applied', { channelRef, targetUserId, action, muteUntil: muteUntil ? muteUntil.toISOString() : null });
+        logger.info('live:mod_action applied', { channelRef, targetUserId, action, byUserId: user.id });
+      } catch (err) {
+        logger.error('live:mod_action error', { error: err.message, channelRef, targetUserId });
+        socket.emit('live:error', { code: 'MOD_ERROR', message: 'Failed to apply moderation action' });
       }
     });
 

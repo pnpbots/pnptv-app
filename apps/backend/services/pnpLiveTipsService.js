@@ -188,7 +188,7 @@ class PNPLiveTipsService {
             'SELECT user_id, display_name FROM performers WHERE id::text = $1 LIMIT 1',
             [String(performerId)]
           );
-          
+
           if (performerRows.length > 0) {
             const performerUserId = performerRows[0].user_id;
             const performerName = performerRows[0].display_name;
@@ -198,11 +198,11 @@ class PNPLiveTipsService {
               'SELECT balance_tokens FROM user_token_wallets WHERE user_id = $1',
               [String(performerUserId)]
             );
-            
+
             if (performerWallet.rows.length > 0) {
               const pBalance = performerWallet.rows[0].balance_tokens;
               io.to(`user:${performerUserId}`).emit('wallet:updated', { balance: pBalance });
-              
+
               // Emit session earnings update for streamer's dashboard
               io.to(`user:${performerUserId}`).emit('stream:earnings_update', {
                 amount: amount,
@@ -231,7 +231,38 @@ class PNPLiveTipsService {
                 createdAt: tip.created_at,
                 paymentMethod: 'tokens'
               });
+
+              // Update tip goal progress if an active goal exists on this stream
+              try {
+                const { rows: goalRows } = await query(
+                  `UPDATE live_streams
+                     SET tip_goal_progress = LEAST(tip_goal_progress + $1, tip_goal_amount),
+                         tip_goal_completed = (tip_goal_progress + $1 >= tip_goal_amount)
+                   WHERE channel_name = $2 AND status = 'live' AND tip_goal_amount IS NOT NULL
+                   RETURNING tip_goal_amount, tip_goal_label, tip_goal_progress, tip_goal_completed`,
+                  [amount, streamId]
+                );
+                if (goalRows.length > 0) {
+                  const g = goalRows[0];
+                  io.to(`live:${streamId}`).emit('live:goal_update', {
+                    goalAmount: parseFloat(g.tip_goal_amount),
+                    goalLabel: g.tip_goal_label,
+                    progress: parseFloat(g.tip_goal_progress),
+                    completed: g.tip_goal_completed,
+                  });
+                }
+              } catch (goalErr) {
+                logger.warn('Failed to update tip goal progress (non-fatal)', { error: goalErr.message });
+              }
             }
+
+            // Tip alert event for the performer's own UI (audio ding, overlay)
+            io.to(`user:${performerUserId}`).emit('live:tip_alert', {
+              amount,
+              username: tipperUsername,
+              message,
+              paymentMethod: 'tokens',
+            });
           }
         }
       } catch (socketErr) {
@@ -354,7 +385,7 @@ class PNPLiveTipsService {
         `SELECT t.*, u.username as user_username
          FROM pnp_tips t
          LEFT JOIN users u ON t.user_id = u.id
-         WHERE t.model_id = $1 AND t.created_at >= $2
+         WHERE (t.model_id = $1 OR t.performer_id = $1::text) AND t.created_at >= $2
          ORDER BY t.created_at DESC`,
         [modelId, startDate]
       );
@@ -376,13 +407,13 @@ class PNPLiveTipsService {
   static async getTipStatistics(modelId, startDate, endDate) {
     try {
       const result = await query(
-        `SELECT 
+        `SELECT
           COUNT(*) as total_tips,
           SUM(amount) as total_amount,
           COUNT(*) FILTER (WHERE payment_status = 'completed') as completed_tips,
           SUM(amount) FILTER (WHERE payment_status = 'completed') as completed_amount
          FROM pnp_tips
-         WHERE model_id = $1 
+         WHERE (model_id = $1 OR performer_id = $1::text)
            AND created_at >= $2
            AND created_at <= $3`,
         [modelId, startDate, endDate]

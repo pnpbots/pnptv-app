@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Card, Skeleton } from "@pnptv/ui-kit";
@@ -25,6 +25,8 @@ import {
   type LiveStreamWithHost,
   type RecentTip,
   type StreamOverlay,
+  type TipGoal,
+  type TipMenuItem,
   getRecentTips,
   getWalletBalance,
   getWebAppLiveStreams,
@@ -34,6 +36,10 @@ import {
   getSlotTicketStatus,
   buySlotTicket,
   isCreatorPayLocked,
+  getLiveGoal,
+  getTipMenu,
+  getTipLeaderboard,
+  getCreatorRecordings,
 } from "@/lib/api";
 import { StreamHealthPanel } from "@/components/stream/StreamHealthPanel";
 import { type LivePlayerStats } from "@/components/LivePlayer";
@@ -46,19 +52,34 @@ function extractChannelRef(streamId: string): string | null {
 }
 
 // ── Virtualized chat message list (react-window v2) ───────────────────────
-type ChatMsg = { id: string | number; username: string; content: string };
+type ChatMsg = { id: string | number; username: string; content: string; userId?: string };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function ChatRow(props: any) {
-  const { index, style, messages } = props as { index: number; style: React.CSSProperties; messages: ChatMsg[] };
+  const { index, style, messages, isOwner, onBan } = props as {
+    index: number;
+    style: React.CSSProperties;
+    messages: ChatMsg[];
+    isOwner?: boolean;
+    onBan?: (userId: string) => void;
+  };
   const msg = messages[index];
   if (!msg) return null;
   return (
     <div style={style} className="py-0.5">
-      <div className="text-xs">
+      <div className="text-xs flex items-center gap-1">
         <span className="font-medium text-gradient">@{msg.username}</span>
-        <span className="text-pnp-textSecondary mx-1">·</span>
-        <span className="text-pnp-textPrimary">{msg.content}</span>
+        <span className="text-pnp-textSecondary mx-0.5">·</span>
+        <span className="text-pnp-textPrimary flex-1">{msg.content}</span>
+        {isOwner && msg.userId && onBan && (
+          <button
+            onClick={() => onBan(msg.userId!)}
+            className="flex-shrink-0 ml-1 text-[9px] text-pnp-textSecondary/40 hover:text-red-400 transition-colors"
+            title="Ban from chat"
+          >
+            ✕
+          </button>
+        )}
       </div>
     </div>
   );
@@ -68,11 +89,15 @@ function ChatMessageList({
   messages,
   listRef,
   containerRef: _containerRef,
+  isOwner,
+  onBan,
 }: {
   messages: ChatMsg[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   listRef: React.MutableRefObject<any>;
   containerRef: React.RefObject<HTMLDivElement | null>;
+  isOwner?: boolean;
+  onBan?: (userId: string) => void;
 }) {
   const rowHeight = useDynamicRowHeight({ defaultRowHeight: 24, key: messages.length });
   return (
@@ -84,7 +109,7 @@ function ChatMessageList({
       rowCount={messages.length}
       rowHeight={rowHeight}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      rowProps={{ messages } as any}
+      rowProps={{ messages, isOwner, onBan } as any}
       style={{ height: 192, width: "100%", marginBottom: "0.5rem" }}
       tagName="div"
     />
@@ -196,6 +221,16 @@ function StreamInner() {
   // ── Leaderboard overlay state ──────────────────────────────────────────────
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [leaderboardTab, setLeaderboardTab] = useState<"today" | "week">("today");
+  const [leaderboardData, setLeaderboardData] = useState<{ today: { username: string; total: number; tip_count: number }[]; week: { username: string; total: number; tip_count: number }[] }>({ today: [], week: [] });
+
+  // ── Tip goal state ─────────────────────────────────────────────────────────
+  const [tipGoal, setTipGoal] = useState<TipGoal | null>(null);
+
+  // ── Tip menu state ─────────────────────────────────────────────────────────
+  const [tipMenu, setTipMenu] = useState<TipMenuItem[]>([]);
+
+  // ── VOD replay state ───────────────────────────────────────────────────────
+  const [replayUrl, setReplayUrl] = useState<string | null>(null);
 
   // ── Ticket / paywall state ─────────────────────────────────────────────────
   const [ticketStatus, setTicketStatus] = useState<{
@@ -240,6 +275,8 @@ function StreamInner() {
     socketError,
     raidEvent,
     dismissRaid,
+    tipGoal: socketTipGoal,
+    chatBanned,
   } = useLiveSocket(streamId || null);
 
   // chatSendingRef gates rapid Enter-Enter and click-click to keep both
@@ -255,6 +292,12 @@ function StreamInner() {
     setChatInput("");
     setTimeout(() => { chatSendingRef.current = false; }, 250);
   }, [chatInput, sendMessage]);
+
+  const handleBanUser = useCallback((targetUserId: string) => {
+    const socket = connectSocket();
+    if (!socket.connected) return;
+    socket.emit("live:mod_action", { targetUserId, action: "ban" });
+  }, []);
 
   // Cleanup all timers/intervals on unmount. Dash tip polling + countdown
   // intervals plus the three one-shot setTimeouts (tip-success toast, dash-tip
@@ -868,6 +911,47 @@ function StreamInner() {
     setRecentTips((prev) => [mapped, ...prev.filter((t) => t.id !== mapped.id)].slice(0, 5));
   }, [latestTip]);
 
+  // ── Tip goal: load on mount + sync from socket ─────────────────────────────
+  useEffect(() => {
+    const channelRef = streamId ? extractChannelRef(streamId) : null;
+    if (!channelRef) return;
+    getLiveGoal(channelRef)
+      .then((res) => { if (res.goalAmount !== null) setTipGoal(res); })
+      .catch(() => {});
+  }, [streamId]);
+
+  useEffect(() => {
+    if (socketTipGoal) setTipGoal(socketTipGoal);
+  }, [socketTipGoal]);
+
+  // ── Tip menu: load when stream resolves ────────────────────────────────────
+  useEffect(() => {
+    if (!streamId) return;
+    getTipMenu(streamId)
+      .then((res) => setTipMenu(res.items || []))
+      .catch(() => {});
+  }, [streamId]);
+
+  // ── Leaderboard: fetch when panel opens or tab changes ─────────────────────
+  useEffect(() => {
+    const channelRef = streamId ? extractChannelRef(streamId) : null;
+    if (!showLeaderboard || !channelRef) return;
+    getTipLeaderboard(channelRef, leaderboardTab)
+      .then((res) => setLeaderboardData((prev) => ({ ...prev, [leaderboardTab]: res.entries || [] })))
+      .catch(() => {});
+  }, [showLeaderboard, leaderboardTab, streamId]);
+
+  // ── VOD replay: fetch recordings when stream is detected offline ────────────
+  useEffect(() => {
+    if (!stream || stream.isLive || !streamId) return;
+    getCreatorRecordings(streamId)
+      .then((res) => {
+        const latest = (res.recordings || [])[0];
+        if (latest?.hlsUrl) setReplayUrl(latest.hlsUrl);
+      })
+      .catch(() => {});
+  }, [stream?.isLive, streamId]);
+
   // Countdown timer for Dash tip invoice (15-minute expiry)
   useEffect(() => {
     if (!dashTip) {
@@ -1014,28 +1098,8 @@ function StreamInner() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chatListRef = useRef<any>(null);
 
-  // ── Leaderboard: derive from recentTips (client-side, no new endpoints) ────
-  const leaderboardData = useMemo(() => {
-    const now = new Date();
-    const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).getTime();
-    const startOfWeek = (() => {
-      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-      d.setUTCDate(d.getUTCDate() - d.getUTCDay());
-      return d.getTime();
-    })();
-    const aggregate = (cutoff: number) => {
-      const map = new Map<string, { username: string; total: number }>();
-      recentTips.forEach((tip) => {
-        if (new Date(tip.created_at).getTime() < cutoff) return;
-        const key = tip.user_username;
-        const entry = map.get(key) || { username: tip.user_username, total: 0 };
-        entry.total += tip.amount;
-        map.set(key, entry);
-      });
-      return Array.from(map.values()).sort((a, b) => b.total - a.total).slice(0, 5);
-    };
-    return { today: aggregate(startOfDay), week: aggregate(startOfWeek) };
-  }, [recentTips]);
+  // ── Leaderboard: fetched from API when panel is opened ─────────────────────
+  // (leaderboardData state is declared above near the showLeaderboard state)
 
   const isNearBottom = () => {
     const el = chatContainerRef.current;
@@ -1589,6 +1653,45 @@ function StreamInner() {
         )}
       </div>
 
+      {/* ── Tip goal progress bar ─────────────────────────────────────────────── */}
+      {tipGoal && tipGoal.goalAmount && (
+        <div className="px-4 py-2 bg-pnp-surface border-b border-pnp-border">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-semibold text-pnp-textPrimary truncate">
+              {tipGoal.goalLabel || "Goal"}
+            </span>
+            <span className="text-xs text-pnp-textSecondary flex-shrink-0 ml-2">
+              {Math.round(tipGoal.progress)}/{Math.round(tipGoal.goalAmount)} tokens
+            </span>
+          </div>
+          <div className="h-2 rounded-full bg-pnp-border overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                tipGoal.completed ? "bg-green-500" : "bg-pnp-accent"
+              }`}
+              style={{ width: `${Math.min(100, Math.round((tipGoal.progress / tipGoal.goalAmount) * 100))}%` }}
+            />
+          </div>
+          {tipGoal.completed && (
+            <p className="text-[10px] text-green-400 font-semibold mt-1 text-center">Goal reached!</p>
+          )}
+        </div>
+      )}
+
+      {/* ── VOD replay — shown when stream is offline and a recording exists ──── */}
+      {!stream.isLive && replayUrl && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 px-1">
+            <span className="text-[10px] font-semibold text-pnp-textSecondary uppercase tracking-wider">Past stream replay</span>
+          </div>
+          <LivePlayer
+            src={replayUrl}
+            title={stream.name}
+            poster={stream.thumbnailUrl || undefined}
+          />
+        </div>
+      )}
+
       <div className={`space-y-3 ${isTheaterMode ? "max-w-7xl mx-auto px-4 sm:px-6 pb-8" : ""}`}>
         {/* ── Stream health panel — owner-only, shows RTMP signal status ─── */}
         {isStreamOwner && streamId && (
@@ -1723,6 +1826,27 @@ function StreamInner() {
             </svg>
             + Top up
           </button>
+        </div>
+      )}
+
+      {/* Tip menu — shown above fixed amounts when the creator has configured items */}
+      {tipMenu.length > 0 && stream.isLive && !isCreatorPayLocked(stream.username) && (
+        <div>
+          <p className="text-[10px] text-pnp-textSecondary mb-1.5 font-medium">Tip menu</p>
+          <div className="flex flex-wrap gap-1.5">
+            {tipMenu.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => handleTip(item.tokensAmount)}
+                disabled={tipping}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-pnp-border bg-pnp-surface text-pnp-textPrimary hover:border-pnp-accent/60 transition-colors text-left disabled:opacity-50"
+              >
+                <span className="text-pnp-accent font-bold">{item.tokensAmount}</span>
+                <span className="text-pnp-textSecondary mx-1">·</span>
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1962,36 +2086,44 @@ function StreamInner() {
                   messages={chatMessages.slice(-50)}
                   listRef={chatListRef}
                   containerRef={chatContainerRef}
+                  isOwner={isStreamOwner}
+                  onBan={isStreamOwner ? handleBanUser : undefined}
                 />
               )}
               <div ref={chatEndRef} />
             </div>
 
             {isAuthenticated ? (
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Type a message..."
-                  aria-label="Type a chat message"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      submitChat();
-                    }
-                  }}
-                  maxLength={500}
-                  className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
-                />
-                <button
-                  onClick={submitChat}
-                  disabled={!chatInput.trim()}
-                  className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Send
-                </button>
-              </div>
+              chatBanned ? (
+                <p className="text-[10px] text-red-400 text-center py-1">
+                  You are banned from this stream's chat.
+                </p>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Type a message..."
+                    aria-label="Type a chat message"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        submitChat();
+                      }
+                    }}
+                    maxLength={500}
+                    className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+                  />
+                  <button
+                    onClick={submitChat}
+                    disabled={!chatInput.trim()}
+                    className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Send
+                  </button>
+                </div>
+              )
             ) : (
               <button onClick={login} className="text-xs text-pnp-accent hover:underline">
                 {t.live.logInToChat}

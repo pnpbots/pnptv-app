@@ -1,9 +1,22 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { Card, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { getRtmpKey, provisionChannel, broadcastLiveNow, getWalletBalance } from "@/lib/api";
+import {
+  getRtmpKey,
+  provisionChannel,
+  broadcastLiveNow,
+  getWalletBalance,
+  getLiveGoal,
+  setLiveGoal,
+  clearLiveGoal,
+  getTipMenu,
+  saveTipMenu,
+  type TipGoal,
+  type TipMenuItem,
+} from "@/lib/api";
+import { useLiveSocket } from "@/hooks/useLiveSocket";
 
 const STUDIO_LOGIN_URL = `/login?returnTo=${encodeURIComponent("https://studio.pnptv.app/")}`;
 
@@ -28,6 +41,96 @@ export default function CreatorLive() {
   useEffect(() => {
     getWalletBalance().then((res) => { if (typeof res.balance === "number") setTokenBalance(res.balance); }).catch(() => {});
   }, []);
+
+  // ── Channel ref (populated after credentials load) ─────────────────────────
+  const [channelRef, setChannelRef] = useState<string | null>(null);
+
+  // ── Tip alert audio + toast ────────────────────────────────────────────────
+  const tipAudioRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    tipAudioRef.current = new Audio("/sounds/tip-ding.mp3");
+    tipAudioRef.current.volume = 0.6;
+  }, []);
+
+  const { tipAlert } = useLiveSocket(channelRef);
+
+  useEffect(() => {
+    if (!tipAlert) return;
+    tipAudioRef.current?.play().catch(() => {});
+  }, [tipAlert]);
+
+  // ── Tip goal state ─────────────────────────────────────────────────────────
+  const [goalAmount, setGoalAmount] = useState("");
+  const [goalLabel, setGoalLabel] = useState("");
+  const [goalSaving, setGoalSaving] = useState(false);
+  const [currentGoal, setCurrentGoal] = useState<TipGoal | null>(null);
+  const [showGoalEditor, setShowGoalEditor] = useState(false);
+
+  useEffect(() => {
+    if (!channelRef) return;
+    getLiveGoal(channelRef)
+      .then((res) => { if (res.goalAmount !== null) setCurrentGoal(res); })
+      .catch(() => {});
+  }, [channelRef]);
+
+  const handleSetGoal = useCallback(async () => {
+    const amt = parseInt(goalAmount);
+    if (!amt || amt <= 0) return;
+    setGoalSaving(true);
+    try {
+      await setLiveGoal(amt, goalLabel.trim() || "Goal");
+      setCurrentGoal({ goalAmount: amt, goalLabel: goalLabel.trim() || "Goal", progress: 0, completed: false });
+      setGoalAmount("");
+      setGoalLabel("");
+      setShowGoalEditor(false);
+    } catch {
+      // silently ignore — user will retry
+    } finally {
+      setGoalSaving(false);
+    }
+  }, [goalAmount, goalLabel]);
+
+  const handleClearGoal = useCallback(async () => {
+    await clearLiveGoal().catch(() => {});
+    setCurrentGoal(null);
+  }, []);
+
+  // ── Tip menu state ─────────────────────────────────────────────────────────
+  const [tipMenuItems, setTipMenuItems] = useState<TipMenuItem[]>([]);
+  const [menuEditing, setMenuEditing] = useState(false);
+  const [newItemAmount, setNewItemAmount] = useState("");
+  const [newItemLabel, setNewItemLabel] = useState("");
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) return;
+    getTipMenu(userId)
+      .then((res) => setTipMenuItems(res.items || []))
+      .catch(() => {});
+  }, [user?.id]);
+
+  const handleAddMenuItem = useCallback(async () => {
+    const amt = parseInt(newItemAmount);
+    if (!amt || !newItemLabel.trim()) return;
+    const newItems: TipMenuItem[] = [
+      ...tipMenuItems,
+      { id: Date.now(), tokensAmount: amt, label: newItemLabel.trim(), sortOrder: tipMenuItems.length },
+    ];
+    setTipMenuItems(newItems);
+    setNewItemAmount("");
+    setNewItemLabel("");
+    await saveTipMenu(
+      newItems.map(({ tokensAmount, label, sortOrder }) => ({ tokensAmount, label, sortOrder }))
+    ).catch(() => {});
+  }, [newItemAmount, newItemLabel, tipMenuItems]);
+
+  const handleRemoveMenuItem = useCallback(async (id: number) => {
+    const newItems = tipMenuItems.filter((i) => i.id !== id);
+    setTipMenuItems(newItems);
+    await saveTipMenu(
+      newItems.map(({ tokensAmount, label, sortOrder }) => ({ tokensAmount, label, sortOrder }))
+    ).catch(() => {});
+  }, [tipMenuItems]);
 
   const handleBroadcast = useCallback(async () => {
     if (broadcastDisabled || broadcastStatus === "sending") return;
@@ -72,6 +175,7 @@ export default function CreatorLive() {
       const result = await getRtmpKey();
       if (result.success && result.rtmpUrl && result.streamKey) {
         setRtmpInfo({ rtmpUrl: result.rtmpUrl, streamKey: result.streamKey });
+        if (result.channelRef) setChannelRef(result.channelRef);
         setPhase("ready");
         return;
       }
@@ -82,6 +186,7 @@ export default function CreatorLive() {
       const provision = await provisionChannel();
       if (provision.success && provision.rtmpUrl && provision.streamKey) {
         setRtmpInfo({ rtmpUrl: provision.rtmpUrl, streamKey: provision.streamKey });
+        if (provision.channelRef) setChannelRef(provision.channelRef);
         setPhase("ready");
       } else {
         setError(provision.error || "Could not set up your streaming channel");
@@ -118,6 +223,18 @@ export default function CreatorLive() {
       <Helmet>
         <title>Go Live — PNPtv!</title>
       </Helmet>
+
+      {/* Tip alert toast */}
+      {tipAlert && (
+        <div className="fixed top-4 right-4 z-50 px-4 py-3 rounded-xl bg-pnp-surface border border-pnp-accent/40 shadow-lg shadow-pnp-accent/10 max-w-xs pointer-events-none">
+          <p className="text-sm font-bold text-pnp-accent">+{tipAlert.amount} tokens</p>
+          <p className="text-xs text-pnp-textSecondary">from @{tipAlert.username}</p>
+          {tipAlert.message && (
+            <p className="text-xs text-pnp-textPrimary mt-0.5 italic">"{tipAlert.message}"</p>
+          )}
+        </div>
+      )}
+
       <div className="p-4 lg:p-6 space-y-5 max-w-2xl mx-auto">
 
         {/* Token balance chip */}
@@ -542,6 +659,162 @@ export default function CreatorLive() {
               <span>Set a schedule — regular streams build a loyal audience</span>
             </li>
           </ul>
+        </Card>
+
+        {/* Tip Goal */}
+        <Card className="p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <svg className="w-4 h-4 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+              Tip Goal
+            </h2>
+            <button
+              onClick={() => setShowGoalEditor((v) => !v)}
+              className="text-[10px] text-pnp-accent hover:underline"
+            >
+              {showGoalEditor ? "Cancel" : currentGoal ? "Edit" : "Set goal"}
+            </button>
+          </div>
+
+          {currentGoal ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-pnp-textPrimary">{currentGoal.goalLabel || "Goal"}</span>
+                <span className="text-xs text-pnp-textSecondary">
+                  {Math.round(currentGoal.progress)}/{Math.round(currentGoal.goalAmount ?? 0)} tokens
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-pnp-border overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${currentGoal.completed ? "bg-green-500" : "bg-pnp-accent"}`}
+                  style={{ width: `${Math.min(100, Math.round(((currentGoal.progress) / (currentGoal.goalAmount ?? 1)) * 100))}%` }}
+                />
+              </div>
+              {currentGoal.completed && (
+                <p className="text-[10px] text-green-400 font-semibold text-center">Goal reached!</p>
+              )}
+              <button
+                onClick={handleClearGoal}
+                className="text-[10px] text-red-400/70 hover:text-red-400 transition-colors"
+              >
+                Clear goal
+              </button>
+            </div>
+          ) : (
+            !showGoalEditor && (
+              <p className="text-xs text-pnp-textSecondary">No active goal. Set one to motivate your viewers.</p>
+            )
+          )}
+
+          {showGoalEditor && (
+            <div className="space-y-2 pt-1 border-t border-pnp-border">
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Tokens (e.g. 500)"
+                  value={goalAmount}
+                  onChange={(e) => setGoalAmount(e.target.value)}
+                  className="w-32 rounded-lg bg-pnp-surface border border-pnp-border px-2.5 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-1 focus:ring-pnp-accent"
+                />
+                <input
+                  type="text"
+                  placeholder="Label (optional)"
+                  maxLength={60}
+                  value={goalLabel}
+                  onChange={(e) => setGoalLabel(e.target.value)}
+                  className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-2.5 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-1 focus:ring-pnp-accent"
+                />
+              </div>
+              <button
+                onClick={handleSetGoal}
+                disabled={goalSaving || !goalAmount}
+                className="px-4 py-2 rounded-lg btn-gradient text-white text-xs font-semibold disabled:opacity-50 transition-all active:scale-95"
+              >
+                {goalSaving ? "Saving..." : "Set goal"}
+              </button>
+            </div>
+          )}
+        </Card>
+
+        {/* Tip Menu */}
+        <Card className="p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <svg className="w-4 h-4 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
+              </svg>
+              Tip Menu
+            </h2>
+            <button
+              onClick={() => setMenuEditing((v) => !v)}
+              className="text-[10px] text-pnp-accent hover:underline"
+            >
+              {menuEditing ? "Done" : "Edit"}
+            </button>
+          </div>
+
+          {tipMenuItems.length === 0 && !menuEditing && (
+            <p className="text-xs text-pnp-textSecondary">
+              No tip menu items. Add items so viewers can tip for specific actions.
+            </p>
+          )}
+
+          {tipMenuItems.length > 0 && (
+            <ul className="space-y-1.5">
+              {tipMenuItems.map((item) => (
+                <li key={item.id} className="flex items-center justify-between gap-2 py-1 border-b border-pnp-border/50 last:border-0">
+                  <span className="text-xs text-pnp-textPrimary">
+                    <span className="text-pnp-accent font-bold">{item.tokensAmount}T</span>
+                    <span className="text-pnp-textSecondary mx-1.5">·</span>
+                    {item.label}
+                  </span>
+                  {menuEditing && (
+                    <button
+                      onClick={() => handleRemoveMenuItem(item.id)}
+                      className="text-[10px] text-red-400/60 hover:text-red-400 transition-colors flex-shrink-0"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {menuEditing && (
+            <div className="pt-2 border-t border-pnp-border space-y-2">
+              <p className="text-[10px] text-pnp-textSecondary font-medium uppercase tracking-wider">Add item</p>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Tokens"
+                  value={newItemAmount}
+                  onChange={(e) => setNewItemAmount(e.target.value)}
+                  className="w-24 rounded-lg bg-pnp-surface border border-pnp-border px-2.5 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-1 focus:ring-pnp-accent"
+                />
+                <input
+                  type="text"
+                  placeholder="What you'll do (e.g. Take off shirt)"
+                  maxLength={80}
+                  value={newItemLabel}
+                  onChange={(e) => setNewItemLabel(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddMenuItem(); } }}
+                  className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-2.5 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-1 focus:ring-pnp-accent"
+                />
+              </div>
+              <button
+                onClick={handleAddMenuItem}
+                disabled={!newItemAmount || !newItemLabel.trim()}
+                className="px-3 py-1.5 rounded-lg bg-pnp-accent/20 border border-pnp-accent/40 text-pnp-accent text-xs font-semibold disabled:opacity-40 transition-colors active:scale-95"
+              >
+                Add item
+              </button>
+            </div>
+          )}
         </Card>
       </div>
     </>

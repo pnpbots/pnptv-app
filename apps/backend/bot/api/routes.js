@@ -15,7 +15,7 @@ const crypto = require('crypto');
 const FileType = require('../utils/fileType');
 const geoip = require('geoip-lite');
 const { getRedis, cache } = require('../../config/redis');
-const { getPool } = require('../../config/postgres');
+const { getPool, query } = require('../../config/postgres');
 const logger = require('../../utils/logger');
 
 // Controllers
@@ -8078,6 +8078,471 @@ app.get('/api/proxy/live/tips/recent', requireSessionAuth, requireMemberTier, as
   }
 }));
 
+// ==========================================
+// TIP GOALS
+// ==========================================
+
+// POST /api/webapp/live/goal — creator sets a tip goal on their active stream
+app.post('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const userId = String(user.id);
+  const { amount, label } = req.body;
+
+  // Validate inputs
+  const parsedAmount = parseFloat(amount);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || parsedAmount > 10000) {
+    return res.status(400).json({ success: false, error: 'amount must be a positive number ≤ 10000' });
+  }
+  if (!label || typeof label !== 'string' || label.trim().length === 0 || label.trim().length > 120) {
+    return res.status(400).json({ success: false, error: 'label must be a non-empty string ≤ 120 characters' });
+  }
+  const safeLabel = label.trim();
+
+  try {
+    // Resolve the creator's assigned channel
+    const { rows: userRows } = await query(
+      'SELECT live_channel FROM users WHERE id = $1',
+      [userId]
+    );
+    const channelRef = userRows[0]?.live_channel;
+    if (!channelRef) {
+      return res.status(400).json({ success: false, error: 'No channel assigned to your account' });
+    }
+
+    // Find the active stream for this channel
+    const { rows: streamRows } = await query(
+      `SELECT id FROM live_streams WHERE channel_name = $1 AND status = 'live' ORDER BY created_at DESC LIMIT 1`,
+      [channelRef]
+    );
+    if (streamRows.length === 0) {
+      return res.status(400).json({ success: false, error: 'No active stream' });
+    }
+    const streamDbId = streamRows[0].id;
+
+    // Set the goal
+    const { rows: goalRows } = await query(
+      `UPDATE live_streams
+         SET tip_goal_amount = $1,
+             tip_goal_label = $2,
+             tip_goal_progress = COALESCE(tip_goal_progress, 0),
+             tip_goal_completed = false
+       WHERE id = $3
+       RETURNING tip_goal_amount, tip_goal_label, tip_goal_progress, tip_goal_completed`,
+      [parsedAmount, safeLabel, streamDbId]
+    );
+    const g = goalRows[0];
+
+    // Broadcast goal state to all viewers in the stream room
+    try {
+      const socketSingleton = require('../../services/socketSingleton');
+      const io = socketSingleton.get();
+      if (io) {
+        io.to(`live:${channelRef}`).emit('live:goal_update', {
+          goalAmount: parseFloat(g.tip_goal_amount),
+          goalLabel: g.tip_goal_label,
+          progress: parseFloat(g.tip_goal_progress),
+          completed: g.tip_goal_completed,
+        });
+      }
+    } catch (sockErr) {
+      logger.warn('live/goal POST: socket emit failed (non-fatal)', { error: sockErr.message });
+    }
+
+    return res.json({
+      success: true,
+      goal: {
+        goalAmount: parseFloat(g.tip_goal_amount),
+        goalLabel: g.tip_goal_label,
+        progress: parseFloat(g.tip_goal_progress),
+        completed: g.tip_goal_completed,
+      },
+    });
+  } catch (err) {
+    logger.error('POST /api/webapp/live/goal error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to set tip goal' });
+  }
+}));
+
+// DELETE /api/webapp/live/goal — creator clears the tip goal on their active stream
+app.delete('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const userId = String(user.id);
+
+  try {
+    const { rows: userRows } = await query(
+      'SELECT live_channel FROM users WHERE id = $1',
+      [userId]
+    );
+    const channelRef = userRows[0]?.live_channel;
+    if (!channelRef) {
+      return res.status(400).json({ success: false, error: 'No channel assigned to your account' });
+    }
+
+    await query(
+      `UPDATE live_streams
+         SET tip_goal_amount = NULL,
+             tip_goal_label = NULL,
+             tip_goal_progress = 0,
+             tip_goal_completed = false
+       WHERE channel_name = $1 AND status = 'live'`,
+      [channelRef]
+    );
+
+    try {
+      const socketSingleton = require('../../services/socketSingleton');
+      const io = socketSingleton.get();
+      if (io) {
+        io.to(`live:${channelRef}`).emit('live:goal_update', {
+          goalAmount: null,
+          goalLabel: null,
+          progress: 0,
+          completed: false,
+        });
+      }
+    } catch (sockErr) {
+      logger.warn('live/goal DELETE: socket emit failed (non-fatal)', { error: sockErr.message });
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('DELETE /api/webapp/live/goal error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to clear tip goal' });
+  }
+}));
+
+// GET /api/proxy/live/goal/:channelRef — public, returns current goal state (30s cache)
+app.get('/api/proxy/live/goal/:channelRef', asyncHandler(async (req, res) => {
+  const channelRef = String(req.params.channelRef || '').trim();
+  if (!channelRef || !/^[a-zA-Z0-9-]+$/.test(channelRef)) {
+    return res.status(400).json({ success: false, error: 'Invalid channelRef' });
+  }
+
+  const cacheKey = `live:goal:${channelRef}`;
+  try {
+    const cached = await cache.get(cacheKey);
+    if (cached) {
+      return res.json({ success: true, ...JSON.parse(cached) });
+    }
+  } catch (_) { /* cache miss, continue */ }
+
+  try {
+    const { rows } = await query(
+      `SELECT tip_goal_amount, tip_goal_label, tip_goal_progress, tip_goal_completed
+         FROM live_streams
+        WHERE channel_name = $1 AND status = 'live'
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [channelRef]
+    );
+
+    const row = rows[0];
+    const payload = {
+      goalAmount: row?.tip_goal_amount != null ? parseFloat(row.tip_goal_amount) : null,
+      goalLabel: row?.tip_goal_label || null,
+      progress: row?.tip_goal_progress != null ? parseFloat(row.tip_goal_progress) : 0,
+      completed: row?.tip_goal_completed || false,
+    };
+
+    try {
+      await cache.set(cacheKey, JSON.stringify(payload), 30);
+    } catch (_) { /* best-effort cache write */ }
+
+    return res.json({ success: true, ...payload });
+  } catch (err) {
+    logger.error('GET /api/proxy/live/goal/:channelRef error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to fetch tip goal' });
+  }
+}));
+
+// ==========================================
+// TIP MENU
+// ==========================================
+
+// GET /api/webapp/live/tip-menu/:performerId — public, get performer's active tip menu items
+app.get('/api/webapp/live/tip-menu/:performerId', asyncHandler(async (req, res) => {
+  const performerId = String(req.params.performerId || '').trim();
+  if (!performerId) {
+    return res.status(400).json({ success: false, error: 'performerId required' });
+  }
+
+  try {
+    const { rows } = await query(
+      `SELECT id, tokens_amount, label, sort_order
+         FROM tip_menu_items
+        WHERE performer_id = $1 AND is_active = true
+        ORDER BY sort_order ASC, tokens_amount ASC`,
+      [performerId]
+    );
+    return res.json({ success: true, items: rows });
+  } catch (err) {
+    logger.error('GET /api/webapp/live/tip-menu/:performerId error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to fetch tip menu' });
+  }
+}));
+
+// POST /api/webapp/live/tip-menu — creator saves tip menu (full replace)
+app.post('/api/webapp/live/tip-menu', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const userId = String(user.id);
+  const { items } = req.body;
+
+  if (!Array.isArray(items)) {
+    return res.status(400).json({ success: false, error: 'items must be an array' });
+  }
+  if (items.length > 10) {
+    return res.status(400).json({ success: false, error: 'Maximum 10 tip menu items allowed' });
+  }
+
+  // Validate each item
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const tokens = parseInt(item.tokensAmount, 10);
+    if (!Number.isInteger(tokens) || tokens <= 0 || tokens > 100000) {
+      return res.status(400).json({ success: false, error: `Item ${i + 1}: tokensAmount must be a positive integer ≤ 100000` });
+    }
+    if (!item.label || typeof item.label !== 'string' || item.label.trim().length === 0 || item.label.trim().length > 120) {
+      return res.status(400).json({ success: false, error: `Item ${i + 1}: label must be a non-empty string ≤ 120 characters` });
+    }
+  }
+
+  try {
+    // Resolve performer ID from session user
+    const { rows: perfRows } = await query(
+      'SELECT id FROM performers WHERE user_id = $1 LIMIT 1',
+      [userId]
+    );
+    if (perfRows.length === 0) {
+      return res.status(403).json({ success: false, error: 'No performer profile found' });
+    }
+    const performerId = String(perfRows[0].id);
+
+    // Full replace: delete all existing items then insert new batch
+    await query('DELETE FROM tip_menu_items WHERE performer_id = $1', [performerId]);
+
+    if (items.length > 0) {
+      const valueClauses = items.map((item, i) => {
+        const base = i * 4;
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`;
+      });
+      const params = [];
+      items.forEach((item) => {
+        params.push(
+          performerId,
+          parseInt(item.tokensAmount, 10),
+          item.label.trim(),
+          Number.isInteger(item.sortOrder) ? item.sortOrder : 0
+        );
+      });
+      await query(
+        `INSERT INTO tip_menu_items (performer_id, tokens_amount, label, sort_order) VALUES ${valueClauses.join(', ')}`,
+        params
+      );
+    }
+
+    const { rows: savedItems } = await query(
+      `SELECT id, tokens_amount, label, sort_order
+         FROM tip_menu_items
+        WHERE performer_id = $1 AND is_active = true
+        ORDER BY sort_order ASC, tokens_amount ASC`,
+      [performerId]
+    );
+
+    return res.json({ success: true, items: savedItems });
+  } catch (err) {
+    logger.error('POST /api/webapp/live/tip-menu error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to save tip menu' });
+  }
+}));
+
+// DELETE /api/webapp/live/tip-menu/:itemId — creator soft-deletes a tip menu item
+app.delete('/api/webapp/live/tip-menu/:itemId', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const userId = String(user.id);
+  const itemId = parseInt(req.params.itemId, 10);
+
+  if (!Number.isInteger(itemId) || itemId <= 0) {
+    return res.status(400).json({ success: false, error: 'Invalid itemId' });
+  }
+
+  try {
+    const { rows: perfRows } = await query(
+      'SELECT id FROM performers WHERE user_id = $1 LIMIT 1',
+      [userId]
+    );
+    if (perfRows.length === 0) {
+      return res.status(403).json({ success: false, error: 'No performer profile found' });
+    }
+    const performerId = String(perfRows[0].id);
+
+    const { rowCount } = await query(
+      'UPDATE tip_menu_items SET is_active = false WHERE id = $1 AND performer_id = $2',
+      [itemId, performerId]
+    );
+
+    if (rowCount === 0) {
+      return res.status(404).json({ success: false, error: 'Item not found or not owned by you' });
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('DELETE /api/webapp/live/tip-menu/:itemId error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to delete tip menu item' });
+  }
+}));
+
+// ==========================================
+// TIP LEADERBOARD
+// ==========================================
+
+// GET /api/proxy/live/tips/leaderboard — public tip leaderboard (60s cache)
+app.get('/api/proxy/live/tips/leaderboard', asyncHandler(async (req, res) => {
+  const channelRef = req.query.channelRef ? String(req.query.channelRef).trim() : null;
+  const period = req.query.period === 'week' ? 'week' : 'today';
+
+  if (channelRef && !/^[a-zA-Z0-9-]+$/.test(channelRef)) {
+    return res.status(400).json({ success: false, error: 'Invalid channelRef' });
+  }
+
+  const cacheKey = `live:leaderboard:${channelRef || 'global'}:${period}`;
+  try {
+    const cached = await cache.get(cacheKey);
+    if (cached) {
+      return res.json({ success: true, leaderboard: JSON.parse(cached) });
+    }
+  } catch (_) { /* cache miss */ }
+
+  try {
+    const periodStart = period === 'week'
+      ? `DATE_TRUNC('week', NOW())`
+      : `DATE_TRUNC('day', NOW())`;
+
+    let sqlText;
+    let params;
+
+    if (channelRef) {
+      sqlText = `
+        SELECT t.user_id, u.username, SUM(t.amount) AS total, COUNT(*) AS tip_count
+          FROM pnp_tips t
+          LEFT JOIN users u ON t.user_id = u.id
+          JOIN users pu ON pu.live_channel = $1
+          JOIN performers p ON p.user_id = pu.id
+         WHERE t.payment_status = 'completed'
+           AND t.created_at >= ${periodStart}
+           AND (t.performer_id = p.id::text OR t.model_id = p.id)
+         GROUP BY t.user_id, u.username
+         ORDER BY total DESC
+         LIMIT 10`;
+      params = [channelRef];
+    } else {
+      sqlText = `
+        SELECT t.user_id, u.username, SUM(t.amount) AS total, COUNT(*) AS tip_count
+          FROM pnp_tips t
+          LEFT JOIN users u ON t.user_id = u.id
+         WHERE t.payment_status = 'completed'
+           AND t.created_at >= ${periodStart}
+         GROUP BY t.user_id, u.username
+         ORDER BY total DESC
+         LIMIT 10`;
+      params = [];
+    }
+
+    const { rows } = await query(sqlText, params);
+    const leaderboard = rows.map(r => ({
+      userId: r.user_id,
+      username: r.username || 'Anonymous',
+      total: parseFloat(r.total),
+      tipCount: parseInt(r.tip_count, 10),
+    }));
+
+    try {
+      await cache.set(cacheKey, JSON.stringify(leaderboard), 60);
+    } catch (_) { /* best-effort */ }
+
+    return res.json({ success: true, leaderboard });
+  } catch (err) {
+    logger.error('GET /api/proxy/live/tips/leaderboard error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to fetch leaderboard' });
+  }
+}));
+
+// ==========================================
+// CHAT MODERATION (REST)
+// ==========================================
+
+// GET /api/webapp/live/chat-bans/:channelRef — creator gets their ban list
+app.get('/api/webapp/live/chat-bans/:channelRef', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const userId = String(user.id);
+  const channelRef = String(req.params.channelRef || '').trim();
+
+  if (!channelRef || !/^[a-zA-Z0-9-]+$/.test(channelRef)) {
+    return res.status(400).json({ success: false, error: 'Invalid channelRef' });
+  }
+
+  try {
+    // Verify the requestor owns this channel (or is admin)
+    const { rows: userRows } = await query(
+      'SELECT live_channel, role FROM users WHERE id = $1',
+      [userId]
+    );
+    const dbUser = userRows[0];
+    const isAdmin = dbUser?.role === 'admin' || dbUser?.role === 'superadmin';
+    if (!isAdmin && dbUser?.live_channel !== channelRef) {
+      return res.status(403).json({ success: false, error: 'You do not own this channel' });
+    }
+
+    const { rows } = await query(
+      `SELECT scb.id, scb.banned_user_id, scb.action, scb.mute_until, scb.created_at,
+              u.username AS banned_username
+         FROM stream_chat_bans scb
+         LEFT JOIN users u ON u.id = scb.banned_user_id
+        WHERE scb.channel_ref = $1
+          AND (scb.mute_until IS NULL OR scb.mute_until > NOW())
+        ORDER BY scb.created_at DESC`,
+      [channelRef]
+    );
+
+    return res.json({ success: true, bans: rows });
+  } catch (err) {
+    logger.error('GET /api/webapp/live/chat-bans/:channelRef error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to fetch ban list' });
+  }
+}));
+
+// DELETE /api/webapp/live/chat-bans/:bannedUserId — creator unbans a user
+app.delete('/api/webapp/live/chat-bans/:bannedUserId', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const userId = String(user.id);
+  const bannedUserId = String(req.params.bannedUserId || '').trim();
+  const channelRef = String(req.query.channelRef || '').trim();
+
+  if (!bannedUserId || !channelRef || !/^[a-zA-Z0-9-]+$/.test(channelRef)) {
+    return res.status(400).json({ success: false, error: 'bannedUserId and channelRef required' });
+  }
+
+  try {
+    const { rows: userRows } = await query(
+      'SELECT live_channel, role FROM users WHERE id = $1',
+      [userId]
+    );
+    const dbUser = userRows[0];
+    const isAdmin = dbUser?.role === 'admin' || dbUser?.role === 'superadmin';
+    if (!isAdmin && dbUser?.live_channel !== channelRef) {
+      return res.status(403).json({ success: false, error: 'You do not own this channel' });
+    }
+
+    await query(
+      'DELETE FROM stream_chat_bans WHERE channel_ref = $1 AND banned_user_id = $2',
+      [channelRef, bannedUserId]
+    );
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('DELETE /api/webapp/live/chat-bans/:bannedUserId error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to remove ban' });
+  }
+}));
+
 // POST /api/proxy/live/tips/callback — Payment webhook callback
 app.post('/api/proxy/live/tips/callback', webhookLimiter, asyncHandler(async (req, res) => {
   // C1: Webhook secret verification using timing-safe comparison
@@ -8473,13 +8938,8 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
     if (plan.payment_method === 'crypto') {
       usdAmount = basePrice;
     } else {
-      const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
-      if (isLongTerm) {
-        usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
-        discountInfo = { originalAmount: basePrice, discountPct: 20 };
-      } else {
-        usdAmount = basePrice;
-      }
+      usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
+      discountInfo = { originalAmount: basePrice, discountPct: 20 };
     }
     planDisplayName = plan.display_name || plan.name;
   }
@@ -8701,13 +9161,8 @@ app.post('/api/webapp/payments/lightning/create', requireSessionAuth, paymentCre
     if (plan.payment_method === 'crypto') {
       usdAmount = basePrice;
     } else {
-      const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
-      if (isLongTerm) {
-        usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
-        discountInfo = { originalAmount: basePrice, discountPct: 20 };
-      } else {
-        usdAmount = basePrice;
-      }
+      usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
+      discountInfo = { originalAmount: basePrice, discountPct: 20 };
     }
     planDisplayName = plan.display_name || plan.name;
   }
@@ -8933,13 +9388,8 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
     if (plan.payment_method === 'crypto') {
       usdAmount = basePrice;
     } else {
-      const isLongTerm = plan.is_lifetime || (plan.duration_days || 0) >= 365;
-      if (isLongTerm) {
-        usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
-        discountInfo = { originalAmount: basePrice, discountPct: 20 };
-      } else {
-        usdAmount = basePrice;
-      }
+      usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
+      discountInfo = { originalAmount: basePrice, discountPct: 20 };
     }
     planDisplayName = plan.display_name || plan.name;
   }
