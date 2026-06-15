@@ -9536,10 +9536,11 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
       global._npJwtAt = Date.now();
       if (!global._npJwt) throw new Error('NOWPayments JWT auth failed');
     }
-    const subResp = await axios.post(`${NOWPAYMENTS_URL}/subscriptions`, {
+    const subBody = {
       subscription_plan_id: parseInt(nowpaymentsPlanId, 10),
-      ...(customerEmail ? { customer_email: customerEmail } : {}),
-    }, {
+      email: customerEmail || `${userId}@pnptv.app`,
+    };
+    const subResp = await axios.post(`${NOWPAYMENTS_URL}/subscriptions`, subBody, {
       headers: {
         'x-api-key': NOWPAYMENTS_API_KEY,
         'Authorization': `Bearer ${global._npJwt}`,
@@ -9547,12 +9548,30 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
       },
       timeout: 10000,
     });
-    subscriptionId = subResp.data?.result?.id;
-    paymentLink = subResp.data?.result?.payment_link;
-    if (!paymentLink) throw new Error('No payment_link in response');
+    const resultData = Array.isArray(subResp.data?.result) ? subResp.data.result[0] : subResp.data?.result;
+    subscriptionId = resultData?.id ?? subResp.data?.id;
+    if (!subscriptionId) throw new Error('No subscription id in response: ' + JSON.stringify(subResp.data));
+    paymentLink = `https://nowpayments.io/payment/?sub_id=${subscriptionId}`;
   } catch (err) {
-    logger.error('[NOWPayments] Subscription creation failed', { userId, planId, error: err.response?.data || err.message });
-    return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
+    const npErr = err.response?.data;
+    // "already subscribed" — fetch the existing subscription from NP and resume
+    if (npErr?.message?.includes('already subscribed')) {
+      try {
+        const listResp = await axios.get(`${NOWPAYMENTS_URL}/subscriptions?limit=5`, {
+          headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Authorization': `Bearer ${global._npJwt}` },
+          timeout: 8000,
+        });
+        const existing = (listResp.data?.result || []).find(s => String(s.subscription_plan_id) === String(nowpaymentsPlanId));
+        if (existing?.id) {
+          subscriptionId = existing.id;
+          paymentLink = `https://nowpayments.io/payment/?sub_id=${subscriptionId}`;
+        }
+      } catch (_) { /* fall through to generic error */ }
+    }
+    if (!paymentLink) {
+      logger.error('[NOWPayments] Subscription creation failed', { userId, planId, error: npErr || err.message });
+      return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
+    }
   }
 
   const orderId = `pnptv-nowp-sub-${userId}-${Date.now()}`;
