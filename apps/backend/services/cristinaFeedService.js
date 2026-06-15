@@ -242,122 +242,12 @@ async function shoutoutNewContent(_creatorId, _creatorName, _mediaType, _postId)
  */
 async function announceLiveStream(_creatorId, _creatorName, _streamTitle) {}
 
-// ── In-call presence: tips, replies, video suggestions ──────────────────────
-// Used by socketHandlers.js when Cristina is attached to a hangout call. She
-// is a virtual participant (no LiveKit actor) — her output is broadcast over
-// Socket.IO to the hangout:<groupId> room so every client in the call sees it.
-
-/**
- * Generate a short wellness tip suitable for broadcast inside a call. Reuses
- * the existing wellness prompts but asks Grok for tighter output (~1–2 lines)
- * so it fits a call toast.
- */
-async function generateCallWellnessTip({ language = 'bilingual' } = {}) {
-  const prompt = await pickPrompt('wellness');
-  if (!prompt) return null;
-  try {
-    const lang = language === 'bilingual' ? (Math.random() > 0.5 ? 'English' : 'Spanish') : language;
-    const content = await GrokService.chat({
-      mode: 'call_tip',
-      language: lang,
-      prompt: `${prompt} Keep it to 1-2 sentences, max 180 characters. This is shown as a toast during a live video call, so be concise and warm.`,
-      personaType: 'cristina',
-      maxTokens: 120,
-    });
-    const trimmed = (content || '').trim().slice(0, 220);
-    return trimmed.length >= 8 ? trimmed : null;
-  } catch (err) {
-    logger.warn('CristinaCall: tip generation failed', { error: err.message });
-    return null;
-  }
-}
-
-/**
- * Answer a user's question during a call. `prompt` is the user's raw input;
- * it's sanitised for injection + truncated before being passed to Grok.
- */
-async function generateCallReply({ prompt, userName = 'friend', language = 'bilingual' }) {
-  const safe = sanitizeForPrompt(prompt);
-  if (!safe) return null;
-  try {
-    const lang = language === 'bilingual' ? (Math.random() > 0.5 ? 'English' : 'Spanish') : language;
-    const content = await GrokService.chat({
-      mode: 'call_reply',
-      language: lang,
-      prompt: `A user named ${sanitizeForPrompt(userName)} asked during a hangout video call: "${safe}". Reply supportively in 2-3 sentences, max 300 characters. Warm, non-judgmental, practical.`,
-      personaType: 'cristina',
-      maxTokens: 180,
-    });
-    const trimmed = (content || '').trim().slice(0, 340);
-    return trimmed.length >= 8 ? trimmed : null;
-  } catch (err) {
-    logger.warn('CristinaCall: reply generation failed', { error: err.message });
-    return null;
-  }
-}
-
-/**
- * Pick a video suggestion for a hangout call. Primary source is community
- * social_posts (where most of the platform's video content actually lives);
- * creator_media is a fallback for when a curator-picked clip exists. Premium
- * content is excluded so free-tier participants aren't paywalled mid-call.
- */
-async function pickCallVideoSuggestion() {
-  try {
-    const { rows } = await query(
-      `SELECT sp.id, sp.media_url, sp.video_thumbnail_url, sp.video_title, sp.content,
-              u.username AS creator_username, u.first_name AS creator_first_name
-         FROM social_posts sp
-         LEFT JOIN users u ON u.id = sp.user_id
-        WHERE sp.media_type = 'video'
-          AND sp.media_url IS NOT NULL
-          AND COALESCE(sp.is_deleted, false) = false
-        ORDER BY RANDOM()
-        LIMIT 1`
-    );
-    if (rows.length) {
-      const v = rows[0];
-      const byLine = v.creator_first_name || v.creator_username
-        ? ` — @${v.creator_username || v.creator_first_name}`
-        : '';
-      const baseTitle = v.video_title || (v.content || '').slice(0, 80) || 'Community clip';
-      return {
-        id: `sp-${v.id}`,
-        title: baseTitle.slice(0, 120) + byLine,
-        url: v.media_url,
-        durationSec: null,
-        thumbUrl: v.video_thumbnail_url || null,
-      };
-    }
-    // Fallback: creator_media library
-    const cm = await query(
-      `SELECT cm.id, cm.url, cm.thumb_url, cm.caption,
-              u.username AS creator_username, u.first_name AS creator_first_name
-         FROM creator_media cm
-         LEFT JOIN users u ON u.id = cm.creator_id
-        WHERE cm.media_type = 'video'
-          AND cm.is_premium = false
-          AND cm.url IS NOT NULL
-        ORDER BY RANDOM()
-        LIMIT 1`
-    );
-    if (!cm.rows.length) return null;
-    const v = cm.rows[0];
-    const byLine = v.creator_first_name || v.creator_username
-      ? ` — by ${v.creator_first_name || v.creator_username}`
-      : '';
-    return {
-      id: `cm-${v.id}`,
-      title: (v.caption || 'Video suggestion').slice(0, 120) + byLine,
-      url: v.url,
-      durationSec: null,
-      thumbUrl: v.thumb_url || null,
-    };
-  } catch (err) {
-    logger.warn('CristinaCall: video pick failed', { error: err.message });
-    return null;
-  }
-}
+// ── In-call presence: disabled ───────────────────────────────────────────────
+// All Cristina in-call activity (tips, replies, video suggestions) disabled
+// per admin request. cristinaStartSession in socketHandlers.js is also no-op.
+async function generateCallWellnessTip() { return null; }
+async function generateCallReply() { return null; }
+async function pickCallVideoSuggestion() { return null; }
 
 module.exports = {
   postWellness,
