@@ -13,6 +13,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
+const { failStuckVideoUploads } = require('../services/channelVideoService');
 
 // Hangouts upload root — the only directory we are allowed to delete from.
 // __dirname = /app/apps/backend/workers → three levels up = /app → then public/uploads/hangouts
@@ -143,6 +144,14 @@ async function runOnce() {
   }
 
   logger.info(`[OrphanedMediaCleanup] Cleanup pass complete — deleted ${deleted} file(s)`);
+
+  // Also flip any channel_videos stuck in 'processing' for over 1 hour
+  try {
+    await failStuckVideoUploads();
+  } catch (err) {
+    logger.error('[OrphanedMediaCleanup] failStuckVideoUploads error', { error: err.message });
+  }
+
   return deleted;
 }
 
