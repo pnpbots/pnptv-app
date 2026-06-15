@@ -399,6 +399,55 @@ export default function Subscribe() {
     };
   }, [usdcOrder, usdcPolling, refreshUser]);
 
+  async function handleQuickCheckout(planId: string, chosenProvider: Provider) {
+    if (submitting) return;
+    setSelectedPlan(planId);
+    setProvider(chosenProvider);
+    setError(null);
+    setSubmitting(true);
+    try {
+      if (chosenProvider === "epayco") {
+        const result = await createPayment(planId, "epayco", undefined, appliedPromo?.code || undefined);
+        if (result.success && result.paymentUrl) {
+          window.location.href = result.paymentUrl;
+        } else {
+          setError(result.error || result.message || s.paymentErrorGeneric);
+        }
+      } else if (chosenProvider === "usdc") {
+        const result = await prepareUsdcSubscription(planId, user?.email || undefined);
+        if (result.success && result.orderId && result.invoiceUrl) {
+          const order = {
+            orderId: result.orderId,
+            planName: result.planName || "subscription",
+            usdAmount: result.usdAmount,
+            invoiceUrl: result.invoiceUrl,
+            createdAt: Date.now(),
+          };
+          setUsdcOrder(order);
+          setUsdcPolling(true);
+          try { sessionStorage.setItem("pnp_pending_usdc_order", JSON.stringify(order)); } catch {}
+          if (isTelegramContext()) {
+            window.Telegram!.WebApp.openLink(result.invoiceUrl);
+          } else {
+            window.open(result.invoiceUrl, "_blank", "noopener,noreferrer");
+          }
+        } else {
+          setError(s.failedToCreateUsdcInvoice);
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        if (err.code === "NOWPAYMENTS_NOT_CONFIGURED") setError(s.usdcNotConfigured);
+        else if (err.code === "NOWPAYMENTS_UNREACHABLE" || err.code === "NOWPAYMENTS_ERROR") setError(s.failedToCreateUsdcInvoice);
+        else setError(err.message || s.paymentErrorGeneric);
+      } else {
+        setError(err instanceof Error ? err.message : s.paymentErrorGeneric);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleSubscribe() {
     if (!selectedPlan || submitting) return;
 
@@ -837,6 +886,26 @@ export default function Subscribe() {
                   ))}
                 </div>
               )}
+
+              {/* Quick-pay buttons */}
+              <div className="mt-3 pt-3 border-t border-white/5 flex gap-2" onClick={(e) => e.stopPropagation()}>
+                <button
+                  disabled={submitting}
+                  onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "epayco"); }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-white bg-[#D4007A] hover:bg-[#B8006A] disabled:opacity-50 transition-colors"
+                >
+                  <span>💳</span> {t.lang === "es" ? "Pagar con Tarjeta" : "Pay with Card"}
+                </button>
+                {usdcAvailable !== false && (
+                  <button
+                    disabled={submitting}
+                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdc"); }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-green-300 border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                  >
+                    <span>🪙</span> {t.lang === "es" ? "Cripto −20%" : "Crypto −20%"}
+                  </button>
+                )}
+              </div>
             </button>
           );
         })}
@@ -971,6 +1040,26 @@ export default function Subscribe() {
                   ))}
                 </div>
               )}
+
+              {/* Quick-pay buttons */}
+              <div className="mt-3 pt-3 border-t border-white/5 flex gap-2" onClick={(e) => e.stopPropagation()}>
+                <button
+                  disabled={submitting}
+                  onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "epayco"); }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-white bg-[#D4007A] hover:bg-[#B8006A] disabled:opacity-50 transition-colors"
+                >
+                  <span>💳</span> {t.lang === "es" ? "Pagar con Tarjeta" : "Pay with Card"}
+                </button>
+                {usdcAvailable !== false && (
+                  <button
+                    disabled={submitting}
+                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdc"); }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-green-300 border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                  >
+                    <span>🪙</span> {t.lang === "es" ? "Cripto −20%" : "Crypto −20%"}
+                  </button>
+                )}
+              </div>
             </button>
           );
         })}
