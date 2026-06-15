@@ -2069,12 +2069,6 @@ const updateProfile = async (req, res) => {
 
   // Validate and check uniqueness of username if provided
   if (req.body.username !== undefined && req.body.username !== '') {
-    // Username can only be set once manually — if already set, reject
-    const currentRow = await query('SELECT username FROM users WHERE id = $1', [user.id]);
-    const currentUsername = currentRow.rows[0]?.username;
-    if (currentUsername && currentUsername.trim() !== '' && currentUsername.toUpperCase() !== 'ANONYMOUS') {
-      return res.status(403).json({ error: 'Username cannot be changed once set. Link your Telegram account to use your Telegram username.' });
-    }
     const rawUsername = String(req.body.username).trim();
     if (!/^[a-zA-Z0-9_]{3,30}$/.test(rawUsername)) {
       return res.status(400).json({ error: 'Username must be 3–30 characters and contain only letters, numbers, or underscores' });
@@ -2195,6 +2189,7 @@ const updateProfile = async (req, res) => {
     }
 
     // Refresh session fields if changed
+    if (req.body.username  !== undefined && req.body.username !== '') req.session.user.username = req.body.username.trim();
     if (req.body.firstName !== undefined) req.session.user.firstName = req.body.firstName || req.session.user.firstName;
     if (req.body.lastName  !== undefined) req.session.user.lastName  = req.body.lastName  || null;
     if (req.body.language  !== undefined) req.session.user.language  = req.body.language;

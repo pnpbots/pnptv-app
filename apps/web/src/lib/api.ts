@@ -1099,6 +1099,10 @@ export function enablePnptvIdLogin(email: string): Promise<EnablePnptvIdResponse
   });
 }
 
+export function changeEmail(email: string): Promise<{ success: boolean; email?: string; error?: string }> {
+  return request("/api/webapp/settings/change-email", { method: "POST", body: { email } });
+}
+
 export function deleteAccount(): Promise<{ success: boolean }> {
   return request("/api/webapp/account", { method: "DELETE" });
 }

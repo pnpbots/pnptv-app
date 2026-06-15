@@ -3255,6 +3255,109 @@ app.post('/api/webapp/auth/enable-pnptv-id', requireSessionAuth, enablePnptvIdLi
 
 // ── End Authentik OIDC Routes ─────────────────────────────────────────────────
 
+/**
+ * POST /api/webapp/settings/change-email
+ * Change the account email for an authenticated user.
+ * Validates uniqueness, updates DB + Authentik, notifies old + new address.
+ *
+ * Body: { email: string }
+ * Auth: session required
+ */
+const changeEmailLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  handler: (req, res) => res.status(429).json({ error: 'Too many attempts. Try again later.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.post('/api/webapp/settings/change-email', requireSessionAuth, changeEmailLimiter, asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+
+  if (!rawEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
+    return res.status(400).json({ error: 'Please provide a valid email address.' });
+  }
+  if (rawEmail.endsWith('@telegram.pnptv.app')) {
+    return res.status(400).json({ error: 'Please use a real email address.' });
+  }
+
+  const pool = getPool();
+
+  const currentRow = await pool.query('SELECT email FROM users WHERE id = $1', [user.id]);
+  const currentEmail = currentRow.rows[0]?.email ?? '';
+
+  if (currentEmail.toLowerCase() === rawEmail) {
+    return res.status(400).json({ error: 'That is already your current email.' });
+  }
+
+  const dup = await pool.query(
+    `SELECT id FROM users WHERE LOWER(email) = $1 AND id != $2 AND COALESCE(is_deleted, false) = false LIMIT 1`,
+    [rawEmail, user.id]
+  );
+  if (dup.rows.length > 0) {
+    return res.status(409).json({ error: 'That email is already linked to another account.' });
+  }
+
+  // Update in Authentik if identity is linked
+  const sub = user.pnptvId || user.pnptv_id;
+  if (sub) {
+    const authentikPk = await AuthentikService._getUserPkBySub(sub).catch(() => null);
+    if (authentikPk) {
+      await AuthentikService.updateUserEmail(authentikPk, rawEmail).catch((err) => {
+        logger.warn('[change-email] Authentik email update failed (non-fatal)', { userId: user.id, error: err.message });
+      });
+    }
+  }
+
+  await pool.query(`UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2`, [rawEmail, user.id]);
+
+  // Update session
+  req.session.user.email = rawEmail;
+  await new Promise((resolve, reject) => req.session.save(err => (err ? reject(err) : resolve())));
+
+  // Send notification emails (non-fatal)
+  try {
+    const EmailService = require('../../services/emailService');
+    const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    const displayName = user.displayName || user.firstName || user.username || 'there';
+
+    if (currentEmail && !currentEmail.endsWith('@telegram.pnptv.app')) {
+      await EmailService.send({
+        to: currentEmail,
+        subject: 'Your PNPtv email has been changed',
+        html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111;">
+          <h2 style="color:#D4007A;margin:0 0 16px;">Email address changed</h2>
+          <p>Hey ${escape(displayName)},</p>
+          <p>Your PNPtv account email was changed to <strong>${escape(rawEmail)}</strong>.</p>
+          <p>If you did not make this change, contact us immediately at <a href="mailto:support@pnptv.app">support@pnptv.app</a>.</p>
+          <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+          <p style="color:#999;font-size:12px;">PNPtv! · <a href="https://pnptv.app" style="color:#999;">pnptv.app</a></p>
+        </div>`,
+      }).catch(() => {});
+    }
+
+    await EmailService.send({
+      to: rawEmail,
+      subject: 'PNPtv email address confirmed',
+      html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111;">
+        <h2 style="color:#D4007A;margin:0 0 16px;">Email address confirmed</h2>
+        <p>Hey ${escape(displayName)},</p>
+        <p>This email address is now linked to your PNPtv account. You can use it to log in and receive notifications.</p>
+        <p style="text-align:center;margin:28px 0;">
+          <a href="https://pnptv.app/settings" style="display:inline-block;background:linear-gradient(135deg,#D4007A,#E69138);color:#fff;text-decoration:none;padding:14px 28px;border-radius:10px;font-weight:700;">Go to settings</a>
+        </p>
+        <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+        <p style="color:#999;font-size:12px;">PNPtv! · <a href="https://pnptv.app" style="color:#999;">pnptv.app</a></p>
+      </div>`,
+    }).catch(() => {});
+  } catch (mailErr) {
+    logger.warn('[change-email] Failed to send notification emails', { userId: user.id, error: mailErr.message });
+  }
+
+  logger.info('[change-email] Email changed', { userId: user.id, newEmail: rawEmail });
+  res.json({ success: true, email: rawEmail });
+}));
+
 // Web App Profile
 app.get('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.getProfile));
 app.put('/api/webapp/profile', requireSessionAuth, asyncHandler(webAppController.updateProfile));

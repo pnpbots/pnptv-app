@@ -9,6 +9,8 @@ import {
   getMyReferral,
   getUpcomingBookings,
   enablePnptvIdLogin,
+  changeEmail,
+  updateProfile,
   type ReferralStats,
   type UpcomingBooking,
 } from "@/lib/api";
@@ -41,6 +43,20 @@ export default function AccountSettings() {
   const [enablePnptvIdSaving, setEnablePnptvIdSaving] = useState(false);
   const [enablePnptvIdError, setEnablePnptvIdError] = useState<string | null>(null);
   const [enablePnptvIdSuccess, setEnablePnptvIdSuccess] = useState<string | null>(null);
+
+  // Username edit
+  const [usernameEdit, setUsernameEdit] = useState(false);
+  const [usernameValue, setUsernameValue] = useState("");
+  const [usernameSaving, setUsernameSaving] = useState(false);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [usernameSuccess, setUsernameSuccess] = useState(false);
+
+  // Email change
+  const [emailEdit, setEmailEdit] = useState(false);
+  const [emailValue, setEmailValue] = useState("");
+  const [emailSaving, setEmailSaving] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
 
   const [referralStats, setReferralStats] = useState<ReferralStats | null>(null);
   const [referralCopied, setReferralCopied] = useState(false);
@@ -125,27 +141,197 @@ export default function AccountSettings() {
             <div className="h-3 rounded bg-white/10 animate-pulse w-28" />
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-white">
                   {user?.displayName || user?.firstName || "—"}
                 </p>
-                {user?.username && (
-                  <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
-                    @{user.username}
+                {memberSince && (
+                  <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: "var(--pnp-text-secondary)" }}>
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                    </svg>
+                    {p.joined} {formatDate(memberSince, uiLang)}
                   </p>
                 )}
               </div>
               <Badge variant={isPrime ? "accent" : "default"}>{tierLabel}</Badge>
             </div>
-            {memberSince && (
-              <p className="text-xs flex items-center gap-1.5" style={{ color: "var(--pnp-text-secondary)" }}>
-                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                </svg>
-                {p.joined} {formatDate(memberSince, uiLang)}
+
+            {/* Username edit */}
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wider mb-1.5" style={{ color: "var(--pnp-text-secondary)" }}>
+                @username
               </p>
+              {usernameEdit ? (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const val = usernameValue.trim();
+                    setUsernameError(null);
+                    if (!/^[a-zA-Z0-9_]{3,30}$/.test(val)) {
+                      setUsernameError("3–30 characters, letters/numbers/underscores only.");
+                      return;
+                    }
+                    setUsernameSaving(true);
+                    try {
+                      await updateProfile({ username: val });
+                      await refreshUser();
+                      setUsernameSuccess(true);
+                      setUsernameEdit(false);
+                      setTimeout(() => setUsernameSuccess(false), 3000);
+                    } catch (err: unknown) {
+                      setUsernameError(err instanceof Error ? err.message : "Could not save. Try again.");
+                    } finally {
+                      setUsernameSaving(false);
+                    }
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="text"
+                    value={usernameValue}
+                    onChange={(e) => { setUsernameValue(e.target.value); setUsernameError(null); }}
+                    placeholder={user?.username || "choose_a_handle"}
+                    maxLength={30}
+                    autoFocus
+                    disabled={usernameSaving}
+                    className="flex-1 py-2 px-3 rounded-lg text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 disabled:opacity-60"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: usernameError ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.12)",
+                      fontSize: "16px",
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={usernameSaving || !usernameValue.trim()}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110 disabled:opacity-50 btn-gradient"
+                  >
+                    {usernameSaving ? "…" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setUsernameEdit(false); setUsernameError(null); }}
+                    className="px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+                    style={{ color: "var(--pnp-text-secondary)", background: "rgba(255,255,255,0.06)" }}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm" style={{ color: user?.username ? "#EBEBF5" : "var(--pnp-text-secondary)" }}>
+                    {user?.username ? `@${user.username}` : "Not set"}
+                  </span>
+                  <button
+                    onClick={() => { setUsernameValue(user?.username || ""); setUsernameEdit(true); setUsernameSuccess(false); }}
+                    className="text-xs font-medium transition-opacity hover:opacity-70"
+                    style={{ color: "var(--pnp-accent, #D4007A)" }}
+                  >
+                    {user?.username ? "Change" : "Set"}
+                  </button>
+                </div>
+              )}
+              {usernameError && <p className="text-xs text-red-400 mt-1">{usernameError}</p>}
+              {usernameSuccess && <p className="text-xs mt-1" style={{ color: "#4ade80" }}>Username updated!</p>}
+            </div>
+
+            {/* Email change */}
+            {profileEmail && !profileEmail.endsWith("@telegram.pnptv.app") && (
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wider mb-1.5" style={{ color: "var(--pnp-text-secondary)" }}>
+                  Email
+                </p>
+                {emailSuccess ? (
+                  <div
+                    className="rounded-xl p-3 text-sm"
+                    style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", color: "#86efac" }}
+                  >
+                    {emailSuccess}
+                  </div>
+                ) : emailEdit ? (
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const val = emailValue.trim().toLowerCase();
+                      setEmailError(null);
+                      if (!val || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+                        setEmailError("Please enter a valid email address.");
+                        return;
+                      }
+                      setEmailSaving(true);
+                      try {
+                        const res = await changeEmail(val);
+                        if (res.success) {
+                          setProfileEmail(res.email ?? val);
+                          setEmailEdit(false);
+                          setEmailValue("");
+                          setEmailSuccess(`Email updated to ${res.email ?? val}. A confirmation was sent.`);
+                          await refreshUser().catch(() => {});
+                        } else {
+                          setEmailError(res.error || "Could not update email. Try again.");
+                        }
+                      } catch (err: unknown) {
+                        setEmailError(err instanceof Error ? err.message : "Connection error. Try again.");
+                      } finally {
+                        setEmailSaving(false);
+                      }
+                    }}
+                    className="space-y-2"
+                  >
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        inputMode="email"
+                        autoComplete="email"
+                        value={emailValue}
+                        onChange={(e) => { setEmailValue(e.target.value); setEmailError(null); }}
+                        placeholder="new@email.com"
+                        autoFocus
+                        disabled={emailSaving}
+                        className="flex-1 py-2 px-3 rounded-lg text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 disabled:opacity-60"
+                        style={{
+                          background: "rgba(255,255,255,0.07)",
+                          border: emailError ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.12)",
+                          fontSize: "16px",
+                        }}
+                      />
+                      <button
+                        type="submit"
+                        disabled={emailSaving || !emailValue.trim()}
+                        className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110 disabled:opacity-50 btn-gradient"
+                      >
+                        {emailSaving ? "…" : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setEmailEdit(false); setEmailError(null); setEmailValue(""); }}
+                        className="px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+                        style={{ color: "var(--pnp-text-secondary)", background: "rgba(255,255,255,0.06)" }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    {emailError && <p className="text-xs text-red-400">{emailError}</p>}
+                    <p className="text-[11px]" style={{ color: "var(--pnp-text-secondary)" }}>
+                      We'll notify your current address and send a confirmation to the new one.
+                    </p>
+                  </form>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm" style={{ color: "#EBEBF5" }}>{profileEmail}</span>
+                    <button
+                      onClick={() => { setEmailEdit(true); setEmailSuccess(null); }}
+                      className="text-xs font-medium transition-opacity hover:opacity-70"
+                      style={{ color: "var(--pnp-accent, #D4007A)" }}
+                    >
+                      Change
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
