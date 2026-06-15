@@ -96,58 +96,9 @@ const buildReplyPreviewText = (row) => {
   return '[media]';
 };
 
-/**
- * Send a Cristina welcome message into the hangout chat and optionally DM the user via Telegram.
- * Fire-and-forget — never throws, never blocks the caller.
- */
-async function sendHangoutWelcome(groupId, groupName, groupRules, userId, firstName) {
-  try {
-    const rulesBlockEn = groupRules
-      ? `📋 *Group rules:*\n${groupRules}`
-      : `No special rules set yet — just respect and good vibes! 🌈`;
-
-    const welcomeText = `🧜‍♀️ *Cristina AI agent says:*\n\nWelcome to *${groupName}*, ${firstName || 'friend'}! 🎉\n\nI'm Cristina, your PNPtv AI guide. Here's what you need to know:\n\n📱 *Use the PNPtv app* for the full experience — live chat, media feed, video calls, and more. This Telegram group mirrors the conversation, but the full features are in the app.\n\n💡 *Tip:* Photos and videos shared here automatically appear in the group's media feed. Text messages stay in chat. Everything is only visible to members.\n\n${rulesBlockEn}\n\nQuestions? Say "Hey Cristina" in the app anytime.`;
-
-    // Insert into chat_messages for the in-app chat feed
-    await query(
-      `INSERT INTO chat_messages (room, user_id, username, first_name, content)
-       VALUES ($1, 'cristina-ai', 'cristina', 'Cristina', $2)`,
-      [`hangout:${groupId}`, welcomeText]
-    );
-
-    // Emit via Socket.IO to live clients in the hangout room
-    const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
-    if (io) {
-      io.to(`hangout:${groupId}`).emit('chat:message', {
-        room: `hangout:${groupId}`,
-        user_id: 'cristina-ai',
-        username: 'cristina',
-        first_name: 'Cristina',
-        content: welcomeText,
-        created_at: new Date().toISOString(),
-        id: Date.now(),
-      });
-    }
-
-    // DM the user on Telegram if they have a linked account (fire-and-forget)
-    if (userId) {
-      (async () => {
-        try {
-          const { rows: userRows } = await query('SELECT telegram FROM users WHERE id = $1', [userId]);
-          if (userRows[0]?.telegram) {
-            const { getBotInstance } = require('../../core/bot');
-            const bot = getBotInstance();
-            if (bot) {
-              await bot.telegram.sendMessage(userRows[0].telegram, welcomeText, { parse_mode: 'Markdown' });
-            }
-          }
-        } catch (_e) { /* silent */ }
-      })();
-    }
-  } catch (err) {
-    logger.warn('sendHangoutWelcome failed (non-critical):', err.message);
-  }
-}
+// sendHangoutWelcome disabled — was spamming every hangout on join.
+// eslint-disable-next-line no-unused-vars
+async function sendHangoutWelcome(_groupId, _groupName, _groupRules, _userId, _firstName) {}
 
 // GET /api/webapp/hangouts/groups
 // Unread counts are tracked via Redis (set by matrixMessageController + hangoutMediaController).
