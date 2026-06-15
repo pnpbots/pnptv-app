@@ -1024,7 +1024,7 @@ const getMessages = async (req, res) => {
     const { rows } = await query(
       `SELECT cm.id, cm.room, cm.user_id, cm.username, cm.first_name,
               COALESCE(u.photo_file_id, cm.photo_url) as photo_url,
-              cm.content,
+              cm.content, cm.message_type, cm.meta,
               cm.media_url, cm.media_type, cm.media_mime,
               cm.media_thumb_url, cm.media_width, cm.media_height,
               cm.media_metadata, cm.reply_to_id,
