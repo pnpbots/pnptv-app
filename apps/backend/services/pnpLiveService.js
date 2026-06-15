@@ -80,11 +80,8 @@ class PNPLiveService {
         commission: this.DEFAULT_COMMISSION
       };
     } catch (error) {
-      logger.error('Error getting model pricing:', error);
-      return {
-        price: this.DEFAULT_PRICING[durationMinutes] || 60,
-        commission: this.DEFAULT_COMMISSION
-      };
+      logger.error('Error getting model pricing — booking will be rejected to prevent price miscalculation:', error);
+      throw error;
     }
   }
 
@@ -218,7 +215,7 @@ class PNPLiveService {
       // gate, but this lock is the load-shed in front of it.
       const slotStartIso = bookingTimeUtc.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
       bookingLockKey = `booking:lock:slot:${modelId}:${slotStartIso}`;
-      const lockTtlSeconds = Math.max(60, Math.min(durationMinutes * 60 + 300, 3600));
+      const lockTtlSeconds = Math.max(60, Math.min(durationMinutes * 60 + 300, 7200));
       const lockAcquired = await cache.acquireLock(bookingLockKey, lockTtlSeconds);
       if (!lockAcquired) {
         return {
@@ -257,6 +254,22 @@ class PNPLiveService {
 
       if (overlappingBooking.rows?.length) {
         throw new Error('Model already has a booking during this time');
+      }
+
+      // Verify a valid availability slot exists for this model+time that isn't
+      // already booked or held by a different user. Prevents bookings for slots
+      // that were never offered or are actively held by someone else.
+      const slotCheck = await client.query(
+        `SELECT id FROM pnp_availability
+         WHERE model_id = $1
+           AND available_from = $2
+           AND is_booked = FALSE
+           AND (hold_user_id IS NULL OR hold_user_id = $3)
+         LIMIT 1`,
+        [modelId, bookingTimeUtc, userId]
+      );
+      if (!slotCheck.rows?.length) {
+        throw new Error('This time slot is not available for booking');
       }
 
       // Create booking with earnings split
@@ -1056,7 +1069,10 @@ class PNPLiveService {
       const now = new Date();
       const timeUntilBooking = (bookingTime - now) / (1000 * 60); // positive = future
 
-      if (timeUntilBooking < 15 && booking.status !== 'pending') {
+      // Block refunds if: booking already passed, OR less than 15 min away (unless
+      // still pending — payment not yet confirmed — in which case allow cancel anytime
+      // the booking hasn't started yet).
+      if (timeUntilBooking < 0 || (timeUntilBooking < 15 && booking.status !== 'pending')) {
         throw new Error('Refund can only be requested at least 15 minutes before booking time');
       }
 

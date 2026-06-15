@@ -1,6 +1,7 @@
 const logger = require('../../../utils/logger');
 const CreatorService = require('../../../services/creatorService');
 const IdentityVerificationService = require('../../../services/identityVerificationService');
+const NotificationEmitter = require('../../../services/notificationEmitter');
 const { query, getPool } = require('../../../config/postgres');
 const { hasAccess } = require('../../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
@@ -347,12 +348,19 @@ const approveEnrollment = async (req, res) => {
           );
         }
       } catch (idErr) {
-        // Non-fatal — log but don't block the enrollment approval response
-        logger.warn('approveEnrollment: auto-approve 2257 record failed (non-fatal)', {
+        logger.error('approveEnrollment: auto-approve 2257 record failed — manual review required', {
           enrollmentId: req.params.id,
           creatorUserId,
           error: idErr.message,
         });
+        // Notify admin so this doesn't get buried in logs
+        NotificationEmitter.emit({
+          type: 'admin_alert',
+          category: 'compliance',
+          priority: 'high',
+          targetUserId: req.user.id,
+          message: `2257 auto-approval failed for creator ${creatorUserId} (enrollment ${req.params.id}). Manual review required. Error: ${idErr.message}`,
+        }).catch(() => {});
       }
     }
 

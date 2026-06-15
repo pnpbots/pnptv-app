@@ -1186,6 +1186,7 @@ class CreatorService {
          creator_enabled_at = NOW(),
          creator_terms_accepted_at = NOW(),
          creator_strikes = 0,
+         creator_locked = TRUE,
          role = CASE WHEN role = 'user' THEN 'model' ELSE role END
        WHERE id = $1`,
       [enrollment.user_id, enrollment.tier, price]

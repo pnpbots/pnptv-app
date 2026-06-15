@@ -583,11 +583,29 @@ class PNPLiveAvailabilityService {
    */
   static async releaseExpiredHolds() {
     try {
+      // Capture affected users before releasing so we can notify them
+      const expiredRows = await query(
+        `SELECT DISTINCT hold_user_id FROM pnp_availability
+         WHERE hold_user_id IS NOT NULL AND hold_expires_at <= NOW()`
+      );
+      const affectedUserIds = expiredRows.rows.map(r => r.hold_user_id).filter(Boolean);
+
       const result = await query(`SELECT release_expired_holds() as count`);
       const count = result.rows?.[0]?.count || 0;
 
       if (count > 0) {
         logger.info('Released expired holds', { count });
+        // Notify each user their hold expired so they know to rebook
+        const NotificationEmitter = require('./notificationEmitter');
+        for (const userId of affectedUserIds) {
+          NotificationEmitter.emit({
+            type: 'slot_hold_expired',
+            category: 'booking',
+            priority: 'normal',
+            targetUserId: String(userId),
+            message: 'Your reserved time slot has expired. Please select a new slot to complete your booking.',
+          }).catch(() => {});
+        }
       }
 
       return count;

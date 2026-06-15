@@ -510,6 +510,13 @@ class CreatorPayoutService {
       priceUsd = parseFloat(fallback.rows[0]?.creator_price_usd);
       if (!Number.isFinite(priceUsd) || priceUsd <= 0) {
         logger.error('CreatorPayoutService: cannot determine renewal price, skipping', { subscriptionId: subscription_id });
+        NotificationEmitter.emit({
+          type: 'subscription_renewal_failed',
+          category: 'commerce',
+          priority: 'high',
+          targetUserId: String(subscriber_id),
+          message: `Your subscription to ${creatorName} could not be renewed because the price could not be determined. Please contact support.`,
+        }).catch(() => {});
         return { renewed: false };
       }
     }
