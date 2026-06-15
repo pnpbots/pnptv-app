@@ -206,41 +206,18 @@ function broadcastPost(post) {
 /**
  * Post a wellness tip to the social feed.
  */
-async function postWellness() {
-  try {
-    const prompt = await pickPrompt('wellness');
-    if (!prompt) return;
-    return await generateAndPost(prompt);
-  } catch (err) {
-    logger.error('CristinaFeed: wellness post failed', { error: err.message });
-  }
-}
+// Disabled — social feed posts by Cristina AI removed per admin request.
+async function postWellness() {}
 
 /**
  * Post a feature tutorial to the social feed.
  */
-async function postFeatureTutorial() {
-  try {
-    const prompt = await pickPrompt('feature_tutorial');
-    if (!prompt) return;
-    return await generateAndPost(prompt);
-  } catch (err) {
-    logger.error('CristinaFeed: feature tutorial post failed', { error: err.message });
-  }
-}
+async function postFeatureTutorial() {}
 
 /**
  * Post a PRIME upgrade promo to the social feed.
  */
-async function postPrimePromo() {
-  try {
-    const prompt = await pickPrompt('prime_promo');
-    if (!prompt) return;
-    return await generateAndPost(prompt);
-  } catch (err) {
-    logger.error('CristinaFeed: PRIME promo post failed', { error: err.message });
-  }
-}
+async function postPrimePromo() {}
 
 // ── Event-driven: Creator shoutouts ──────────────────────────────────────────
 
@@ -253,60 +230,7 @@ async function postPrimePromo() {
  * @param {string} mediaType     - 'image' or 'video'
  * @param {number} postId        - The post ID for linking
  */
-async function shoutoutNewContent(creatorId, creatorName, mediaType, postId) {
-  try {
-    if (!creatorId || String(creatorId) === CRISTINA_USER_ID) return;
-
-    // Rate limit: 1 shoutout per creator per 6h — fail-closed if Redis unavailable
-    const redis = getRedis();
-    if (!redis) {
-      logger.warn('CristinaFeed: Redis unavailable, skipping shoutout to avoid amplification', { creatorId });
-      return;
-    }
-    try {
-      const key = `${REDIS_PREFIX}shoutout:${creatorId}`;
-      const exists = await redis.get(key);
-      if (exists) return; // Already shouted out recently
-      await redis.set(key, '1', 'EX', CREATOR_SHOUTOUT_TTL);
-    } catch (redisErr) {
-      logger.warn('CristinaFeed: Redis error in shoutout rate-limit check, skipping to avoid amplification', { creatorId, error: redisErr.message });
-      return;
-    }
-
-    const safeCreatorName = sanitizeForPrompt(creatorName);
-    const mediaLabel = mediaType === 'video' ? 'a new video' : 'new content';
-    const prompt = `Write a very short, enthusiastic shoutout (2-3 sentences max) announcing that @"${safeCreatorName}" just posted ${mediaLabel} on pnptv.app. Encourage the community to check it out and follow them. Be warm and celebratory. Do NOT include any URLs.`;
-
-    const lang = Math.random() > 0.5 ? 'English' : 'Spanish';
-    const content = await GrokService.chat({
-      mode: 'post',
-      language: lang,
-      prompt,
-      personaType: 'cristina',
-      maxTokens: 250,
-    });
-
-    if (!content || content.trim().length < 10) return;
-
-    const post = await SocialPostService.createPost(
-      CRISTINA_USER_ID,
-      content.trim(),
-      null, null, null, null,
-      false, false, true,
-    );
-
-    broadcastPost(post);
-
-    logger.info('CristinaFeed: creator content shoutout', {
-      creatorId,
-      creatorName,
-      mediaType,
-      postId: post.id,
-    });
-  } catch (err) {
-    logger.error('CristinaFeed: creator shoutout failed', { creatorId, error: err.message });
-  }
-}
+async function shoutoutNewContent(_creatorId, _creatorName, _mediaType, _postId) {}
 
 /**
  * Announce that a creator just went live.
@@ -316,61 +240,7 @@ async function shoutoutNewContent(creatorId, creatorName, mediaType, postId) {
  * @param {string} creatorName  - Display name or username
  * @param {string} streamTitle  - Title of the stream (optional)
  */
-async function announceLiveStream(creatorId, creatorName, streamTitle) {
-  try {
-    if (!creatorId || String(creatorId) === CRISTINA_USER_ID) return;
-
-    // Rate limit — fail-closed if Redis unavailable
-    const redis = getRedis();
-    if (!redis) {
-      logger.warn('CristinaFeed: Redis unavailable, skipping live announcement to avoid amplification', { creatorId });
-      return;
-    }
-    try {
-      const key = `${REDIS_PREFIX}live:${creatorId}`;
-      const exists = await redis.get(key);
-      if (exists) return;
-      await redis.set(key, '1', 'EX', CREATOR_SHOUTOUT_TTL);
-    } catch (redisErr) {
-      logger.warn('CristinaFeed: Redis error in live announcement rate-limit check, skipping to avoid amplification', { creatorId, error: redisErr.message });
-      return;
-    }
-
-    const safeCreatorName = sanitizeForPrompt(creatorName);
-    const safeStreamTitle = streamTitle ? sanitizeForPrompt(streamTitle) : null;
-    const titlePart = safeStreamTitle ? ` titled "${safeStreamTitle}"` : '';
-    const prompt = `Write a very short, exciting announcement (2-3 sentences max) that @"${safeCreatorName}" just went LIVE on PNP Television${titlePart}! Encourage everyone to tune in now. Be enthusiastic and use the energy of a live event. Do NOT include any URLs.`;
-
-    const lang = Math.random() > 0.5 ? 'English' : 'Spanish';
-    const content = await GrokService.chat({
-      mode: 'post',
-      language: lang,
-      prompt,
-      personaType: 'cristina',
-      maxTokens: 250,
-    });
-
-    if (!content || content.trim().length < 10) return;
-
-    const post = await SocialPostService.createPost(
-      CRISTINA_USER_ID,
-      content.trim(),
-      null, null, null, null,
-      false, false, true,
-    );
-
-    broadcastPost(post);
-
-    logger.info('CristinaFeed: live stream announcement', {
-      creatorId,
-      creatorName,
-      streamTitle,
-      postId: post.id,
-    });
-  } catch (err) {
-    logger.error('CristinaFeed: live announcement failed', { creatorId, error: err.message });
-  }
-}
+async function announceLiveStream(_creatorId, _creatorName, _streamTitle) {}
 
 // ── In-call presence: tips, replies, video suggestions ──────────────────────
 // Used by socketHandlers.js when Cristina is attached to a hangout call. She
