@@ -9521,22 +9521,37 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
     }
   }
 
-  // Create NOWPayments subscription
+  // Create NOWPayments subscription — requires JWT Bearer + x-api-key
   const customerEmail = email || user.email || null;
   let subscriptionId, paymentLink;
   try {
+    // Obtain JWT (cached in-process for up to 4 min; token TTL is 5 min)
+    const NP_JWT_CACHE_MS = 4 * 60 * 1000;
+    if (!global._npJwt || !global._npJwtAt || (Date.now() - global._npJwtAt) > NP_JWT_CACHE_MS) {
+      const authResp = await axios.post(`${NOWPAYMENTS_URL}/auth`, {
+        email: process.env.NOWPAYMENTS_EMAIL,
+        password: process.env.NOWPAYMENTS_PASSWORD,
+      }, { timeout: 8000 });
+      global._npJwt = authResp.data?.token;
+      global._npJwtAt = Date.now();
+      if (!global._npJwt) throw new Error('NOWPayments JWT auth failed');
+    }
     const subResp = await axios.post(`${NOWPAYMENTS_URL}/subscriptions`, {
       subscription_plan_id: parseInt(nowpaymentsPlanId, 10),
       ...(customerEmail ? { customer_email: customerEmail } : {}),
     }, {
-      headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
+      headers: {
+        'x-api-key': NOWPAYMENTS_API_KEY,
+        'Authorization': `Bearer ${global._npJwt}`,
+        'Content-Type': 'application/json',
+      },
       timeout: 10000,
     });
     subscriptionId = subResp.data?.result?.id;
     paymentLink = subResp.data?.result?.payment_link;
     if (!paymentLink) throw new Error('No payment_link in response');
   } catch (err) {
-    logger.error('[NOWPayments] Subscription creation failed', { userId, planId, error: err.message });
+    logger.error('[NOWPayments] Subscription creation failed', { userId, planId, error: err.response?.data || err.message });
     return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
   }
 
