@@ -23,6 +23,7 @@ interface CinemaGridProps {
   mediaSrc: string | null;
   mediaPlaying?: boolean;
   mediaVolume?: number;
+  mediaStartedAt?: number | null;
   /** Karaoke mode hides the bottom cammer strip — the spotlighted cammer
    *  is rendered as a floating corner tile by the caller instead. */
   hideCammerStrip?: boolean;
@@ -33,9 +34,10 @@ interface UrlMediaPlayerProps {
   kind: "video" | "music";
   playing: boolean;
   volume: number;
+  startedAt?: number | null;
 }
 
-function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
+function UrlMediaPlayer({ src, kind, playing, volume, startedAt }: UrlMediaPlayerProps) {
   const t = useI18n().live;
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -109,6 +111,14 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
     // if (kind === "video") el.playbackRate = 1.08;
     if (!canPlay) return;
     if (playing) {
+      // Seek to approximate playback position so late-joiners aren't at time=0.
+      // Only seek if we're more than 3s off — avoids jitter on minor clock skew.
+      if (startedAt && el instanceof HTMLVideoElement && el.duration > 0) {
+        const expectedPos = Math.max(0, (Date.now() - startedAt) / 1000);
+        if (Math.abs(el.currentTime - expectedPos) > 3) {
+          el.currentTime = Math.min(expectedPos, el.duration - 0.5);
+        }
+      }
       el.play().catch(() => {
         setMuted(true);
         if (el) el.muted = true;
@@ -120,7 +130,7 @@ function UrlMediaPlayer({ src, kind, playing, volume }: UrlMediaPlayerProps) {
     return () => {
       el.pause();
     };
-  }, [playing, volume, muted, canPlay, kind]);
+  }, [playing, volume, muted, canPlay, kind, startedAt]);
 
   const handleUnmute = () => {
     setMuted(false);
@@ -364,6 +374,7 @@ export function CinemaGrid({
   mediaSrc,
   mediaPlaying = true,
   mediaVolume = 0.8,
+  mediaStartedAt = null,
   hideCammerStrip = false,
 }: CinemaGridProps) {
   const t = useI18n().live;
@@ -408,6 +419,7 @@ export function CinemaGrid({
             kind={mediaKind === "music" ? "music" : "video"}
             playing={mediaPlaying}
             volume={mediaVolume}
+            startedAt={mediaStartedAt}
           />
         ) : null}
       </div>

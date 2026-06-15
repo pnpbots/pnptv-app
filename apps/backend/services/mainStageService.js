@@ -46,6 +46,7 @@ const MEDIA_DEFAULTS = {
   playing:     false,
   volume:      70,
   startedAt:   null,
+  elapsedMs:   0,
   adminLocked: false,
   modeLocked:  false,
 };
@@ -200,7 +201,7 @@ async function setMedia({ kind, src, title, playing, volume, adminLocked, _fromA
   const rawNow = await redis.get('mainstage:media');
   let current  = {
     kind: 'off', src: null, title: null, playing: false, volume: 70,
-    startedAt: null, playbackRate: 1.25, adminLocked: false,
+    startedAt: null, elapsedMs: 0, playbackRate: 1.25, adminLocked: false,
   };
   if (rawNow) { try { current = { ...current, ...JSON.parse(rawNow) }; } catch (_) {} }
 
@@ -228,12 +229,21 @@ async function setMedia({ kind, src, title, playing, volume, adminLocked, _fromA
   if (playing !== undefined) {
     const wasPlaying = current.playing;
     current.playing  = Boolean(playing);
-    // Track when playback started so the frontend can sync position
     if (current.playing && !wasPlaying) {
-      current.startedAt = Date.now();
-    } else if (!current.playing) {
+      // Resuming: shift startedAt back by accumulated elapsed time so
+      // clients can seek to the correct position mid-video.
+      current.startedAt = Date.now() - (current.elapsedMs || 0);
+      current.elapsedMs = 0;
+    } else if (!current.playing && wasPlaying) {
+      // Pausing: record how far we got so resume can restore position.
+      current.elapsedMs = current.startedAt ? Date.now() - current.startedAt : (current.elapsedMs || 0);
       current.startedAt = null;
     }
+  }
+  // Source change resets position tracking
+  if (src !== undefined) {
+    current.startedAt = null;
+    current.elapsedMs = 0;
   }
 
   await redis.set('mainstage:media', JSON.stringify(current), 'EX', STATE_CACHE_TTL_S);

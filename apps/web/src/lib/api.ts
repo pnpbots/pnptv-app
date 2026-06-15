@@ -6696,6 +6696,7 @@ export interface MainStageState {
     playing: boolean;
     volume: number;
     startedAt: number | null;
+    elapsedMs?: number;
     playbackRate?: number;
     adminLocked?: boolean;
   };
@@ -6811,6 +6812,7 @@ export function setMainStageMedia(payload: {
   src?: string | null;
   playing?: boolean;
   volume?: number;
+  adminLocked?: boolean;
 }): Promise<{ success: boolean }> {
   return request("/api/main-stage/media", { method: "POST", body: payload });
 }

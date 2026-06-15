@@ -392,7 +392,7 @@ const setMode = asyncHandler(async (req, res) => {
  * Admin only. Body: { kind, src, playing, volume }
  */
 const setMedia = asyncHandler(async (req, res) => {
-  const { kind, src, playing, volume } = req.body || {};
+  const { kind, src, playing, volume, adminLocked } = req.body || {};
 
   // Validate media src before accepting it — prevents SSRF and ffmpeg arg injection
   if (src !== undefined && src !== null) {
@@ -402,8 +402,8 @@ const setMedia = asyncHandler(async (req, res) => {
     }
   }
 
-  await mainStageService.setMedia({ kind, src, playing, volume });
-  await mainStageService.logAdminAction(req.user.id, 'set_media', { kind, src, playing, volume });
+  await mainStageService.setMedia({ kind, src, playing, volume, adminLocked });
+  await mainStageService.logAdminAction(req.user.id, 'set_media', { kind, src, playing, volume, adminLocked });
 
   // Notify media broadcaster to reload source / toggle playback
   try {

@@ -47,10 +47,12 @@ let ingressId       = null;
 let retryTimer      = null;
 // If the LiveKit server's ingress service is not provisioned (no ingress
 // binary / no Redis), createIngress returns "ingress not connected". Retrying
-// won't help until infra is fixed, so we latch here and skip further attempts
-// until either the process restarts or an admin hits play after the infra
-// change (which resets the latch).
-let ingressDisabled = false;
+// won't help until infra is fixed, so we latch here and skip further attempts.
+// The latch auto-resets after 1 hour so a fixed infra doesn't require a bot restart.
+// An admin hitting Play also clears the latch (via setPlaying/updateSource).
+let ingressDisabled   = false;
+let ingressDisabledAt = null;
+const INGRESS_LATCH_RESET_MS = 60 * 60 * 1000; // 1 hour
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -126,6 +128,23 @@ async function createUrlIngress(src) {
 }
 
 /**
+ * Quick HEAD probe to check a source URL is reachable before creating a
+ * LiveKit ingress. Fails fast (5s) so broken URLs don't block reconcile.
+ */
+async function probeUrl(src) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const res = await fetch(src, { method: 'HEAD', signal: controller.signal });
+    return res.ok || res.status === 405; // 405 = HEAD not allowed but server is alive
+  } catch (_) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Bring the ingress state in line with (isPlaying, currentSrc):
  *   - no src or not playing → ensure no ingress
  *   - playing + src         → ensure an ingress exists pointing at src
@@ -147,8 +166,26 @@ async function reconcile() {
   }
 
   if (ingressDisabled) {
-    logger.warn('[MainStageMedia] ingress latched off — admin play ignored until infra is fixed and bot restarts');
-    return;
+    const latchAge = ingressDisabledAt ? Date.now() - ingressDisabledAt : Infinity;
+    if (latchAge >= INGRESS_LATCH_RESET_MS) {
+      logger.info('[MainStageMedia] ingress latch auto-reset after 1h — retrying');
+      ingressDisabled   = false;
+      ingressDisabledAt = null;
+    } else {
+      logger.warn('[MainStageMedia] ingress latched off — admin play ignored until infra is fixed or latch resets in ' +
+        Math.ceil((INGRESS_LATCH_RESET_MS - latchAge) / 60000) + 'min');
+      return;
+    }
+  }
+
+  // Probe the source URL before creating an ingress so admins get fast feedback
+  // on broken links rather than a silent retry loop.
+  if (currentSrc) {
+    const probeOk = await probeUrl(currentSrc);
+    if (!probeOk) {
+      logger.warn('[MainStageMedia] source URL unreachable — skipping ingress create', { src: currentSrc.slice(0, 80) });
+      return;
+    }
   }
 
   try {
@@ -159,7 +196,8 @@ async function reconcile() {
     backoffMs = MIN_BACKOFF_MS;
   } catch (err) {
     if (isIngressInfraError(err)) {
-      ingressDisabled = true;
+      ingressDisabled   = true;
+      ingressDisabledAt = Date.now();
       logger.error(
         '[MainStageMedia] LiveKit ingress service is not provisioned on this server ' +
         '(err: "' + err.message + '"). Media playback is disabled until livekit-ingress ' +

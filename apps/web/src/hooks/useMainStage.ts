@@ -38,6 +38,7 @@ interface UseMainStageReturn {
       src?: string | null;
       playing?: boolean;
       volume?: number;
+      adminLocked?: boolean;
     }) => Promise<void>;
     setVolume: (payload: { cams?: number; media?: number }) => Promise<void>;
     setSpotlight: (cammer: string) => Promise<void>;
@@ -63,7 +64,7 @@ export function useMainStage(): UseMainStageReturn {
   }, []);
 
   const adminSetMedia = useCallback(
-    async (payload: { kind: "video" | "music" | "off"; src?: string | null; playing?: boolean; volume?: number }) => {
+    async (payload: { kind: "video" | "music" | "off"; src?: string | null; playing?: boolean; volume?: number; adminLocked?: boolean }) => {
       await setMainStageMedia(payload);
     },
     []

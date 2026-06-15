@@ -146,6 +146,7 @@ interface MainStageInnerProps {
   mediaSrc: string | null;
   mediaPlaying: boolean;
   mediaVolume: number;
+  mediaStartedAt: number | null;
   isParticipant: boolean;
   isAdmin: boolean;
   onSpotlightPick: (identity: string) => void;
@@ -165,6 +166,7 @@ function MainStageInner({
   mediaSrc,
   mediaPlaying,
   mediaVolume,
+  mediaStartedAt,
   isParticipant,
   isAdmin,
   onSpotlightPick,
@@ -195,6 +197,7 @@ function MainStageInner({
             mediaSrc={mediaSrc}
             mediaPlaying={mediaPlaying}
             mediaVolume={mediaVolume}
+            mediaStartedAt={mediaStartedAt}
           />
         )}
         {mode === "theater" && (
@@ -205,6 +208,7 @@ function MainStageInner({
               mediaSrc={mediaSrc}
               mediaPlaying={mediaPlaying}
               mediaVolume={mediaVolume}
+              mediaStartedAt={mediaStartedAt}
             />
             <TheaterCurtains />
           </div>
@@ -217,6 +221,7 @@ function MainStageInner({
               mediaSrc={mediaSrc}
               mediaPlaying={mediaPlaying}
               mediaVolume={mediaVolume}
+              mediaStartedAt={mediaStartedAt}
               hideCammerStrip
             />
             <KaraokeCammerOverlay spotlightIdentity={spotlightCammer} />
@@ -553,7 +558,7 @@ export default function MainStage() {
     getMainStageState().then(s => setViewerStateOverride(s)).catch(() => {});
     const id = setInterval(() => {
       getMainStageState().then(s => setViewerStateOverride(s)).catch(() => {});
-    }, 30_000);
+    }, 10_000);
     return () => clearInterval(id);
   }, [isViewerMode, viewerLkToken]);
 
@@ -1291,6 +1296,7 @@ export default function MainStage() {
             mediaSrc={state?.media?.src ?? null}
             mediaPlaying={state?.media?.playing ?? true}
             mediaVolume={state?.media?.volume ?? 70}
+            mediaStartedAt={state?.media?.startedAt ?? null}
             isParticipant={isParticipant}
             isAdmin={isAdmin}
             onSpotlightPick={(identity) => admin.setSpotlight(identity)}
@@ -1322,6 +1328,7 @@ export default function MainStage() {
               mediaSrc={(viewerStateOverride ?? state)?.media?.src ?? null}
               mediaPlaying={(viewerStateOverride ?? state)?.media?.playing ?? true}
               mediaVolume={(viewerStateOverride ?? state)?.media?.volume ?? 70}
+              mediaStartedAt={(viewerStateOverride ?? state)?.media?.startedAt ?? null}
               isParticipant={false}
               isAdmin={false}
               onSpotlightPick={() => {}}
@@ -1399,6 +1406,7 @@ export default function MainStage() {
             mediaSrc={state?.media?.src ?? null}
             mediaPlaying={state?.media?.playing ?? true}
             mediaVolume={state?.media?.volume ?? 70}
+            mediaStartedAt={state?.media?.startedAt ?? null}
             isParticipant={isParticipant}
             isAdmin={isAdmin}
             onSpotlightPick={(identity) => admin.setSpotlight(identity)}

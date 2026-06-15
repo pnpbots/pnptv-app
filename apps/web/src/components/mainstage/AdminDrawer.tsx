@@ -439,6 +439,18 @@ export function AdminPanelContent({
                 </button>
               </div>
             )}
+            {isAdmin && state?.media?.adminLocked && state.media.kind === "off" && (
+              <button
+                type="button"
+                onClick={() => admin.setMedia({ kind: "off", src: null, playing: false, adminLocked: false })}
+                className="w-full min-h-[40px] flex items-center justify-center gap-2 px-4 rounded-xl text-xs font-semibold text-white/60 border border-white/10 bg-white/[0.04] transition-all active:scale-[0.97]"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                </svg>
+                Resume auto-rotation
+              </button>
+            )}
           </div>
         </section>
 
