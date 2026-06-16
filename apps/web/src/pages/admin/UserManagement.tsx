@@ -217,9 +217,23 @@ export default function UserManagement() {
     {
       key: "email",
       header: t.users.email,
-      render: (row: AdminUser) => (
-        <span className="text-pnp-textSecondary">{row.email || "—"}</span>
-      ),
+      render: (row: AdminUser) => {
+        if (!row.email) return <span className="text-pnp-textSecondary opacity-50">—</span>;
+        return (
+          <button
+            type="button"
+            title="Click para buscar por este email"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleFilterChange("emailFilter", row.email!);
+              setPage(1);
+            }}
+            className="text-pnp-textSecondary hover:text-pnp-accent transition-colors text-left underline decoration-dotted"
+          >
+            {row.email}
+          </button>
+        );
+      },
     },
     {
       key: "tier",
@@ -345,6 +359,21 @@ export default function UserManagement() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Email exacto</label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-pnp-textSecondary text-xs select-none">@</span>
+            <input
+              type="email"
+              inputMode="email"
+              value={filters.emailFilter || ""}
+              onChange={(e) => handleFilterChange("emailFilter", e.target.value.trim())}
+              placeholder="usuario@dominio.com"
+              className="w-full pl-7 pr-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary placeholder:text-pnp-textSecondary/50 focus:outline-none focus:border-pnp-accent"
+              style={{ fontSize: "16px" }}
+            />
+          </div>
+        </div>
         <div className="flex-1 min-w-[120px]">
           <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">{t.users.tier}</label>
           <select

@@ -97,6 +97,7 @@ const listUsers = async (req, res) => {
     const planFilter = (req.query.plan || '').trim();
     const roleFilter = (req.query.role || '').trim();
     const telegramFilter = (req.query.telegram || '').trim();
+    const emailFilter = (req.query.emailFilter || '').trim();
     const limit = 20;
     const offset = (page - 1) * limit;
 
@@ -168,6 +169,15 @@ const listUsers = async (req, res) => {
       const clause = ` AND (telegram IS NULL OR telegram = '')`;
       countQuery += clause;
       dataQuery += clause;
+    }
+
+    if (emailFilter) {
+      const idx = params.length + 1;
+      const clause = ` AND LOWER(email) = LOWER($${idx})`;
+      countQuery += clause;
+      dataQuery += clause;
+      params.push(emailFilter);
+      countParams.push(emailFilter);
     }
 
     dataQuery += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);

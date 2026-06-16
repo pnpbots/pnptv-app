@@ -4639,6 +4639,8 @@ export interface AdminUserFilters {
   role?: string;
   /** 'linked' | 'unlinked' */
   telegram?: string;
+  /** Exact email match (case-insensitive) */
+  emailFilter?: string;
 }
 
 export function getAdminUsers(
@@ -4653,6 +4655,7 @@ export function getAdminUsers(
   if (filters?.plan) params.set("plan", filters.plan);
   if (filters?.role) params.set("role", filters.role);
   if (filters?.telegram) params.set("telegram", filters.telegram);
+  if (filters?.emailFilter) params.set("emailFilter", filters.emailFilter);
   return request(`/api/webapp/admin/users?${params}`);
 }
 
