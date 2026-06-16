@@ -2791,7 +2791,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
 
   const subLookup = await pool.query(
     `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
-            tier, terms_accepted, photo_file_id, bio, language, role,
+            tier, terms_accepted, age_verified, photo_file_id, bio, language, role,
             creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
             email, last_login_method
      FROM users
@@ -2819,7 +2819,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     // No existing OIDC link — check if an account with this email already exists (case-insensitive)
     const emailLookup = await pool.query(
       `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
-              tier, terms_accepted, photo_file_id, bio, language, role,
+              tier, terms_accepted, age_verified, photo_file_id, bio, language, role,
               creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
               email, last_login_method
        FROM users
@@ -2856,7 +2856,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
   if (!userRow && preferred_username) {
     const usernameLookup = await pool.query(
       `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
-              tier, terms_accepted, photo_file_id, bio, language, role,
+              tier, terms_accepted, age_verified, photo_file_id, bio, language, role,
               creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
               email, last_login_method
        FROM users
@@ -2915,7 +2915,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'free', 'free', false,
                  'user', 'oidc', NOW(), NOW(), NOW())
          RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
-                   tier, terms_accepted, photo_file_id, bio, language, role,
+                   tier, terms_accepted, age_verified, photo_file_id, bio, language, role,
                    creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
                    email, last_login_method`,
         [
@@ -2945,7 +2945,7 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'free', 'free', false,
                    'user', 'oidc', NOW(), NOW(), NOW())
            RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
-                     tier, terms_accepted, photo_file_id, bio, language, role,
+                     tier, terms_accepted, age_verified, photo_file_id, bio, language, role,
                      creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
                      email, last_login_method`,
           [
@@ -2986,6 +2986,8 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     subscriptionStatus: userRow.subscription_status,
     tier: userRow.tier || 'free',
     acceptedTerms: userRow.terms_accepted,
+    ageVerified: userRow.age_verified || false,
+    email: userRow.email || null,
     photoUrl: userRow.photo_file_id,
     bio: userRow.bio,
     language: userRow.language,
@@ -10234,6 +10236,9 @@ app.post('/api/verify-age-self', authLimiter, asyncHandler(async (req, res) => {
       return res.status(500).json({ success: false, error: 'Verification failed' });
     }
     req.session.user.ageVerified = true;
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => (err ? reject(err) : resolve()));
+    });
     await getPool().query(
       `INSERT INTO audit_logs (actor_id, action, resource_type, resource_id, metadata, ip_address, user_agent, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,

@@ -56,7 +56,6 @@ import { VerificationGate } from "@/components/VerificationGate";
 import { TierGate } from "@/components/TierGate";
 
 const Home = lazy(() => import("@/pages/Home"));
-const LoginPage = lazy(() => import("@/pages/LoginPage"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Live = lazy(() => import("@/pages/Live"));
 const Stream = lazy(() => import("@/pages/Stream"));
@@ -163,7 +162,9 @@ export const router = createBrowserRouter([
         index: true,
         element: (
           <ModuleLoader>
-            <Home />
+            <VerificationGate>
+              <Home />
+            </VerificationGate>
           </ModuleLoader>
         ),
       },

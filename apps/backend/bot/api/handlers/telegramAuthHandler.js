@@ -436,10 +436,11 @@ const handleAcceptTerms = async (req, res) => {
     
     // Update session
     req.session.user.acceptedTerms = true;
-    
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => (err ? reject(err) : resolve()));
+    });
+
     logger.info(`User ${user.id} accepted terms and conditions`);
-    
-    // Get the original URL from localStorage (will be handled by frontend)
     res.json({ success: true });
     
   } catch (error) {
@@ -526,6 +527,8 @@ const checkAuthStatus = async (req, res) => {
         auth_methods: authMethods,
         // Login method tracking
         last_login_method: user.last_login_method || null,
+        // Email (from OIDC or direct registration)
+        email: user.email || null,
       }
     });
 
