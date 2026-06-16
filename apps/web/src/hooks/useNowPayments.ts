@@ -143,8 +143,14 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
         credentials: "include",
         body: JSON.stringify({ planId, email, creatorId, ...(returnUrl ? { returnUrl } : {}) }),
       });
+
+      if (res.status === 401) {
+        window.location.href = `/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
+        return { success: false, error: "Session expired" };
+      }
+
       const result = await res.json();
-      
+
       if (result.success && result.orderId && result.invoiceUrl) {
         const newOrder: NowPaymentsOrder = {
           orderId: result.orderId,

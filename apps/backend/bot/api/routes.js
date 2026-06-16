@@ -9445,7 +9445,7 @@ const usdcAvailableLimiter = rateLimit({
 
 // GET /api/webapp/payments/usdc/available — check if NOWPayments is configured
 app.get('/api/webapp/payments/usdc/available', usdcAvailableLimiter, asyncHandler(async (req, res) => {
-  const configured = !!(NOWPAYMENTS_API_KEY && process.env.NOWPAYMENTS_PUBLIC_KEY);
+  const configured = !!NOWPAYMENTS_API_KEY;
   return res.json({ available: configured, configured });
 }));
 
@@ -9989,18 +9989,6 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       await dbQuery(
         `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
         [order_id, `nowpayments:${payment_id}:underpaid:${actually_paid}/${referenceAmount}`]
-      );
-      return res.json({ received: true });
-    }
-  } else if (order.usd_amount) {
-    // IPN fields absent — validate against DB authoritative amount as fallback (same-currency only)
-    const paid = parseFloat(actually_paid || '0');
-    const expected = parseFloat(order.usd_amount);
-    if (paid > 0 && Number.isFinite(expected) && !pay_currency && paid < expected * 0.98) {
-      logger.warn('[NOWPayments] IPN: underpayment (fallback DB check)', { order_id, actually_paid, dbAmount: order.usd_amount });
-      await dbQuery(
-        `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
-        [order_id, `nowpayments:${payment_id}:underpaid_fallback:${actually_paid}`]
       );
       return res.json({ received: true });
     }
