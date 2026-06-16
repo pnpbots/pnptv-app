@@ -312,56 +312,60 @@ const createDmVideoCallInvite = async (req, res) => {
   }
 
   try {
-    const { rows } = await query(
+    const { rows: partnerRows } = await query(
       `SELECT id FROM users WHERE id = $1`,
       [partnerId]
     );
 
-    if (rows.length === 0) {
+    if (partnerRows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     const callerId = String(user.id);
     const calleeId = String(partnerId);
-    // Deterministic room name — same for both participants regardless of who initiates
     const roomName = `dm-${Math.min(Number(callerId), Number(calleeId))}-${Math.max(Number(callerId), Number(calleeId))}`;
 
-    // Dedup: atomic NX set — prevents duplicate rooms if bot and webapp race
-    const createdAt = new Date();
-    const expiresAt = new Date(createdAt.getTime() + DM_CALL_TTL_SECONDS * 1000).toISOString();
-    const callData = JSON.stringify({ roomName, callerId, calleeId, createdAt: createdAt.toISOString(), expiresAt });
-
-    const wasSet = await getRedis().set(
-      `${DM_CALL_KEY_PREFIX}${roomName}`,
-      callData,
-      'EX',
-      DM_CALL_TTL_SECONDS,
-      'NX'
+    // Abort if there is already an active call between these two users
+    const { rows: activeRows } = await query(
+      `SELECT id, room_name FROM dm_video_calls
+       WHERE status = 'active'
+         AND LEAST(caller_id, callee_id) = LEAST($1, $2)
+         AND GREATEST(caller_id, callee_id) = GREATEST($1, $2)
+       LIMIT 1`,
+      [callerId, calleeId]
     );
 
-    const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
+    let callId;
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + DM_CALL_TTL_SECONDS * 1000).toISOString();
 
-    if (!wasSet) {
-      const raw = await getRedis().get(`${DM_CALL_KEY_PREFIX}${roomName}`);
-      const existingCall = raw ? JSON.parse(raw) : { callerId, calleeId, expiresAt };
-      const token = await generateToken(roomName, callerId, displayName, true);
-      return res.json({
-        success: true,
-        roomName,
-        callLink: buildDmCallLink(roomName, existingCall.callerId, existingCall.calleeId),
-        callerId: existingCall.callerId,
-        calleeId: existingCall.calleeId,
-        expiresAt: existingCall.expiresAt,
-        token,
-        livekitUrl: LIVEKIT_WS_URL,
-      });
+    if (activeRows.length > 0) {
+      // Resume existing call
+      callId = activeRows[0].id;
+    } else {
+      // Create persistent call record so signaling, decline, and history all work
+      const { rows: insertRows } = await query(
+        `INSERT INTO dm_video_calls (id, caller_id, callee_id, room_name, status, created_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, 'active', NOW())
+         RETURNING id`,
+        [callerId, calleeId, roomName]
+      );
+      callId = insertRows[0].id;
     }
 
+    // Redis entry carries callId so socket handlers can look it up
+    const callData = JSON.stringify({ callId, roomName, callerId, calleeId, createdAt: createdAt.toISOString(), expiresAt });
+    await getRedis().set(`${DM_CALL_KEY_PREFIX}${roomName}`, callData, 'EX', DM_CALL_TTL_SECONDS);
+
+    const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
     const callLink = buildDmCallLink(roomName, callerId, calleeId);
     const token = await generateToken(roomName, callerId, displayName, true);
 
+    logger.info('DM call created', { callId, callerId, calleeId, roomName });
+
     return res.json({
       success: true,
+      callId,
       roomName,
       callLink,
       callerId,

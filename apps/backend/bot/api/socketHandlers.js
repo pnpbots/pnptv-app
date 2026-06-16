@@ -1854,38 +1854,177 @@ function initSocketIO(io) {
       }
     });
 
-    // Decline an incoming DM video call (callee only)
-    socket.on('dm:call:decline', async ({ callId } = {}) => {
-      if (!callId) return;
+    // ── DM Video Call signaling ────────────────────────────────────────────────
 
+    const DM_CALL_RING_TIMEOUT_MS = 45_000;
+    const _DM_CALL_KEY_PREFIX = 'dm:call:';
+
+    // dm:call:ring — caller emits right after REST /dm/call/start returns.
+    // Looks up caller info and forwards dm:call:incoming to the callee's socket room.
+    socket.on('dm:call:ring', async ({ callId, roomName } = {}) => {
+      if (!callId || !roomName) return;
       try {
+        const { rows } = await query(
+          `SELECT id, caller_id, callee_id, room_name, status FROM dm_video_calls WHERE id = $1 LIMIT 1`,
+          [callId]
+        );
+        const call = rows[0];
+        if (!call || call.status !== 'active') return;
+        if (String(call.caller_id) !== String(user.id)) return;
+
+        const { rows: callerRows } = await query(
+          `SELECT username, first_name, photo_file_id FROM users WHERE id = $1`,
+          [call.caller_id]
+        );
+        const caller = callerRows[0] || {};
+
+        io.to(`user:${call.callee_id}`).emit('dm:call:incoming', {
+          callId: call.id,
+          roomName: call.room_name,
+          callerId: call.caller_id,
+          calleeId: call.callee_id,
+          callerName: caller.first_name || caller.username || 'PNPtv User',
+          callerUsername: caller.username || null,
+          callerAvatar: caller.photo_file_id || null,
+        });
+
+        logger.info('DM call ring → incoming forwarded', { callId, callerId: call.caller_id, calleeId: call.callee_id });
+
+        // Server-side missed-call timeout — marks missed and notifies both parties
+        const missedTimer = setTimeout(async () => {
+          try {
+            const { rowCount } = await query(
+              `UPDATE dm_video_calls SET status = 'missed', ended_at = NOW()
+               WHERE id = $1 AND status = 'active'`,
+              [callId]
+            );
+            if (rowCount > 0) {
+              io.to(`user:${call.caller_id}`).emit('dm:call:missed', { callId });
+              io.to(`user:${call.callee_id}`).emit('dm:call:missed', { callId });
+              logger.info('DM call missed (no answer)', { callId });
+            }
+          } catch (e) {
+            logger.error('DM call missed-timer error', { callId, error: e.message });
+          }
+        }, DM_CALL_RING_TIMEOUT_MS);
+
+        if (!socket._dmCallTimers) socket._dmCallTimers = new Map();
+        socket._dmCallTimers.set(callId, missedTimer);
+      } catch (err) {
+        logger.error('dm:call:ring error', err);
+      }
+    });
+
+    // dm:call:accept — callee accepts; notify caller so their UI joins the room
+    socket.on('dm:call:accept', async ({ callId } = {}) => {
+      if (!callId) return;
+      try {
+        const { rows } = await query(
+          `SELECT id, caller_id, callee_id FROM dm_video_calls WHERE id = $1 AND status = 'active' LIMIT 1`,
+          [callId]
+        );
+        const call = rows[0];
+        if (!call) return;
+        if (String(call.callee_id) !== String(user.id)) return;
+
+        const { rows: calleeRows } = await query(
+          `SELECT username, first_name FROM users WHERE id = $1`,
+          [call.callee_id]
+        );
+        const callee = calleeRows[0] || {};
+
+        // Clear missed-call timer on the caller's socket(s)
+        const callerSockets = await io.in(`user:${call.caller_id}`).fetchSockets();
+        for (const s of callerSockets) {
+          const t = s._dmCallTimers?.get(call.id);
+          if (t) { clearTimeout(t); s._dmCallTimers.delete(call.id); }
+        }
+
+        io.to(`user:${call.caller_id}`).emit('dm:call:accepted', {
+          callId: call.id,
+          calleeName: callee.first_name || callee.username || 'PNPtv User',
+        });
+
+        logger.info('DM call accepted', { callId, calleeId: user.id, callerId: call.caller_id });
+      } catch (err) {
+        logger.error('dm:call:accept error', err);
+      }
+    });
+
+    // dm:call:decline — callee declines; support both callId (UUID) and roomName (fallback)
+    socket.on('dm:call:decline', async ({ callId, roomName } = {}) => {
+      if (!callId && !roomName) return;
+      try {
+        const lookupValue = callId || roomName;
+        const whereClause = callId
+          ? `id = $2 AND callee_id = $1 AND status = 'active'`
+          : `room_name = $2 AND callee_id = $1 AND status = 'active'`;
+
         const { rows, rowCount } = await query(
           `UPDATE dm_video_calls
            SET status = 'declined', ended_at = NOW(), ended_by = $1
-           WHERE id = $2 AND callee_id = $1 AND status = 'active'
-           RETURNING id, caller_id, callee_id`,
-          [user.id, callId]
+           WHERE ${whereClause}
+           RETURNING id, caller_id, room_name`,
+          [user.id, lookupValue]
         );
+        if (rowCount === 0) return;
+        const call = rows[0];
 
-        if (rowCount === 0) {
-          socket.emit('dm:error', { message: 'Call not found or already ended', code: 'NOT_FOUND' });
-          return;
+        // Clear missed timer on caller socket(s)
+        const callerSockets = await io.in(`user:${call.caller_id}`).fetchSockets();
+        for (const s of callerSockets) {
+          const t = s._dmCallTimers?.get(call.id);
+          if (t) { clearTimeout(t); s._dmCallTimers.delete(call.id); }
         }
 
-        const call = rows[0];
+        getRedis().del(`${_DM_CALL_KEY_PREFIX}${call.room_name}`).catch(() => {});
+
         io.to(`user:${call.caller_id}`).emit('dm:call:declined', {
           callId: call.id,
-          declinedBy: {
-            id: user.id,
-            username: user.username,
-            firstName: user.firstName || user.first_name,
-          },
+          declinedBy: { id: user.id, username: user.username, firstName: user.firstName || user.first_name },
         });
 
-        logger.info('DM call declined via socket', { callId, calleeId: user.id, callerId: call.caller_id });
+        logger.info('DM call declined', { callId: call.id, calleeId: user.id, callerId: call.caller_id });
       } catch (err) {
         logger.error('dm:call:decline error', err);
         socket.emit('dm:error', { message: 'Failed to decline call', code: 'SERVER_ERROR' });
+      }
+    });
+
+    // dm:call:end — either party hangs up; close the room for both sides
+    socket.on('dm:call:end', async ({ callId, roomName } = {}) => {
+      if (!callId && !roomName) return;
+      try {
+        const lookupValue = callId || roomName;
+        const whereClause = callId
+          ? `id = $2 AND (caller_id = $1 OR callee_id = $1) AND status = 'active'`
+          : `room_name = $2 AND (caller_id = $1 OR callee_id = $1) AND status = 'active'`;
+
+        const { rows, rowCount } = await query(
+          `UPDATE dm_video_calls
+           SET status = 'ended', ended_at = NOW(), ended_by = $1
+           WHERE ${whereClause}
+           RETURNING id, caller_id, callee_id, room_name`,
+          [user.id, lookupValue]
+        );
+        if (rowCount === 0) return;
+        const call = rows[0];
+
+        getRedis().del(`${_DM_CALL_KEY_PREFIX}${call.room_name}`).catch(() => {});
+
+        // Clear missed timer
+        const t = socket._dmCallTimers?.get(call.id);
+        if (t) { clearTimeout(t); socket._dmCallTimers.delete(call.id); }
+
+        const otherId = String(call.caller_id) === String(user.id) ? call.callee_id : call.caller_id;
+        io.to(`user:${otherId}`).emit('dm:call:ended', {
+          callId: call.id,
+          endedBy: { id: user.id, username: user.username },
+        });
+
+        logger.info('DM call ended', { callId: call.id, endedBy: user.id });
+      } catch (err) {
+        logger.error('dm:call:end error', err);
       }
     });
 

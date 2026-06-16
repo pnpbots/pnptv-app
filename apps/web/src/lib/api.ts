@@ -2450,6 +2450,7 @@ export function deleteDmMessage(messageId: number): Promise<{ success: boolean }
 
 
 export interface DmVideoCallInvite {
+  callId: string;
   roomName: string;
   callLink: string;
   callerId: string;

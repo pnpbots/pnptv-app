@@ -278,8 +278,9 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
   const [pendingCallRoom, setPendingCallRoom] = useState<string | null>(null);
   const [activeCall, setActiveCall] = useState<DmVideoCallSession | null>(null);
   const [callBusy, setCallBusy] = useState(false);
-  const [incomingCall, setIncomingCall] = useState<{ roomName: string; callerId: string; calleeId: string; callerName: string } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{ callId: string; roomName: string; callerId: string; calleeId: string; callerName: string } | null>(null);
   const incomingCallDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeCallIdRef = useRef<string | null>(null);
 
   // Context menu / delete confirm
   const [contextMenu, setContextMenu] = useState<{ msg: DmMessage; x: number; y: number } | null>(null);
@@ -471,11 +472,9 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
       setChatError(data.message || data.error || "Something went wrong");
     };
 
-    const onDmCallIncoming = (data: { roomName: string; callerId: string; calleeId: string; callerName: string }) => {
-      // Only show if we're the callee
+    const onDmCallIncoming = (data: { callId: string; roomName: string; callerId: string; calleeId: string; callerName: string }) => {
       if (String(data.calleeId) !== String(myUserId)) return;
       setIncomingCall(data);
-      // Auto-dismiss after 30 seconds
       if (incomingCallDismissTimer.current) clearTimeout(incomingCallDismissTimer.current);
       incomingCallDismissTimer.current = setTimeout(() => {
         setIncomingCall(null);
@@ -489,6 +488,28 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
         clearTimeout(incomingCallDismissTimer.current);
         incomingCallDismissTimer.current = null;
       }
+    };
+
+    const onDmCallAccepted = (_data: { callId: string; calleeName: string }) => {
+      // Caller is already in the LiveKit room; this is a confirmation the callee answered
+    };
+
+    const onDmCallMissed = (_data: { callId: string }) => {
+      setIncomingCall(null);
+      setPendingCallRoom(null);
+      setShowPermGate(false);
+      activeCallIdRef.current = null;
+      if (incomingCallDismissTimer.current) {
+        clearTimeout(incomingCallDismissTimer.current);
+        incomingCallDismissTimer.current = null;
+      }
+    };
+
+    const onDmCallEnded = (_data: { callId: string }) => {
+      activeCallIdRef.current = null;
+      setActiveCall(null);
+      setPendingCallRoom(null);
+      clearCallParams();
     };
 
     const onPresenceUpdate = (data: { userId: string; online: boolean; lastSeen: string | null }) => {
@@ -511,6 +532,9 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
     socket.on("dm:error", onDmError);
     socket.on("dm:call:incoming", onDmCallIncoming);
     socket.on("dm:call:declined", onDmCallDeclined);
+    socket.on("dm:call:accepted", onDmCallAccepted);
+    socket.on("dm:call:missed", onDmCallMissed);
+    socket.on("dm:call:ended", onDmCallEnded);
     socket.on("presence:update", onPresenceUpdate);
     socket.on("dm:message:read", onDmReadByPartner);
 
@@ -529,6 +553,9 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
       socket.off("dm:error", onDmError);
       socket.off("dm:call:incoming", onDmCallIncoming);
       socket.off("dm:call:declined", onDmCallDeclined);
+      socket.off("dm:call:accepted", onDmCallAccepted);
+      socket.off("dm:call:missed", onDmCallMissed);
+      socket.off("dm:call:ended", onDmCallEnded);
       socket.off("presence:update", onPresenceUpdate);
       socket.off("dm:message:read", onDmReadByPartner);
       if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
@@ -595,22 +622,8 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
 
     try {
       const invite = await createDmVideoCall(userId);
-      const inviteMessage = `Join my PNPtv video call:\n${invite.callLink}`;
-      const res = await fetch(`${API_BASE}/api/webapp/dm/send/${userId}`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: inviteMessage }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.message) {
-          setMessages((prev) => prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]);
-          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-        }
-      }
-
+      activeCallIdRef.current = invite.callId;
+      connectSocket().emit("dm:call:ring", { callId: invite.callId, roomName: invite.roomName });
       await copyToClipboard(invite.callLink);
       setPendingCallRoom(invite.roomName);
       syncCallParams(invite.roomName, invite.callerId, invite.calleeId);
@@ -623,10 +636,16 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
   }, [callBusy, copyToClipboard, syncCallParams, userId]);
 
   const closeActiveCall = useCallback(() => {
+    const callId = activeCallIdRef.current;
+    const roomName = activeCall?.roomName ?? pendingCallRoom;
+    if (callId || roomName) {
+      try { connectSocket().emit("dm:call:end", { callId, roomName }); } catch { /* ignore */ }
+    }
+    activeCallIdRef.current = null;
     setActiveCall(null);
     setPendingCallRoom(null);
     clearCallParams();
-  }, [clearCallParams]);
+  }, [activeCall?.roomName, pendingCallRoom, clearCallParams]);
 
   const uploadMediaWithProgress = (file: File, caption: string): Promise<{ message?: DmMessage }> => {
     return new Promise((resolve, reject) => {
@@ -1286,6 +1305,8 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
                   clearTimeout(incomingCallDismissTimer.current);
                   incomingCallDismissTimer.current = null;
                 }
+                activeCallIdRef.current = call.callId;
+                connectSocket().emit("dm:call:accept", { callId: call.callId });
                 beginJoinCall(call.roomName, call.callerId, call.calleeId);
               }}
               className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white transition-all active:scale-95 bg-green-600 hover:bg-green-500"
@@ -1301,7 +1322,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
                   clearTimeout(incomingCallDismissTimer.current);
                   incomingCallDismissTimer.current = null;
                 }
-                connectSocket().emit("dm:call:decline", { roomName: call.roomName });
+                connectSocket().emit("dm:call:decline", { callId: call.callId, roomName: call.roomName });
               }}
               className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white/80 border border-white/10 hover:bg-red-500/20 hover:border-red-500/40 hover:text-red-400 transition-all active:scale-95"
             >
