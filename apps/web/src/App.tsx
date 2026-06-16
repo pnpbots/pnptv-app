@@ -297,7 +297,7 @@ function AppOverlays() {
                   const call = incomingCall;
                   dismissIncomingCall();
                   connectSocket().emit("dm:call:accept", { callId: call.callId });
-                  const url = `/chat/${call.callerId}?call=${encodeURIComponent(call.roomName)}&caller=${call.callerId}&callee=${call.calleeId}&callId=${call.callId}`;
+                  const url = `/dm/${call.callerId}?call=${encodeURIComponent(call.roomName)}&caller=${call.callerId}&callee=${call.calleeId}&callId=${call.callId}`;
                   router.navigate(url);
                 }}
                 className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-green-600 hover:bg-green-500 transition-all active:scale-95"
