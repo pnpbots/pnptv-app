@@ -191,9 +191,21 @@ function useNavigationDiagnostics() {
 // SW updates now apply silently after a 5s grace period (see main.tsx).
 // No banner — user does not need to take any action.
 
+type IncomingDmCall = {
+  callId: string;
+  roomName: string;
+  callerId: string;
+  calleeId: string;
+  callerName: string;
+  callerUsername: string | null;
+  callerAvatar: string | null;
+};
+
 function useGlobalSocketEvents() {
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, logout, user } = useAuth();
   const [suspendedMsg, setSuspendedMsg] = useState<string | null>(null);
+  const [incomingCall, setIncomingCall] = useState<IncomingDmCall | null>(null);
+  const callDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -201,7 +213,6 @@ function useGlobalSocketEvents() {
 
     const onSessionExpired = () => {
       disconnectSocket();
-      // Redirect to login — full page reload clears all state
       window.location.href = "/login?reason=session_expired";
     };
 
@@ -214,20 +225,45 @@ function useGlobalSocketEvents() {
       }, 4000);
     };
 
+    const onDmCallIncoming = (data: IncomingDmCall) => {
+      const myId = user?.dbId ?? user?.id ?? "";
+      if (myId && String(data.calleeId) !== String(myId)) return;
+      setIncomingCall(data);
+      if (callDismissTimer.current) clearTimeout(callDismissTimer.current);
+      callDismissTimer.current = setTimeout(() => {
+        setIncomingCall(null);
+        callDismissTimer.current = null;
+      }, 45_000);
+    };
+
+    const onDmCallMissed = () => {
+      setIncomingCall(null);
+      if (callDismissTimer.current) { clearTimeout(callDismissTimer.current); callDismissTimer.current = null; }
+    };
+
     socket.on("auth:session_expired", onSessionExpired);
     socket.on("auth:suspended", onSuspended);
+    socket.on("dm:call:incoming", onDmCallIncoming);
+    socket.on("dm:call:missed", onDmCallMissed);
     return () => {
       socket.off("auth:session_expired", onSessionExpired);
       socket.off("auth:suspended", onSuspended);
+      socket.off("dm:call:incoming", onDmCallIncoming);
+      socket.off("dm:call:missed", onDmCallMissed);
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user?.dbId, user?.id]);
 
-  return { suspendedMsg };
+  const dismissIncomingCall = () => {
+    setIncomingCall(null);
+    if (callDismissTimer.current) { clearTimeout(callDismissTimer.current); callDismissTimer.current = null; }
+  };
+
+  return { suspendedMsg, incomingCall, dismissIncomingCall };
 }
 
 function AppOverlays() {
   const { isAuthenticated } = useAuth();
-  const { suspendedMsg } = useGlobalSocketEvents();
+  const { suspendedMsg, incomingCall, dismissIncomingCall } = useGlobalSocketEvents();
   useDocumentDir();
   useReferralCapture();
   return (
@@ -241,6 +277,45 @@ function AppOverlays() {
             <p className="text-red-400 font-semibold">Account Suspended</p>
             <p className="text-pnp-textSecondary text-sm">{suspendedMsg}</p>
             <p className="text-pnp-textSecondary text-xs">Redirecting to login…</p>
+          </div>
+        </div>
+      )}
+      {incomingCall && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9998] w-[calc(100%-2rem)] max-w-sm">
+          <div className="bg-[#0d1f0d] border border-green-500/30 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3">
+            <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white truncate">
+                Incoming video call
+              </p>
+              <p className="text-xs text-green-300/80 truncate">{incomingCall.callerName}</p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const call = incomingCall;
+                  dismissIncomingCall();
+                  connectSocket().emit("dm:call:accept", { callId: call.callId });
+                  const url = `/chat/${call.callerId}?call=${encodeURIComponent(call.roomName)}&caller=${call.callerId}&callee=${call.calleeId}&callId=${call.callId}`;
+                  router.navigate(url);
+                }}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-green-600 hover:bg-green-500 transition-all active:scale-95"
+              >
+                Answer
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const call = incomingCall;
+                  dismissIncomingCall();
+                  connectSocket().emit("dm:call:decline", { callId: call.callId, roomName: call.roomName });
+                }}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white/80 border border-white/10 hover:bg-red-500/20 hover:border-red-500/40 hover:text-red-400 transition-all active:scale-95"
+              >
+                Decline
+              </button>
+            </div>
           </div>
         </div>
       )}

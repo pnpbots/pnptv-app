@@ -411,7 +411,9 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
 
   useEffect(() => {
     if (!inviteRoomFromQuery || activeCall?.roomName === inviteRoomFromQuery) return;
-    setPendingCallRoom(inviteRoomFromQuery);
+    const callId = searchParams.get("callId");
+    if (callId) activeCallIdRef.current = callId;
+    beginJoinCall(inviteRoomFromQuery, searchParams.get("caller") ?? undefined, searchParams.get("callee") ?? undefined);
   }, [activeCall?.roomName, inviteRoomFromQuery]);
 
   // Socket.IO real-time
@@ -472,16 +474,6 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
       setChatError(data.message || data.error || "Something went wrong");
     };
 
-    const onDmCallIncoming = (data: { callId: string; roomName: string; callerId: string; calleeId: string; callerName: string }) => {
-      if (String(data.calleeId) !== String(myUserId)) return;
-      setIncomingCall(data);
-      if (incomingCallDismissTimer.current) clearTimeout(incomingCallDismissTimer.current);
-      incomingCallDismissTimer.current = setTimeout(() => {
-        setIncomingCall(null);
-        incomingCallDismissTimer.current = null;
-      }, 30000);
-    };
-
     const onDmCallDeclined = () => {
       setIncomingCall(null);
       if (incomingCallDismissTimer.current) {
@@ -530,7 +522,6 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
     socket.on("dm:message:deleted", onDmDeleted);
     socket.on("dm:reaction:updated", onDmReactionUpdated);
     socket.on("dm:error", onDmError);
-    socket.on("dm:call:incoming", onDmCallIncoming);
     socket.on("dm:call:declined", onDmCallDeclined);
     socket.on("dm:call:accepted", onDmCallAccepted);
     socket.on("dm:call:missed", onDmCallMissed);
@@ -551,7 +542,6 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin }: { userId: string; myD
       socket.off("dm:message:deleted", onDmDeleted);
       socket.off("dm:reaction:updated", onDmReactionUpdated);
       socket.off("dm:error", onDmError);
-      socket.off("dm:call:incoming", onDmCallIncoming);
       socket.off("dm:call:declined", onDmCallDeclined);
       socket.off("dm:call:accepted", onDmCallAccepted);
       socket.off("dm:call:missed", onDmCallMissed);
