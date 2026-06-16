@@ -409,7 +409,11 @@ const joinDmVideoCall = async (req, res) => {
 
     const isModerator = currentUserId === callerId;
     const displayName = user.firstName || user.first_name || user.username || 'PNPtv User';
-    const token = await generateToken(roomName, currentUserId, displayName, isModerator);
+    // Both caller and callee need publish rights in a 1-on-1 call
+    const token = await generateToken(roomName, currentUserId, displayName, isModerator, {
+      canPublishAudio: true,
+      canPublishVideo: true,
+    });
 
     return res.json({
       success: true,
