@@ -255,6 +255,15 @@ export function LandingPage() {
   const [passkeyState, setPasskeyState] = useState<"idle" | "trying">("idle");
   const [passkeyHint, setPasskeyHint] = useState<string | null>(null);
 
+  // Native registration form state
+  type RegState = "hidden" | "form" | "submitting";
+  const [regState, setRegState] = useState<RegState>("hidden");
+  const [regEmail, setRegEmail] = useState("");
+  const [regUsername, setRegUsername] = useState("");
+  const [regPassword, setRegPassword] = useState("");
+  const [regShowPassword, setRegShowPassword] = useState(false);
+  const [regError, setRegError] = useState<string | null>(null);
+
   // Telegram deep-link flow state
   type TgState = "idle" | "waiting" | "error";
   const [tgState, setTgState] = useState<TgState>("idle");
@@ -413,6 +422,45 @@ export function LandingPage() {
         setMagicSendError("Couldn't send the link. Please try again.");
       }
       setMagicState("form");
+    }
+  };
+
+  // ── Native registration ──────────────────────────────────────────────────
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = regEmail.trim();
+    const username = regUsername.trim();
+    setRegError(null);
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setRegError("Please enter a valid email address.");
+      return;
+    }
+    if (!username || !/^[a-zA-Z0-9_]{3,30}$/.test(username)) {
+      setRegError("Username must be 3–30 characters (letters, numbers, underscores).");
+      return;
+    }
+    if (!regPassword || regPassword.length < 8) {
+      setRegError("Password must be at least 8 characters.");
+      return;
+    }
+    setRegState("submitting");
+    try {
+      const res = await fetch(`${API_BASE}/api/webapp/auth/register`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, username, password: regPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRegError(data.error || "Registration failed. Please try again.");
+        setRegState("form");
+        return;
+      }
+      window.location.href = "/";
+    } catch {
+      setRegError("Connection error. Please try again.");
+      setRegState("form");
     }
   };
 
@@ -763,13 +811,104 @@ export function LandingPage() {
             </a>
           )}
 
-          {/* No account → OIDC prompt=create (routes through enrollment and back to pnptv.app) */}
-          <p className="text-xs text-pnp-textSecondary">
-            No account?{" "}
-            <a href="/api/webapp/auth/oidc/login?method=register" className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all">
-              Create one
-            </a>
-          </p>
+          {/* No account → inline registration form */}
+          {regState === "hidden" && (
+            <p className="text-xs text-pnp-textSecondary">
+              No account?{" "}
+              <button
+                type="button"
+                onClick={() => { setRegState("form"); setRegError(null); }}
+                className="font-semibold underline text-pnp-accent hover:brightness-125 transition-all"
+              >
+                Create one
+              </button>
+            </p>
+          )}
+
+          {(regState === "form" || regState === "submitting") && (
+            <form onSubmit={handleRegister} className="w-full space-y-2" noValidate>
+              <p className="text-xs font-semibold text-white text-center">Create your account</p>
+              <input
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={regEmail}
+                onChange={(e) => { setRegEmail(e.target.value); setRegError(null); }}
+                placeholder="Email address"
+                aria-label="Email address"
+                disabled={regState === "submitting"}
+                autoFocus
+                className="w-full py-3 px-4 rounded-xl text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 transition-all disabled:opacity-60"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
+              />
+              <input
+                type="text"
+                autoComplete="username"
+                value={regUsername}
+                onChange={(e) => { setRegUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, "")); setRegError(null); }}
+                placeholder="Username (letters, numbers, _)"
+                aria-label="Username"
+                disabled={regState === "submitting"}
+                className="w-full py-3 px-4 rounded-xl text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 transition-all disabled:opacity-60"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
+              />
+              <div className="relative">
+                <input
+                  type={regShowPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={regPassword}
+                  onChange={(e) => { setRegPassword(e.target.value); setRegError(null); }}
+                  placeholder="Password (min 8 chars)"
+                  aria-label="Password"
+                  disabled={regState === "submitting"}
+                  className="w-full py-3 px-4 pr-10 rounded-xl text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 transition-all disabled:opacity-60"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setRegShowPassword(!regShowPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70 transition-colors"
+                  aria-label={regShowPassword ? "Hide password" : "Show password"}
+                >
+                  {regShowPassword ? (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+              {regError && <p className="text-xs text-red-400 px-1 text-left">{regError}</p>}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setRegState("hidden"); setRegEmail(""); setRegUsername(""); setRegPassword(""); setRegError(null); }}
+                  disabled={regState === "submitting"}
+                  className="px-4 py-3 rounded-xl text-xs font-semibold text-pnp-textSecondary hover:text-white transition-colors disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={regState === "submitting"}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-semibold text-sm text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  {regState === "submitting" ? <Spinner /> : "Create account"}
+                </button>
+              </div>
+              <p className="text-[10px] text-white/30 text-center">
+                By creating an account you agree to our{" "}
+                <a href="/terms" className="underline hover:text-white/50">Terms</a>
+                {" "}and{" "}
+                <a href="/privacy" className="underline hover:text-white/50">Privacy Policy</a>.
+              </p>
+            </form>
+          )}
 
         </div>
       </main>

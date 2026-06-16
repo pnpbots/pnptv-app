@@ -3048,6 +3048,220 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
 }));
 
 /**
+ * POST /api/webapp/auth/register
+ * Native PNPtv account registration — bypasses Authentik enrollment flow.
+ * Creates the user in Authentik via admin API, then in PNPtv DB, then
+ * establishes the session directly (same shape as OIDC callback).
+ */
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.ip,
+  handler: (req, res) => res.status(429).json({ error: 'Too many registration attempts. Try again later.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.post('/api/webapp/auth/register', registerLimiter, asyncHandler(async (req, res) => {
+  const { email, username, password } = req.body || {};
+
+  // ── 1. Input validation ──────────────────────────────────────────────────────
+  if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    return res.status(400).json({ error: 'A valid email address is required.' });
+  }
+  if (!username || typeof username !== 'string' || !/^[a-zA-Z0-9_]{3,30}$/.test(username.trim())) {
+    return res.status(400).json({ error: 'Username must be 3–30 characters (letters, numbers, underscores only).' });
+  }
+  if (!password || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  }
+  if (password.length > 128) {
+    return res.status(400).json({ error: 'Password is too long.' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanUsername = username.trim();
+
+  const pool = getPool();
+  const AUTHENTIK_URL = process.env.AUTHENTIK_URL || 'https://auth.pnptv.app';
+  const AUTHENTIK_TOKEN = process.env.AUTHENTIK_API_TOKEN;
+
+  if (!AUTHENTIK_TOKEN) {
+    logger.error('[Register] AUTHENTIK_API_TOKEN is not configured');
+    return res.status(503).json({ error: 'Registration is temporarily unavailable.' });
+  }
+
+  // ── 2. Check availability in PNPtv DB ───────────────────────────────────────
+  const [emailCheck, usernameCheck] = await Promise.all([
+    pool.query('SELECT 1 FROM users WHERE LOWER(email) = $1 AND is_deleted = false LIMIT 1', [cleanEmail]),
+    pool.query('SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1', [cleanUsername]),
+  ]);
+  if (emailCheck.rows.length > 0) {
+    return res.status(409).json({ error: 'An account with this email already exists. Sign in instead.' });
+  }
+  if (usernameCheck.rows.length > 0) {
+    return res.status(409).json({ error: 'That username is already taken. Try a different one.' });
+  }
+
+  // ── 3. Create user in Authentik ──────────────────────────────────────────────
+  let authentikUser;
+  try {
+    // Check if email already exists in Authentik
+    const existingRes = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
+      params: { email: cleanEmail },
+      headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+      timeout: 10000,
+    });
+    if (existingRes.data.results && existingRes.data.results.length > 0) {
+      return res.status(409).json({ error: 'An account with this email already exists. Sign in instead.' });
+    }
+
+    const createRes = await axios.post(`${AUTHENTIK_URL}/api/v3/core/users/`, {
+      username: cleanUsername,
+      name: cleanUsername,
+      email: cleanEmail,
+      type: 'internal',
+      is_active: true,
+      path: 'users',
+      attributes: {
+        provisioned_via: 'native_registration',
+        provisioned_at: new Date().toISOString(),
+      },
+    }, {
+      headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+      timeout: 10000,
+    });
+    authentikUser = createRes.data;
+  } catch (err) {
+    const data = err.response?.data;
+    if (err.response?.status === 400 && data?.username) {
+      return res.status(409).json({ error: 'That username is already taken in our identity provider. Try a different one.' });
+    }
+    if (err.response?.status === 400 && data?.email) {
+      return res.status(409).json({ error: 'An account with this email already exists. Sign in instead.' });
+    }
+    logger.error('[Register] Failed to create Authentik user:', err.response?.data || err.message);
+    return res.status(503).json({ error: 'Registration failed. Please try again.' });
+  }
+
+  // ── 4. Set password ──────────────────────────────────────────────────────────
+  try {
+    await axios.post(`${AUTHENTIK_URL}/api/v3/core/users/${authentikUser.pk}/set_password/`, {
+      password,
+    }, {
+      headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+      timeout: 10000,
+    });
+  } catch (err) {
+    // Clean up the Authentik user so it can be retried
+    try {
+      await axios.delete(`${AUTHENTIK_URL}/api/v3/core/users/${authentikUser.pk}/`, {
+        headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+        timeout: 10000,
+      });
+    } catch { /* best-effort */ }
+    logger.error('[Register] Failed to set Authentik password:', err.response?.data || err.message);
+    return res.status(503).json({ error: 'Registration failed. Please try again.' });
+  }
+
+  // ── 5. Add to Users group (best-effort) ─────────────────────────────────────
+  try {
+    const groupRes = await axios.get(`${AUTHENTIK_URL}/api/v3/core/groups/`, {
+      params: { name: 'Users' },
+      headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+      timeout: 10000,
+    });
+    const usersGroup = groupRes.data.results?.find((g) => g.name === 'Users');
+    if (usersGroup) {
+      await axios.post(`${AUTHENTIK_URL}/api/v3/core/groups/${usersGroup.pk}/add_user/`, {
+        pk: authentikUser.pk,
+      }, {
+        headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+        timeout: 10000,
+      });
+    }
+  } catch (groupErr) {
+    logger.warn('[Register] Failed to add user to Users group (non-fatal):', groupErr.message);
+  }
+
+  // ── 6. Create PNPtv DB user ──────────────────────────────────────────────────
+  const sub = authentikUser.uuid || String(authentikUser.pk);
+  const newUserId = crypto.randomUUID();
+  let userRow;
+  try {
+    const insertResult = await pool.query(
+      `INSERT INTO users
+         (id, pnptv_id, username, first_name, email, email_verified,
+          tier, subscription_status, terms_accepted,
+          role, last_login_method, last_login_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, false, 'free', 'free', false,
+               'user', 'native_register', NOW(), NOW(), NOW())
+       RETURNING id, pnptv_id, username, first_name, last_name, subscription_status,
+                 tier, terms_accepted, age_verified, photo_file_id, bio, language, role,
+                 creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
+                 email, last_login_method`,
+      [newUserId, sub, cleanUsername, cleanUsername, cleanEmail]
+    );
+    userRow = insertResult.rows[0];
+  } catch (err) {
+    // Clean up Authentik user
+    try {
+      await axios.delete(`${AUTHENTIK_URL}/api/v3/core/users/${authentikUser.pk}/`, {
+        headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+        timeout: 10000,
+      });
+    } catch { /* best-effort */ }
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'An account with this username or email already exists.' });
+    }
+    logger.error('[Register] Failed to insert PNPtv user:', err.message);
+    return res.status(503).json({ error: 'Registration failed. Please try again.' });
+  }
+
+  logger.info('[Register] New PNPtv user registered natively', {
+    userId: userRow.id,
+    username: userRow.username,
+    sub,
+  });
+
+  // ── 7. Establish session ─────────────────────────────────────────────────────
+  await new Promise((resolve, reject) => {
+    req.session.regenerate((err) => (err ? reject(err) : resolve()));
+  });
+
+  req.session.user = {
+    id: userRow.id,
+    pnptvId: userRow.pnptv_id,
+    username: userRow.username,
+    displayName: userRow.first_name || userRow.username || 'Member',
+    firstName: userRow.first_name,
+    lastName: userRow.last_name,
+    subscriptionStatus: userRow.subscription_status,
+    tier: userRow.tier || 'free',
+    acceptedTerms: userRow.terms_accepted,
+    ageVerified: userRow.age_verified || false,
+    email: userRow.email || null,
+    photoUrl: userRow.photo_file_id || null,
+    bio: userRow.bio || null,
+    language: userRow.language || null,
+    role: userRow.role || 'user',
+    creator_status: userRow.creator_status || 'none',
+    contentDisclaimer: userRow.content_disclaimer || false,
+    xHandle: null,
+    pnptv_id: userRow.pnptv_id,
+    oidc_refresh_token: null,
+    auth_methods: { telegram: false, x: false, oidc: false },
+    last_login_method: 'native_register',
+  };
+
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
+
+  return res.json({ success: true });
+}));
+
+/**
  * POST /api/webapp/auth/oidc/refresh
  * Refreshes the session's OIDC tokens using the stored refresh_token.
  * Requires an active session. The new refresh token is stored back in the session.
