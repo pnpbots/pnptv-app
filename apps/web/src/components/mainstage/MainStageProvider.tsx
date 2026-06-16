@@ -778,11 +778,29 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   const [miniPathname, setMiniPathname] = useState(() =>
     typeof window !== "undefined" ? window.location.pathname : "/"
   );
+  const isOnMainStage = miniPathname.startsWith("/main-stage") || miniPathname === "/subscribe" || miniPathname === "/lifetime100";
+  const hasActiveMiniMedia =
+    state?.media?.kind === "video" && Boolean(state?.media?.playing) && Boolean(state?.media?.src);
+
+  // Collect tracks early (before showMiniPlayer) so we can check if cammers are present.
+  // useMiniTracks only subscribes when isJoined, so this is safe even when disconnected.
+  const miniTracks = useMiniTracks(sharedRoom, isJoined);
+
+  const miniOtherTracksCount = miniTracks.filter((t) => !t.isLocal && t.identity !== MINI_MEDIA_IDENTITY).length;
+
+  // Only surface the mini player when there is something meaningful to watch:
+  // admin is playing media OR live cammers are present in the room.
+  const hasMeaningfulContent = hasActiveMiniMedia || (isJoined && miniOtherTracksCount > 0);
+
+  // Reset dismiss only when leaving main-stage while content is actually live —
+  // prevents the player from hijacking the screen after every empty-stage visit.
   useEffect(() => {
     const onNav = () => {
       const p = window.location.pathname;
       setMiniPathname(p);
-      if (!p.startsWith("/main-stage")) setMiniDismissed(false);
+      if (!p.startsWith("/main-stage") && hasMeaningfulContent) {
+        setMiniDismissed(false);
+      }
     };
     window.addEventListener("pnptv:navigation", onNav);
     window.addEventListener("popstate", onNav);
@@ -790,12 +808,19 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("pnptv:navigation", onNav);
       window.removeEventListener("popstate", onNav);
     };
-  }, []);
-  const isOnMainStage = miniPathname.startsWith("/main-stage") || miniPathname === "/subscribe" || miniPathname === "/lifetime100";
-  const hasActiveMiniMedia =
-    state?.media?.kind === "video" && Boolean(state?.media?.playing) && Boolean(state?.media?.src);
-  const showMiniPlayer = isAuthenticated && !isOnMainStage && !miniDismissed && (isJoined || hasActiveMiniMedia);
-  const miniTracks = useMiniTracks(sharedRoom, showMiniPlayer && isJoined);
+  }, [hasMeaningfulContent]);
+
+  // Surface the player when admin starts a new broadcast so users don't miss live content,
+  // but only if they are not on the main stage page itself.
+  const prevHasActiveMiniMediaRef = useRef(hasActiveMiniMedia);
+  useEffect(() => {
+    if (hasActiveMiniMedia && !prevHasActiveMiniMediaRef.current && !isOnMainStage) {
+      setMiniDismissed(false);
+    }
+    prevHasActiveMiniMediaRef.current = hasActiveMiniMedia;
+  }, [hasActiveMiniMedia, isOnMainStage]);
+
+  const showMiniPlayer = isAuthenticated && !isOnMainStage && !miniDismissed && hasMeaningfulContent;
   const miniMediaTrack = miniTracks.find((t) => t.identity === MINI_MEDIA_IDENTITY);
   const miniLocalTrack = miniTracks.find((t) => t.isLocal);
   const miniOtherTracks = miniTracks.filter((t) => !t.isLocal && t.identity !== MINI_MEDIA_IDENTITY);
