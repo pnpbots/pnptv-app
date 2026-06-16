@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { Outlet, NavLink, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { AnnouncementStrip } from "./AnnouncementStrip";
+import { VerificationGate } from "./VerificationGate";
 import { useAuth } from "@/hooks/useAuth";
 import { useTelegram } from "@/hooks/useTelegram";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
@@ -1413,13 +1414,13 @@ export function Layout() {
            = ~44px AnnouncementStrip (no bottom nav on lg). Without this, the
            strip overlays the bottom of any video <controls> bar in the feed. */}
       <main className="flex-1 overflow-y-auto overscroll-contain lg:pl-72 lg:overflow-visible lg:pb-12 pb-28">
-        <Outlet />
+        <VerificationGate>
+          <Outlet />
+        </VerificationGate>
       </main>
 
-      {/* Global announcement strip — pinned above the bottom nav (mobile)
-          and at the bottom of the viewport offset by the side rail (desktop).
-          Self-hides on /main-stage and when there's no content to show. */}
-      {isAuthenticated && (
+      {/* Global announcement strip — only after verification */}
+      {isAuthenticated && user?.ageVerified && user?.termsAccepted && (
         <div className="fixed left-0 right-0 bottom-16 z-40 lg:bottom-0 lg:left-72 pointer-events-none">
           <div className="pointer-events-auto">
             <AnnouncementStrip />
@@ -1432,8 +1433,8 @@ export function Layout() {
         <BottomNav />
       </div>
 
-      {/* Unified Cristina widget: AI Chat + VJ + Travel Agent — code-split to remove from initial bundle */}
-      {isAuthenticated && (() => {
+      {/* Unified Cristina widget — only after verification */}
+      {isAuthenticated && user?.ageVerified && user?.termsAccepted && (() => {
         const inVideoCall = location.pathname.startsWith("/chat/");
         const showCompact = isLandscape && isMobile && inVideoCall;
         return (

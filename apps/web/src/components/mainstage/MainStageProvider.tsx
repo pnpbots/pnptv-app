@@ -828,7 +828,8 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     prevHasActiveMiniMediaRef.current = hasActiveMiniMedia;
   }, [hasActiveMiniMedia, isOnMainStage]);
 
-  const showMiniPlayer = isAuthenticated && !isOnMainStage && !miniDismissed && hasMeaningfulContent;
+  const isVerified = !!(user?.ageVerified && user?.termsAccepted);
+  const showMiniPlayer = isAuthenticated && isVerified && !isOnMainStage && !miniDismissed && hasMeaningfulContent;
   const miniMediaTrack = miniTracks.find((t) => t.identity === MINI_MEDIA_IDENTITY);
   const miniLocalTrack = miniTracks.find((t) => t.isLocal);
   const miniOtherTracks = miniTracks.filter((t) => !t.isLocal && t.identity !== MINI_MEDIA_IDENTITY);
