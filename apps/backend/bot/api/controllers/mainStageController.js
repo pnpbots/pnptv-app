@@ -187,13 +187,6 @@ const token = asyncHandler(async (req, res) => {
   const adminUser = isAdminRole(userRow.role);
   const role = adminUser ? 'admin' : 'member';
 
-  // Premium = admin, PRIME tier, member tier, or creator tier.
-  // Free users get a capped 1h session + 30min cooldown.
-  const isPremium = adminUser || ['PRIME', 'member', 'creator'].includes(userRow.tier);
-
-  // Screen sharing (broadcasting video) is PRIME/member/creator only.
-  const canScreenShare = isPremium;
-
   // Kicked-set check — admins bypass
   if (!adminUser) {
     try {
@@ -217,9 +210,10 @@ const token = asyncHandler(async (req, res) => {
   }
 
   // Entitlement gate — members must have pnp-member entitlement to join.
+  let hasMembership = false;
   if (!adminUser) {
     try {
-      const hasMembership = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
+      hasMembership = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
       if (!hasMembership) {
         return res.status(403).json({
           success: false,
@@ -236,6 +230,11 @@ const token = asyncHandler(async (req, res) => {
       });
     }
   }
+
+  // Premium = admin or confirmed live pnp-member entitlement (not stale tier column).
+  // Determines session TTL (6h vs 1h) and screen share grant.
+  const isPremium = adminUser || hasMembership;
+  const canScreenShare = isPremium;
 
   // Free-user session tracking: 1h cam session, 30min cooldown.
   // Redis key: mainstage:session:start:<userId> = ms timestamp, TTL = 90min.
@@ -290,8 +289,6 @@ const token = asyncHandler(async (req, res) => {
     }
   }
 
-  // Main Stage is open to all authenticated users — no entitlement gate.
-  // Every authenticated entrant joins the stage rotation/visibility queue.
   // Admins bypass the cap (addCammerForce skips cap but still deduplicates).
   let addResult;
   try {

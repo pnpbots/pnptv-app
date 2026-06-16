@@ -845,7 +845,7 @@ export default function SocialPostCard({
                     <img
                       src={post.media_url}
                       alt="Post image"
-                      className="w-full max-h-80 rounded-lg object-cover"
+                      className="w-full rounded-lg object-cover"
                       loading="lazy"
                       onError={(e) => {
                         (e.target as HTMLImageElement).parentElement!.style.display =

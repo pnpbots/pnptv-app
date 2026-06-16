@@ -202,7 +202,6 @@ function UrlMediaPlayer({ src, kind, playing, volume, startedAt }: UrlMediaPlaye
         loop
         onEnded={() => { videoRef.current?.play().catch(() => {}); }}
       />
-      <PrimeWatermark />
       {!canPlay && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
           <div
@@ -233,120 +232,6 @@ function UrlMediaPlayer({ src, kind, playing, volume, startedAt }: UrlMediaPlaye
   );
 }
 
-/**
- * Anti-capture + upsell watermark layered on the Prime Video.
- *
- * Two layers, both ABOVE the <video>:
- *
- * 1. A tiling SVG-text pattern that covers the full player. Screen
- *    recordings of any region of the video will contain the text,
- *    because cropping out the watermark requires cropping out the
- *    video too. The pattern itself drifts diagonally every few seconds
- *    so a crop-and-stitch defeat is still noticeable.
- *
- * 2. A prominent clickable corner badge with the CTA — keeps the
- *    affordance obvious, drifts through all four corners on a timer.
- */
-function PrimeWatermark() {
-  const t = useI18n().live;
-  const [cornerIdx, setCornerIdx] = useState(() => Math.floor(Math.random() * 4));
-  const [patternOffset, setPatternOffset] = useState(() => Math.floor(Math.random() * 300));
-  useEffect(() => {
-    const cornerTimer = setInterval(() => setCornerIdx((i) => (i + 1) % 4), 10000);
-    const patternTimer = setInterval(() => setPatternOffset((o) => (o + 47) % 300), 12000);
-    return () => { clearInterval(cornerTimer); clearInterval(patternTimer); };
-  }, []);
-
-  // Corner positions: 0=TL, 1=TR, 2=BR, 3=BL
-  const positions: Array<React.CSSProperties> = [
-    { top: "8%",    left: "4%",   right: "auto",  bottom: "auto" },
-    { top: "8%",    right: "4%",  left: "auto",   bottom: "auto" },
-    { bottom: "8%", right: "4%",  left: "auto",   top: "auto"    },
-    { bottom: "8%", left: "4%",   right: "auto",  top: "auto"    },
-  ];
-
-  // Inline SVG pattern — high-density watermark designed to cover roughly
-  // half of every video frame. Tile 320×180 (smaller = denser repeats).
-  // Five overlapping text rows at increased size + opacity. At standard
-  // viewing distance the text is recognizable; at screen-capture quality
-  // it's unmissable. Stroke + Gaussian blur keep it legible on bright
-  // and dark frames.
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='320' height='180' viewBox='0 0 320 180'>
-    <defs>
-      <filter id='s'><feGaussianBlur stdDeviation='0.4'/></filter>
-    </defs>
-    <g transform='rotate(-22 160 90)' filter='url(%23s)'>
-      <text x='160' y='30' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='32' font-weight='900' fill='rgba(255,255,255,0.32)' stroke='rgba(0,0,0,0.55)' stroke-width='1.1' letter-spacing='2'>PNPtv! PRIME</text>
-      <text x='160' y='62' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='16' font-weight='800' fill='rgba(255,255,255,0.26)' stroke='rgba(0,0,0,0.45)' stroke-width='0.7' letter-spacing='2'>SUBSCRIBE TO WATCH</text>
-      <text x='160' y='92' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='32' font-weight='900' fill='rgba(229,255,0,0.30)' stroke='rgba(0,0,0,0.55)' stroke-width='1.1' letter-spacing='2'>PNPtv! PRIME</text>
-      <text x='160' y='124' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.22)' stroke='rgba(0,0,0,0.42)' stroke-width='0.6'>pnptv.app/subscribe</text>
-      <text x='160' y='156' text-anchor='middle' font-family='system-ui,Arial,sans-serif' font-size='14' font-weight='700' fill='rgba(255,255,255,0.22)' stroke='rgba(0,0,0,0.42)' stroke-width='0.6' letter-spacing='1'>MEMBERS ONLY · DO NOT RECORD</text>
-    </g>
-  </svg>`;
-  const encoded = encodeURIComponent(svg).replace(/'/g, "%27");
-
-  return (
-    <>
-      {/* Layer 1 — repeating diagonal watermark across the whole video */}
-      <div
-        className="absolute inset-0 pointer-events-none z-[11]"
-        aria-hidden
-        style={{
-          backgroundImage: `url("data:image/svg+xml;charset=utf-8,${encoded}")`,
-          backgroundRepeat: "repeat",
-          backgroundSize: "320px 180px",
-          backgroundPosition: `${patternOffset}px ${patternOffset}px`,
-          transition: "background-position 12s linear",
-          opacity: 0.9,
-        }}
-      />
-
-      {/* Layer 2 — clickable corner badge with the CTA */}
-      <a
-        href="/subscribe"
-        aria-label={t.mainStageWatermarkAria}
-        className="absolute z-[12] select-none transition-[top,bottom,left,right] duration-700 ease-out"
-        style={{ ...positions[cornerIdx], pointerEvents: "auto", textDecoration: "none" }}
-      >
-        <div
-          className="flex flex-col items-start gap-0.5 px-3 py-2 rounded-xl"
-          style={{
-            background: "rgba(10,10,15,0.55)",
-            backdropFilter: "blur(6px)",
-            border: "1px solid rgba(255,255,255,0.25)",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
-            transform: "rotate(-3deg)",
-          }}
-        >
-          <span
-            className="text-[9px] font-bold uppercase tracking-[0.22em]"
-            style={{ color: "rgba(255,255,255,0.80)", textShadow: "0 1px 2px rgba(0,0,0,0.9)" }}
-          >
-            {t.mainStageWatermarkSubscribeTo}
-          </span>
-          <span
-            className="text-sm sm:text-base font-extrabold leading-none"
-            style={{
-              background: "linear-gradient(135deg,#D4007A,#E5FF00)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              backgroundClip: "text",
-              textShadow: "0 1px 3px rgba(0,0,0,0.6)",
-            }}
-          >
-            PNPtv! PRIME
-          </span>
-          <span
-            className="text-[9px] font-medium"
-            style={{ color: "rgba(255,255,255,0.65)", textShadow: "0 1px 2px rgba(0,0,0,0.9)" }}
-          >
-            {t.mainStageWatermarkCta}
-          </span>
-        </div>
-      </a>
-    </>
-  );
-}
 
 /**
  * Strip tile for the Cinema layout cammer row.
