@@ -3106,14 +3106,37 @@ app.post('/api/webapp/auth/register', registerLimiter, asyncHandler(async (req, 
   // ── 3. Create user in Authentik ──────────────────────────────────────────────
   let authentikUser;
   try {
-    // Check if email already exists in Authentik
+    // Check if email already exists in Authentik.
+    // Orphaned Authentik accounts (type=external, no PNPtv DB row) are leftovers
+    // from the old enrollment flow that failed before writing to our DB — delete
+    // them so registration can proceed cleanly.
     const existingRes = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
       params: { email: cleanEmail },
       headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
       timeout: 10000,
     });
     if (existingRes.data.results && existingRes.data.results.length > 0) {
-      return res.status(409).json({ error: 'An account with this email already exists. Sign in instead.' });
+      // Check if any of these have a matching PNPtv DB account
+      const subs = existingRes.data.results.map((u) => u.uuid || String(u.pk));
+      const dbCheck = await pool.query(
+        `SELECT 1 FROM users WHERE pnptv_id = ANY($1::text[]) AND is_deleted = false LIMIT 1`,
+        [subs]
+      );
+      if (dbCheck.rows.length > 0) {
+        return res.status(409).json({ error: 'An account with this email already exists. Sign in instead.' });
+      }
+      // Orphaned Authentik accounts — delete them so we can re-create cleanly
+      for (const orphan of existingRes.data.results) {
+        try {
+          await axios.delete(`${AUTHENTIK_URL}/api/v3/core/users/${orphan.pk}/`, {
+            headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+            timeout: 10000,
+          });
+          logger.info('[Register] Deleted orphaned Authentik account', { pk: orphan.pk, email: cleanEmail });
+        } catch (delErr) {
+          logger.warn('[Register] Could not delete orphaned Authentik account', { pk: orphan.pk, error: delErr.message });
+        }
+      }
     }
 
     const createRes = await axios.post(`${AUTHENTIK_URL}/api/v3/core/users/`, {
