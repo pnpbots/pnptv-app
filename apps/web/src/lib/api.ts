@@ -6721,9 +6721,10 @@ export interface MainStageTokenResponse {
   roomName: string;
   role: "admin" | "member" | "guest";
   canScreenShare?: boolean;
-  /** ms timestamp — only present for free (non-premium) users */
+  participantTier?: "newcomer" | "member" | "prime" | "admin";
+  /** ms timestamp — only present for newcomer (free) users */
   sessionStartedAt?: number;
-  /** seconds — only present for free (non-premium) users */
+  /** seconds — only present for newcomer (free) users */
   sessionLimitSeconds?: number;
 }
 
@@ -6904,6 +6905,20 @@ export function listMemberMainStageInvites(): Promise<MainStageInvite[]> {
   return request<{ success: boolean; invites: MainStageInvite[] }>(
     "/api/main-stage/member-invites"
   ).then((res) => res.invites);
+}
+
+export function voteSkipMainStage(): Promise<{ count: number; threshold: number; triggered: boolean }> {
+  return request<{ success: boolean; count: number; threshold: number; triggered: boolean }>(
+    "/api/main-stage/vote-skip",
+    { method: "POST" }
+  ).then(({ count, threshold, triggered }) => ({ count, threshold, triggered }));
+}
+
+export function playNextMainStage(): Promise<{ cooldownSeconds?: number }> {
+  return request<{ success: boolean; cooldownSeconds?: number }>(
+    "/api/main-stage/play-next",
+    { method: "POST" }
+  ).then(({ cooldownSeconds }) => ({ cooldownSeconds }));
 }
 
 export function previewMainStageInvite(code: string): Promise<MainStageInvitePreview> {

@@ -12,6 +12,7 @@
  * socketHandlers.js) to avoid a circular require with bot.js.
  */
 
+const crypto      = require('crypto');
 const axios       = require('axios');
 const logger      = require('../utils/logger');
 const { getRedis } = require('../config/redis');
@@ -50,6 +51,13 @@ const MEDIA_DEFAULTS = {
   adminLocked: false,
   modeLocked:  false,
 };
+
+// Playlist sorted set: score = last_played ms timestamp (0 = never played).
+// Members with lowest scores are picked first — fair round-robin across all videos.
+const PLAYLIST_KEY     = 'mainstage:playlist';
+// Skip-vote sets expire in 30 min. Key encodes the current src so votes
+// automatically become stale when the video changes without explicit cleanup.
+const SKIP_VOTES_TTL_S = 1800;
 
 // Directus endpoints for background Prime Video auto-rotation
 const DIRECTUS_INTERNAL_URL = (process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055').replace(/\/$/, '');
@@ -586,53 +594,160 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * 2. If state.media.adminLocked === true, we skip even when kind === 'off'
  *    (admin explicitly chose silence).
  */
+// ── Playlist helpers ───────────────────────────────────────────────────────────
+
+function srcToSkipKey(src) {
+  return `mainstage:skip-votes:${crypto.createHash('sha256').update(String(src)).digest('hex').slice(0, 12)}`;
+}
+
+async function seedPlaylist(items) {
+  if (!items.length) return;
+  const redis = getRedis();
+  for (const item of items) {
+    if (item.fileId && UUID_RE.test(item.fileId)) {
+      await redis.zadd(PLAYLIST_KEY, 'NX', 0, item.fileId);
+    }
+  }
+  await redis.expire(PLAYLIST_KEY, STATE_CACHE_TTL_S);
+}
+
+/**
+ * Advance to the least-recently-played Prime Video (fair round-robin).
+ * Skips the currently playing video unless it's the only one available.
+ * Updates the sorted-set score so the same video isn't picked again immediately.
+ */
+async function advanceVideo() {
+  const items = await fetchFeaturedPrimeVideos();
+  if (!items.length) {
+    logger.warn('[MainStage] advanceVideo: no prime videos available');
+    return false;
+  }
+
+  const titleMap = {};
+  for (const item of items) {
+    if (item.fileId && UUID_RE.test(item.fileId)) titleMap[item.fileId] = item.title ?? null;
+  }
+
+  await seedPlaylist(items);
+
+  const redis = getRedis();
+
+  // Identify currently playing fileId from Redis media state
+  let currentFileId = null;
+  const rawMedia = await redis.get(MEDIA_KEY);
+  if (rawMedia) {
+    try {
+      const m = JSON.parse(rawMedia);
+      if (m.src) {
+        const match = m.src.match(/\/assets\/([0-9a-f-]{36})/i);
+        if (match) currentFileId = match[1];
+      }
+    } catch (_) {}
+  }
+
+  // Fetch entire playlist sorted by score ascending (lowest = oldest / never played)
+  const all = await redis.zrange(PLAYLIST_KEY, 0, -1, 'WITHSCORES');
+  const candidates = [];
+  for (let i = 0; i < all.length; i += 2) {
+    const fid = all[i];
+    if (fid !== currentFileId && titleMap[fid] !== undefined) {
+      candidates.push({ fileId: fid, score: parseFloat(all[i + 1]), title: titleMap[fid] });
+    }
+  }
+  // If only one video exists, allow re-playing it
+  if (!candidates.length) {
+    for (let i = 0; i < all.length; i += 2) {
+      const fid = all[i];
+      if (titleMap[fid] !== undefined) {
+        candidates.push({ fileId: fid, score: parseFloat(all[i + 1]), title: titleMap[fid] });
+      }
+    }
+  }
+  if (!candidates.length) return false;
+
+  candidates.sort((a, b) => a.score - b.score);
+  const pick = candidates[0];
+
+  const publicSrc   = `${DIRECTUS_PUBLIC_URL}/assets/${pick.fileId}`;
+  const internalSrc = `${DIRECTUS_INTERNAL_URL}/assets/${pick.fileId}`;
+
+  // Mark as just-played so it goes to the back of the queue
+  await redis.zadd(PLAYLIST_KEY, Date.now(), pick.fileId);
+  await redis.expire(PLAYLIST_KEY, STATE_CACHE_TTL_S);
+
+  // Force a media-compatible layout mode
+  const currentMode = await redis.get(MODE_KEY);
+  if (currentMode !== 'cinema' && currentMode !== 'theater' && currentMode !== 'karaoke') {
+    await setMode('cinema');
+  }
+
+  await setMedia({ kind: 'video', src: publicSrc, title: pick.title, playing: true, _fromAutoRotate: true });
+  logger.info('[MainStage] advanceVideo', { fileId: pick.fileId, title: pick.title });
+
+  try {
+    const broadcaster = require('../workers/mainStageMediaBroadcaster');
+    await broadcaster.updateSource(internalSrc);
+    await broadcaster.setPlaying(true);
+  } catch (bcErr) {
+    logger.warn('[MainStage] advanceVideo: broadcaster sync failed (non-fatal)', { error: bcErr.message });
+  }
+
+  return true;
+}
+
+/**
+ * Record a skip vote for the given user + current video src.
+ * Returns { count, threshold, triggered } — triggered=true means the
+ * threshold was met and advanceVideo() was already called.
+ */
+async function voteSkip(userId, src) {
+  if (!src) return { count: 0, threshold: 3, triggered: false };
+  const redis    = getRedis();
+  const VOTE_KEY = srcToSkipKey(src);
+
+  await redis.sadd(VOTE_KEY, String(userId));
+  await redis.expire(VOTE_KEY, SKIP_VOTES_TTL_S);
+  const count = await redis.scard(VOTE_KEY);
+
+  const queue     = await redis.lrange('mainstage:spotlight:queue', 0, -1);
+  const threshold = Math.max(3, Math.ceil(queue.length * 0.20));
+  const triggered = count >= threshold;
+
+  if (triggered) {
+    await redis.del(VOTE_KEY);
+    await advanceVideo();
+  }
+
+  return { count, threshold, triggered };
+}
+
+async function getSkipVotes(src) {
+  if (!src) return { count: 0, threshold: 3 };
+  const redis    = getRedis();
+  const count    = await redis.scard(srcToSkipKey(src));
+  const queue    = await redis.lrange('mainstage:spotlight:queue', 0, -1);
+  const threshold = Math.max(3, Math.ceil(queue.length * 0.20));
+  return { count: count || 0, threshold };
+}
+
+function broadcastSkipVoteUpdate(src, count, threshold) {
+  if (!_io) return;
+  _io.to('mainstage').emit('mainstage:skip-vote-update', { count, threshold });
+}
+
+// ── Auto-rotation (now delegates to advanceVideo) ─────────────────────────────
+
 async function autoRotateMedia() {
   try {
     const redis    = getRedis();
-    const rawMedia = await redis.get('mainstage:media');
+    const rawMedia = await redis.get(MEDIA_KEY);
     let current = { kind: 'off', adminLocked: false };
     if (rawMedia) { try { current = { ...current, ...JSON.parse(rawMedia) }; } catch (_) {} }
 
-    // Admin has media playing — don't interrupt
-    if (current.kind !== 'off') return;
-    // Admin explicitly chose silence — respect it
-    if (current.adminLocked) return;
+    if (current.kind !== 'off') return;   // don't interrupt admin-set media
+    if (current.adminLocked) return;      // admin chose silence explicitly
 
-    const items = await fetchFeaturedPrimeVideos();
-    if (!items.length) return;
-
-    const pick = items[Math.floor(Math.random() * items.length)];
-    if (!pick || typeof pick.fileId !== 'string' || !UUID_RE.test(pick.fileId)) {
-      logger.warn('[MainStage] autoRotateMedia skipped: invalid Directus fileId', { fileId: pick?.fileId });
-      return;
-    }
-    // Public URL goes into Redis state so browser clients can load the file directly.
-    // The internal URL is passed only to the broadcaster so the LiveKit ingress can
-    // pull from the Docker-internal network (avoids nginx throttling large MP4s).
-    const publicSrc   = `${DIRECTUS_PUBLIC_URL}/assets/${pick.fileId}`;
-    const internalSrc = `${DIRECTUS_INTERNAL_URL}/assets/${pick.fileId}`;
-
-    // Only CinemaGrid/Theater/Karaoke render URL-backed media. If the room is
-    // in equal/spotlight mode, the video would be set in state but invisible
-    // — force the layout to cinema when auto-filling.
-    const currentMode = await redis.get('mainstage:mode');
-    if (currentMode !== 'cinema' && currentMode !== 'theater' && currentMode !== 'karaoke') {
-      await setMode('cinema');
-    }
-
-    // _fromAutoRotate bypasses the admin-lock auto-set; the lock stays false.
-    await setMedia({ kind: 'video', src: publicSrc, title: pick.title, playing: true, _fromAutoRotate: true });
-    logger.info('[MainStage] auto-rotated Prime Video', { fileId: pick.fileId, title: pick.title });
-
-    // Sync the broadcaster with the internal URL so the LiveKit ingress pulls
-    // from the Docker-internal network rather than the public proxy.
-    try {
-      const broadcaster = require('../workers/mainStageMediaBroadcaster');
-      await broadcaster.updateSource(internalSrc);
-      await broadcaster.setPlaying(true);
-    } catch (bcErr) {
-      logger.warn('[MainStage] autoRotateMedia: broadcaster sync failed (non-fatal)', { error: bcErr.message });
-    }
+    await advanceVideo();
   } catch (err) {
     logger.error('[MainStage] autoRotateMedia error', { error: err.message });
   }
@@ -911,4 +1026,8 @@ module.exports = {
   logAdminAction,
   notifyViewersChanged,
   autoRotateMedia,
+  advanceVideo,
+  voteSkip,
+  getSkipVotes,
+  broadcastSkipVoteUpdate,
 };

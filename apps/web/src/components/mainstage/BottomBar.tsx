@@ -13,6 +13,16 @@ interface BottomBarProps {
   spotlight?: MainStageState["spotlight"];
   onSendReaction?: (emoji: string) => void;
   canScreenShare?: boolean;
+  /** Whether this user's token grants audio publish (member / prime / admin) */
+  hasMic?: boolean;
+  /** Skip-vote state — only shown for member / prime / admin */
+  skipVoteCount?: number;
+  skipVoteThreshold?: number;
+  hasVotedSkip?: boolean;
+  onVoteSkip?: () => void;
+  /** PRIME play-next — only shown for prime / admin */
+  onPlayNext?: () => void;
+  playNextCooldown?: number; // seconds remaining
 }
 
 export function BottomBarInner({
@@ -22,6 +32,13 @@ export function BottomBarInner({
   spotlight,
   onSendReaction,
   canScreenShare,
+  hasMic = false,
+  skipVoteCount,
+  skipVoteThreshold,
+  hasVotedSkip = false,
+  onVoteSkip,
+  onPlayNext,
+  playNextCooldown,
 }: BottomBarProps) {
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
   const t = useI18n();
@@ -64,8 +81,7 @@ export function BottomBarInner({
     }
   }, [isScreenSharing, localParticipant]);
 
-  // Queue-position indicator for cammers: shows "Position X / Y" or "Live now".
-  // Re-renders every second when nextAt is set so the countdown stays current.
+  // Queue-position indicator — re-renders every second while nextAt is set.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     if (!isParticipant || !spotlight?.nextAt) return;
@@ -105,18 +121,18 @@ export function BottomBarInner({
     );
   })();
 
-  // Cam/mic toggles are admin-only. Non-admin participants are subject to
-  // forced-camera-on + forced-mic-mute rules enforced by MainStageProvider
-  // (and the guest-room enforcer below).
   const handleMicToggle = useCallback(() => {
-    if (!isAdmin) return;
+    if (!isAdmin && !hasMic) return;
     localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
-  }, [isAdmin, localParticipant, isMicrophoneEnabled]);
+  }, [isAdmin, hasMic, localParticipant, isMicrophoneEnabled]);
 
   const handleCamToggle = useCallback(() => {
     if (!isAdmin) return;
     localParticipant.setCameraEnabled(!isCameraEnabled);
   }, [isAdmin, isCameraEnabled, localParticipant]);
+
+  const showSkipVote = isParticipant && !!onVoteSkip && skipVoteThreshold !== undefined;
+  const showPlayNext = isParticipant && !!onPlayNext;
 
   return (
     <div
@@ -129,7 +145,7 @@ export function BottomBarInner({
         zIndex: 45,
       }}
     >
-      {/* LEAVE — always first (critical exit) */}
+      {/* LEAVE — always first */}
       <button
         type="button"
         onClick={onLeave}
@@ -144,7 +160,55 @@ export function BottomBarInner({
 
       {queueChip}
 
-      {/* Reaction picker — visible to all participants including guests */}
+      {/* Skip vote — member / prime / admin */}
+      {showSkipVote && (
+        <button
+          type="button"
+          onClick={onVoteSkip}
+          disabled={hasVotedSkip}
+          aria-label="Vote to skip this video"
+          title={hasVotedSkip ? `You voted · ${skipVoteCount}/${skipVoteThreshold} votes` : `Skip video (${skipVoteCount ?? 0}/${skipVoteThreshold} votes needed)`}
+          className="min-h-[40px] flex-shrink-0 flex items-center gap-1.5 px-2.5 rounded-full text-[10px] font-bold transition-all active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-default"
+          style={{
+            background: hasVotedSkip ? "rgba(123,97,255,0.22)" : "rgba(255,255,255,0.06)",
+            border: hasVotedSkip ? "1px solid rgba(123,97,255,0.50)" : "1px solid rgba(255,255,255,0.12)",
+            color: hasVotedSkip ? "#A990FF" : "rgba(255,255,255,0.60)",
+          }}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z" />
+          </svg>
+          <span className="hidden sm:inline tabular-nums">
+            {skipVoteCount ?? 0}/{skipVoteThreshold}
+          </span>
+        </button>
+      )}
+
+      {/* Play Next — PRIME / admin only */}
+      {showPlayNext && (
+        <button
+          type="button"
+          onClick={onPlayNext}
+          disabled={!!playNextCooldown}
+          aria-label="Play next video"
+          title={playNextCooldown ? `Available in ${playNextCooldown}s` : "Play next video (PRIME)"}
+          className="min-h-[40px] flex-shrink-0 flex items-center gap-1.5 px-2.5 rounded-full text-[10px] font-bold transition-all active:scale-[0.94] focus-visible:outline-none disabled:cursor-default"
+          style={{
+            background: playNextCooldown ? "rgba(255,255,255,0.04)" : "rgba(229,255,0,0.10)",
+            border: playNextCooldown ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(229,255,0,0.30)",
+            color: playNextCooldown ? "rgba(255,255,255,0.30)" : "#E5FF00",
+          }}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z" />
+          </svg>
+          <span className="hidden sm:inline">
+            {playNextCooldown ? `${playNextCooldown}s` : "Next"}
+          </span>
+        </button>
+      )}
+
+      {/* Reaction picker */}
       {isParticipant && (
         <div ref={reactionPickerRef} className="relative flex-shrink-0">
           <button
@@ -187,7 +251,7 @@ export function BottomBarInner({
         </div>
       )}
 
-      {/* Screen share — admin participants only when canScreenShare is true */}
+      {/* Screen share — member / prime / admin when canScreenShare */}
       {isParticipant && canScreenShare && (
         <button
           type="button"
@@ -197,26 +261,21 @@ export function BottomBarInner({
           aria-pressed={isScreenSharing}
           className="min-h-[40px] flex-shrink-0 flex items-center gap-1.5 px-3 rounded-full text-xs font-bold text-white transition-all hover:bg-white/10 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
-            background: isScreenSharing
-              ? "linear-gradient(135deg,#D4007A,#7B61FF)"
-              : "rgba(255,255,255,0.06)",
-            border: isScreenSharing
-              ? "1px solid rgba(212,0,122,0.60)"
-              : "1px solid rgba(255,255,255,0.12)",
+            background: isScreenSharing ? "linear-gradient(135deg,#D4007A,#7B61FF)" : "rgba(255,255,255,0.06)",
+            border: isScreenSharing ? "1px solid rgba(212,0,122,0.60)" : "1px solid rgba(255,255,255,0.12)",
             boxShadow: isScreenSharing ? "0 4px 16px rgba(212,0,122,0.45)" : undefined,
           }}
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <rect x="2" y="4" width="20" height="14" rx="2" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M8 20h8M12 18v2" />
-            {isScreenSharing && (
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 10l2 2 4-4" />
-            )}
+            {isScreenSharing && <path strokeLinecap="round" strokeLinejoin="round" d="M9 10l2 2 4-4" />}
           </svg>
           <span className="hidden sm:inline">{isScreenSharing ? "Stop sharing" : "Share"}</span>
         </button>
       )}
 
+      {/* Camera toggle — admin only */}
       {isParticipant && isAdmin && (
         <button
           type="button"
@@ -226,15 +285,9 @@ export function BottomBarInner({
           aria-pressed={isCameraEnabled}
           className="min-h-[40px] flex-shrink-0 flex items-center gap-1.5 px-3 rounded-full text-xs font-bold text-white transition-all hover:bg-white/10 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
-            background: isCameraEnabled
-              ? "rgba(255,69,58,0.18)"
-              : "linear-gradient(135deg,#D4007A,#7B61FF)",
-            border: isCameraEnabled
-              ? "1px solid rgba(255,69,58,0.45)"
-              : "1px solid rgba(212,0,122,0.60)",
-            boxShadow: isCameraEnabled
-              ? "0 2px 10px rgba(255,69,58,0.25)"
-              : "0 4px 16px rgba(212,0,122,0.45)",
+            background: isCameraEnabled ? "rgba(255,69,58,0.18)" : "linear-gradient(135deg,#D4007A,#7B61FF)",
+            border: isCameraEnabled ? "1px solid rgba(255,69,58,0.45)" : "1px solid rgba(212,0,122,0.60)",
+            boxShadow: isCameraEnabled ? "0 2px 10px rgba(255,69,58,0.25)" : "0 4px 16px rgba(212,0,122,0.45)",
             color: isCameraEnabled ? "#FF453A" : "#FFFFFF",
           }}
         >
@@ -251,7 +304,8 @@ export function BottomBarInner({
         </button>
       )}
 
-      {isParticipant && isAdmin && (
+      {/* Mic toggle — admin + member/prime (hasMic) */}
+      {isParticipant && (isAdmin || hasMic) && (
         <button
           type="button"
           onClick={handleMicToggle}
@@ -260,12 +314,8 @@ export function BottomBarInner({
           aria-pressed={isMicrophoneEnabled}
           className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
-            background: isMicrophoneEnabled
-              ? "rgba(212,0,122,0.18)"
-              : "rgba(255,255,255,0.05)",
-            border: isMicrophoneEnabled
-              ? "1px solid rgba(212,0,122,0.40)"
-              : "1px solid rgba(255,255,255,0.12)",
+            background: isMicrophoneEnabled ? "rgba(212,0,122,0.18)" : "rgba(255,255,255,0.05)",
+            border: isMicrophoneEnabled ? "1px solid rgba(212,0,122,0.40)" : "1px solid rgba(255,255,255,0.12)",
           }}
         >
           {isMicrophoneEnabled ? (
@@ -280,14 +330,12 @@ export function BottomBarInner({
         </button>
       )}
 
-      {isParticipant && !isAdmin && (
+      {/* Newcomer badge — cam only, mic muted */}
+      {isParticipant && !isAdmin && !hasMic && (
         <span
           className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold text-white/70"
-          style={{
-            background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.10)",
-          }}
-          title="Camera is required and your microphone is muted by the stage."
+          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
+          title="Camera is required and your microphone is muted. Become a Member to unlock your mic."
         >
           <svg className="w-3 h-3 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
@@ -295,7 +343,6 @@ export function BottomBarInner({
           <span>Cam on · Mic muted</span>
         </span>
       )}
-
     </div>
   );
 }

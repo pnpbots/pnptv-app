@@ -575,6 +575,96 @@ const viewerToken = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * POST /api/main-stage/vote-skip
+ * Auth required. Member/Prime/Admin only. Records a skip vote for the
+ * currently playing video. When the threshold is reached advanceVideo()
+ * fires automatically.
+ */
+const voteSkip = asyncHandler(async (req, res) => {
+  const userId = req.user?.id;
+
+  const userRow = await fetchUserRow(userId);
+  if (!userRow) return res.status(404).json({ success: false, error: 'User not found' });
+
+  const adminUser    = isAdminRole(userRow.role);
+  const hasMembership = adminUser || await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
+  if (!hasMembership) {
+    return res.status(403).json({ success: false, error: 'Membership required to vote.', code: 'MEMBERSHIP_REQUIRED' });
+  }
+
+  const state = await mainStageService.getState();
+  const src   = state?.media?.src;
+  if (!src) {
+    return res.status(400).json({ success: false, error: 'No video is currently playing.', code: 'NO_VIDEO_PLAYING' });
+  }
+
+  const result = await mainStageService.voteSkip(String(userId), src);
+
+  if (!result.triggered) {
+    mainStageService.broadcastSkipVoteUpdate(src, result.count, result.threshold);
+  }
+
+  logger.info('[MainStage] vote-skip', { userId, count: result.count, threshold: result.threshold, triggered: result.triggered });
+  return res.json({ success: true, ...result });
+});
+
+/**
+ * POST /api/main-stage/play-next
+ * Auth required. PRIME (1 per 5 min rate limit) or Admin (unlimited).
+ * Immediately advances to the next least-recently-played video.
+ */
+const playNext = asyncHandler(async (req, res) => {
+  const userId = req.user?.id;
+
+  const userRow  = await fetchUserRow(userId);
+  if (!userRow) return res.status(404).json({ success: false, error: 'User not found' });
+
+  const adminUser = isAdminRole(userRow.role);
+
+  if (!adminUser) {
+    let hasMembership = false;
+    try {
+      hasMembership = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
+    } catch (entErr) {
+      logger.error('[MainStage] play-next: entitlement check failed', { error: entErr.message });
+      return res.status(503).json({ success: false, error: 'Service temporarily unavailable.', code: 'SESSION_BACKEND_UNAVAILABLE' });
+    }
+    const hasPrime = hasMembership && userRow.tier === 'PRIME';
+    if (!hasPrime) {
+      return res.status(403).json({ success: false, error: 'PRIME membership required to skip videos.', code: 'PRIME_REQUIRED' });
+    }
+
+    // Rate limit: 1 play-next per 5 minutes per PRIME user
+    try {
+      const redis    = getRedis();
+      const RATE_KEY = `mainstage:play-next-rate:${String(userId)}`;
+      const existing = await redis.get(RATE_KEY);
+      if (existing) {
+        const ttl = await redis.ttl(RATE_KEY);
+        return res.status(429).json({
+          success: false,
+          error: 'You can skip once every 5 minutes.',
+          code: 'PLAY_NEXT_RATE_LIMITED',
+          cooldownSeconds: ttl > 0 ? ttl : 300,
+        });
+      }
+      await redis.set(RATE_KEY, '1', 'EX', 300);
+    } catch (redisErr) {
+      logger.error('[MainStage] play-next: Redis error', { error: redisErr.message });
+      return res.status(503).json({ success: false, error: 'Service temporarily unavailable.', code: 'SESSION_BACKEND_UNAVAILABLE' });
+    }
+  }
+
+  const advanced = await mainStageService.advanceVideo();
+  if (!advanced) {
+    return res.status(503).json({ success: false, error: 'No videos available.', code: 'NO_VIDEOS_AVAILABLE' });
+  }
+
+  logger.info('[MainStage] play-next triggered', { userId, adminUser });
+  return res.json({ success: true });
+});
+
 module.exports = {
   token,
   viewerToken,
@@ -587,4 +677,6 @@ module.exports = {
   setSpotlight,
   moderate,
   shuffle,
+  voteSkip,
+  playNext,
 };

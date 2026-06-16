@@ -7,7 +7,7 @@ import {
 import { ConnectionState, RoomEvent } from "livekit-client";
 import { useMainStage, type MainStageState } from "@/hooks/useMainStage";
 import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
-import { getMainStageJoinCheck, acceptMainStageConsents, getWalletBalance, getMainStageViewerToken, getMainStageState, type MainStageJoinCheck } from "@/lib/api";
+import { getMainStageJoinCheck, acceptMainStageConsents, getWalletBalance, getMainStageViewerToken, getMainStageState, voteSkipMainStage, playNextMainStage, type MainStageJoinCheck } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/hooks/useAuth";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
@@ -158,6 +158,13 @@ interface MainStageInnerProps {
   showBottomBar?: boolean;
   onSendReaction?: (emoji: string) => void;
   canScreenShare?: boolean;
+  hasMic?: boolean;
+  skipVoteCount?: number;
+  skipVoteThreshold?: number;
+  hasVotedSkip?: boolean;
+  onVoteSkip?: () => void;
+  onPlayNext?: () => void;
+  playNextCooldown?: number;
 }
 
 function MainStageInner({
@@ -180,6 +187,13 @@ function MainStageInner({
   showBottomBar = true,
   onSendReaction,
   canScreenShare,
+  hasMic,
+  skipVoteCount,
+  skipVoteThreshold,
+  hasVotedSkip,
+  onVoteSkip,
+  onPlayNext,
+  playNextCooldown,
 }: MainStageInnerProps) {
   return (
     <>
@@ -246,6 +260,13 @@ function MainStageInner({
           spotlight={spotlight}
           onSendReaction={onSendReaction}
           canScreenShare={canScreenShare}
+          hasMic={hasMic}
+          skipVoteCount={skipVoteCount}
+          skipVoteThreshold={skipVoteThreshold}
+          hasVotedSkip={hasVotedSkip}
+          onVoteSkip={onVoteSkip}
+          onPlayNext={onPlayNext}
+          playNextCooldown={playNextCooldown}
         />
       )}
     </>
@@ -401,6 +422,82 @@ export default function MainStage() {
   const handleSendReaction = useCallback((emoji: string) => {
     getSocket().emit('mainstage:reaction-send', { emoji });
   }, []);
+
+  // ── Skip-vote & Play-next ─────────────────────────────────────────────────────
+  const [skipVoteCount, setSkipVoteCount] = useState(0);
+  const [skipVoteThreshold, setSkipVoteThreshold] = useState(3);
+  const [hasVotedSkip, setHasVotedSkip] = useState(false);
+  const [playNextCooldown, setPlayNextCooldown] = useState(0);
+  const playNextTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Reset skip-vote state whenever the playing video src changes
+  const lastMediaSrc = useRef<string | null>(null);
+  useEffect(() => {
+    const src = state?.media?.src ?? null;
+    if (src !== lastMediaSrc.current) {
+      lastMediaSrc.current = src;
+      setSkipVoteCount(0);
+      setHasVotedSkip(false);
+    }
+  }, [state?.media?.src]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const onSkipVoteUpdate = (payload: { count: number; threshold: number }) => {
+      setSkipVoteCount(payload.count);
+      setSkipVoteThreshold(payload.threshold);
+    };
+    socket.on('mainstage:skip-vote-update', onSkipVoteUpdate);
+    return () => { socket.off('mainstage:skip-vote-update', onSkipVoteUpdate); };
+  }, []);
+
+  const hasMic = isAdmin || participantTier === 'member' || participantTier === 'prime';
+  const canPlayNext = isAdmin || participantTier === 'prime';
+
+  const handleVoteSkip = useCallback(async () => {
+    if (hasVotedSkip) return;
+    try {
+      const result = await voteSkipMainStage();
+      setHasVotedSkip(true);
+      setSkipVoteCount(result.count);
+      setSkipVoteThreshold(result.threshold);
+      if (result.triggered) {
+        setSkipVoteCount(0);
+        setHasVotedSkip(false);
+      }
+    } catch {
+      // silently ignore
+    }
+  }, [hasVotedSkip]);
+
+  const handlePlayNext = useCallback(async () => {
+    if (playNextCooldown > 0) return;
+    try {
+      const result = await playNextMainStage();
+      if (result.cooldownSeconds) {
+        setPlayNextCooldown(result.cooldownSeconds);
+      } else {
+        setPlayNextCooldown(300); // default 5 min
+      }
+    } catch {
+      // silently ignore
+    }
+  }, [playNextCooldown]);
+
+  // Count down play-next cooldown every second
+  useEffect(() => {
+    if (playNextCooldown <= 0) {
+      if (playNextTimerRef.current) { clearInterval(playNextTimerRef.current); playNextTimerRef.current = null; }
+      return;
+    }
+    playNextTimerRef.current = setInterval(() => {
+      setPlayNextCooldown((n) => {
+        if (n <= 1) { clearInterval(playNextTimerRef.current!); playNextTimerRef.current = null; return 0; }
+        return n - 1;
+      });
+    }, 1000);
+    return () => { if (playNextTimerRef.current) clearInterval(playNextTimerRef.current); };
+  }, [playNextCooldown > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // canScreenShare is already destructured from useMainStageRoom() above
 
@@ -1421,6 +1518,13 @@ export default function MainStage() {
             showTips={!adminOpen}
             onSendReaction={handleSendReaction}
             canScreenShare={canScreenShare}
+            hasMic={hasMic}
+            skipVoteCount={skipVoteCount}
+            skipVoteThreshold={skipVoteThreshold}
+            hasVotedSkip={hasVotedSkip}
+            onVoteSkip={handleVoteSkip}
+            onPlayNext={canPlayNext ? handlePlayNext : undefined}
+            playNextCooldown={playNextCooldown}
           />
         </LiveKitRoom>
       ) : isViewerMode ? (
@@ -1533,6 +1637,13 @@ export default function MainStage() {
             showTips={!adminOpen}
             onSendReaction={handleSendReaction}
             canScreenShare={canScreenShare}
+            hasMic={hasMic}
+            skipVoteCount={skipVoteCount}
+            skipVoteThreshold={skipVoteThreshold}
+            hasVotedSkip={hasVotedSkip}
+            onVoteSkip={handleVoteSkip}
+            onPlayNext={canPlayNext ? handlePlayNext : undefined}
+            playNextCooldown={playNextCooldown}
           />
         </LiveKitRoom>
       )}

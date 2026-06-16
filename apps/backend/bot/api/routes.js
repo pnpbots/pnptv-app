@@ -11948,6 +11948,19 @@ app.post(
   mainStageInvitesController.guestToken
 );
 
+// Video skip-vote — auth + member+; PRIME play-next — auth + PRIME/admin
+app.post(
+  '/api/main-stage/vote-skip',
+  authenticateUser,
+  mainStageController.voteSkip
+);
+
+app.post(
+  '/api/main-stage/play-next',
+  authenticateUser,
+  mainStageController.playNext
+);
+
 // Member invite CRUD — auth + pnp-member entitlement (checked inside handler)
 app.post(
   '/api/main-stage/member-invites',
