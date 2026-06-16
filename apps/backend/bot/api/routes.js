@@ -11948,6 +11948,21 @@ app.post(
   mainStageInvitesController.guestToken
 );
 
+// Member invite CRUD — auth + pnp-member entitlement (checked inside handler)
+app.post(
+  '/api/main-stage/member-invites',
+  authenticateUser,
+  mainStageInviteCreateLimiter,
+  mainStageInvitesController.createMemberInvite
+);
+
+app.get(
+  '/api/main-stage/member-invites',
+  authenticateUser,
+  mainStageAdminLimiter,
+  mainStageInvitesController.listMemberInvites
+);
+
 // ── End Main Stage ────────────────────────────────────────────────────────────
 
 // Sentry error handler - must be last

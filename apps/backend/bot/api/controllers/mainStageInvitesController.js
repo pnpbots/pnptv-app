@@ -14,6 +14,8 @@ const mainStageService   = require('../../../services/mainStageService');
 const livekitService     = require('../../../services/livekitService');
 const mainStageInviteService = require('../../../services/mainStageInviteService');
 const emailService       = require('../../../services/emailService');
+const EntitlementAccessService = require('../../../services/entitlementAccessService');
+const { getRedis }       = require('../../../config/redis');
 
 // RFC 5322-leaning practical email regex — keeps quoted local-parts out
 // (nodemailer-parser CVE class) but accepts every realistic address.
@@ -278,6 +280,73 @@ const guestToken = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * POST /api/main-stage/member-invites
+ * Auth required + pnp-member entitlement. Max 3 invites per 24h rolling window.
+ * Creates a single-use, 24h invite that any member can share with a friend.
+ */
+const createMemberInvite = asyncHandler(async (req, res) => {
+  const userId = req.user?.id;
+
+  const hasMembership = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
+  if (!hasMembership) {
+    return res.status(403).json({
+      success: false,
+      error: 'PNP membership is required to create invites.',
+      code: 'MEMBERSHIP_REQUIRED',
+    });
+  }
+
+  const DAILY_LIMIT = 3;
+  const QUOTA_KEY   = `mainstage:member-invite-quota:${String(userId)}`;
+
+  let redis;
+  try {
+    redis = getRedis();
+    const count = await redis.incr(QUOTA_KEY);
+    if (count === 1) await redis.expire(QUOTA_KEY, 24 * 3600);
+    if (count > DAILY_LIMIT) {
+      const ttl = await redis.ttl(QUOTA_KEY);
+      return res.status(429).json({
+        success: false,
+        error: `You can create up to ${DAILY_LIMIT} invites per day.`,
+        code: 'MEMBER_INVITE_QUOTA_EXCEEDED',
+        resetsInSeconds: ttl > 0 ? ttl : 86400,
+      });
+    }
+  } catch (redisErr) {
+    logger.error('[MainStage] createMemberInvite: Redis unavailable', { error: redisErr.message });
+    return res.status(503).json({ success: false, error: 'Service temporarily unavailable.', code: 'SESSION_BACKEND_UNAVAILABLE' });
+  }
+
+  const { label } = req.body;
+  const invite = await mainStageInviteService.createInvite({
+    creatorUserId:    userId,
+    label:            label ? String(label).slice(0, 100) : 'Member invite',
+    expiresInSeconds: 24 * 3600,
+    maxUses:          1,
+  });
+
+  logger.info('[MainStage] member invite created', { userId, inviteId: invite.id });
+  return res.json({ success: true, ...invite });
+});
+
+/**
+ * GET /api/main-stage/member-invites
+ * Auth required + pnp-member entitlement. Lists the caller's own member invites.
+ */
+const listMemberInvites = asyncHandler(async (req, res) => {
+  const userId = req.user?.id;
+
+  const hasMembership = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
+  if (!hasMembership) {
+    return res.status(403).json({ success: false, error: 'PNP membership is required.', code: 'MEMBERSHIP_REQUIRED' });
+  }
+
+  const invites = await mainStageInviteService.listInvites({ creatorUserId: userId });
+  return res.json({ success: true, invites });
+});
+
 module.exports = {
   createInvite,
   createPermanentInvite,
@@ -285,4 +354,6 @@ module.exports = {
   revokeInvite,
   previewInvite,
   guestToken,
+  createMemberInvite,
+  listMemberInvites,
 };

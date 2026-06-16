@@ -289,7 +289,7 @@ export default function MainStage() {
   // provider-managed connection (persistent across route changes). Guests
   // bypass the provider entirely and use their own short-lived <LiveKitRoom>
   // with the guest token.
-  const { room, isJoined, join, cooldownSeconds, clearCooldown, sessionStartedAt, sessionLimitSeconds, canScreenShare } = useMainStageRoom();
+  const { room, isJoined, join, cooldownSeconds, clearCooldown, sessionStartedAt, sessionLimitSeconds, canScreenShare, participantTier } = useMainStageRoom();
 
   // Auth state — viewer mode only applies to unauthenticated users.
   const { user, isLoading: isAuthLoading } = useAuth();
@@ -706,16 +706,16 @@ export default function MainStage() {
           </svg>
         </div>
         <div>
-          <p className="text-white font-bold text-xl mb-1">Take a break!</p>
+          <p className="text-white font-bold text-xl mb-1">Preview over — great session!</p>
           <p className="text-white/70 text-sm max-w-xs mx-auto">
-            Free accounts get 1 hour of cam time. Come back in{" "}
+            Your free 1-hour preview ended. Come back in{" "}
             <span className="text-pink-400 font-bold tabular-nums">
               {cooldownLeft !== null ? fmtMmSs(cooldownLeft) : `${mins} min`}
-            </span>{" "}
-            to cam again.
+            </span>
+            , or become a Member to stay on cam all day.
           </p>
           <p className="text-white/35 text-xs mt-1 max-w-xs mx-auto">
-            Cuentas gratuitas: 1 hora de cámara. Vuelve en {mins} min.
+            Tu hora de cámara gratuita terminó. Vuelve en {mins} min o únete como Miembro.
           </p>
         </div>
         <div className="flex flex-col gap-3 w-full max-w-xs">
@@ -725,7 +725,7 @@ export default function MainStage() {
             className="min-h-[50px] w-full rounded-2xl text-sm font-bold text-white transition-all active:scale-[0.97]"
             style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
           >
-            ⭐ Go PRIME — Unlimited Cam Time
+            Become a Member — Cam + Mic, 4h Sessions
           </button>
           <button
             type="button"
@@ -791,10 +791,10 @@ export default function MainStage() {
         <div>
           <p className="text-white font-bold text-xl mb-1">Main Stage · Live Now</p>
           <p className="text-white/55 text-sm max-w-xs mx-auto">
-            Watch the room live — free. Go PRIME to turn your camera on and be part of the show.
+            Watch live for free — or sign up and get 1 hour on cam, no subscription needed.
           </p>
           <p className="text-white/35 text-xs mt-2 max-w-xs mx-auto">
-            Ver la sala en vivo — gratis. Únete a PRIME para encender tu cámara.
+            Ver gratis, o regístrate y obtén 1 hora de cámara sin pagar.
           </p>
         </div>
         <label className="flex items-center gap-3 cursor-pointer select-none">
@@ -819,11 +819,19 @@ export default function MainStage() {
           </button>
           <button
             type="button"
+            onClick={() => navigate("/register")}
+            className="min-h-[44px] w-full rounded-2xl text-sm font-semibold text-white transition-all active:scale-[0.97]"
+            style={{ background: "rgba(123,97,255,0.15)", border: "1px solid rgba(123,97,255,0.40)" }}
+          >
+            Sign Up Free — Get 1 Hour on Cam
+          </button>
+          <button
+            type="button"
             onClick={() => navigate("/subscribe")}
             className="min-h-[44px] w-full rounded-2xl text-sm font-semibold text-white transition-all active:scale-[0.97]"
             style={{ background: "rgba(212,0,122,0.12)", border: "1px solid rgba(212,0,122,0.35)" }}
           >
-            ⭐ Go PRIME — Join & Turn Your Cam On
+            ⭐ Go Member — Cam + Mic, All Day
           </button>
           <button
             type="button"
@@ -1149,22 +1157,25 @@ export default function MainStage() {
               )}
             </span>
           )}
-          {/* Free-user session countdown */}
-          {!isGuestMode && sessionSecsLeft !== null && sessionSecsLeft > 0 && (
-            <span
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+          {/* Newcomer session countdown + upgrade nudge */}
+          {!isGuestMode && participantTier === 'newcomer' && sessionSecsLeft !== null && sessionSecsLeft > 0 && (
+            <button
+              type="button"
+              onClick={() => navigate("/subscribe")}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold transition-opacity hover:opacity-80"
               style={{
                 background: sessionSecsLeft < 300 ? "rgba(212,0,122,0.20)" : "rgba(123,97,255,0.18)",
                 border:     `1px solid ${sessionSecsLeft < 300 ? "rgba(212,0,122,0.5)" : "rgba(123,97,255,0.40)"}`,
                 color:      sessionSecsLeft < 300 ? "#FF6BB0" : "#A990FF",
               }}
-              title="Cam time remaining (free tier)"
+              title="Free preview — tap to become a Member for mic + all-day cam"
             >
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               {fmtMmSs(sessionSecsLeft)}
-            </span>
+              {sessionSecsLeft < 300 && <span className="ml-0.5">· Upgrade</span>}
+            </button>
           )}
           <button
             type="button"

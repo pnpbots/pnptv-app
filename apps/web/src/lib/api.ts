@@ -6893,6 +6893,19 @@ export function revokeMainStageInvite(id: number): Promise<void> {
   return request(`/api/main-stage/invites/${id}`, { method: "DELETE" }).then(() => undefined);
 }
 
+export function createMemberMainStageInvite(label?: string): Promise<MainStageInvite & { url: string }> {
+  return request<{ success: boolean } & MainStageInvite & { url: string }>(
+    "/api/main-stage/member-invites",
+    { method: "POST", body: JSON.stringify({ label }) }
+  ).then(({ success: _s, ...invite }) => invite as MainStageInvite & { url: string });
+}
+
+export function listMemberMainStageInvites(): Promise<MainStageInvite[]> {
+  return request<{ success: boolean; invites: MainStageInvite[] }>(
+    "/api/main-stage/member-invites"
+  ).then((res) => res.invites);
+}
+
 export function previewMainStageInvite(code: string): Promise<MainStageInvitePreview> {
   return request<{ success: boolean } & MainStageInvitePreview>(
     `/api/main-stage/invites/preview/${encodeURIComponent(code)}`

@@ -103,6 +103,9 @@ export interface MainStageProviderValue {
   /** When the user hits their free-user cooldown: seconds remaining (null otherwise) */
   cooldownSeconds: number | null;
   clearCooldown: () => void;
+
+  /** Tier assigned by the backend for this session: newcomer | member | prime | admin */
+  participantTier: 'newcomer' | 'member' | 'prime' | 'admin' | null;
 }
 
 // ─── Mini Stage Player helpers ─────────────────────────────────────────────
@@ -231,6 +234,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
   const [sessionLimitSeconds, setSessionLimitSeconds] = useState<number | null>(null);
   const [cooldownSeconds, setCooldownSeconds] = useState<number | null>(null);
+  const [participantTier, setParticipantTier] = useState<'newcomer' | 'member' | 'prime' | 'admin' | null>(null);
   const roleRef = useRef<MainStageRole>(null);
   const roomNameRef = useRef("main-stage-prime");
   const userIdRef = useRef<string | null>(null);
@@ -288,6 +292,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
         if (res.canScreenShare !== undefined) setCanScreenShare(res.canScreenShare);
         if (res.sessionStartedAt !== undefined) setSessionStartedAt(res.sessionStartedAt);
         if (res.sessionLimitSeconds !== undefined) setSessionLimitSeconds(res.sessionLimitSeconds);
+        if (res.participantTier !== undefined) setParticipantTier(res.participantTier);
         if (intentConnectedRef.current && sharedRoom.state === "disconnected") {
           await sharedRoom.connect(res.livekitUrl, res.token);
         }
@@ -669,6 +674,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
         setCanScreenShare(res.canScreenShare ?? false);
         if (res.sessionStartedAt !== undefined) setSessionStartedAt(res.sessionStartedAt);
         if (res.sessionLimitSeconds !== undefined) setSessionLimitSeconds(res.sessionLimitSeconds);
+        if (res.participantTier !== undefined) setParticipantTier(res.participantTier);
         setCooldownSeconds(null);
         setState(stateRes);
         emitDiagnostic("token-minted", { tokenRole: res.role });
@@ -755,6 +761,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     setCanScreenShare(false);
     setSessionStartedAt(null);
     setSessionLimitSeconds(null);
+    setParticipantTier(null);
 
     // Notify server before disconnecting.
     try {
@@ -854,6 +861,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       sessionLimitSeconds,
       cooldownSeconds,
       clearCooldown,
+      participantTier,
     }),
     [
       role,
@@ -872,6 +880,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       sessionLimitSeconds,
       cooldownSeconds,
       clearCooldown,
+      participantTier,
     ]
   );
 

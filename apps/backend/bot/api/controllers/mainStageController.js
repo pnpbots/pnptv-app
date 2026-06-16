@@ -209,18 +209,15 @@ const token = asyncHandler(async (req, res) => {
     }
   }
 
-  // Entitlement gate — members must have pnp-member entitlement to join.
+  // Tier detection — non-blocking. Any consented, non-kicked user can join.
+  // newcomer → free registered account (no active membership)
+  // member   → active pnp-member entitlement
+  // prime    → member + PRIME tier column (extended session + spotlight priority)
+  // admin    → admin/superadmin role
   let hasMembership = false;
   if (!adminUser) {
     try {
       hasMembership = await EntitlementAccessService.hasEntitlement(String(userId), 'pnp-member');
-      if (!hasMembership) {
-        return res.status(403).json({
-          success: false,
-          error: 'PNP membership is required to join the Main Stage.',
-          code: 'MEMBERSHIP_REQUIRED',
-        });
-      }
     } catch (entErr) {
       logger.error('[MainStage] token: entitlement check failed', { error: entErr.message });
       return res.status(503).json({
@@ -230,50 +227,53 @@ const token = asyncHandler(async (req, res) => {
       });
     }
   }
+  const hasPrime = hasMembership && userRow.tier === 'PRIME';
+  const participantTier = adminUser ? 'admin' : hasPrime ? 'prime' : hasMembership ? 'member' : 'newcomer';
 
-  // Premium = admin or confirmed live pnp-member entitlement (not stale tier column).
-  // Determines session TTL (6h vs 1h) and screen share grant.
-  const isPremium = adminUser || hasMembership;
-  const canScreenShare = isPremium;
+  // Newcomers: cam on, no mic, 60-min session then 40-min cooldown.
+  // Members: cam + mic, 4-hour sessions.
+  // Prime / Admin: cam + mic, 12-hour tokens (no session cap).
+  const canScreenShare    = participantTier !== 'newcomer';
+  const canPublishAudio   = participantTier !== 'newcomer';
 
-  // Free-user session tracking: 1h cam session, 30min cooldown.
-  // Redis key: mainstage:session:start:<userId> = ms timestamp, TTL = 90min.
-  // Layout: first 60min → active session; min 60–90 → cooldown.
-  let tokenTtlSeconds = isPremium ? 6 * 3600 : 3600; // 6h for premium, 1h for free
-  let sessionStartedAt = null;
+  const NEWCOMER_SESSION_S  = 3600;               // 60 min cam window
+  const NEWCOMER_COOLDOWN_S = 2400;               // 40 min cooldown
+  const NEWCOMER_WINDOW_S   = NEWCOMER_SESSION_S + NEWCOMER_COOLDOWN_S; // 100 min Redis TTL
+
+  let tokenTtlSeconds = participantTier === 'newcomer'
+    ? NEWCOMER_SESSION_S
+    : participantTier === 'member'
+      ? 4 * 3600
+      : 12 * 3600; // prime / admin
+
+  let sessionStartedAt   = null;
   let sessionLimitSeconds = null;
-  let cooldownSeconds = null;
 
-  if (!adminUser && !isPremium) {
+  if (participantTier === 'newcomer') {
     try {
       const SESSION_KEY = `mainstage:session:start:${String(userId)}`;
-      const SESSION_TTL_S = 90 * 60; // 90-min window (1h session + 30min cooldown)
       const redis = getRedis();
       const startRaw = await redis.get(SESSION_KEY);
 
       if (startRaw === null) {
-        // New session — record start time, grant 1h token
         const nowMs = Date.now();
-        await redis.set(SESSION_KEY, String(nowMs), 'EX', SESSION_TTL_S);
-        sessionStartedAt = nowMs;
-        sessionLimitSeconds = 3600;
-        tokenTtlSeconds = 3600;
+        await redis.set(SESSION_KEY, String(nowMs), 'EX', NEWCOMER_WINDOW_S);
+        sessionStartedAt    = nowMs;
+        sessionLimitSeconds = NEWCOMER_SESSION_S;
+        tokenTtlSeconds     = NEWCOMER_SESSION_S;
       } else {
-        const startMs = parseInt(startRaw, 10);
-        const elapsedMs = Date.now() - startMs;
-        const elapsedS = Math.floor(elapsedMs / 1000);
+        const startMs  = parseInt(startRaw, 10);
+        const elapsedS = Math.floor((Date.now() - startMs) / 1000);
 
-        if (elapsedS < 3600) {
-          // Still within the 1h active window — issue remaining time
-          sessionStartedAt = startMs;
-          sessionLimitSeconds = 3600;
-          tokenTtlSeconds = Math.max(60, 3600 - elapsedS);
+        if (elapsedS < NEWCOMER_SESSION_S) {
+          sessionStartedAt    = startMs;
+          sessionLimitSeconds = NEWCOMER_SESSION_S;
+          tokenTtlSeconds     = Math.max(60, NEWCOMER_SESSION_S - elapsedS);
         } else {
-          // In cooldown (60–90 min elapsed) — reject with countdown
-          const cooldownRemainingS = Math.max(0, SESSION_TTL_S - elapsedS);
+          const cooldownRemainingS = Math.max(0, NEWCOMER_WINDOW_S - elapsedS);
           return res.status(429).json({
             success: false,
-            error: 'Free users get 1 hour of cammed time. Take a 30-minute break and come back!',
+            error: 'Your 1-hour preview has ended. Take a 40-minute break, or become a Member to stay on cam.',
             code: 'FREE_USER_COOLDOWN',
             cooldownSeconds: cooldownRemainingS,
           });
@@ -320,33 +320,33 @@ const token = asyncHandler(async (req, res) => {
     displayName,
     isModerator,
     {
-      canPublishVideo: true,
-      canPublishAudio: isModerator,
-      ttlSeconds: tokenTtlSeconds,
+      canPublishVideo:  true,
+      canPublishAudio,
+      ttlSeconds:       tokenTtlSeconds,
     }
   );
 
   logger.info('[MainStage] token issued', {
     userId,
-    role,
-    isPremium,
+    participantTier,
     tokenTtlSeconds,
     ip: req.ip || req.headers['x-forwarded-for'] || null,
     userAgent: req.get('user-agent') || null,
   });
 
   const responseBody = {
-    success:        true,
-    token:          lkToken,
-    livekitUrl:     livekitService.LIVEKIT_WS_URL,
-    roomName:       ROOM_NAME,
+    success:          true,
+    token:            lkToken,
+    livekitUrl:       livekitService.LIVEKIT_WS_URL,
+    roomName:         ROOM_NAME,
     role,
     displayName,
     canScreenShare,
+    participantTier,
   };
 
   if (sessionStartedAt !== null) {
-    responseBody.sessionStartedAt   = sessionStartedAt;
+    responseBody.sessionStartedAt    = sessionStartedAt;
     responseBody.sessionLimitSeconds = sessionLimitSeconds;
   }
 
