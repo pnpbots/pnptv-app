@@ -76,7 +76,7 @@ export function BottomNav() {
   };
 
   return (
-    <nav className="glass-nav border-t border-pnp-border safe-area-bottom">
+    <nav className="glass-nav border-t border-pnp-border safe-area-bottom" translate="no" lang="en">
       <div className="flex items-center justify-around h-16 max-w-lg mx-auto">
         {navItems.map((item) => {
           const active = getIsActive(item);
