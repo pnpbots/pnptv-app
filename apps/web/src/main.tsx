@@ -63,12 +63,28 @@ if (resetInProgress) {
   document.body.innerHTML = "";
 }
 
+// Vite 4.4+ emits this when a dynamic import chunk fails to load (stale build hash).
+// Silently reload once — the new build's chunks will be fetched fresh.
+window.addEventListener("vite:preloadError", () => {
+  if (sessionStorage.getItem("pnptv:stale-chunk-reload") === "1") return;
+  sessionStorage.setItem("pnptv:stale-chunk-reload", "1");
+  clearClientCaches()
+    .catch(() => undefined)
+    .finally(() => {
+      const retryUrl = new URL(window.location.href);
+      retryUrl.searchParams.set("update", "1");
+      window.location.replace(retryUrl.toString());
+    });
+});
+
 window.addEventListener("error", (event) => {
   const message = String(event.error?.message || event.message || "");
   const file = String(event.filename || "");
   const isStaleChunk =
-    file.includes("/assets/Chat-") &&
-    (message.includes("before initialization") || message.includes("is not defined"));
+    file.includes("/assets/") &&
+    (message.includes("Failed to fetch dynamically imported module") ||
+     message.includes("Importing a module script failed") ||
+     (file.includes("/assets/Chat-") && (message.includes("before initialization") || message.includes("is not defined"))));
   if (!isStaleChunk || sessionStorage.getItem("pnptv:stale-chunk-reload") === "1") return;
 
   sessionStorage.setItem("pnptv:stale-chunk-reload", "1");

@@ -957,7 +957,7 @@ export function Layout() {
         </div>
 
         {/* Primary nav — grouped sections */}
-        <nav className="flex-1 py-4 px-3 overflow-y-auto" aria-label="Primary navigation">
+        <nav className="flex-1 py-4 px-3 overflow-y-auto" aria-label="Primary navigation" translate="no" lang="en">
           {navSections.map((section, idx) => (
             <div key={section.label} className={idx > 0 ? "mt-4" : ""}>
               <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">
@@ -1208,7 +1208,7 @@ export function Layout() {
 
             {/* Scrollable link menu — native <details> for collapsibles
                  (built-in a11y, prefers-reduced-motion-respecting, no JS state). */}
-            <nav className="flex-1 overflow-y-auto" aria-label="Mobile navigation">
+            <nav className="flex-1 overflow-y-auto" aria-label="Mobile navigation" translate="no" lang="en">
               <div className="px-3 py-3 space-y-2">
 
                 {/* ── Navigation (open by default) ────────────────────────── */}
