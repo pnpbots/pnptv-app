@@ -792,13 +792,21 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   // admin is playing media OR live cammers are present in the room.
   const hasMeaningfulContent = hasActiveMiniMedia || (isJoined && miniOtherTracksCount > 0);
 
-  // Reset dismiss only when leaving main-stage while content is actually live —
-  // prevents the player from hijacking the screen after every empty-stage visit.
+  // Refs keep the nav handler stable (registered once, no stale closures).
+  const hasMeaningfulContentRef = useRef(hasMeaningfulContent);
+  useEffect(() => { hasMeaningfulContentRef.current = hasMeaningfulContent; }, [hasMeaningfulContent]);
+
+  const prevPathnameRef = useRef(miniPathname);
+
+  // Reset dismiss ONLY when leaving /main-stage while content is live.
+  // Any other navigation between non-stage pages must never re-open the player.
   useEffect(() => {
     const onNav = () => {
+      const prevPath = prevPathnameRef.current;
       const p = window.location.pathname;
+      prevPathnameRef.current = p;
       setMiniPathname(p);
-      if (!p.startsWith("/main-stage") && hasMeaningfulContent) {
+      if (prevPath.startsWith("/main-stage") && !p.startsWith("/main-stage") && hasMeaningfulContentRef.current) {
         setMiniDismissed(false);
       }
     };
@@ -808,7 +816,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("pnptv:navigation", onNav);
       window.removeEventListener("popstate", onNav);
     };
-  }, [hasMeaningfulContent]);
+  }, []); // empty — handler is stable via refs
 
   // Surface the player when admin starts a new broadcast so users don't miss live content,
   // but only if they are not on the main stage page itself.
