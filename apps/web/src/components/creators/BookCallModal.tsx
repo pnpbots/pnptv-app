@@ -434,6 +434,10 @@ export function BookCallModal({
     setCheckoutLoading(true);
     setIsProcessing(true);
     setCheckoutError(null);
+    // Prevents finally from resetting submission guards while the browser is
+    // navigating to the ePayco hosted checkout page. Without this flag the
+    // guards reset before the page unloads, allowing a second submission.
+    let navigatingAway = false;
 
     try {
       // ePayco — redirect to hosted card checkout
@@ -445,7 +449,9 @@ export function BookCallModal({
           email.trim() || undefined
         );
         if (epaycoRes.checkoutUrl || epaycoRes.paymentUrl) {
+          navigatingAway = true;
           window.location.href = epaycoRes.checkoutUrl || epaycoRes.paymentUrl;
+          return;
         } else {
           setCheckoutError(t.creator.checkoutFailed);
         }
@@ -542,9 +548,11 @@ export function BookCallModal({
         });
       }
     } finally {
-      setCheckoutLoading(false);
-      setIsProcessing(false);
-      checkoutInFlight.current = false;
+      if (!navigatingAway) {
+        setCheckoutLoading(false);
+        setIsProcessing(false);
+        checkoutInFlight.current = false;
+      }
     }
   }, [activePackage, provider, email, selectedSlot]);
 
@@ -1174,6 +1182,7 @@ export function BookCallModal({
               onClick={() => {
                 setDashTimedOut(false);
                 setCheckoutError(null);
+                setIsProcessing(false);
                 checkoutInFlight.current = false;
                 handleCheckout();
               }}

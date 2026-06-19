@@ -3334,6 +3334,7 @@ export interface CreatorChannel {
   hangoutGroupId: number | null;
   hangoutGroupName?: string | null;
   postCount: number;
+  videoCount?: number;
   sortOrder: number;
   createdAt: string;
   creatorName?: string;

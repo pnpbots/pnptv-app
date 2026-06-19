@@ -344,6 +344,10 @@ class CreatorService {
   }
 
   static async subscribeToCreator(subscriberId, creatorId, paymentId) {
+    // paymentId is required — null would break ON CONFLICT (source_payment_id) deduplication
+    // in creator_earnings, silently losing earnings on duplicate calls.
+    if (!paymentId) throw new Error('subscribeToCreator: paymentId is required');
+
     // Validate creator is active (outside transaction — read-only, no locking needed)
     const creatorRes = await query(
       'SELECT creator_status, creator_locked, creator_price_usd FROM users WHERE id = $1',
@@ -360,13 +364,13 @@ class CreatorService {
       throw err;
     }
 
-    // Validate subscriber has PRIME entitlement (live check, not stale users.tier)
-    const EntitlementAccessService = require('./entitlementAccessService');
-    const hasPrime = await EntitlementAccessService.hasEntitlement(subscriberId, 'prime');
-    if (!hasPrime) {
-      throw new Error('PRIME subscription required to subscribe to creators');
-    }
+    // Payment verification is the caller's responsibility:
+    // - REST controller verifies ownership, status, plan_id, and creatorId before reaching here.
+    // - Webhook handlers (BTCPay/NowPayments/ePayco) verify payment server-side before calling.
+    // The former hasPrime gate was removed: it conflated platform PRIME with per-creator payment,
+    // allowing any PRIME user to subscribe to any creator for free.
 
+    const EntitlementAccessService = require('./entitlementAccessService');
     const priceUsd = parseFloat(creator.creator_price_usd);
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
@@ -554,11 +558,24 @@ class CreatorService {
   }
 
   static async expireCreatorSubscriptions() {
-    const { rows } = await query(
+    // Prevent concurrent runs from double-processing the same expired rows
+    // (e.g., on a PM2 cluster restart overlap or multi-instance deploy).
+    const { cache } = require('../config/redis');
+    const lockKey = 'creator:expire-subscriptions:lock';
+    const lockAcquired = await cache.acquireLock(lockKey, 120).catch(() => false);
+    if (!lockAcquired) {
+      logger.info('expireCreatorSubscriptions: lock held by another instance, skipping');
+      return { expired: 0 };
+    }
+
+    let rows = [];
+    try {
+    const result = await query(
       `UPDATE creator_subscriptions SET status = 'expired'
        WHERE status = 'active' AND expires_at < NOW()
        RETURNING subscriber_id, creator_id`
     );
+    rows = result.rows;
 
     // Recompute subscriber counts and revoke entitlements for each affected creator
     const creatorIds = [...new Set(rows.map(r => r.creator_id))];
@@ -599,6 +616,9 @@ class CreatorService {
 
     logger.info('Expired creator subscriptions', { expired: rows.length, creators: creatorIds.length });
     return { expired: rows.length };
+    } finally {
+      await cache.releaseLock(lockKey).catch(() => {});
+    }
   }
 
   // ── Dashboard ──────────────────────────────────────────────────────────────

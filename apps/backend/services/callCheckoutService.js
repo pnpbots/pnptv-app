@@ -681,6 +681,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
         success_url: successUrl,
         is_fixed_rate: true,
         is_fee_paid_by_user: false,
+        expiry_time: 1800,
       },
       { headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' } }
     );

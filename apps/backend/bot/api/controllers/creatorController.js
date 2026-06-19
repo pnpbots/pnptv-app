@@ -115,13 +115,39 @@ const getSubscriptionStatus = async (req, res) => {
 
 // POST /api/webapp/creator/:creatorId/subscribe
 const subscribeToCreator = async (req, res) => {
-  if (!req.body?.paymentId) {
+  const { paymentId } = req.body || {};
+  if (!paymentId) {
     return res.status(400).json({ error: 'paymentId is required' });
   }
   try {
     const creatorId = await resolveUserId(req.params.creatorId);
     if (!creatorId) return res.status(404).json({ error: 'Creator not found' });
-    const result = await CreatorService.subscribeToCreator(req.user.id, creatorId, req.body.paymentId);
+
+    // Verify the payment belongs to this user, is completed, and targets this creator.
+    // This prevents PRIME users from subscribing to any creator for free by omitting payment.
+    const payRes = await query(
+      `SELECT user_id, status, plan_id, metadata FROM payments WHERE id = $1`,
+      [paymentId]
+    );
+    const payment = payRes.rows[0];
+    if (!payment) {
+      return res.status(400).json({ error: 'Payment not found' });
+    }
+    if (String(payment.user_id) !== String(req.user.id)) {
+      return res.status(403).json({ error: 'Payment does not belong to this user' });
+    }
+    if (payment.status !== 'completed') {
+      return res.status(400).json({ error: 'Payment has not been completed', code: 'PAYMENT_NOT_COMPLETED' });
+    }
+    const meta = payment.metadata || {};
+    if (meta.type !== 'creator_monthly' && payment.plan_id !== 'creator_monthly') {
+      return res.status(400).json({ error: 'Payment is not for a creator subscription' });
+    }
+    if (meta.creatorId && String(meta.creatorId) !== String(creatorId)) {
+      return res.status(400).json({ error: 'Payment is for a different creator' });
+    }
+
+    const result = await CreatorService.subscribeToCreator(req.user.id, creatorId, paymentId);
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('subscribeToCreator error', err);

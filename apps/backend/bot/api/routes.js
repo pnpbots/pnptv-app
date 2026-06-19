@@ -1863,6 +1863,7 @@ app.get('/api/auth-status', authStatusLimiter, (req, res, next) => {
 // adminGuard returns 403 for non-admins; frontend treats any non-200 as isAdmin: false.
 const adminCheckLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, keyGenerator: (req) => req.ip, standardHeaders: true, legacyHeaders: false });
 const paymentCreateLimiter = rateLimit({ windowMs: 60 * 1000, max: 8, keyGenerator: (req) => req.session?.user?.id || req.ip, handler: (req, res) => res.status(429).json({ success: false, error: 'Demasiados intentos. Espera un minuto antes de intentar nuevamente.' }), standardHeaders: true, legacyHeaders: false });
+const creatorSubscriptionLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, keyGenerator: (req) => req.session?.user?.id || req.ip, handler: (req, res) => res.status(429).json({ success: false, error: 'Too many requests. Wait a minute and try again.' }), standardHeaders: true, legacyHeaders: false });
 app.get('/api/admin/check', adminCheckLimiter, adminGuard, (req, res) => {
   res.json({ isAdmin: true });
 });
@@ -1970,8 +1971,8 @@ app.post('/checkout/pnp/confirmation', webhookLimiter, webhookController.handleE
 
 const creatorController = require('./controllers/creatorController');
 app.get('/api/webapp/creator/:creatorId/subscription-status', requireSessionAuth, asyncHandler(creatorController.getSubscriptionStatus));
-app.post('/api/webapp/creator/:creatorId/subscribe', requireSessionAuth, asyncHandler(creatorController.subscribeToCreator));
-app.post('/api/webapp/creator/:creatorId/unsubscribe', requireSessionAuth, asyncHandler(creatorController.unsubscribeFromCreator));
+app.post('/api/webapp/creator/:creatorId/subscribe', requireSessionAuth, creatorSubscriptionLimiter, asyncHandler(creatorController.subscribeToCreator));
+app.post('/api/webapp/creator/:creatorId/unsubscribe', requireSessionAuth, creatorSubscriptionLimiter, asyncHandler(creatorController.unsubscribeFromCreator));
 
 // LiveKit webhook — participant_joined, participant_left, room_finished
 // express.raw() is required — livekit-server-sdk verifies the raw body signature
@@ -7431,7 +7432,8 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
       const total = countRes.rows[0]?.total || 0;
 
       const result = await getPool().query(
-        `SELECT cc.*, u.username, u.first_name, u.last_name, u.photo_file_id, u.creator_verified
+        `SELECT cc.*, u.username, u.first_name, u.last_name, u.photo_file_id, u.creator_verified,
+                (SELECT COUNT(*)::int FROM channel_videos cv WHERE cv.channel_id = cc.id AND cv.status = 'published') AS video_count
          FROM creator_channels cc
          JOIN users u ON u.id = cc.creator_id
          WHERE ${conditions.join(' AND ')}
@@ -7456,6 +7458,7 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
           accessType: ch.access_type,
           featured: ch.is_featured === true,
           postCount: ch.post_count,
+          videoCount: ch.video_count || 0,
           subscriberCount: ch.subscriber_count,
           createdAt: ch.created_at,
           creatorName: [ch.first_name, ch.last_name].filter(Boolean).join(' ') || ch.username || 'Creator',
@@ -7776,6 +7779,10 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
     const isOwner = viewerId !== null && String(viewerId) === String(ch.creator_id);
     const isCollaborator = !isOwner && Array.isArray(ch.collaborators) && ch.collaborators.includes(String(viewerId));
 
+    const videoCountRes = await getPool().query(
+      `SELECT COUNT(*)::int AS cnt FROM channel_videos WHERE channel_id = $1 AND status = 'published'`,
+      [channelId]
+    );
     const channel = {
       id: ch.id,
       creatorId: ch.creator_id,
@@ -7787,6 +7794,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       isPremium: ch.is_premium,
       accessType: ch.access_type || (ch.is_premium ? 'subscription' : 'free'),
       postCount: ch.post_count,
+      videoCount: videoCountRes.rows[0]?.cnt || 0,
       createdAt: ch.created_at,
       creatorName: [ch.first_name, ch.last_name].filter(Boolean).join(' ') || ch.username || 'Creator',
       creatorUsername: ch.username,

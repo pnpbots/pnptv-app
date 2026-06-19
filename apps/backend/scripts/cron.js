@@ -15,6 +15,7 @@ const TutorialReminderService = require(path.join(backendPath, 'services/tutoria
 const CultEventService = require(path.join(backendPath, 'services/cultEventService'));
 const logger = require(path.join(backendPath, 'utils/logger'));
 const PaymentRecoveryService = require(path.join(backendPath, 'services/paymentRecoveryService'));
+const { expireAbandonedBookings } = require(path.join(backendPath, 'services/callCheckoutService'));
 const MediaCleanupService = require(path.join(backendPath, 'services/mediaCleanupService'));
 const CreatorService = require(path.join(backendPath, 'services/creatorService'));
 const CreatorPayoutService = require(path.join(backendPath, 'services/creatorPayoutService'));
@@ -69,9 +70,10 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
-    // Abandoned payment cleanup - daily at midnight
-    // Marks payments pending > 24 hours as abandoned (prevents 3DS timeout issues)
-    cron.schedule(process.env.PAYMENT_CLEANUP_CRON || '0 0 * * *', async () => {
+    // Abandoned payment cleanup - every 2 hours
+    // Step 0: expire no-card-entry ePayco rows at 2h mark (fast cleanup for bounced sessions)
+    // Step 1: mark all remaining pending ePayco rows > 24h as abandoned (3DS timeout)
+    cron.schedule(process.env.PAYMENT_CLEANUP_CRON || '0 */2 * * *', async () => {
       try {
         logger.info('Running abandoned payment cleanup...');
         const results = await PaymentRecoveryService.cleanupAbandonedPayments();
@@ -81,6 +83,21 @@ const startCronJobs = async (bot = null) => {
         });
       } catch (error) {
         logger.error('Error in abandoned payment cleanup cron:', error);
+      }
+    });
+
+    // Private call booking expiry — every hour at :30
+    // Expires bookings stuck in 'awaiting_payment' for > 2 hours (ePayco/BTCPay
+    // checkouts the user abandoned without paying). Frees the calendar slot and
+    // marks the payment 'abandoned' so recovery crons skip it.
+    cron.schedule(process.env.CALL_BOOKING_EXPIRE_CRON || '30 * * * *', async () => {
+      try {
+        const results = await expireAbandonedBookings();
+        if (results.expired > 0 || results.errors > 0) {
+          logger.info('Call booking expiry completed', results);
+        }
+      } catch (error) {
+        logger.error('Error in call booking expiry cron:', error);
       }
     });
 
@@ -380,8 +397,8 @@ const startCronJobs = async (bot = null) => {
     // ePayco / Daimo / BTCPay webhook paths which call grantEntitlementsForPlan
     // with the payment row's metadata.
 
-    // Creator eligibility batch check - daily at 3 AM UTC
-    cron.schedule('0 3 * * *', async () => {
+    // Creator eligibility batch check - daily at 03:10 UTC (staggered from media cleanup at 03:00)
+    cron.schedule('10 3 * * *', async () => {
       try {
         logger.info('Running creator eligibility batch check...');
         const results = await CreatorService.runBatchEligibilityCheck();
@@ -471,10 +488,10 @@ const startCronJobs = async (bot = null) => {
     // Hangout subgroup inactivity cleanup — DISABLED 2026-06-18 (permanent hangouts policy)
     // Was: delete user-created groups inactive for 72+ hours. Removed per user request.
 
-    // Notification cleanup — daily at 03:00 UTC
+    // Notification cleanup — daily at 03:20 UTC (staggered from media cleanup at 03:00)
     // Removes read notifications older than 90 days and all hangout_call
     // notifications older than 30 days (they become stale very quickly).
-    cron.schedule('0 3 * * *', async () => {
+    cron.schedule('20 3 * * *', async () => {
       try {
         logger.info('Running notification cleanup job...');
 
@@ -585,9 +602,9 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
-    // VOD recording retention — daily at 03:00 UTC
+    // VOD recording retention — daily at 03:35 UTC (staggered from media cleanup at 03:00)
     // Deletes completed recordings older than 7 days and removes their HLS files.
-    cron.schedule(process.env.RECORDING_EXPIRY_CRON || '0 3 * * *', async () => {
+    cron.schedule(process.env.RECORDING_EXPIRY_CRON || '35 3 * * *', async () => {
       try {
         logger.info('Running VOD recording retention cleanup...');
         await StreamRecordingService.expireOldRecordings(7);
@@ -710,9 +727,9 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
-    // ── user_access_logs retention — daily at 03:00 UTC ─────────────────────
+    // ── user_access_logs retention — daily at 03:50 UTC (staggered from media cleanup at 03:00) ──
     // Deletes rows older than 90 days in small batches to avoid long locks.
-    cron.schedule('0 3 * * *', async () => {
+    cron.schedule('50 3 * * *', async () => {
       try {
         const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
         const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();

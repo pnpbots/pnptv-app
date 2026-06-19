@@ -155,7 +155,9 @@ function CreatorChannelCard({
             )}
           </div>
           <span className="text-[11px] text-pnp-textSecondary flex-shrink-0">
-            {channel.postCount} post{channel.postCount !== 1 ? "s" : ""}
+            {channel.videoCount != null && channel.videoCount > 0
+              ? `${channel.videoCount} video${channel.videoCount !== 1 ? "s" : ""}`
+              : `${channel.postCount} post${channel.postCount !== 1 ? "s" : ""}`}
           </span>
         </div>
       </div>
@@ -362,18 +364,30 @@ function ChannelDetailView({
   };
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    getChannelDetail(channelId)
-      .then((res) => {
-        if (res.success) {
-          setChannel(res.channel);
-          setVideos(res.videos ?? []);
-          setLocked(res.locked);
-        }
-      })
-      .catch((err) => setError(err.message || "Failed to load channel"))
-      .finally(() => setLoading(false));
+    const refetch = () => {
+      setLoading(true);
+      setError(null);
+      getChannelDetail(channelId)
+        .then((res) => {
+          if (res.success) {
+            setChannel(res.channel);
+            setVideos(res.videos ?? []);
+            setLocked(res.locked);
+          }
+        })
+        .catch((err) => setError(err.message || "Failed to load channel"))
+        .finally(() => setLoading(false));
+    };
+
+    refetch();
+
+    // Re-check access when the user returns to this tab (e.g., after subscribing
+    // to the creator in another tab and coming back to the channel).
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") refetch();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [channelId]);
 
   if (loading) {
@@ -1157,7 +1171,7 @@ function ChannelCard({ channel, onClick }: { channel: Channel; onClick: () => vo
         <div className="flex items-center gap-3 text-[11px] text-pnp-textSecondary">
           <span>{channel.subscriberCount} subs</span>
           <span className="w-0.5 h-0.5 rounded-full bg-pnp-textSecondary" />
-          <span>{channel.postCount} posts</span>
+          <span>{channel.videoCount != null && channel.videoCount > 0 ? `${channel.videoCount} videos` : `${channel.postCount} posts`}</span>
         </div>
 
         {/* Featured badge */}
@@ -1604,7 +1618,7 @@ function ChannelsInner() {
                                 </p>
                               )}
                               <div className="mt-3 flex items-center gap-3 text-xs text-white/80">
-                                <span>{featuredChannel.postCount} posts</span>
+                                <span>{featuredChannel.videoCount != null && featuredChannel.videoCount > 0 ? `${featuredChannel.videoCount} videos` : `${featuredChannel.postCount} posts`}</span>
                                 {(featuredChannel.subscriberCount ?? 0) > 0 && (
                                   <>
                                     <span className="w-0.5 h-0.5 rounded-full bg-white/60" />
