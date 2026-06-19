@@ -754,7 +754,8 @@ export const buyTokensWithCard = buyTokensWithEpayco;
 export function createCallCheckoutEpayco(
   packageId: number,
   startTimeUtc?: string,
-  endTimeUtc?: string
+  endTimeUtc?: string,
+  email?: string
 ): Promise<{
   success: boolean;
   paymentId: string;
@@ -768,6 +769,7 @@ export function createCallCheckoutEpayco(
   const body: Record<string, unknown> = { packageId, provider: "epayco" };
   if (startTimeUtc) body.startTimeUtc = startTimeUtc;
   if (endTimeUtc) body.endTimeUtc = endTimeUtc;
+  if (email) body.email = email;
   return request("/api/webapp/book-call/checkout", {
     method: "POST",
     body,
@@ -3073,7 +3075,9 @@ export interface FeaturedPerformer {
   basePrice: number;
   totalCalls: number;
   averageRating: number;
-  /** Set by the backend when the performer is currently streaming via Restreamer. */
+  /** True when the performer has an active webapp session (Socket.IO presence). Used for call availability. */
+  isOnline?: boolean;
+  /** Set by the backend when the performer is currently streaming via Restreamer. Disabled — always false. */
   isLive?: boolean;
   /** Direct HLS playback URL, populated when isLive is true. */
   hlsUrl?: string | null;
@@ -5998,9 +6002,7 @@ export interface CreatorCallEarnings {
 
 export interface CallCheckoutPayload {
   packageId: number;
-  // Card checkout via this endpoint has been retired. Use createCallCheckoutDash()
-  // for Dash (crypto) payments, or the web app at pnptv.app/book-call.
-  provider: "dash";
+  provider: "epayco";
   email: string;
   quantity?: number;
   selectedSlot?: string | null;
@@ -6025,15 +6027,15 @@ export function createCallCheckout(
   });
 }
 
-export function createCallCheckoutDash(
+export function createCallCheckoutNowPayments(
   packageId: number,
   startTimeUtc?: string,
   endTimeUtc?: string
-): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; paymentId: string; amountUsd: number; addressDash?: string; expiresAt?: string }> {
+): Promise<{ success: boolean; invoiceUrl: string; paymentId: string; amountUsd: number; expiresAt?: string; bookingId?: string; orderId?: string }> {
   const body: Record<string, unknown> = { packageId };
   if (startTimeUtc) body.startTimeUtc = startTimeUtc;
   if (endTimeUtc) body.endTimeUtc = endTimeUtc;
-  return request("/api/webapp/book-call/checkout/dash", {
+  return request("/api/webapp/book-call/checkout/nowpayments", {
     method: "POST",
     body,
   });

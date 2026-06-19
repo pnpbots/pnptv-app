@@ -311,7 +311,7 @@ const query = async (text, params, { cache = queryCache.enabled, ttl = queryCach
       source: isMutation ? 'database(mutation)' : 'database'
     });
 
-    if (duration > 100) { // Log slow queries
+    if (duration > 300) { // Log slow queries
       const inBootGrace = (Date.now() - PROCESS_START_TIME) < SLOW_QUERY_BOOT_GRACE_MS;
       const log = inBootGrace ? logger.debug.bind(logger) : logger.warn.bind(logger);
       log('Slow query detected', {

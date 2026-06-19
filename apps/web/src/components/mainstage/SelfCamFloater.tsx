@@ -27,6 +27,7 @@ export function SelfCamFloater() {
 
   const isOnMainStage = location.pathname === "/main-stage";
   const isParticipant = role === "member" || role === "admin";
+  const { showMiniPlayer } = useMainStageRoom();
 
   // Attach the local camera track to the <video> element whenever it
   // changes. We listen on the shared room so the floater survives route
@@ -72,9 +73,9 @@ export function SelfCamFloater() {
     };
   }, [isParticipant, room]);
 
-  // Don't render when on the Main Stage page (full tile visible there)
-  // or when not a participant, or when the cam track isn't live yet.
-  if (isOnMainStage || !isParticipant) return null;
+  // Don't render on Main Stage (full tile visible there), when not a participant,
+  // or when the mini player is showing (it has its own mycam tab — avoid duplicating).
+  if (isOnMainStage || !isParticipant || showMiniPlayer) return null;
 
   return (
     <div

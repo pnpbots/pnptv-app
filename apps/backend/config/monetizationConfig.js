@@ -12,7 +12,7 @@ const CREATOR_REVENUE_RATE = 0.70; // must equal 1 - PLATFORM_COMMISSION_RATE
 // Earnings hold period: newly-recorded earnings sit in 'holding' status for this
 // many hours before maturing to 'available'. This gives the platform time to
 // process any refund or chargeback before paying out the creator.
-const EARNINGS_HOLD_HOURS = 168; // 7 days
+const EARNINGS_HOLD_HOURS = 72; // 72-hour hold per platform policy
 
 module.exports = {
   // Exported as top-level named constants for direct destructured imports.

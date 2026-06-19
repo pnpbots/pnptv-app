@@ -1513,7 +1513,7 @@ const getPost = async (req, res) => {
         }
       } catch (subErr) {
         logger.error('getPost: creator subscription check failed', { viewerId, err: subErr.message });
-        // Fail open — do not lock content on check error to avoid breaking access for valid subscribers
+        contentLocked = true;
       }
     }
 

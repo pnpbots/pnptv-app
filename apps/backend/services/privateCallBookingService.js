@@ -57,8 +57,8 @@ class PrivateCallBookingService {
       }
 
       // Check membership (require prime for private calls)
-      const hasPrime = (user.membership_tier || '').toLowerCase() === 'prime' || (user.membership_tier || '').toLowerCase() === 'admin';
-      const membershipExpired = user.membership_expires_at && new Date(user.membership_expires_at) < new Date();
+      const hasPrime = (user.tier || '').toLowerCase() === 'prime' || (user.tier || '').toLowerCase() === 'admin';
+      const membershipExpired = user.subscription_expires_at && new Date(user.subscription_expires_at) < new Date();
 
       if (!hasPrime) {
         reasons.push('membership_required');
@@ -70,8 +70,8 @@ class PrivateCallBookingService {
         eligible: reasons.length === 0,
         reasons,
         membership: {
-          tier: user.membership_tier,
-          expiresAt: user.membership_expires_at,
+          tier: user.tier,
+          expiresAt: user.subscription_expires_at,
         },
         isRestricted: user.is_restricted || false,
       };
@@ -380,48 +380,6 @@ class PrivateCallBookingService {
             },
           });
           paymentLink = `${domain}/payment/${paymentsRow.id}`;
-          break;
-        }
-
-        case 'dash': {
-          // BTCPay invoice in USD. On settlement, the /api/webhooks/btcpay
-          // handler reads dash_subscription_orders.metadata.resource and
-          // routes to PrivateCallBookingService.handlePaymentComplete.
-          const { createInvoice, isConfigured: btcpayConfigured } = require('../config/btcpay');
-          if (!btcpayConfigured()) {
-            return { success: false, error: 'btcpay_not_configured' };
-          }
-          const usdAmount = Number(booking.priceCents) / 100;
-          const invoice = await createInvoice({
-            amount: usdAmount,
-            currency: 'USD',
-            orderId: `booking-${bookingId}`,
-            userId: String(booking.userId),
-            planId: 'private_call_booking',
-            metadata: {
-              resource: 'private_call_booking',
-              bookingId,
-              paymentId,
-            },
-            redirectUrl: `${domain}/private-call/booking/${bookingId}?payment=${paymentId}`,
-          });
-          const { query: dbQuery } = require('../config/postgres');
-          await dbQuery(
-            `INSERT INTO dash_subscription_orders
-             (user_id, plan_id, usd_amount, btcpay_invoice_id, status, metadata)
-             VALUES ($1, 'private_call_booking', $2, $3, 'pending', $4)`,
-            [
-              String(booking.userId),
-              usdAmount,
-              invoice.invoiceId,
-              JSON.stringify({
-                resource: 'private_call_booking',
-                bookingId,
-                paymentId,
-              }),
-            ]
-          );
-          paymentLink = invoice.checkoutLink;
           break;
         }
 
@@ -823,10 +781,10 @@ class PrivateCallBookingService {
           const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
           const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
           const pmtRow = await query(
-            `SELECT id FROM booking_payments WHERE booking_id = $1 AND status = 'paid' LIMIT 1`,
+            `SELECT payment_id FROM bookings WHERE id = $1 LIMIT 1`,
             [bookingId]
           );
-          const sourcePaymentId = pmtRow.rows[0]?.id || null;
+          const sourcePaymentId = pmtRow.rows[0]?.payment_id || null;
           await query(
             `INSERT INTO creator_earnings
                (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)

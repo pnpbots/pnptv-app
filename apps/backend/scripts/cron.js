@@ -468,46 +468,8 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
-    // Hangout subgroup inactivity cleanup - hourly
-    // Deletes user-created hangout groups inactive for 72+ hours (CASCADE handles members, calls, messages)
-    cron.schedule('0 * * * *', async () => {
-      try {
-        logger.info('Running hangout inactivity cleanup...');
-
-        // Find stale user-created groups (not main, not wall of fame)
-        const { rows: staleGroups } = await pgQuery(
-          `SELECT id, name FROM hangout_groups
-           WHERE is_main = false AND is_wall_of_fame = false
-             AND last_activity_at < NOW() - INTERVAL '72 hours'`
-        );
-
-        if (staleGroups.length === 0) {
-          logger.info('Hangout cleanup: no stale groups found');
-          return;
-        }
-
-        for (const group of staleGroups) {
-          try {
-            // End any active calls first
-            await pgQuery(
-              `UPDATE hangout_video_calls SET status = 'ended', ended_at = NOW()
-               WHERE group_id = $1 AND status = 'active'`,
-              [group.id]
-            );
-
-            // Delete group (CASCADE handles members, calls, participants, messages)
-            await pgQuery('DELETE FROM hangout_groups WHERE id = $1', [group.id]);
-            logger.info(`Hangout cleanup: deleted stale group "${group.name}" (id=${group.id})`);
-          } catch (groupErr) {
-            logger.error(`Hangout cleanup: failed to delete group ${group.id}`, groupErr);
-          }
-        }
-
-        logger.info(`Hangout inactivity cleanup completed: ${staleGroups.length} group(s) deleted`);
-      } catch (error) {
-        logger.error('Error in hangout inactivity cleanup cron:', error);
-      }
-    });
+    // Hangout subgroup inactivity cleanup — DISABLED 2026-06-18 (permanent hangouts policy)
+    // Was: delete user-created groups inactive for 72+ hours. Removed per user request.
 
     // Notification cleanup — daily at 03:00 UTC
     // Removes read notifications older than 90 days and all hangout_call
@@ -745,6 +707,30 @@ const startCronJobs = async (bot = null) => {
         }
       } catch (err) {
         logger.error('[2257] Enforcement cron error', { error: err.message });
+      }
+    });
+
+    // ── user_access_logs retention — daily at 03:00 UTC ─────────────────────
+    // Deletes rows older than 90 days in small batches to avoid long locks.
+    cron.schedule('0 3 * * *', async () => {
+      try {
+        const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
+        const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+        let total = 0;
+        let deleted;
+        do {
+          const res = await pgQuery(
+            `DELETE FROM user_access_logs WHERE id IN (
+               SELECT id FROM user_access_logs WHERE created_at < $1 LIMIT 10000
+             )`,
+            [cutoff]
+          );
+          deleted = res.rowCount || 0;
+          total += deleted;
+        } while (deleted === 10000);
+        if (total > 0) logger.info('[retention] user_access_logs purged', { deleted: total });
+      } catch (err) {
+        logger.error('[retention] user_access_logs purge error', { error: err.message });
       }
     });
 

@@ -229,8 +229,9 @@ async function sendBookingConfirmationToMember(memberId, booking, callInfo) {
   }
 
   // Telegram
-  const formattedTime = formatDateTime(booking.start_at);
-  const tgMsg = `Your 1-on-1 call with <b>${creatorName}</b> is confirmed!\n\n📅 ${formattedTime}\n⏱ ${booking.duration_minutes} min`;
+  const formattedTime = booking.start_at ? formatDateTime(booking.start_at) : 'Now';
+  const joinLine = joinUrl ? `\n\n🔗 Join your call:\n${joinUrl}` : '';
+  const tgMsg = `✅ Your 1-on-1 call with <b>${creatorName}</b> is confirmed!\n\n📅 ${formattedTime}\n⏱ ${booking.duration_minutes} min${joinLine}`;
   await sendNotificationViaTelegram(memberId, {
     type: 'hangout_call',
     message: tgMsg,
@@ -267,8 +268,9 @@ async function sendBookingConfirmationToCreator(creatorId, booking, memberInfo, 
   }
 
   // Telegram
-  const formattedTime = formatDateTime(booking.start_at);
-  const tgMsg = `New call booking from <b>${memberUsername}</b>!\n\n📅 ${formattedTime}\n⏱ ${booking.duration_minutes} min`;
+  const formattedTime = booking.start_at ? formatDateTime(booking.start_at) : 'Now';
+  const joinLine = joinUrl ? `\n\n🔗 Join the call:\n${joinUrl}` : '';
+  const tgMsg = `🔔 New call booking from <b>${memberUsername}</b>!\n\n📅 ${formattedTime}\n⏱ ${booking.duration_minutes} min${joinLine}`;
   await sendNotificationViaTelegram(creatorId, {
     type: 'hangout_call',
     message: tgMsg,
@@ -372,11 +374,11 @@ async function reconcileReminders() {
       `SELECT b.id AS booking_id,
               b.user_id    AS member_id,
               p.user_id    AS creator_id,
-              b.start_time_utc AS start_at
-       FROM bookings b
+              b.scheduled_at AS start_at
+       FROM call_bookings b
        JOIN performers p ON p.id = b.performer_id
        WHERE b.status IN ('confirmed', 'paid')
-         AND b.start_time_utc > NOW()`
+         AND b.scheduled_at > NOW()`
     );
 
     let count = 0;

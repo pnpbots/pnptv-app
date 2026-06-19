@@ -344,7 +344,7 @@ class CreatorService {
   }
 
   static async subscribeToCreator(subscriberId, creatorId, paymentId) {
-    // Validate creator is active
+    // Validate creator is active (outside transaction — read-only, no locking needed)
     const creatorRes = await query(
       'SELECT creator_status, creator_locked, creator_price_usd FROM users WHERE id = $1',
       [creatorId]
@@ -371,35 +371,42 @@ class CreatorService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    // Upsert subscription
-    const { rows } = await query(
-      `INSERT INTO creator_subscriptions (creator_id, subscriber_id, price_usd, expires_at, payment_id, status)
-       VALUES ($1, $2, $3, $4, $5, 'active')
-       ON CONFLICT (creator_id, subscriber_id)
-       DO UPDATE SET status = 'active', price_usd = $3, expires_at = $4, payment_id = $5,
-                     cancelled_at = NULL, auto_renew = TRUE
-       RETURNING id`,
-      [creatorId, subscriberId, priceUsd, expiresAt, paymentId || null]
-    );
-
-    // Recompute the visible subscriber count from canonical rows instead of
-    // incrementing blindly, which drifts on renewals and idempotent replays.
-    await query(
-      `UPDATE users
-          SET creator_subscriber_count = (
-            SELECT COUNT(*)
-            FROM creator_subscriptions
-            WHERE creator_id = $1
-              AND status = 'active'
-              AND (expires_at IS NULL OR expires_at > NOW())
-          )
-        WHERE id = $1`,
-      [creatorId]
-    );
-
-    // Write creator-subscription entitlement so entitlement-based access checks work
+    // Wrap all DB writes in a transaction so a mid-flight crash leaves no partial state
+    const { getPool } = require('../config/postgres');
+    const client = await getPool().connect();
+    let rows;
     try {
-      await query(`
+      await client.query('BEGIN');
+
+      // Upsert subscription
+      const subResult = await client.query(
+        `INSERT INTO creator_subscriptions (creator_id, subscriber_id, price_usd, expires_at, payment_id, status)
+         VALUES ($1, $2, $3, $4, $5, 'active')
+         ON CONFLICT (creator_id, subscriber_id)
+         DO UPDATE SET status = 'active', price_usd = $3, expires_at = $4, payment_id = $5,
+                       cancelled_at = NULL, auto_renew = TRUE
+         RETURNING id`,
+        [creatorId, subscriberId, priceUsd, expiresAt, paymentId || null]
+      );
+      rows = subResult.rows;
+
+      // Recompute the visible subscriber count from canonical rows instead of
+      // incrementing blindly, which drifts on renewals and idempotent replays.
+      await client.query(
+        `UPDATE users
+            SET creator_subscriber_count = (
+              SELECT COUNT(*)
+              FROM creator_subscriptions
+              WHERE creator_id = $1
+                AND status = 'active'
+                AND (expires_at IS NULL OR expires_at > NOW())
+            )
+          WHERE id = $1`,
+        [creatorId]
+      );
+
+      // Write creator-subscription entitlement so entitlement-based access checks work
+      await client.query(`
         INSERT INTO user_entitlements (user_id, add_on_id, creator_id, expires_at, source_plan_id, source_payment_id)
         VALUES ($1, 'creator-subscription', $2, NOW() + INTERVAL '30 days', 'creator_monthly', $3)
         ON CONFLICT (user_id, add_on_id, creator_id)
@@ -410,21 +417,32 @@ class CreatorService {
           updated_at = NOW()
         WHERE NOT user_entitlements.is_lifetime
       `, [String(subscriberId), String(creatorId), paymentId || null]);
-      const EntitlementAccessService = require('./entitlementAccessService');
-      await EntitlementAccessService.invalidateCache(String(subscriberId));
-    } catch (entErr) {
-      logger.warn('subscribeToCreator: failed to write entitlement', { subscriberId, creatorId, error: entErr.message });
+
+      // Record earnings (70/30 split) — held for EARNINGS_HOLD_HOURS before maturing to 'available'
+      const amountCreator = Math.round(priceUsd * CREATOR_REVENUE_RATE * 100) / 100;
+      const amountPlatform = Math.round(priceUsd * PLATFORM_COMMISSION_RATE * 100) / 100;
+
+      await client.query(
+        `INSERT INTO creator_earnings (creator_id, subscription_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+         VALUES ($1, $2, $3, $4, $5, 'holding', NOW() + ($6 || ' hours')::interval, $7, date_trunc('month', CURRENT_DATE)::date)
+         ON CONFLICT (source_payment_id) DO NOTHING`,
+        [creatorId, rows[0].id, priceUsd, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId || null]
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
 
-    // Record earnings (70/30 split) — held for EARNINGS_HOLD_HOURS before maturing to 'available'
-    const amountCreator = Math.round(priceUsd * CREATOR_REVENUE_RATE * 100) / 100;
-    const amountPlatform = Math.round(priceUsd * PLATFORM_COMMISSION_RATE * 100) / 100;
-
-    await query(
-      `INSERT INTO creator_earnings (creator_id, subscription_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
-       VALUES ($1, $2, $3, $4, $5, 'holding', NOW() + ($6 || ' hours')::interval, $7, date_trunc('month', CURRENT_DATE)::date)`,
-      [creatorId, rows[0].id, priceUsd, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId || null]
-    );
+    // Cache invalidation runs outside the transaction (non-fatal)
+    try {
+      await EntitlementAccessService.invalidateCache(String(subscriberId));
+    } catch (cacheErr) {
+      logger.warn('subscribeToCreator: cache invalidation failed (non-fatal)', { subscriberId, error: cacheErr.message });
+    }
 
     // Notify subscriber's frontend to refresh subscription state
     try {
@@ -488,7 +506,10 @@ class CreatorService {
     if (result.rowCount === 0) throw new Error('No active subscription found');
 
     await query(
-      'UPDATE users SET creator_subscriber_count = GREATEST(0, creator_subscriber_count - 1) WHERE id = $1',
+      `UPDATE users SET creator_subscriber_count = (
+         SELECT COUNT(*) FROM creator_subscriptions
+         WHERE creator_id = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW())
+       ) WHERE id = $1`,
       [creatorId]
     );
 
@@ -536,17 +557,44 @@ class CreatorService {
     const { rows } = await query(
       `UPDATE creator_subscriptions SET status = 'expired'
        WHERE status = 'active' AND expires_at < NOW()
-       RETURNING creator_id`
+       RETURNING subscriber_id, creator_id`
     );
 
-    // Decrement subscriber counts
+    // Recompute subscriber counts and revoke entitlements for each affected creator
     const creatorIds = [...new Set(rows.map(r => r.creator_id))];
     for (const creatorId of creatorIds) {
-      const expiredCount = rows.filter(r => r.creator_id === creatorId).length;
       await query(
-        'UPDATE users SET creator_subscriber_count = GREATEST(0, creator_subscriber_count - $2) WHERE id = $1',
-        [creatorId, expiredCount]
+        `UPDATE users SET creator_subscriber_count = (
+           SELECT COUNT(*) FROM creator_subscriptions
+           WHERE creator_id = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW())
+         ) WHERE id = $1`,
+        [creatorId]
       );
+    }
+
+    // Revoke user_entitlements for all expired subscriptions and invalidate caches
+    const EntitlementAccessService = require('./entitlementAccessService');
+    for (const { subscriber_id: subscriberId, creator_id: creatorId } of rows) {
+      try {
+        await query(
+          `UPDATE user_entitlements
+           SET expires_at = NOW(), updated_at = NOW()
+           WHERE user_id = $1 AND add_on_id = 'creator-subscription' AND creator_id = $2
+             AND expires_at > NOW()`,
+          [String(subscriberId), String(creatorId)]
+        );
+      } catch (entErr) {
+        logger.warn('expireCreatorSubscriptions: failed to revoke entitlement', {
+          subscriberId, creatorId, error: entErr.message,
+        });
+      }
+      try {
+        await EntitlementAccessService.invalidateCache(String(subscriberId));
+      } catch (cacheErr) {
+        logger.warn('expireCreatorSubscriptions: cache invalidation failed (non-fatal)', {
+          subscriberId, error: cacheErr.message,
+        });
+      }
     }
 
     logger.info('Expired creator subscriptions', { expired: rows.length, creators: creatorIds.length });
@@ -623,7 +671,8 @@ class CreatorService {
     // Check active subscription
     const subRes = await query(
       `SELECT id FROM creator_subscriptions
-       WHERE creator_id = $1 AND subscriber_id = $2 AND status = 'active'`,
+       WHERE creator_id = $1 AND subscriber_id = $2 AND status = 'active'
+         AND (expires_at IS NULL OR expires_at > NOW())`,
       [creatorId, viewerId]
     );
 
@@ -675,7 +724,8 @@ class CreatorService {
     if (creatorIds.length > 0) {
       const subsRes = await query(
         `SELECT creator_id FROM creator_subscriptions
-         WHERE subscriber_id = $1 AND creator_id = ANY($2) AND status = 'active'`,
+         WHERE subscriber_id = $1 AND creator_id = ANY($2) AND status = 'active'
+           AND (expires_at IS NULL OR expires_at > NOW())`,
         [viewerId, creatorIds]
       );
       subscribedCreatorIds = new Set(subsRes.rows.map(r => r.creator_id));
@@ -721,6 +771,8 @@ class CreatorService {
         `SELECT id, status, price_usd, started_at, expires_at, auto_renew
          FROM creator_subscriptions
          WHERE creator_id = $1 AND subscriber_id = $2
+           AND status = 'active'
+           AND (expires_at IS NULL OR expires_at > NOW())
          ORDER BY created_at DESC LIMIT 1`,
         [creatorId, subscriberId]
       ),

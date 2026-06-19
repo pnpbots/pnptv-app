@@ -1375,7 +1375,7 @@ export default function Profile() {
                     </svg>
                   </button>
                 )}
-                {profile.creatorStatus === "active" && isAuthenticated && (() => {
+                {profile.creatorStatus === "active" && isAuthenticated && !isOwnProfile && (() => {
                   const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
                   if (isCreatorPayLocked(profile.username)) {
                     return (

@@ -115,8 +115,8 @@ const getSubscriptionStatus = async (req, res) => {
 
 // POST /api/webapp/creator/:creatorId/subscribe
 const subscribeToCreator = async (req, res) => {
-  if (!hasAccess(req.user, 'member')) {
-    return res.status(403).json({ error: 'Member subscription required to subscribe to creators' });
+  if (!req.body?.paymentId) {
+    return res.status(400).json({ error: 'paymentId is required' });
   }
   try {
     const creatorId = await resolveUserId(req.params.creatorId);

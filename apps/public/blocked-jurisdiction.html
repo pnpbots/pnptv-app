@@ -33,6 +33,18 @@
         .bypass-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .bypass-note { font-size: 12px; color: var(--text-muted); margin-top: 10px; margin-bottom: 0; }
         .bypass-error { font-size: 13px; color: #ff6b6b; margin-top: 8px; display: none; }
+        /* Invite card (CO/VE) */
+        .invite-card { background: rgba(230,145,56,0.08); border: 1px solid rgba(230,145,56,0.30); border-radius: 16px; padding: 24px; margin-bottom: 24px; text-align: left; backdrop-filter: blur(20px); }
+        .invite-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 10px; color: var(--text-main); }
+        .invite-card p { font-size: 14px; color: rgba(255,255,255,0.8); margin-bottom: 14px; }
+        .invite-input-row { display: flex; gap: 8px; }
+        .invite-input { flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; padding: 11px 14px; color: #fff; font-size: 14px; font-family: monospace; outline: none; }
+        .invite-input::placeholder { color: rgba(255,255,255,0.3); }
+        .invite-input:focus { border-color: rgba(230,145,56,0.6); }
+        .invite-submit { background: linear-gradient(135deg, var(--neon-amber), var(--neon-pink)); color: #fff; font-size: 14px; font-weight: 600; border: none; border-radius: 10px; padding: 11px 20px; cursor: pointer; white-space: nowrap; transition: opacity 0.15s; }
+        .invite-submit:hover:not(:disabled) { opacity: 0.88; }
+        .invite-submit:disabled { opacity: 0.45; cursor: not-allowed; }
+        .invite-error { font-size: 13px; color: #ff9f43; margin-top: 8px; display: none; }
     </style>
 </head>
 <body>
@@ -41,7 +53,7 @@
     <h1>Service Not Available in Your Jurisdiction</h1>
     <p class="subtitle" id="subtitle-text">We're not able to serve users from your location due to local age-verification laws.</p>
 
-    <div class="bypass-card" id="bypass-card">
+    <div id="bypass-card-self" class="bypass-card">
         <h2>Not actually in a restricted area?</h2>
         <p>Mobile carriers (T-Mobile, AT&T, Verizon) and some VPNs route traffic through exit nodes in restricted states, causing our location detection to misidentify you. If you are <strong>not physically located</strong> in a restricted jurisdiction, you can continue by confirming your actual location below.</p>
         <button class="bypass-btn" id="bypass-btn" onclick="requestBypass()">I am not in a restricted jurisdiction &mdash; Continue</button>
@@ -49,19 +61,31 @@
         <p class="bypass-error" id="bypass-error">Something went wrong. Please try again or contact support@pnptv.app.</p>
     </div>
 
+    <div id="invite-card" class="invite-card" style="display:none">
+        <h2>Have an invite link?</h2>
+        <p>PNPtv access from your region is currently by invitation only. If someone shared an invite link with you, paste the code below to continue.</p>
+        <div class="invite-input-row">
+            <input class="invite-input" id="invite-input" type="text" placeholder="Paste your invite code here" maxlength="32" autocomplete="off" spellcheck="false" />
+            <button class="invite-submit" id="invite-submit" onclick="redeemInvite()">Enter</button>
+        </div>
+        <p class="invite-error" id="invite-error">Invalid or expired invite code. Contact the person who shared it with you.</p>
+    </div>
+
     <div class="card">
-        <h2>Why is PNPtv blocked here?</h2>
-        <p>PNPtv is an adult content platform. Several US states and the United Kingdom have enacted laws requiring adult platforms to collect, verify, and retain government-issued identification for every user. PNPtv has chosen <strong>not to collect that data</strong> &mdash; protecting user privacy is a core platform value. Rather than comply with these identification mandates, we block access from those jurisdictions entirely.</p>
+        <h2>Why is PNPtv restricted here?</h2>
+        <p id="why-blocked-text">PNPtv is an adult content platform. Several US states and the United Kingdom have enacted laws requiring adult platforms to collect, verify, and retain government-issued identification for every user. PNPtv has chosen <strong>not to collect that data</strong> &mdash; protecting user privacy is a core platform value. Rather than comply with these identification mandates, we block access from those jurisdictions entirely.</p>
         <p>This is a temporary measure. PNPtv is exploring privacy-preserving age verification solutions (such as zero-knowledge proofs) that would allow access without identity exposure. When that system is available, affected users will be notified. See <a href="/2257" target="_blank">18 U.S.C. &sect; 2257 records</a> for compliance documentation.</p>
     </div>
 
     <div class="card">
-        <h2>Which jurisdictions are blocked?</h2>
+        <h2>Which jurisdictions are restricted?</h2>
         <ul>
             <li><strong>United States:</strong> Texas, Louisiana, Utah, Virginia, Indiana, Arkansas, Mississippi, North Carolina, Tennessee, Florida</li>
             <li><strong>United Kingdom</strong> (Online Safety Act 2023 / Ofcom HEAA)</li>
+            <li><strong>Colombia</strong> &mdash; invite only</li>
+            <li><strong>Venezuela</strong> &mdash; invite only</li>
         </ul>
-        <p>Only states with <em>active, enforced</em> age-verification laws as of May 2026 are blocked. This list will be updated as legal landscapes change.</p>
+        <p>Colombia and Venezuela require an admin-issued invitation to join. US states and UK are blocked due to active age-verification laws.</p>
     </div>
 
     <div class="card">
@@ -90,23 +114,78 @@
     </div>
 </div>
 <script>
-    // Extract jurisdiction from query param for personalised messaging
+    var INVITE_ONLY_COUNTRIES = ['CO', 'VE'];
+    var currentCountry = null;
+
     (function() {
         var params = new URLSearchParams(window.location.search);
         var j = params.get('j');
+        var err = params.get('err');
+        var stateNames = {
+            TX: 'Texas', TN: 'Tennessee', FL: 'Florida', LA: 'Louisiana',
+            UT: 'Utah', VA: 'Virginia', IN: 'Indiana', AR: 'Arkansas',
+            MS: 'Mississippi', NC: 'North Carolina', GB: 'the United Kingdom',
+            CO: 'Colombia', VE: 'Venezuela'
+        };
+
         if (j) {
-            var stateNames = {
-                TX: 'Texas', TN: 'Tennessee', FL: 'Florida', LA: 'Louisiana',
-                UT: 'Utah', VA: 'Virginia', IN: 'Indiana', AR: 'Arkansas',
-                MS: 'Mississippi', NC: 'North Carolina', GB: 'the United Kingdom'
-            };
+            currentCountry = j;
             var displayName = stateNames[j] || j;
             var subtitle = document.getElementById('subtitle-text');
-            if (subtitle) {
-                subtitle.textContent = 'Our records show your connection is routing through ' + displayName + ', which has active age-verification laws that prevent us from serving users there.';
+            var whyText = document.getElementById('why-blocked-text');
+            var isInviteOnly = INVITE_ONLY_COUNTRIES.indexOf(j) !== -1;
+
+            if (isInviteOnly) {
+                if (subtitle) subtitle.textContent = 'PNPtv access from ' + displayName + ' is currently by invitation only. You need an admin-issued invite link to join.';
+                if (whyText) whyText.textContent = 'PNPtv is an invite-only platform for users from ' + displayName + ' at this time. If you received an invite from a friend or creator, enter your code above to get access.';
+                // Show invite card, hide self-cert card
+                document.getElementById('invite-card').style.display = 'block';
+                document.getElementById('bypass-card-self').style.display = 'none';
+            } else {
+                if (subtitle) subtitle.textContent = 'Our records show your connection is routing through ' + displayName + ', which has active age-verification laws that prevent us from serving users there.';
+            }
+        }
+
+        // Handle error codes from invite redemption redirects
+        if (err) {
+            var errMap = {
+                invalid_invite: 'Invalid invite code. Double-check the link and try again.',
+                expired_invite: 'This invite link has expired. Contact the person who shared it.',
+                invite_used: 'This invite link has already been used. Contact support for a new one.'
+            };
+            var errMsg = errMap[err];
+            if (errMsg) {
+                document.getElementById('invite-card').style.display = 'block';
+                document.getElementById('bypass-card-self').style.display = 'none';
+                var invErrEl = document.getElementById('invite-error');
+                invErrEl.textContent = errMsg;
+                invErrEl.style.display = 'block';
             }
         }
     })();
+
+    function redeemInvite() {
+        var input = document.getElementById('invite-input');
+        var btn = document.getElementById('invite-submit');
+        var errEl = document.getElementById('invite-error');
+        var code = (input.value || '').trim();
+        if (!code) return;
+        btn.disabled = true;
+        btn.textContent = '…';
+        errEl.style.display = 'none';
+        // Navigate directly — the endpoint sets the session and redirects
+        window.location.href = '/api/public/geo-invite/' + encodeURIComponent(code);
+    }
+
+    // Allow Enter key in the invite input
+    document.addEventListener('DOMContentLoaded', function() {
+        var input = document.getElementById('invite-input');
+        if (input) {
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') redeemInvite();
+            });
+        }
+    });
 
     function requestBypass() {
         var btn = document.getElementById('bypass-btn');

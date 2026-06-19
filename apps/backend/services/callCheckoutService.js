@@ -18,16 +18,15 @@ const { sendNotificationViaTelegram } = require('./notificationBotDelivery');
 const emailService = require('./emailservice');
 const logger = require('../utils/logger');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
-// Loaded lazily to avoid circular-require on startup
-function getBtcpay() {
-  return require('../config/btcpay');
-}
 function getCallNotificationService() {
   return require('./callNotificationService');
 }
 
 const CHECKOUT_DOMAIN = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
 const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
+const NOWPAYMENTS_URL = process.env.NOWPAYMENTS_ENVIRONMENT === 'sandbox'
+  ? 'https://api-sandbox.nowpayments.io/v1'
+  : 'https://api.nowpayments.io/v1';
 
 /**
  * Escape user-supplied values before interpolation into HTML templates.
@@ -66,9 +65,9 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     throw err;
   }
 
-  // Only Dash (BTCPay) and ePayco (card) are supported for call checkouts.
-  if (provider !== 'dash' && provider !== 'epayco') {
-    const err = new Error(`Invalid payment provider: ${provider}. Supported: epayco, dash.`);
+  // Only ePayco (card) and nowpayments (crypto) are supported for call checkouts.
+  if (provider !== 'nowpayments' && provider !== 'epayco') {
+    const err = new Error(`Invalid payment provider: ${provider}. Supported: epayco, nowpayments.`);
     err.code = 'INVALID_PROVIDER';
     throw err;
   }
@@ -391,20 +390,55 @@ async function onCallPaymentSuccess(paymentId) {
             });
           }
         }
-        // Schedule call reminders if we have a confirmed booking with time slots
+        // Booking-specific notifications + lifecycle setup when a scheduled slot exists
+        // Direct call room URL (/call/:creditId) works for both scheduled and NOW flows.
+        const callJoinUrl = `${WEB_APP_URL}/call/${encodeURIComponent(String(credit.id))}`;
+        // Send booking confirmation emails + Telegram to both parties (always, scheduled or NOW)
+        const notifSvc = getCallNotificationService();
+        const bookingSummary = {
+          creator_name: creatorName,
+          start_at: meta.startTimeUtc || null,
+          duration_minutes: pkg.duration_minutes,
+        };
+        const callInfo = { meetingUrl: callJoinUrl };
+        await Promise.allSettled([
+          notifSvc.sendBookingConfirmationToMember(payment.user_id, bookingSummary, callInfo),
+          notifSvc.sendBookingConfirmationToCreator(creator_id, bookingSummary, {}, callInfo),
+        ]);
+
         if (confirmedBookingId && meta.startTimeUtc) {
+          // Schedule in-memory reminders (1h + 15min before)
           try {
-            getCallNotificationService().scheduleCallReminders(
+            notifSvc.scheduleCallReminders(
               confirmedBookingId,
               creator_id,
               payment.user_id,
               meta.startTimeUtc,
-              null
+              { meetingUrl: callJoinUrl }
             );
           } catch (reminderErr) {
             logger.warn('[callCheckoutService] failed to schedule call reminders (non-critical)', {
               bookingId: confirmedBookingId, error: reminderErr.message,
             });
+          }
+
+          // Create call_sessions row so the lifecycle worker can auto-end overdue calls
+          try {
+            const CallSessionModel = require('../models/callSessionModel');
+            await CallSessionModel.create({
+              bookingId: confirmedBookingId,
+              roomProvider: 'livekit',
+              roomId: `booking-${credit.id}`,
+              roomName: `Private Call - ${safeCreatorName}`,
+              maxParticipants: 2,
+              recordingDisabled: true,
+            });
+          } catch (sessionErr) {
+            if (sessionErr.code !== '23505') {
+              logger.warn('[callCheckoutService] call_sessions row creation failed (non-fatal)', {
+                bookingId: confirmedBookingId, error: sessionErr.message,
+              });
+            }
           }
         }
       } catch (notifErr) {
@@ -502,22 +536,30 @@ async function _getPerformerId(client, creatorUserId) {
 }
 
 // ---------------------------------------------------------------------------
-// createCallCheckoutDash — Dash/BTCPay checkout for a call package
+// createCallCheckoutNowPayments — NowPayments (crypto) checkout for a call package
 // ---------------------------------------------------------------------------
 
 /**
- * Create a BTCPay Dash invoice for a call package purchase.
- * Locks the slot atomically and creates an awaiting_payment booking row
- * before the invoice is issued.
+ * Create a NowPayments hosted invoice for a call package purchase (20% crypto discount).
+ * Locks the slot atomically and creates an awaiting_payment booking row before the invoice.
  *
  * @param {object} opts
  * @param {string} opts.userId        - users.id of the buyer
  * @param {number} opts.packageId     - call_packages.id
- * @param {string} opts.startTimeUtc  - ISO 8601
- * @param {string} opts.endTimeUtc    - ISO 8601
- * @returns {{ invoiceId, checkoutUrl, paymentId, amountUsd, expiresAt, bookingId }}
+ * @param {string} [opts.startTimeUtc] - ISO 8601
+ * @param {string} [opts.endTimeUtc]   - ISO 8601
+ * @returns {{ invoiceUrl, paymentId, bookingId, amountUsd, expiresAt, orderId }}
  */
-async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTimeUtc }) {
+async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, endTimeUtc }) {
+  const axios = require('axios');
+  const NOWPAYMENTS_API_KEY = process.env.NOWPAYMENTS_API_KEY || '';
+  if (!NOWPAYMENTS_API_KEY) {
+    const err = new Error('Crypto payments are not configured');
+    err.code = 'NOWPAYMENTS_NOT_CONFIGURED';
+    err.status = 503;
+    throw err;
+  }
+
   // 1. Load package
   const pkgResult = await query(
     'SELECT * FROM call_packages WHERE id = $1 AND is_active = true',
@@ -530,13 +572,14 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
     throw err;
   }
 
-  const amountUsd = Math.round(parseFloat(pkg.price_usd) * 0.95 * 100) / 100;
+  // 2. Apply 20% crypto discount
+  const amountUsd = Math.round(parseFloat(pkg.price_usd) * 0.80 * 100) / 100;
 
-  // 2. Create a pending payment record so we have a payment UUID before the invoice
+  // 3. Create pending payment record
   const payment = await PaymentModel.create({
     userId,
     planId: null,
-    provider: 'dash',
+    provider: 'nowpayments',
     sku: pkg.sku,
     amount: amountUsd,
     currency: 'USD',
@@ -546,29 +589,24 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
       packageId: pkg.id,
       packageSku: pkg.sku,
       creatorId: pkg.creator_id,
-      startTimeUtc,
-      endTimeUtc,
-      provider: 'dash',
+      startTimeUtc: startTimeUtc || null,
+      endTimeUtc: endTimeUtc || null,
+      provider: 'nowpayments',
     },
   });
 
+  // 4. Slot-lock + insert booking row when times are provided
   const pool = getPool();
   const client = await pool.connect();
   let booking;
   try {
     await client.query('BEGIN');
-
-    // 3. Resolve performer row for the creator
     const performerId = await _getPerformerId(client, pkg.creator_id);
     if (!performerId) {
       throw Object.assign(new Error(`Creator ${pkg.creator_id} has no performer profile`), {
         code: 'PERFORMER_NOT_FOUND', status: 404,
       });
     }
-
-    // 4. Slot-lock + insert booking row only when slot times are provided.
-    // When null (creator is online / "NOW" flow), the booking is created later
-    // in onCallPaymentSuccess after BTCPay confirms.
     if (startTimeUtc && endTimeUtc) {
       booking = await _lockSlotAndInsertBooking(client, {
         performerId,
@@ -581,121 +619,98 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
         priceUsd: pkg.price_usd,
       });
     }
-
     await client.query('COMMIT');
   } catch (txErr) {
     await client.query('ROLLBACK');
-    // Clean up the pending payment record so it doesn't accumulate as orphaned debt
-    await query(
-      `UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1`,
-      [payment.id]
-    ).catch(() => {});
+    await query(`UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1`, [payment.id]).catch(() => {});
     throw txErr;
   } finally {
     client.release();
   }
 
-  // 5. Create BTCPay invoice — outside the booking transaction so a BTCPay error
-  //    doesn't leave a half-committed DB state. On failure, expire the booking.
-  const { createInvoice } = getBtcpay();
-  let btcpayInvoice;
-  try {
-    const orderId = `call-${payment.id}`;
-    const redirectUrl = booking?.id
-      ? `${process.env.WEBAPP_URL || 'https://pnptv.app'}/booking/${booking.id}/confirm`
-      : `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`;
+  // 5. Create NowPayments invoice — outside the booking transaction
+  const orderId = `call-${payment.id}`;
+  const successUrl = booking?.id
+    ? `${WEB_APP_URL}/booking/${booking.id}/confirm?nowpayments=success`
+    : `${WEB_APP_URL}/subscribe?nowpayments=success`;
 
-    btcpayInvoice = await createInvoice({
-      amount: amountUsd,
-      currency: 'USD',
-      orderId,
-      userId,
-      planId: 'call_package',
-      metadata: {
-        resource: 'call_package',
-        packageId: pkg.id,
-        paymentId: payment.id,
-        bookingId: booking?.id ?? null,
-        creatorId: pkg.creator_id,
-        startTimeUtc,
-        endTimeUtc,
+  let invoiceUrl;
+  try {
+    const invoiceResp = await axios.post(
+      `${NOWPAYMENTS_URL}/invoice`,
+      {
+        price_amount: amountUsd,
+        price_currency: 'usd',
+        order_id: orderId,
+        order_description: `${pkg.duration_minutes}-min call — PNPtv`,
+        ipn_callback_url: `${WEB_APP_URL}/api/webhooks/nowpayments`,
+        success_url: successUrl,
+        is_fixed_rate: true,
+        is_fee_paid_by_user: false,
       },
-      redirectUrl,
-      paymentMethods: ['DASH'],
-    });
+      { headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' } }
+    );
+    invoiceUrl = invoiceResp.data?.invoice_url;
+    if (!invoiceUrl) throw new Error('NowPayments returned no invoice_url');
   } catch (invoiceErr) {
-    // Expire the booking so the slot is freed (booking may be null on NOW flow)
     if (booking?.id) {
-      await query(
-        `UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`,
-        [booking.id]
-      ).catch(() => {});
+      await query(`UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`, [booking.id]).catch(() => {});
     }
-    await query(
-      `UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1`,
-      [payment.id]
-    ).catch(() => {});
-    logger.error('[callCheckoutService] BTCPay invoice creation failed', {
-      paymentId: payment.id, bookingId: booking?.id ?? null, error: invoiceErr.message,
+    await query(`UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1`, [payment.id]).catch(() => {});
+    logger.error('[callCheckoutService] NowPayments invoice creation failed', {
+      paymentId: payment.id, bookingId: booking?.id ?? null,
+      error: invoiceErr.response?.data?.message || invoiceErr.message,
     });
-    throw invoiceErr;
+    throw Object.assign(new Error('Could not reach NowPayments. Please try again.'), {
+      code: 'NOWPAYMENTS_ERROR', status: 502,
+    });
   }
 
-  // 6. Link BTCPay invoice to the dash_subscription_orders table so the webhook can route
+  // 6. Register in dash_subscription_orders so the webhook handler can route
   await query(
     `INSERT INTO dash_subscription_orders
        (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id, metadata)
      VALUES ($1, 'call_package', NULL, $2, $3, 'pending', $4, $5::jsonb)
      ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
     [
-      userId,
-      amountUsd,
-      btcpayInvoice.invoiceId,
-      pkg.creator_id,
+      userId, amountUsd, orderId, pkg.creator_id,
       JSON.stringify({
         resource: 'call_package',
         packageId: pkg.id,
         paymentId: payment.id,
         bookingId: booking?.id ?? null,
-        startTimeUtc,
-        endTimeUtc,
+        startTimeUtc: startTimeUtc || null,
+        endTimeUtc: endTimeUtc || null,
       }),
     ]
   );
 
-  // 7. Stamp the invoice ID back onto the payment record for cross-reference
+  // 7. Stamp orderId + bookingId back onto payment metadata for getBookingPaymentStatus polling
   await query(
-    `UPDATE payments
-     SET metadata = metadata || $2::jsonb, updated_at = NOW()
-     WHERE id = $1`,
-    [payment.id, JSON.stringify({ btcpay_invoice_id: btcpayInvoice.invoiceId, booking_id: booking?.id ?? null })]
+    `UPDATE payments SET metadata = metadata || $2::jsonb, updated_at = NOW() WHERE id = $1`,
+    [payment.id, JSON.stringify({ btcpay_invoice_id: orderId, booking_id: booking?.id ?? null })]
   );
 
-  // BTCPay invoices expire after the store's default window (usually 15 min).
-  // We don't receive this from the API, so use a 15-min heuristic.
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  // NowPayments invoices expire after 30 minutes by default
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
-  logger.info('[callCheckoutService] Dash checkout created', {
-    paymentId: payment.id,
-    bookingId: booking?.id ?? null,
-    btcpayInvoiceId: btcpayInvoice.invoiceId,
-    packageId: pkg.id,
-    amountUsd,
+  logger.info('[callCheckoutService] NowPayments call checkout created', {
+    paymentId: payment.id, bookingId: booking?.id ?? null, orderId, packageId: pkg.id, amountUsd,
   });
 
   return {
-    invoiceId: btcpayInvoice.invoiceId,
-    checkoutUrl: btcpayInvoice.checkoutLink,
+    invoiceUrl,
     paymentId: payment.id,
     bookingId: booking?.id ?? null,
     amountUsd,
     expiresAt,
+    orderId,
   };
 }
 
 module.exports = {
   createCallCheckout,
-  createCallCheckoutDash,
+  createCallCheckoutNowPayments,
   onCallPaymentSuccess,
   _lockSlotAndInsertBooking,
   _getPerformerId,

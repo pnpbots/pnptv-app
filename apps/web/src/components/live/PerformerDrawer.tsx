@@ -20,7 +20,6 @@ import {
   listCreatorMedia,
   listCreatorRecordings,
   getCreatorSubscriptionStatus,
-  subscribeToCreator,
   isCreatorPayLocked,
   type CreatorMediaItem,
   type StreamRecording,
@@ -239,23 +238,13 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
     if (delta > 80) onClose();
   }, [onClose]);
 
-  const handleSubscribe = async () => {
+  const handleSubscribe = () => {
     if (!isAuthenticated) { navigate("/login"); return; }
     if (!creatorId) return;
-    setSubLoading(true);
-    try {
-      // MED-04: Payment enforcement is done server-side in CreatorService.subscribeToCreator,
-      // which verifies the caller holds a pnp-prime entitlement before inserting a
-      // creator_subscriptions row. This call is the trigger only — no client-side
-      // payment collection happens here.
-      await subscribeToCreator(creatorId);
-      setSubscribed(true);
-      setShowSubscribePrompt(false);
-    } catch {
-      // surface error in prompt
-    } finally {
-      setSubLoading(false);
-    }
+    // Navigate to the creator's profile page where the proper payment-gated
+    // subscribe flow lives. Direct API subscription without payment is not allowed.
+    navigate(`/profile/${creatorId}`);
+    onClose();
   };
 
   if (!performer) return null;

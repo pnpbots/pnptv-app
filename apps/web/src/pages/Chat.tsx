@@ -1568,6 +1568,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
   // Create group error
   const [createError, setCreateError] = useState<string | null>(null);
+  const [createTermsAccepted, setCreateTermsAccepted] = useState(false);
 
   // Online members panel
   const [showOnline, setShowOnline] = useState(false);
@@ -2045,6 +2046,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setNewSlowMode(0);
       setNewFeedVisibility("public");
       setNewChannelId(null);
+      setCreateTermsAccepted(false);
       loadGroups();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : t.chat.errorFailedToCreate);
@@ -3960,17 +3962,46 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             </div>
           )}
 
+          {/* Creator accountability acknowledgment */}
+          <label className="flex items-start gap-2.5 cursor-pointer select-none" htmlFor="create-terms-accept">
+            <div className="relative mt-0.5 flex-shrink-0">
+              <input
+                id="create-terms-accept"
+                type="checkbox"
+                className="sr-only"
+                checked={createTermsAccepted}
+                onChange={(e) => setCreateTermsAccepted(e.target.checked)}
+              />
+              <div
+                className="w-4 h-4 rounded border transition-all"
+                style={{
+                  background: createTermsAccepted ? "linear-gradient(135deg, #D4007A, #7B61FF)" : "rgba(255,255,255,0.06)",
+                  borderColor: createTermsAccepted ? "transparent" : "rgba(255,255,255,0.2)",
+                }}
+              >
+                {createTermsAccepted && (
+                  <svg className="w-4 h-4 text-white p-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </div>
+            </div>
+            <p className="text-[11px] text-pnp-textSecondary leading-relaxed">
+              I understand that as the creator of this Hangout I am <span className="text-pnp-textPrimary font-medium">solely responsible</span> for moderating member conduct, enforcing community rules, and ensuring no prohibited content is shared (no solicitation, no minors, no off-platform recruitment). PNPtv is not liable for content posted in creator-owned Hangouts. Violations may result in removal of the group and suspension of my account.
+            </p>
+          </label>
+
           {/* Action buttons */}
           <div className="flex gap-2">
             <button
-              onClick={() => { setShowCreate(false); setCreateError(null); setNewTags([]); }}
+              onClick={() => { setShowCreate(false); setCreateError(null); setNewTags([]); setCreateTermsAccepted(false); }}
               className="flex-1 py-2.5 rounded-xl text-sm text-pnp-textSecondary border border-white/10 hover:bg-white/5 active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
             >
               {t.chat.cancel}
             </button>
             <button
               onClick={handleCreate}
-              disabled={!newName.trim() || creating}
+              disabled={!newName.trim() || creating || !createTermsAccepted}
               className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
               style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)" }}
             >

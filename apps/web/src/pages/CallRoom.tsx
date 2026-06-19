@@ -442,8 +442,8 @@ export default function CallRoom() {
         token={joinData.token}
         serverUrl={joinData.livekitUrl}
         connect={true}
-        audio={false}
         video={true}
+        audio={true}
         options={{ adaptiveStream: true, dynacast: true }}
         onDisconnected={() => {
           try {

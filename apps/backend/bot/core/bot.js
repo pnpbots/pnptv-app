@@ -1066,8 +1066,16 @@ const startBot = async () => {
             try {
               const SocialPostService = require('../../services/socialPostService');
               const localUrl = await downloadAndSaveHangoutMedia(mediaUrl, mediaType, hangoutId, chatMsgId);
+
+              // Update chat_messages to the local persistent URL so it never expires
+              await dbQuery(
+                `UPDATE chat_messages SET media_url = $1 WHERE id = $2`,
+                [localUrl, chatMsgId]
+              );
+              socketIO.to(room).emit('chat:message:update', { id: chatMsgId, room, media_url: localUrl });
+
               await SocialPostService.createPost(
-                userId, textContent || null, localUrl, mediaType,
+                userId, textContent || '', localUrl, mediaType,
                 null, null, false, false, true, null, null, null,
                 hangoutId, chatMsgId
               );
@@ -1885,6 +1893,16 @@ const startBot = async () => {
     // Cristina onboarding reminders — DISABLED (spam prevention per admin request)
     logger.info('• Cristina onboarding reminders skipped (disabled)');
 
+
+    // Private calls lifecycle worker (expire held bookings, auto-end overdue calls, no-show detection)
+    try {
+      const { initializeWorker: initPrivateCallsWorker } = require('../../workers/privateCallsWorker');
+      const privateCallsWorker = initPrivateCallsWorker(bot);
+      privateCallsWorker.start();
+      logger.info('✓ Private calls worker initialized');
+    } catch (error) {
+      logger.warn(`Private calls worker initialization failed: ${error.message}`);
+    }
 
     // Initialize orphaned media cleanup worker (every 6h, 10-min startup delay)
     try {

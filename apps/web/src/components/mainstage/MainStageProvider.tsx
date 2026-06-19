@@ -106,6 +106,9 @@ export interface MainStageProviderValue {
 
   /** Tier assigned by the backend for this session: newcomer | member | prime | admin */
   participantTier: 'newcomer' | 'member' | 'prime' | 'admin' | null;
+
+  /** True when the persistent mini player is currently visible (off /main-stage with live content) */
+  showMiniPlayer: boolean;
 }
 
 // ─── Mini Stage Player helpers ─────────────────────────────────────────────
@@ -862,6 +865,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       cooldownSeconds,
       clearCooldown,
       participantTier,
+      showMiniPlayer,
     }),
     [
       role,
@@ -881,6 +885,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       cooldownSeconds,
       clearCooldown,
       participantTier,
+      showMiniPlayer,
     ]
   );
 

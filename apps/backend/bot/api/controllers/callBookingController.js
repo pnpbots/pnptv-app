@@ -40,15 +40,15 @@ async function resolveBooking(rawId, callerUserId) {
               cp.duration_minutes, cp.title AS package_title,
               u_creator.username AS creator_username,
               COALESCE(u_creator.first_name, u_creator.username) AS creator_display_name,
-              u_creator.photo_url AS creator_photo,
+              u_creator.photo_file_id AS creator_photo,
               u_member.username AS member_username,
               COALESCE(u_member.first_name, u_member.username) AS member_display_name,
-              u_member.photo_url AS member_photo,
+              u_member.photo_file_id AS member_photo,
               b.start_time_utc AS start_at,
               b.end_time_utc AS end_at,
               b.status AS booking_status
        FROM bookings b
-       JOIN call_credits cc ON cc.id = b.credit_id
+       LEFT JOIN call_credits cc ON cc.id = b.credit_id
        JOIN call_packages cp ON cp.id = cc.package_id
        JOIN users u_creator ON u_creator.id = cc.creator_id
        JOIN users u_member  ON u_member.id  = cc.member_id
@@ -70,10 +70,10 @@ async function resolveBooking(rawId, callerUserId) {
               cp.duration_minutes, cp.title AS package_title,
               u_creator.username AS creator_username,
               COALESCE(u_creator.first_name, u_creator.username) AS creator_display_name,
-              u_creator.photo_url AS creator_photo,
+              u_creator.photo_file_id AS creator_photo,
               u_member.username AS member_username,
               COALESCE(u_member.first_name, u_member.username) AS member_display_name,
-              u_member.photo_url AS member_photo,
+              u_member.photo_file_id AS member_photo,
               b.start_time_utc AS start_at,
               b.end_time_utc AS end_at,
               b.status AS booking_status
@@ -171,80 +171,6 @@ async function createCheckout(req, res) {
   }
 }
 
-// eslint-disable-next-line no-unused-vars
-async function _createCheckout_retired(req, res) {
-  try {
-    const sessionUser = req.session?.user;
-    if (!sessionUser?.id) {
-      return res.status(401).json({ success: false, error: 'Not authenticated' });
-    }
-    const memberId = String(sessionUser.id);
-
-    const { packageId, provider, email, startTimeUtc, endTimeUtc } = req.body;
-
-    if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
-      return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
-    }
-    if (!provider || provider !== 'dash') {
-      return res.status(400).json({ success: false, error: 'provider must be dash (use /book-call/checkout/dash)' });
-    }
-    if (!email || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ success: false, error: 'A valid email is required' });
-    }
-    // Optional slot times — when both are provided the service locks the slot
-    // at checkout and a bookings row is created with status='awaiting_payment'.
-    // When omitted, the legacy credit-only flow runs (no scheduled booking).
-    const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
-    let slotTimes = null;
-    if (startTimeUtc || endTimeUtc) {
-      if (!startTimeUtc || !endTimeUtc || !ISO_RE.test(startTimeUtc) || !ISO_RE.test(endTimeUtc)) {
-        return res.status(400).json({ success: false, error: 'startTimeUtc and endTimeUtc must both be ISO 8601 timestamps with timezone' });
-      }
-      const s = new Date(startTimeUtc);
-      const e = new Date(endTimeUtc);
-      if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) {
-        return res.status(400).json({ success: false, error: 'startTimeUtc or endTimeUtc is not a valid date' });
-      }
-      if (e <= s) {
-        return res.status(400).json({ success: false, error: 'endTimeUtc must be after startTimeUtc' });
-      }
-      if (s <= new Date()) {
-        return res.status(400).json({ success: false, error: 'startTimeUtc must be in the future' });
-      }
-      slotTimes = { startTimeUtc, endTimeUtc };
-    }
-
-    const result = await callCheckoutService.createCallCheckout(
-      memberId,
-      Number(packageId),
-      provider,
-      email.trim().toLowerCase(),
-      slotTimes
-    );
-
-    return res.status(201).json({ success: true, ...result });
-  } catch (err) {
-    logger.error('[callBookingController] createCheckout error', { error: err.message, code: err.code });
-
-    if (err.code === 'FX_RATE_UNAVAILABLE') {
-      return res.status(503).json({
-        success: false,
-        error: 'FX rate unavailable, please retry in a few minutes',
-        code: 'FX_RATE_UNAVAILABLE',
-      });
-    }
-    if (err.code === 'PACKAGE_NOT_FOUND') {
-      return res.status(404).json({ success: false, error: 'Call package not found or inactive' });
-    }
-    if (err.code === 'INVALID_PROVIDER') {
-      return res.status(400).json({ success: false, error: err.message });
-    }
-    if (err.code === 'SLOT_TAKEN') {
-      return res.status(409).json({ success: false, error: 'That time slot is no longer available. Please choose another.', code: 'SLOT_TAKEN' });
-    }
-    return res.status(500).json({ success: false, error: 'Failed to create checkout' });
-  }
-}
 
 // ---------------------------------------------------------------------------
 // GET /api/webapp/bookings/:bookingId
@@ -717,7 +643,7 @@ async function getMyBookings(req, res) {
         cp.price_usd,
         u_member.username  AS member_username,
         COALESCE(u_member.first_name, u_member.username) AS member_display_name,
-        u_member.photo_url AS member_photo
+        u_member.photo_file_id AS member_photo
       FROM call_credits cc
       JOIN call_packages cp ON cp.id = cc.package_id
       JOIN users u_member  ON u_member.id = cc.member_id
@@ -837,6 +763,12 @@ async function completeBooking(req, res) {
     }
 
     await CallBookingService.completeBooking(bookingId);
+
+    // Fire earnings recording + post-call survey async — do not block the response
+    const PrivateCallBookingService = require('../../../services/privateCallBookingService');
+    PrivateCallBookingService._onCallCompleted(bookingId).catch((err) => {
+      logger.warn('[callBookingController] _onCallCompleted failed (non-fatal)', { bookingId, error: err.message });
+    });
 
     logger.info('[callBookingController] booking completed', { bookingId, userId });
     return res.json({ success: true });
@@ -998,15 +930,15 @@ async function setNextShowDate(req, res) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/webapp/book-call/checkout/dash
+// POST /api/webapp/book-call/checkout/nowpayments
 // ---------------------------------------------------------------------------
 
 /**
- * Create a BTCPay Dash invoice for a call package purchase.
- * Body: { packageId: number, startTimeUtc: string (ISO 8601), endTimeUtc: string (ISO 8601) }
- * Returns: { invoiceId, checkoutUrl, paymentId, bookingId, amountUsd, expiresAt }
+ * Create a NowPayments hosted invoice for a call package purchase (20% crypto discount).
+ * Body: { packageId: number, startTimeUtc?: string (ISO 8601), endTimeUtc?: string (ISO 8601) }
+ * Returns: { invoiceUrl, paymentId, bookingId, amountUsd, expiresAt, orderId }
  */
-async function createCheckoutDash(req, res) {
+async function createCheckoutNowPayments(req, res) {
   try {
     const sessionUser = req.session?.user;
     if (!sessionUser?.id) {
@@ -1020,7 +952,7 @@ async function createCheckoutDash(req, res) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
     }
 
-    const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+    const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
     let slotTimes = null;
     if (startTimeUtc || endTimeUtc) {
       if (!startTimeUtc || typeof startTimeUtc !== 'string' || !ISO_RE.test(startTimeUtc)) {
@@ -1043,7 +975,7 @@ async function createCheckoutDash(req, res) {
       slotTimes = { startTimeUtc, endTimeUtc };
     }
 
-    const result = await callCheckoutService.createCallCheckoutDash({
+    const result = await callCheckoutService.createCallCheckoutNowPayments({
       userId,
       packageId: Number(packageId),
       startTimeUtc: slotTimes?.startTimeUtc ?? null,
@@ -1052,8 +984,14 @@ async function createCheckoutDash(req, res) {
 
     return res.status(201).json({ success: true, ...result });
   } catch (err) {
-    logger.error('[callBookingController] createCheckoutDash error', { error: err.message, code: err.code });
+    logger.error('[callBookingController] createCheckoutNowPayments error', { error: err.message, code: err.code });
 
+    if (err.code === 'NOWPAYMENTS_NOT_CONFIGURED') {
+      return res.status(503).json({ success: false, error: 'Crypto payments are not available right now' });
+    }
+    if (err.code === 'NOWPAYMENTS_ERROR') {
+      return res.status(502).json({ success: false, error: 'Could not reach NowPayments. Please try again.' });
+    }
     if (err.code === 'PACKAGE_NOT_FOUND') {
       return res.status(404).json({ success: false, error: 'Call package not found or inactive' });
     }
@@ -1063,7 +1001,7 @@ async function createCheckoutDash(req, res) {
     if (err.code === 'SLOT_TAKEN') {
       return res.status(409).json({ success: false, error: 'The requested time slot is no longer available' });
     }
-    return res.status(500).json({ success: false, error: 'Failed to create Dash checkout' });
+    return res.status(500).json({ success: false, error: 'Failed to create crypto checkout' });
   }
 }
 
@@ -1201,7 +1139,7 @@ async function getUpcomingBookings(req, res) {
          u_creator.id          AS creator_id,
          u_creator.username    AS performer_username,
          COALESCE(u_creator.first_name, u_creator.username) AS performer_name,
-         u_creator.photo_url   AS performer_photo,
+         u_creator.photo_file_id AS performer_photo,
          b.start_time_utc,
          b.end_time_utc,
          b.duration_minutes,
@@ -1228,7 +1166,7 @@ async function getUpcomingBookings(req, res) {
 
 module.exports = {
   createCheckout,
-  createCheckoutDash,
+  createCheckoutNowPayments,
   getBooking,
   joinBooking,
   getBookingPaymentStatus,

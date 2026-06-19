@@ -897,7 +897,18 @@ class PaymentRecoveryService {
                 ).catch(() => {});
               }
             } catch (lookupErr) {
-              logger.warn('NOWPayments reconciler: payment lookup by order_id failed', { orderId: row.order_id, error: lookupErr.response?.status || lookupErr.message });
+              const httpStatus = lookupErr.response?.status;
+              if (httpStatus === 400 || httpStatus === 404) {
+                // Invoice unknown/deleted on NowPayments side — expire locally so it stops retrying
+                await query(
+                  `UPDATE dash_subscription_orders SET status = 'expired', notes = COALESCE(notes || ' ', '') || '[reconciler_np_${httpStatus}]', completed_at = NOW()
+                   WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','expired')`,
+                  [row.order_id]
+                ).catch(() => {});
+                results.stillPending++;
+                continue;
+              }
+              logger.warn('NOWPayments reconciler: payment lookup by order_id failed', { orderId: row.order_id, error: httpStatus || lookupErr.message });
             }
             if (!paymentId) {
               results.stillPending++;
