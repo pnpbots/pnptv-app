@@ -367,9 +367,10 @@ app.use(ipTracker); // Log every authenticated request IP for security
 // Cached per-IP in Redis 1h to avoid the geoip lookup on every request.
 // (geoip module is already required at the top of the file — reuse it.)
 const BLOCKED_US_REGIONS = new Set();
+// CO + VE geo-blocks lifted 2026-06-18 — full open access.
 const BLOCKED_COUNTRIES = new Set();
 // Per-user geo-block whitelist — bypasses the hard country block for specific user IDs.
-const GEO_BLOCK_USER_WHITELIST = new Set(['7246621722']); // PNPLatinoBoy
+const GEO_BLOCK_USER_WHITELIST = new Set(['7246621722', '8599671840']); // PNPLatinoBoy, SantinoFurioso
 const GEO_BLOCK_BYPASS_PATHS = [
   /^\/blocked-jurisdiction$/,
   /^\/health$/,
@@ -387,6 +388,8 @@ const GEO_BLOCK_BYPASS_PATHS = [
   /^\/api\/webhooks?\b/,
   // Bypass endpoint must be reachable from the blocked page itself
   /^\/api\/public\/geo-bypass$/,
+  // Geo invite token redemption must be reachable before the block fires
+  /^\/api\/public\/geo-invite\//,
   // lifetime100 purchase flow is exempt by operator policy
   /^\/api\/public\/lifetime100\b/,
 ];
@@ -422,6 +425,87 @@ app.post('/api/public/geo-bypass', (req, res) => {
   });
 });
 
+// Geo invite token redemption — must be registered BEFORE the geo-block middleware.
+// Admin creates a token via POST /api/admin/geo-invite; user visits the link from
+// the blocked-jurisdiction page; token is validated, session is flagged, user is
+// redirected to /.
+app.get('/api/public/geo-invite/:token', asyncHandler(async (req, res) => {
+  const { token } = req.params;
+  if (!token || !/^[a-f0-9]{32}$/.test(token)) {
+    return res.redirect(302, '/blocked-jurisdiction?err=invalid_invite');
+  }
+  const row = await dbQuery(
+    `SELECT id, countries, max_uses, uses_count, is_active, expires_at
+     FROM geo_invite_tokens
+     WHERE token = $1`,
+    [token]
+  );
+  const invite = row.rows[0];
+  if (!invite || !invite.is_active) {
+    return res.redirect(302, '/blocked-jurisdiction?err=invalid_invite');
+  }
+  if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
+    return res.redirect(302, '/blocked-jurisdiction?err=expired_invite');
+  }
+  if (invite.uses_count >= invite.max_uses) {
+    return res.redirect(302, '/blocked-jurisdiction?err=invite_used');
+  }
+  // Increment uses, auto-deactivate if exhausted
+  await dbQuery(
+    `UPDATE geo_invite_tokens
+     SET uses_count = uses_count + 1,
+         is_active  = CASE WHEN uses_count + 1 >= max_uses THEN false ELSE true END
+     WHERE id = $1`,
+    [invite.id]
+  );
+  req.session.geoInviteBypass = true;
+  req.session.geoInviteToken  = token;
+  req.session.save((err) => {
+    if (err) logger.warn('[geo-invite] session save failed', { error: err.message, ip: req.ip });
+    return res.redirect(302, '/');
+  });
+}));
+
+// Admin: create geo invite token
+app.post('/api/admin/geo-invite', adminGuard, asyncHandler(async (req, res) => {
+  const { countries = ['CO', 'VE'], max_uses = 1, notes = '', expires_at = null } = req.body;
+  const crypto = require('crypto');
+  const token = crypto.randomBytes(16).toString('hex'); // 32-char hex
+  const adminId = req.session.user.id;
+  await dbQuery(
+    `INSERT INTO geo_invite_tokens (token, countries, created_by, max_uses, notes, expires_at)
+     VALUES ($1, $2::text[], $3, $4, $5, $6)`,
+    [token, countries, adminId, max_uses, notes || null, expires_at || null]
+  );
+  const APP_URL = process.env.APP_URL || 'https://pnptv.app';
+  return res.json({
+    success: true,
+    token,
+    url: `${APP_URL}/api/public/geo-invite/${token}`,
+    countries,
+    max_uses,
+  });
+}));
+
+// Admin: list geo invite tokens
+app.get('/api/admin/geo-invite', adminGuard, asyncHandler(async (req, res) => {
+  const rows = await dbQuery(
+    `SELECT g.id, g.token, g.countries, g.max_uses, g.uses_count, g.is_active,
+            g.notes, g.expires_at, g.created_at, u.username AS created_by_username
+     FROM geo_invite_tokens g
+     LEFT JOIN users u ON u.id = g.created_by
+     ORDER BY g.created_at DESC
+     LIMIT 100`
+  );
+  const APP_URL = process.env.APP_URL || 'https://pnptv.app';
+  return res.json({
+    tokens: rows.rows.map(r => ({
+      ...r,
+      url: `${APP_URL}/api/public/geo-invite/${r.token}`,
+    })),
+  });
+}));
+
 const { cache: geoCache } = require('../../config/redis');
 app.use(async (req, res, next) => {
   if (GEO_BLOCK_BYPASS_PATHS.some(rx => rx.test(req.path))) return next();
@@ -440,6 +524,10 @@ app.use(async (req, res, next) => {
     delete req.session.geoBypass;
     delete req.session.geoBypassAt;
   }
+
+  // Admin-issued geo invite bypass — set by GET /api/public/geo-invite/:token.
+  // Valid for the lifetime of the session (no expiry — user redeemed a real invite).
+  if (req.session?.geoInviteBypass === true) return next();
 
   // NOTE: paying users are NOT grandfathered. Per platform policy, the
   // geo-block applies uniformly to everyone in blocked jurisdictions —
@@ -7224,8 +7312,8 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
     const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
     const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
 
-    // Fetch featured from Directus + active creators from DB + live streams from Restreamer
-    const [directusResult, dbResult, streamsResult] = await Promise.allSettled([
+    // Fetch featured from Directus + active creators from DB
+    const [directusResult, dbResult] = await Promise.allSettled([
       axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
         params: {
           'filter[status][_eq]': 'published',
@@ -7244,29 +7332,6 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
          ORDER BY creator_subscriber_count DESC NULLS LAST
          LIMIT 20`
       ),
-      (async () => {
-        if (process.env.RESTREAMER_USER === undefined || process.env.RESTREAMER_PASSWORD === undefined) return [];
-        try {
-          let token = null;
-          try {
-            const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
-              username: process.env.RESTREAMER_USER,
-              password: process.env.RESTREAMER_PASSWORD,
-            }, { timeout: 5000 });
-            token = loginResp.data?.access_token ?? null;
-          } catch (loginErr) {
-            logger.warn(`featured: Restreamer login failed (non-fatal): ${loginErr.message}`);
-          }
-          const headers = token ? { Authorization: `Bearer ${token}` } : {};
-          const procResp = await axios.get(`${restreamerUrl}/api/v3/process`, { headers, timeout: 8000 });
-          return (procResp.data || []).filter(p =>
-            p.id?.startsWith('restreamer-ui:ingest:') && p.state?.exec === 'running'
-          );
-        } catch (e) {
-          logger.warn(`featured: Restreamer fetch failed (non-fatal): ${e.message}`);
-          return [];
-        }
-      })(),
     ]);
 
     const directusPerformers = directusResult.status === 'fulfilled'
@@ -7275,16 +7340,6 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
     const dbCreators = dbResult.status === 'fulfilled'
       ? (dbResult.value.rows || [])
       : [];
-    const liveProcesses = streamsResult.status === 'fulfilled'
-      ? (streamsResult.value || [])
-      : [];
-
-    // Build set of currently-live Restreamer channel references
-    const liveRefs = new Set(
-      liveProcesses
-        .map(p => (typeof p.reference === 'string' && p.reference) ? p.reference : null)
-        .filter(Boolean)
-    );
 
     const photoMap = await fetchPerformerPhotos(directusPerformers);
     const mapped = directusPerformers.map(p => mapDirectusPerformer(p, photoMap));
@@ -7313,60 +7368,27 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
       });
     }
 
-    // Inject live status: match users by live_channel against running Restreamer processes
-    if (liveRefs.size > 0) {
-      try {
-        const placeholders = [...liveRefs].map((_, i) => `$${i + 1}`).join(',');
-        const { rows: channelUsers } = await getPool().query(
-          `SELECT id, live_channel FROM users WHERE live_channel IN (${placeholders})`,
-          [...liveRefs]
-        );
-
-        const redis = getRedis();
-        for (const u of channelUsers) {
-          const channelRef = u.live_channel;
-          const safeRef = typeof channelRef === 'string'
-            ? channelRef.replace(/[^a-zA-Z0-9\-_.]/g, '')
-            : null;
-          const hlsUrl = safeRef && !safeRef.includes('..')
-            ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8`
-            : null;
-
-          // Fetch metadata and thumbnail from Redis
-          let metadata = {};
-          let thumbUrl = null;
-          if (redis && safeRef) {
-            try {
-              const [metaRaw, thumbRaw] = await Promise.all([
-                redis.get(`stream:meta:${safeRef}`),
-                redis.get(`stream:thumb:${safeRef}`),
-              ]);
-              if (metaRaw) metadata = JSON.parse(metaRaw);
-              thumbUrl = thumbRaw;
-            } catch { /* ignore */ }
-          }
-
-          const uid = String(u.id);
-          for (const entry of mapped) {
-            if (entry.userId && String(entry.userId) === uid) {
-              entry.isLive = true;
-              entry.hlsUrl = hlsUrl;
-              if (metadata.title) entry.displayName = metadata.title; // Optional: or use a separate field
-              entry.streamTitle = metadata.title || null;
-              entry.tags = metadata.tags || [];
-              entry.thumbnailUrl = thumbUrl || null;
-            }
+    // Inject online presence: check Redis Socket.IO active keys for each performer
+    try {
+      const redis = getRedis();
+      const userIds = mapped.map(p => p.userId).filter(Boolean).map(String);
+      if (userIds.length > 0) {
+        const results = await Promise.all(userIds.map(id => redis.get(`user:${id}:active`)));
+        const onlineIds = new Set(userIds.filter((_, i) => results[i] !== null && results[i] !== '0'));
+        for (const entry of mapped) {
+          if (entry.userId && onlineIds.has(String(entry.userId))) {
+            entry.isOnline = true;
           }
         }
-      } catch (liveErr) {
-        logger.warn(`featured: live injection failed (non-fatal): ${liveErr.message}`);
       }
+    } catch (presenceErr) {
+      logger.warn(`featured: presence check failed (non-fatal): ${presenceErr.message}`);
     }
 
-    // Sort: live performers first, then featured, then rest
+    // Sort: online performers first, then featured, then rest
     mapped.sort((a, b) => {
-      if (a.isLive && !b.isLive) return -1;
-      if (!a.isLive && b.isLive) return 1;
+      if (a.isOnline && !b.isOnline) return -1;
+      if (!a.isOnline && b.isOnline) return 1;
       if (a.isFeatured && !b.isFeatured) return -1;
       if (!a.isFeatured && b.isFeatured) return 1;
       return 0;
@@ -7495,8 +7517,8 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
     // Count total
     const countQuery = `SELECT COUNT(*)::int AS total FROM users u WHERE ${conditions.join(' AND ')}`;
 
-    // Fetch channels + live processes in parallel
-    const [countResult, channelsResult, streamsResult] = await Promise.allSettled([
+    // Fetch channels
+    const [countResult, channelsResult] = await Promise.allSettled([
       getPool().query(countQuery, params),
       getPool().query(
         `SELECT u.id, u.username, u.first_name, u.last_name, u.photo_file_id, u.bio,
@@ -7510,67 +7532,14 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
          LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
         [...params, limit, offset]
       ),
-      (async () => {
-        if (!process.env.RESTREAMER_USER || !process.env.RESTREAMER_PASSWORD) return [];
-        try {
-          let token = null;
-          try {
-            const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
-              username: process.env.RESTREAMER_USER,
-              password: process.env.RESTREAMER_PASSWORD,
-            }, { timeout: 5000 });
-            token = loginResp.data?.access_token ?? null;
-          } catch (loginErr) {
-            logger.warn(`channels: Restreamer login failed (non-fatal): ${loginErr.message}`);
-          }
-          const headers = token ? { Authorization: `Bearer ${token}` } : {};
-          const procResp = await axios.get(`${restreamerUrl}/api/v3/process`, { headers, timeout: 8000 });
-          return (procResp.data || []).filter(p =>
-            p.id?.startsWith('restreamer-ui:ingest:') && p.state?.exec === 'running'
-          );
-        } catch (e) {
-          logger.warn(`channels: Restreamer fetch failed (non-fatal): ${e.message}`);
-          return [];
-        }
-      })(),
     ]);
 
     const total = countResult.status === 'fulfilled' ? (countResult.value.rows[0]?.total || 0) : 0;
     const rows = channelsResult.status === 'fulfilled' ? (channelsResult.value.rows || []) : [];
-    const liveProcesses = streamsResult.status === 'fulfilled' ? (streamsResult.value || []) : [];
 
-    // Build live refs set
-    const liveRefs = new Set(
-      liveProcesses
-        .map(p => (typeof p.reference === 'string' && p.reference) ? p.reference : null)
-        .filter(Boolean)
-    );
-
-    // Map live channels to user IDs
-    let liveUserIds = new Set();
-    if (liveRefs.size > 0) {
-      try {
-        const placeholders = [...liveRefs].map((_, i) => `$${i + 1}`).join(',');
-        const { rows: channelUsers } = await getPool().query(
-          `SELECT id, live_channel FROM users WHERE live_channel IN (${placeholders})`,
-          [...liveRefs]
-        );
-        for (const u of channelUsers) liveUserIds.add(String(u.id));
-      } catch (e) {
-        logger.warn(`channels: live user lookup failed (non-fatal): ${e.message}`);
-      }
-    }
-
-    // Map rows to response
+    // Map rows to response — live streaming disabled, isLive always false
     let channels = rows.map(c => {
       const uid = String(c.id);
-      const isLive = liveUserIds.has(uid);
-      const safeChannel = typeof c.live_channel === 'string'
-        ? c.live_channel.replace(/[^a-zA-Z0-9\-_.]/g, '')
-        : null;
-      const hlsUrl = isLive && safeChannel && !safeChannel.includes('..')
-        ? `${restreamerPublicUrl}/memfs/${safeChannel}.m3u8`
-        : null;
       const photo = c.photo_file_id
         ? (c.photo_file_id.startsWith('/') || c.photo_file_id.startsWith('http') ? c.photo_file_id : `/${c.photo_file_id}`)
         : null;
@@ -7587,22 +7556,15 @@ app.get('/api/webapp/channels', softAuth, asyncHandler(async (req, res) => {
         verified: c.creator_verified === true,
         featured: c.creator_featured === true,
         postCount: c.post_count || 0,
-        isLive,
-        hlsUrl,
+        isLive: false,
+        hlsUrl: null,
       };
     });
 
-    // Filter live-only after injection
+    // liveOnly filter: no live streams currently, return empty if requested
     if (liveOnly) {
-      channels = channels.filter(c => c.isLive);
+      channels = [];
     }
-
-    // Sort: live first, then preserve original DB order
-    channels.sort((a, b) => {
-      if (a.isLive && !b.isLive) return -1;
-      if (!a.isLive && b.isLive) return 1;
-      return 0;
-    });
 
     const nextPage = offset + limit < total ? page + 1 : null;
 
@@ -7895,8 +7857,8 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
     const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
     const restreamerPublicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
 
-    // Fetch from Directus CMS, active creators in DB, and live Restreamer streams — all in parallel
-    const [directusResult, dbResult, streamsResult] = await Promise.allSettled([
+    // Fetch from Directus CMS and active creators in DB — in parallel
+    const [directusResult, dbResult] = await Promise.allSettled([
       axios.get(`${DIRECTUS_INTERNAL_URL}/items/performers`, {
         params: {
           'filter[status][_eq]': 'published',
@@ -7914,35 +7876,6 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
          ORDER BY first_name ASC
          LIMIT 100`
       ),
-      // Fetch live streams from Restreamer (best-effort — failures are non-fatal).
-      // Only returns processes that are actively running (state.exec === 'running').
-      (async () => {
-        if (process.env.RESTREAMER_USER === undefined || process.env.RESTREAMER_PASSWORD === undefined) return [];
-        try {
-          // Use strict undefined-check: empty-string password is valid and must be sent.
-          let token = null;
-          try {
-            const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
-              username: process.env.RESTREAMER_USER,
-              password: process.env.RESTREAMER_PASSWORD,
-            }, { timeout: 5000 });
-            token = loginResp.data?.access_token ?? null;
-          } catch (loginErr) {
-            logger.warn(`performers: Restreamer login failed (non-fatal): ${loginErr.message}`);
-          }
-          const headers = token ? { Authorization: `Bearer ${token}` } : {};
-          const procResp = await axios.get(`${restreamerUrl}/api/v3/process`, {
-            headers,
-            timeout: 8000,
-          });
-          return (procResp.data || []).filter(p =>
-            p.id?.startsWith('restreamer-ui:ingest:') && p.state?.exec === 'running'
-          );
-        } catch (e) {
-          logger.warn(`performers: Restreamer fetch failed (non-fatal): ${e.message}`);
-          return [];
-        }
-      })(),
     ]);
 
     const directusPerformers = directusResult.status === 'fulfilled'
@@ -7950,9 +7883,6 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
       : [];
     const dbCreators = dbResult.status === 'fulfilled'
       ? (dbResult.value.rows || [])
-      : [];
-    const liveProcesses = streamsResult.status === 'fulfilled'
-      ? (streamsResult.value || [])
       : [];
 
     // Map Directus performers
@@ -7989,95 +7919,24 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
       });
     }
 
-    // --- Inject currently-live users ---
-    if (liveProcesses.length > 0) {
-      try {
-        const liveRefs = liveProcesses
-          .map(p => (typeof p.reference === 'string' && p.reference) ? p.reference : null)
-          .filter(Boolean);
-
-        if (liveRefs.length > 0) {
-          const placeholders = liveRefs.map((_, i) => `$${i + 1}`).join(',');
-          const { rows: channelUsers } = await getPool().query(
-            `SELECT id, username, first_name, last_name, photo_file_id, bio, live_channel
-             FROM users
-             WHERE live_channel IN (${placeholders})`,
-            liveRefs
-          );
-
-          const redis = getRedis();
-          for (const u of channelUsers) {
-            const channelRef = u.live_channel;
-            const safeRef = typeof channelRef === 'string'
-              ? channelRef.replace(/[^a-zA-Z0-9\-_.]/g, '')
-              : null;
-            const hlsUrl = safeRef && !safeRef.includes('..')
-              ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8`
-              : null;
-
-            // Fetch metadata and thumbnail from Redis
-            let metadata = {};
-            let thumbUrl = null;
-            if (redis && safeRef) {
-              try {
-                const [metaRaw, thumbRaw] = await Promise.all([
-                  redis.get(`stream:meta:${safeRef}`),
-                  redis.get(`stream:thumb:${safeRef}`),
-                ]);
-                if (metaRaw) metadata = JSON.parse(metaRaw);
-                thumbUrl = thumbRaw;
-              } catch { /* ignore */ }
-            }
-
-            const uid = String(u.id);
-
-            if (coveredUserIds.has(uid)) {
-              for (const entry of mapped) {
-                if (entry.userId && String(entry.userId) === uid) {
-                  entry.isLive = true;
-                  if (hlsUrl) entry.hlsUrl = hlsUrl;
-                  entry.streamTitle = metadata.title || null;
-                  entry.tags = metadata.tags || [];
-                  entry.thumbnailUrl = thumbUrl || null;
-                  break;
-                }
-              }
-            } else {
-              const photo = u.photo_file_id
-                ? (u.photo_file_id.startsWith('/') ? u.photo_file_id : `/${u.photo_file_id}`)
-                : null;
-              mapped.push({
-                id: `live-${u.id}`,
-                userId: u.id,
-                slug: u.username || null,
-                displayName: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || `User ${u.id}`,
-                bio: u.bio || null,
-                photoUrl: photo,
-                isFeatured: false,
-                isAvailable: true,
-                isLive: true,
-                hlsUrl,
-                streamTitle: metadata.title || null,
-                tags: metadata.tags || [],
-                thumbnailUrl: thumbUrl || null,
-                basePrice: 0,
-                totalCalls: 0,
-                averageRating: 0,
-              });
-              coveredUserIds.add(uid);
-            }
+    // Inject online presence: check Redis Socket.IO active keys for each performer
+    try {
+      const redis = getRedis();
+      const userIds = mapped.map(p => p.userId).filter(Boolean).map(String);
+      if (userIds.length > 0) {
+        const results = await Promise.all(userIds.map(id => redis.get(`user:${id}:active`)));
+        const onlineIds = new Set(userIds.filter((_, i) => results[i] !== null && results[i] !== '0'));
+        for (const entry of mapped) {
+          if (entry.userId && onlineIds.has(String(entry.userId))) {
+            entry.isOnline = true;
           }
         }
-      } catch (liveErr) {
-        logger.warn(`performers: live-user injection failed (non-fatal): ${liveErr.message}`);
       }
+    } catch (presenceErr) {
+      logger.warn(`performers: presence check failed (non-fatal): ${presenceErr.message}`);
     }
 
-    // Strip HLS stream URLs for unauthenticated users — prevents public access to stream links.
-    const isAuthenticated = !!req.user?.id;
-    const safePerformers = isAuthenticated
-      ? mapped
-      : mapped.map(p => { const { hlsUrl, ...rest } = p; return rest; });
+    const safePerformers = mapped;
 
     res.json({ success: true, performers: safePerformers });
   } catch (error) {
@@ -10039,6 +9898,46 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       `UPDATE dash_subscription_orders SET status = 'failed', notes = $2 WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed')`,
       [order_id, `nowpayments:${payment_id}:${payment_status}`]
     );
+
+    // C-2: For refunds, also revoke entitlements regardless of whether the order
+    // was already marked completed (the UPDATE above no-ops on completed orders).
+    if (payment_status === 'refunded') {
+      try {
+        const orderRes = await dbQuery(
+          `SELECT user_id, creator_id, plan_id FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 LIMIT 1`,
+          [order_id]
+        );
+        const order = orderRes.rows[0];
+        if (order && order.creator_id) {
+          const { user_id: refundUserId, creator_id: refundCreatorId } = order;
+          await dbQuery(
+            `UPDATE user_entitlements SET expires_at = NOW(), updated_at = NOW()
+             WHERE user_id = $1 AND add_on_id = 'creator-subscription' AND creator_id = $2
+               AND expires_at > NOW()`,
+            [String(refundUserId), String(refundCreatorId)]
+          );
+          await dbQuery(
+            `UPDATE creator_subscriptions SET status = 'cancelled', cancelled_at = NOW()
+             WHERE subscriber_id = $1 AND creator_id = $2 AND status = 'active'`,
+            [String(refundUserId), String(refundCreatorId)]
+          );
+          await dbQuery(
+            `UPDATE creator_earnings SET status = 'void'
+             WHERE source_payment_id = $1 AND status IN ('holding', 'pending')`,
+            [order_id]
+          );
+          try {
+            await EntitlementAccessService.invalidateCache(String(refundUserId));
+          } catch (_) { /* non-fatal */ }
+          logger.info('[NOWPayments] Refund: entitlements revoked and earnings voided', {
+            order_id, userId: refundUserId, creatorId: refundCreatorId,
+          });
+        }
+      } catch (refundErr) {
+        logger.error('[NOWPayments] Refund: entitlement revocation failed', { order_id, error: refundErr.message });
+      }
+    }
+
     return res.json({ received: true });
   }
 
@@ -10108,7 +10007,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
   const lockRes = await dbQuery(
     `UPDATE dash_subscription_orders SET status = 'processing'
      WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','processing')
-     RETURNING id, user_id, plan_id, usd_amount, creator_id`,
+     RETURNING id, user_id, plan_id, usd_amount, creator_id, metadata`,
     [order_id]
   );
 
@@ -10231,6 +10130,35 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       );
       return res.json({ received: true });
     }
+  }
+
+  // call_package orders: route to callCheckoutService.onCallPaymentSuccess instead of grantEntitlementsForPlan
+  if (order.plan_id === 'call_package') {
+    const callMeta = order.metadata || {};
+    const callPaymentId = callMeta.paymentId;
+    if (!callPaymentId) {
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+        [order_id, 'call_package:missing_paymentId']
+      ).catch(() => {});
+      throw new Error(`call_package IPN: missing paymentId in DSO metadata for order ${order_id}`);
+    }
+    try {
+      const CallCheckoutSvc = require('../../services/callCheckoutService');
+      await CallCheckoutSvc.onCallPaymentSuccess(callPaymentId);
+    } catch (callGrantErr) {
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+        [order_id, `call_package:grant_failed:${callGrantErr.message}`.slice(0, 500)]
+      ).catch(() => {});
+      throw callGrantErr;
+    }
+    await dbQuery(
+      `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
+      [order_id, `nowpayments:call:${payment_id}`]
+    );
+    logger.info('[NOWPayments] IPN: call_package credits granted', { order_id, callPaymentId, userId: order.user_id });
+    return res.json({ received: true });
   }
 
   // Grant FIRST — if this throws, roll back to pending so NOWPayments retries
@@ -10933,10 +10861,10 @@ app.post('/api/webapp/book-call/checkout',
   requireSessionAuth,
   asyncHandler(callBookingController.createCheckout));
 
-// Dash/BTCPay checkout for call packages
-app.post('/api/webapp/book-call/checkout/dash',
+// NowPayments (crypto) checkout for call packages
+app.post('/api/webapp/book-call/checkout/nowpayments',
   requireSessionAuth,
-  asyncHandler(callBookingController.createCheckoutDash));
+  asyncHandler(callBookingController.createCheckoutNowPayments));
 
 // Member: upcoming confirmed bookings — must be before /:bookingId catch-all
 app.get('/api/webapp/bookings/upcoming',
