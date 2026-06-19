@@ -341,7 +341,10 @@ export default function Subscribe() {
       if (chosenProvider === "epayco") {
         const result = await createPayment(planId, "epayco", undefined, appliedPromo?.code || undefined);
         if (result.success && result.paymentUrl) {
+          // Keep submitting=true — page is navigating away, button must stay disabled
+          // to prevent duplicate payments from double-clicks during navigation.
           window.location.href = result.paymentUrl;
+          return;
         } else {
           failWithNudge(result.error || result.message || s.paymentErrorGeneric);
         }
