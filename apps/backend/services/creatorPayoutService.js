@@ -410,23 +410,28 @@ class CreatorPayoutService {
     try {
       const result = await query(`
         SELECT
-          cs.id              AS subscription_id,
+          cs.id                 AS subscription_id,
           cs.creator_id,
           cs.subscriber_id,
           cs.price_usd,
           cs.expires_at,
-          cs.payment_id      AS original_payment_id,
-          sub.username       AS subscriber_username,
-          sub.first_name     AS subscriber_first_name,
-          cr.username        AS creator_username,
-          cr.first_name      AS creator_first_name
+          cs.payment_id         AS original_payment_id,
+          cs.renewal_payment_id,
+          sub.username          AS subscriber_username,
+          sub.first_name        AS subscriber_first_name,
+          cr.username           AS creator_username,
+          cr.first_name         AS creator_first_name
         FROM creator_subscriptions cs
         JOIN users sub ON sub.id = cs.subscriber_id
         JOIN users cr  ON cr.id  = cs.creator_id
+        -- Skip if a pending renewal invoice is already in-flight for this subscription.
+        -- Checked via LEFT JOIN so subscriptions without a renewal_payment_id still pass.
+        LEFT JOIN payments rp ON rp.id = cs.renewal_payment_id
         WHERE cs.status     = 'active'
           AND cs.auto_renew = true
           AND cs.expires_at <= NOW() + INTERVAL '3 days'
           AND cs.expires_at >  NOW()
+          AND (cs.renewal_payment_id IS NULL OR rp.status NOT IN ('pending'))
         ORDER BY cs.expires_at ASC
       `);
       subs = result.rows;
@@ -629,6 +634,28 @@ class CreatorPayoutService {
         paymentId: newPaymentId,
       },
     });
+
+    // Email fallback for subscribers who have no Telegram connection
+    try {
+      const { query: dbQuery } = require('../config/postgres');
+      const emailService = require('./emailservice');
+      const subRow = await dbQuery(`SELECT email FROM users WHERE id = $1`, [String(subscriber_id)]);
+      const subscriberEmail = subRow.rows[0]?.email;
+      if (subscriberEmail && emailService.transporters?.pnptv) {
+        await emailService.transporters.pnptv.sendMail({
+          from: '"PNPtv" <support@pnptv.app>',
+          to: subscriberEmail,
+          subject: `Renueva tu suscripción a ${creatorName} en PNPtv`,
+          html: `<p>Tu suscripción a <strong>${creatorName}</strong> vence pronto.</p>
+                 <p><a href="${checkoutUrl}" style="color:#D4007A;font-weight:bold;">Haz clic aquí para renovar</a></p>
+                 <p style="color:#888;font-size:12px;">Si ya renovaste, ignora este mensaje.</p>`,
+        });
+      }
+    } catch (emailErr) {
+      logger.warn('CreatorPayoutService: renewal email failed (non-fatal)', {
+        subscriberId: subscriber_id, error: emailErr.message,
+      });
+    }
 
     logger.info('CreatorPayoutService: renewal payment created', {
       subscriptionId: subscription_id,

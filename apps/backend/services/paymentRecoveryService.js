@@ -215,14 +215,16 @@ class PaymentRecoveryService {
       }
 
       // Find pending Dash/BTCPay invoices older than 10 min and < 7 days old.
-      // NOWPayments orders use a 'pnptv-nowp-' prefix — exclude them here so
-      // BTCPay 404 responses don't falsely expire legitimate NP orders.
+      // NOWPayments subscription orders use a 'pnptv-nowp-' prefix and call-package
+      // NowPayments orders use a 'call-' prefix — exclude both so BTCPay 404
+      // responses don't falsely expire legitimate NP orders.
       const stuck = await query(`
         SELECT btcpay_invoice_id AS invoice_id, 'dash_subscription_orders' AS source, created_at
         FROM dash_subscription_orders
         WHERE status = 'pending'
           AND btcpay_invoice_id IS NOT NULL
           AND btcpay_invoice_id NOT LIKE 'pnptv-nowp-%'
+          AND btcpay_invoice_id NOT LIKE 'call-%'
           AND created_at < NOW() - INTERVAL '10 minutes'
           AND created_at > NOW() - INTERVAL '7 days'
         UNION ALL
@@ -285,6 +287,11 @@ class PaymentRecoveryService {
               `UPDATE token_purchases SET status = 'expired' WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
               [row.invoice_id]
             );
+            await query(
+              `UPDATE payments SET status = 'abandoned', updated_at = NOW()
+               WHERE metadata->>'btcpayInvoiceId' = $1 AND status = 'pending' AND provider = 'dash'`,
+              [row.invoice_id]
+            );
           } else if (eventType === 'InvoiceInvalid') {
             await query(
               `UPDATE dash_subscription_orders SET status = 'invalid' WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
@@ -292,6 +299,11 @@ class PaymentRecoveryService {
             );
             await query(
               `UPDATE token_purchases SET status = 'invalid' WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
+              [row.invoice_id]
+            );
+            await query(
+              `UPDATE payments SET status = 'abandoned', updated_at = NOW()
+               WHERE metadata->>'btcpayInvoiceId' = $1 AND status = 'pending' AND provider = 'dash'`,
               [row.invoice_id]
             );
           } else if (eventType === 'InvoiceSettled') {
@@ -346,6 +358,11 @@ class PaymentRecoveryService {
             );
             await query(
               `UPDATE token_purchases SET status = 'expired' WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
+              [row.invoice_id]
+            );
+            await query(
+              `UPDATE payments SET status = 'abandoned', updated_at = NOW()
+               WHERE metadata->>'btcpayInvoiceId' = $1 AND status = 'pending' AND provider = 'dash'`,
               [row.invoice_id]
             );
             results.expired++;
@@ -825,7 +842,7 @@ class PaymentRecoveryService {
       if (!apiKey) return results;
 
       const stuck = await query(
-        `SELECT id, btcpay_invoice_id as order_id, user_id, plan_id, status, notes, created_at, creator_id, usd_amount
+        `SELECT id, btcpay_invoice_id as order_id, user_id, plan_id, status, notes, created_at, creator_id, usd_amount, metadata
          FROM dash_subscription_orders
          WHERE btcpay_invoice_id LIKE 'pnptv-nowp-%'
            AND status IN ('pending', 'confirming', 'confirmed', 'partially_paid')
@@ -939,6 +956,44 @@ class PaymentRecoveryService {
               continue;
             }
             const order = lockRes.rows[0];
+
+            // call_package orders must route to onCallPaymentSuccess — not grantEntitlementsForPlan
+            if (order.plan_id === 'call_package') {
+              try {
+                const rowMeta = row.metadata && typeof row.metadata === 'object'
+                  ? row.metadata
+                  : (typeof row.metadata === 'string'
+                      ? (() => { try { return JSON.parse(row.metadata); } catch { return null; } })()
+                      : null);
+                const callPaymentId = rowMeta?.paymentId;
+                if (!callPaymentId) {
+                  await query(
+                    `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+                    [row.order_id, 'reconciler:call_package:missing_paymentId']
+                  ).catch(() => {});
+                  results.errors++;
+                  logger.error('NOWPayments reconciler: call_package missing paymentId in metadata', { orderId: row.order_id });
+                  continue;
+                }
+                const CallCheckoutSvc = require('./callCheckoutService');
+                await CallCheckoutSvc.onCallPaymentSuccess(callPaymentId);
+                await query(
+                  `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
+                  [row.order_id, `nowpayments:reconciler:call:${paymentId}`]
+                );
+                results.settled++;
+                logger.info('NOWPayments reconciler: call_package settled', { orderId: row.order_id, callPaymentId });
+              } catch (callErr) {
+                await query(
+                  `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+                  [row.order_id, `reconciler:call_package:failed:${callErr.message}`.slice(0, 500)]
+                ).catch(() => {});
+                results.errors++;
+                logger.error('NOWPayments reconciler: call_package grant failed', { orderId: row.order_id, error: callErr.message });
+              }
+              continue;
+            }
+
             try {
               const PaymentService = require('./paymentService');
               const grantResult = await PaymentService.grantEntitlementsForPlan(
