@@ -23,7 +23,7 @@ import { useI18n } from "@/lib/i18n";
 import {
   getCreatorCallPackages,
   getBookingOptions,
-  createCallCheckoutDash,
+  createCallCheckoutNowPayments,
   createCallCheckoutEpayco,
   getBookingPaymentStatus,
   assertPaymentUrl,
@@ -36,7 +36,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "epayco" | "dash";
+type Provider = "epayco" | "nowpayments";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -152,7 +152,7 @@ export function BookCallModal({
   const [isOnline, setIsOnline] = useState(initialIsOnline);
   const [duration, setDuration] = useState<30 | 60>(initialDuration);
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
-  const [provider, setProvider] = useState<Provider>("dash");
+  const [provider, setProvider] = useState<Provider>("nowpayments");
   const [email, setEmail] = useState("");
 
   // ── Data state ──────────────────────────────────────────────────────────────
@@ -198,6 +198,7 @@ export function BookCallModal({
   const firstFocusRef = useRef<HTMLButtonElement>(null);
   const checkoutInFlight = useRef(false);
   const dashPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const paymentPopupRef = useRef<Window | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
   // ── Derived ─────────────────────────────────────────────────────────────────
@@ -231,7 +232,7 @@ export function BookCallModal({
     setIsOnline(initialIsOnline);
     setDuration(initialDuration);
     setSelectedSlot(null);
-    setProvider("dash");
+    setProvider("nowpayments");
     setEmail("");
     setCheckoutError(null);
     setConfirmedStartAt(null);
@@ -332,6 +333,7 @@ export function BookCallModal({
           setHasMoreSlots(res.hasMore ?? false);
           setIsCreatorLive(res.isLive ?? false);
           setLiveMessage(res.liveMessage ?? null);
+          if (res.isOnline) setIsOnline(true);
         })
         .catch((err: Error) => {
           if (!append) setSlotsError(err.message || t.creator.failedLoadSlots);
@@ -409,7 +411,7 @@ export function BookCallModal({
       bio: p.bio,
     };
     setCreator(asCreator);
-    setIsOnline(p.isLive === true);
+    setIsOnline(p.isOnline === true);
     setStep("SELECT_SLOT");
   };
 
@@ -439,7 +441,8 @@ export function BookCallModal({
         const epaycoRes = await createCallCheckoutEpayco(
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
-          selectedSlot?.endUtc ?? undefined
+          selectedSlot?.endUtc ?? undefined,
+          email.trim() || undefined
         );
         if (epaycoRes.checkoutUrl || epaycoRes.paymentUrl) {
           window.location.href = epaycoRes.checkoutUrl || epaycoRes.paymentUrl;
@@ -449,34 +452,35 @@ export function BookCallModal({
         return;
       }
 
-      // Dash uses a separate endpoint that creates a BTCPay invoice
-      if (provider === "dash") {
-        const dashRes = await createCallCheckoutDash(
+      // NowPayments — open a centered popup (cannot redirect: breaks iOS + 3rd-party cookie policy)
+      if (provider === "nowpayments") {
+        const npRes = await createCallCheckoutNowPayments(
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
           selectedSlot?.endUtc ?? undefined
         );
-        if (dashRes.checkoutUrl) {
-          // iOS Safari blocks window.open called after an await. Navigate in the same
-          // tab — BTCPay's successUrl redirects back to /booking/:id/confirm after payment.
-          window.location.href = dashRes.checkoutUrl;
+        if (npRes.invoiceUrl) {
+          const safeUrl = assertPaymentUrl(npRes.invoiceUrl);
+          const pw = 600, ph = 700;
+          const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+          const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+          paymentPopupRef.current = window.open(
+            safeUrl, "_blank",
+            `noopener,width=${pw},height=${ph},left=${pl},top=${pt}`
+          );
         }
-        // Store paymentId for retry if needed
-        setDashPaymentId(dashRes.paymentId ?? null);
+        setDashPaymentId(npRes.paymentId ?? null);
 
-        // Poll with bookingId when available (scheduled); fall back to paymentId
-        // for the "NOW" flow where no booking exists at checkout time.
-        const pollId = dashRes.bookingId ?? dashRes.paymentId;
+        // Poll with bookingId when available (scheduled); fall back to paymentId for NOW flow
+        const pollId = npRes.bookingId ?? npRes.paymentId;
         if (pollId) {
           if (dashPollRef.current) clearInterval(dashPollRef.current);
-
 
           const POLL_INTERVAL_MS = 5_000;
           const POLL_TIMEOUT_MS = 900_000; // 15 min
           const pollStart = Date.now();
 
           dashPollRef.current = setInterval(async () => {
-            // Hard-stop after 15 minutes
             if (Date.now() - pollStart >= POLL_TIMEOUT_MS) {
               if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
               setCheckoutLoading(false);
@@ -489,9 +493,10 @@ export function BookCallModal({
               const status = await getBookingPaymentStatus(pollId);
               if (status.status === "paid") {
                 if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+                paymentPopupRef.current?.close();
+                paymentPopupRef.current = null;
                 setConfirmedRoomName(status.roomName ?? null);
                 setConfirmedBookingId(status.bookingId ?? pollId);
-                // Preserve slot start time so SUCCESS step can show "scheduled for"
                 if (selectedSlot?.startUtc) setConfirmedStartAt(selectedSlot.startUtc);
                 setStep("SUCCESS");
                 setCheckoutLoading(false);
@@ -501,12 +506,12 @@ export function BookCallModal({
                 if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
                 setCheckoutError(
                   status.status === "expired"
-                    ? "Dash invoice expired. Please try again."
+                    ? "Invoice expired. Please try again."
                     : "Payment failed. Please try again."
                 );
                 setRetryPayload({
                   packageId: activePackage.id,
-                  provider: "dash",
+                  provider: "nowpayments",
                   email,
                   quantity: 1,
                   selectedSlot: selectedSlot?.startUtc ?? null,
@@ -523,22 +528,6 @@ export function BookCallModal({
         }
         return;
       }
-
-      // Dash checkout via dedicated endpoint
-      const res = await createCallCheckoutDash(
-        activePackage.id,
-        selectedSlot?.startUtc,
-        selectedSlot?.endUtc
-      );
-
-      if (res.checkoutUrl) {
-        const safeUrl = assertPaymentUrl(res.checkoutUrl);
-        window.open(safeUrl, "_blank", "noopener,noreferrer");
-        setDashPaymentId(res.paymentId);
-      }
-
-      setConfirmedStartAt(null);
-      setStep("SUCCESS");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t.creator.checkoutFailed;
       setCheckoutError(msg);
@@ -605,7 +594,7 @@ export function BookCallModal({
           aria-label={t.creator.ariaAvailablePerformers}
         >
           {performers.map((p) => {
-            const live = p.isLive === true;
+            const live = p.isOnline === true;
             return (
               <button
                 key={p.id}
@@ -1119,13 +1108,13 @@ export function BookCallModal({
           </button>
           <button
             type="button"
-            onClick={() => setProvider("dash")}
+            onClick={() => setProvider("nowpayments")}
             className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
-            style={provider === "dash"
+            style={provider === "nowpayments"
               ? { background: "rgba(212,0,122,0.16)", border: "1.5px solid #D4007A", color: "#D4007A" }
               : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
-            🥷 Dash
+            ⚡ Crypto
           </button>
         </div>
       </div>
@@ -1159,7 +1148,7 @@ export function BookCallModal({
       </div>
 
       {/* Dash: 15-min timeout recovery card */}
-      {provider === "dash" && dashTimedOut && (
+      {provider === "nowpayments" && dashTimedOut && (
         <div
           className="rounded-xl px-4 py-4 space-y-3"
           style={{ background: "rgba(255,159,10,0.10)", border: "1px solid rgba(255,159,10,0.25)" }}
@@ -1198,7 +1187,7 @@ export function BookCallModal({
       )}
 
       {/* Dash: waiting for payment indicator */}
-      {provider === "dash" && checkoutLoading && !dashTimedOut && (
+      {provider === "nowpayments" && checkoutLoading && !dashTimedOut && (
         <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
           <div className="flex items-center gap-2">
             <Spinner size={16} />
@@ -1243,10 +1232,10 @@ export function BookCallModal({
       )}
 
       {/* Submit */}
-      {!(provider === "dash" && (checkoutLoading || dashTimedOut)) && (
+      {!(provider === "nowpayments" && (checkoutLoading || dashTimedOut)) && (
         <button
           type="button"
-          disabled={checkoutLoading || !email.trim() || !activePackage}
+          disabled={checkoutLoading || (provider === "epayco" && !email.trim()) || !activePackage}
           onClick={handleCheckout}
           className={clsx(
             "w-full min-h-[48px] rounded-2xl text-base font-bold text-white",

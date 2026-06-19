@@ -112,6 +112,14 @@ export default function Subscribe() {
   const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
+  // Crypto nudge — shown after any ePayco failure/timeout/abandon
+  const [showCryptoNudge, setShowCryptoNudge] = useState(false);
+
+  function failWithNudge(msg: string) {
+    setError(msg);
+    setShowCryptoNudge(true);
+  }
+
   // USDC / USDT stablecoin state (NOWPayments hook)
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
   const {
@@ -289,7 +297,7 @@ export default function Subscribe() {
         if (attempts >= maxAttempts) {
           setPollingPaymentId(null);
           try { sessionStorage.removeItem("pnp_pending_payment"); } catch {}
-          setError(s.paymentTimedOut);
+          failWithNudge(s.paymentTimedOut);
         }
         return;
       }
@@ -304,10 +312,10 @@ export default function Subscribe() {
           await refreshUser();
           return;
         }
-        if (data.status === "failed" || data.status === "refunded") {
+        if (data.status === "failed" || data.status === "refunded" || data.status === "abandoned") {
           setPollingPaymentId(null);
           try { sessionStorage.removeItem("pnp_pending_payment"); } catch {}
-          setError(mapEpaycoError(data.epaycoError) || data.message || s.paymentNotSuccessful);
+          failWithNudge(mapEpaycoError(data.epaycoError) || data.message || s.paymentNotSuccessful);
           return;
         }
         if (!cancelled) timerId = setTimeout(poll, interval);
@@ -327,6 +335,7 @@ export default function Subscribe() {
     if (submitting) return;
     setSelectedPlan(planId);
     setError(null);
+    setShowCryptoNudge(false);
     setSubmitting(true);
     try {
       if (chosenProvider === "epayco") {
@@ -334,7 +343,7 @@ export default function Subscribe() {
         if (result.success && result.paymentUrl) {
           window.location.href = result.paymentUrl;
         } else {
-          setError(result.error || result.message || s.paymentErrorGeneric);
+          failWithNudge(result.error || result.message || s.paymentErrorGeneric);
         }
       } else if (chosenProvider === "usdc") {
         const result = await startNowPayments(planId, user?.email || undefined);
@@ -343,7 +352,7 @@ export default function Subscribe() {
         }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : s.paymentErrorGeneric);
+      failWithNudge(err instanceof Error ? err.message : s.paymentErrorGeneric);
     } finally {
       setSubmitting(false);
     }
@@ -1002,6 +1011,29 @@ export default function Subscribe() {
           <p className="text-xs text-pnp-textSecondary">
             {s.completePaymentInWindow}
           </p>
+        </div>
+      )}
+
+      {/* Crypto nudge — shown after ePayco failure/timeout/abandon */}
+      {showCryptoNudge && usdcAvailable && selectedPlan && !usdcOrder && (
+        <div className="mb-3 rounded-xl border border-green-500/40 bg-green-500/10 p-4">
+          <p className="text-sm font-bold text-green-300 mb-0.5">
+            {t.lang === "es" ? "¿Problema con tu tarjeta? Paga con cripto" : "Card not working? Pay with crypto"}
+          </p>
+          <p className="text-xs text-pnp-textSecondary mb-3">
+            {t.lang === "es"
+              ? "BTC, ETH, USDC y +100 monedas. Descuento del 20% aplicado automáticamente."
+              : "BTC, ETH, USDC + 100 coins. 20% discount applied automatically."}
+          </p>
+          <button
+            disabled={submitting}
+            onClick={() => handleQuickCheckout(selectedPlan, "usdc")}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold text-white disabled:opacity-50 transition-colors"
+            style={{ background: "linear-gradient(90deg, #16a34a, #15803d)" }}
+          >
+            <span>🪙</span>
+            {t.lang === "es" ? "Pagar con Cripto — Ahorra 20%" : "Pay with Crypto — Save 20%"}
+          </button>
         </div>
       )}
 

@@ -89,18 +89,12 @@ async function getBookingOptions(req, res) {
       return res.status(400).json({ error: 'duration must be 30 or 60' });
     }
 
-    // Check if the creator is currently live (Socket.IO presence key written by notificationThrottleService)
+    // Check if the creator is currently online (Socket.IO presence key written by notificationThrottleService)
     const { getRedis } = require('../../../config/redis');
     const redis = getRedis();
     const onlineRaw = await redis.get(`user:${creatorId}:active`);
-    const isLive = onlineRaw !== null && onlineRaw !== '0';
-    const liveMessage = isLive
-      ? 'This model is currently in a live show. You can still book a future call!'
-      : null;
+    const isOnline = onlineRaw !== null && onlineRaw !== '0';
 
-    // Fetch enough slots to cover the requested page plus one extra to determine hasMore.
-    // We request offset + 10 slots from the availability engine so we avoid re-fetching
-    // for the first several pages without over-fetching on large offsets.
     const fromDate = moment.utc().toDate();
     const toDate = moment.utc().add(14, 'days').toDate();
     const slots = await CallBookingService.getAvailableSlots(creatorId, fromDate, toDate, durationMinutes);
@@ -113,8 +107,9 @@ async function getBookingOptions(req, res) {
       success: true,
       slots: pageSlots,
       hasMore,
-      isLive,
-      liveMessage,
+      isOnline,
+      isLive: false,
+      liveMessage: null,
       type: 'slots',
     });
   } catch (err) {
