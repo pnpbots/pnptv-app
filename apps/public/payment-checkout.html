@@ -637,6 +637,11 @@
                 if (paymentData.showDocFields) {
                     document.getElementById('docFields').style.display = 'flex';
                 }
+                // Pre-fill email if the checkout was created with one
+                if (paymentData.metadata && paymentData.metadata.email) {
+                    const emailEl = document.getElementById('email');
+                    if (emailEl && !emailEl.value) emailEl.value = paymentData.metadata.email;
+                }
                 showState('form');
             } catch (err) {
                 showState('fatal');

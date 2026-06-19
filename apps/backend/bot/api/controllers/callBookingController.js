@@ -1056,7 +1056,25 @@ async function getBookingPaymentStatus(req, res) {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Booking not found' });
+      // NOW flow: no booking was pre-created (caller passed payment UUID directly).
+      // Fall back to checking the payments table so the modal can detect completion.
+      const paymentResult = await query(
+        `SELECT id, user_id, status FROM payments WHERE id = $1 AND type = 'call_package'`,
+        [bookingId]
+      );
+      if (paymentResult.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'Booking not found' });
+      }
+      const pRow = paymentResult.rows[0];
+      if (String(pRow.user_id) !== callerUserId) {
+        return res.status(403).json({ success: false, error: 'Not authorized' });
+      }
+      const ps = pRow.status;
+      const status = ps === 'completed' ? 'paid'
+        : ps === 'failed' ? 'failed'
+        : ps === 'abandoned' ? 'expired'
+        : 'pending';
+      return res.json({ success: true, status, bookingId: null });
     }
 
     const row = result.rows[0];

@@ -502,7 +502,8 @@ export function BookCallModal({
                 paymentPopupRef.current?.close();
                 paymentPopupRef.current = null;
                 setConfirmedRoomName(status.roomName ?? null);
-                setConfirmedBookingId(status.bookingId ?? pollId);
+                // bookingId is null for NOW flow (credits-only, no pre-created booking)
+                setConfirmedBookingId(status.bookingId ?? null);
                 if (selectedSlot?.startUtc) setConfirmedStartAt(selectedSlot.startUtc);
                 setStep("SUCCESS");
                 setCheckoutLoading(false);

@@ -333,6 +333,7 @@ class PaymentController {
           originalPrice: null,
           discountAmount: null,
           promoCode: null,
+          metadata: { email: payment.metadata?.email || null },
           plan: {
             id: `call_package_${pkg.id}`,
             sku: pkg.sku,
