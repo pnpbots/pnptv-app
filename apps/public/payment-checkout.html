@@ -1014,6 +1014,14 @@
                         showState('success');
                         document.getElementById('success-detail').textContent =
                             data.message || 'Your subscription has been activated!';
+                        // For call package payments, update "Return to App" button to go to booking confirmation
+                        if (data.redirectUrl) {
+                            var retBtn = document.querySelector('#state-success .btn-pay');
+                            if (retBtn) {
+                                retBtn.textContent = 'View Booking';
+                                retBtn.onclick = function() { window.location.href = data.redirectUrl; };
+                            }
+                        }
                         return;
                     }
 

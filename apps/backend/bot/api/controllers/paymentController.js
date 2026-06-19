@@ -284,6 +284,105 @@ class PaymentController {
         return res.json({ success: true, payment: tokenPaymentData });
       }
 
+      // Call package purchases — plan_id is null, metadata.type = 'call_package'
+      if (paymentType === 'call_package') {
+        const pkgRes = await query('SELECT * FROM call_packages WHERE id = $1', [payment.metadata?.packageId]);
+        const pkg = pkgRes.rows[0];
+        if (!pkg) {
+          logger.error('Call package not found for payment', { paymentId, packageId: payment.metadata?.packageId });
+          return res.status(404).json({ success: false, error: 'Call package not found.' });
+        }
+
+        let copRate;
+        try {
+          copRate = await getEpaycoCopRate();
+        } catch (fxErr) {
+          logger.error('[ePayco FX] Rate unavailable for call package checkout', { error: fxErr.message, paymentId });
+          return res.status(503).json({
+            success: false,
+            error: 'FX rate unavailable, please retry in a few minutes',
+            code: 'FX_RATE_UNAVAILABLE',
+          });
+        }
+
+        const paymentAmountUsd = parseFloat(payment.amount);
+        const priceInCOP = Math.round(paymentAmountUsd * copRate);
+        const amountCOPString = String(priceInCOP);
+        const currencyCode = 'COP';
+        const actualPaymentId = payment.id;
+        // Use CALL- prefix so ePayco bill field is unique vs subscription PAY- refs
+        const paymentRef = `CALL-${actualPaymentId.substring(0, 8).toUpperCase()}`;
+        const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
+        const epaycoWebhookDomain = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app';
+        const provider = payment.provider || 'epayco';
+        const userId = payment.userId || payment.user_id;
+
+        const callPaymentData = {
+          paymentId: actualPaymentId,
+          paymentRef,
+          userId,
+          // Must be 'call_package' (not null) so ePayco sends x_extra2='call_package'
+          // back in the webhook, routing the completion to onCallPaymentSuccess.
+          planId: 'call_package',
+          provider,
+          status: payment.status,
+          amountUSD: paymentAmountUsd,
+          amountCOP: priceInCOP,
+          currencyCode,
+          isPromo: false,
+          originalPrice: null,
+          discountAmount: null,
+          promoCode: null,
+          plan: {
+            id: `call_package_${pkg.id}`,
+            sku: pkg.sku,
+            name: `${pkg.duration_minutes}-min Private Call`,
+            description: `${pkg.duration_minutes}-min private video call — PNPtv`,
+            icon: '📞',
+            duration: null,
+            features: [`${pkg.duration_minutes}-min private video call`],
+          },
+        };
+
+        if (provider === 'epayco') {
+          callPaymentData.epaycoPublicKey = process.env.EPAYCO_PUBLIC_KEY;
+          callPaymentData.testMode = process.env.EPAYCO_TEST_MODE === 'true';
+          callPaymentData.confirmationUrl = `${epaycoWebhookDomain}/api/webhooks/epayco`;
+          callPaymentData.responseUrl = `${webhookDomain}/api/payment-response`;
+          callPaymentData.epaycoSignature = PaymentService.generateEpaycoCheckoutSignature({
+            invoice: paymentRef,
+            amount: amountCOPString,
+            currencyCode,
+          });
+          try {
+            if (
+              payment.metadata?.expected_epayco_amount !== amountCOPString
+              || payment.metadata?.expected_epayco_currency !== currencyCode
+            ) {
+              await PaymentModel.updateStatus(actualPaymentId, payment.status, {
+                expected_epayco_amount: amountCOPString,
+                expected_epayco_currency: currencyCode,
+              });
+            }
+          } catch (metaError) {
+            logger.error('Failed to persist expected ePayco webhook amount/currency for call package (non-critical)', {
+              paymentId: actualPaymentId,
+              error: metaError.message,
+            });
+          }
+          if (!callPaymentData.epaycoSignature) {
+            return res.status(500).json({ success: false, error: 'Error de configuración del pago.' });
+          }
+        }
+
+        const clientIpCall = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+        const geoCall = geoip.lookup(clientIpCall);
+        callPaymentData.showDocFields = geoCall?.country === 'CO';
+
+        logger.info('Call package payment info retrieved', { paymentId, userId, packageId: pkg.id, duration: pkg.duration_minutes });
+        return res.json({ success: true, payment: callPaymentData });
+      }
+
       const plan = await PlanModel.getById(planId);
 
       if (!plan) {
@@ -598,19 +697,27 @@ class PaymentController {
         }
 
         // Include plan details for completed payments (used by confirmation page)
-        if (payment.status === 'completed' && payment.planId) {
-          try {
-            const plan = await PlanModel.getById(payment.planId);
-            if (plan) {
-              const durationDays = plan.duration_days || plan.duration || 30;
-              response.planName = plan.display_name || plan.name;
-              response.amount = payment.amount;
-              response.currency = payment.currency || 'USD';
-              response.durationDays = durationDays;
-              response.transactionId = payment.reference || payment.transactionId;
+        if (payment.status === 'completed') {
+          const meta = payment.metadata || {};
+          if (meta.type === 'call_package') {
+            // Provide a post-payment redirect to the booking confirmation page
+            const bookingId = meta.bookingId || meta.booking_id || null;
+            response.message = 'Your call credit has been granted!';
+            response.redirectUrl = bookingId ? `/booking/${encodeURIComponent(String(bookingId))}/confirm?epayco=success` : null;
+          } else if (payment.planId) {
+            try {
+              const plan = await PlanModel.getById(payment.planId);
+              if (plan) {
+                const durationDays = plan.duration_days || plan.duration || 30;
+                response.planName = plan.display_name || plan.name;
+                response.amount = payment.amount;
+                response.currency = payment.currency || 'USD';
+                response.durationDays = durationDays;
+                response.transactionId = payment.reference || payment.transactionId;
+              }
+            } catch (planErr) {
+              logger.warn('Could not fetch plan details for payment status', { error: planErr.message });
             }
-          } catch (planErr) {
-            logger.warn('Could not fetch plan details for payment status', { error: planErr.message });
           }
         }
 

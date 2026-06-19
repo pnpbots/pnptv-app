@@ -1661,13 +1661,20 @@ class PaymentService {
               return { success: true, type: 'call_package', alreadyProcessed: true };
             }
 
+            // Stamp ePayco reference fields while the payment is still 'pending'
+            // so they survive the CAS guard inside onCallPaymentSuccess. If we
+            // tried to write them after onCallPaymentSuccess flips status to
+            // 'completed', PaymentModel.updateStatus hits the guard
+            // (AND status != 'completed') and silently drops the fields — leaving
+            // no x_ref_payco on the row for dispute resolution.
+            await PaymentModel.updateStatus(paymentIdOrType, 'pending', {
+              transaction_id: x_transaction_id,
+              reference: x_ref_payco,
+              epayco_ref: x_ref_payco,
+            });
+
             const callCheckoutService = require('./callCheckoutService');
             await callCheckoutService.onCallPaymentSuccess(paymentIdOrType);
-
-            await PaymentModel.updateStatus(paymentIdOrType, 'completed', {
-              transaction_id: x_transaction_id,
-              reference_code: x_ref_payco,
-            });
 
             logger.info('ePayco: call package credits granted', {
               paymentId: paymentIdOrType,
@@ -2684,9 +2691,27 @@ class PaymentService {
       }
 
       const planId = payment.planId || payment.plan_id;
-      const plan = await PlanModel.getById(planId);
-      if (!plan) {
-        return { success: false, error: 'Plan not found' };
+      const paymentMeta = payment.metadata || {};
+      const isCallPackage = paymentMeta.type === 'call_package';
+
+      let plan = null;
+      let callPkg = null;
+      // effectivePlanId is sent as ePayco extra2 → webhook uses it to route to the
+      // correct fulfillment handler. Must be 'call_package' (not null) for call packages.
+      let effectivePlanId = planId;
+
+      if (isCallPackage) {
+        const pkgRes = await query('SELECT * FROM call_packages WHERE id = $1', [paymentMeta.packageId]);
+        callPkg = pkgRes.rows[0];
+        if (!callPkg) {
+          return { success: false, error: 'Call package not found' };
+        }
+        effectivePlanId = 'call_package';
+      } else {
+        plan = await PlanModel.getById(planId);
+        if (!plan) {
+          return { success: false, error: 'Plan not found' };
+        }
       }
 
       const userId = payment.userId || payment.user_id;
@@ -2694,8 +2719,11 @@ class PaymentService {
       // Colombian acquiring network in COP. The rate is fetched daily from a public
       // FX API (see getEpaycoCopRate above). Do not hardcode a fallback — fail closed instead.
       const USD_TO_COP_RATE = await getEpaycoCopRate();
-      const amountCOP = Math.round((payment.amount || parseFloat(plan.price)) * USD_TO_COP_RATE);
-      const paymentRef = `PAY-${paymentId.substring(0, 8).toUpperCase()}`;
+      const paymentAmount = payment.amount || (isCallPackage ? parseFloat(callPkg.price_usd) : parseFloat(plan.price));
+      const amountCOP = Math.round(paymentAmount * USD_TO_COP_RATE);
+      const paymentRef = isCallPackage
+        ? `CALL-${paymentId.substring(0, 8).toUpperCase()}`
+        : `PAY-${paymentId.substring(0, 8).toUpperCase()}`;
       const normalizedBrowserInfo = this.buildChargeBrowserInfo({
         browserInfo,
         userAgent,
@@ -2711,7 +2739,7 @@ class PaymentService {
 
       // Security: Validate payment amount integrity
       try {
-        const amountCheck = await PaymentSecurityService.validatePaymentAmount(paymentId, payment.amount || parseFloat(plan.price));
+        const amountCheck = await PaymentSecurityService.validatePaymentAmount(paymentId, paymentAmount);
         if (!amountCheck.valid) {
           logger.warn('Payment amount integrity warning', { paymentId, reason: amountCheck.reason });
         }
@@ -2721,7 +2749,7 @@ class PaymentService {
 
       // Security: 2FA check for large payments
       try {
-        const twoFA = await PaymentSecurityService.requireTwoFactorAuth(paymentId, userId, payment.amount || parseFloat(plan.price));
+        const twoFA = await PaymentSecurityService.requireTwoFactorAuth(paymentId, userId, paymentAmount);
         if (twoFA.required) {
           // Check if already verified
           const verified = await cache.get(`payment:2fa:verified:${paymentId}`);
@@ -2836,7 +2864,9 @@ class PaymentService {
         phone: customer.phone || '3101234567',
         cell_phone: customer.cell_phone || customer.phone || '3101234567',
         bill: paymentRef,
-        description: 'PNPtv PRIME - Membresia',
+        description: isCallPackage
+          ? `${callPkg.duration_minutes}-min Private Call — PNPtv`
+          : 'PNPtv PRIME - Membresia',
         value: String(amountCOP),
         tax: '0',
         tax_base: '0',
@@ -2862,7 +2892,7 @@ class PaymentService {
         deviceChannel: '02',
         country: customer.country || 'CO',
         extra1: String(userId),
-        extra2: planId,
+        extra2: effectivePlanId,
         extra3: paymentId,
       });
 
