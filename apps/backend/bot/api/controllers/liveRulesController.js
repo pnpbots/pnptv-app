@@ -43,7 +43,7 @@ const getRulesStatus = async (req, res) => {
     const { channelRef } = req.query;
     if (channelRef && typeof channelRef === 'string') {
       const creatorResult = await pool.query(
-        `SELECT display_name, username, stream_rules
+        `SELECT first_name, username, stream_rules
          FROM users
          WHERE live_channel = $1
          LIMIT 1`,
@@ -52,7 +52,7 @@ const getRulesStatus = async (req, res) => {
       if (creatorResult.rowCount > 0) {
         const row = creatorResult.rows[0];
         response.creatorRules = row.stream_rules || null;
-        response.creatorName = row.display_name || row.username || null;
+        response.creatorName = row.first_name || row.username || null;
       }
     }
 

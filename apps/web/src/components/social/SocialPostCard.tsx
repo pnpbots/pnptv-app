@@ -144,6 +144,7 @@ export default function SocialPostCard({
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content || "");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [videoError, setVideoError] = useState(false);
   const [localContent, setLocalContent] = useState<string | null>(null);
 
   const isOwn = String(post.author_id) === currentUserId;
@@ -830,16 +831,28 @@ export default function SocialPostCard({
                           )}
                         </div>
                       )}
-                      <video
-                        src={post.media_url}
-                        controls
-                        controlsList="nodownload"
-                        onContextMenu={(e) => e.preventDefault()}
-                        playsInline
-                        className="w-full max-h-[480px] rounded-lg object-contain bg-black"
-                        preload="metadata"
-                        poster={post.video_thumbnail_url || undefined}
-                      />
+                      {videoError ? (
+                        <div className="w-full rounded-lg bg-white/5 flex flex-col items-center justify-center gap-2 py-10 text-white/40">
+                          <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                          </svg>
+                          <span className="text-xs">
+                            {lang === "es" ? "Este video ya no está disponible" : "Video no longer available"}
+                          </span>
+                        </div>
+                      ) : (
+                        <video
+                          src={post.media_url}
+                          controls
+                          controlsList="nodownload"
+                          onContextMenu={(e) => e.preventDefault()}
+                          playsInline
+                          className="w-full max-h-[480px] rounded-lg object-contain bg-black"
+                          preload="metadata"
+                          poster={post.video_thumbnail_url || undefined}
+                          onError={() => setVideoError(true)}
+                        />
+                      )}
                     </>
                   ) : (
                     <img

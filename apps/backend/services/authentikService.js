@@ -200,6 +200,11 @@ class AuthentikService {
 
   static async updateUserEmailByUuid(pnptvUuid, email) {
     if (!pnptvUuid || !email) return false;
+    // Authentik UUIDs are 36-char xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx format.
+    // Legacy pnptv_id values stored as long hex strings are not Authentik UUIDs — skip silently.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pnptvUuid)) {
+      return false;
+    }
     const pk = await AuthentikService._getUserPkBySub(pnptvUuid);
     if (!pk) {
       logger.warn('[Authentik] updateUserEmailByUuid: user not found', { pnptvUuid });
@@ -260,7 +265,9 @@ class AuthentikService {
       };
 
       // 1. Reuse the canonical Authentik identity if PNPtv already linked one.
-      if (dbLinkedPnptvId) {
+      // Guard against CONFLICT_ / legacy hex pnptv_ids that aren't valid UUIDs.
+      const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (dbLinkedPnptvId && isValidUuid.test(dbLinkedPnptvId)) {
         await collectCandidates({ uuid: dbLinkedPnptvId });
       }
       // 2. Username-only lookup keeps current behavior for stable usernames.
