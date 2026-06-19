@@ -703,7 +703,9 @@ class PaymentController {
             // Provide a post-payment redirect to the booking confirmation page
             const bookingId = meta.bookingId || meta.booking_id || null;
             response.message = 'Your call credit has been granted!';
-            response.redirectUrl = bookingId ? `/booking/${encodeURIComponent(String(bookingId))}/confirm?epayco=success` : null;
+            response.redirectUrl = bookingId
+              ? `/booking/${encodeURIComponent(String(bookingId))}/confirm?epayco=success`
+              : '/channels';
           } else if (payment.planId) {
             try {
               const plan = await PlanModel.getById(payment.planId);

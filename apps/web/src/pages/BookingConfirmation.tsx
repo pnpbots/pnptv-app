@@ -89,10 +89,11 @@ export default function BookingConfirmation() {
   const [showSurvey, setShowSurvey] = useState(() => searchParams.get("survey") === "1");
   const [pollingPayment, setPollingPayment] = useState(false);
 
-  // FIX M-1: Poll payment status after NowPayments redirect until confirmed
+  // Poll payment status after NowPayments or ePayco redirect until booking is confirmed
   useEffect(() => {
-    const isNowPaymentsReturn = searchParams.get("nowpayments") === "success";
-    if (!isNowPaymentsReturn || !bookingId) return;
+    const isPaymentReturn =
+      searchParams.get("nowpayments") === "success" || searchParams.get("epayco") === "success";
+    if (!isPaymentReturn || !bookingId) return;
     if (!(/^\d+$/.test(bookingId) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingId))) return;
 
     let stopped = false;
