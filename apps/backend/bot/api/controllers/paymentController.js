@@ -951,7 +951,7 @@ class PaymentController {
         if (timeout.expired) {
           return res.status(400).json({
             success: false,
-            error: 'El tiempo para completar este pago ha expirado. Por favor, genera un nuevo enlace desde el bot.',
+            error: 'El tiempo para completar este pago ha expirado. Por favor, regresa a la app y genera un nuevo enlace.',
           });
         }
       } catch (err) {

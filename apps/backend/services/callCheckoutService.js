@@ -18,6 +18,7 @@ const { sendNotificationViaTelegram } = require('./notificationBotDelivery');
 const emailService = require('./emailservice');
 const logger = require('../utils/logger');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
+const PaymentSecurityService = require('./paymentSecurityService');
 function getCallNotificationService() {
   return require('./callNotificationService');
 }
@@ -100,7 +101,32 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     metadata: paymentMetadata,
   });
 
-  // 2b. If slot times are provided, lock the slot + create awaiting_payment
+  // Set payment timeout (1-hour window to complete), same as subscription checkout.
+  // Without this, the tokenized-charge endpoint returns 400 "expired" immediately.
+  PaymentSecurityService.setPaymentTimeout(payment.id, 3600).catch(() => {});
+
+  // 2b. For ePayco: stamp the expected COP amount so the webhook amount
+  //     validator can verify the charge without a live FX API call at
+  //     delivery time. Mirrors the pattern used for subscription checkouts
+  //     (paymentService.js ~line 806). Non-fatal: if the FX lookup fails the
+  //     webhook validator falls back to a dynamic FX fetch.
+  if (provider === 'epayco') {
+    try {
+      const { getEpaycoCopRate } = require('./paymentService');
+      const usdToCopRate = await getEpaycoCopRate();
+      const expectedCOP = String(Math.round(parseFloat(pkg.price_usd) * usdToCopRate));
+      await PaymentModel.updateStatus(payment.id, 'pending', {
+        expected_epayco_amount: expectedCOP,
+        expected_epayco_currency: 'COP',
+      });
+    } catch (fxErr) {
+      logger.warn('[callCheckoutService] could not stamp expected COP amount — webhook will use dynamic FX fallback', {
+        paymentId: payment.id, error: fxErr.message,
+      });
+    }
+  }
+
+  // 2c. If slot times are provided, lock the slot + create awaiting_payment
   //     booking row. Same pattern as createCallCheckoutDash so the two
   //     payment providers converge at onCallPaymentSuccess.
   if (slotTimes?.startTimeUtc && slotTimes?.endTimeUtc) {
@@ -223,9 +249,23 @@ async function onCallPaymentSuccess(paymentId) {
     );
 
     if (creditResult.rows.length === 0) {
-      // Duplicate webhook — credits already granted; commit nothing and return success
-      await client.query('ROLLBACK');
-      logger.info('[callCheckoutService] onCallPaymentSuccess: duplicate webhook — credits already granted, skipping', { paymentId });
+      // Credits already granted by an earlier delivery. Re-check the booking in case
+      // the first delivery committed credits but crashed before confirming the booking.
+      const existingCredit = await client.query(
+        `SELECT id FROM call_credits WHERE payment_id = $1 LIMIT 1`,
+        [paymentId]
+      );
+      const existingCreditId = existingCredit.rows[0]?.id;
+      const existingBookingId = meta.bookingId || null;
+      if (existingBookingId && existingCreditId) {
+        await client.query(
+          `UPDATE bookings SET status = 'confirmed', credit_id = $2, updated_at = NOW()
+           WHERE id = $1 AND payment_id = $3 AND status = 'awaiting_payment'`,
+          [existingBookingId, existingCreditId, paymentId]
+        );
+      }
+      await client.query('COMMIT');
+      logger.info('[callCheckoutService] onCallPaymentSuccess: duplicate webhook — credits already granted, booking re-confirmed', { paymentId, existingBookingId });
       return;
     }
 
@@ -281,27 +321,21 @@ async function onCallPaymentSuccess(paymentId) {
       );
     }
 
-    // Record 70/30 earnings split inside the transaction so a post-COMMIT crash
-    // cannot silently absorb creator earnings with no audit trail.
-    try {
-      const pkg = pkgResult.rows[0];
-      const grossAmount = parseFloat(pkg.price_usd);
-      const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
-      const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
-      await client.query(
-        `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
-         VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))
-         ON CONFLICT (source_payment_id) DO NOTHING`,
-        [creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId || null]
-      );
-      logger.info('[callCheckoutService] creator earnings recorded (holding)', {
-        creatorId: creator_id, grossAmount, amountCreator, amountPlatform,
-      });
-    } catch (earningsErr) {
-      logger.warn('[onCallPaymentSuccess] creator_earnings insert failed (non-fatal, call credit still granted)', {
-        paymentId, error: earningsErr.message,
-      });
-    }
+    // Record 70/30 earnings split inside the transaction — failure rolls back the
+    // entire payment so creator earnings are never silently lost.
+    const pkg = pkgResult.rows[0];
+    const grossAmount = parseFloat(pkg.price_usd);
+    const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
+    const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
+    await client.query(
+      `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+       VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))
+       ON CONFLICT (source_payment_id) DO NOTHING`,
+      [creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId || null]
+    );
+    logger.info('[callCheckoutService] creator earnings recorded (holding)', {
+      creatorId: creator_id, grossAmount, amountCreator, amountPlatform,
+    });
 
     await client.query('COMMIT');
 
@@ -708,10 +742,60 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
   };
 }
 
+/**
+ * Expire bookings stuck in 'awaiting_payment' for more than 2 hours.
+ * Called by the cron every hour. Frees calendar slots that were locked
+ * by an ePayco or BTCPay checkout the user abandoned without paying.
+ * Also marks the associated payment rows as 'abandoned' so they are
+ * excluded from payment-recovery retries.
+ *
+ * @returns {{ expired: number, errors: number }}
+ */
+async function expireAbandonedBookings() {
+  let expired = 0;
+  let errors = 0;
+  try {
+    const result = await query(
+      `UPDATE bookings
+       SET status = 'expired', updated_at = NOW()
+       WHERE status = 'awaiting_payment'
+         AND created_at < NOW() - INTERVAL '2 hours'
+       RETURNING id, payment_id`,
+    );
+    expired = result.rows.length;
+
+    if (expired > 0) {
+      const paymentIds = result.rows
+        .map((r) => r.payment_id)
+        .filter(Boolean);
+      if (paymentIds.length > 0) {
+        // Mark the associated payment rows abandoned so payment-recovery
+        // crons do not keep polling ePayco for these known-abandoned refs.
+        await query(
+          `UPDATE payments
+           SET status = 'abandoned', updated_at = NOW()
+           WHERE id = ANY($1::uuid[])
+             AND status = 'pending'`,
+          [paymentIds],
+        );
+      }
+      logger.info('[callCheckoutService] expireAbandonedBookings: expired stuck bookings', {
+        count: expired,
+        paymentIds,
+      });
+    }
+  } catch (err) {
+    errors++;
+    logger.error('[callCheckoutService] expireAbandonedBookings failed', { error: err.message });
+  }
+  return { expired, errors };
+}
+
 module.exports = {
   createCallCheckout,
   createCallCheckoutNowPayments,
   onCallPaymentSuccess,
+  expireAbandonedBookings,
   _lockSlotAndInsertBooking,
   _getPerformerId,
 };
