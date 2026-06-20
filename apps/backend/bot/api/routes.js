@@ -9528,6 +9528,149 @@ app.get('/api/webapp/payments/lightning/details/:invoiceId', requireSessionAuth,
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BTC (on-chain + Lightning) — Bitcoin subscription payments via BTCPay Server
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/webapp/payments/btc/available — config-only check, no live BTCPay call
+app.get('/api/webapp/payments/btc/available', healthLimiter, asyncHandler(async (req, res) => {
+  const { isConfigured } = require('../../config/btcpay');
+  return res.json({ available: !!isConfigured, configured: !!isConfigured });
+}));
+
+// POST /api/webapp/payments/btc/create — create a BTCPay invoice accepting BTC on-chain + Lightning Network
+app.post('/api/webapp/payments/btc/create', requireSessionAuth, paymentCreateLimiter, asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const { planId, email, creatorId } = req.body;
+
+  if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
+  if (typeof planId !== 'string' || planId.length > 100 || !/^[a-z0-9_-]+$/.test(planId)) {
+    return res.status(400).json({ success: false, error: 'Invalid planId format' });
+  }
+
+  const userId = String(user.telegram_id || user.id);
+
+  if (creatorId && String(creatorId) === userId) {
+    return res.status(400).json({ success: false, error: 'You cannot subscribe to yourself' });
+  }
+
+  const { isConfigured, createInvoice } = require('../../config/btcpay');
+  if (!isConfigured) {
+    return res.status(503).json({ success: false, error: 'Bitcoin payments are not available yet.', code: 'BTCPAY_NOT_CONFIGURED' });
+  }
+
+  const { query: dbQuery } = require('../../config/postgres');
+
+  let planDisplayName;
+  let usdAmount;
+  let discountInfo = null;
+
+  if (planId === 'creator_monthly') {
+    if (!creatorId) return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
+    const creatorRes = await dbQuery(
+      'SELECT id, creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
+      [String(creatorId), 'active']
+    );
+    if (creatorRes.rows.length === 0) return res.status(404).json({ success: false, error: 'Creator not found or not active' });
+    const price = parseFloat(creatorRes.rows[0].creator_price_usd);
+    if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
+    usdAmount = price;
+    planDisplayName = 'Premium subscription';
+  } else {
+    const PlanModel = require('../../models/planModel');
+    const plan = await PlanModel.getById(planId);
+    if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+    const basePrice = parseFloat(plan.price);
+    if (plan.payment_method === 'crypto') {
+      usdAmount = basePrice;
+    } else {
+      usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
+      discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    }
+    planDisplayName = plan.display_name || plan.name;
+  }
+
+  // Dedup: return existing pending BTC invoice for same user+plan within 15 minutes
+  const { rows: existing } = await dbQuery(
+    `SELECT btcpay_invoice_id FROM dash_subscription_orders
+     WHERE user_id = $1 AND plan_id = $2 AND status = 'pending'
+       AND created_at > NOW() - INTERVAL '15 minutes'
+     LIMIT 1`,
+    [userId, planId]
+  );
+  if (existing.length) {
+    const existingId = existing[0].btcpay_invoice_id;
+    const btcpayBase = (process.env.BTCPAY_PUBLIC_URL || 'https://btcpay.pnptv.app').replace(/\/$/, '');
+    return res.json({
+      success: true,
+      invoiceId: existingId,
+      checkoutUrl: `${btcpayBase}/i/${existingId}`,
+      planName: planDisplayName,
+      usdAmount,
+      deduplicated: true,
+    });
+  }
+
+  const orderId = `pnptv-btc-${userId}-${Date.now()}`;
+
+  try {
+    const invoice = await createInvoice({
+      amount: usdAmount,
+      currency: 'USD',
+      orderId,
+      userId,
+      planId,
+      metadata: creatorId ? { creatorId: String(creatorId) } : {},
+      redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`,
+      paymentMethods: ['BTC-LightningNetwork', 'BTC'],
+    });
+
+    await dbQuery(
+      `INSERT INTO dash_subscription_orders (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+       ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
+      [userId, planId, email || null, usdAmount, invoice.invoiceId, creatorId ? String(creatorId) : null]
+    );
+
+    return res.json({
+      success: true,
+      invoiceId: invoice.invoiceId,
+      checkoutUrl: invoice.checkoutLink,
+      planName: planDisplayName,
+      usdAmount,
+      ...(discountInfo || {}),
+    });
+  } catch (err) {
+    logger.error(`BTC subscription invoice error: ${err.message}`);
+    if (err.message?.includes('not configured')) {
+      return res.status(503).json({ success: false, error: 'Bitcoin payments are not available yet. Please use another payment method.', code: 'BTCPAY_NOT_CONFIGURED' });
+    }
+    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
+      return res.status(503).json({ success: false, error: 'Payment server is temporarily unavailable. Please try again later.', code: 'BTCPAY_UNREACHABLE' });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to create Bitcoin invoice. Please try again.', code: 'BTCPAY_ERROR' });
+  }
+}));
+
+// GET /api/webapp/payments/btc/status/:invoiceId — poll invoice status
+app.get('/api/webapp/payments/btc/status/:invoiceId', requireSessionAuth, dashStatusLimiter, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { invoiceId } = req.params;
+  if (!invoiceId || !/^[A-Za-z0-9_-]{5,64}$/.test(invoiceId)) {
+    return res.status(400).json({ success: false, error: 'Invalid invoiceId' });
+  }
+  const { query: dbQuery } = require('../../config/postgres');
+  const result = await dbQuery(
+    `SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2`,
+    [invoiceId, String(user.telegram_id || user.id)]
+  );
+
+  if (result.rows.length === 0) return res.status(404).json({ success: false, error: 'Order not found' });
+  return res.json({ success: true, status: result.rows[0].status });
+}));
+
+// ─────────────────────────────────────────────────────────────────────────────
 // NOWPayments — USDC / USDT stablecoin payments
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -10860,18 +11003,18 @@ app.get('/api/webapp/my-call-credits',
   requireSessionAuth,
   asyncHandler(callPackageController.myCallCredits));
 
-// HIGH-01: Creator: manage own call packages (role-gated via middleware + controller)
+// HIGH-01: Creator: manage own call packages
 app.get('/api/webapp/creator/call-packages',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callPackageController.listMyPackages));
 app.post('/api/webapp/creator/call-packages',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callPackageController.createMyPackage));
 app.put('/api/webapp/creator/call-packages/:packageId',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callPackageController.updateMyPackage));
 app.delete('/api/webapp/creator/call-packages/:packageId',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callPackageController.deactivateMyPackage));
 
 // ── Book a Call: Checkout, Booking Management & Creator Availability ─────────
@@ -10934,29 +11077,29 @@ app.get('/api/webapp/creator/availability/schedule',
   asyncHandler(callBookingController.getAvailabilitySchedule));
 
 app.post('/api/webapp/creator/availability/schedule',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.saveAvailabilitySchedule));
 
 // BC-C-02: PUT alias for frontend compatibility
 app.put('/api/webapp/creator/availability/schedule',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.saveAvailabilitySchedule));
 
 app.put('/api/webapp/creator/online-status',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.setOnlineStatus));
 
 app.get('/api/webapp/creator/call-bookings',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.getMyBookings));
 
 app.get('/api/webapp/creator/call-earnings',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.getCallEarnings));
 
 // Creator: complete a booking (creator-only action)
 app.patch('/api/webapp/bookings/:bookingId/complete',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.completeBooking));
 
 // Member or creator: cancel a booking
@@ -10966,10 +11109,10 @@ app.post('/api/webapp/bookings/:bookingId/cancel',
 
 // Creator: get/set next show date
 app.get('/api/webapp/creator/next-show-date',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.getNextShowDate));
 app.put('/api/webapp/creator/next-show-date',
-  requireSessionAuth, roleGuard('model', 'admin', 'superadmin'),
+  requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.setNextShowDate));
 
 

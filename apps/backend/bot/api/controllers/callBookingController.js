@@ -455,11 +455,7 @@ async function saveAvailabilitySchedule(req, res) {
     }
     const creatorId = String(sessionUser.id);
 
-    // Only creators (role: 'model'), admins, and superadmins may manage availability
-    const userRole = sessionUser.role || '';
-    if (!['model', 'admin', 'superadmin'].includes(userRole)) {
-      return res.status(403).json({ success: false, error: 'Only creators can manage availability' });
-    }
+    // creatorGuard middleware already enforces creator_status / admin role — this is a belt-and-suspenders check
 
     let { schedule } = req.body;
 

@@ -280,10 +280,6 @@ async function listMyPackages(req, res) {
 async function createMyPackage(req, res) {
   try {
     const sessionUser = req.session.user;
-    const role = sessionUser.role || '';
-    if (!['model', 'admin', 'superadmin'].includes(role)) {
-      return res.status(403).json({ success: false, error: 'Only creators can manage packages' });
-    }
     const creatorId = String(sessionUser.id);
     const { durationMinutes, quantity, priceUsd, title } = req.body;
 

@@ -62,7 +62,7 @@ async function creatorGuard(req, res, next) {
 
   try {
     const result = await getPool().query(
-      'SELECT creator_status, creator_locked FROM users WHERE id = $1',
+      'SELECT role, creator_status, creator_locked FROM users WHERE id = $1',
       [sessionUser.id]
     );
 
@@ -76,10 +76,13 @@ async function creatorGuard(req, res, next) {
       });
     }
 
-    const { creator_status, creator_locked } = result.rows[0];
+    const { role, creator_status, creator_locked } = result.rows[0];
 
-    if (creator_status !== 'active') {
-      logger.warn('creatorGuard: access denied — creator profile not active', {
+    const isAdmin = ['admin', 'superadmin'].includes(role);
+    const isCreator = ['active', 'eligible'].includes(creator_status);
+
+    if (!isAdmin && !isCreator) {
+      logger.warn('creatorGuard: access denied — no active creator profile', {
         userId: sessionUser.id,
         creator_status,
         path: req.path,
