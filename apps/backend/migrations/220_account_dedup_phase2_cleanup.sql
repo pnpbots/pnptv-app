@@ -72,6 +72,11 @@ BEGIN
     -- Revoke any entitlements first (shouldn't exist for free, but defensive)
     DELETE FROM user_entitlements WHERE user_id = victim.id;
 
+    -- Delete actor-side notifications before user delete to avoid SET NULL
+    -- colliding with the uq_notif_dedup_system unique constraint on
+    -- (type, target_user_id, entity_type, entity_id).
+    DELETE FROM notifications WHERE actor_id = victim.id;
+
     -- Hard delete — FKs cascade
     DELETE FROM users WHERE id = victim.id;
 
@@ -130,9 +135,11 @@ BEGIN
            ))
      WHERE id = victim.id;
 
-    -- Mark entitlements consumed (access resolver denies)
+    -- Mark entitlements consumed (access resolver denies).
+    -- Lifetime rows (is_lifetime=true) must keep expires_at=NULL per chk_lifetime_no_expiry.
     UPDATE user_entitlements
-       SET is_consumed = true, expires_at = NOW()
+       SET is_consumed = true,
+           expires_at  = CASE WHEN is_lifetime THEN NULL ELSE NOW() END
      WHERE user_id = victim.id AND is_consumed = false;
 
     INSERT INTO user_merge_log (loser_id, winner_id, merge_reason, dimension, rows_transferred, performed_by)
