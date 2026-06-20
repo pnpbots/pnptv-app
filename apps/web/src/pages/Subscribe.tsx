@@ -7,9 +7,6 @@ import {
   getPaymentStatus,
   createPayment,
   getUsdcAvailable,
-  getBtcAvailable,
-  createBtcSubscription,
-  getBtcSubscriptionStatus,
   getLabelColor,
   validatePromoCode,
   type SubscriptionPlan,
@@ -123,16 +120,7 @@ export default function Subscribe() {
     setShowCryptoNudge(true);
   }
 
-  // BTC on-chain + Lightning (BTCPay) checkout state
-  const [btcAvailable, setBtcAvailable] = useState<boolean | null>(null);
-  const [btcOrder, setBtcOrder] = useState<{
-    invoiceId: string; checkoutUrl: string; planId: string; planName: string; usdAmount: number; createdAt: number;
-  } | null>(null);
-  const [btcPolling, setBtcPolling] = useState(false);
-  const [btcSuccess, setBtcSuccess] = useState(false);
-  const btcPopupRef = useRef<Window | null>(null);
-
-  // USDC / USDT stablecoin state (NOWPayments hook)
+  // USDC / USDT / BTC stablecoin+crypto state (NOWPayments hook)
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
   const {
     order: usdcOrder,
@@ -179,10 +167,6 @@ export default function Subscribe() {
       .then((res) => setUsdcAvailable(res.available === true && res.configured === true))
       .catch(() => setUsdcAvailable(false));
 
-    getBtcAvailable()
-      .then((res) => setBtcAvailable(res.available === true && res.configured === true))
-      .catch(() => setBtcAvailable(false));
-
     // Handle ?nowpayments=success&order=<id> from hosted checkout return
     const nowpResult = searchParams.get("nowpayments");
     const nowpOrderId = searchParams.get("order");
@@ -202,20 +186,6 @@ export default function Subscribe() {
       }
     } catch {}
 
-    // Resume pending BTC invoice from sessionStorage (1-hour TTL)
-    try {
-      const pendingBtc = sessionStorage.getItem("pnp_pending_btc_order");
-      if (pendingBtc) {
-        const parsed = JSON.parse(pendingBtc);
-        if (parsed?.invoiceId && Date.now() - (parsed.createdAt || 0) < 3600000) {
-          setBtcOrder(parsed);
-          setSelectedPlan(parsed.planId);
-          setBtcPolling(true);
-        } else {
-          sessionStorage.removeItem("pnp_pending_btc_order");
-        }
-      }
-    } catch {}
   }, [searchParams]);
 
 
@@ -302,50 +272,6 @@ export default function Subscribe() {
       }, 100);
     }
   }, [usdcOrder?.orderId]);
-
-  // BTCPay polling — polls every 10s; BTC on-chain can take minutes to confirm
-  useEffect(() => {
-    if (!btcOrder || !btcPolling || btcSuccess) return;
-    let cancelled = false;
-    const maxMs = 60 * 60 * 1000;
-    const startedAt = Date.now();
-    let timerId: ReturnType<typeof setTimeout>;
-
-    const poll = async () => {
-      if (cancelled || Date.now() - startedAt >= maxMs) {
-        setBtcPolling(false);
-        return;
-      }
-      try {
-        const data = await getBtcSubscriptionStatus(btcOrder.invoiceId);
-        if (cancelled) return;
-        if (data.success && data.status === "completed") {
-          setBtcPolling(false);
-          setBtcSuccess(true);
-          btcPopupRef.current?.close();
-          btcPopupRef.current = null;
-          sessionStorage.removeItem("pnp_pending_btc_order");
-          await refreshUser();
-          setTimeout(() => setPaymentSuccess(true), 500);
-          return;
-        }
-        if (data.status === "expired" || data.status === "failed") {
-          setBtcPolling(false);
-          sessionStorage.removeItem("pnp_pending_btc_order");
-          setError(t.lang === "es" ? "El pago expiró. Intenta de nuevo." : "Payment expired. Please try again.");
-          setBtcOrder(null);
-          return;
-        }
-      } catch (err: unknown) {
-        if ((err as { status?: number }).status === 401) { setBtcPolling(false); return; }
-      }
-      if (!cancelled) timerId = setTimeout(poll, 10000);
-    };
-
-    poll();
-    return () => { cancelled = true; clearTimeout(timerId); };
-  }, [btcOrder, btcPolling, btcSuccess, t.lang, refreshUser]);
-
 
   function clearPromo() {
     setAppliedPromo(null);
@@ -452,52 +378,13 @@ export default function Subscribe() {
     }
   }
 
-  function openBtcPopup(url: string) {
-    const w = window.screen.width, h = window.screen.height;
-    const pw = Math.min(560, w), ph = Math.min(780, h);
-    const left = Math.round((w - pw) / 2), top = Math.round((h - ph) / 2);
-    btcPopupRef.current = window.open(url, "btcpay_checkout", `width=${pw},height=${ph},left=${left},top=${top},resizable=yes,scrollbars=yes`);
-  }
-
-  function cancelBtcOrder() {
-    setBtcOrder(null);
-    setBtcPolling(false);
-    setBtcSuccess(false);
-    btcPopupRef.current?.close();
-    btcPopupRef.current = null;
-    sessionStorage.removeItem("pnp_pending_btc_order");
-  }
-
-  async function handleBtcpayCheckout(planId: string) {
+  const handleBitcoinCheckout = useCallback(async (planId: string) => {
     if (submitting) return;
     setSelectedPlan(planId);
-    setError(null);
-    setSubmitting(true);
-    try {
-      const result = await createBtcSubscription(planId, user?.email || undefined);
-      if (!result.success || !result.invoiceId) {
-        setError(result.error || (t.lang === "es" ? "No se pudo crear la factura Bitcoin." : "Failed to create Bitcoin invoice."));
-        return;
-      }
-      const newOrder = {
-        invoiceId: result.invoiceId,
-        checkoutUrl: result.checkoutUrl,
-        planId,
-        planName: result.planName || "Subscription",
-        usdAmount: result.usdAmount || 0,
-        createdAt: Date.now(),
-      };
-      setBtcOrder(newOrder);
-      setBtcPolling(true);
-      setBtcSuccess(false);
-      sessionStorage.setItem("pnp_pending_btc_order", JSON.stringify(newOrder));
-      openBtcPopup(result.checkoutUrl);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : (t.lang === "es" ? "Error al crear el pago." : "Payment error. Please try again."));
-    } finally {
-      setSubmitting(false);
-    }
-  }
+    const SUBSCRIBABLE_PLAN_IDS = new Set(["prime-week-pass-7d", "monthly-pass", "prime-diamond-pass-365d"]);
+    const isSubscription = SUBSCRIBABLE_PLAN_IDS.has(planId);
+    await startNowPayments(planId, user?.email || undefined, undefined, isSubscription, "btc");
+  }, [startNowPayments, submitting, user?.email]);
 
   // Derive current tier display from user object
   function renderTierBanner() {
@@ -808,8 +695,8 @@ export default function Subscribe() {
           const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
-          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id) || !!(btcOrder && selectedPlan === plan.id);
-          const isDimmed = !!((usdcOrder && !usdcPaymentSuccess) || (btcOrder && !btcSuccess)) && selectedPlan !== plan.id;
+          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id);
+          const isDimmed = !!(usdcOrder && !usdcPaymentSuccess) && selectedPlan !== plan.id;
           return (
             <div key={plan.id} className={`transition-all duration-200 ${isDimmed ? "opacity-50 pointer-events-none" : ""}`}>
             <button
@@ -913,10 +800,10 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
-                {btcAvailable !== false && (
+                {usdcAvailable !== false && (
                   <button
                     disabled={submitting}
-                    onClick={(e) => { e.stopPropagation(); handleBtcpayCheckout(plan.id); }}
+                    onClick={(e) => { e.stopPropagation(); handleBitcoinCheckout(plan.id); }}
                     className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/20 disabled:opacity-50 transition-colors"
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-orange-300">
@@ -938,48 +825,6 @@ export default function Subscribe() {
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
                 />
-              </div>
-            )}
-            {btcOrder && selectedPlan === plan.id && !btcSuccess && (
-              <div className="rounded-b-xl border border-t-0 border-orange-500/30 bg-[#1a1108] p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-orange-400 text-base">₿</span>
-                    <p className="text-sm font-semibold text-pnp-textPrimary">
-                      {t.lang === "es" ? "Esperando pago Bitcoin" : "Waiting for Bitcoin payment"}
-                    </p>
-                  </div>
-                  <button onClick={cancelBtcOrder} className="text-pnp-textSecondary hover:text-pnp-textPrimary text-sm leading-none">✕</button>
-                </div>
-                <p className="text-xs text-pnp-textSecondary mb-3">
-                  {t.lang === "es"
-                    ? "Completa el pago en BTCPay. Elige Lightning Network (instantáneo) o BTC on-chain."
-                    : "Complete payment in BTCPay. Choose Lightning Network (instant) or BTC on-chain."}
-                </p>
-                <div className="flex gap-2 mb-2">
-                  <button
-                    onClick={() => openBtcPopup(btcOrder.checkoutUrl)}
-                    className="flex-1 py-2 px-3 rounded-lg text-xs font-semibold bg-orange-500 hover:bg-orange-600 text-white transition-colors"
-                  >
-                    {t.lang === "es" ? "Abrir BTCPay ↗" : "Open BTCPay ↗"}
-                  </button>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(btcOrder.checkoutUrl)}
-                    className="py-2 px-3 rounded-lg text-xs border border-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-                  >
-                    {t.lang === "es" ? "Copiar" : "Copy"}
-                  </button>
-                </div>
-                {btcPolling && (
-                  <p className="text-[10px] text-pnp-textSecondary/60 text-center">
-                    {t.lang === "es" ? "Verificando automáticamente..." : "Checking automatically..."}
-                  </p>
-                )}
-              </div>
-            )}
-            {btcOrder && selectedPlan === plan.id && btcSuccess && (
-              <div className="rounded-b-xl border border-t-0 border-green-500/30 bg-green-500/5 p-4 text-center">
-                <p className="text-green-400 font-semibold text-sm">✓ {t.lang === "es" ? "¡Pago confirmado!" : "Payment confirmed!"}</p>
               </div>
             )}
             </div>
@@ -1010,8 +855,8 @@ export default function Subscribe() {
           const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
-          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id) || !!(btcOrder && selectedPlan === plan.id);
-          const isDimmed = !!((usdcOrder && !usdcPaymentSuccess) || (btcOrder && !btcSuccess)) && selectedPlan !== plan.id;
+          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id);
+          const isDimmed = !!(usdcOrder && !usdcPaymentSuccess) && selectedPlan !== plan.id;
           return (
             <div key={plan.id} className={`transition-all duration-200 ${isDimmed ? "opacity-50 pointer-events-none" : ""}`}>
             <button
@@ -1151,10 +996,10 @@ export default function Subscribe() {
                     </button>
                   )
                 )}
-                {btcAvailable !== false && (
+                {usdcAvailable !== false && (
                   <button
                     disabled={submitting}
-                    onClick={(e) => { e.stopPropagation(); handleBtcpayCheckout(plan.id); }}
+                    onClick={(e) => { e.stopPropagation(); handleBitcoinCheckout(plan.id); }}
                     className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/20 disabled:opacity-50 transition-colors"
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-orange-300">
@@ -1176,48 +1021,6 @@ export default function Subscribe() {
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
                 />
-              </div>
-            )}
-            {btcOrder && selectedPlan === plan.id && !btcSuccess && (
-              <div className="rounded-b-xl border border-t-0 border-orange-500/30 bg-[#1a1108] p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-orange-400 text-base">₿</span>
-                    <p className="text-sm font-semibold text-pnp-textPrimary">
-                      {t.lang === "es" ? "Esperando pago Bitcoin" : "Waiting for Bitcoin payment"}
-                    </p>
-                  </div>
-                  <button onClick={cancelBtcOrder} className="text-pnp-textSecondary hover:text-pnp-textPrimary text-sm leading-none">✕</button>
-                </div>
-                <p className="text-xs text-pnp-textSecondary mb-3">
-                  {t.lang === "es"
-                    ? "Completa el pago en BTCPay. Elige Lightning Network (instantáneo) o BTC on-chain."
-                    : "Complete payment in BTCPay. Choose Lightning Network (instant) or BTC on-chain."}
-                </p>
-                <div className="flex gap-2 mb-2">
-                  <button
-                    onClick={() => openBtcPopup(btcOrder.checkoutUrl)}
-                    className="flex-1 py-2 px-3 rounded-lg text-xs font-semibold bg-orange-500 hover:bg-orange-600 text-white transition-colors"
-                  >
-                    {t.lang === "es" ? "Abrir BTCPay ↗" : "Open BTCPay ↗"}
-                  </button>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(btcOrder.checkoutUrl)}
-                    className="py-2 px-3 rounded-lg text-xs border border-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-                  >
-                    {t.lang === "es" ? "Copiar" : "Copy"}
-                  </button>
-                </div>
-                {btcPolling && (
-                  <p className="text-[10px] text-pnp-textSecondary/60 text-center">
-                    {t.lang === "es" ? "Verificando automáticamente..." : "Checking automatically..."}
-                  </p>
-                )}
-              </div>
-            )}
-            {btcOrder && selectedPlan === plan.id && btcSuccess && (
-              <div className="rounded-b-xl border border-t-0 border-green-500/30 bg-green-500/5 p-4 text-center">
-                <p className="text-green-400 font-semibold text-sm">✓ {t.lang === "es" ? "¡Pago confirmado!" : "Payment confirmed!"}</p>
               </div>
             )}
             </div>

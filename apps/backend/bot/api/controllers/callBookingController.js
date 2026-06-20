@@ -942,11 +942,15 @@ async function createCheckoutNowPayments(req, res) {
     }
     const userId = String(sessionUser.id);
 
-    const { packageId, startTimeUtc, endTimeUtc } = req.body;
+    const { packageId, startTimeUtc, endTimeUtc, payCurrency: rawPayCurrency } = req.body;
 
     if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
     }
+
+    const ALLOWED_PAY_CURRENCIES_CALL = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdtbsc', 'usdcbsc']);
+    const payCurrency = (rawPayCurrency && ALLOWED_PAY_CURRENCIES_CALL.has(String(rawPayCurrency).toLowerCase()))
+      ? String(rawPayCurrency).toLowerCase() : null;
 
     const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
     let slotTimes = null;
@@ -976,6 +980,7 @@ async function createCheckoutNowPayments(req, res) {
       packageId: Number(packageId),
       startTimeUtc: slotTimes?.startTimeUtc ?? null,
       endTimeUtc: slotTimes?.endTimeUtc ?? null,
+      payCurrency,
     });
 
     return res.status(201).json({ success: true, ...result });

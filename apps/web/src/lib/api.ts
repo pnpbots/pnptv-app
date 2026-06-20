@@ -737,8 +737,8 @@ export function getWalletHistory(): Promise<{ success: boolean; history: TokenPu
   return request("/api/wallet/history");
 }
 
-export function buyTokensWithBtc(packageId: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usd: number }> {
-  return request("/api/wallet/buy-btc", { method: "POST", body: { packageId } });
+export function buyTokensWithNowPayments(packageId: string, payCurrency?: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usdAmount: number; error?: string }> {
+  return request("/api/wallet/buy-nowpayments", { method: "POST", body: { packageId, ...(payCurrency ? { payCurrency } : {}) } });
 }
 
 export function buyTokensWithEpayco(packageId: string): Promise<{
@@ -2767,7 +2767,7 @@ export function getPaymentStatus(
 
 export function purchaseChannelAccess(
   channelId: number,
-  provider: 'dash' | 'btc',
+  provider: 'dash',
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/channels/${channelId}/purchase`, {
@@ -2781,7 +2781,7 @@ export function purchaseChannelAccess(
 // channel-access grants cover both the channel and its linked hangout.
 export function purchaseHangoutAccess(
   hangoutGroupId: number,
-  provider: 'dash' | 'btc',
+  provider: 'dash',
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/hangouts/groups/${hangoutGroupId}/purchase`, {
@@ -2898,38 +2898,8 @@ export function getLightningPaymentDetails(
   return request(`/api/webapp/payments/lightning/details/${encodeURIComponent(invoiceId)}`);
 }
 
-export function createBtcSubscription(
-  planId: string,
-  email?: string,
-  creatorId?: string,
-): Promise<{
-  success: boolean;
-  invoiceId: string;
-  checkoutUrl: string;
-  planName?: string;
-  usdAmount?: number;
-  error?: string;
-}> {
-  const body: Record<string, string> = { planId };
-  if (email) body.email = email;
-  if (creatorId) body.creatorId = creatorId;
-  return request("/api/webapp/payments/btc/create", { method: "POST", body });
-}
-
-export function getBtcSubscriptionStatus(invoiceId: string): Promise<{
-  success: boolean;
-  status: string;
-  error?: string;
-}> {
-  return request(`/api/webapp/payments/btc/status/${encodeURIComponent(invoiceId)}`);
-}
-
-export function getBtcAvailable(): Promise<{
-  available: boolean;
-  configured: boolean;
-}> {
-  return request("/api/webapp/payments/btc/available");
-}
+// BTCPay BTC routes removed — Bitcoin payments use NowPayments via prepareUsdcSubscription
+// with payCurrency:'btc', or buyTokensWithNowPayments with payCurrency:'btc'.
 
 export function prepareUsdcSubscription(
   planId: string,
@@ -6092,30 +6062,20 @@ export function createCallCheckout(
 export function createCallCheckoutNowPayments(
   packageId: number,
   startTimeUtc?: string,
-  endTimeUtc?: string
+  endTimeUtc?: string,
+  payCurrency?: string
 ): Promise<{ success: boolean; invoiceUrl: string; paymentId: string; amountUsd: number; expiresAt?: string; bookingId?: string; orderId?: string }> {
   const body: Record<string, unknown> = { packageId };
   if (startTimeUtc) body.startTimeUtc = startTimeUtc;
   if (endTimeUtc) body.endTimeUtc = endTimeUtc;
+  if (payCurrency) body.payCurrency = payCurrency;
   return request("/api/webapp/book-call/checkout/nowpayments", {
     method: "POST",
     body,
   });
 }
-
-export function createCallCheckoutBtc(
-  packageId: number,
-  startTimeUtc?: string,
-  endTimeUtc?: string
-): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; bookingId?: string | null; usdAmount: number; orderId?: string; paymentId?: string }> {
-  const body: Record<string, unknown> = { packageId };
-  if (startTimeUtc) body.startTimeUtc = startTimeUtc;
-  if (endTimeUtc) body.endTimeUtc = endTimeUtc;
-  return request("/api/webapp/book-call/checkout/btc", {
-    method: "POST",
-    body,
-  });
-}
+// createCallCheckoutBtc removed — BTCPay BTC route is gone.
+// Use createCallCheckoutNowPayments with payCurrency:'btc' instead.
 
 export interface BookingPaymentStatus {
   status: "pending" | "paid" | "expired" | "failed";

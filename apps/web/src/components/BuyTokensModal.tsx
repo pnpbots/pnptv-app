@@ -6,10 +6,9 @@ import {
   getTokenPackages,
   buyTokens,
   buyTokensWithCard,
-  buyTokensWithBtc,
+  buyTokensWithNowPayments,
   getDashPaymentDetails,
   getDashSubscriptionStatus,
-  getBtcSubscriptionStatus,
   assertPaymentUrl,
   type TokenPackage,
 } from "@/lib/api";
@@ -195,33 +194,38 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
     }
   };
 
-  const handleBuyTokensBtc = async (pkg: TokenPackage) => {
+  const handleBuyTokensBtcNow = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
     setBuyError(null);
     try {
-      const result = await buyTokensWithBtc(pkg.id);
+      const result = await buyTokensWithNowPayments(pkg.id, 'btc');
       if (!result.success || !result.invoiceId) {
-        setBuyError("Failed to create Bitcoin invoice. Please try again.");
+        setBuyError(result.error || "Failed to create Bitcoin invoice. Please try again.");
         setBuyingPackage(null);
         return;
       }
-      setBtcPayment({ invoiceId: result.invoiceId, checkoutUrl: result.checkoutUrl });
+      // Open NowPayments hosted checkout in a centered popup
+      const checkoutUrl = result.checkoutUrl;
+      setBtcPayment({ invoiceId: result.invoiceId, checkoutUrl });
       setBtcPolling(true);
       setBtcSuccess(false);
       const pw = 560, ph = 780;
       const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
       const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
       btcPopupRef.current = window.open(
-        result.checkoutUrl,
-        'btcpay_checkout',
-        `width=${pw},height=${ph},left=${pl},top=${pt},noopener`
+        checkoutUrl,
+        'nowpayments_btc_checkout',
+        `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
       );
-      const pollInvoiceId = result.invoiceId;
+      // Poll the dash_subscription_orders status via the USDC status endpoint
+      // (the token purchase order is stored in dash_subscription_orders with plan_id='token_purchase')
+      const pollOrderId = result.invoiceId;
       if (btcPollRef.current) clearInterval(btcPollRef.current);
       btcPollRef.current = setInterval(async () => {
         try {
-          const statusRes = await getBtcSubscriptionStatus(pollInvoiceId);
-          if (statusRes.status === 'completed' || statusRes.status === 'paid') {
+          const { getUsdcSubscriptionStatus } = await import('@/lib/api');
+          const statusRes = await getUsdcSubscriptionStatus(pollOrderId);
+          if (statusRes.completed) {
             if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
             btcPopupRef.current?.close();
             btcPopupRef.current = null;
@@ -232,11 +236,11 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               if (onSuccess) onSuccess(balRes.balance);
               onClose();
             }, 1500);
-          } else if (statusRes.status === 'expired' || statusRes.status === 'invalid') {
+          } else if (statusRes.failed) {
             if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
             setBtcPolling(false);
             setBtcPayment(null);
-            setBuyError('Invoice expired. Please try again.');
+            setBuyError('Invoice expired or failed. Please try again.');
           }
         } catch { /* network hiccup — keep polling */ }
       }, 10000);
@@ -550,7 +554,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               {buyMethod === 'card'
                 ? 'Pay with Visa or Mastercard via ePayco. You\'ll be redirected to a secure checkout page.'
                 : buyMethod === 'btc'
-                ? 'Pay with Bitcoin (on-chain or Lightning) via BTCPay. 20% discount applied automatically. A popup will open for checkout.'
+                ? 'Pay with Bitcoin (on-chain or Lightning) via NowPayments. 20% discount applied automatically. A popup will open for checkout.'
                 : 'Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed.'}
             </p>
 
@@ -567,7 +571,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     key={pkg.id}
                     onClick={() => {
                       if (buyMethod === 'card') return handleBuyTokensCard(pkg);
-                      if (buyMethod === 'btc') return handleBuyTokensBtc(pkg);
+                      if (buyMethod === 'btc') return handleBuyTokensBtcNow(pkg);
                       return handleBuyTokens(pkg);
                     }}
                     disabled={buyingPackage === pkg.id}

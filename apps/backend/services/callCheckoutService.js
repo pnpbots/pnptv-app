@@ -582,9 +582,10 @@ async function _getPerformerId(client, creatorUserId) {
  * @param {number} opts.packageId     - call_packages.id
  * @param {string} [opts.startTimeUtc] - ISO 8601
  * @param {string} [opts.endTimeUtc]   - ISO 8601
+ * @param {string} [opts.payCurrency]  - Optional NowPayments pay_currency (e.g. 'btc', 'btcln')
  * @returns {{ invoiceUrl, paymentId, bookingId, amountUsd, expiresAt, orderId }}
  */
-async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, endTimeUtc }) {
+async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, endTimeUtc, payCurrency = null }) {
   const axios = require('axios');
   const NOWPAYMENTS_API_KEY = process.env.NOWPAYMENTS_API_KEY || '';
   if (!NOWPAYMENTS_API_KEY) {
@@ -670,6 +671,10 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
 
   let invoiceUrl;
   try {
+    const ALLOWED_CALL_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdtbsc', 'usdcbsc']);
+    const validCallPayCurrency = (payCurrency && ALLOWED_CALL_PAY_CURRENCIES.has(String(payCurrency).toLowerCase()))
+      ? String(payCurrency).toLowerCase() : null;
+
     const invoiceResp = await axios.post(
       `${NOWPAYMENTS_URL}/invoice`,
       {
@@ -682,6 +687,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
         is_fixed_rate: true,
         is_fee_paid_by_user: false,
         expiry_time: 1800,
+        ...(validCallPayCurrency ? { pay_currency: validCallPayCurrency } : {}),
       },
       { headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' } }
     );

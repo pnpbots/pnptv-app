@@ -25,7 +25,6 @@ import {
   getBookingOptions,
   createCallCheckoutNowPayments,
   createCallCheckoutEpayco,
-  createCallCheckoutBtc,
   getBookingPaymentStatus,
   assertPaymentUrl,
   type CallPackage,
@@ -537,21 +536,22 @@ export function BookCallModal({
         return;
       }
 
-      // BTC + Lightning — open a centered popup, poll booking payment status
+      // BTC + Lightning — use NowPayments with payCurrency:'btc', open a centered popup
       if (provider === "btc") {
-        const btcRes = await createCallCheckoutBtc(
+        const btcRes = await createCallCheckoutNowPayments(
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
-          selectedSlot?.endUtc ?? undefined
+          selectedSlot?.endUtc ?? undefined,
+          "btc"
         );
-        if (btcRes.checkoutUrl) {
-          const safeUrl = assertPaymentUrl(btcRes.checkoutUrl);
+        if (btcRes.invoiceUrl) {
+          const safeUrl = assertPaymentUrl(btcRes.invoiceUrl);
           const pw = 560, ph = 780;
           const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
           const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
           paymentPopupRef.current = window.open(
-            safeUrl, "btcpay_checkout",
-            `width=${pw},height=${ph},left=${pl},top=${pt},noopener`
+            safeUrl, "nowpayments_btc_checkout",
+            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
           );
         }
         setDashPaymentId(btcRes.paymentId ?? null);

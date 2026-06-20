@@ -23,6 +23,7 @@
 'use strict';
 
 const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
 const { query, getClient } = require('../config/postgres');
 const { createDashInvoice, createInvoice: createBtcInvoice } = require('../config/btcpay');
 const DashTokenService = require('./dashTokenService');
@@ -32,6 +33,11 @@ const { cache } = require('../config/redis');
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const WEB_APP_URL = process.env.WEB_APP_URL || 'https://pnptv.app';
+
+const NOWPAYMENTS_URL = process.env.NOWPAYMENTS_ENVIRONMENT === 'sandbox'
+  ? 'https://api-sandbox.nowpayments.io/v1'
+  : 'https://api.nowpayments.io/v1';
+const NOWPAYMENTS_API_KEY = process.env.NOWPAYMENTS_API_KEY || '';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -503,6 +509,95 @@ class TokenCheckoutService {
       client.release();
       await cache.releaseLock(lockKey).catch(() => {});
     }
+  }
+
+  // ── NowPayments checkout ─────────────────────────────────────────────────
+
+  /**
+   * Create a NowPayments hosted invoice for a token package purchase (20% crypto discount).
+   * Uses the same dash_subscription_orders table as other NowPayments flows so the
+   * existing webhook handler routes payment confirmation automatically.
+   *
+   * @param {string} userId
+   * @param {string} packageId
+   * @param {string|null} [payCurrency]  Optional NowPayments pay_currency (e.g. 'btc', 'btcln')
+   * @returns {Promise<{ invoiceId: string, checkoutUrl: string, tokens: number, usdAmount: number }>}
+   */
+  static async createNowPaymentsCheckout(userId, packageId, payCurrency = null) {
+    const pkg = resolvePackage(packageId);
+    if (!pkg) {
+      throw Object.assign(new Error(`Token package '${packageId}' not found`), { code: 'PACKAGE_NOT_FOUND', status: 404 });
+    }
+
+    if (!NOWPAYMENTS_API_KEY) {
+      throw Object.assign(new Error('Crypto payments are not configured'), { code: 'NOWPAYMENTS_NOT_CONFIGURED', status: 503 });
+    }
+
+    // 20% discount for crypto payments
+    const usdAmount = Math.round(pkg.usd * 0.80 * 100) / 100;
+    const orderId = `pnptv-tokens-nowp-${userId}-${Date.now()}`;
+    const successUrl = `${WEB_APP_URL}/wallet?nowpayments=success&order=${encodeURIComponent(orderId)}`;
+    const cancelUrl = `${WEB_APP_URL}/wallet`;
+
+    let invoiceUrl;
+    try {
+      const invoiceResp = await axios.post(
+        `${NOWPAYMENTS_URL}/invoice`,
+        {
+          price_amount: usdAmount,
+          price_currency: 'usd',
+          order_id: orderId,
+          order_description: `${pkg.tokens} PNP Tokens`,
+          ipn_callback_url: `${WEB_APP_URL}/api/webhooks/nowpayments`,
+          success_url: successUrl,
+          cancel_url: cancelUrl,
+          ...(payCurrency ? { pay_currency: payCurrency } : {}),
+        },
+        { headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' }, timeout: 10000 }
+      );
+      invoiceUrl = invoiceResp.data?.invoice_url;
+      if (!invoiceUrl) throw new Error('No invoice_url in response');
+    } catch (invoiceErr) {
+      logger.error('TokenCheckoutService.createNowPaymentsCheckout: NowPayments error', {
+        userId, packageId, payCurrency, error: invoiceErr.response?.data || invoiceErr.message,
+      });
+      const err = Object.assign(new Error('Could not reach NowPayments. Please try again.'), { code: 'NOWPAYMENTS_ERROR', status: 502 });
+      throw err;
+    }
+
+    // Store in dash_subscription_orders so the NowPayments IPN webhook can
+    // find and fulfill this order (same path as subscription/plan payments).
+    const { query: pgQuery } = require('../config/postgres');
+    await pgQuery(
+      `INSERT INTO dash_subscription_orders
+         (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
+       VALUES ($1, 'token_purchase', NULL, $2, $3, 'pending', $4)
+       ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
+      [
+        userId,
+        usdAmount,
+        orderId,
+        JSON.stringify({
+          provider: 'nowpayments',
+          flow: 'token_purchase',
+          packageId: pkg.id,
+          tokens: pkg.tokens,
+          invoiceUrl,
+          ...(payCurrency ? { payCurrency } : {}),
+        }),
+      ]
+    );
+
+    logger.info('TokenCheckoutService.createNowPaymentsCheckout: invoice created', {
+      userId, packageId, orderId, usdAmount, payCurrency, tokens: pkg.tokens,
+    });
+
+    return {
+      invoiceId: orderId,
+      checkoutUrl: invoiceUrl,
+      tokens: pkg.tokens,
+      usdAmount,
+    };
   }
 
   /**

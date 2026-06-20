@@ -23,9 +23,7 @@ import {
   unsubscribeFromCreator,
   createDashSubscription,
   getDashAvailable,
-  createBtcSubscription,
-  getBtcSubscriptionStatus,
-  getBtcAvailable,
+  prepareUsdcSubscription,
   getUserLabel,
   getLabelColor,
   assertPaymentUrl,
@@ -190,9 +188,8 @@ export default function Profile() {
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [subscribeEmail, setSubscribeEmail] = useState("");
   const [subscribeEmailError, setSubscribeEmailError] = useState<string | null>(null);
-  const [subscribeProvider, setSubscribeProvider] = useState<"dash" | "btc">("dash");
+  const [subscribeProvider, setSubscribeProvider] = useState<"dash" | "nowpayments-btc">("dash");
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
-  const [btcAvailable, setBtcAvailable] = useState<boolean | null>(null);
   const [subscribePaymentLoading, setSubscribePaymentLoading] = useState(false);
   const [subscribePaymentId, setSubscribePaymentId] = useState<string | null>(null);
   const [subscribeAwaitingPayment, setSubscribeAwaitingPayment] = useState(false);
@@ -524,12 +521,6 @@ export default function Profile() {
         .then((res) => setDashAvailable(res.available === true && res.configured === true))
         .catch(() => setDashAvailable(false));
     }
-    // Probe BTC availability lazily.
-    if (btcAvailable === null) {
-      getBtcAvailable()
-        .then((res) => setBtcAvailable(res.available === true && res.configured === true))
-        .catch(() => setBtcAvailable(false));
-    }
   };
 
   const handleUnsubscribe = async () => {
@@ -559,18 +550,19 @@ export default function Profile() {
       }
       setSubscribeEmailError(null);
 
-      if (subscribeProvider === "btc") {
-        const btcRes = await createBtcSubscription("creator_monthly", trimmed, creatorId);
-        if (btcRes.success && btcRes.checkoutUrl) {
-          const pw = 560, ph = 780;
+      if (subscribeProvider === "nowpayments-btc") {
+        // Bitcoin via NowPayments — call /api/webapp/payments/usdc/prepare with payCurrency:'btc'
+        const btcRes = await prepareUsdcSubscription("creator_monthly", trimmed, creatorId);
+        if (btcRes.success && btcRes.invoiceUrl) {
+          const pw = 500, ph = 720;
           const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
           const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
           window.open(
-            assertPaymentUrl(btcRes.checkoutUrl),
-            "btcpay_checkout",
-            `width=${pw},height=${ph},left=${pl},top=${pt},noopener`
+            assertPaymentUrl(btcRes.invoiceUrl),
+            "nowpayments_btc_checkout",
+            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
           );
-          setSubscribePaymentId(btcRes.invoiceId);
+          setSubscribePaymentId(btcRes.orderId);
           setSubscribeAwaitingPayment(true);
         } else {
           setSubscribeError(btcRes.error || p.failedToCreatePayment);
@@ -1577,18 +1569,16 @@ export default function Profile() {
                         🥷 Dash
                       </button>
                     )}
-                    {btcAvailable !== false && (
-                      <button
-                        type="button"
-                        onClick={() => setSubscribeProvider("btc")}
-                        className="flex-1 py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
-                        style={subscribeProvider === "btc"
-                          ? { background: "rgba(247,147,26,0.20)", color: "#F7931A", borderColor: "rgba(247,147,26,0.5)" }
-                          : { background: "rgba(247,147,26,0.06)", color: "#F7931A", borderColor: "rgba(247,147,26,0.2)" }}
-                      >
-                        ₿ Bitcoin −20%
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSubscribeProvider("nowpayments-btc")}
+                      className="flex-1 py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
+                      style={subscribeProvider === "nowpayments-btc"
+                        ? { background: "rgba(247,147,26,0.20)", color: "#F7931A", borderColor: "rgba(247,147,26,0.5)" }
+                        : { background: "rgba(247,147,26,0.06)", color: "#F7931A", borderColor: "rgba(247,147,26,0.2)" }}
+                    >
+                      ₿ Bitcoin −20%
+                    </button>
                   </div>
                 </div>
 

@@ -131,17 +131,17 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
     };
   }, [order, isPolling, isSuccess, storageKey, onSuccess, onError]);
 
-  const startPayment = useCallback(async (planId: string, email?: string, creatorId?: string, isSubscription?: boolean) => {
+  const startPayment = useCallback(async (planId: string, email?: string, creatorId?: string, isSubscription?: boolean, payCurrency?: string) => {
     setError(null);
     setIsSuccess(false);
-    
+
     try {
       const endpoint = isSubscription ? "/api/webapp/payments/usdc/subscribe" : "/api/webapp/payments/usdc/prepare";
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ planId, email, creatorId, ...(returnUrl ? { returnUrl } : {}) }),
+        body: JSON.stringify({ planId, email, creatorId, ...(returnUrl ? { returnUrl } : {}), ...(payCurrency ? { payCurrency } : {}) }),
       });
 
       if (res.status === 401) {

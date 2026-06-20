@@ -1540,7 +1540,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     groupId: number;
     groupName?: string;
   } | null>(null);
-  const [pgProvider, setPgProvider] = useState<'dash' | 'btc'>('dash');
+  const [pgProvider] = useState<'dash'>('dash');
   const [pgLoading, setPgLoading] = useState(false);
   const [pgPolling, setPgPolling] = useState(false);
 
@@ -2113,14 +2113,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         ? await purchaseChannelAccess(channelId, pgProvider)
         : await purchaseHangoutAccess(groupId, pgProvider);
       if (res.checkoutUrl) {
-        if (pgProvider === 'btc') {
-          const pw = 560, ph = 780;
-          const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
-          const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
-          window.open(res.checkoutUrl, 'btcpay_checkout', `width=${pw},height=${ph},left=${pl},top=${pt},noopener`);
-        } else {
-          window.open(res.checkoutUrl, '_blank');
-        }
+        window.open(res.checkoutUrl, '_blank');
       }
       setPgPolling(true);
       const pollId = res.paymentId;
@@ -4873,20 +4866,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   <div className="space-y-2">
                     <p className="text-[10px] text-pnp-textSecondary text-center uppercase tracking-wider font-semibold">Choose payment method</p>
                     <button
-                      onClick={() => { setPgProvider('dash'); handlePurchaseChannel(); }}
+                      onClick={() => { handlePurchaseChannel(); }}
                       disabled={pgLoading}
                       className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
                       style={{ background: "linear-gradient(135deg, #008DE4, #0066B2)" }}
                     >
                       🥷 Pay with Dash (Crypto)
-                    </button>
-                    <button
-                      onClick={() => { setPgProvider('btc'); handlePurchaseChannel(); }}
-                      disabled={pgLoading}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all active:scale-[0.98] disabled:opacity-50"
-                      style={{ background: "linear-gradient(135deg, #F7931A, #C97000)", color: "#fff" }}
-                    >
-                      ₿ Bitcoin / Lightning <span className="text-xs font-normal opacity-80">−20%</span>
                     </button>
                   </div>
                 )}
