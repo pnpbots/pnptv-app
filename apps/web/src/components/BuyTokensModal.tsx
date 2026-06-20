@@ -506,7 +506,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
             ) : (
               <div className="flex flex-col items-center gap-4 py-4">
                 <p className="text-sm text-pnp-textSecondary text-center">
-                  Complete your payment in the BTCPay checkout window. This page will update automatically.
+                  Complete your payment in the NowPayments checkout window. This page will update automatically.
                 </p>
                 {btcPolling && (
                   <div className="flex items-center gap-2 text-xs text-pnp-textSecondary">
@@ -525,7 +525,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     className="flex-1 text-center py-2.5 rounded-xl text-sm font-semibold transition-colors"
                     style={{ background: "rgba(247,147,26,0.15)", color: "#F7931A", border: "1px solid rgba(247,147,26,0.3)" }}
                   >
-                    Open BTCPay
+                    Open Checkout
                   </a>
                   <button
                     onClick={() => {

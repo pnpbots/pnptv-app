@@ -9908,7 +9908,7 @@ app.get('/api/webapp/payments/usdc/status/:orderId', requireSessionAuth, usdcSta
   if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
 
   const { orderId } = req.params;
-  if (!orderId || !/^pnptv-nowp-[A-Za-z0-9_-]+-\d+$/.test(orderId)) {
+  if (!orderId || !/^pnptv-(tokens-)?nowp-[A-Za-z0-9_-]+-\d+$/.test(orderId)) {
     return res.status(400).json({ success: false, error: 'Invalid orderId' });
   }
 

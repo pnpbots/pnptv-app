@@ -153,12 +153,13 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     id: "payments",
     emoji: "💳",
     steps: [
-      { title: "Payment Methods Overview", description: "PNPtv accepts three payment methods: ePayco (credit/debit cards), Dash via BTCPay (private crypto), and Meru activation codes. Choose whichever is most convenient for you." },
+      { title: "Payment Methods Overview", description: "PNPtv accepts four payment methods: ePayco (credit/debit cards), Dash via BTCPay (private crypto), Bitcoin/Lightning via NowPayments (20% discount), and Meru activation codes. Choose whichever is most convenient for you." },
       { title: "Step 1: Choose Your Plan", description: "Go to the Subscribe page from the bottom nav or the upgrade banner on Home. Browse available plans — each shows the price, duration, and what's included. Tap a plan card to select it.", action: "Go to Subscribe" },
       { title: "Credit/Debit Card via ePayco", description: "After selecting a plan, tap 'Pay with Card'. The ePayco secure checkout opens. Enter your card number, expiry date, CVV, and name. Supports Visa, Mastercard, Amex. Payments can be in USD or COP (auto-detected by your region)." },
       { title: "ePayco: Completing Payment", description: "After entering your card details, tap 'Pay'. You may need to complete 3D Secure verification (a popup from your bank). Once approved, your PRIME status activates automatically and you're redirected back to PNPtv." },
       { title: "Anonymous Crypto via Dash/BTCPay", description: "Tap 'Pay with Dash'. A BTCPay invoice is generated with a QR code, the exact Dash amount, and the destination address. Open your Dash wallet, scan the code, and send the amount. The system polls for confirmation. Good for maximum privacy — no personal info required." },
       { title: "Dash: Payment Confirmation", description: "After sending Dash, the app polls BTCPay for confirmation. Once confirmed (usually 2–5 minutes thanks to InstantSend), your PRIME activates automatically. You'll see a confirmation screen." },
+      { title: "Bitcoin / Lightning via NowPayments", description: "Tap 'Pay with Bitcoin'. A NowPayments hosted checkout opens in a popup — pay with BTC on-chain or Lightning Network (Lightning is instant). You get a 20% discount on all plans. This page polls for confirmation and activates automatically once the payment is detected." },
       { title: "Activation Codes (Meru)", description: "If you have a Meru code (from email, promotions, or referrals), go to Subscribe and enter it in the activation code field. Tap 'Activate'. If you forgot your code, you must provide a bank statement screenshot showing the amount, date, and hour of payment via support ticket to recover it." },
       { title: "Payment Issues?", description: "If your payment fails: check your card has sufficient funds, ensure 3D Secure popup wasn't blocked, or try a different payment method. For crypto, make sure you sent the exact amount to the correct address. Contact Cristina AI or email support@pnptv.app for help." },
     ],
@@ -169,7 +170,7 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     steps: [
       { title: "What are PNP Tokens?", description: "PNP Tokens are the in-app currency. You can use tokens to tip creators, make in-app purchases, and unlock special features. Tokens are separate from your PRIME subscription." },
       { title: "Buy Tokens", description: "Go to the Token Checkout page. You'll see available token packages at different price points. Select a package to proceed to payment.", action: "Go to Token Checkout" },
-      { title: "Pay for Tokens", description: "Token purchases support ePayco (credit/debit cards) and Dash via BTCPay (private crypto). Select your preferred method and complete the payment flow." },
+      { title: "Pay for Tokens", description: "Token purchases support ePayco (credit/debit cards), Dash via BTCPay (5% crypto discount), and Bitcoin/Lightning via NowPayments (20% crypto discount). Select your preferred method and complete the payment flow." },
       { title: "Check Your Balance", description: "Your token balance is shown in your wallet. You can access it from your Profile or the token section. The balance updates in real time after purchases." },
       { title: "View Purchase History", description: "Your token transaction history shows all purchases and spending. Each entry includes the amount, date, and type of transaction." },
     ],
