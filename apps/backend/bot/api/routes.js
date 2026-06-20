@@ -7601,8 +7601,8 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
   if (!Number.isFinite(hangoutId)) {
     return res.status(400).json({ error: 'Invalid hangout ID' });
   }
-  if (provider !== 'dash') {
-    return res.status(400).json({ error: 'Provider must be dash' });
+  if (provider !== 'dash' && provider !== 'btc') {
+    return res.status(400).json({ error: 'Provider must be dash or btc' });
   }
 
   const { rows: groups } = await getPool().query(
@@ -7679,6 +7679,46 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
     }
   }
 
+  // ── BTC + Lightning branch ────────────────────────────────────────────────
+  if (provider === 'btc') {
+    try {
+      const userId = String(user.telegram_id || user.id);
+      const discountedPrice = Math.round(hangoutPrice * 0.80 * 100) / 100;
+      const orderId = `pnptv-hangout-btc-${userId}-${hangout.id}-${Date.now()}`;
+      const invoice = await createBtcpayInvoice({
+        amount: discountedPrice,
+        currency: 'USD',
+        orderId,
+        userId,
+        planId: 'hangout_access',
+        metadata: { ...scopeMetadata },
+        redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/chat/${hangout.id}`,
+        paymentMethods: ['BTC-LightningNetwork', 'BTC'],
+      });
+      const insertRes = await getPool().query(
+        `INSERT INTO dash_subscription_orders
+           (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
+         VALUES ($1, 'hangout_access', $2, $3, $4, 'pending', $5)
+         ON CONFLICT (btcpay_invoice_id) DO UPDATE
+           SET status = dash_subscription_orders.status
+         RETURNING id`,
+        [userId, email || null, discountedPrice, invoice.invoiceId, JSON.stringify(scopeMetadata)]
+      );
+      return res.json({
+        success: true,
+        paymentId: String(insertRes.rows[0].id),
+        invoiceId: invoice.invoiceId,
+        checkoutUrl: invoice.checkoutLink,
+      });
+    } catch (err) {
+      logger.error(`Hangout BTC purchase failed: ${err.message}`);
+      if (err.message?.includes('not configured')) {
+        return res.status(503).json({ error: 'Bitcoin payments are not available yet.', code: 'BTCPAY_NOT_CONFIGURED' });
+      }
+      return res.status(500).json({ error: 'Failed to create Bitcoin invoice. Please try again.', code: 'BTCPAY_ERROR' });
+    }
+  }
+
   return res.status(400).json({ error: 'Unsupported provider' });
 }));
 
@@ -7693,8 +7733,8 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
   if (!Number.isFinite(channelId)) {
     return res.status(400).json({ error: 'Invalid channel ID' });
   }
-  if (provider !== 'dash') {
-    return res.status(400).json({ error: 'Provider must be dash' });
+  if (provider !== 'dash' && provider !== 'btc') {
+    return res.status(400).json({ error: 'Provider must be dash or btc' });
   }
 
   const { rows: channels } = await getPool().query(
@@ -7761,6 +7801,46 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHa
         return res.status(503).json({ error: 'Crypto payments are not available yet.', code: 'BTCPAY_NOT_CONFIGURED' });
       }
       return res.status(500).json({ error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
+    }
+  }
+
+  // ── BTC + Lightning branch ────────────────────────────────────────────────
+  if (provider === 'btc') {
+    try {
+      const userId = String(user.telegram_id || user.id);
+      const discountedChannelPrice = Math.round(channelPrice * 0.80 * 100) / 100;
+      const orderId = `pnptv-channel-btc-${userId}-${channel.id}-${Date.now()}`;
+      const invoice = await createBtcpayInvoice({
+        amount: discountedChannelPrice,
+        currency: 'USD',
+        orderId,
+        userId,
+        planId: 'channel_access',
+        metadata: { ...scopeMetadata },
+        redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/chat/${channel.hangout_group_id || ''}`,
+        paymentMethods: ['BTC-LightningNetwork', 'BTC'],
+      });
+      const insertRes = await getPool().query(
+        `INSERT INTO dash_subscription_orders
+           (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
+         VALUES ($1, 'channel_access', $2, $3, $4, 'pending', $5)
+         ON CONFLICT (btcpay_invoice_id) DO UPDATE
+           SET status = dash_subscription_orders.status
+         RETURNING id`,
+        [userId, email || null, discountedChannelPrice, invoice.invoiceId, JSON.stringify(scopeMetadata)]
+      );
+      return res.json({
+        success: true,
+        paymentId: String(insertRes.rows[0].id),
+        invoiceId: invoice.invoiceId,
+        checkoutUrl: invoice.checkoutLink,
+      });
+    } catch (err) {
+      logger.error(`Channel BTC purchase failed: ${err.message}`);
+      if (err.message?.includes('not configured')) {
+        return res.status(503).json({ error: 'Bitcoin payments are not available yet.', code: 'BTCPAY_NOT_CONFIGURED' });
+      }
+      return res.status(500).json({ error: 'Failed to create Bitcoin invoice. Please try again.', code: 'BTCPAY_ERROR' });
     }
   }
 
@@ -8930,6 +9010,33 @@ app.post('/api/wallet/buy', requireSessionAuth, asyncHandler(async (req, res) =>
       return res.status(503).json({ success: false, error: 'Payment server is temporarily unavailable. Please try again later.', code: 'BTCPAY_UNREACHABLE' });
     }
     res.status(500).json({ success: false, error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
+  }
+}));
+
+// POST /api/wallet/buy-btc — create a BTCPay BTC+Lightning invoice for token purchase (20% discount)
+app.post('/api/wallet/buy-btc', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+
+  const { packageId } = req.body;
+  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
+
+  const userId = String(user.telegram_id || user.id);
+
+  try {
+    const result = await TokenCheckoutService.createBtcCheckout(userId, packageId);
+    res.json(result);
+  } catch (err) {
+    logger.error(`Wallet buy (BTC) error: ${err.message}`);
+    if (err.code === 'INVALID_PACKAGE') {
+      return res.status(400).json({ success: false, error: 'Invalid package ID' });
+    }
+    if (err.message?.includes('not configured')) {
+      return res.status(503).json({ success: false, error: 'Bitcoin payments are not available yet. Please use another payment method.', code: 'BTCPAY_NOT_CONFIGURED' });
+    }
+    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
+      return res.status(503).json({ success: false, error: 'Payment server is temporarily unavailable. Please try again later.', code: 'BTCPAY_UNREACHABLE' });
+    }
+    res.status(500).json({ success: false, error: 'Failed to create Bitcoin invoice. Please try again.', code: 'BTCPAY_ERROR' });
   }
 }));
 
@@ -11028,6 +11135,11 @@ app.post('/api/webapp/book-call/checkout',
 app.post('/api/webapp/book-call/checkout/nowpayments',
   requireSessionAuth,
   asyncHandler(callBookingController.createCheckoutNowPayments));
+
+// BTC + Lightning (BTCPay) checkout for call packages (20% crypto discount)
+app.post('/api/webapp/book-call/checkout/btc',
+  requireSessionAuth,
+  asyncHandler(callBookingController.createCheckoutBtc));
 
 // Member: upcoming confirmed bookings — must be before /:bookingId catch-all
 app.get('/api/webapp/bookings/upcoming',

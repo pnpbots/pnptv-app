@@ -23,6 +23,9 @@ import {
   unsubscribeFromCreator,
   createDashSubscription,
   getDashAvailable,
+  createBtcSubscription,
+  getBtcSubscriptionStatus,
+  getBtcAvailable,
   getUserLabel,
   getLabelColor,
   assertPaymentUrl,
@@ -186,8 +189,9 @@ export default function Profile() {
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [subscribeEmail, setSubscribeEmail] = useState("");
   const [subscribeEmailError, setSubscribeEmailError] = useState<string | null>(null);
-  const [subscribeProvider, setSubscribeProvider] = useState<"dash">("dash");
+  const [subscribeProvider, setSubscribeProvider] = useState<"dash" | "btc">("dash");
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
+  const [btcAvailable, setBtcAvailable] = useState<boolean | null>(null);
   const [subscribePaymentLoading, setSubscribePaymentLoading] = useState(false);
   const [subscribePaymentId, setSubscribePaymentId] = useState<string | null>(null);
   const [subscribeAwaitingPayment, setSubscribeAwaitingPayment] = useState(false);
@@ -512,11 +516,17 @@ export default function Profile() {
     setSubscribePaymentId(null);
     setSubscribeProvider("dash");
     setShowSubscribeModal(true);
-    // Probe Dash availability lazily — if BTCPay is down we'll hide the Dash tab.
+    // Probe Dash availability lazily — if BTCPay is down we'll hide the Dash option.
     if (dashAvailable === null) {
       getDashAvailable()
         .then((res) => setDashAvailable(res.available === true && res.configured === true))
         .catch(() => setDashAvailable(false));
+    }
+    // Probe BTC availability lazily.
+    if (btcAvailable === null) {
+      getBtcAvailable()
+        .then((res) => setBtcAvailable(res.available === true && res.configured === true))
+        .catch(() => setBtcAvailable(false));
     }
   };
 
@@ -539,7 +549,6 @@ export default function Profile() {
     setSubscribeError(null);
     try {
       const creatorId = profile.id || paramUserId!;
-      // Dash path — requires email
       const trimmed = subscribeEmail.trim();
       if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) || trimmed.length > 254) {
         setSubscribeEmailError("Please enter a valid email address");
@@ -547,13 +556,33 @@ export default function Profile() {
         return;
       }
       setSubscribeEmailError(null);
-      const dashRes = await createDashSubscription("creator_monthly", trimmed, creatorId);
-      if (dashRes.success && dashRes.checkoutUrl) {
-        window.open(assertPaymentUrl(dashRes.checkoutUrl), "_blank", "noopener,noreferrer");
-        setSubscribePaymentId(dashRes.invoiceId);
-        setSubscribeAwaitingPayment(true);
+
+      if (subscribeProvider === "btc") {
+        const btcRes = await createBtcSubscription("creator_monthly", trimmed, creatorId);
+        if (btcRes.success && btcRes.checkoutUrl) {
+          const pw = 560, ph = 780;
+          const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+          const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+          window.open(
+            assertPaymentUrl(btcRes.checkoutUrl),
+            "btcpay_checkout",
+            `width=${pw},height=${ph},left=${pl},top=${pt},noopener`
+          );
+          setSubscribePaymentId(btcRes.invoiceId);
+          setSubscribeAwaitingPayment(true);
+        } else {
+          setSubscribeError(btcRes.error || p.failedToCreatePayment);
+        }
       } else {
-        setSubscribeError(dashRes.error || p.failedToCreatePayment);
+        // Dash path
+        const dashRes = await createDashSubscription("creator_monthly", trimmed, creatorId);
+        if (dashRes.success && dashRes.checkoutUrl) {
+          window.open(assertPaymentUrl(dashRes.checkoutUrl), "_blank", "noopener,noreferrer");
+          setSubscribePaymentId(dashRes.invoiceId);
+          setSubscribeAwaitingPayment(true);
+        } else {
+          setSubscribeError(dashRes.error || p.failedToCreatePayment);
+        }
       }
     } catch (err) {
       setSubscribeError(err instanceof Error ? err.message : p.paymentError);
@@ -1530,14 +1559,34 @@ export default function Profile() {
 
             {!subscribeAwaitingPayment ? (
               <>
-                {/* Payment method — Dash only */}
+                {/* Payment method selector */}
                 <div>
                   <p className="text-xs font-medium mb-2" style={{ color: "var(--pnp-text-secondary)" }}>{p.paymentMethod}</p>
-                  <div
-                    className="py-2.5 rounded-lg text-sm font-medium text-center border"
-                    style={{ background: "rgba(0,141,228,0.15)", color: "#008DE4", borderColor: "rgba(0,141,228,0.4)" }}
-                  >
-                    🥷 Dash (Crypto)
+                  <div className="flex gap-2">
+                    {dashAvailable !== false && (
+                      <button
+                        type="button"
+                        onClick={() => setSubscribeProvider("dash")}
+                        className="flex-1 py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
+                        style={subscribeProvider === "dash"
+                          ? { background: "rgba(0,141,228,0.20)", color: "#008DE4", borderColor: "rgba(0,141,228,0.5)" }
+                          : { background: "rgba(0,141,228,0.06)", color: "#008DE4", borderColor: "rgba(0,141,228,0.2)" }}
+                      >
+                        🥷 Dash
+                      </button>
+                    )}
+                    {btcAvailable !== false && (
+                      <button
+                        type="button"
+                        onClick={() => setSubscribeProvider("btc")}
+                        className="flex-1 py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
+                        style={subscribeProvider === "btc"
+                          ? { background: "rgba(247,147,26,0.20)", color: "#F7931A", borderColor: "rgba(247,147,26,0.5)" }
+                          : { background: "rgba(247,147,26,0.06)", color: "#F7931A", borderColor: "rgba(247,147,26,0.2)" }}
+                      >
+                        ₿ Bitcoin −20%
+                      </button>
+                    )}
                   </div>
                 </div>
 

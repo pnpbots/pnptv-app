@@ -737,6 +737,10 @@ export function getWalletHistory(): Promise<{ success: boolean; history: TokenPu
   return request("/api/wallet/history");
 }
 
+export function buyTokensWithBtc(packageId: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usd: number }> {
+  return request("/api/wallet/buy-btc", { method: "POST", body: { packageId } });
+}
+
 export function buyTokensWithEpayco(packageId: string): Promise<{
   success: boolean;
   paymentUrl: string;
@@ -2763,7 +2767,7 @@ export function getPaymentStatus(
 
 export function purchaseChannelAccess(
   channelId: number,
-  provider: 'dash',
+  provider: 'dash' | 'btc',
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/channels/${channelId}/purchase`, {
@@ -2777,7 +2781,7 @@ export function purchaseChannelAccess(
 // channel-access grants cover both the channel and its linked hangout.
 export function purchaseHangoutAccess(
   hangoutGroupId: number,
-  provider: 'dash',
+  provider: 'dash' | 'btc',
   email?: string
 ): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
   return request(`/api/webapp/hangouts/groups/${hangoutGroupId}/purchase`, {
@@ -6094,6 +6098,20 @@ export function createCallCheckoutNowPayments(
   if (startTimeUtc) body.startTimeUtc = startTimeUtc;
   if (endTimeUtc) body.endTimeUtc = endTimeUtc;
   return request("/api/webapp/book-call/checkout/nowpayments", {
+    method: "POST",
+    body,
+  });
+}
+
+export function createCallCheckoutBtc(
+  packageId: number,
+  startTimeUtc?: string,
+  endTimeUtc?: string
+): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; bookingId?: string | null; usdAmount: number; orderId?: string; paymentId?: string }> {
+  const body: Record<string, unknown> = { packageId };
+  if (startTimeUtc) body.startTimeUtc = startTimeUtc;
+  if (endTimeUtc) body.endTimeUtc = endTimeUtc;
+  return request("/api/webapp/book-call/checkout/btc", {
     method: "POST",
     body,
   });

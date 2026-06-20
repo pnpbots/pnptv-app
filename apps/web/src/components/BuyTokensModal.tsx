@@ -6,8 +6,10 @@ import {
   getTokenPackages,
   buyTokens,
   buyTokensWithCard,
+  buyTokensWithBtc,
   getDashPaymentDetails,
   getDashSubscriptionStatus,
+  getBtcSubscriptionStatus,
   assertPaymentUrl,
   type TokenPackage,
 } from "@/lib/api";
@@ -21,7 +23,7 @@ interface BuyTokensModalProps {
 
 export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTokensModalProps) {
   const t = useI18n();
-  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'card'>('select');
+  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'card' | 'btc'>('select');
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
@@ -44,6 +46,13 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
   const dashPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dashCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // BTC popup + poll state
+  const btcPopupRef = useRef<Window | null>(null);
+  const btcPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [btcPayment, setBtcPayment] = useState<{ invoiceId: string; checkoutUrl: string } | null>(null);
+  const [btcSuccess, setBtcSuccess] = useState(false);
+  const [btcPolling, setBtcPolling] = useState(false);
+
   useEffect(() => {
     if (isOpen) {
       setLoadingPackages(true);
@@ -62,6 +71,12 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
       setDashPaymentSuccess(false);
       if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
       if (dashCountdownRef.current) { clearInterval(dashCountdownRef.current); dashCountdownRef.current = null; }
+      setBtcPayment(null);
+      setBtcSuccess(false);
+      setBtcPolling(false);
+      if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
+      btcPopupRef.current?.close();
+      btcPopupRef.current = null;
     }
   }, [isOpen]);
 
@@ -180,6 +195,58 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
     }
   };
 
+  const handleBuyTokensBtc = async (pkg: TokenPackage) => {
+    setBuyingPackage(pkg.id);
+    setBuyError(null);
+    try {
+      const result = await buyTokensWithBtc(pkg.id);
+      if (!result.success || !result.invoiceId) {
+        setBuyError("Failed to create Bitcoin invoice. Please try again.");
+        setBuyingPackage(null);
+        return;
+      }
+      setBtcPayment({ invoiceId: result.invoiceId, checkoutUrl: result.checkoutUrl });
+      setBtcPolling(true);
+      setBtcSuccess(false);
+      const pw = 560, ph = 780;
+      const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+      const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+      btcPopupRef.current = window.open(
+        result.checkoutUrl,
+        'btcpay_checkout',
+        `width=${pw},height=${ph},left=${pl},top=${pt},noopener`
+      );
+      const pollInvoiceId = result.invoiceId;
+      if (btcPollRef.current) clearInterval(btcPollRef.current);
+      btcPollRef.current = setInterval(async () => {
+        try {
+          const statusRes = await getBtcSubscriptionStatus(pollInvoiceId);
+          if (statusRes.status === 'completed' || statusRes.status === 'paid') {
+            if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
+            btcPopupRef.current?.close();
+            btcPopupRef.current = null;
+            setBtcPolling(false);
+            setBtcSuccess(true);
+            const balRes = await getWalletBalance().catch(() => ({ balance: 0 }));
+            setTimeout(() => {
+              if (onSuccess) onSuccess(balRes.balance);
+              onClose();
+            }, 1500);
+          } else if (statusRes.status === 'expired' || statusRes.status === 'invalid') {
+            if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
+            setBtcPolling(false);
+            setBtcPayment(null);
+            setBuyError('Invoice expired. Please try again.');
+          }
+        } catch { /* network hiccup — keep polling */ }
+      }, 10000);
+    } catch (err: unknown) {
+      setBuyError(err instanceof Error ? err.message : "Failed to create Bitcoin invoice.");
+    } finally {
+      setBuyingPackage(null);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -194,7 +261,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         {/* Modal header — shared between both steps */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            {buyMethod !== 'select' && (
+            {buyMethod !== 'select' && !btcPayment && (
               <button
                 onClick={() => { setBuyMethod('select'); setBuyError(null); }}
                 className="flex items-center justify-center w-7 h-7 rounded-full bg-pnp-surface hover:bg-pnp-surfaceHover transition-colors"
@@ -259,6 +326,23 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-pnp-textPrimary">Buy with More Privacy</p>
                 <p className="text-xs text-pnp-textSecondary truncate">Dash cryptocurrency</p>
+              </div>
+              <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+
+            {/* Bitcoin / Lightning */}
+            <button
+              onClick={() => setBuyMethod('btc')}
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-orange-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
+            >
+              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(247,147,26,0.15)" }}>
+                <span className="text-lg leading-none" style={{ color: "#F7931A" }}>₿</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-pnp-textPrimary">Bitcoin <span className="text-xs font-normal text-orange-400 ml-1">−20%</span></p>
+                <p className="text-xs text-pnp-textSecondary truncate">BTC on-chain or Lightning Network</p>
               </div>
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -397,13 +481,76 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           </div>
         )}
 
+        {/* BTC waiting panel */}
+        {btcPayment && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#F7931A" }} />
+              <span className="text-sm font-medium text-pnp-textPrimary">Waiting for Bitcoin payment...</span>
+            </div>
+
+            {btcSuccess ? (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <div className="w-14 h-14 rounded-full bg-green-500/20 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <p className="text-base font-semibold text-green-400">Tokens added!</p>
+                <p className="text-xs text-pnp-textSecondary">Your balance has been updated.</p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-4 py-4">
+                <p className="text-sm text-pnp-textSecondary text-center">
+                  Complete your payment in the BTCPay checkout window. This page will update automatically.
+                </p>
+                {btcPolling && (
+                  <div className="flex items-center gap-2 text-xs text-pnp-textSecondary">
+                    <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span>Checking payment status...</span>
+                  </div>
+                )}
+                <div className="flex gap-2 w-full">
+                  <a
+                    href={btcPayment.checkoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-center py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                    style={{ background: "rgba(247,147,26,0.15)", color: "#F7931A", border: "1px solid rgba(247,147,26,0.3)" }}
+                  >
+                    Open BTCPay
+                  </a>
+                  <button
+                    onClick={() => {
+                      if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
+                      btcPopupRef.current?.close();
+                      btcPopupRef.current = null;
+                      setBtcPayment(null);
+                      setBtcPolling(false);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Step 2: Package grid after method selected */}
-        {buyMethod !== 'select' && !dashPayment && (
+        {buyMethod !== 'select' && !dashPayment && !btcPayment && (
           <>
             {/* Method explanation */}
             <p className="text-xs text-pnp-textSecondary mb-4 leading-relaxed">
               {buyMethod === 'card'
                 ? 'Pay with Visa or Mastercard via ePayco. You\'ll be redirected to a secure checkout page.'
+                : buyMethod === 'btc'
+                ? 'Pay with Bitcoin (on-chain or Lightning) via BTCPay. 20% discount applied automatically. A popup will open for checkout.'
                 : 'Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed.'}
             </p>
 
@@ -418,15 +565,23 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 {tokenPackages.map((pkg) => (
                   <button
                     key={pkg.id}
-                    onClick={() => buyMethod === 'card' ? handleBuyTokensCard(pkg) : handleBuyTokens(pkg)}
+                    onClick={() => {
+                      if (buyMethod === 'card') return handleBuyTokensCard(pkg);
+                      if (buyMethod === 'btc') return handleBuyTokensBtc(pkg);
+                      return handleBuyTokens(pkg);
+                    }}
                     disabled={buyingPackage === pkg.id}
                     className="p-3 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-pnp-accent/50 active:scale-[0.98] transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
                   >
                     <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
                     <p className="text-xs text-pnp-textSecondary">{t.live.tokensLabel}</p>
                     <p className="text-sm font-semibold mt-1" style={{
-                      color: buyMethod === 'card' ? '#D4007A' : '#008CE7'
-                    }}>${pkg.usd}</p>
+                      color: buyMethod === 'card' ? '#D4007A' : buyMethod === 'btc' ? '#F7931A' : '#008CE7'
+                    }}>
+                      {buyMethod === 'btc'
+                        ? `$${(Math.round(pkg.usd * 0.80 * 100) / 100).toFixed(2)}`
+                        : `$${pkg.usd}`}
+                    </p>
                     {buyingPackage === pkg.id && (
                       <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.opening}</p>
                     )}

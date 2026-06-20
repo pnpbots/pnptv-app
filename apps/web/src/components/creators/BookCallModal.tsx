@@ -25,6 +25,7 @@ import {
   getBookingOptions,
   createCallCheckoutNowPayments,
   createCallCheckoutEpayco,
+  createCallCheckoutBtc,
   getBookingPaymentStatus,
   assertPaymentUrl,
   type CallPackage,
@@ -36,7 +37,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "epayco" | "nowpayments";
+type Provider = "epayco" | "nowpayments" | "btc";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -528,6 +529,81 @@ export function BookCallModal({
                 checkoutInFlight.current = false;
               }
               // status === 'pending' → keep polling
+            } catch {
+              // Network hiccup — keep polling
+            }
+          }, POLL_INTERVAL_MS);
+        }
+        return;
+      }
+
+      // BTC + Lightning — open a centered popup, poll booking payment status
+      if (provider === "btc") {
+        const btcRes = await createCallCheckoutBtc(
+          activePackage.id,
+          selectedSlot?.startUtc ?? undefined,
+          selectedSlot?.endUtc ?? undefined
+        );
+        if (btcRes.checkoutUrl) {
+          const safeUrl = assertPaymentUrl(btcRes.checkoutUrl);
+          const pw = 560, ph = 780;
+          const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+          const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+          paymentPopupRef.current = window.open(
+            safeUrl, "btcpay_checkout",
+            `width=${pw},height=${ph},left=${pl},top=${pt},noopener`
+          );
+        }
+        setDashPaymentId(btcRes.paymentId ?? null);
+
+        const pollId = btcRes.bookingId ?? btcRes.paymentId;
+        if (pollId) {
+          if (dashPollRef.current) clearInterval(dashPollRef.current);
+
+          const POLL_INTERVAL_MS = 5_000;
+          const POLL_TIMEOUT_MS = 900_000; // 15 min
+          const pollStart = Date.now();
+
+          dashPollRef.current = setInterval(async () => {
+            if (Date.now() - pollStart >= POLL_TIMEOUT_MS) {
+              if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+              setCheckoutLoading(false);
+              setIsProcessing(false);
+              checkoutInFlight.current = false;
+              setDashTimedOut(true);
+              return;
+            }
+            try {
+              const status = await getBookingPaymentStatus(String(pollId));
+              if (status.status === "paid") {
+                if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+                paymentPopupRef.current?.close();
+                paymentPopupRef.current = null;
+                setConfirmedRoomName(status.roomName ?? null);
+                setConfirmedBookingId(status.bookingId ?? null);
+                if (selectedSlot?.startUtc) setConfirmedStartAt(selectedSlot.startUtc);
+                setStep("SUCCESS");
+                setCheckoutLoading(false);
+                setIsProcessing(false);
+                checkoutInFlight.current = false;
+              } else if (status.status === "expired" || status.status === "failed") {
+                if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+                setCheckoutError(
+                  status.status === "expired"
+                    ? "Invoice expired. Please try again."
+                    : "Payment failed. Please try again."
+                );
+                setRetryPayload({
+                  packageId: activePackage.id,
+                  provider: "btc",
+                  email,
+                  quantity: 1,
+                  selectedSlot: selectedSlot?.startUtc ?? null,
+                });
+                setCheckoutLoading(false);
+                setIsProcessing(false);
+                checkoutInFlight.current = false;
+              }
             } catch {
               // Network hiccup — keep polling
             }
@@ -1125,6 +1201,16 @@ export function BookCallModal({
           >
             ⚡ Crypto
           </button>
+          <button
+            type="button"
+            onClick={() => setProvider("btc")}
+            className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+            style={provider === "btc"
+              ? { background: "rgba(247,147,26,0.16)", border: "1.5px solid #F7931A", color: "#F7931A" }
+              : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+          >
+            ₿ BTC −20%
+          </button>
         </div>
       </div>
 
@@ -1156,8 +1242,8 @@ export function BookCallModal({
         />
       </div>
 
-      {/* Dash: 15-min timeout recovery card */}
-      {provider === "nowpayments" && dashTimedOut && (
+      {/* Crypto: 15-min timeout recovery card */}
+      {(provider === "nowpayments" || provider === "btc") && dashTimedOut && (
         <div
           className="rounded-xl px-4 py-4 space-y-3"
           style={{ background: "rgba(255,159,10,0.10)", border: "1px solid rgba(255,159,10,0.25)" }}
@@ -1196,8 +1282,8 @@ export function BookCallModal({
         </div>
       )}
 
-      {/* Dash: waiting for payment indicator */}
-      {provider === "nowpayments" && checkoutLoading && !dashTimedOut && (
+      {/* Crypto: waiting for payment indicator */}
+      {(provider === "nowpayments" || provider === "btc") && checkoutLoading && !dashTimedOut && (
         <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
           <div className="flex items-center gap-2">
             <Spinner size={16} />
@@ -1242,7 +1328,7 @@ export function BookCallModal({
       )}
 
       {/* Submit */}
-      {!(provider === "nowpayments" && (checkoutLoading || dashTimedOut)) && (
+      {!((provider === "nowpayments" || provider === "btc") && (checkoutLoading || dashTimedOut)) && (
         <button
           type="button"
           disabled={checkoutLoading || (provider === "epayco" && !email.trim()) || !activePackage}

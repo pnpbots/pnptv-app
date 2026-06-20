@@ -1002,6 +1002,74 @@ async function createCheckoutNowPayments(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/webapp/book-call/checkout/btc
+// ---------------------------------------------------------------------------
+
+async function createCheckoutBtc(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+
+    const { packageId, startTimeUtc, endTimeUtc } = req.body;
+
+    if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
+      return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
+    }
+
+    const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+    let slotTimes = null;
+    if (startTimeUtc || endTimeUtc) {
+      if (!startTimeUtc || typeof startTimeUtc !== 'string' || !ISO_RE.test(startTimeUtc)) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc must be an ISO 8601 timestamp with timezone' });
+      }
+      if (!endTimeUtc || typeof endTimeUtc !== 'string' || !ISO_RE.test(endTimeUtc)) {
+        return res.status(400).json({ success: false, error: 'endTimeUtc must be an ISO 8601 timestamp with timezone' });
+      }
+      const start = new Date(startTimeUtc);
+      const end = new Date(endTimeUtc);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc or endTimeUtc is not a valid date' });
+      }
+      if (start >= end) {
+        return res.status(400).json({ success: false, error: 'endTimeUtc must be after startTimeUtc' });
+      }
+      if (start <= new Date()) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc must be in the future' });
+      }
+      slotTimes = { startTimeUtc, endTimeUtc };
+    }
+
+    const result = await callCheckoutService.createCallCheckoutBtc({
+      userId,
+      packageId: Number(packageId),
+      startTimeUtc: slotTimes?.startTimeUtc ?? null,
+      endTimeUtc: slotTimes?.endTimeUtc ?? null,
+    });
+
+    return res.status(201).json({ success: true, ...result });
+  } catch (err) {
+    logger.error('[callBookingController] createCheckoutBtc error', { error: err.message, code: err.code });
+
+    if (err.code === 'BTCPAY_ERROR') {
+      return res.status(502).json({ success: false, error: 'Could not reach BTCPay. Please try again.' });
+    }
+    if (err.code === 'PACKAGE_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Call package not found or inactive' });
+    }
+    if (err.code === 'PERFORMER_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Creator profile not found' });
+    }
+    if (err.code === 'SLOT_TAKEN') {
+      return res.status(409).json({ success: false, error: 'The requested time slot is no longer available' });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to create Bitcoin checkout' });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/webapp/bookings/:bookingId/payment-status
 // ---------------------------------------------------------------------------
 
@@ -1181,6 +1249,7 @@ async function getUpcomingBookings(req, res) {
 module.exports = {
   createCheckout,
   createCheckoutNowPayments,
+  createCheckoutBtc,
   getBooking,
   joinBooking,
   getBookingPaymentStatus,

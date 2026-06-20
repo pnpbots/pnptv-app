@@ -24,7 +24,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { query, getClient } = require('../config/postgres');
-const { createDashInvoice } = require('../config/btcpay');
+const { createDashInvoice, createInvoice: createBtcInvoice } = require('../config/btcpay');
 const DashTokenService = require('./dashTokenService');
 const logger = require('../utils/logger');
 const { cache } = require('../config/redis');
@@ -212,6 +212,101 @@ class TokenCheckoutService {
       purchaseId: purchaseUuid,
       invoiceId: invoice.invoiceId,
       checkoutUrl: invoice.checkoutUrl,
+      tokens: pkg.tokens,
+      usd: discountedUsd,
+    };
+  }
+
+  // ── BTC / Lightning checkout ──────────────────────────────────────────────
+
+  /**
+   * Create a BTCPay BTC+Lightning invoice for a token package (20% crypto discount).
+   * Identical flow to createDashCheckout but uses paymentMethods=['BTC-LightningNetwork','BTC'].
+   *
+   * @param {string} userId
+   * @param {string} packageId
+   * @returns {Promise<{
+   *   success: boolean,
+   *   purchaseId: string,
+   *   invoiceId: string,
+   *   checkoutUrl: string,
+   *   tokens: number,
+   *   usd: number,
+   * }>}
+   */
+  static async createBtcCheckout(userId, packageId) {
+    const pkg = resolvePackage(packageId);
+    if (!pkg) {
+      throw Object.assign(new Error('Invalid package ID'), { code: 'INVALID_PACKAGE', status: 400 });
+    }
+
+    const purchaseUuid = uuidv4();
+    const placeholderKey = idempotencyKey('btc-pending', purchaseUuid);
+
+    const discountedUsd = Math.round(pkg.usd * 0.80 * 100) / 100;
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      await insertPendingPurchase(client, {
+        purchaseUuid,
+        userId,
+        tokens: pkg.tokens,
+        usd: discountedUsd,
+        invoiceKey: placeholderKey,
+        paymentMethod: 'btc',
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      logger.error('TokenCheckoutService.createBtcCheckout DB error', {
+        userId, packageId, error: err.message,
+      });
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    let invoice;
+    try {
+      invoice = await createBtcInvoice({
+        amount: discountedUsd,
+        currency: 'USD',
+        userId,
+        orderId: `pnptv-tokens-btc-${userId}-${Date.now()}`,
+        planId: 'token_purchase',
+        redirectUrl: `${WEB_APP_URL}/wallet`,
+        paymentMethods: ['BTC-LightningNetwork', 'BTC'],
+      });
+    } catch (btcpayErr) {
+      await query(
+        `UPDATE token_purchases SET status = 'failed' WHERE purchase_uuid = $1`,
+        [purchaseUuid]
+      ).catch(() => {});
+      logger.error('TokenCheckoutService.createBtcCheckout BTCPay error', {
+        userId, packageId, purchaseUuid, error: btcpayErr.message,
+      });
+      throw btcpayErr;
+    }
+
+    await query(
+      `UPDATE token_purchases SET btcpay_invoice_id = $1 WHERE purchase_uuid = $2`,
+      [invoice.invoiceId, purchaseUuid]
+    ).catch((updateErr) => {
+      logger.error('TokenCheckoutService.createBtcCheckout: failed to write real invoiceId', {
+        purchaseUuid, invoiceId: invoice.invoiceId, error: updateErr.message,
+      });
+      throw updateErr;
+    });
+
+    logger.info('Token BTC checkout created', {
+      userId, packageId, purchaseUuid, invoiceId: invoice.invoiceId, tokens: pkg.tokens,
+    });
+
+    return {
+      success: true,
+      purchaseId: purchaseUuid,
+      invoiceId: invoice.invoiceId,
+      checkoutUrl: invoice.checkoutLink,
       tokens: pkg.tokens,
       usd: discountedUsd,
     };
