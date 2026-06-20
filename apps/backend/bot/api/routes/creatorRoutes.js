@@ -88,6 +88,9 @@ router.post('/wallet', authGuard, creatorController.saveWalletAddress);
 // Creator tier change
 router.post('/change-tier', authGuard, creatorController.changeTier);
 
+// Toggle whether the creator accepts new memberships
+router.post('/toggle-subscription', authGuard, creatorController.toggleSubscription);
+
 // ── CMS routes (active creators only) ────────────────────────────────────────
 // GETs stay open so locked creators can still review their own content.
 // Write operations require that the creator is not onboarding-locked.

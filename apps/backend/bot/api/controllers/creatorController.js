@@ -257,6 +257,28 @@ const saveWalletAddress = async (req, res) => {
 };
 
 // POST /api/webapp/creator/change-tier
+const toggleSubscription = async (req, res) => {
+  try {
+    const userRes = await query(
+      'SELECT creator_status, creator_subscription_paused FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const user = userRes.rows[0];
+    if (!user || user.creator_status !== 'active') {
+      return res.status(403).json({ error: 'Creator profile not active' });
+    }
+    const paused = !user.creator_subscription_paused;
+    await query(
+      'UPDATE users SET creator_subscription_paused = $1 WHERE id = $2',
+      [paused, req.user.id]
+    );
+    return res.json({ success: true, subscriptionPaused: paused });
+  } catch (err) {
+    logger.error('toggleSubscription error', err);
+    return res.status(500).json({ error: 'Failed to update subscription setting' });
+  }
+};
+
 const changeTier = async (req, res) => {
   try {
     const { tier } = req.body || {};
@@ -1358,6 +1380,7 @@ module.exports = {
   unsubscribeFromCreator,
   getWalletAddress,
   saveWalletAddress,
+  toggleSubscription,
   changeTier,
   listActiveCreators,
   getStrikes,

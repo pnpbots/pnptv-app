@@ -350,7 +350,7 @@ class CreatorService {
 
     // Validate creator is active (outside transaction — read-only, no locking needed)
     const creatorRes = await query(
-      'SELECT creator_status, creator_locked, creator_price_usd FROM users WHERE id = $1',
+      'SELECT creator_status, creator_locked, creator_subscription_paused, creator_price_usd FROM users WHERE id = $1',
       [creatorId]
     );
     const creator = creatorRes.rows[0];
@@ -360,6 +360,12 @@ class CreatorService {
     if (creator.creator_locked === true) {
       const err = new Error('This creator is completing onboarding and cannot accept new subscriptions yet.');
       err.code = 'CREATOR_LOCKED';
+      err.statusCode = 423;
+      throw err;
+    }
+    if (creator.creator_subscription_paused === true) {
+      const err = new Error('This creator has paused new memberships.');
+      err.code = 'SUBSCRIPTIONS_PAUSED';
       err.statusCode = 423;
       throw err;
     }
@@ -626,7 +632,7 @@ class CreatorService {
   static async getCreatorDashboard(creatorId) {
     const [subscriberRes, earningsRes, exclusiveRes, applicationRes, enrollmentRes] = await Promise.all([
       query(
-        'SELECT creator_subscriber_count, creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_dash_address, stream_rules FROM users WHERE id = $1',
+        'SELECT creator_subscriber_count, creator_status, creator_type, creator_price_usd, creator_verified, creator_featured, creator_dash_address, stream_rules, creator_subscription_paused FROM users WHERE id = $1',
         [creatorId]
       ),
       query(
@@ -665,6 +671,7 @@ class CreatorService {
       enrollment: enrollmentRes.rows[0] || null,
       walletAddress: user.creator_dash_address || null,
       streamRules: user.stream_rules || null,
+      subscriptionPaused: user.creator_subscription_paused || false,
     };
   }
 

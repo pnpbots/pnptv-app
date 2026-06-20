@@ -4,6 +4,7 @@ import {
   getCreatorWallet,
   saveCreatorWallet,
   saveStreamRules,
+  toggleCreatorSubscription,
   listCreatorMedia,
   addCreatorMedia,
   updateCreatorMedia,
@@ -231,6 +232,34 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
     }
   };
 
+  // Membership toggle state
+  const [subscriptionPaused, setSubscriptionPaused] = useState<boolean>(
+    dashboard.subscriptionPaused ?? false
+  );
+  const [subToggling, setSubToggling] = useState(false);
+  const [subToggleError, setSubToggleError] = useState<string | null>(null);
+
+  const handleToggleSubscription = async () => {
+    setSubToggleError(null);
+    setSubToggling(true);
+    const prev = subscriptionPaused;
+    setSubscriptionPaused(!prev);
+    try {
+      const res = await toggleCreatorSubscription();
+      if (res.success) {
+        setSubscriptionPaused(res.subscriptionPaused);
+      } else {
+        setSubscriptionPaused(prev);
+        setSubToggleError(res.error || "Failed to update setting.");
+      }
+    } catch (err) {
+      setSubscriptionPaused(prev);
+      setSubToggleError(err instanceof Error ? err.message : "Failed to update setting.");
+    } finally {
+      setSubToggling(false);
+    }
+  };
+
   // Stream rules state
   const STREAM_RULES_MAX = 2000;
   const [streamRules, setStreamRules] = useState<string>(
@@ -365,6 +394,39 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
 
   return (
     <div className="space-y-4">
+      {/* Membership toggle */}
+      <div className="glass-card-sm p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-white">Accept new memberships</p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+              {subscriptionPaused
+                ? "New memberships are paused. Existing subscribers are unaffected."
+                : "Fans can subscribe to your profile."}
+            </p>
+          </div>
+          <button
+            onClick={handleToggleSubscription}
+            disabled={subToggling}
+            aria-pressed={!subscriptionPaused}
+            className="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:opacity-50 focus:outline-none"
+            style={{
+              background: subscriptionPaused
+                ? "rgba(255,255,255,0.12)"
+                : "linear-gradient(135deg, #D4007A, #E69138)",
+            }}
+          >
+            <span
+              className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200"
+              style={{ transform: subscriptionPaused ? "translateX(0)" : "translateX(24px)" }}
+            />
+          </button>
+        </div>
+        {subToggleError && (
+          <p className="mt-2 text-xs text-red-300">{subToggleError}</p>
+        )}
+      </div>
+
       {/* Payout Method Card */}
       <div className="glass-card-sm p-5">
         <p className="text-sm font-semibold text-white mb-1">{t.payoutMethodTitle}</p>

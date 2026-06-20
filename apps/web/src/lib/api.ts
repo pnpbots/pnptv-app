@@ -2894,6 +2894,39 @@ export function getLightningPaymentDetails(
   return request(`/api/webapp/payments/lightning/details/${encodeURIComponent(invoiceId)}`);
 }
 
+export function createBtcSubscription(
+  planId: string,
+  email?: string,
+  creatorId?: string,
+): Promise<{
+  success: boolean;
+  invoiceId: string;
+  checkoutUrl: string;
+  planName?: string;
+  usdAmount?: number;
+  error?: string;
+}> {
+  const body: Record<string, string> = { planId };
+  if (email) body.email = email;
+  if (creatorId) body.creatorId = creatorId;
+  return request("/api/webapp/payments/btc/create", { method: "POST", body });
+}
+
+export function getBtcSubscriptionStatus(invoiceId: string): Promise<{
+  success: boolean;
+  status: string;
+  error?: string;
+}> {
+  return request(`/api/webapp/payments/btc/status/${encodeURIComponent(invoiceId)}`);
+}
+
+export function getBtcAvailable(): Promise<{
+  available: boolean;
+  configured: boolean;
+}> {
+  return request("/api/webapp/payments/btc/available");
+}
+
 export function prepareUsdcSubscription(
   planId: string,
   email?: string,
@@ -3250,6 +3283,7 @@ export interface CreatorDashboard {
   } | null;
   walletAddress?: string | null;
   streamRules?: string | null;
+  subscriptionPaused?: boolean;
 }
 
 export interface CreatorSubscriptionStatus {
@@ -5424,6 +5458,10 @@ export function getLiveRulesStatus(channelRef?: string | null): Promise<{
 
 export function acknowledgeLiveRules(): Promise<{ success: boolean }> {
   return request("/api/webapp/live/acknowledge-rules", { method: "POST" });
+}
+
+export function toggleCreatorSubscription(): Promise<{ success: boolean; subscriptionPaused: boolean; error?: string }> {
+  return request("/api/webapp/creator/toggle-subscription", { method: "POST" });
 }
 
 export function saveStreamRules(rules: string): Promise<{ success: boolean; rules: string | null; error?: string }> {
