@@ -1196,7 +1196,7 @@ export const getSocialPost = getPublicPost;
 export function getSocialFeedPosts(
   cursor?: string,
   limit = 20
-): Promise<{ success: boolean; posts: SocialPostItem[]; nextCursor: string | null }> {
+): Promise<{ success: boolean; posts: SocialPostItem[]; nextCursor: string | null; freeUserLimited?: boolean }> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
   return request(`/api/webapp/social/feed?${params}`);

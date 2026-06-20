@@ -491,7 +491,18 @@ class EntitlementAccessService {
     if (kind === 'channel') {
       const accessType = resource.access_type || 'free';
       if (accessType === 'free') {
-        return { allowed: true, reason: 'free' };
+        // Even "free" channels require at least a pnp-member entitlement.
+        const hasMember = await EntitlementAccessService.hasEntitlement(userId, 'pnp-member');
+        const hasPrime = hasMember ? false : await EntitlementAccessService.hasEntitlement(userId, 'prime');
+        if (!hasMember && !hasPrime) {
+          return {
+            allowed: false,
+            reason: 'requires_member',
+            accessType: 'free',
+            code: 'MEMBER_REQUIRED',
+          };
+        }
+        return { allowed: true, reason: 'member_free_channel' };
       }
       if (accessType === 'prime') {
         // PRIME channel — only the 'prime' entitlement unlocks it.

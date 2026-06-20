@@ -74,6 +74,7 @@ export default function SocialFeedTabs({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [freeUserLimited, setFreeUserLimited] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   // Feed mode tab — "all" (default) or "following" (only when no filter is active)
   const [feedMode, setFeedMode] = useState<"all" | "following">("all");
@@ -113,6 +114,7 @@ export default function SocialFeedTabs({
           setPosts(res.posts);
         }
         setNextCursor(res.nextCursor);
+        if ('freeUserLimited' in res) setFreeUserLimited(!!res.freeUserLimited);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load feed");
@@ -361,7 +363,25 @@ export default function SocialFeedTabs({
               distanceKm={nearbyDistances.get(String(post.author_id)) ?? null}
             />
           ))}
-          {nextCursor && (
+          {freeUserLimited && (
+            <div
+              className="rounded-2xl p-5 text-center mx-1"
+              style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(230,145,56,0.08))", border: "1px solid rgba(212,0,122,0.25)" }}
+            >
+              <p className="text-base font-bold text-white mb-1">You're seeing 5 of many posts</p>
+              <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                Become a PNPtv! member to unlock the full community feed, browse all profiles, and access channels.
+              </p>
+              <button
+                onClick={() => onNavigate("/subscribe")}
+                className="text-sm font-semibold px-6 py-2.5 rounded-xl text-white"
+                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+              >
+                Join the community →
+              </button>
+            </div>
+          )}
+          {!freeUserLimited && nextCursor && (
             <div className="text-center pt-2 pb-4">
               <button
                 onClick={handleLoadMore}

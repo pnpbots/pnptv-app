@@ -93,6 +93,7 @@ export default function Profile() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [freeViewerLimited, setFreeViewerLimited] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -313,6 +314,7 @@ export default function Profile() {
           setPosts((prev) => [...prev, ...res.posts]);
         }
         setNextCursor(res.nextCursor);
+        if ('freeUserLimited' in res) setFreeViewerLimited(!!res.freeUserLimited);
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load profile");
@@ -1770,7 +1772,7 @@ export default function Profile() {
               ))}
 
               {/* Load more */}
-              {nextCursor && (
+              {!freeViewerLimited && nextCursor && (
                 <div className="text-center py-4">
                   <button
                     onClick={() => loadProfile(nextCursor)}
@@ -1779,6 +1781,24 @@ export default function Profile() {
                     style={{ color: "var(--pnp-text-secondary)" }}
                   >
                     {loadingMore ? p.loading : p.loadMorePosts}
+                  </button>
+                </div>
+              )}
+              {freeViewerLimited && (
+                <div
+                  className="rounded-2xl p-5 text-center mx-1 mt-2"
+                  style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(230,145,56,0.08))", border: "1px solid rgba(212,0,122,0.25)" }}
+                >
+                  <p className="text-sm font-bold text-white mb-1">Members see the full profile</p>
+                  <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                    You're seeing {posts.length} posts. Join PNPtv! to unlock this profile, the community feed, and all channels.
+                  </p>
+                  <button
+                    onClick={() => navigate("/subscribe")}
+                    className="text-sm font-semibold px-6 py-2.5 rounded-xl text-white"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  >
+                    Join the community →
                   </button>
                 </div>
               )}

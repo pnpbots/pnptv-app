@@ -66,17 +66,27 @@ const getUserPhotoFromDb = async (userId) => {
 
 // ── Feed ──────────────────────────────────────────────────────────────────────
 
+const FREE_FEED_LIMIT = 5;
+const FREE_PROFILE_LIMIT = 3;
+
 const getFeed = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   try {
     const isAdmin = user.role === 'admin' || user.role === 'superadmin';
     const viewerTier = await validateTierFresh(user.id, user.tier || 'free');
     if (viewerTier !== (user.tier || 'free').toLowerCase()) req.session.user.tier = viewerTier;
+    const isFreeUser = !isAdmin && viewerTier === 'free';
     // Fetch the viewer's blocked list from DB to exclude their posts (C-08)
     const blockedRes = await dbQuery('SELECT blocked FROM users WHERE id = $1', [user.id]);
     const blockedIds = (blockedRes.rows[0]?.blocked || []).map(Number);
-    const result = await SocialPostService.getFeed(user.id, req.query.cursor, req.query.limit, viewerTier, isAdmin, blockedIds);
-    return res.json({ success: true, ...result });
+    const result = await SocialPostService.getFeed(
+      user.id,
+      isFreeUser ? undefined : req.query.cursor,
+      isFreeUser ? FREE_FEED_LIMIT : req.query.limit,
+      viewerTier, isAdmin, blockedIds
+    );
+    if (isFreeUser) result.nextCursor = null;
+    return res.json({ success: true, freeUserLimited: isFreeUser, ...result });
   } catch (err) {
     logger.error('getFeed error', err);
     return res.status(500).json({ error: 'Failed to load feed' });
@@ -1164,7 +1174,13 @@ const getPublicProfile = async (req, res) => {
 
     // Profile browsing is open to all authenticated users (no tier restriction).
 
-    const result = await SocialPostService.getPublicProfile(userId, viewerId, req.query.cursor, req.query.limit, viewerTier, isAdmin);
+    const isFreeViewer = !isAdmin && viewerTier === 'free';
+    const result = await SocialPostService.getPublicProfile(
+      userId, viewerId,
+      isFreeViewer ? undefined : req.query.cursor,
+      isFreeViewer ? FREE_PROFILE_LIMIT : req.query.limit,
+      viewerTier, isAdmin
+    );
     if (!result.profile) return res.status(404).json({ error: 'User not found' });
 
     const profile = result.profile;
@@ -1214,7 +1230,8 @@ const getPublicProfile = async (req, res) => {
         gamificationBadges,
       },
       posts: result.posts,
-      nextCursor: result.nextCursor,
+      nextCursor: isFreeViewer ? null : result.nextCursor,
+      freeUserLimited: isFreeViewer,
     });
   } catch (err) {
     logger.error('getPublicProfile error', err);
