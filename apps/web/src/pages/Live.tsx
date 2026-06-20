@@ -109,6 +109,7 @@ export default function Live() {
   // Performer drawer
   const [drawerPerformer, setDrawerPerformer] = useState<FeaturedPerformer | null>(null);
   const [drawerStreamId, setDrawerStreamId] = useState<string | null>(null);
+  const [drawerOpenInEditMode, setDrawerOpenInEditMode] = useState(false);
   // Album thumbnail cache: creatorId → first 2 thumbs
   const [albumThumbs, setAlbumThumbs] = useState<Record<string, CreatorMediaItem[]>>({});
   const thumbLoadedRef = useRef<Set<string>>(new Set());
@@ -772,6 +773,7 @@ export default function Live() {
             const thumbs = cid ? (albumThumbs[cid] || []) : [];
             const thumb1 = thumbs[0];
             const thumb2 = thumbs[1];
+            const isOwnCard = !!(user?.id && cid && String(user.id) === String(cid));
             return (
               <div
                 key={p.id}
@@ -779,27 +781,43 @@ export default function Live() {
                 tabIndex={0}
                 aria-label={`Open ${p.displayName} profile`}
                 onClick={() => {
+                  setDrawerOpenInEditMode(false);
                   setDrawerPerformer(p);
                   setDrawerStreamId(stream ? stream.id : p.hlsUrl && p.userId ? String(p.userId) : null);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
+                    setDrawerOpenInEditMode(false);
                     setDrawerPerformer(p);
                     setDrawerStreamId(stream ? stream.id : p.hlsUrl && p.userId ? String(p.userId) : null);
                   }
                 }}
-                className={`rounded-xl border bg-pnp-surface overflow-hidden cursor-pointer active:scale-95 transition-all ${isLive ? "border-red-500/50 ring-1 ring-red-500/20" : "border-pnp-border"}`}
+                className={`relative rounded-xl border bg-pnp-surface overflow-hidden cursor-pointer active:scale-95 transition-all ${isLive ? "border-red-500/50 ring-1 ring-red-500/20" : "border-pnp-border"}`}
               >
                 {/* 3-image mosaic: avatar left, 2 album thumbs stacked right */}
                 <div className="flex h-28">
                   {/* Avatar (left, larger) */}
                   <div className="relative w-[58%] flex-shrink-0">
-                    <img
-                      src={isValidPhotoUrl(p.photoUrl) ? p.photoUrl as string : "/default-performer.svg"}
-                      alt={p.displayName}
-                      className="w-full h-full object-cover"
-                      onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
-                    />
+                    {isValidPhotoUrl(p.photoUrl) ? (
+                      <img
+                        src={p.photoUrl as string}
+                        alt={p.displayName}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const img = e.target as HTMLImageElement;
+                          img.style.display = "none";
+                          const fallback = img.nextElementSibling as HTMLElement | null;
+                          if (fallback) fallback.style.display = "flex";
+                        }}
+                      />
+                    ) : null}
+                    <div
+                      className="w-full h-full bg-gradient-to-br from-pnp-accent/70 to-purple-600/70 flex items-center justify-center text-white text-lg font-bold select-none"
+                      style={{ display: isValidPhotoUrl(p.photoUrl) ? "none" : "flex" }}
+                      aria-hidden="true"
+                    >
+                      {(p.displayName || "?").charAt(0).toUpperCase()}
+                    </div>
                     {isLive && (
                       <span className="absolute top-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
                         <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
@@ -810,7 +828,7 @@ export default function Live() {
                   {/* Two album thumbs (right column, stacked) */}
                   <div className="flex flex-col flex-1 gap-px">
                     {[thumb1, thumb2].map((thumb, idx) => (
-                      <div key={idx} className="flex-1 relative bg-pnp-border/30 overflow-hidden">
+                      <div key={idx} className="flex-1 relative bg-white/5 border-l border-b border-white/10 overflow-hidden last:border-b-0">
                         {thumb && (thumb.thumbUrl || thumb.url) ? (
                           thumb.type === "video" ? (
                             <video
@@ -830,9 +848,13 @@ export default function Live() {
                           )
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
-                            <svg className="w-4 h-4 text-pnp-border/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909" />
-                            </svg>
+                            {isOwnCard ? (
+                              <span className="text-pnp-border/80 text-sm font-bold leading-none">+</span>
+                            ) : (
+                              <svg className="w-4 h-4 text-pnp-border/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909" />
+                              </svg>
+                            )}
                           </div>
                         )}
                       </div>
@@ -846,6 +868,23 @@ export default function Live() {
                     <span className="text-[9px] font-bold flex-shrink-0" style={{ color: "#5ED1C4" }}>★</span>
                   )}
                 </div>
+                {/* Edit shortcut — own card only */}
+                {isOwnCard && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDrawerOpenInEditMode(true);
+                      setDrawerPerformer(p);
+                      setDrawerStreamId(stream ? stream.id : p.hlsUrl && p.userId ? String(p.userId) : null);
+                    }}
+                    className="absolute bottom-8 right-1.5 z-10 w-6 h-6 rounded-full bg-pnp-accent/90 flex items-center justify-center shadow"
+                    aria-label="Edit profile photos"
+                  >
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                    </svg>
+                  </button>
+                )}
               </div>
             );
           })}
@@ -1070,7 +1109,12 @@ export default function Live() {
         <PerformerDrawer
           performer={drawerPerformer}
           liveStreamId={drawerStreamId}
-          onClose={() => { setDrawerPerformer(null); setDrawerStreamId(null); }}
+          onClose={() => { setDrawerPerformer(null); setDrawerStreamId(null); setDrawerOpenInEditMode(false); }}
+          currentUserId={user?.id}
+          openInEditMode={drawerOpenInEditMode}
+          onAlbumUpdate={(cid, items) => {
+            setAlbumThumbs((prev) => ({ ...prev, [cid]: items.slice(0, 2) }));
+          }}
         />
       )}
     </div>

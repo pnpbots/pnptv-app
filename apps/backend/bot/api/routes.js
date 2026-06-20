@@ -1405,6 +1405,18 @@ const verifyMagicBytes = (allowedMimes) => async (req, res, next) => {
 
 const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heif', 'image/heic', 'image/avif']);
 
+// Creator media (album photos) — 10MB max, images only
+const creatorMediaUploadDir = path.join(__dirname, '../../../../public/uploads/creator-media');
+if (!fs.existsSync(creatorMediaUploadDir)) fs.mkdirSync(creatorMediaUploadDir, { recursive: true });
+const creatorMediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (IMAGE_MIMES.has(file.mimetype)) cb(null, true);
+    else cb(new Error('Images only'));
+  },
+});
+
 // Magic bytes verification for disk-stored uploads (post media, large files).
 // file.buffer is empty for diskStorage — read first 12 bytes from the saved path instead.
 const verifyDiskFileType = async (req, res, next) => {
@@ -11595,7 +11607,42 @@ app.get('/api/webapp/creators/:creatorId/media',
   softAuth,
   asyncHandler(creatorMediaController.listMedia));
 
-// Creator-only: add, update, delete, reorder
+// Creator-only: file upload for album photos — registered before /reorder and plain POST
+// to avoid Express matching /upload as a /:id param on PATCH/DELETE routes.
+app.post('/api/webapp/creators/media/upload',
+  requireSessionAuth, creatorGuard,
+  uploadLimiter,
+  creatorMediaUpload.single('file'),
+  verifyMagicBytes(IMAGE_MIMES),
+  asyncHandler(async (req, res) => {
+    const sharp = require('sharp');
+    const user = req.user || req.session?.user;
+    if (!req.file) return res.status(400).json({ success: false, error: { code: 'NO_FILE', message: 'No file provided' } });
+
+    const filename = `${user.id}-${Date.now()}.webp`;
+    const filePath = path.join(creatorMediaUploadDir, filename);
+    const publicUrl = `/uploads/creator-media/${filename}`;
+
+    await sharp(req.file.buffer)
+      .rotate()
+      .withMetadata(false)
+      .resize(1200, null, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 85 })
+      .toFile(filePath);
+
+    const creatorMediaService = require('../../../services/creatorMediaService');
+    const caption = typeof req.body.caption === 'string' ? req.body.caption.trim() || null : null;
+    const item = await creatorMediaService.addMedia(String(user.id), {
+      type: 'photo',
+      url: publicUrl,
+      thumbUrl: null,
+      caption,
+      isPremium: false,
+    });
+
+    return res.status(201).json({ success: true, item });
+  }));
+
 // reorder must be registered before /:id to avoid param collision
 app.post('/api/webapp/creators/media/reorder',
   requireSessionAuth, creatorGuard,

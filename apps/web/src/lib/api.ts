@@ -1141,6 +1141,25 @@ export async function uploadAvatar(file: File): Promise<{ success: boolean; phot
   return res.json();
 }
 
+export async function uploadCreatorMediaFile(
+  file: File,
+  caption?: string
+): Promise<{ success: boolean; item: CreatorMediaItem }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (caption) fd.append("caption", caption);
+  const res = await fetch(`${API_BASE}/api/webapp/creators/media/upload`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error?.message || body?.error || `Upload failed (${res.status})`);
+  }
+  return res.json();
+}
+
 export function getPublicProfile(
   userId: string,
   cursor?: string,

@@ -21,6 +21,9 @@ import {
   listCreatorRecordings,
   getCreatorSubscriptionStatus,
   isCreatorPayLocked,
+  uploadAvatar,
+  uploadCreatorMediaFile,
+  deleteCreatorMedia,
   type CreatorMediaItem,
   type StreamRecording,
   type FeaturedPerformer,
@@ -38,6 +41,9 @@ export interface PerformerDrawerProps {
   performer: FeaturedPerformer | null;
   liveStreamId?: string | null;
   onClose: () => void;
+  currentUserId?: string;
+  openInEditMode?: boolean;
+  onAlbumUpdate?: (creatorId: string, items: CreatorMediaItem[]) => void;
 }
 
 // ─── Internal: Album Grid ─────────────────────────────────────────────────────
@@ -54,9 +60,13 @@ function LockIcon() {
 function AlbumTile({
   item,
   onGatedTap,
+  editMode = false,
+  onDelete,
 }: {
   item: CreatorMediaItem;
   onGatedTap: () => void;
+  editMode?: boolean;
+  onDelete?: (id: string) => void;
 }) {
   const src = item.thumbUrl || item.url;
 
@@ -70,12 +80,22 @@ function AlbumTile({
         onKeyDown={(e) => e.key === "Enter" && onGatedTap()}
         aria-label="Premium content — subscribe to view"
       >
-        {/* blurred placeholder */}
         <div className="absolute inset-0 bg-gradient-to-br from-pnp-border/60 to-pnp-surface/80" />
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
           <LockIcon />
           <span className="text-[10px] text-white/60 font-medium">Premium</span>
         </div>
+        {editMode && onDelete && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
+            className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-600 flex items-center justify-center z-10"
+            aria-label="Remove photo"
+          >
+            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
     );
   }
@@ -109,15 +129,26 @@ function AlbumTile({
           VIDEO
         </span>
       )}
-      {item.isPremium && (
+      {item.isPremium && !editMode && (
         <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full bg-pnp-accent/80 text-white text-[9px] font-bold">
           PREM
         </span>
       )}
-      {item.caption && (
+      {item.caption && !editMode && (
         <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-black/50 text-white text-[10px] leading-tight line-clamp-2 opacity-0 group-hover:opacity-100 transition-opacity">
           {item.caption}
         </div>
+      )}
+      {editMode && onDelete && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
+          className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-600 flex items-center justify-center z-10"
+          aria-label="Remove photo"
+        >
+          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       )}
     </div>
   );
@@ -153,7 +184,7 @@ function formatReplayDate(iso: string | null): string {
 
 // ─── Main Drawer ──────────────────────────────────────────────────────────────
 
-export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerDrawerProps) {
+export function PerformerDrawer({ performer, liveStreamId, onClose, currentUserId, openInEditMode, onAlbumUpdate }: PerformerDrawerProps) {
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
 
@@ -167,10 +198,16 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
   const [recordings, setRecordings] = useState<StreamRecording[]>([]);
   const [recordingsLoading, setRecordingsLoading] = useState(false);
   const [replayUrl, setReplayUrl] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const addPhotoInputRef = useRef<HTMLInputElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
 
   const isLive = !!liveStreamId;
   const creatorId = performer?.userId || performer?.id || null;
+  const isOwner = !!(currentUserId && creatorId && String(currentUserId) === String(creatorId));
 
   // Load media + subscription status when drawer opens
   useEffect(() => {
@@ -227,6 +264,54 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  // Auto-enter edit mode when requested by parent (own card edit button)
+  useEffect(() => {
+    if (openInEditMode && isOwner) setEditMode(true);
+  }, [openInEditMode, isOwner]);
+
+  const handleAddPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !creatorId) return;
+    e.target.value = "";
+    setUploadingMedia(true);
+    try {
+      const res = await uploadCreatorMediaFile(file);
+      const updated = [...media, res.item];
+      setMedia(updated);
+      onAlbumUpdate?.(String(creatorId), updated);
+    } catch {
+      // non-fatal — silently ignore
+    } finally {
+      setUploadingMedia(false);
+    }
+  };
+
+  const handleDeleteMedia = async (id: string) => {
+    try {
+      await deleteCreatorMedia(id);
+      const updated = media.filter((m) => m.id !== id);
+      setMedia(updated);
+      onAlbumUpdate?.(String(creatorId!), updated);
+    } catch {
+      // non-fatal
+    }
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setUploadingAvatar(true);
+    try {
+      await uploadAvatar(file);
+      // Avatar shown via performer.photoUrl — parent will re-fetch on next load
+    } catch {
+      // non-fatal
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   // Swipe-down to close on mobile
   const touchStartY = useRef(0);
@@ -307,6 +392,45 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
           </svg>
         </button>
 
+        {/* Edit / Done toggle — only visible to the owner */}
+        {isOwner && !editMode && (
+          <button
+            onClick={() => setEditMode(true)}
+            className="absolute top-3 left-3 z-10 w-8 h-8 rounded-full bg-black/40 flex items-center justify-center text-white hover:bg-black/60 transition-colors"
+            aria-label="Edit profile photos"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.125L18 6" />
+            </svg>
+          </button>
+        )}
+        {isOwner && editMode && (
+          <button
+            onClick={() => setEditMode(false)}
+            className="absolute top-3 left-3 z-10 px-3 h-8 rounded-full bg-pnp-accent flex items-center justify-center text-white text-xs font-bold hover:opacity-90 transition-opacity"
+            aria-label="Done editing"
+          >
+            Done
+          </button>
+        )}
+
+        {/* Hidden file inputs for edit mode */}
+        <input
+          ref={avatarInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleAvatarChange}
+        />
+        <input
+          ref={addPhotoInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleAddPhoto}
+        />
+
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto overscroll-contain">
 
@@ -354,16 +478,46 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
           {/* Name + bio */}
           <div className="px-4 py-3">
             <div className="flex items-center gap-3">
-              <img
-                src={avatar || "/default-performer.svg"}
-                alt={displayName}
-                className="w-12 h-12 rounded-full object-cover border-2 border-pnp-border flex-shrink-0"
-                onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
-              />
+              {editMode ? (
+                <button
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={uploadingAvatar}
+                  className="relative w-12 h-12 rounded-full overflow-hidden flex-shrink-0 border-2 border-pnp-accent focus:outline-none"
+                  aria-label="Change profile photo"
+                >
+                  <img
+                    src={avatar || "/default-performer.svg"}
+                    alt={displayName}
+                    className="w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
+                  />
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                    {uploadingAvatar ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                      </svg>
+                    )}
+                  </div>
+                </button>
+              ) : (
+                <img
+                  src={avatar || "/default-performer.svg"}
+                  alt={displayName}
+                  className="w-12 h-12 rounded-full object-cover border-2 border-pnp-border flex-shrink-0"
+                  onError={(e) => { (e.target as HTMLImageElement).src = "/default-performer.svg"; }}
+                />
+              )}
               <div className="min-w-0">
                 <p className="text-base font-bold text-pnp-textPrimary truncate">{displayName}</p>
-                {performer.bio && (
-                  <p className="text-xs text-pnp-textSecondary line-clamp-2 mt-0.5">{performer.bio}</p>
+                {editMode ? (
+                  <p className="text-xs text-pnp-accent mt-0.5">Tap photo to change avatar</p>
+                ) : (
+                  performer.bio && (
+                    <p className="text-xs text-pnp-textSecondary line-clamp-2 mt-0.5">{performer.bio}</p>
+                  )
                 )}
               </div>
             </div>
@@ -371,27 +525,54 @@ export function PerformerDrawer({ performer, liveStreamId, onClose }: PerformerD
 
           {/* ── Zone 2: Album grid ── */}
           <div className="px-4 pb-4">
-            <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">Album</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider">
+                {editMode ? "Edit Profile Photos" : "Album"}
+              </p>
+            </div>
             {mediaLoading ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {[1, 2, 3, 4, 5, 6].map((i) => (
                   <div key={i} className="aspect-square rounded-xl bg-pnp-surface animate-pulse" />
                 ))}
               </div>
-            ) : media.length === 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                <PlaceholderTile />
-                <PlaceholderTile />
-              </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {media.map((item) => (
-                  <AlbumTile
-                    key={item.id}
-                    item={item}
-                    onGatedTap={() => setShowSubscribePrompt(true)}
-                  />
-                ))}
+                {editMode && (
+                  <button
+                    onClick={() => addPhotoInputRef.current?.click()}
+                    disabled={uploadingMedia}
+                    className="aspect-square rounded-xl border-2 border-dashed border-pnp-border/60 bg-pnp-surface/50 flex flex-col items-center justify-center gap-1 hover:border-pnp-accent/60 transition-colors focus:outline-none"
+                    aria-label="Add photo"
+                  >
+                    {uploadingMedia ? (
+                      <div className="w-5 h-5 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <svg className="w-6 h-6 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                        </svg>
+                        <span className="text-[10px] text-pnp-textSecondary">Add photo</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                {media.length === 0 && !editMode ? (
+                  <>
+                    <PlaceholderTile />
+                    <PlaceholderTile />
+                  </>
+                ) : (
+                  media.map((item) => (
+                    <AlbumTile
+                      key={item.id}
+                      item={item}
+                      onGatedTap={() => setShowSubscribePrompt(true)}
+                      editMode={editMode}
+                      onDelete={editMode ? handleDeleteMedia : undefined}
+                    />
+                  ))
+                )}
               </div>
             )}
           </div>
