@@ -1839,6 +1839,7 @@ const makeCreator = async (req, res) => {
       'creator_verified = true',
       'creator_featured = true',
       'creator_strikes = 0',
+      'creator_subscription_paused = TRUE',
       'role_assigned_at = NOW()',
       'primary_role = $4',
       'updated_at = NOW()',
