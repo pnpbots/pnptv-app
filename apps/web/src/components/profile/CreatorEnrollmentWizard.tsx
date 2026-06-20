@@ -29,6 +29,129 @@ export interface CreatorEnrollmentWizardProps {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+// ── Creator Guidelines content ────────────────────────────────────────────────
+
+const PROFILE_SCHEDULE = [
+  { day: "Pre-launch", action: "Upload 5 exclusive videos (5–8 min each) before enabling your fee. This is your content wall — no wall, no charge." },
+  { day: "Mon + Thu", action: "Drop 1 exclusive video each day (5–8 min). Raw, solo, spontaneous. Minimal editing." },
+  { day: "Tue / Wed / Fri", action: "1 free teaser post per day — a still, a 30-sec clip, or a voice note. This is your marketing." },
+  { day: "Weekend", action: "Optional: 1 bonus exclusive or a poll asking fans what they want to see next." },
+  { day: "Monthly goal", action: "8–10 exclusive videos + 12–15 free teasers. Subscribers renew every 30 days — give them a reason to stay." },
+];
+
+const CHANNEL_SCHEDULE = [
+  { day: "Pre-launch", action: "Upload 3 full-length videos (20+ min each) before publishing the channel. Subscribers need to see value on day one." },
+  { day: "Every 7 days", action: "1 full-length video (20–40 min). Multiple creators, planned scene, clear concept. Quality over quantity." },
+  { day: "Every 3–4 days", action: "1 supplementary clip (5–10 min): behind-the-scenes, casting call, community teaser." },
+  { day: "Monthly collab", action: "At least 1 video per month featuring a creator from a different area. Cross-pollination grows both audiences." },
+  { day: "Monthly goal", action: "4 full-length videos + 6–8 supplementary clips. Channels live or die by consistency." },
+];
+
+const PROFILE_GUIDE = (
+  <div className="space-y-3 text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">What is a Creator Profile?</p>
+      <p>Your profile is <em>you</em> — a persona, not a concept. Fans follow you for who you are, not a theme. This is the right format if you shoot spontaneously, perform solo, and don't want to coordinate with other creators.</p>
+    </div>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">Video Format</p>
+      <ul className="list-disc list-inside space-y-1 mt-1">
+        <li><strong className="text-white">Length:</strong> 5–8 minutes per video. Long enough to be satisfying, short enough to shoot in one take.</li>
+        <li><strong className="text-white">Style:</strong> Raw and amateur. Phone camera is fine. Natural lighting, no script. The less produced it looks, the more authentic it feels.</li>
+        <li><strong className="text-white">Content:</strong> Solo performer is the core format — just you. Keep it focused, keep it real.</li>
+        <li><strong className="text-white">Editing:</strong> Minimal. Trim dead air at the start and end. No music, no cuts unless necessary. The rawness is the product.</li>
+        <li><strong className="text-white">File format:</strong> MP4, max 500 MB per video. Portrait or landscape both work.</li>
+      </ul>
+    </div>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">Recommended Posting Schedule</p>
+      <div className="space-y-2 mt-1">
+        {PROFILE_SCHEDULE.map((row, i) => (
+          <div key={i} className="flex gap-2">
+            <span className="font-semibold flex-shrink-0" style={{ color: "#D4007A", minWidth: 80 }}>{row.day}</span>
+            <span>{row.action}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">Monetization Strategy</p>
+      <ol className="list-decimal list-inside space-y-1 mt-1">
+        <li>Upload 5 exclusive videos <em>before</em> turning on your fee. Your wall must have content before you charge.</li>
+        <li>Enable your membership fee in Settings → "Accept new memberships."</li>
+        <li>Keep free teasers flowing daily — this is how new fans find you and decide to subscribe.</li>
+        <li>Never delete old exclusive videos. Subscribers pay for access to your full archive.</li>
+      </ol>
+    </div>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">Privacy & Visibility</p>
+      <p>PNPtv! is a closed community. Your content is visible only to registered members — not indexable by Google, not shareable to outside platforms. You can build a real following inside the community while remaining completely invisible to the outside world. Use a stage name. You control what is free and what is exclusive.</p>
+    </div>
+  </div>
+);
+
+const CHANNEL_GUIDE = (
+  <div className="space-y-3 text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">What is a Channel?</p>
+      <p>A channel is built around a <em>concept</em>, not a person. Examples: <strong className="text-white">PNP Cruising Spots</strong>, <strong className="text-white">PNP Trans Scenes</strong>, <strong className="text-white">Bareback Latino</strong>, <strong className="text-white">Bear Den</strong>. Multiple creators contribute. The concept is the brand — creators come and go, the channel endures.</p>
+    </div>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">Video Format</p>
+      <ul className="list-disc list-inside space-y-1 mt-1">
+        <li><strong className="text-white">Length:</strong> 20 minutes minimum. 30–40 min is the ideal sweet spot. Longer is fine if the content warrants it.</li>
+        <li><strong className="text-white">Style:</strong> More produced than profiles. Multiple angles, basic editing, scene structure (build-up, main event, outro). A tripod and external mic make a real difference.</li>
+        <li><strong className="text-white">Creators per scene:</strong> 2 or more. Channels are about chemistry and ensemble — solo content belongs on profiles, not channels.</li>
+        <li><strong className="text-white">Editing:</strong> Cut dead time, add a simple title card, sync audio if you're using an external mic. Color correction is a bonus, not required.</li>
+        <li><strong className="text-white">File format:</strong> MP4, max 2 GB per video. Landscape (16:9) strongly recommended.</li>
+      </ul>
+    </div>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">Collaboration Policy</p>
+      <p>Creators in the same city or region are <strong className="text-white">strongly encouraged</strong> to create joint channels. A channel with 3 active creators posting weekly outperforms a solo creator channel every time. Add collaborators in Creator Studio → Channels → Edit → Collaborators. All collaborators can upload; channel ownership stays with the creator who created it.</p>
+    </div>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">Recommended Posting Schedule</p>
+      <div className="space-y-2 mt-1">
+        {CHANNEL_SCHEDULE.map((row, i) => (
+          <div key={i} className="flex gap-2">
+            <span className="font-semibold flex-shrink-0" style={{ color: "#E69138", minWidth: 100 }}>{row.day}</span>
+            <span>{row.action}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">Linking Your Channel to a Hangout</p>
+      <p>Every channel can be linked to a Hangout — a private group chat exclusive to your channel subscribers. This is your most powerful tool for building loyalty.</p>
+      <ol className="list-decimal list-inside space-y-1 mt-1">
+        <li>Create or open your Hangout in the Hangouts section.</li>
+        <li>In Hangout Settings, select "Link to Channel" and choose your channel.</li>
+        <li>From this point, everyone who subscribes to the channel automatically gets access to the Hangout.</li>
+        <li>Use the Hangout to announce new videos, take requests, do Q&A, share unedited clips, and talk directly with your most loyal fans.</li>
+      </ol>
+      <p className="mt-1">The Hangout is not just chat — it is the direct communication line between your channel and your paying audience. Creators who use it consistently retain subscribers at a significantly higher rate.</p>
+    </div>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">Sharing Posts from Your Feed to a Hangout</p>
+      <p>When you create a post in your feed (a teaser clip, a photo set, an announcement), you can simultaneously send it to your linked Hangout. In the Post Composer, select your channel in the "Post to" dropdown, then also toggle "Share to Hangout." The post appears in the community feed AND drops directly into the Hangout as a message — your subscribers see it in both places.</p>
+      <p className="mt-1">This is how one piece of content does double duty: it markets to the broader community and rewards your paying fans with first access, all in one tap.</p>
+    </div>
+    <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="font-semibold text-white">Visibility Strategy — Famous Inside, Invisible Outside</p>
+      <p>PNPtv! is a sealed community. No content is indexed externally. Here is how to maximize your reach <em>within</em> the platform:</p>
+      <ul className="list-disc list-inside space-y-1 mt-1">
+        <li><strong className="text-white">Post free teasers to the feed</strong> — every free post is visible to all members and drives subscriptions.</li>
+        <li><strong className="text-white">Use your Hangout actively</strong> — the algorithm surfaces channels whose Hangouts have recent activity.</li>
+        <li><strong className="text-white">Cross-post to the community feed</strong> when you drop a new channel video — use the feed post as the trailer, the channel video as the full content.</li>
+        <li><strong className="text-white">Collaborate with creators in other cities</strong> — when they share the collab video on their profile, their audience discovers your channel.</li>
+        <li><strong className="text-white">React and engage</strong> — comment on other creators' posts. Visibility on PNPtv! is earned through participation, not paid promotion.</li>
+      </ul>
+      <p className="mt-1">The goal: become a name that every member of the community knows, while the outside world has no idea you exist.</p>
+    </div>
+  </div>
+);
+
 export default function CreatorEnrollmentWizard({
   tier,
   onClose,
@@ -38,13 +161,17 @@ export default function CreatorEnrollmentWizard({
   const pr = i18n.profile;
   const t = TIER_CONFIG[tier];
   const [step, setStep] = useState(1);
-  const TOTAL_STEPS = 5;
+  const TOTAL_STEPS = 6;
 
-  // Step 1 state
+  // Step 1 state (guidelines)
+  const [guideTab, setGuideTab] = useState<"profile" | "channel">("profile");
+  const [guidelinesRead, setGuidelinesRead] = useState(false);
+
+  // Step 2 state (terms)
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [commitmentAccepted, setCommitmentAccepted] = useState(false);
 
-  // Step 2 state (payment)
+  // Step 3 state (payment)
   // Dash via BTCPay is the canonical crypto payout path post-Daimo retirement
   // (2026-04-21). Meru is the fiat off-ramp. usdc/usdt remain UI options for
   // creators who already set them up before the migration; new creators are
@@ -53,7 +180,7 @@ export default function CreatorEnrollmentWizard({
   const [paymentAddress, setPaymentAddress] = useState("");
   const [paymentNetwork, setPaymentNetwork] = useState("dash");
 
-  // Step 3 state (ID + signature)
+  // Step 4 state (ID + signature)
   const [idFile, setIdFile] = useState<File | null>(null);
   const [idPreview, setIdPreview] = useState<string | null>(null);
   const [signatureData, setSignatureData] = useState("");
@@ -94,10 +221,11 @@ export default function CreatorEnrollmentWizard({
     }
   };
 
-  const canProceedStep1 = termsAccepted && commitmentAccepted;
-  const canProceedStep2 = paymentAddress.trim().length >= 3;
-  const canProceedStep3 = !!idFile;
-  const canProceedStep4 = !!signatureData;
+  const canProceedStep1 = guidelinesRead;
+  const canProceedStep2 = termsAccepted && commitmentAccepted;
+  const canProceedStep3 = paymentAddress.trim().length >= 3;
+  const canProceedStep4 = !!idFile;
+  const canProceedStep5 = !!signatureData;
 
   return (
     <div
@@ -140,8 +268,54 @@ export default function CreatorEnrollmentWizard({
         {/* Body — scrollable */}
         <div className="overflow-y-auto flex-1 px-5 pb-4 space-y-4">
 
-          {/* Step 1: Terms & Commitment */}
+          {/* Step 1: Creator Guidelines (mandatory read) */}
           {step === 1 && (
+            <>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">PNPtv! Creator Guidelines</p>
+              <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                Read both sections before continuing. These guidelines apply from your first day as a creator.
+              </p>
+
+              {/* Profile / Channel tab toggle */}
+              <div className="flex rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+                {(["profile", "channel"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setGuideTab(tab)}
+                    className="flex-1 py-2 text-xs font-semibold transition-colors"
+                    style={guideTab === tab
+                      ? { background: t.gradient, color: "#fff" }
+                      : { background: "rgba(255,255,255,0.03)", color: "var(--pnp-text-secondary, #8E8E93)" }
+                    }
+                  >
+                    {tab === "profile" ? "Profile Guidelines" : "Channel Guidelines"}
+                  </button>
+                ))}
+              </div>
+
+              {guideTab === "profile" ? PROFILE_GUIDE : CHANNEL_GUIDE}
+
+              <label className="flex items-start gap-3 cursor-pointer pt-2">
+                <div
+                  className="mt-0.5 w-5 h-5 rounded flex items-center justify-center flex-shrink-0 transition-colors"
+                  style={{ background: guidelinesRead ? t.gradient : "rgba(255,255,255,0.08)", border: `1px solid rgba(${t.rgb},0.4)` }}
+                  onClick={() => setGuidelinesRead((v) => !v)}
+                >
+                  {guidelinesRead && (
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                <span className="text-xs" style={{ color: guidelinesRead ? "#fff" : "#8E8E93" }}>
+                  I have read and understood the <strong>PNPtv! Profile Guidelines</strong> and the <strong>PNPtv! Channel Guidelines</strong>.
+                </span>
+              </label>
+            </>
+          )}
+
+          {/* Step 2: Terms & Commitment */}
+          {step === 2 && (
             <>
               <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">{pr.termsAndConditions}</p>
 
@@ -202,8 +376,8 @@ export default function CreatorEnrollmentWizard({
             </>
           )}
 
-          {/* Step 2: Payment Setup */}
-          {step === 2 && (
+          {/* Step 3: Payment Setup */}
+          {step === 3 && (
             <>
               <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">{pr.paymentSetup}</p>
 
@@ -287,8 +461,8 @@ export default function CreatorEnrollmentWizard({
             </>
           )}
 
-          {/* Step 3: Identity Verification */}
-          {step === 3 && (
+          {/* Step 4: Identity Verification */}
+          {step === 4 && (
             <>
               <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">{pr.identityVerification}</p>
 
@@ -336,8 +510,8 @@ export default function CreatorEnrollmentWizard({
             </>
           )}
 
-          {/* Step 4: Digital Signature */}
-          {step === 4 && (
+          {/* Step 5: Digital Signature */}
+          {step === 5 && (
             <>
               <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">
                 {pr.digitalSignature}
@@ -362,8 +536,8 @@ export default function CreatorEnrollmentWizard({
             </>
           )}
 
-          {/* Step 5: Review & Submit */}
-          {step === 5 && (
+          {/* Step 6: Review & Submit */}
+          {step === 6 && (
             <>
               <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">{pr.reviewAndSubmit}</p>
 
@@ -437,7 +611,8 @@ export default function CreatorEnrollmentWizard({
                 (step === 1 && !canProceedStep1) ||
                 (step === 2 && !canProceedStep2) ||
                 (step === 3 && !canProceedStep3) ||
-                (step === 4 && !canProceedStep4)
+                (step === 4 && !canProceedStep4) ||
+                (step === 5 && !canProceedStep5)
               }
               className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-40"
               style={{ background: t.gradient }}
