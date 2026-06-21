@@ -7,9 +7,11 @@ import {
   getSupportTicket,
   getTicketMessages,
   addTicketMessage,
+  uploadSupportAttachment,
   type SupportTicket,
   type TicketMessage,
   type TicketCategory,
+  type SupportAttachment,
 } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { connectSocket } from "@/lib/socket";
@@ -167,6 +169,11 @@ function TicketChat({ userId }: { userId: string }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Pending attachments for next message
+  const [pendingAttachments, setPendingAttachments] = useState<SupportAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   // Create ticket form
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -219,21 +226,39 @@ function TicketChat({ userId }: { userId: string }) {
     };
   }, []);
 
+  // File pick handler
+  const handleFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      const uploaded = await uploadSupportAttachment(files);
+      setPendingAttachments((prev) => [...prev, ...uploaded]);
+    } catch { /* user can retry */ }
+    finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
   // Send message
   const handleSend = async () => {
-    if (!messageInput.trim() || sending) return;
+    if ((!messageInput.trim() && pendingAttachments.length === 0) || sending) return;
+    const attachSnap = pendingAttachments.slice();
     setSending(true);
     try {
-      await addTicketMessage(messageInput.trim());
+      await addTicketMessage(messageInput.trim() || "📎 Attachment", attachSnap.length > 0 ? attachSnap : undefined);
       // Optimistically add
       setMessages((prev) => [...prev, {
         id: Date.now(),
         sender_type: "user",
         sender_name: "You",
-        content: messageInput.trim(),
+        content: messageInput.trim() || "📎 Attachment",
+        attachments: attachSnap,
         created_at: new Date().toISOString(),
       }]);
       setMessageInput("");
+      setPendingAttachments([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send");
     } finally { setSending(false); }
@@ -399,6 +424,32 @@ function TicketChat({ userId }: { userId: string }) {
                           )}
 
                           <p>{msg.content}</p>
+                          {(msg.attachments ?? []).length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {(msg.attachments ?? []).map((att, ai) =>
+                                att.type?.startsWith("image/") ? (
+                                  <img
+                                    key={ai}
+                                    src={att.url}
+                                    alt={att.name}
+                                    className="max-w-[160px] max-h-[120px] rounded-lg object-cover cursor-pointer"
+                                    onClick={() => window.open(att.url, "_blank")}
+                                  />
+                                ) : (
+                                  <a
+                                    key={ai}
+                                    href={att.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-black/20 border border-white/10 text-xs hover:bg-black/30 transition-colors"
+                                  >
+                                    <span>📄</span>
+                                    <span className="truncate max-w-[120px]">{att.name}</span>
+                                  </a>
+                                )
+                              )}
+                            </div>
+                          )}
                           <p className={`text-[10px] mt-0.5 ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>{timeStr}</p>
                         </div>
                       </div>
@@ -414,15 +465,64 @@ function TicketChat({ userId }: { userId: string }) {
 
       {/* Input bar */}
       {ticket.status === "open" && (
-        <div className="flex items-end gap-2 px-3 py-2 border-t border-pnp-border" style={{ background: "var(--pnp-surface, #1C1C1E)" }}>
-          <textarea value={messageInput} onChange={(e) => setMessageInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder="Type a message..." className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2.5 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-24" rows={1} style={{ minHeight: "40px", fontSize: "16px" }} />
-          <button type="button" onClick={handleSend} disabled={sending || !messageInput.trim()} className="p-2 rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }} aria-label="Send">
-            {sending ? (
-              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
-            )}
-          </button>
+        <div className="border-t border-pnp-border px-3 py-2" style={{ background: "var(--pnp-surface, #1C1C1E)" }}>
+          {/* Pending attachment preview */}
+          {pendingAttachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {pendingAttachments.map((att, i) =>
+                att.type?.startsWith("image/") ? (
+                  <div key={i} className="relative flex-shrink-0">
+                    <img src={att.url} alt={att.name} className="w-12 h-12 rounded-lg object-cover border border-white/10" />
+                    <button
+                      type="button"
+                      onClick={() => setPendingAttachments((p) => p.filter((_, idx) => idx !== i))}
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-black/80 text-white text-[9px] flex items-center justify-center"
+                    >✕</button>
+                  </div>
+                ) : (
+                  <div key={i} className="relative flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-xs text-white max-w-[140px]">
+                    <span>📄</span><span className="truncate">{att.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setPendingAttachments((p) => p.filter((_, idx) => idx !== i))}
+                      className="ml-1 flex-shrink-0 text-white/50 hover:text-white"
+                    >✕</button>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,application/pdf"
+              className="sr-only"
+              onChange={handleFilePick}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              aria-label="Attach files"
+              className="flex-shrink-0 p-2 rounded-full text-pnp-textSecondary hover:text-white transition-colors disabled:opacity-40"
+            >
+              {uploading ? (
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+              )}
+            </button>
+            <textarea value={messageInput} onChange={(e) => setMessageInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder="Type a message..." className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2.5 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-24" rows={1} style={{ minHeight: "40px", fontSize: "16px" }} />
+            <button type="button" onClick={handleSend} disabled={sending || (!messageInput.trim() && pendingAttachments.length === 0)} className="p-2 rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }} aria-label="Send">
+              {sending ? (
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
+              )}
+            </button>
+          </div>
         </div>
       )}
 

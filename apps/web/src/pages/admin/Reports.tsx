@@ -319,9 +319,23 @@ function ReportsView({ onPendingCount }: { onPendingCount: (n: number) => void }
               {selected.evidence_type && (
                 <div>
                   <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Evidence</p>
-                  <p className="text-sm text-white/70 mt-1">
-                    {selected.evidence_type}{selected.evidence_id ? ` #${selected.evidence_id}` : ""}
-                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs text-white/50 capitalize">{selected.evidence_type}{selected.evidence_id ? ` #${selected.evidence_id}` : ""}</span>
+                    {(selected.evidence_type === "post" || selected.evidence_type === "profile") && (
+                      <a
+                        href={`/profile/${selected.reported_user_id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition-colors"
+                        style={{ background: "rgba(212,0,122,0.12)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.25)" }}
+                      >
+                        View {selected.evidence_type === "post" ? "Post" : "Profile"}
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                      </a>
+                    )}
+                  </div>
                 </div>
               )}
 

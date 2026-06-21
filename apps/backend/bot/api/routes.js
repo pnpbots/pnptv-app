@@ -1719,6 +1719,28 @@ const uploadModelIdDocuments = (req, res, next) => {
   });
 };
 
+// Support ticket attachment upload — images + PDF, 10 MB each, up to 5 files
+const supportAttachUploadDir = path.join(__dirname, '../../../../public/uploads/support');
+if (!fs.existsSync(supportAttachUploadDir)) fs.mkdirSync(supportAttachUploadDir, { recursive: true });
+
+const supportAttachUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
+  fileFilter: (_req, file, cb) => {
+    const m = (file.mimetype || '').toLowerCase();
+    if (/^image\/(jpeg|jpg|png|webp|gif)$/.test(m) || m === 'application/pdf') return cb(null, true);
+    cb(new Error('Only images (JPG/PNG/WebP/GIF) and PDF files are allowed'));
+  },
+});
+
+const handleSupportAttach = (req, res, next) => {
+  supportAttachUpload.array('files', 5)(req, res, (err) => {
+    if (!err) return next();
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? 'File too large. Max 10 MB each.' : (err.message || 'Upload failed');
+    return res.status(400).json({ success: false, error: msg });
+  });
+};
+
 // Stricter rate limiting for webhooks to prevent abuse
 const webhookLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
@@ -4800,6 +4822,39 @@ app.post('/api/webapp/support/ticket', requireSessionAuth, supportChatLimiter, a
 app.get('/api/webapp/support/ticket', requireSessionAuth, asyncHandler(supportController.getTicket));
 app.get('/api/webapp/support/ticket/messages', requireSessionAuth, asyncHandler(supportController.getTicketMessages));
 app.post('/api/webapp/support/ticket/message', requireSessionAuth, supportChatLimiter, asyncHandler(supportController.addTicketMessage));
+
+// Support attachment upload — images + PDF, max 5 files × 10 MB
+app.post('/api/webapp/support/ticket/upload', requireSessionAuth, handleSupportAttach, asyncHandler(async (req, res) => {
+  const files = req.files || [];
+  if (!files.length) return res.status(400).json({ success: false, error: 'No files provided' });
+
+  const sharp = require('sharp');
+  const { v4: uuidv4 } = require('uuid');
+
+  const attachments = [];
+  for (const file of files) {
+    const isPdf = file.mimetype === 'application/pdf';
+    const ext = isPdf ? 'pdf' : 'webp';
+    const filename = `${uuidv4()}.${ext}`;
+    const dest = path.join(supportAttachUploadDir, filename);
+
+    if (isPdf) {
+      await fs.promises.writeFile(dest, file.buffer);
+    } else {
+      await sharp(file.buffer).webp({ quality: 85 }).toFile(dest);
+    }
+
+    attachments.push({
+      url: `/uploads/support/${filename}`,
+      name: file.originalname,
+      type: isPdf ? 'application/pdf' : 'image/webp',
+      size: file.size,
+    });
+  }
+
+  res.json({ success: true, attachments });
+}));
+
 // Admin: Cristina AI payment verification agent
 app.post('/api/webapp/support/verify-payment', adminGuard, asyncHandler(supportController.verifyPayment));
 
@@ -5815,15 +5870,19 @@ app.get('/api/webapp/admin/support/tickets/:userId/messages', adminGuard, asyncH
     senderRole: m.sender_type === 'agent' ? 'agent' : m.sender_type === 'admin' ? 'admin' : 'user',
     senderName: m.sender_name || null,
     createdAt: m.created_at,
+    attachments: Array.isArray(m.attachments) ? m.attachments : [],
   }));
   res.json({ success: true, messages });
 }));
 
 app.post('/api/webapp/admin/support/tickets/:userId/reply', adminGuard, asyncHandler(async (req, res) => {
-  const { content } = req.body;
+  const { content, attachments } = req.body;
   if (!content || typeof content !== 'string' || !content.trim() || content.length > 2000) {
     return res.status(400).json({ success: false, error: 'Message required (max 2000 chars)' });
   }
+  const safeAttachments = Array.isArray(attachments)
+    ? attachments.filter(a => a && typeof a.url === 'string' && typeof a.name === 'string').slice(0, 5)
+    : [];
 
   const userId = req.params.userId;
   const adminName = req.session?.user?.displayName || req.session?.user?.username || 'Support';
@@ -5835,6 +5894,7 @@ app.post('/api/webapp/admin/support/tickets/:userId/reply', adminGuard, asyncHan
     senderType: 'agent',
     senderName: adminName,
     content: content.trim(),
+    attachments: safeAttachments,
   });
 
   await SupportTopicModel.updateLastMessage(userId);
@@ -5853,6 +5913,7 @@ app.post('/api/webapp/admin/support/tickets/:userId/reply', adminGuard, asyncHan
         sender_type: 'agent',
         sender_name: adminName,
         content: content.trim(),
+        attachments: safeAttachments,
         created_at: saved.created_at || new Date().toISOString(),
       });
     }
@@ -5874,6 +5935,7 @@ app.post('/api/webapp/admin/support/tickets/:userId/reply', adminGuard, asyncHan
       content: saved.content,
       senderRole: 'agent',
       senderName: adminName,
+      attachments: safeAttachments,
       createdAt: saved.created_at || new Date().toISOString(),
     }
   });

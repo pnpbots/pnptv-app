@@ -284,7 +284,56 @@ class UserReportService {
       newStatus,
     });
 
+    // Notify reporter with a DM from the reviewing admin
+    try {
+      const msg = this._buildResolutionMessage(action, report.category, reportId);
+      await query(
+        `INSERT INTO direct_messages (sender_id, recipient_id, content, message_type, meta)
+         VALUES ($1, $2, $3, 'text', $4::jsonb)`,
+        [
+          reviewerId,
+          report.reporter_id,
+          msg,
+          JSON.stringify({ report_id: reportId, report_action: action, system_notification: true }),
+        ]
+      );
+    } catch (dmErr) {
+      logger.warn('Failed to send resolution DM to reporter — non-fatal', {
+        reportId,
+        reporterId: report.reporter_id,
+        error: dmErr.message,
+      });
+    }
+
     return { success: true, report: updated.rows[0] };
+  }
+
+  _buildResolutionMessage(action, category, reportId) {
+    const categoryLabel = {
+      harassment: 'harassment',
+      hate: 'hate / discrimination',
+      spam_scam: 'spam or scam',
+      impersonation: 'impersonation',
+      csam: 'child safety',
+      nudity_nonconsensual: 'non-consensual content',
+      self_harm: 'self-harm',
+      other: 'a community violation',
+    }[category] || 'a community violation';
+
+    const thanks = `Thank you for reporting ${categoryLabel} — it helps keep PNPtv! a safer space for everyone. 💙`;
+
+    switch (action) {
+      case 'dismiss':
+        return `Hi! ${thanks}\n\nAfter reviewing your report (#${reportId}), our team determined no action was needed at this time. We appreciate you looking out for the community.`;
+      case 'warn':
+        return `Hi! ${thanks}\n\nWe've reviewed your report (#${reportId}) and issued a warning to the account involved. Thank you for caring for our community.`;
+      case 'suspend_7d':
+        return `Hi! ${thanks}\n\nAfter reviewing your report (#${reportId}), we've temporarily suspended the reported account. Thank you for helping make PNPtv! a safer place.`;
+      case 'ban':
+        return `Hi! ${thanks}\n\nAfter reviewing your report (#${reportId}), the reported account has been permanently removed from our platform. Thank you for protecting our community.`;
+      default:
+        return `Hi! ${thanks}\n\nYour report (#${reportId}) has been reviewed by our team. Thank you for caring for our community.`;
+    }
   }
 }
 

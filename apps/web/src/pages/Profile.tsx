@@ -174,6 +174,7 @@ export default function Profile() {
   const [reportSending, setReportSending] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSent, setReportSent] = useState(false);
+  const [reportEvidencePostId, setReportEvidencePostId] = useState<number | null>(null);
 
   // My Events state (own profile only)
   const [myEvents, setMyEvents] = useState<EventItem[]>([]);
@@ -253,7 +254,7 @@ export default function Profile() {
       if (e.key !== "Escape") return;
       if (showBugModal) { setShowBugModal(false); return; }
       if (showReportModal && !reportSending) {
-        setShowReportModal(false); setReportSent(false); setReportCategory(""); setReportDescription(""); setReportError(null);
+        setShowReportModal(false); setReportSent(false); setReportCategory(""); setReportDescription(""); setReportError(null); setReportEvidencePostId(null);
         return;
       }
       if (showBlockConfirm) { setShowBlockConfirm(false); return; }
@@ -540,7 +541,8 @@ export default function Profile() {
         reportedUserId: targetId,
         category: reportCategory as ReportCategory,
         description: reportDescription.trim() || undefined,
-        evidenceType: "profile",
+        evidenceType: reportEvidencePostId ? "post" : "profile",
+        evidenceId: reportEvidencePostId ? String(reportEvidencePostId) : undefined,
       });
       if (res.success) {
         setReportSent(true);
@@ -1812,9 +1814,10 @@ export default function Profile() {
                   onSubscribeCta={handleSubscribeCta}
                   onReport={(postId) => {
                     setReportCategory("");
-                    setReportDescription(`Regarding post #${postId}`);
+                    setReportDescription("");
                     setReportError(null);
                     setReportSent(false);
+                    setReportEvidencePostId(postId);
                     setShowReportModal(true);
                   }}
                   contentDisclaimerAccepted={contentDisclaimer}
@@ -2211,7 +2214,7 @@ export default function Profile() {
       {showReportModal && profile && (
         <div
           className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center"
-          onClick={() => !reportSending && (setShowReportModal(false), setReportSent(false), setReportCategory(""), setReportDescription(""), setReportError(null))}
+          onClick={() => !reportSending && (setShowReportModal(false), setReportSent(false), setReportCategory(""), setReportDescription(""), setReportError(null), setReportEvidencePostId(null))}
         >
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
@@ -2223,14 +2226,19 @@ export default function Profile() {
             aria-label={p.reportTitle}
           >
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-pnp-textPrimary flex items-center gap-2">
-                <svg className="w-5 h-5" style={{ color: "#FFB454" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v1.5M3 21v-6m0 0l2.77-.693a9 9 0 016.208.682l.108.054a9 9 0 006.086.71l3.114-.732a48.524 48.524 0 01-.005-10.499l-3.11.732a9 9 0 01-6.085-.711l-.108-.054a9 9 0 00-6.208-.682L3 4.5M3 15V4.5" />
-                </svg>
-                {p.reportTitle}
-              </h2>
+              <div>
+                <h2 className="text-lg font-bold text-pnp-textPrimary flex items-center gap-2">
+                  <svg className="w-5 h-5" style={{ color: "#FFB454" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v1.5M3 21v-6m0 0l2.77-.693a9 9 0 016.208.682l.108.054a9 9 0 006.086.71l3.114-.732a48.524 48.524 0 01-.005-10.499l-3.11.732a9 9 0 01-6.085-.711l-.108-.054a9 9 0 00-6.208-.682L3 4.5M3 15V4.5" />
+                  </svg>
+                  {p.reportTitle}
+                </h2>
+                {reportEvidencePostId && (
+                  <p className="text-xs mt-0.5" style={{ color: "#FFB454" }}>Reporting post #{reportEvidencePostId}</p>
+                )}
+              </div>
               <button
-                onClick={() => !reportSending && (setShowReportModal(false), setReportSent(false), setReportCategory(""), setReportDescription(""), setReportError(null))}
+                onClick={() => !reportSending && (setShowReportModal(false), setReportSent(false), setReportCategory(""), setReportDescription(""), setReportError(null), setReportEvidencePostId(null))}
                 className="p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 transition-colors"
                 aria-label={p.reportCancel}
               >

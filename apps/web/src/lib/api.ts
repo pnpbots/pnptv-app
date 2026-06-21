@@ -3012,6 +3012,7 @@ export interface TicketMessage {
   sender_name: string;
   content: string;
   created_at: string;
+  attachments?: SupportAttachment[];
 }
 
 export type TicketCategory =
@@ -3048,11 +3049,12 @@ export function getTicketMessages(since?: string): Promise<{
 }
 
 export function addTicketMessage(
-  message: string
+  message: string,
+  attachments?: SupportAttachment[]
 ): Promise<{ success: boolean }> {
   return request("/api/webapp/support/ticket/message", {
     method: "POST",
-    body: { message },
+    body: { message, attachments: attachments ?? [] },
   });
 }
 
@@ -5372,12 +5374,20 @@ export interface AdminSupportTicket {
   createdAt: string;
 }
 
+export interface SupportAttachment {
+  url: string;
+  name: string;
+  type: string;
+  size?: number;
+}
+
 export interface SupportMessage {
   id: number;
   content: string;
   senderRole: "user" | "agent" | "admin";
   senderName: string | null;
   createdAt: string;
+  attachments?: SupportAttachment[];
 }
 
 export function getAdminSupportStats(): Promise<{ success: boolean; stats: SupportStats }> {
@@ -5399,11 +5409,12 @@ export function getAdminTicketMessages(
 
 export function sendAdminTicketReply(
   userId: string,
-  content: string
+  content: string,
+  attachments?: SupportAttachment[]
 ): Promise<{ success: boolean; message: SupportMessage }> {
   return request(`/api/webapp/admin/support/tickets/${userId}/reply`, {
     method: "POST",
-    body: { content },
+    body: { content, attachments: attachments ?? [] },
   });
 }
 
@@ -5414,6 +5425,43 @@ export function updateAdminTicket(
   return request(`/api/webapp/admin/support/tickets/${userId}`, {
     method: "PATCH",
     body: data,
+  });
+}
+
+export async function uploadSupportAttachment(files: FileList | File[]): Promise<SupportAttachment[]> {
+  const fd = new FormData();
+  Array.from(files).forEach((f) => fd.append("files", f));
+  const res = await fetch(`${API_BASE}/api/webapp/support/ticket/upload`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `Upload failed (${res.status})`);
+  }
+  const data = await res.json();
+  return data.attachments as SupportAttachment[];
+}
+
+export function adminAssignUserPlan(
+  userId: string,
+  planId: string
+): Promise<{ success: boolean; user?: object; plan?: { id: string; displayName: string; tier: string }; error?: string }> {
+  return request(`/api/webapp/admin/users/${userId}/assign-plan`, {
+    method: "POST",
+    body: { planId },
+  });
+}
+
+export function adminGrantUserEntitlement(
+  userId: string,
+  addOnId: string,
+  opts: { durationDays?: number; isLifetime?: boolean; reason?: string }
+): Promise<{ success: boolean; error?: string }> {
+  return request(`/api/webapp/admin/users/${userId}/entitlements`, {
+    method: "POST",
+    body: { addOnId, ...opts },
   });
 }
 

@@ -8,9 +8,15 @@ import {
   getAdminTicketMessages,
   sendAdminTicketReply,
   updateAdminTicket,
+  getAdminPlans,
+  adminAssignUserPlan,
+  adminGrantUserEntitlement,
+  uploadSupportAttachment,
   type SupportStats,
   type AdminSupportTicket,
   type SupportMessage,
+  type SupportAttachment,
+  type AdminPlan,
 } from "@/lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -309,6 +315,7 @@ function TicketCard({
 
 function MessageBubble({ message }: { message: SupportMessage }) {
   const isAgent = message.senderRole === "agent" || message.senderRole === "admin";
+  const attachments = message.attachments ?? [];
   return (
     <div className={`flex ${isAgent ? "justify-end" : "justify-start"}`}>
       <div className={`max-w-sm lg:max-w-md ${isAgent ? "items-end" : "items-start"} flex flex-col gap-1`}>
@@ -323,6 +330,32 @@ function MessageBubble({ message }: { message: SupportMessage }) {
           }`}
         >
           {message.content}
+          {attachments.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {attachments.map((att, i) =>
+                att.type.startsWith("image/") ? (
+                  <img
+                    key={i}
+                    src={att.url}
+                    alt={att.name}
+                    className="max-w-[180px] max-h-[120px] rounded-lg object-cover cursor-pointer"
+                    onClick={() => window.open(att.url, "_blank")}
+                  />
+                ) : (
+                  <a
+                    key={i}
+                    href={att.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/20 border border-white/10 text-xs hover:bg-black/30 transition-colors"
+                  >
+                    <span>📄</span>
+                    <span className="truncate max-w-[140px]">{att.name}</span>
+                  </a>
+                )
+              )}
+            </div>
+          )}
         </div>
         <span className={`text-xs text-pnp-textSecondary px-1 ${isAgent ? "text-right" : ""}`}>
           {formatTime(message.createdAt)}
@@ -331,6 +364,15 @@ function MessageBubble({ message }: { message: SupportMessage }) {
     </div>
   );
 }
+
+// ── Grant Access Panel ────────────────────────────────────────────────────────
+
+const ADDON_OPTIONS = [
+  { value: "prime", label: "PRIME" },
+  { value: "pnp-member", label: "PNP Member" },
+  { value: "channel-access", label: "Channel Access" },
+  { value: "hangout-access", label: "Hangout Access" },
+];
 
 // ── Ticket Detail Panel ────────────────────────────────────────────────────────
 
@@ -350,6 +392,34 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Grant Access state
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [grantTab, setGrantTab] = useState<"plan" | "addon">("plan");
+  const [plans, setPlans] = useState<AdminPlan[]>([]);
+  const [grantPlanId, setGrantPlanId] = useState("");
+  const [grantAddOnId, setGrantAddOnId] = useState("prime");
+  const [grantDays, setGrantDays] = useState(30);
+  const [grantLifetime, setGrantLifetime] = useState(false);
+  const [grantLoading, setGrantLoading] = useState(false);
+  const [grantResult, setGrantResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  // Attachment state
+  const [replyAttachments, setReplyAttachments] = useState<SupportAttachment[]>([]);
+  const [attachUploading, setAttachUploading] = useState(false);
+  const replyFileRef = useRef<HTMLInputElement>(null);
+
+  // Load plans when ticket changes
+  useEffect(() => {
+    if (!ticket) return;
+    setGrantOpen(false);
+    setGrantResult(null);
+    getAdminPlans().then((r) => {
+      const active = r.plans.filter((p) => p.active);
+      setPlans(active);
+      if (active.length > 0) setGrantPlanId(String(active[0].id));
+    }).catch(() => {});
+  }, [ticket.userId]);
+
   const loadMessages = useCallback(async () => {
     try {
       const res = await getAdminTicketMessages(String(ticket.userId));
@@ -367,6 +437,7 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
     setMessages([]);
     setMessagesError(null);
     setReply("");
+    setReplyAttachments([]);
     loadMessages();
     pollRef.current = setInterval(loadMessages, 10_000);
     return () => {
@@ -382,16 +453,22 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
     const content = reply.trim();
     if (!content || sending) return;
     setSending(true);
+    const attachmentsSnapshot = replyAttachments.slice();
     try {
-      await sendAdminTicketReply(String(ticket.userId), content);
+      await sendAdminTicketReply(
+        String(ticket.userId),
+        content,
+        attachmentsSnapshot.length > 0 ? attachmentsSnapshot : undefined
+      );
       setReply("");
+      setReplyAttachments([]);
       await loadMessages();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to send reply");
     } finally {
       setSending(false);
     }
-  }, [reply, sending, ticket.userId, loadMessages]);
+  }, [reply, sending, ticket.userId, loadMessages, replyAttachments]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -402,6 +479,26 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
     },
     [handleSend]
   );
+
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setAttachUploading(true);
+    try {
+      const uploaded = await uploadSupportAttachment(files);
+      setReplyAttachments((prev) => [...prev, ...uploaded]);
+    } catch {
+      // silently ignore upload errors — user can retry by re-selecting
+    } finally {
+      setAttachUploading(false);
+      // reset so the same file can be re-selected if needed
+      e.target.value = "";
+    }
+  }, []);
+
+  const removeAttachment = useCallback((idx: number) => {
+    setReplyAttachments((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
 
   const handleStatusChange = useCallback(
     async (newStatus: string) => {
@@ -450,6 +547,54 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
     },
     [ticket.userId, onUpdate]
   );
+
+  const handleGrantPlan = useCallback(async () => {
+    if (!grantPlanId || grantLoading) return;
+    setGrantLoading(true);
+    setGrantResult(null);
+    try {
+      const res = await adminAssignUserPlan(String(ticket.userId), grantPlanId);
+      if (res.success) {
+        const planName = res.plan?.displayName ?? plans.find((p) => String(p.id) === grantPlanId)?.display_name ?? grantPlanId;
+        setGrantResult({ ok: true, msg: `Granted ${planName}` });
+        // Auto-send confirmation reply in thread
+        sendAdminTicketReply(String(ticket.userId), `Access granted: ${planName}`).then(loadMessages).catch(() => {});
+      } else {
+        setGrantResult({ ok: false, msg: res.error ?? "Failed to assign plan" });
+      }
+    } catch (err) {
+      setGrantResult({ ok: false, msg: err instanceof Error ? err.message : "Failed to assign plan" });
+    } finally {
+      setGrantLoading(false);
+    }
+  }, [grantPlanId, grantLoading, ticket.userId, plans, loadMessages]);
+
+  const handleGrantAddon = useCallback(async () => {
+    if (grantLoading) return;
+    setGrantLoading(true);
+    setGrantResult(null);
+    try {
+      const res = await adminGrantUserEntitlement(String(ticket.userId), grantAddOnId, {
+        durationDays: grantLifetime ? undefined : grantDays,
+        isLifetime: grantLifetime,
+        reason: "admin_support",
+      });
+      if (res.success) {
+        const suffix = grantLifetime ? " (lifetime)" : ` — ${grantDays}d`;
+        setGrantResult({ ok: true, msg: `Entitlement granted: ${grantAddOnId}${suffix}` });
+        sendAdminTicketReply(
+          String(ticket.userId),
+          `Entitlement granted: ${grantAddOnId}${suffix}`
+        ).then(loadMessages).catch(() => {});
+      } else {
+        setGrantResult({ ok: false, msg: res.error ?? "Failed to grant entitlement" });
+      }
+    } catch (err) {
+      setGrantResult({ ok: false, msg: err instanceof Error ? err.message : "Failed to grant entitlement" });
+    } finally {
+      setGrantLoading(false);
+    }
+  }, [grantLoading, ticket.userId, grantAddOnId, grantLifetime, grantDays, loadMessages]);
 
   return (
     <div className="flex flex-col h-full">
@@ -571,10 +716,137 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
               Escalate
             </button>
           )}
+          {/* Grant Access toggle */}
+          <button
+            onClick={() => { setGrantOpen((v) => !v); setGrantResult(null); }}
+            className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
+              grantOpen
+                ? "bg-yellow-500/20 border-yellow-500/30 text-yellow-300"
+                : "bg-pnp-surface border-pnp-border text-pnp-textSecondary hover:border-yellow-500/50 hover:text-yellow-300"
+            }`}
+          >
+            ⚡ Grant Access
+          </button>
         </div>
 
         {actionError && (
           <p className="text-xs text-pnp-error mt-2">{actionError}</p>
+        )}
+
+        {/* Grant Access panel */}
+        {grantOpen && (
+          <div className="mt-3 rounded-xl bg-pnp-surface border border-white/10 p-3 text-sm">
+            {/* Tab switcher */}
+            <div className="flex gap-1 mb-3 p-1 rounded-lg bg-pnp-background border border-pnp-border w-fit">
+              <button
+                onClick={() => setGrantTab("plan")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  grantTab === "plan"
+                    ? "bg-pnp-accent text-white"
+                    : "text-pnp-textSecondary hover:text-pnp-textPrimary"
+                }`}
+              >
+                Plan
+              </button>
+              <button
+                onClick={() => setGrantTab("addon")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  grantTab === "addon"
+                    ? "bg-pnp-accent text-white"
+                    : "text-pnp-textSecondary hover:text-pnp-textPrimary"
+                }`}
+              >
+                Add-on
+              </button>
+            </div>
+
+            {grantTab === "plan" && (
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={grantPlanId}
+                  onChange={(e) => setGrantPlanId(e.target.value)}
+                  disabled={grantLoading || plans.length === 0}
+                  className="flex-1 min-w-[160px] rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary text-xs px-2 py-1.5 focus:outline-none focus:border-pnp-accent disabled:opacity-50"
+                >
+                  {plans.length === 0 ? (
+                    <option value="">Loading plans...</option>
+                  ) : (
+                    plans.map((p) => (
+                      <option key={p.id} value={String(p.id)}>
+                        {p.display_name} ({p.tier})
+                      </option>
+                    ))
+                  )}
+                </select>
+                <button
+                  onClick={handleGrantPlan}
+                  disabled={grantLoading || !grantPlanId || plans.length === 0}
+                  className="px-3 py-1.5 rounded-lg bg-pnp-accent text-white text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {grantLoading ? (
+                    <div className="w-3 h-3 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+                  ) : null}
+                  Assign Plan
+                </button>
+              </div>
+            )}
+
+            {grantTab === "addon" && (
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={grantAddOnId}
+                    onChange={(e) => setGrantAddOnId(e.target.value)}
+                    disabled={grantLoading}
+                    className="rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary text-xs px-2 py-1.5 focus:outline-none focus:border-pnp-accent disabled:opacity-50"
+                  >
+                    {ADDON_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={3650}
+                      value={grantDays}
+                      onChange={(e) => setGrantDays(Math.max(1, Math.min(3650, Number(e.target.value))))}
+                      disabled={grantLoading || grantLifetime}
+                      className="w-20 rounded-lg bg-pnp-background border border-pnp-border text-pnp-textPrimary text-xs px-2 py-1.5 text-center focus:outline-none focus:border-pnp-accent disabled:opacity-40"
+                    />
+                    <span className="text-xs text-pnp-textSecondary">days</span>
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={grantLifetime}
+                        onChange={(e) => setGrantLifetime(e.target.checked)}
+                        disabled={grantLoading}
+                        className="accent-pnp-accent"
+                      />
+                      <span className="text-xs text-pnp-textSecondary">Lifetime</span>
+                    </label>
+                  </div>
+                  <button
+                    onClick={handleGrantAddon}
+                    disabled={grantLoading}
+                    className="px-3 py-1.5 rounded-lg bg-pnp-accent text-white text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    {grantLoading ? (
+                      <div className="w-3 h-3 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+                    ) : null}
+                    Grant
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Grant result feedback */}
+            {grantResult && (
+              <p className={`mt-2 text-xs font-medium ${grantResult.ok ? "text-green-400" : "text-pnp-error"}`}>
+                {grantResult.ok ? "✅" : "❌"} {grantResult.msg}
+              </p>
+            )}
+          </div>
         )}
       </div>
 
@@ -621,7 +893,54 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
 
       {/* Reply input */}
       <div className="p-4 border-t border-pnp-border flex-shrink-0">
+        {/* Attachment preview strip */}
+        {replyAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {replyAttachments.map((att, i) =>
+              att.type.startsWith("image/") ? (
+                <div key={i} className="relative flex-shrink-0">
+                  <img
+                    src={att.url}
+                    alt={att.name}
+                    className="w-12 h-12 rounded-lg object-cover border border-pnp-border"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(i)}
+                    aria-label={`Remove ${att.name}`}
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-pnp-background border border-pnp-border text-pnp-textSecondary flex items-center justify-center text-xs leading-none hover:text-pnp-error transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <div key={i} className="relative flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-pnp-surface border border-pnp-border text-xs text-pnp-textSecondary max-w-[180px]">
+                  <span>📄</span>
+                  <span className="truncate">{att.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(i)}
+                    aria-label={`Remove ${att.name}`}
+                    className="ml-1 flex-shrink-0 text-pnp-textSecondary hover:text-pnp-error transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )
+            )}
+          </div>
+        )}
+
         <div className="flex gap-2 items-end">
+          {/* Hidden file input */}
+          <input
+            ref={replyFileRef}
+            type="file"
+            multiple
+            accept="image/*,application/pdf"
+            className="sr-only"
+            onChange={handleFileChange}
+          />
           <textarea
             value={reply}
             onChange={(e) => setReply(e.target.value)}
@@ -630,9 +949,25 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
             rows={3}
             className="flex-1 rounded-xl bg-pnp-surface border border-pnp-border text-pnp-textPrimary px-3 py-2.5 placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent resize-none" style={{ fontSize: "16px" }}
           />
+          {/* Paperclip button */}
+          <button
+            type="button"
+            onClick={() => replyFileRef.current?.click()}
+            disabled={attachUploading}
+            aria-label="Attach files"
+            title="Attach files"
+            className="flex-shrink-0 w-10 h-10 rounded-xl bg-pnp-surface border border-pnp-border text-pnp-textSecondary flex items-center justify-center hover:border-pnp-accent hover:text-pnp-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {attachUploading ? (
+              <div className="w-4 h-4 border-2 border-pnp-textSecondary/50 border-t-pnp-textSecondary rounded-full animate-spin" />
+            ) : (
+              <span className="text-base leading-none">📎</span>
+            )}
+          </button>
+          {/* Send button */}
           <button
             onClick={handleSend}
-            disabled={sending || !reply.trim()}
+            disabled={sending || (!reply.trim() && replyAttachments.length === 0)}
             className="flex-shrink-0 w-10 h-10 rounded-xl bg-pnp-accent flex items-center justify-center text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {sending ? (

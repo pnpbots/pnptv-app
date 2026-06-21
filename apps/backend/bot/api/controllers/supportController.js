@@ -195,7 +195,7 @@ async function createTicket(req, res) {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
-  const { category, description } = req.body;
+  const { category, description, attachments: rawAttachments } = req.body;
   const validCategories = ['payment', 'account', 'bug', 'feature', 'technical', 'general'];
   if (!validCategories.includes(category)) {
     return res.status(400).json({ success: false, error: 'Invalid category' });
@@ -203,6 +203,10 @@ async function createTicket(req, res) {
   if (!description || description.trim().length < 10 || description.trim().length > 2000) {
     return res.status(400).json({ success: false, error: 'Description must be 10-2000 characters' });
   }
+  // sanitize: must be array of {url,name,type,size}, max 5 items
+  const attachments = Array.isArray(rawAttachments)
+    ? rawAttachments.slice(0, 5).filter(a => a && typeof a.url === 'string')
+    : [];
 
   const categoryEmojis = { payment: '💳', account: '👤', bug: '🐛', feature: '🚀', technical: '🛠', general: '📋' };
   const categoryLabels = { payment: 'Payment Issue', account: 'Account Problem', bug: 'Bug Report', feature: 'Feature Request', technical: 'Technical Issue', general: 'General' };
@@ -227,6 +231,7 @@ async function createTicket(req, res) {
       senderType: 'user',
       senderName: userObj.first_name,
       content: description.trim(),
+      attachments,
     });
 
     const ticket = await SupportTopicModel.getByUserId(String(user.id));
@@ -280,10 +285,13 @@ async function addTicketMessage(req, res) {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
-  const { message } = req.body;
+  const { message, attachments } = req.body;
   if (!message || message.trim().length < 1 || message.trim().length > 2000) {
     return res.status(400).json({ success: false, error: 'Message must be 1-2000 characters' });
   }
+  const safeAttachments = Array.isArray(attachments)
+    ? attachments.filter(a => a && typeof a.url === 'string').slice(0, 5)
+    : [];
 
   try {
     const ticket = await SupportTopicModel.getByUserId(String(user.id));
@@ -307,6 +315,7 @@ async function addTicketMessage(req, res) {
       senderType: 'user',
       senderName: userObj.first_name,
       content: message.trim(),
+      attachments: safeAttachments,
     });
 
     return res.json({ success: true });

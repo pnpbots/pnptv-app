@@ -41,17 +41,24 @@ class SupportTicketMessageModel {
    * @param {string} data.senderType - 'user' or 'agent'
    * @param {string} [data.senderName] - Display name of sender
    * @param {string} data.content - Message text content
+   * @param {Array} [data.attachments] - Optional array of attachment objects {url,name,type,size}
    * @returns {Promise<Object>} Created message row
    */
-  static async create({ userId, senderType, senderName, content }) {
+  static async create({ userId, senderType, senderName, content, attachments = [] }) {
     const query = `
-      INSERT INTO support_ticket_messages (user_id, sender_type, sender_name, content)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO support_ticket_messages (user_id, sender_type, sender_name, content, attachments)
+      VALUES ($1, $2, $3, $4, $5::jsonb)
       RETURNING *
     `;
 
     try {
-      const result = await getPool().query(query, [userId, senderType, senderName || null, content]);
+      const result = await getPool().query(query, [
+        userId,
+        senderType,
+        senderName || null,
+        content,
+        JSON.stringify(attachments),
+      ]);
       logger.info('Support ticket message created', { userId, senderType });
       return result.rows[0];
     } catch (error) {
