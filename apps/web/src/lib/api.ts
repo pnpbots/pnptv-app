@@ -872,6 +872,8 @@ export interface UserProfile {
   creatorVerified?: boolean;
   creatorFeatured?: boolean;
   creatorSubscriberCount?: number;
+  exclusiveVideoCount?: number;
+  exclusivePhotoCount?: number;
   // Performer fields (set when user has an active performers record)
   performerData?: {
     id: string;

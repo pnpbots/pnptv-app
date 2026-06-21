@@ -1148,13 +1148,13 @@ export default function Profile() {
                 </span>
               )}
               {profile.creatorStatus === "active" && (() => {
-                const exclusiveCount = posts.filter(post => post.is_exclusive).length;
-                return exclusiveCount > 0 ? (
+                const exclusiveTotal = (profile.exclusiveVideoCount ?? 0) + (profile.exclusivePhotoCount ?? 0);
+                return exclusiveTotal > 0 ? (
                   <span className="inline-flex items-center gap-1">
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true" style={{ color: "#D4007A" }}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                     </svg>
-                    <strong className="text-white tabular-nums">{exclusiveCount}</strong>
+                    <strong className="text-white tabular-nums">{exclusiveTotal}</strong>
                     <span>{p.exclusive}</span>
                   </span>
                 ) : null;
@@ -1881,6 +1881,19 @@ export default function Profile() {
                 </svg>
               </div>
               <p className="text-white font-bold mb-1">{p.exclusiveContentTitle}</p>
+              {((profile.exclusiveVideoCount ?? 0) + (profile.exclusivePhotoCount ?? 0)) > 0 && (
+                <div className="flex items-center justify-center gap-2 mb-3 text-sm font-medium" style={{ color: "var(--pnp-text-secondary)" }}>
+                  {(profile.exclusiveVideoCount ?? 0) > 0 && (
+                    <span>🎬 <strong className="text-white">{profile.exclusiveVideoCount}</strong> {p.exclusiveVideosLabel}</span>
+                  )}
+                  {(profile.exclusiveVideoCount ?? 0) > 0 && (profile.exclusivePhotoCount ?? 0) > 0 && (
+                    <span aria-hidden="true">·</span>
+                  )}
+                  {(profile.exclusivePhotoCount ?? 0) > 0 && (
+                    <span>📸 <strong className="text-white">{profile.exclusivePhotoCount}</strong> {p.exclusivePhotosLabel}</span>
+                  )}
+                </div>
+              )}
               <p className="text-sm mb-4 leading-relaxed" style={{ color: "var(--pnp-text-secondary)" }}>
                 {profile.creatorPriceUsd != null
                   ? p.subscribeForPriceToUnlock.replace('${price}', String(profile.creatorPriceUsd))

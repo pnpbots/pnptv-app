@@ -823,7 +823,7 @@ class SocialPostService {
       cursorClause = `AND sp.id < $${params.length}`;
     }
 
-    const [postsRes, profileRes, postCountRes, performerRes] = await Promise.all([
+    const [postsRes, profileRes, postCountRes, performerRes, exclusiveCountRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description,
                 sp.source_channel, sp.channel_id,
@@ -856,6 +856,14 @@ class SocialPostService {
       query(
         `SELECT id, is_available, base_price, total_calls, total_rating, rating_count, availability_message
          FROM performers WHERE user_id = $1 AND status = 'active' LIMIT 1`,
+        [userId]
+      ),
+      query(
+        `SELECT
+           COALESCE(SUM(CASE WHEN media_type = 'video' THEN 1 ELSE 0 END), 0)::int AS exclusive_videos,
+           COALESCE(SUM(CASE WHEN media_type IS NOT NULL AND media_type != 'video' THEN 1 ELSE 0 END), 0)::int AS exclusive_photos
+         FROM social_posts
+         WHERE user_id = $1 AND is_exclusive = true AND is_deleted = false`,
         [userId]
       ),
     ]);
@@ -901,8 +909,10 @@ class SocialPostService {
     const nextCursor = posts.length === lim ? String(posts[posts.length - 1].id) : null;
     const postCount = postCountRes.rows[0]?.count || 0;
     const performerData = performerRes.rows[0] || null;
+    const exclusiveVideoCount = exclusiveCountRes.rows[0]?.exclusive_videos || 0;
+    const exclusivePhotoCount = exclusiveCountRes.rows[0]?.exclusive_photos || 0;
 
-    return { profile, posts, nextCursor, postCount, performerData };
+    return { profile, posts, nextCursor, postCount, performerData, exclusiveVideoCount, exclusivePhotoCount };
   }
 
   // ── Wall of Fame: Leaderboard ─────────────────────────────────────────────

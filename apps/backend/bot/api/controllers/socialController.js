@@ -1217,6 +1217,8 @@ const getPublicProfile = async (req, res) => {
         creatorVerified: profile.creator_verified || false,
         creatorFeatured: profile.creator_featured || false,
         creatorSubscriberCount: profile.creator_subscriber_count || 0,
+        exclusiveVideoCount: result.exclusiveVideoCount,
+        exclusivePhotoCount: result.exclusivePhotoCount,
         performerData: pd ? {
           id: pd.id,
           isAvailable: pd.is_available,
