@@ -37,14 +37,26 @@ export function useCreatorData(): CreatorDataResult {
     setLoading(true);
     setError(null);
     try {
-      const [eligRes, dashRes] = await Promise.all([
+      const [eligResult, dashResult] = await Promise.allSettled([
         getCreatorEligibility(),
         getCreatorDashboard(),
       ]);
-      setEligibility(eligRes);
-      setDashboard(dashRes);
 
-      if (dashRes.creatorStatus === "active") {
+      const eligRes = eligResult.status === "fulfilled" ? eligResult.value : null;
+      const dashRes = dashResult.status === "fulfilled" ? dashResult.value : null;
+
+      if (eligRes) setEligibility(eligRes);
+      if (dashRes) setDashboard(dashRes);
+
+      if (eligResult.status === "rejected" && dashResult.status === "rejected") {
+        setError(
+          eligResult.reason instanceof Error
+            ? eligResult.reason.message
+            : "Failed to load creator data"
+        );
+      }
+
+      if (dashRes?.creatorStatus === "active") {
         const [earningsRes, withdrawableRes, historyRes] = await Promise.allSettled([
           getModelEarnings(),
           getWithdrawableAmount(),

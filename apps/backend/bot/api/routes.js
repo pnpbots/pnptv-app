@@ -4497,8 +4497,18 @@ app.get('/api/webapp/live/analytics/summary', requireSessionAuth, creatorGuard, 
 // Creator revenue aggregation (tips + tickets + subs + calls)
 app.get('/api/webapp/creator/revenue', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.getCreatorRevenue));
 
+// CR-SQ-01: 3 broadcasts per hour per user — prevents follower notification spam
+const broadcastLiveLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  handler: (req, res) => res.status(429).json({ success: false, error: 'You can only broadcast going-live 3 times per hour. Try again later.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Manual going-live broadcast to followers
-app.post('/api/webapp/live/broadcast-live-now', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.broadcastLiveNow));
+app.post('/api/webapp/live/broadcast-live-now', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), broadcastLiveLimiter, asyncHandler(webappLiveController.broadcastLiveNow));
 
 // VOD replay recordings
 app.get('/api/webapp/creators/:creatorId/recordings', softAuth, asyncHandler(webappLiveController.listCreatorRecordings));
@@ -4517,8 +4527,8 @@ app.post('/api/webapp/live/snapshot', requireSessionAuth, roleGuard('model', 'cr
 // Gap 1: Past-session earnings history for studio panel
 app.get('/api/webapp/live/earnings', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.getEarningsHistory));
 
-// Gap 4: User-uploaded local recording blob
-app.post('/api/webapp/live/recording', requireSessionAuth, webappLiveController.uploadLocalRecording);
+// Gap 4: User-uploaded local recording blob (CR-02: roleGuard prevents non-creator 3 GB uploads)
+app.post('/api/webapp/live/recording', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), webappLiveController.uploadLocalRecording);
 
 // Gap 5: Scene presets
 app.get('/api/webapp/live/scene-presets', requireSessionAuth, asyncHandler(webappLiveController.getScenePresets));
@@ -4573,8 +4583,17 @@ const connectionTestLimiter = rateLimit({
 });
 app.get('/api/webapp/live/stream-profile', requireSessionAuth, asyncHandler(streamAutoController.getStreamProfile));
 app.post('/api/webapp/live/stream-profile', requireSessionAuth, grokStreamChatLimiter, asyncHandler(streamAutoController.saveStreamProfile));
-app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamAutoController.startAutoMessages));
-app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamAutoController.stopAutoMessages));
+// CR-SQ-02: 10 start/stop per minute per user — each triggers a Grok API call
+const autoStreamLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  handler: (req, res) => res.status(429).json({ success: false, error: 'Too many requests. Please wait before toggling AI messages again.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), autoStreamLimiter, asyncHandler(streamAutoController.startAutoMessages));
+app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), autoStreamLimiter, asyncHandler(streamAutoController.stopAutoMessages));
 
 // Connection quality test — measures round-trip latency and upload throughput
 app.post('/api/webapp/live/connection-test', requireSessionAuth, connectionTestLimiter, asyncHandler(async (req, res) => {
@@ -8303,8 +8322,18 @@ app.get('/api/proxy/live/tips/recent', requireSessionAuth, requireMemberTier, as
 // TIP GOALS
 // ==========================================
 
+// CR-SQ-03: 30 goal updates per minute per user — prevents Socket.IO broadcast flood
+const goalUpdateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  handler: (req, res) => res.status(429).json({ success: false, error: 'Too many goal updates. Please slow down.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // POST /api/webapp/live/goal — creator sets a tip goal on their active stream
-app.post('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+app.post('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), goalUpdateLimiter, asyncHandler(async (req, res) => {
   const user = req.session.user;
   const userId = String(user.id);
   const { amount, label } = req.body;
@@ -8479,6 +8508,33 @@ app.get('/api/proxy/live/goal/:channelRef', asyncHandler(async (req, res) => {
 // TIP MENU
 // ==========================================
 
+// GET /api/webapp/live/tip-menu — auth-required self endpoint: returns the authenticated creator's own tip menu
+// Must be registered BEFORE the parameterized /:performerId route to avoid being swallowed by it.
+app.get('/api/webapp/live/tip-menu', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+  const userId = String(req.session.user.id);
+  try {
+    const { rows: perfRows } = await query(
+      'SELECT id FROM performers WHERE user_id = $1 LIMIT 1',
+      [userId]
+    );
+    if (perfRows.length === 0) {
+      return res.json({ success: true, items: [] });
+    }
+    const performerId = String(perfRows[0].id);
+    const { rows } = await query(
+      `SELECT id, tokens_amount AS "tokensAmount", label, sort_order AS "sortOrder"
+         FROM tip_menu_items
+        WHERE performer_id = $1 AND is_active = true
+        ORDER BY sort_order ASC, tokens_amount ASC`,
+      [performerId]
+    );
+    return res.json({ success: true, items: rows });
+  } catch (err) {
+    logger.error('GET /api/webapp/live/tip-menu (self) error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to fetch tip menu' });
+  }
+}));
+
 // GET /api/webapp/live/tip-menu/:performerId — public, get performer's active tip menu items
 app.get('/api/webapp/live/tip-menu/:performerId', asyncHandler(async (req, res) => {
   const performerId = String(req.params.performerId || '').trim();
@@ -8526,19 +8582,22 @@ app.post('/api/webapp/live/tip-menu', requireSessionAuth, roleGuard('model', 'cr
     }
   }
 
+  const client = await getPool().connect();
   try {
     // Resolve performer ID from session user
-    const { rows: perfRows } = await query(
+    const { rows: perfRows } = await client.query(
       'SELECT id FROM performers WHERE user_id = $1 LIMIT 1',
       [userId]
     );
     if (perfRows.length === 0) {
+      client.release();
       return res.status(403).json({ success: false, error: 'No performer profile found' });
     }
     const performerId = String(perfRows[0].id);
 
-    // Full replace: delete all existing items then insert new batch
-    await query('DELETE FROM tip_menu_items WHERE performer_id = $1', [performerId]);
+    // Full replace wrapped in a transaction to prevent concurrent double-submit corruption
+    await client.query('BEGIN');
+    await client.query('DELETE FROM tip_menu_items WHERE performer_id = $1', [performerId]);
 
     if (items.length > 0) {
       const valueClauses = items.map((item, i) => {
@@ -8554,13 +8613,14 @@ app.post('/api/webapp/live/tip-menu', requireSessionAuth, roleGuard('model', 'cr
           Number.isInteger(item.sortOrder) ? item.sortOrder : 0
         );
       });
-      await query(
+      await client.query(
         `INSERT INTO tip_menu_items (performer_id, tokens_amount, label, sort_order) VALUES ${valueClauses.join(', ')}`,
         params
       );
     }
+    await client.query('COMMIT');
 
-    const { rows: savedItems } = await query(
+    const { rows: savedItems } = await client.query(
       `SELECT id, tokens_amount, label, sort_order
          FROM tip_menu_items
         WHERE performer_id = $1 AND is_active = true
@@ -8570,8 +8630,11 @@ app.post('/api/webapp/live/tip-menu', requireSessionAuth, roleGuard('model', 'cr
 
     return res.json({ success: true, items: savedItems });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     logger.error('POST /api/webapp/live/tip-menu error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to save tip menu' });
+  } finally {
+    client.release();
   }
 }));
 
@@ -8740,6 +8803,9 @@ app.delete('/api/webapp/live/chat-bans/:bannedUserId', requireSessionAuth, roleG
   if (!bannedUserId || !channelRef || !/^[a-zA-Z0-9-]+$/.test(channelRef)) {
     return res.status(400).json({ success: false, error: 'bannedUserId and channelRef required' });
   }
+  if (!/^[0-9a-f-]{8,36}$|^\d{1,20}$/i.test(bannedUserId)) {
+    return res.status(400).json({ success: false, error: 'Invalid bannedUserId format' });
+  }
 
   try {
     const { rows: userRows } = await query(
@@ -8752,10 +8818,13 @@ app.delete('/api/webapp/live/chat-bans/:bannedUserId', requireSessionAuth, roleG
       return res.status(403).json({ success: false, error: 'You do not own this channel' });
     }
 
-    await query(
+    const result = await query(
       'DELETE FROM stream_chat_bans WHERE channel_ref = $1 AND banned_user_id = $2',
       [channelRef, bannedUserId]
     );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, error: 'Ban not found' });
+    }
 
     return res.json({ success: true });
   } catch (err) {
@@ -10990,7 +11059,7 @@ app.post('/api/webapp/bookings/:bookingId/survey',
   asyncHandler(callBookingController.submitSurvey));
 
 app.get('/api/webapp/creator/availability/schedule',
-  requireSessionAuth,
+  requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.getAvailabilitySchedule));
 
 app.post('/api/webapp/creator/availability/schedule',

@@ -102,14 +102,17 @@ export default function CreatorLayout() {
   // Allow /creators/apply without creator_status check
   const isApplyPath = location.pathname === "/creators/apply";
 
-  if (!isAuthenticated || (!isApplyPath && user?.creator_status !== "active")) {
-    if (isAuthenticated && !isApplyPath) {
-      navigate("/creators/apply", { replace: true });
-      return null;
-    }
-    if (!isAuthenticated) {
-      return <Navigate to={`/login?returnTo=${encodeURIComponent(location.pathname)}`} replace />;
-    }
+  // Admins and superadmins always pass — they manage the panel without being creators themselves.
+  const isAdminRole = user?.role === "admin" || user?.role === "superadmin";
+  const hasCreatorAccess = isAdminRole || user?.creator_status === "active";
+
+  if (!isAuthenticated) {
+    return <Navigate to={`/login?returnTo=${encodeURIComponent(location.pathname)}`} replace />;
+  }
+
+  if (!isApplyPath && !hasCreatorAccess) {
+    navigate("/creators/apply", { replace: true });
+    return null;
   }
 
   const tierInfo = user?.creator_type ? TIER_BADGE[user.creator_type] : null;
@@ -268,13 +271,18 @@ export function CreatorSubscribers() {
   const [data, setData] = React.useState<any>(null);
   const [page, setPage] = React.useState(1);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await getCreatorMySubscribers(page);
       if (res.success) setData(res);
-    } catch {}
+      else setError("Failed to load subscribers.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load subscribers.");
+    }
     setLoading(false);
   }, [page]);
 
@@ -298,6 +306,11 @@ export function CreatorSubscribers() {
               {[1,2,3,4].map(i => <div key={i} className="h-20 bg-white/5 rounded-xl" />)}
             </div>
             <div className="h-48 bg-white/5 rounded-xl" />
+          </div>
+        ) : error ? (
+          <div className="text-center py-12 rounded-xl" style={{ background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.2)" }}>
+            <p className="text-sm text-red-400">{error}</p>
+            <button onClick={load} className="mt-3 text-xs text-pnp-textSecondary underline">Retry</button>
           </div>
         ) : data ? (
           <>
@@ -494,6 +507,7 @@ export function CreatorConsents() {
   const [consents, setConsents] = React.useState<any>(null);
   const [userId, setUserId] = React.useState<string | number | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [showWizard, setShowWizard] = React.useState(false);
   const [wizardTier] = React.useState<TierId>("ice");
 
@@ -502,9 +516,14 @@ export function CreatorConsents() {
       if (res.success) {
         setConsents(res.consents);
         if (res.userId !== undefined && res.userId !== null) setUserId(res.userId);
+      } else {
+        setLoadError("Failed to load your consent records.");
       }
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch((err) => {
+      setLoadError(err instanceof Error ? err.message : "Failed to load your consent records.");
+      setLoading(false);
+    });
   }, []);
 
   const genericRows: ConsentRow[] = consents ? [
@@ -649,6 +668,11 @@ export function CreatorConsents() {
           <div className="animate-pulse space-y-3">
             {[1,2,3,4,5].map(i => <div key={i} className="h-16 bg-white/5 rounded-xl" />)}
           </div>
+        ) : loadError ? (
+          <div className="text-center py-8 rounded-xl" style={{ background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.2)" }}>
+            <p className="text-sm text-red-400">{loadError}</p>
+            <button onClick={() => window.location.reload()} className="mt-3 text-xs text-pnp-textSecondary underline">Retry</button>
+          </div>
         ) : !consents ? (
           <p className="text-sm text-pnp-textSecondary">Could not load your consents.</p>
         ) : (
@@ -713,6 +737,8 @@ export function CreatorXCampaigns() {
   const [campaigns, setCampaigns] = React.useState<XAutoCampaign[]>([]);
   const [campaignLimit, setCampaignLimit] = React.useState(2);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [actionError, setActionError] = React.useState<string | null>(null);
   const [showCreate, setShowCreate] = React.useState(false);
   const [expandedHistory, setExpandedHistory] = React.useState<string | null>(null);
   const [historyData, setHistoryData] = React.useState<Record<string, { posts: XAutoCampaignPost[]; page: number; totalPages: number }>>({});
@@ -729,29 +755,43 @@ export function CreatorXCampaigns() {
 
   const loadAll = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [acctRes, campRes] = await Promise.all([getCreatorXAccount(), getCreatorXCampaigns()]);
       if (acctRes.success) setAccount(acctRes.account);
+      else setLoadError("Failed to load X account.");
       if (campRes.success) {
         setCampaigns(campRes.campaigns);
         setCampaignLimit(campRes.campaignLimit);
+      } else if (!acctRes.success) {
+        setLoadError("Failed to load campaign data.");
       }
-    } catch {}
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load X campaigns.");
+    }
     setLoading(false);
   }, []);
 
   React.useEffect(() => { loadAll(); }, [loadAll]);
 
   const handleConnectX = async () => {
+    setActionError(null);
     try {
       const res = await startCreatorXOAuth();
-      if (res.success && res.url) window.location.href = res.url;
-    } catch {}
+      if (res.success && res.url) {
+        window.location.href = res.url;
+      } else {
+        setActionError("Could not start X authorization. Please try again.");
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to connect X account.");
+    }
   };
 
   const handleCreate = async () => {
     if (!formName.trim() || !formTopic.trim() || !account) return;
     setCreating(true);
+    setActionError(null);
     try {
       const res = await createCreatorXCampaign({
         name: formName.trim(),
@@ -767,23 +807,42 @@ export function CreatorXCampaigns() {
         setShowCreate(false);
         setFormName(""); setFormTopic("");
         await loadAll();
+      } else {
+        setActionError("Failed to create campaign. Please try again.");
       }
-    } catch {}
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to create campaign.");
+    }
     setCreating(false);
   };
 
   const handlePause = async (id: string) => {
-    await pauseCreatorXCampaign(id);
-    loadAll();
+    setActionError(null);
+    try {
+      await pauseCreatorXCampaign(id);
+      await loadAll();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to pause campaign.");
+    }
   };
   const handleResume = async (id: string) => {
-    await resumeCreatorXCampaign(id);
-    loadAll();
+    setActionError(null);
+    try {
+      await resumeCreatorXCampaign(id);
+      await loadAll();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to resume campaign.");
+    }
   };
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this campaign? This cannot be undone.")) return;
-    await deleteCreatorXCampaign(id);
-    loadAll();
+    setActionError(null);
+    try {
+      await deleteCreatorXCampaign(id);
+      await loadAll();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to delete campaign.");
+    }
   };
 
   const toggleHistory = async (campaignId: string) => {
@@ -814,10 +873,21 @@ export function CreatorXCampaigns() {
       <div className="p-4 lg:p-6">
         <h1 className="text-xl font-bold text-pnp-textPrimary mb-4">X Campaigns</h1>
 
+        {actionError && (
+          <div className="mb-4 px-4 py-3 rounded-xl text-sm text-red-400" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+            {actionError}
+          </div>
+        )}
+
         {loading ? (
           <div className="animate-pulse space-y-3">
             <div className="h-20 bg-white/5 rounded-xl" />
             <div className="h-40 bg-white/5 rounded-xl" />
+          </div>
+        ) : loadError ? (
+          <div className="text-center py-8 rounded-xl" style={{ background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.2)" }}>
+            <p className="text-sm text-red-400">{loadError}</p>
+            <button onClick={loadAll} className="mt-3 text-xs text-pnp-textSecondary underline">Retry</button>
           </div>
         ) : !account ? (
           /* No X account connected */

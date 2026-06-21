@@ -11,7 +11,7 @@ import {
   getLiveGoal,
   setLiveGoal,
   clearLiveGoal,
-  getTipMenu,
+  getMyTipMenu,
   saveTipMenu,
   type TipGoal,
   type TipMenuItem,
@@ -102,12 +102,10 @@ export default function CreatorLive() {
   const [newItemLabel, setNewItemLabel] = useState("");
 
   useEffect(() => {
-    const userId = user?.id;
-    if (!userId) return;
-    getTipMenu(userId)
+    getMyTipMenu()
       .then((res) => setTipMenuItems(res.items || []))
       .catch(() => {});
-  }, [user?.id]);
+  }, []);
 
   const handleAddMenuItem = useCallback(async () => {
     const amt = parseInt(newItemAmount);
@@ -689,7 +687,7 @@ export default function CreatorLive() {
               <div className="h-2 rounded-full bg-pnp-border overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all duration-500 ${currentGoal.completed ? "bg-green-500" : "bg-pnp-accent"}`}
-                  style={{ width: `${Math.min(100, Math.round(((currentGoal.progress) / (currentGoal.goalAmount ?? 1)) * 100))}%` }}
+                  style={{ width: `${currentGoal.goalAmount && currentGoal.goalAmount > 0 ? Math.min(100, Math.round(((currentGoal.progress ?? 0) / currentGoal.goalAmount) * 100)) : 0}%` }}
                 />
               </div>
               {currentGoal.completed && (

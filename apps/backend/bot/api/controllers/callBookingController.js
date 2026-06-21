@@ -345,7 +345,11 @@ async function submitSurvey(req, res) {
       return res.status(401).json({ success: false, error: 'Not authenticated' });
     }
     const memberId = String(sessionUser.id);
-    const creditId = Number(req.params.bookingId);
+    const rawBookingId = String(req.params.bookingId || '');
+    if (rawBookingId.length > 15) {
+      return res.status(400).json({ success: false, error: 'Invalid bookingId' });
+    }
+    const creditId = Number(rawBookingId);
 
     if (!Number.isInteger(creditId) || creditId < 1) {
       return res.status(400).json({ success: false, error: 'Invalid bookingId' });
@@ -576,10 +580,16 @@ async function setOnlineStatus(req, res) {
     const redis = getRedis();
     const key = ONLINE_KEY(userId);
 
-    if (online) {
-      await redis.set(key, '1', 'EX', ONLINE_TTL_SECONDS);
-    } else {
-      await redis.del(key);
+    try {
+      if (online) {
+        await redis.set(key, '1', 'EX', ONLINE_TTL_SECONDS);
+      } else {
+        await redis.del(key);
+      }
+    } catch (redisErr) {
+      // Redis outage — online status is a transient UI signal; degrade gracefully
+      logger.warn('[callBookingController] setOnlineStatus Redis unavailable — degraded', { userId, error: redisErr.message });
+      return res.json({ success: true, online, degraded: true });
     }
 
     logger.info('[callBookingController] creator online status updated', { userId, online });

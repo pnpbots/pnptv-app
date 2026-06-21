@@ -231,9 +231,14 @@ const saveWalletAddress = async (req, res) => {
       if (!account || account.length > 200) {
         return res.status(400).json({ error: 'Fiat account handle/email is required (max 200 chars).' });
       }
+      // Strip HTML tags before storage to prevent injection into payout emails
+      const safeAccount = account.replace(/<[^>]*>/g, '').trim();
+      if (!safeAccount) {
+        return res.status(400).json({ error: 'Fiat account handle/email cannot be empty.' });
+      }
       await query(
         'UPDATE users SET payout_method = $1, fiat_payout_method = $2, fiat_payout_account = $3, meru_account = NULL WHERE id = $4',
-        ['fiat', provider, account, req.user.id]
+        ['fiat', provider, safeAccount, req.user.id]
       );
     } else {
       const meru = (meruAccount || '').trim();
@@ -242,6 +247,10 @@ const saveWalletAddress = async (req, res) => {
       }
       if (meru.length > 100) {
         return res.status(400).json({ error: 'Meru account too long.' });
+      }
+      // Basic format: international phone (+digits) or alphanumeric username
+      if (!/^(\+?[0-9]{7,15}|[a-zA-Z0-9._-]{3,50})$/.test(meru)) {
+        return res.status(400).json({ error: 'Invalid Meru account format. Use a phone number (e.g. +573001234567) or username (3-50 alphanumeric chars).' });
       }
       await query(
         'UPDATE users SET payout_method = $1, meru_account = $2 WHERE id = $3',
@@ -1029,7 +1038,7 @@ const removeCollaborator = async (req, res) => {
 
 const getMySubscribers = async (req, res) => {
   try {
-    const creatorId = req.session?.user?.id;
+    const creatorId = req.user.id;
     const page = Math.max(1, parseInt(req.query.page || '1'));
     const limit = 20;
     const offset = (page - 1) * limit;
@@ -1076,7 +1085,7 @@ const getMySubscribers = async (req, res) => {
 
 const getMyConsents = async (req, res) => {
   try {
-    const userId = req.session?.user?.id;
+    const userId = req.user.id;
     // Pull generic consent flags from users plus payout-config flags. Joined to
     // the latest model_application so the consents page can also show creator/
     // performer-specific form status (2257 ID, legal name, onboarding call).
@@ -1127,7 +1136,7 @@ const getMyConsents = async (req, res) => {
 
 const getMyXAccount = async (req, res) => {
   try {
-    const userId = req.session?.user?.id;
+    const userId = req.user.id;
     const result = await query(`
       SELECT account_id, handle, display_name FROM x_accounts
       WHERE created_by = $1 AND is_active = TRUE LIMIT 1
@@ -1143,7 +1152,7 @@ const CREATOR_CAMPAIGN_LIMIT = 2;
 
 const getMyXCampaigns = async (req, res) => {
   try {
-    const creatorId = String(req.session?.user?.id);
+    const creatorId = String(req.user.id);
     const result = await query(`
       SELECT c.*, a.handle, a.display_name as account_display_name
       FROM x_auto_campaigns c
@@ -1161,8 +1170,8 @@ const getMyXCampaigns = async (req, res) => {
 
 const createMyXCampaign = async (req, res) => {
   try {
-    const creatorId = String(req.session?.user?.id);
-    const creatorUsername = req.session?.user?.username;
+    const creatorId = String(req.user.id);
+    const creatorUsername = req.user.username;
     const { accountId, name, topic, grokMode, language, intervalMinutes, activeHoursStart, activeHoursEnd } = req.body;
     if (!name || !accountId || !topic) return res.status(400).json({ error: 'name, accountId, and topic are required' });
     if (String(name).length > 200) return res.status(400).json({ error: 'name too long (max 200 chars)' });
@@ -1217,7 +1226,7 @@ const _verifyCampaignOwnership = async (campaignId, userId) => {
 
 const updateMyXCampaign = async (req, res) => {
   try {
-    const campaign = await _verifyCampaignOwnership(req.params.id, req.session?.user?.id);
+    const campaign = await _verifyCampaignOwnership(req.params.id, req.user.id);
     if (!campaign) return res.status(403).json({ error: 'Not your campaign' });
     const allowed = ['name', 'topic', 'grokMode', 'language', 'intervalMinutes', 'activeHoursStart', 'activeHoursEnd'];
     const updates = {};
@@ -1232,7 +1241,7 @@ const updateMyXCampaign = async (req, res) => {
 
 const pauseMyXCampaign = async (req, res) => {
   try {
-    const campaign = await _verifyCampaignOwnership(req.params.id, req.session?.user?.id);
+    const campaign = await _verifyCampaignOwnership(req.params.id, req.user.id);
     if (!campaign) return res.status(403).json({ error: 'Not your campaign' });
     await XAutoCampaignService.pauseCampaign(req.params.id);
     return res.json({ success: true });
@@ -1241,7 +1250,7 @@ const pauseMyXCampaign = async (req, res) => {
 
 const resumeMyXCampaign = async (req, res) => {
   try {
-    const campaign = await _verifyCampaignOwnership(req.params.id, req.session?.user?.id);
+    const campaign = await _verifyCampaignOwnership(req.params.id, req.user.id);
     if (!campaign) return res.status(403).json({ error: 'Not your campaign' });
     await XAutoCampaignService.resumeCampaign(req.params.id);
     return res.json({ success: true });
@@ -1250,7 +1259,7 @@ const resumeMyXCampaign = async (req, res) => {
 
 const deleteMyXCampaign = async (req, res) => {
   try {
-    const campaign = await _verifyCampaignOwnership(req.params.id, req.session?.user?.id);
+    const campaign = await _verifyCampaignOwnership(req.params.id, req.user.id);
     if (!campaign) return res.status(403).json({ error: 'Not your campaign' });
     await XAutoCampaignService.deleteCampaign(req.params.id);
     return res.json({ success: true });
@@ -1259,7 +1268,7 @@ const deleteMyXCampaign = async (req, res) => {
 
 const getMyXCampaignHistory = async (req, res) => {
   try {
-    const campaign = await _verifyCampaignOwnership(req.params.campId, req.session?.user?.id);
+    const campaign = await _verifyCampaignOwnership(req.params.campId, req.user.id);
     if (!campaign) return res.status(403).json({ error: 'Not your campaign' });
     const page = Math.max(1, parseInt(req.query.page || '1'));
     const limit = 20;

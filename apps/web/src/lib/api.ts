@@ -7391,6 +7391,11 @@ export function getTipMenu(performerId: string): Promise<{ items: TipMenuItem[] 
   return request(`/api/webapp/live/tip-menu/${encodeURIComponent(performerId)}`);
 }
 
+/** Fetch the authenticated creator's own tip menu items (no param needed). */
+export function getMyTipMenu(): Promise<{ success: boolean; items: TipMenuItem[] }> {
+  return request("/api/webapp/live/tip-menu");
+}
+
 export function saveTipMenu(
   items: { tokensAmount: number; label: string; sortOrder: number }[]
 ): Promise<{ success: boolean }> {
