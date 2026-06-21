@@ -25,6 +25,7 @@ const NotificationDigestScheduler = require(path.join(backendPath, 'services/not
 const AppUserService = require(path.join(backendPath, 'services/userService'));
 const CristinaFeedService = require(path.join(backendPath, 'services/cristinaFeedService'));
 const StreamRecordingService = require(path.join(backendPath, 'services/streamRecordingService'));
+const { failStuckVideoUploads } = require(path.join(backendPath, 'services/channelVideoService'));
 
 /**
  * Initialize and start cron jobs
@@ -610,6 +611,20 @@ const startCronJobs = async (bot = null) => {
         await StreamRecordingService.expireOldRecordings(7);
       } catch (error) {
         logger.error('Error in VOD recording retention cron:', error);
+      }
+    });
+
+    // Channel video stuck-processing cleanup — hourly at :45
+    // Flips channel_videos rows that have been in 'processing' for >1 hour to 'failed'.
+    // GIF generation times out at 60 s; any row older than 1h is definitively stuck.
+    cron.schedule(process.env.CHANNEL_VIDEO_STUCK_CRON || '45 * * * *', async () => {
+      try {
+        const flipped = await failStuckVideoUploads();
+        if (flipped > 0) {
+          logger.warn('[channelVideos] Flipped stuck processing rows to failed', { count: flipped });
+        }
+      } catch (error) {
+        logger.error('[channelVideos] Stuck-video cleanup cron error', { error: error.message });
       }
     });
 
