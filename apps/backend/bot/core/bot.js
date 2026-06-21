@@ -799,7 +799,7 @@ const startBot = async () => {
      */
     const downloadAndSaveHangoutMedia = async (telegramFileUrl, mediaType, hangoutId, chatMsgId) => {
       const sharp = require('sharp');
-      const uploadsDir = path.join(__dirname, '../../../public/uploads/posts');
+      const uploadsDir = path.join(__dirname, '../../../../public/uploads/posts');
       fs.mkdirSync(uploadsDir, { recursive: true });
 
       const response = await fetch(telegramFileUrl);
