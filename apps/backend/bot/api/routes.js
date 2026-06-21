@@ -11707,7 +11707,7 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
     let updated;
     try {
       const { data } = await axios.patch(
-        `${directusBaseUrl()}/items/prime_videos/${id}`,
+        `${directusBaseUrl()}/items/prime_videos/${id}?fields=id,video_file,title,description,status,is_featured,is_explicit,category,tags`,
         patch,
         { headers: directusHeaders(), timeout: 8000 }
       );
@@ -11746,6 +11746,35 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
       }
     } catch (syncErr) {
       logger.warn('admin prime-videos social_posts mirror failed (non-fatal)', { id, error: syncErr.message });
+    }
+
+    // Also sync channel_videos so the prime channel page reflects edits immediately.
+    if (updated.video_file) {
+      try {
+        const cvSets = ['updated_at = NOW()'];
+        const cvVals = [updated.video_file, 5];
+        let cvIdx = 3;
+        if (Object.prototype.hasOwnProperty.call(patch, 'title')) {
+          cvSets.push(`title = $${cvIdx++}`);
+          cvVals.push(updated.title);
+        }
+        if (Object.prototype.hasOwnProperty.call(patch, 'description')) {
+          cvSets.push(`description = $${cvIdx++}`);
+          cvVals.push(updated.description || null);
+        }
+        if (Object.prototype.hasOwnProperty.call(patch, 'status')) {
+          const cvStatus = updated.status === 'published' ? 'published'
+            : updated.status === 'archived' ? 'removed' : 'draft';
+          cvSets.push(`status = $${cvIdx++}`);
+          cvVals.push(cvStatus);
+        }
+        await getPool().query(
+          `UPDATE channel_videos SET ${cvSets.join(', ')} WHERE directus_file_id = $1 AND channel_id = $2`,
+          cvVals
+        );
+      } catch (cvErr) {
+        logger.warn('admin prime-videos channel_videos sync failed (non-fatal)', { id, error: cvErr.message });
+      }
     }
 
     res.json({ success: true, item: updated });
@@ -11980,6 +12009,22 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
         } catch (syncErr) {
           logger.warn('social_posts mirror after upload failed (non-fatal)', { id: primeRow.id, error: syncErr.message });
         }
+      }
+
+      // Step 5 — insert into channel_videos so the video appears on the /channels/5 page
+      try {
+        const cvStatus = status === 'published' ? 'published' : 'draft';
+        const thumbUrl = `https://cms.pnptv.app/video-thumb/${fileId}.jpg`;
+        await getPool().query(
+          `INSERT INTO channel_videos
+             (channel_id, uploader_id, directus_file_id, title, description, duration_sec,
+              thumbnail_url, status, created_at, updated_at)
+           VALUES (5, $1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
+          ['8599671840', fileId, titleInput.slice(0, 255), description, durationSec, thumbUrl, cvStatus]
+        );
+        logger.info('prime-videos: channel_videos row created', { fileId, status: cvStatus });
+      } catch (cvErr) {
+        logger.warn('prime-videos: channel_videos insert failed (non-fatal)', { fileId, error: cvErr.message });
       }
 
       res.json({
