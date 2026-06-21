@@ -9,6 +9,12 @@
 const PLATFORM_COMMISSION_RATE = 0.30;
 const CREATOR_REVENUE_RATE = 0.70; // must equal 1 - PLATFORM_COMMISSION_RATE
 
+// ── Gifted-token policy ──────────────────────────────────────────────────────
+// Tokens gifted before PNP Live's public launch are restricted to these
+// performers' live shows (tips + stream heartbeats). User IDs: SantinoFurioso,
+// PNPLatinoBoy. Regular purchased tokens work for any performer.
+const GIFTED_ALLOWED_PERFORMER_USER_IDS = ['8599671840', '7246621722'];
+
 // Earnings hold period: newly-recorded earnings sit in 'holding' status for this
 // many hours before maturing to 'available'. This gives the platform time to
 // process any refund or chargeback before paying out the creator.
@@ -19,6 +25,7 @@ module.exports = {
   PLATFORM_COMMISSION_RATE,
   CREATOR_REVENUE_RATE,
   EARNINGS_HOLD_HOURS,
+  GIFTED_ALLOWED_PERFORMER_USER_IDS,
   // ==========================================
   // SUBSCRIPTION SETTINGS
   // ==========================================

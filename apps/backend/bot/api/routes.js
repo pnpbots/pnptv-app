@@ -4020,8 +4020,13 @@ const tokenService = require('../../services/tokenService');
 app.get('/api/webapp/users/me/tokens', requireSessionAuth, asyncHandler(async (req, res) => {
   const userId = req.session?.user?.id;
   if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
-  const balance = await tokenService.getBalance(userId);
-  return res.json({ success: true, balance });
+  const { rows } = await getPool().query(
+    'SELECT balance_tokens, gifted_balance FROM user_token_wallets WHERE user_id = $1',
+    [String(userId)]
+  );
+  const regular = rows.length ? (Number(rows[0].balance_tokens) || 0) : 0;
+  const gifted  = rows.length ? (Number(rows[0].gifted_balance)  || 0) : 0;
+  return res.json({ success: true, balance: regular + gifted, regularBalance: regular, giftedBalance: gifted });
 }));
 
 // ── My active scoped subscriptions (paid channel/hangout 30-day passes) ────

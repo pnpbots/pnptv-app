@@ -5,7 +5,7 @@
 
 const { query, getClient } = require('../config/postgres');
 const logger = require('../utils/logger');
-const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
+const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS } = require('../config/monetizationConfig');
 
 class PNPLiveTipsService {
   // Standard tip amounts
@@ -74,6 +74,9 @@ class PNPLiveTipsService {
       throw err;
     }
 
+    // Gifted-token restriction gate — resolved inside the if(performerId) block below.
+    let isGiftedAllowed = false;
+
     // Block tips while the performer is in the temporary onboarding-lock
     // state. Tokens must not be debited from the sender if the recipient
     // cannot receive — fail fast before BEGIN.
@@ -115,6 +118,14 @@ class PNPLiveTipsService {
         err.status = 400;
         throw err;
       }
+
+      // Gifted-token restriction: tokens gifted before public launch can only be
+      // spent on Santino / PNPLatinoBoy live shows. Capture performer user_id here
+      // (already fetched by the self-tip check above) so we can choose the right pool.
+      const perfUserId = selfRows.length > 0
+        ? String(selfRows[0].user_id)
+        : String(performerId);
+      isGiftedAllowed = GIFTED_ALLOWED_PERFORMER_USER_IDS.includes(perfUserId);
     }
 
     let client;
@@ -122,15 +133,30 @@ class PNPLiveTipsService {
       client = await getClient();
       await client.query('BEGIN');
 
-      // Debit tokens atomically — fails immediately if balance is insufficient
-      const debitResult = await client.query(
-        `UPDATE user_token_wallets
-         SET balance_tokens = balance_tokens - $2,
-             updated_at = NOW()
-         WHERE user_id = $1 AND balance_tokens >= $2
-         RETURNING balance_tokens`,
-        [userId, amount]
-      );
+      // Debit tokens atomically — pool selection depends on performer:
+      // • Allowed performers (Santino/PNPLatinoBoy): gifted_balance first, then regular.
+      // • All others: regular balance_tokens only (gifted tokens are not accepted).
+      let debitResult;
+      if (isGiftedAllowed) {
+        debitResult = await client.query(
+          `UPDATE user_token_wallets
+           SET gifted_balance = GREATEST(0, gifted_balance - $2),
+               balance_tokens = balance_tokens - GREATEST(0, $2 - gifted_balance),
+               updated_at = NOW()
+           WHERE user_id = $1 AND (gifted_balance + balance_tokens) >= $2
+           RETURNING balance_tokens, gifted_balance`,
+          [userId, amount]
+        );
+      } else {
+        debitResult = await client.query(
+          `UPDATE user_token_wallets
+           SET balance_tokens = balance_tokens - $2,
+               updated_at = NOW()
+           WHERE user_id = $1 AND balance_tokens >= $2
+           RETURNING balance_tokens, gifted_balance`,
+          [userId, amount]
+        );
+      }
 
       if (debitResult.rows.length === 0) {
         const err = new Error('Insufficient token balance');
@@ -138,7 +164,8 @@ class PNPLiveTipsService {
         throw err;
       }
 
-      const newBalance = debitResult.rows[0].balance_tokens;
+      const { balance_tokens: reg, gifted_balance: gift } = debitResult.rows[0];
+      const newBalance = (reg || 0) + (gift || 0);
 
       // Insert tip record as already paid. transaction_id uses crypto.randomUUID
       // (collision-resistant) instead of `TOKEN-${userId}-${Date.now()}` which

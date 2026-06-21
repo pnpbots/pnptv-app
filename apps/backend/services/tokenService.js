@@ -13,7 +13,7 @@ const userService = require('./userService');
 const { query, getClient } = require('../config/postgres');
 const { cache } = require('../config/redis');
 
-const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
+const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS } = require('../config/monetizationConfig');
 
 const STREAM_HEARTBEAT_COST = 1;
 // STREAM_HEARTBEAT_REVENUE and STREAM_HEARTBEAT_PLATFORM derive from the canonical
@@ -151,26 +151,43 @@ async function processStreamHeartbeat(viewerId, channelRef) {
     return { success: true };
   }
 
+  // Gifted tokens are accepted for Santino/PNPLatinoBoy streams; regular-only elsewhere.
+  const isGiftedAllowed = GIFTED_ALLOWED_PERFORMER_USER_IDS.includes(String(streamer.id));
+
   const client = await getClient();
   try {
     await client.query('BEGIN');
 
-    // 1. Check and deduct from viewer
-    const debitResult = await client.query(
-      `UPDATE user_token_wallets
-       SET balance_tokens = balance_tokens - $2,
-           updated_at = NOW()
-       WHERE user_id = $1 AND balance_tokens >= $2
-       RETURNING balance_tokens`,
-      [String(viewerId), STREAM_HEARTBEAT_COST]
-    );
+    // 1. Check and deduct from viewer — use gifted pool first for allowed performers.
+    let debitResult;
+    if (isGiftedAllowed) {
+      debitResult = await client.query(
+        `UPDATE user_token_wallets
+         SET gifted_balance = GREATEST(0, gifted_balance - $2),
+             balance_tokens = balance_tokens - GREATEST(0, $2 - gifted_balance),
+             updated_at = NOW()
+         WHERE user_id = $1 AND (gifted_balance + balance_tokens) >= $2
+         RETURNING balance_tokens, gifted_balance`,
+        [String(viewerId), STREAM_HEARTBEAT_COST]
+      );
+    } else {
+      debitResult = await client.query(
+        `UPDATE user_token_wallets
+         SET balance_tokens = balance_tokens - $2,
+             updated_at = NOW()
+         WHERE user_id = $1 AND balance_tokens >= $2
+         RETURNING balance_tokens, gifted_balance`,
+        [String(viewerId), STREAM_HEARTBEAT_COST]
+      );
+    }
 
     if (debitResult.rows.length === 0) {
       await client.query('ROLLBACK');
       return { success: false, error: 'INSUFFICIENT_FUNDS' };
     }
 
-    const newBalance = debitResult.rows[0].balance_tokens;
+    const { balance_tokens: reg, gifted_balance: gift } = debitResult.rows[0];
+    const newBalance = (reg || 0) + (gift || 0);
 
     // 2. Credit streamer
     await client.query(
@@ -252,10 +269,10 @@ async function getBalance(userId) {
       if (Number.isFinite(n)) return n;
     }
     const res = await query(
-      'SELECT balance_tokens FROM user_token_wallets WHERE user_id = $1',
+      'SELECT balance_tokens, gifted_balance FROM user_token_wallets WHERE user_id = $1',
       [String(userId)]
     );
-    const balance = res.rows.length === 0 ? 0 : Number(res.rows[0].balance_tokens) || 0;
+    const balance = res.rows.length === 0 ? 0 : (Number(res.rows[0].balance_tokens) || 0) + (Number(res.rows[0].gifted_balance) || 0);
     await cache.set(`wallet:${userId}`, balance, 30).catch(() => {});
     return balance;
   } catch (error) {
