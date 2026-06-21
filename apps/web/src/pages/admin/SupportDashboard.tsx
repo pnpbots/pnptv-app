@@ -370,8 +370,6 @@ function MessageBubble({ message }: { message: SupportMessage }) {
 const ADDON_OPTIONS = [
   { value: "prime", label: "PRIME" },
   { value: "pnp-member", label: "PNP Member" },
-  { value: "channel-access", label: "Channel Access" },
-  { value: "hangout-access", label: "Hangout Access" },
 ];
 
 // ── Ticket Detail Panel ────────────────────────────────────────────────────────
@@ -414,7 +412,7 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
     setGrantOpen(false);
     setGrantResult(null);
     getAdminPlans().then((r) => {
-      const active = r.plans.filter((p) => p.active);
+      const active = r.plans.filter((p) => p.active && p.add_ons && p.add_ons.length > 0);
       setPlans(active);
       if (active.length > 0) setGrantPlanId(String(active[0].id));
     }).catch(() => {});
