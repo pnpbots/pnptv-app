@@ -11,7 +11,6 @@ import {
   updateCreatorChannel,
   deleteCreatorChannel,
   uploadChannelCover,
-  uploadChannelVideo,
   updateChannelVideo,
   deleteChannelVideo,
   aiTitleChannelVideo,
@@ -264,35 +263,6 @@ function ChannelDetailView({
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Direct CMS video upload (owner-only) ──
-  const videoInputRef = useRef<HTMLInputElement>(null);
-  const [videoUploading, setVideoUploading] = useState(false);
-  const [videoError, setVideoError] = useState<string | null>(null);
-
-  const handleVideoFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file || !channel) return;
-    if (file.size > 2 * 1024 * 1024 * 1024) {
-      setVideoError("Video must be under 2 GB");
-      return;
-    }
-    setVideoError(null);
-    setVideoUploading(true);
-    try {
-      const res = await uploadChannelVideo(channel.id, file);
-      if (res?.success) {
-        setChannel((prev) =>
-          prev ? { ...prev, postCount: (prev.postCount || 0) + 1 } : prev,
-        );
-      }
-    } catch (err) {
-      setVideoError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setVideoUploading(false);
-    }
-  };
-
   const openEdit = () => {
     if (!channel) return;
     setEditForm({
@@ -507,30 +477,6 @@ function ChannelDetailView({
                     pricePerMonth={channel.priceUsd ?? null}
                     creatorUsername={channel.creatorUsername ?? null}
                   />
-                  <input
-                    ref={videoInputRef}
-                    type="file"
-                    accept="video/mp4,video/webm,video/quicktime"
-                    className="hidden"
-                    onChange={handleVideoFileSelected}
-                  />
-                  <button
-                    onClick={() => videoInputRef.current?.click()}
-                    disabled={videoUploading}
-                    className="p-1.5 rounded-lg text-pnp-accent hover:text-white hover:bg-pnp-accent/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={videoUploading ? "Uploading video…" : "Legacy upload (no AI assist)"}
-                  >
-                    {videoUploading ? (
-                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={3} />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-                      </svg>
-                    )}
-                  </button>
                   <button
                     onClick={openEdit}
                     className="p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/8 transition-colors"
@@ -553,25 +499,6 @@ function ChannelDetailView({
               )}
             </div>
           </div>
-
-          {/* Video upload feedback (owner-only) */}
-          {channel.isOwner && videoUploading && (
-            <div className="rounded-lg border border-pnp-accent/30 bg-pnp-accent/10 px-3 py-2 text-xs text-pnp-accent">
-              Uploading video to your CMS folder…
-            </div>
-          )}
-          {channel.isOwner && videoError && !videoUploading && (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300 flex items-center justify-between">
-              <span>{videoError}</span>
-              <button
-                onClick={() => setVideoError(null)}
-                className="ml-3 text-red-300/70 hover:text-red-200"
-                aria-label="Dismiss"
-              >
-                ×
-              </button>
-            </div>
-          )}
 
           {/* Edit form */}
           {showEditForm && channel.isOwner && (

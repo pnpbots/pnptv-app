@@ -3489,25 +3489,6 @@ export async function uploadChannelCover(channelId: number, file: File): Promise
   return res.json();
 }
 
-export async function uploadChannelVideo(
-  channelId: number,
-  file: File,
-  caption?: string,
-): Promise<{ success: boolean; post: SocialPostItem; fileId: string }> {
-  const formData = new FormData();
-  formData.append("video", file);
-  if (caption) formData.append("caption", caption);
-  const res = await fetch(`${API_BASE}/api/webapp/creator/channels/${channelId}/video`, {
-    method: "POST",
-    credentials: "include",
-    body: formData,
-  });
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(error.error || `API error ${res.status}`);
-  }
-  return res.json();
-}
 
 export function addChannelCollaborator(channelId: number, userId: string): Promise<{ success: boolean; channel: CreatorChannel }> {
   return request(`/api/webapp/creator/channels/${channelId}/collaborators`, { method: "POST", body: { userId } });

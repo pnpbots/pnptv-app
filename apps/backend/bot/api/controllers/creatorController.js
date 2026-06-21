@@ -6,7 +6,6 @@ const { query, getPool } = require('../../../config/postgres');
 const { hasAccess } = require('../../../services/accessService');
 const { resolveUserId } = require('../../utils/helpers');
 const XAutoCampaignService = require('../../../services/xAutoCampaignService');
-const { uploadBufferToCreatorFolder, uploadStreamToCreatorFolder } = require('./cmsCreatorController');
 const fs = require('fs');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1328,106 +1327,6 @@ const getMyXCampaignHistory = async (req, res) => {
   } catch (err) { logger.error('getMyXCampaignHistory error', err); return res.status(500).json({ error: 'Failed to load history' }); }
 };
 
-// POST /api/webapp/creator/channels/:id/video
-// Owner-only: uploads a video file into the creator's private Directus folder
-// and publishes it as a social_post in this channel in a single round-trip.
-const uploadChannelVideo = async (req, res) => {
-  const channelId = parseInt(req.params.id, 10);
-  if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
-
-  // Multer wrote the upload to disk (see channelVideoUpload in cmsCreatorController).
-  // We must unlink the temp file on every exit path — success, error, or early return —
-  // otherwise /tmp fills up with orphaned 2 GB blobs.
-  const tmpPath = req.file?.path || null;
-
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No video file provided' });
-
-    // ── 2257 compliance gate ──────────────────────────────────────────────────
-    // Load fresh columns from DB since session may not have them after migration
-    const { rows: compRows } = await query(
-      'SELECT identity_verified, identity_verification_required_by FROM users WHERE id = $1',
-      [req.user.id]
-    );
-    const dbUserComp = compRows[0] || {};
-    if (!IdentityVerificationService.is2257Compliant(dbUserComp)) {
-      return res.status(403).json({
-        error: 'identity_verification_required',
-        message: 'Complete identity verification (18 U.S.C. § 2257) before uploading content.',
-      });
-    }
-    // ─────────────────────────────────────────────────────────────────────────
-
-    const chRes = await query(
-      'SELECT id, creator_id FROM creator_channels WHERE id = $1 AND is_active = true',
-      [channelId]
-    );
-    if (!chRes.rows.length || chRes.rows[0].creator_id !== req.user.id) {
-      return res.status(404).json({ error: 'Channel not found or not yours' });
-    }
-
-    const userRes = await query(
-      'SELECT pnptv_id, creator_status FROM users WHERE id = $1',
-      [req.user.id]
-    );
-    const user = userRes.rows[0];
-    if (!user || user.creator_status !== 'active') {
-      return res.status(403).json({ error: 'Active creator account required' });
-    }
-    if (!user.pnptv_id) {
-      return res.status(500).json({ error: 'Creator missing pnptv_id — cannot scope CMS folder' });
-    }
-
-    const { fileId, url } = await uploadStreamToCreatorFolder({
-      pnptvId: user.pnptv_id,
-      filePath: req.file.path,
-      filename: req.file.originalname,
-      contentType: req.file.mimetype,
-      knownLength: req.file.size,
-    });
-
-    if (!fileId || !url) {
-      return res.status(502).json({ error: 'CMS did not return a file id' });
-    }
-
-    const caption = typeof req.body?.caption === 'string'
-      ? req.body.caption.trim().slice(0, 2000)
-      : '';
-    const mediaItems = [{ url, type: 'video', cmsFileId: fileId }];
-
-    const insertRes = await query(
-      `INSERT INTO social_posts
-         (user_id, content, media_url, media_type, media_urls,
-          is_wof, is_exclusive, is_shareable, content_tier, channel_id)
-       VALUES ($1, $2, $3, 'video', $4, false, false, true, 'free', $5)
-       RETURNING id, content, media_url, media_type, media_urls, video_thumbnail_url,
-                 channel_id, likes_count, reposts_count, replies_count,
-                 is_wof, is_exclusive, is_shareable, content_tier, created_at`,
-      [req.user.id, caption, url, JSON.stringify(mediaItems), channelId]
-    );
-
-    await query(
-      `UPDATE creator_channels SET post_count = (
-         SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false
-       ) WHERE id = $1`,
-      [channelId]
-    );
-
-    return res.json({ success: true, post: insertRes.rows[0], fileId });
-  } catch (err) {
-    logger.error('uploadChannelVideo error', err?.response?.data || err);
-    return res.status(500).json({ error: 'Failed to upload channel video' });
-  } finally {
-    if (tmpPath) {
-      fs.promises.unlink(tmpPath).catch((err) => {
-        if (err.code !== 'ENOENT') {
-          logger.warn('Failed to unlink channel-video temp file', { tmpPath, err: err.message });
-        }
-      });
-    }
-  }
-};
-
 module.exports = {
   getEligibility,
   activateCreator,
@@ -1456,7 +1355,6 @@ module.exports = {
   createChannel,
   updateChannel,
   deleteChannel,
-  uploadChannelVideo,
   addCollaborator,
   removeCollaborator,
   getMySubscribers,

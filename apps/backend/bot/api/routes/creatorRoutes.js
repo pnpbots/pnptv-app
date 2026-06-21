@@ -115,15 +115,6 @@ router.post('/channels', authGuard, creatorLockGuard, creatorController.createCh
 router.patch('/channels/:id', authGuard, creatorLockGuard, creatorController.updateChannel);
 router.delete('/channels/:id', authGuard, creatorLockGuard, creatorController.deleteChannel);
 
-// Direct video upload: file → creator's private Directus folder → channel post.
-router.post(
-  '/channels/:id/video',
-  authGuard,
-  creatorLockGuard,
-  cmsCreatorController.channelVideoUpload.single('video'),
-  creatorController.uploadChannelVideo,
-);
-
 // ── Channel collaborators (owner-only mutation) ───────────────────────────────
 router.post('/channels/:id/collaborators', authGuard, creatorLockGuard, creatorController.addCollaborator);
 router.delete('/channels/:id/collaborators', authGuard, creatorLockGuard, creatorController.removeCollaborator);

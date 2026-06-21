@@ -29,33 +29,6 @@ const mediaUpload = multer({
   },
 });
 
-// Large-video uploads go to disk, not memory. A 2 GB Buffer would blow Node's
-// ~1.7 GB default V8 heap — `multer.diskStorage` streams straight to /tmp and
-// the handler then `fs.createReadStream`s into Directus, so the bot's memory
-// footprint stays flat regardless of file size. Temp files are unlinked by
-// the handler in a finally block (success or failure).
-const CHANNEL_VIDEO_TMP_DIR = '/tmp/pnp-uploads';
-try {
-  fs.mkdirSync(CHANNEL_VIDEO_TMP_DIR, { recursive: true });
-} catch (err) {
-  logger.warn('Could not pre-create channel video temp dir', { dir: CHANNEL_VIDEO_TMP_DIR, err: err.message });
-}
-
-const channelVideoUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, CHANNEL_VIDEO_TMP_DIR),
-    filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname || '') || '';
-      cb(null, `${crypto.randomUUID()}${ext}`);
-    },
-  }),
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB
-  fileFilter: (_req, file, cb) => {
-    const allowed = ['video/mp4', 'video/webm', 'video/quicktime'];
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Only mp4, webm, or mov videos are allowed'));
-  },
-});
 
 const directusHeaders = () => ({ Authorization: `Bearer ${DIRECTUS_TOKEN}` });
 
@@ -546,9 +519,7 @@ module.exports = {
   updateShow,
   deleteShow,
   uploadMedia,
-  // Exposed for reuse by the channel-video direct-publish flow.
   getOrCreateCreatorFolder,
   uploadBufferToCreatorFolder,
   uploadStreamToCreatorFolder,
-  channelVideoUpload,
 };
