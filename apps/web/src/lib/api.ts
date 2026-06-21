@@ -1164,6 +1164,25 @@ export async function uploadCreatorMediaFile(
   return res.json();
 }
 
+export async function uploadCreatorVideoFile(
+  file: File,
+  caption?: string
+): Promise<{ success: boolean; item: CreatorMediaItem }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (caption) fd.append("caption", caption);
+  const res = await fetch(`${API_BASE}/api/webapp/creators/media/upload-video`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error?.message || body?.error || `Upload failed (${res.status})`);
+  }
+  return res.json();
+}
+
 export function getPublicProfile(
   userId: string,
   cursor?: string,

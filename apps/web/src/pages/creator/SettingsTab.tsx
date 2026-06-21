@@ -13,6 +13,9 @@ import {
   listCreatorRecordings,
   deleteRecording,
   updateRecording,
+  uploadAvatar,
+  uploadCreatorMediaFile,
+  uploadCreatorVideoFile,
   type CreatorDashboard as DashboardData,
   type CreatorMediaItem,
   type StreamRecording,
@@ -84,11 +87,18 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   // Add-form state
   const [showAddForm, setShowAddForm] = useState(false);
   const [addType, setAddType] = useState<"photo" | "video">("photo");
-  const [addUrl, setAddUrl] = useState("");
-  const [addThumbUrl, setAddThumbUrl] = useState("");
   const [addCaption, setAddCaption] = useState("");
   const [addPremium, setAddPremium] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
+  const [addFile, setAddFile] = useState<File | null>(null);
+  const [addFilePreview, setAddFilePreview] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+
+  // Profile photo state
+  const [profilePhotoUploading, setProfilePhotoUploading] = useState(false);
+  const [profilePhotoError, setProfilePhotoError] = useState<string | null>(null);
+  const [profilePhotoSuccess, setProfilePhotoSuccess] = useState<string | null>(null);
+  const [profilePhotoPreview, setProfilePhotoPreview] = useState<string | null>(null);
 
   const loadAlbum = useCallback(async () => {
     const userId = authUser?.id ? String(authUser.id) : null;
@@ -106,25 +116,44 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
 
   useEffect(() => { loadAlbum(); }, [loadAlbum]);
 
+  const handleProfilePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProfilePhotoError(null);
+    setProfilePhotoSuccess(null);
+    setProfilePhotoPreview(URL.createObjectURL(file));
+    setProfilePhotoUploading(true);
+    try {
+      await uploadAvatar(file);
+      setProfilePhotoSuccess("Profile photo updated.");
+    } catch (err) {
+      setProfilePhotoError(err instanceof Error ? err.message : "Upload failed.");
+      setProfilePhotoPreview(null);
+    } finally {
+      setProfilePhotoUploading(false);
+    }
+  };
+
   const handleAddMedia = async () => {
     setAlbumError(null);
     setAlbumSuccess(null);
-    if (!addUrl.trim()) { setAlbumError("URL is required."); return; }
+    if (!addFile) { setAlbumError("Please select a file."); return; }
     setAddSaving(true);
     try {
-      await addCreatorMedia({
-        type: addType,
-        url: addUrl.trim(),
-        thumbUrl: addThumbUrl.trim() || null,
-        caption: addCaption.trim() || null,
-        isPremium: addPremium,
-      });
+      if (addType === "photo") {
+        await uploadCreatorMediaFile(addFile, addCaption.trim() || undefined);
+      } else {
+        await uploadCreatorVideoFile(addFile, addCaption.trim() || undefined);
+      }
       setAlbumSuccess("Media added.");
-      setAddUrl(""); setAddThumbUrl(""); setAddCaption(""); setAddPremium(false);
+      setAddFile(null);
+      setAddFilePreview(null);
+      setAddCaption("");
+      setAddPremium(false);
       setShowAddForm(false);
       await loadAlbum();
     } catch (err) {
-      setAlbumError(err instanceof Error ? err.message : "Failed to add media.");
+      setAlbumError(err instanceof Error ? err.message : "Failed to upload.");
     } finally {
       setAddSaving(false);
     }
@@ -394,6 +423,43 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
 
   return (
     <div className="space-y-4">
+      {/* Profile Photo */}
+      <div className="glass-card-sm p-5">
+        <p className="text-sm font-semibold text-white mb-1">Profile Photo</p>
+        <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+          This photo appears on your creator card, profile page, and everywhere your name is shown.
+        </p>
+        <div className="flex items-center gap-4">
+          <div className="w-16 h-16 rounded-full overflow-hidden flex-shrink-0 bg-white/5 border border-white/10">
+            {(profilePhotoPreview || authUser?.photoUrl) ? (
+              <img src={profilePhotoPreview || authUser?.photoUrl!} alt="Profile" className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-white/20 text-xl">
+                {authUser?.username?.[0]?.toUpperCase() || "?"}
+              </div>
+            )}
+          </div>
+          <div className="flex-1">
+            <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+              style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }}>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              {profilePhotoUploading ? "Uploading..." : "Change Photo"}
+              <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only"
+                onChange={handleProfilePhotoChange} disabled={profilePhotoUploading} />
+            </label>
+            <p className="text-[10px] mt-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>JPG, PNG or WebP · Max 10 MB</p>
+          </div>
+        </div>
+        {profilePhotoSuccess && (
+          <div className="mt-3 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>{profilePhotoSuccess}</div>
+        )}
+        {profilePhotoError && (
+          <div className="mt-3 px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>{profilePhotoError}</div>
+        )}
+      </div>
+
       {/* Membership toggle */}
       <div className="glass-card-sm p-5">
         <div className="flex items-center justify-between">
@@ -796,60 +862,76 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
         {/* Add form */}
         {showAddForm && (
           <div className="mb-4 p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            {/* Type toggle */}
             <div className="flex gap-2 mb-3">
-              {(["photo", "video"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setAddType(t)}
+              {(["photo", "video"] as const).map((typ) => (
+                <button key={typ} onClick={() => { setAddType(typ); setAddFile(null); setAddFilePreview(null); }}
                   className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
                   style={{
-                    background: addType === t ? "linear-gradient(135deg,#D4007A,#E69138)" : "rgba(255,255,255,0.05)",
-                    color: addType === t ? "#fff" : "#8E8E93",
-                    border: addType === t ? "1px solid transparent" : "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  {t === "photo" ? "Photo" : "Video"}
+                    background: addType === typ ? "linear-gradient(135deg,#D4007A,#E69138)" : "rgba(255,255,255,0.05)",
+                    color: addType === typ ? "#fff" : "#8E8E93",
+                    border: addType === typ ? "1px solid transparent" : "1px solid rgba(255,255,255,0.08)",
+                  }}>
+                  {typ === "photo" ? "Photo" : "Video"}
                 </button>
               ))}
             </div>
-            <input
-              type="url"
-              value={addUrl}
-              onChange={(e) => setAddUrl(e.target.value)}
-              placeholder="Media URL (https://...)"
-              className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 mb-2"
-            />
-            <input
-              type="url"
-              value={addThumbUrl}
-              onChange={(e) => setAddThumbUrl(e.target.value)}
-              placeholder="Thumbnail URL (optional)"
-              className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 mb-2"
-            />
-            <input
-              type="text"
-              value={addCaption}
-              onChange={(e) => setAddCaption(e.target.value)}
-              placeholder="Caption (optional)"
-              maxLength={160}
-              className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 mb-3"
-            />
-            <label className="flex items-center gap-2 mb-3 cursor-pointer select-none">
+
+            {/* File picker */}
+            <label className="flex flex-col items-center justify-center gap-2 p-4 rounded-lg cursor-pointer transition-colors mb-3"
+              style={{ border: "1.5px dashed rgba(255,255,255,0.12)", background: addFile ? "rgba(94,209,196,0.05)" : "rgba(255,255,255,0.02)" }}>
+              {addFilePreview && addType === "photo" ? (
+                <img src={addFilePreview} alt="Preview" className="w-24 h-24 object-cover rounded-lg mb-1" />
+              ) : addFile ? (
+                <div className="flex flex-col items-center gap-1">
+                  <svg className="w-8 h-8 text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  <span className="text-xs text-teal-400">{addFile.name}</span>
+                  <span className="text-[10px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{(addFile.size / (1024 * 1024)).toFixed(1)} MB</span>
+                </div>
+              ) : (
+                <>
+                  <svg className="w-8 h-8 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                  <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                    {addType === "photo" ? "Tap to choose a photo" : "Tap to choose a video"}
+                  </span>
+                  <span className="text-[10px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                    {addType === "photo" ? "JPG · PNG · WebP · max 10 MB" : "MP4 · MOV · WebM · max 500 MB"}
+                  </span>
+                </>
+              )}
               <input
-                type="checkbox"
-                checked={addPremium}
-                onChange={(e) => setAddPremium(e.target.checked)}
-                className="w-4 h-4 rounded accent-pink-600"
+                type="file"
+                accept={addType === "photo" ? "image/jpeg,image/png,image/webp" : "video/mp4,video/quicktime,video/webm"}
+                className="sr-only"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  setAddFile(f);
+                  if (addType === "photo") setAddFilePreview(URL.createObjectURL(f));
+                  else setAddFilePreview(null);
+                }}
               />
+            </label>
+
+            {/* Caption */}
+            <input type="text" value={addCaption} onChange={(e) => setAddCaption(e.target.value)}
+              placeholder="Caption (optional)" maxLength={160}
+              className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30 mb-3" />
+
+            {/* Premium toggle */}
+            <label className="flex items-center gap-2 mb-3 cursor-pointer select-none">
+              <input type="checkbox" checked={addPremium} onChange={(e) => setAddPremium(e.target.checked)} className="w-4 h-4 rounded accent-pink-600" />
               <span className="text-xs text-white/80">Premium (subscribers only)</span>
             </label>
-            <button
-              onClick={handleAddMedia}
-              disabled={addSaving || !addUrl.trim()}
+
+            <button onClick={handleAddMedia} disabled={addSaving || !addFile}
               className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
-              style={{ background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }}
-            >
-              {addSaving ? "Adding..." : "Add"}
+              style={{ background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }}>
+              {addSaving ? (addType === "video" ? "Uploading video..." : "Uploading...") : "Upload"}
             </button>
           </div>
         )}

@@ -1417,6 +1417,25 @@ const creatorMediaUpload = multer({
   },
 });
 
+// Creator album videos — 500MB max, disk storage
+const VIDEO_MIMES = new Set(['video/mp4', 'video/quicktime', 'video/webm', 'video/x-msvideo', 'video/x-matroska']);
+const creatorVideoTmpDir = '/tmp/pnp-creator-videos';
+if (!fs.existsSync(creatorVideoTmpDir)) fs.mkdirSync(creatorVideoTmpDir, { recursive: true });
+const creatorVideoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, creatorVideoTmpDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase() || '.mp4';
+      cb(null, `cvid-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+    },
+  }),
+  limits: { fileSize: 500 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (VIDEO_MIMES.has(file.mimetype)) cb(null, true);
+    else cb(new Error('Video files only (mp4, mov, webm)'));
+  },
+});
+
 // Magic bytes verification for disk-stored uploads (post media, large files).
 // file.buffer is empty for diskStorage — read first 12 bytes from the saved path instead.
 const verifyDiskFileType = async (req, res, next) => {
@@ -12013,6 +12032,39 @@ app.post('/api/webapp/creators/media/upload',
     const caption = typeof req.body.caption === 'string' ? req.body.caption.trim() || null : null;
     const item = await creatorMediaService.addMedia(String(user.id), {
       type: 'photo',
+      url: publicUrl,
+      thumbUrl: null,
+      caption,
+      isPremium: false,
+    });
+
+    return res.status(201).json({ success: true, item });
+  }));
+
+app.post('/api/webapp/creators/media/upload-video',
+  requireSessionAuth, creatorGuard,
+  uploadLimiter,
+  creatorVideoUpload.single('file'),
+  verifyDiskFileType,
+  asyncHandler(async (req, res) => {
+    const user = req.user || req.session?.user;
+    if (!req.file) return res.status(400).json({ success: false, error: { code: 'NO_FILE', message: 'No file provided' } });
+
+    const ext = path.extname(req.file.filename).toLowerCase() || '.mp4';
+    const filename = `${user.id}-${Date.now()}${ext}`;
+    const destPath = path.join(creatorMediaUploadDir, filename);
+    const publicUrl = `/uploads/creator-media/${filename}`;
+
+    await fs.promises.rename(req.file.path, destPath).catch(async () => {
+      // rename across filesystems fails — fallback to copy+unlink
+      await fs.promises.copyFile(req.file.path, destPath);
+      await fs.promises.unlink(req.file.path).catch(() => {});
+    });
+
+    const creatorMediaService = require('../../../services/creatorMediaService');
+    const caption = typeof req.body.caption === 'string' ? req.body.caption.trim() || null : null;
+    const item = await creatorMediaService.addMedia(String(user.id), {
+      type: 'video',
       url: publicUrl,
       thumbUrl: null,
       caption,
