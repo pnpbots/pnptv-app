@@ -7,6 +7,9 @@ import {
   getPaymentStatus,
   createPayment,
   getUsdcAvailable,
+  getBtcAvailable,
+  createBtcSubscription,
+  getBtcSubscriptionStatus,
   getLabelColor,
   validatePromoCode,
   type SubscriptionPlan,
@@ -122,6 +125,14 @@ export default function Subscribe() {
 
   // USDC / USDT / BTC stablecoin+crypto state (NOWPayments hook)
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
+
+  // BTCPay BTC+Lightning state
+  const [btcAvailable, setBtcAvailable] = useState<boolean | null>(null);
+  const [btcOrder, setBtcOrder] = useState<{ invoiceId: string; checkoutUrl: string; planName: string; usdAmount: number } | null>(null);
+  const [btcPolling, setBtcPolling] = useState(false);
+  const [btcSuccess, setBtcSuccess] = useState(false);
+  const btcPopupRef = useRef<Window | null>(null);
+  const btcPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const {
     order: usdcOrder,
     isPolling: usdcPolling,
@@ -166,6 +177,24 @@ export default function Subscribe() {
     getUsdcAvailable()
       .then((res) => setUsdcAvailable(res.available === true && res.configured === true))
       .catch(() => setUsdcAvailable(false));
+
+    getBtcAvailable()
+      .then((res) => setBtcAvailable(res.available === true))
+      .catch(() => setBtcAvailable(false));
+
+    // Resume BTC polling if user navigated away mid-payment
+    try {
+      const stored = sessionStorage.getItem("pnp_pending_btc_order");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.invoiceId && Date.now() - (parsed.createdAt || 0) < 3600000) {
+          setBtcOrder(parsed);
+          setBtcPolling(true);
+        } else {
+          sessionStorage.removeItem("pnp_pending_btc_order");
+        }
+      }
+    } catch {}
 
     // Handle ?nowpayments=success&order=<id> from hosted checkout return
     const nowpResult = searchParams.get("nowpayments");
@@ -379,12 +408,65 @@ export default function Subscribe() {
   }
 
   const handleBitcoinCheckout = useCallback(async (planId: string) => {
-    if (submitting) return;
+    if (submitting || !btcAvailable) return;
     setSelectedPlan(planId);
-    const SUBSCRIBABLE_PLAN_IDS = new Set(["prime-week-pass-7d", "monthly-pass", "prime-diamond-pass-365d"]);
-    const isSubscription = SUBSCRIBABLE_PLAN_IDS.has(planId);
-    await startNowPayments(planId, user?.email || undefined, undefined, isSubscription, "btc");
-  }, [startNowPayments, submitting, user?.email]);
+    setError(null);
+    try {
+      const result = await createBtcSubscription(planId, undefined);
+      if (!result.success || !result.checkoutUrl) {
+        setError(result.error || "Failed to create Bitcoin invoice.");
+        return;
+      }
+      const order = { invoiceId: result.invoiceId, checkoutUrl: result.checkoutUrl, planName: result.planName || planId, usdAmount: result.usdAmount || 0 };
+      setBtcOrder(order);
+      setBtcPolling(true);
+      setBtcSuccess(false);
+      sessionStorage.setItem("pnp_pending_btc_order", JSON.stringify({ ...order, createdAt: Date.now() }));
+      const w = window.screen.width, h = window.screen.height;
+      const pw = Math.min(560, w), ph = Math.min(780, h);
+      btcPopupRef.current = window.open(result.checkoutUrl, "btcpay_btc", `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes`);
+    } catch (err: any) {
+      setError(err.message || "Failed to create Bitcoin invoice.");
+    }
+  }, [submitting, btcAvailable]);
+
+  // BTC polling effect
+  useEffect(() => {
+    if (!btcOrder || !btcPolling || btcSuccess) return;
+    let cancelled = false;
+    const startedAt = Date.now();
+    const maxMs = 60 * 60 * 1000;
+    btcPollRef.current = setInterval(async () => {
+      if (cancelled || Date.now() - startedAt > maxMs) {
+        clearInterval(btcPollRef.current!);
+        setBtcPolling(false);
+        return;
+      }
+      try {
+        const data = await getBtcSubscriptionStatus(btcOrder.invoiceId);
+        if (cancelled) return;
+        if (data.completed) {
+          clearInterval(btcPollRef.current!);
+          setBtcPolling(false);
+          setBtcSuccess(true);
+          btcPopupRef.current?.close();
+          btcPopupRef.current = null;
+          sessionStorage.removeItem("pnp_pending_btc_order");
+          await refreshUser();
+          setTimeout(() => setPaymentSuccess(true), 500);
+        } else if (data.failed) {
+          clearInterval(btcPollRef.current!);
+          setBtcPolling(false);
+          sessionStorage.removeItem("pnp_pending_btc_order");
+          setError("Bitcoin payment failed or expired. Please try again.");
+        }
+      } catch {}
+    }, 10000);
+    return () => {
+      cancelled = true;
+      if (btcPollRef.current) clearInterval(btcPollRef.current);
+    };
+  }, [btcOrder, btcPolling, btcSuccess]);
 
   // Derive current tier display from user object
   function renderTierBanner() {
@@ -695,8 +777,9 @@ export default function Subscribe() {
           const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
-          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id);
-          const isDimmed = !!(usdcOrder && !usdcPaymentSuccess) && selectedPlan !== plan.id;
+          const isBtcPanelActive = !!(btcOrder && selectedPlan === plan.id);
+          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id) || isBtcPanelActive;
+          const isDimmed = (!!(usdcOrder && !usdcPaymentSuccess) || !!(btcOrder && !btcSuccess)) && selectedPlan !== plan.id;
           return (
             <div key={plan.id} className={`transition-all duration-200 ${isDimmed ? "opacity-50 pointer-events-none" : ""}`}>
             <button
@@ -800,7 +883,7 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
-                {usdcAvailable !== false && (
+                {btcAvailable && (
                   <button
                     disabled={submitting}
                     onClick={(e) => { e.stopPropagation(); handleBitcoinCheckout(plan.id); }}
@@ -825,6 +908,32 @@ export default function Subscribe() {
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
                 />
+              </div>
+            )}
+            {btcOrder && selectedPlan === plan.id && !btcSuccess && (
+              <div className="mt-0 rounded-t-none rounded-b-xl border border-t-0 border-orange-500/30 bg-orange-500/5 p-4">
+                <p className="text-sm font-semibold text-orange-400 mb-2">
+                  {btcPolling ? "Waiting for Bitcoin payment..." : "Bitcoin Invoice"}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { btcPopupRef.current = window.open(btcOrder.checkoutUrl, "btcpay_btc", "width=560,height=780"); }}
+                    className="flex-1 text-xs bg-orange-500/20 text-orange-300 rounded-lg py-2 px-3 hover:bg-orange-500/30"
+                  >
+                    Open BTCPay
+                  </button>
+                  <button
+                    onClick={() => { setBtcOrder(null); setBtcPolling(false); sessionStorage.removeItem("pnp_pending_btc_order"); if (btcPollRef.current) clearInterval(btcPollRef.current); }}
+                    className="text-xs text-gray-500 px-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {btcOrder && selectedPlan === plan.id && btcSuccess && (
+              <div className="mt-0 rounded-t-none rounded-b-xl border border-t-0 border-green-500/30 bg-green-500/5 p-4 text-center">
+                <p className="text-green-400 font-semibold">Bitcoin payment confirmed!</p>
               </div>
             )}
             </div>
@@ -855,19 +964,22 @@ export default function Subscribe() {
           const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
-          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id);
-          const isDimmed = !!(usdcOrder && !usdcPaymentSuccess) && selectedPlan !== plan.id;
+          const isBtcPanelActive = !!(btcOrder && selectedPlan === plan.id);
+          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id) || isBtcPanelActive;
+          const isDimmed = (!!(usdcOrder && !usdcPaymentSuccess) || !!(btcOrder && !btcSuccess)) && selectedPlan !== plan.id;
+          const primeBtnClass = [
+            "w-full text-left p-4 border-2 transition-all duration-200",
+            isPanelActive ? "rounded-t-xl rounded-b-none" : "rounded-xl",
+            isSelected
+              ? "border-[#D4007A] bg-[#D4007A]/10" + (isPanelActive ? " border-b-transparent" : "")
+              : "border-white/10 bg-white/5 hover:border-white/20",
+            isRecommended ? "ring-1 ring-[#FFB454]/40" : "",
+          ].join(" ");
           return (
             <div key={plan.id} className={`transition-all duration-200 ${isDimmed ? "opacity-50 pointer-events-none" : ""}`}>
             <button
               onClick={() => setSelectedPlan(plan.id)}
-              className={`w-full text-left p-4 border-2 transition-all duration-200 ${
-                isPanelActive ? "rounded-t-xl rounded-b-none" : "rounded-xl"
-              } ${
-                isSelected
-                  ? `border-[#D4007A] bg-[#D4007A]/10${isPanelActive ? " border-b-transparent" : ""}`
-                  : "border-white/10 bg-white/5 hover:border-white/20"
-              } ${isRecommended ? "ring-1 ring-[#FFB454]/40" : ""}`}
+              className={primeBtnClass}
             >
               <div className="flex items-start justify-between mb-2">
                 <div>
@@ -996,7 +1108,7 @@ export default function Subscribe() {
                     </button>
                   )
                 )}
-                {usdcAvailable !== false && (
+                {btcAvailable && (
                   <button
                     disabled={submitting}
                     onClick={(e) => { e.stopPropagation(); handleBitcoinCheckout(plan.id); }}
@@ -1021,6 +1133,32 @@ export default function Subscribe() {
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
                 />
+              </div>
+            )}
+            {btcOrder && selectedPlan === plan.id && !btcSuccess && (
+              <div className="mt-0 rounded-t-none rounded-b-xl border border-t-0 border-orange-500/30 bg-orange-500/5 p-4">
+                <p className="text-sm font-semibold text-orange-400 mb-2">
+                  {btcPolling ? "Waiting for Bitcoin payment..." : "Bitcoin Invoice"}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { btcPopupRef.current = window.open(btcOrder.checkoutUrl, "btcpay_btc", "width=560,height=780"); }}
+                    className="flex-1 text-xs bg-orange-500/20 text-orange-300 rounded-lg py-2 px-3 hover:bg-orange-500/30"
+                  >
+                    Open BTCPay
+                  </button>
+                  <button
+                    onClick={() => { setBtcOrder(null); setBtcPolling(false); sessionStorage.removeItem("pnp_pending_btc_order"); if (btcPollRef.current) clearInterval(btcPollRef.current); }}
+                    className="text-xs text-gray-500 px-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {btcOrder && selectedPlan === plan.id && btcSuccess && (
+              <div className="mt-0 rounded-t-none rounded-b-xl border border-t-0 border-green-500/30 bg-green-500/5 p-4 text-center">
+                <p className="text-green-400 font-semibold">Bitcoin payment confirmed!</p>
               </div>
             )}
             </div>

@@ -24,6 +24,9 @@ import {
   getCreatorCallPackages,
   getBookingOptions,
   createCallCheckoutNowPayments,
+  createCallCheckoutBtc,
+  getBtcAvailable,
+  getBtcSubscriptionStatus,
   createCallCheckoutEpayco,
   getBookingPaymentStatus,
   assertPaymentUrl,
@@ -188,6 +191,11 @@ export function BookCallModal({
   // Join Call state (loading/error shown while navigating)
   const [joinCallLoading, setJoinCallLoading] = useState(false);
   const [joinCallError, setJoinCallError] = useState<string | null>(null);
+  const [btcAvailable, setBtcAvailable] = useState(false);
+
+  useEffect(() => {
+    getBtcAvailable().then((r) => setBtcAvailable(r.available === true)).catch(() => {});
+  }, []);
 
   // Permission preflight state
   const [permissionWarning, setPermissionWarning] = useState<"camera" | "microphone" | "both" | null>(null);
@@ -536,27 +544,27 @@ export function BookCallModal({
         return;
       }
 
-      // BTC + Lightning — use NowPayments with payCurrency:'btc', open a centered popup
+      // BTC + Lightning — BTCPay Server (hidden until BTC node is configured)
       if (provider === "btc") {
-        const btcRes = await createCallCheckoutNowPayments(
+        const btcRes = await createCallCheckoutBtc(
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
           selectedSlot?.endUtc ?? undefined,
-          "btc"
         );
-        if (btcRes.invoiceUrl) {
-          const safeUrl = assertPaymentUrl(btcRes.invoiceUrl);
+        if (btcRes.checkoutUrl) {
+          const safeUrl = assertPaymentUrl(btcRes.checkoutUrl);
           const pw = 560, ph = 780;
           const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
           const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
           paymentPopupRef.current = window.open(
-            safeUrl, "nowpayments_btc_checkout",
+            safeUrl, "btcpay_btc_checkout",
             `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
           );
         }
-        setDashPaymentId(btcRes.paymentId ?? null);
+        const btcInvoiceId = btcRes.invoiceId;
+        setDashPaymentId(btcInvoiceId ?? null);
 
-        const pollId = btcRes.bookingId ?? btcRes.paymentId;
+        const pollId = btcRes.bookingId ?? btcInvoiceId;
         if (pollId) {
           if (dashPollRef.current) clearInterval(dashPollRef.current);
 
@@ -1201,7 +1209,7 @@ export function BookCallModal({
           >
             ⚡ Crypto
           </button>
-          <button
+          {btcAvailable && <button
             type="button"
             onClick={() => setProvider("btc")}
             className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
@@ -1210,7 +1218,7 @@ export function BookCallModal({
               : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
             ₿ BTC −20%
-          </button>
+          </button>}
         </div>
       </div>
 

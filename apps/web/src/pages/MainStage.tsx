@@ -358,11 +358,9 @@ export default function MainStage() {
   }, [isGuestMode]);
 
   // ── In-room chat ─────────────────────────────────────────────────────────────
-  const [chatOpen, setChatOpen] = useState(false);
+  const [chatOverlayVisible, setChatOverlayVisible] = useState(true);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
-  const [unreadChat, setUnreadChat] = useState(0);
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -370,31 +368,12 @@ export default function MainStage() {
     const onChatMessage = (msg: ChatMessage) => {
       setChatMessages((prev) => {
         const next = [...prev, msg];
-        return next.length > 100 ? next.slice(next.length - 100) : next;
-      });
-      setChatOpen((open) => {
-        if (!open) setUnreadChat((n) => n + 1);
-        return open;
+        return next.length > 200 ? next.slice(next.length - 200) : next;
       });
     };
     socket.on('mainstage:chat-message', onChatMessage);
     return () => { socket.off('mainstage:chat-message', onChatMessage); };
   }, []);
-
-  // Auto-scroll to bottom when chat opens or new message arrives
-  useEffect(() => {
-    if (chatOpen && chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [chatMessages, chatOpen]);
-
-  // Focus input when chat opens
-  useEffect(() => {
-    if (chatOpen && chatInputRef.current) {
-      chatInputRef.current.focus();
-      setUnreadChat(0);
-    }
-  }, [chatOpen]);
 
   const handleChatSend = useCallback(() => {
     const text = chatInput.trim();
@@ -1366,16 +1345,16 @@ export default function MainStage() {
           </button>
         )}
         <FullscreenToggle targetRef={stageRootRef} />
-        {/* Chat toggle button */}
+        {/* Chat overlay toggle */}
         <button
           type="button"
-          aria-label="Toggle chat"
-          title="Chat"
-          onClick={() => { setChatOpen((o) => !o); if (!chatOpen) setUnreadChat(0); }}
-          className="relative min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+          aria-label={chatOverlayVisible ? "Hide chat messages" : "Show chat messages"}
+          title={chatOverlayVisible ? "Hide messages" : "Show messages"}
+          onClick={() => setChatOverlayVisible((o) => !o)}
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
-            background: chatOpen ? "linear-gradient(135deg,#D4007A,#7B61FF)" : "rgba(20,20,30,0.85)",
-            border: chatOpen ? "1px solid rgba(212,0,122,0.60)" : "1px solid rgba(212,0,122,0.35)",
+            background: chatOverlayVisible ? "linear-gradient(135deg,#D4007A,#7B61FF)" : "rgba(20,20,30,0.85)",
+            border: chatOverlayVisible ? "1px solid rgba(212,0,122,0.60)" : "1px solid rgba(212,0,122,0.35)",
             backdropFilter: "blur(6px)",
             boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
           }}
@@ -1383,14 +1362,6 @@ export default function MainStage() {
           <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
           </svg>
-          {!chatOpen && unreadChat > 0 && (
-            <span
-              className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-0.5 flex items-center justify-center rounded-full text-[9px] font-bold text-white"
-              style={{ background: "#D4007A" }}
-            >
-              {unreadChat > 9 ? "9+" : unreadChat}
-            </span>
-          )}
         </button>
         <button
           type="button"
@@ -1648,6 +1619,43 @@ export default function MainStage() {
         </LiveKitRoom>
       )}
 
+      {/* ── Always-visible chat input — sits below the participant bottom bar ── */}
+      {!isViewerMode && (
+        <div
+          className="flex-shrink-0 flex items-center gap-2 px-3 py-2 z-40"
+          style={{
+            background: "rgba(8,8,14,0.88)",
+            backdropFilter: "blur(16px)",
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+            paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))",
+          }}
+        >
+          <input
+            ref={chatInputRef}
+            type="text"
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
+            placeholder={user ? "Say something…" : "Sign in to chat"}
+            disabled={!user}
+            maxLength={300}
+            className="flex-1 min-h-[38px] px-3 rounded-xl text-sm text-white placeholder-white/30 bg-white/[0.07] border border-white/10 focus:outline-none focus:border-pnp-accent/50 disabled:opacity-40"
+          />
+          <button
+            type="button"
+            onClick={handleChatSend}
+            disabled={!user || !chatInput.trim()}
+            aria-label="Send message"
+            className="flex-shrink-0 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl transition-all active:scale-[0.94] disabled:opacity-30 disabled:cursor-not-allowed"
+            style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+          >
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       <ConnectionOverlay
         connState={isViewerMode ? viewerConnState : connState}
         errorMessage={isViewerMode ? (viewerError ?? null) : (camError || error)}
@@ -1678,115 +1686,65 @@ export default function MainStage() {
         dpnsHandle={null}
       />
 
-      {/* ── In-room chat panel ─────────────────────────────────────────────── */}
+      {/* ── YouTube-style chat messages overlay ─────────────────────────────── */}
       <style>{`
         @keyframes mainstage-float-up {
           0%   { transform: translateY(0) scale(1);   opacity: 1; }
           80%  { transform: translateY(-60vh) scale(1.2); opacity: 0.9; }
           100% { transform: translateY(-80vh) scale(0.8); opacity: 0; }
         }
+        @keyframes chat-msg-in {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
       `}</style>
 
-      {chatOpen && (
+      {chatOverlayVisible && !isViewerMode && chatMessages.length > 0 && (
         <div
-          className="fixed top-0 right-0 bottom-0 flex flex-col"
+          aria-live="polite"
+          aria-label="Chat messages"
+          className="absolute left-3 pointer-events-none z-30 flex flex-col justify-end gap-1"
           style={{
-            width: "min(320px, 100vw)",
-            zIndex: 45,
-            background: "rgba(8,8,14,0.97)",
-            borderLeft: "1px solid rgba(255,255,255,0.08)",
-            backdropFilter: "blur(20px)",
-            paddingTop: "env(safe-area-inset-top, 0px)",
-            paddingBottom: "env(safe-area-inset-bottom, 0px)",
+            bottom: "calc(116px + env(safe-area-inset-bottom, 0px))",
+            maxWidth: "min(280px, 58vw)",
+            maxHeight: "38vh",
+            overflow: "hidden",
           }}
         >
-          {/* Chat header */}
-          <div
-            className="flex-shrink-0 flex items-center justify-between px-4 py-3"
-            style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}
-          >
-            <div className="flex items-center gap-2">
-              <svg className="w-4 h-4 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
-              </svg>
-              <span className="text-white font-semibold text-sm">Chat</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setChatOpen(false)}
-              aria-label="Close chat"
-              className="min-h-[32px] min-w-[32px] flex items-center justify-center rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-all"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}>
-            {chatMessages.length === 0 && (
-              <p className="text-white/30 text-xs text-center py-8">No messages yet. Say hi!</p>
-            )}
-            {chatMessages.map((msg) => {
-              const ts = new Date(msg.timestamp);
-              const hhmm = `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}`;
-              const isMe = user && String(msg.userId) === String(user.id);
-              return (
-                <div key={msg.id} className={`flex flex-col gap-0.5 ${isMe ? "items-end" : "items-start"}`}>
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="text-[10px] font-semibold"
-                      style={{ background: "linear-gradient(90deg,#D4007A,#7B61FF)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}
-                    >
-                      {msg.displayName}
-                    </span>
-                    <span className="text-white/25 text-[9px] tabular-nums">{hhmm}</span>
-                  </div>
-                  <div
-                    className="max-w-[240px] px-3 py-1.5 rounded-2xl text-xs text-white/90 break-words"
+          {chatMessages.slice(-10).map((msg) => {
+            const isMe = user && String(msg.userId) === String(user.id);
+            return (
+              <div
+                key={msg.id}
+                className="flex flex-col"
+                style={{ animation: "chat-msg-in 0.2s ease-out" }}
+              >
+                <div
+                  className="inline-flex flex-col px-2.5 py-1 rounded-2xl self-start"
+                  style={{
+                    background: isMe
+                      ? "linear-gradient(135deg,rgba(212,0,122,0.55),rgba(123,97,255,0.45))"
+                      : "rgba(0,0,0,0.58)",
+                    backdropFilter: "blur(8px)",
+                    border: isMe ? "1px solid rgba(212,0,122,0.30)" : "1px solid rgba(255,255,255,0.06)",
+                    maxWidth: "100%",
+                  }}
+                >
+                  <span
+                    className="text-[10px] font-bold leading-tight"
                     style={{
-                      background: isMe ? "linear-gradient(135deg,rgba(212,0,122,0.25),rgba(123,97,255,0.20))" : "rgba(255,255,255,0.07)",
-                      border: isMe ? "1px solid rgba(212,0,122,0.25)" : "1px solid rgba(255,255,255,0.08)",
+                      background: isMe ? "rgba(255,255,255,0.9)" : "linear-gradient(90deg,#FF6BB0,#A990FF)",
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
                     }}
                   >
-                    {msg.text}
-                  </div>
+                    {msg.displayName}
+                  </span>
+                  <span className="text-[12px] leading-snug text-white/92 break-words">{msg.text}</span>
                 </div>
-              );
-            })}
-            <div ref={chatEndRef} />
-          </div>
-
-          {/* Input */}
-          <div
-            className="flex-shrink-0 flex items-center gap-2 px-3 py-2"
-            style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}
-          >
-            <input
-              ref={chatInputRef}
-              type="text"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
-              placeholder={user ? "Say something…" : "Sign in to chat"}
-              disabled={!user}
-              maxLength={300}
-              className="flex-1 min-h-[36px] px-3 rounded-xl text-sm text-white placeholder-white/30 bg-white/[0.06] border border-white/10 focus:outline-none focus:border-pnp-accent/50 disabled:opacity-40"
-            />
-            <button
-              type="button"
-              onClick={handleChatSend}
-              disabled={!user || !chatInput.trim()}
-              aria-label="Send message"
-              className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl transition-all active:scale-[0.94] disabled:opacity-30 disabled:cursor-not-allowed"
-              style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
-            >
-              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-              </svg>
-            </button>
-          </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

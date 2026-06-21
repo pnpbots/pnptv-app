@@ -25,6 +25,9 @@ import {
   createDashSubscription,
   getDashAvailable,
   prepareUsdcSubscription,
+  getBtcAvailable,
+  createBtcSubscription,
+  getBtcSubscriptionStatus,
   getUserLabel,
   getLabelColor,
   assertPaymentUrl,
@@ -193,8 +196,9 @@ export default function Profile() {
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [subscribeEmail, setSubscribeEmail] = useState("");
   const [subscribeEmailError, setSubscribeEmailError] = useState<string | null>(null);
-  const [subscribeProvider, setSubscribeProvider] = useState<"dash" | "nowpayments-btc">("dash");
+  const [subscribeProvider, setSubscribeProvider] = useState<"dash" | "btc">("dash");
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
+  const [btcAvailable, setBtcAvailable] = useState(false);
   const [subscribePaymentLoading, setSubscribePaymentLoading] = useState(false);
   const [subscribePaymentId, setSubscribePaymentId] = useState<string | null>(null);
   const [subscribeAwaitingPayment, setSubscribeAwaitingPayment] = useState(false);
@@ -204,6 +208,9 @@ export default function Profile() {
   // Overflow menu (own profile More button)
   const [overflowOpen, setOverflowOpen] = useState(false);
   const overflowRef = useRef<HTMLDivElement>(null);
+  // Fixed-position coords for the dropdown — bypasses the overflow-y:auto scroll
+  // container on mobile so menu items are never clipped below the viewport.
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
 
   // Creator-interest opt-in: the milestone/eligibility card is only rendered after
   // the user clicks "Become a Creator" from the overflow menu (or once before).
@@ -572,6 +579,9 @@ export default function Profile() {
       getDashAvailable()
         .then((res) => setDashAvailable(res.available === true && res.configured === true))
         .catch(() => setDashAvailable(false));
+      getBtcAvailable()
+        .then((res) => setBtcAvailable(res.available === true))
+        .catch(() => setBtcAvailable(false));
     }
   };
 
@@ -602,19 +612,19 @@ export default function Profile() {
       }
       setSubscribeEmailError(null);
 
-      if (subscribeProvider === "nowpayments-btc") {
-        // Bitcoin via NowPayments — call /api/webapp/payments/usdc/prepare with payCurrency:'btc'
-        const btcRes = await prepareUsdcSubscription("creator_monthly", trimmed, creatorId);
-        if (btcRes.success && btcRes.invoiceUrl) {
-          const pw = 500, ph = 720;
+      if (subscribeProvider === "btc") {
+        // Bitcoin via BTCPay Server
+        const btcRes = await createBtcSubscription("creator_monthly", creatorId);
+        if (btcRes.success && btcRes.checkoutUrl) {
+          const pw = 560, ph = 780;
           const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
           const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
           window.open(
-            assertPaymentUrl(btcRes.invoiceUrl),
-            "nowpayments_btc_checkout",
+            assertPaymentUrl(btcRes.checkoutUrl),
+            "btcpay_btc_checkout",
             `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
           );
-          setSubscribePaymentId(btcRes.orderId);
+          setSubscribePaymentId(btcRes.invoiceId);
           setSubscribeAwaitingPayment(true);
         } else {
           setSubscribeError(btcRes.error || p.failedToCreatePayment);
@@ -1291,10 +1301,16 @@ export default function Profile() {
                   )}
                   <span className="hidden sm:inline">Share</span>
                 </button>
-                <div className="relative" ref={overflowRef}>
+                <div ref={overflowRef}>
                   <button
                     ref={overflowTriggerRef}
-                    onClick={() => setOverflowOpen((v) => !v)}
+                    onClick={() => {
+                      if (!overflowOpen) {
+                        const rect = overflowTriggerRef.current?.getBoundingClientRect();
+                        if (rect) setMenuPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+                      }
+                      setOverflowOpen((v) => !v);
+                    }}
                     aria-haspopup="menu"
                     aria-expanded={overflowOpen}
                     aria-label="More actions"
@@ -1305,11 +1321,11 @@ export default function Profile() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
                     </svg>
                   </button>
-                  {overflowOpen && (
+                  {overflowOpen && menuPos && (
                     <div
                       role="menu"
-                      className="absolute right-0 top-full mt-2 w-56 rounded-xl shadow-2xl z-[60]"
-                      style={{ background: "rgba(28,28,30,0.97)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)", maxHeight: "calc(100dvh - 120px)", overflowY: "auto" }}
+                      className="fixed w-56 rounded-xl shadow-2xl z-[60]"
+                      style={{ top: menuPos.top, right: menuPos.right, background: "rgba(28,28,30,0.97)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)", maxHeight: `calc(100dvh - ${menuPos.top + 8}px)`, overflowY: "auto" }}
                     >
                       {profile.creatorStatus === "active" && (() => {
                         const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
@@ -1513,7 +1529,7 @@ export default function Profile() {
                 <div className="flex justify-end gap-2 mt-1">
                   <button
                     onClick={() => setShowReportModal(true)}
-                    className="text-xs px-3 py-1 rounded-full transition-colors"
+                    className="text-xs px-3 min-h-[36px] rounded-full transition-colors"
                     style={{ background: "rgba(255,180,84,0.08)", color: "#FFB454", border: "1px solid rgba(255,180,84,0.25)" }}
                     title={p.reportUser}
                   >
@@ -1522,7 +1538,7 @@ export default function Profile() {
                   <button
                     onClick={handleBlock}
                     disabled={blockLoading}
-                    className="text-xs px-3 py-1 rounded-full disabled:opacity-50 transition-colors"
+                    className="text-xs px-3 min-h-[36px] rounded-full disabled:opacity-50 transition-colors"
                     style={isBlocked
                       ? { background: "rgba(255,59,48,0.12)", color: "#FF453A", border: "1px solid rgba(255,59,48,0.3)" }
                       : { background: "rgba(255,255,255,0.05)", color: "var(--pnp-text-secondary)", border: "1px solid rgba(255,255,255,0.1)" }
@@ -1614,16 +1630,18 @@ export default function Profile() {
                         🥷 Dash
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setSubscribeProvider("nowpayments-btc")}
-                      className="flex-1 py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
-                      style={subscribeProvider === "nowpayments-btc"
-                        ? { background: "rgba(247,147,26,0.20)", color: "#F7931A", borderColor: "rgba(247,147,26,0.5)" }
-                        : { background: "rgba(247,147,26,0.06)", color: "#F7931A", borderColor: "rgba(247,147,26,0.2)" }}
-                    >
-                      ₿ Bitcoin −20%
-                    </button>
+                    {btcAvailable && (
+                      <button
+                        type="button"
+                        onClick={() => setSubscribeProvider("btc")}
+                        className="flex-1 py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
+                        style={subscribeProvider === "btc"
+                          ? { background: "rgba(247,147,26,0.20)", color: "#F7931A", borderColor: "rgba(247,147,26,0.5)" }
+                          : { background: "rgba(247,147,26,0.06)", color: "#F7931A", borderColor: "rgba(247,147,26,0.2)" }}
+                      >
+                        ₿ Bitcoin −20%
+                      </button>
+                    )}
                   </div>
                 </div>
 

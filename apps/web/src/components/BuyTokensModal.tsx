@@ -6,7 +6,9 @@ import {
   getTokenPackages,
   buyTokens,
   buyTokensWithCard,
-  buyTokensWithNowPayments,
+  buyTokensWithBtc,
+  getBtcAvailable,
+  getBtcSubscriptionStatus,
   getDashPaymentDetails,
   getDashSubscriptionStatus,
   assertPaymentUrl,
@@ -51,6 +53,11 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
   const [btcPayment, setBtcPayment] = useState<{ invoiceId: string; checkoutUrl: string } | null>(null);
   const [btcSuccess, setBtcSuccess] = useState(false);
   const [btcPolling, setBtcPolling] = useState(false);
+  const [btcAvailable, setBtcAvailable] = useState(false);
+
+  useEffect(() => {
+    getBtcAvailable().then((r) => setBtcAvailable(r.available === true)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -194,17 +201,16 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
     }
   };
 
-  const handleBuyTokensBtcNow = async (pkg: TokenPackage) => {
+  const handleBuyTokensBtc = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
     setBuyError(null);
     try {
-      const result = await buyTokensWithNowPayments(pkg.id, 'btc');
+      const result = await buyTokensWithBtc(pkg.id);
       if (!result.success || !result.invoiceId) {
         setBuyError(result.error || "Failed to create Bitcoin invoice. Please try again.");
         setBuyingPackage(null);
         return;
       }
-      // Open NowPayments hosted checkout in a centered popup
       const checkoutUrl = result.checkoutUrl;
       setBtcPayment({ invoiceId: result.invoiceId, checkoutUrl });
       setBtcPolling(true);
@@ -214,17 +220,14 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
       const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
       btcPopupRef.current = window.open(
         checkoutUrl,
-        'nowpayments_btc_checkout',
+        'btcpay_btc_checkout',
         `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
       );
-      // Poll the dash_subscription_orders status via the USDC status endpoint
-      // (the token purchase order is stored in dash_subscription_orders with plan_id='token_purchase')
-      const pollOrderId = result.invoiceId;
+      const pollInvoiceId = result.invoiceId;
       if (btcPollRef.current) clearInterval(btcPollRef.current);
       btcPollRef.current = setInterval(async () => {
         try {
-          const { getUsdcSubscriptionStatus } = await import('@/lib/api');
-          const statusRes = await getUsdcSubscriptionStatus(pollOrderId);
+          const statusRes = await getBtcSubscriptionStatus(pollInvoiceId);
           if (statusRes.completed) {
             if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
             btcPopupRef.current?.close();
@@ -336,8 +339,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               </svg>
             </button>
 
-            {/* Bitcoin / Lightning */}
-            <button
+            {/* Bitcoin / Lightning — only shown when BTCPay has BTC configured */}
+            {btcAvailable && <button
               onClick={() => setBuyMethod('btc')}
               className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-orange-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
             >
@@ -351,7 +354,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-            </button>
+            </button>}
           </div>
         )}
 
@@ -571,7 +574,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     key={pkg.id}
                     onClick={() => {
                       if (buyMethod === 'card') return handleBuyTokensCard(pkg);
-                      if (buyMethod === 'btc') return handleBuyTokensBtcNow(pkg);
+                      if (buyMethod === 'btc') return handleBuyTokensBtc(pkg);
                       return handleBuyTokens(pkg);
                     }}
                     disabled={buyingPackage === pkg.id}

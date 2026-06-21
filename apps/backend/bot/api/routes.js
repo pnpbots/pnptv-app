@@ -9624,8 +9624,192 @@ app.get('/api/webapp/payments/lightning/details/:invoiceId', requireSessionAuth,
   }
 });
 
-// BTC-via-BTCPay routes removed — Bitcoin payments now use NowPayments (pay_currency:'btc').
-// Use POST /api/webapp/payments/usdc/prepare or /usdc/subscribe with payCurrency:'btc'.
+// ─────────────────────────────────────────────────────────────────────────────
+// BTCPay — Bitcoin + Lightning payments
+// Buttons are hidden on the frontend when BTC is not yet configured in BTCPay.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const btcAvailableLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// GET /api/webapp/payments/btc/available — returns true only if BTC is configured in the BTCPay store
+app.get('/api/webapp/payments/btc/available', btcAvailableLimiter, asyncHandler(async (req, res) => {
+  if (!process.env.BTCPAY_API_KEY || !process.env.BTCPAY_STORE_ID || !process.env.BTCPAY_URL) {
+    return res.json({ available: false, configured: false });
+  }
+  try {
+    const resp = await axios.get(
+      `${process.env.BTCPAY_URL}/api/v1/stores/${process.env.BTCPAY_STORE_ID}/payment-methods`,
+      { headers: { Authorization: `token ${process.env.BTCPAY_API_KEY}` }, timeout: 5000 }
+    );
+    const methods = Array.isArray(resp.data) ? resp.data : [];
+    const hasBtc = methods.some(m => m.paymentMethodId === 'BTC-CHAIN' || m.paymentMethodId === 'BTC-LN' || m.paymentMethodId === 'BTC-LightningNetwork');
+    return res.json({ available: hasBtc, configured: hasBtc });
+  } catch {
+    return res.json({ available: false, configured: false });
+  }
+}));
+
+const btcSubscribeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 3,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  message: { success: false, error: 'Too many payment requests. Please wait a few minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// POST /api/webapp/payments/btc/create — create a BTCPay BTC+Lightning invoice for a subscription plan
+app.post('/api/webapp/payments/btc/create', requireSessionAuth, btcSubscribeLimiter, asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const { planId, creatorId } = req.body;
+  if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
+
+  const userId = String(user.telegram_id || user.id);
+  const { query: dbQuery } = require('../../config/postgres');
+  const { createInvoice: createBtcpayInvoice } = require('../../config/btcpay');
+  const webappUrl = process.env.WEBAPP_URL || 'https://pnptv.app';
+
+  let usdAmount, planDisplayName;
+
+  if (planId === 'creator_monthly') {
+    if (!creatorId) return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
+    if (String(creatorId) === userId) return res.status(400).json({ success: false, error: 'You cannot subscribe to yourself' });
+    const creatorRes = await dbQuery('SELECT creator_price_usd, username, first_name FROM users WHERE id = $1 AND creator_status = $2', [String(creatorId), 'active']);
+    if (!creatorRes.rows[0]) return res.status(404).json({ success: false, error: 'Creator not found' });
+    const price = parseFloat(creatorRes.rows[0].creator_price_usd);
+    if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
+    usdAmount = price;
+    planDisplayName = 'Premium subscription';
+  } else {
+    const planRes = await dbQuery('SELECT * FROM plans WHERE id = $1 AND active = true', [planId]);
+    const plan = planRes.rows[0];
+    if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+    const basePrice = parseFloat(plan.price);
+    usdAmount = plan.payment_method === 'crypto' ? basePrice : Math.round(basePrice * 0.80 * 100) / 100;
+    planDisplayName = plan.display_name || plan.name;
+  }
+
+  // Dedup: resume existing pending BTC invoice within 23h
+  const existingRes = await dbQuery(
+    `SELECT btcpay_invoice_id, metadata FROM dash_subscription_orders
+     WHERE user_id = $1 AND plan_id = $2 AND status = 'pending'
+       AND metadata->>'provider' = 'btcpay_btc'
+       AND created_at > NOW() - INTERVAL '23 hours'
+     ORDER BY created_at DESC LIMIT 1`,
+    [userId, planId]
+  );
+  if (existingRes.rows.length > 0) {
+    const meta = existingRes.rows[0].metadata || {};
+    if (meta.checkoutUrl) {
+      return res.json({ success: true, invoiceId: existingRes.rows[0].btcpay_invoice_id, checkoutUrl: meta.checkoutUrl, planName: planDisplayName, usdAmount, resumed: true });
+    }
+  }
+
+  const orderId = `pnptv-btc-${userId}-${Date.now()}`;
+  let invoice;
+  try {
+    invoice = await createBtcpayInvoice({
+      amount: usdAmount,
+      currency: 'USD',
+      orderId,
+      userId,
+      planId,
+      metadata: { provider: 'btcpay_btc', flow: 'subscription', creatorId: creatorId || null },
+      redirectUrl: `${webappUrl}/subscribe`,
+      paymentMethods: ['BTC-LightningNetwork', 'BTC'],
+    });
+  } catch (err) {
+    logger.error('[BTC] Invoice creation failed', { userId, planId, error: err.message });
+    return res.status(502).json({ success: false, error: 'Could not create BTC invoice. Please try again.', code: 'BTCPAY_BTC_ERROR' });
+  }
+
+  await dbQuery(
+    `INSERT INTO dash_subscription_orders (user_id, plan_id, usd_amount, btcpay_invoice_id, status, creator_id, metadata)
+     VALUES ($1, $2, $3, $4, 'pending', $5, $6)
+     ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
+    [userId, planId, usdAmount, invoice.invoiceId, creatorId ? String(creatorId) : null,
+     JSON.stringify({ provider: 'btcpay_btc', flow: 'subscription', checkoutUrl: invoice.checkoutLink })]
+  );
+
+  logger.info('[BTC] Subscription invoice created', { userId, planId, orderId: invoice.invoiceId, usdAmount });
+  return res.json({ success: true, invoiceId: invoice.invoiceId, checkoutUrl: invoice.checkoutLink, planName: planDisplayName, usdAmount });
+}));
+
+const btcStatusLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// GET /api/webapp/payments/btc/status/:invoiceId — poll BTC invoice status from DB
+// Checks both dash_subscription_orders (subscription/creator) and token_purchases (wallet top-up).
+app.get('/api/webapp/payments/btc/status/:invoiceId', requireSessionAuth, btcStatusLimiter, asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const { invoiceId } = req.params;
+  if (!invoiceId || !/^[A-Za-z0-9_-]{5,100}$/.test(invoiceId)) {
+    return res.status(400).json({ success: false, error: 'Invalid invoiceId' });
+  }
+  const userId = String(user.telegram_id || user.id);
+  const { query: dbQuery } = require('../../config/postgres');
+
+  // Check subscriptions/creator payments first
+  const subResult = await dbQuery(
+    `SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2 LIMIT 1`,
+    [invoiceId, userId]
+  );
+  if (subResult.rows.length > 0) {
+    const { status } = subResult.rows[0];
+    return res.json({
+      success: true, status,
+      completed: status === 'completed',
+      confirming: status === 'confirming' || status === 'confirmed',
+      failed: status === 'failed' || status === 'expired',
+    });
+  }
+
+  // Fall back to token purchases (integer user_id in token_purchases)
+  const tokResult = await dbQuery(
+    `SELECT tp.status FROM token_purchases tp
+     JOIN users u ON u.id = tp.user_id
+     WHERE tp.btcpay_invoice_id = $1 AND (u.telegram_id::text = $2 OR u.id::text = $2) LIMIT 1`,
+    [invoiceId, userId]
+  );
+  if (tokResult.rows.length > 0) {
+    const { status } = tokResult.rows[0];
+    return res.json({
+      success: true, status,
+      completed: status === 'completed',
+      confirming: status === 'confirming' || status === 'confirmed',
+      failed: status === 'failed' || status === 'expired',
+    });
+  }
+
+  return res.status(404).json({ success: false, error: 'Order not found' });
+}));
+
+// POST /api/wallet/buy-btc — BTCPay BTC+Lightning invoice for token purchase (20% discount)
+app.post('/api/wallet/buy-btc', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session.user;
+  const { packageId } = req.body;
+  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
+  const userId = String(user.telegram_id || user.id);
+  try {
+    const result = await TokenCheckoutService.createBtcCheckout(userId, packageId);
+    return res.json(result);
+  } catch (err) {
+    logger.error('[wallet/buy-btc]', { error: err.message, code: err.code });
+    if (err.code === 'INVALID_PACKAGE') return res.status(404).json({ success: false, error: err.message });
+    return res.status(502).json({ success: false, error: 'Could not create BTC invoice. Please try again.' });
+  }
+}));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NOWPayments — USDC / USDT stablecoin payments
@@ -11010,10 +11194,14 @@ app.post('/api/webapp/book-call/checkout',
   asyncHandler(callBookingController.createCheckout));
 
 // NowPayments (crypto) checkout for call packages — accepts optional payCurrency ('btc', 'btcln', etc.)
-// Replaces the defunct /api/webapp/book-call/checkout/btc (BTCPay BTC route).
 app.post('/api/webapp/book-call/checkout/nowpayments',
   requireSessionAuth,
   asyncHandler(callBookingController.createCheckoutNowPayments));
+
+// BTCPay BTC+Lightning checkout for call packages (hidden on frontend until BTC node is configured)
+app.post('/api/webapp/book-call/checkout/btc',
+  requireSessionAuth,
+  asyncHandler(callBookingController.createCheckoutBtc));
 
 // Member: upcoming confirmed bookings — must be before /:bookingId catch-all
 app.get('/api/webapp/bookings/upcoming',

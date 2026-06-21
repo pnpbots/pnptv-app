@@ -5940,6 +5940,7 @@ export interface BookingOptionsResponse {
   hasMore?: boolean;
   isLive?: boolean;
   liveMessage?: string | null;
+  isOnline?: boolean;
 }
 
 export function getCreatorCallPackages(
@@ -6074,8 +6075,42 @@ export function createCallCheckoutNowPayments(
     body,
   });
 }
-// createCallCheckoutBtc removed — BTCPay BTC route is gone.
-// Use createCallCheckoutNowPayments with payCurrency:'btc' instead.
+export function createCallCheckoutBtc(
+  packageId: number,
+  startTimeUtc?: string,
+  endTimeUtc?: string
+): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; amountUsd: number; bookingId?: string }> {
+  const body: Record<string, unknown> = { packageId };
+  if (startTimeUtc) body.startTimeUtc = startTimeUtc;
+  if (endTimeUtc) body.endTimeUtc = endTimeUtc;
+  return request("/api/webapp/book-call/checkout/btc", { method: "POST", body });
+}
+
+export function getBtcAvailable(): Promise<{ available: boolean; configured: boolean }> {
+  return request("/api/webapp/payments/btc/available");
+}
+
+export function createBtcSubscription(
+  planId: string,
+  creatorId?: string | number
+): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; planName?: string; usdAmount?: number; error?: string }> {
+  return request("/api/webapp/payments/btc/create", {
+    method: "POST",
+    body: { planId, ...(creatorId ? { creatorId } : {}) },
+  });
+}
+
+export function getBtcSubscriptionStatus(
+  invoiceId: string
+): Promise<{ success: boolean; status: string; completed: boolean; confirming: boolean; failed: boolean }> {
+  return request(`/api/webapp/payments/btc/status/${encodeURIComponent(invoiceId)}`);
+}
+
+export function buyTokensWithBtc(
+  packageId: string
+): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usd: number; error?: string }> {
+  return request("/api/wallet/buy-btc", { method: "POST", body: { packageId } });
+}
 
 export interface BookingPaymentStatus {
   status: "pending" | "paid" | "expired" | "failed";
