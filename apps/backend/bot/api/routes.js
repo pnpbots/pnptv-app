@@ -9344,6 +9344,7 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
   }
 
   const orderId = `pnptv-sub-${userId}-${Date.now()}`;
+  const isDonation = planId.startsWith('donation-');
 
   try {
     const invoice = await createDashInvoice({
@@ -9351,8 +9352,8 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
       userId,
       orderId,
       planId,
-      description: `${planDisplayName} subscription`,
-      redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/subscribe`,
+      description: isDonation ? `PNPtv! donation — ${planDisplayName}` : `${planDisplayName} subscription`,
+      redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}${isDonation ? '/donate' : '/subscribe'}`,
     });
 
     await dbQuery(

@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useNowPayments } from "@/hooks/useNowPayments";
 import { NowPaymentsWaitingPanel } from "@/components/payments/NowPaymentsWaitingPanel";
-import { createPayment, createBtcSubscription } from "@/lib/api";
+import { createPayment, createDashSubscription } from "@/lib/api";
 
 const AMOUNTS = [
   { planId: "donation-5",  usd: 5  },
@@ -13,7 +13,7 @@ const AMOUNTS = [
   { planId: "donation-50", usd: 50 },
 ];
 
-type Method = "crypto" | "btc" | "epayco";
+type Method = "crypto" | "dash" | "epayco";
 
 export default function Donate() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -24,7 +24,7 @@ export default function Donate() {
   const [selectedIdx, setSelectedIdx] = useState(1); // $10 default
   const [method, setMethod] = useState<Method | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [btcUrl, setBtcUrl] = useState<string | null>(null);
+  const [dashUrl, setDashUrl] = useState<string | null>(null);
   const [epaycoUrl, setEpaycoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -34,12 +34,12 @@ export default function Donate() {
     onSuccess: () => setDone(true),
   });
 
-  // BTC: redirect to checkout URL as soon as it's available
+  // Dash: redirect to checkout URL as soon as it's available
   useEffect(() => {
-    if (btcUrl) {
-      window.location.href = btcUrl;
+    if (dashUrl) {
+      window.location.href = dashUrl;
     }
-  }, [btcUrl]);
+  }, [dashUrl]);
 
   // ePayco: redirect as soon as URL is available
   useEffect(() => {
@@ -61,15 +61,15 @@ export default function Donate() {
     try {
       if (method === "crypto") {
         await startPayment(selected.planId, user?.email);
-      } else if (method === "btc") {
-        const res = await createBtcSubscription(selected.planId);
+      } else if (method === "dash") {
+        const res = await createDashSubscription(selected.planId);
         if (res.success && res.checkoutUrl) {
-          setBtcUrl(res.checkoutUrl);
+          setDashUrl(res.checkoutUrl);
         } else {
-          setError(res.error || (es ? "Error al crear el pago BTC." : "Failed to create BTC payment."));
+          setError(res.error || (es ? "Error al crear el pago Dash." : "Failed to create Dash payment."));
         }
       } else if (method === "epayco") {
-        const res = await createPayment({ planId: selected.planId });
+        const res = await createPayment(selected.planId, "epayco");
         if (res.paymentUrl) {
           setEpaycoUrl(res.paymentUrl);
         } else {
@@ -188,7 +188,7 @@ export default function Donate() {
             <div className="space-y-2">
               {([
                 { id: "crypto" as Method, label: es ? "Cripto (BTC, ETH, USDC, SOL…)" : "Crypto (BTC, ETH, USDC, SOL…)", sub: es ? "Más de 100 monedas · Sin cuenta requerida" : "100+ coins · No account required", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
-                { id: "btc" as Method, label: "Bitcoin / Lightning", sub: es ? "BTC on-chain o Lightning Network" : "BTC on-chain or Lightning Network", icon: "M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" },
+                { id: "dash" as Method, label: "Dash (BTCPay)", sub: es ? "Dash via BTCPay · Sin custodio" : "Dash via BTCPay · Non-custodial", icon: "M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" },
                 { id: "epayco" as Method, label: es ? "Tarjeta (América Latina)" : "Card (Latin America)", sub: es ? "Visa, Mastercard vía ePayco" : "Visa, Mastercard via ePayco", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
               ] as { id: Method; label: string; sub: string; icon: string }[]).map((m) => (
                 <button
@@ -235,11 +235,11 @@ export default function Donate() {
             />
           )}
 
-          {/* BTC redirecting */}
-          {submitting && method === "btc" && (
+          {/* Dash redirecting */}
+          {submitting && method === "dash" && (
             <div className="mb-4 p-4 rounded-xl border border-orange-500/30 bg-orange-500/5 text-center">
               <p className="text-sm text-pnp-textSecondary">
-                {es ? "Abriendo checkout de Bitcoin…" : "Opening Bitcoin checkout…"}
+                {es ? "Abriendo checkout de Dash…" : "Opening Dash checkout…"}
               </p>
             </div>
           )}
