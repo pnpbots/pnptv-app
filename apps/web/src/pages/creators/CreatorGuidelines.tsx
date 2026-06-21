@@ -120,6 +120,51 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    id: "strategy",
+    title: "Content Strategy & Posting Guidelines",
+    titleEs: "Estrategia de Contenido y Frecuencia",
+    icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
+    accent: "#E69138",
+    items: [
+      {
+        heading: "New to creating? Start with a profile subscription",
+        headingEs: "¿Eres nuevo creando? Empieza con una suscripción al perfil",
+        body: "If you have no previous experience making content, start with a profile subscription (Ice tier, $5/mo). It's the lowest-barrier entry: one product, one price, no complex production. You build an audience, learn what resonates, and upgrade to Crystal or Diamond as your following grows. You can always add paid channels later — once you know what your community wants.",
+        bodyEs: "Si no tienes experiencia previa creando contenido, empieza con una suscripción al perfil (nivel Ice, $5/mes). Es la entrada más accesible: un producto, un precio, sin producción compleja. Construyes una audiencia, aprendes qué conecta, y subes a Crystal o Diamond conforme crece tu comunidad. Siempre puedes agregar canales de pago después — una vez que sepas qué quiere tu comunidad.",
+      },
+      {
+        heading: "Profile subscription: organic, personal, 5–8 minutes",
+        headingEs: "Suscripción al perfil: orgánico, personal, 5–8 minutos",
+        body: "Profile subscription content is meant to feel intimate and real. Aim for 5–8 minutes per video. Solo performances work perfectly here — no need for heavy editing, color grading, or multiple cameras. The rawer and more natural the better. This is where your subscribers get to know YOU: your personality, your vibe, what you're into. Think of it as your personal feed for fans who subscribe to you as a person.",
+        bodyEs: "El contenido de suscripción al perfil debe sentirse íntimo y real. Apunta a 5–8 minutos por video. Las performances en solitario funcionan perfectamente aquí — sin necesidad de edición pesada, corrección de color ni múltiples cámaras. Mientras más crudo y natural, mejor. Aquí es donde tus suscriptores te conocen A TI: tu personalidad, tu vibra, lo que te gusta. Piénsalo como tu feed personal para fans que se suscriben a ti como persona.",
+      },
+      {
+        heading: "Profile posting frequency: twice a week, minimum",
+        headingEs: "Frecuencia de publicación en perfil: dos veces por semana, mínimo",
+        body: "Post at least twice a week to keep subscribers engaged and justify their monthly fee. The more consistently you post, the stronger the case for a higher tier: Ice creators post 2×/week, Crystal creators aim for 3×/week, Diamond creators post 4+ times a week. Consistency matters more than perfection — a steady stream of authentic content outperforms sporadic high-production uploads.",
+        bodyEs: "Publica al menos dos veces por semana para mantener a los suscriptores comprometidos y justificar su cuota mensual. Mientras más consistente seas, más justificado es un nivel más alto: creadores Ice publican 2×/semana, Crystal apuntan a 3×/semana, Diamond publican 4+ veces por semana. La consistencia importa más que la perfección — un flujo constante de contenido auténtico supera a las subidas esporádicas de alta producción.",
+      },
+      {
+        heading: "Channels: 20 minutes minimum, once a week or every two weeks",
+        headingEs: "Canales: mínimo 20 minutos, una vez por semana o cada dos semanas",
+        body: "Channel content is a different product and should reflect that. Minimum 20 minutes per video. The production should be noticeably richer: multiple performers, thoughtful editing, scene structure, intros. Channels are where you bring subscribers into a curated experience — not just you being yourself, but a show with a concept. Post once a week at most; once every two weeks is perfectly acceptable for high-quality channel content. Quantity matters less here than quality and consistency of concept.",
+        bodyEs: "El contenido de canal es un producto diferente y debe reflejarlo. Mínimo 20 minutos por video. La producción debe ser notablemente más rica: múltiples performers, edición cuidada, estructura de escenas, intros. Los canales son donde llevas a los suscriptores a una experiencia curada — no solo tú siendo tú mismo, sino un show con un concepto. Publica máximo una vez por semana; una vez cada dos semanas es perfectamente aceptable para contenido de canal de alta calidad. La cantidad importa menos que la calidad y consistencia del concepto.",
+      },
+      {
+        heading: "Collaborations and fetish-themed channels",
+        headingEs: "Colaboraciones y canales temáticos de fetiche",
+        body: "We actively encourage creators to partner up and launch joint channels. Collaborative channels perform well because they combine audiences, share production effort, and create variety. Fetish-themed channels — built around a specific kink, scene, or aesthetic — are a great model for this: two or three creators who share the same interest can co-own a channel, cross-promote to their subscriber bases, and build a dedicated following that pays for the specialty content.",
+        bodyEs: "Animamos activamente a los creadores a asociarse y lanzar canales conjuntos. Los canales colaborativos funcionan bien porque combinan audiencias, comparten el esfuerzo de producción y crean variedad. Los canales temáticos de fetiche — construidos alrededor de un kink, escena o estética específica — son un gran modelo para esto: dos o tres creadores que comparten el mismo interés pueden co-propietarios de un canal, hacer cross-promotion a sus bases de suscriptores y construir una audiencia dedicada.",
+      },
+      {
+        heading: "Your profile is about who you are",
+        headingEs: "Tu perfil trata de quién eres",
+        body: "Use your profile and its subscription content to show the community who you are as a person — not just as a performer. What are you into? What's your scene? What do you enjoy outside of creating? The most successful creators on PNPtv! are ones whose subscribers feel like they actually know them. Authenticity builds loyalty, and loyalty drives renewals.",
+        bodyEs: "Usa tu perfil y su contenido de suscripción para mostrarle a la comunidad quién eres como persona — no solo como performer. ¿Qué te gusta? ¿Cuál es tu escena? ¿Qué disfrutas fuera de crear? Los creadores más exitosos en PNPtv! son aquellos cuyos suscriptores sienten que realmente los conocen. La autenticidad construye lealtad, y la lealtad impulsa las renovaciones.",
+      },
+    ],
+  },
+  {
     id: "access",
     title: "Content & Access Types",
     titleEs: "Tipos de Contenido y Acceso",
