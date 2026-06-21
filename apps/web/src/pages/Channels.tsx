@@ -492,7 +492,7 @@ function ChannelDetailView({
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <span className="text-sm text-pnp-textSecondary">
-                {videos.length} video{videos.length !== 1 ? "s" : ""}
+                {(channel.videoCount ?? videos.length)} video{(channel.videoCount ?? videos.length) !== 1 ? "s" : ""}
               </span>
               {channel.isOwner && (
                 <>
