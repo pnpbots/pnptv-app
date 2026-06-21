@@ -9,6 +9,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Button, Badge, Skeleton } from "@pnptv/ui-kit";
 import { PostComposer } from "@/components/PostComposer";
 import {
+  ApiError,
   getProfile,
   getPublicProfile,
   updateProfile,
@@ -125,6 +126,10 @@ export default function Profile() {
   const [bugSending, setBugSending] = useState(false);
   const [bugSent, setBugSent] = useState(false);
   const bugTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const overflowTriggerRef = useRef<HTMLButtonElement>(null);
+
+  // Inline block-confirm state (replaces window.confirm)
+  const [showBlockConfirm, setShowBlockConfirm] = useState(false);
 
   useEffect(() => {
     if (showBugModal && bugTextareaRef.current) bugTextareaRef.current.focus();
@@ -207,15 +212,53 @@ export default function Profile() {
   });
   useEffect(() => {
     if (!overflowOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) setOverflowOpen(false);
+    const handler = (e: MouseEvent | TouchEvent) => {
+      if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
+        setOverflowOpen(false);
+        overflowTriggerRef.current?.focus();
+      }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", handler as EventListener);
+    document.addEventListener("touchstart", handler as EventListener, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", handler as EventListener);
+      document.removeEventListener("touchstart", handler as EventListener);
+    };
   }, [overflowOpen]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const subscribeButtonRef = useRef<HTMLDivElement>(null);
+
+  // Scroll lock — applies whenever any local modal is open
+  useEffect(() => {
+    const anyModalOpen = showReportModal || showBugModal || showSubscribeModal || showBlockConfirm;
+    if (anyModalOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [showReportModal, showBugModal, showSubscribeModal, showBlockConfirm]);
+
+  // Escape key handler — closes the topmost open modal/menu
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (showBugModal) { setShowBugModal(false); return; }
+      if (showReportModal && !reportSending) {
+        setShowReportModal(false); setReportSent(false); setReportCategory(""); setReportDescription(""); setReportError(null);
+        return;
+      }
+      if (showBlockConfirm) { setShowBlockConfirm(false); return; }
+      if (showSubscribeModal) {
+        setShowSubscribeModal(false); setSubscribeAwaitingPayment(false); setSubscribePaymentId(null); setSubscribeError(null);
+        return;
+      }
+      if (overflowOpen) { setOverflowOpen(false); overflowTriggerRef.current?.focus(); return; }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [showBugModal, showReportModal, reportSending, showBlockConfirm, showSubscribeModal, overflowOpen]);
 
   // Reset state when navigating between profiles
   useEffect(() => {
@@ -314,7 +357,9 @@ export default function Profile() {
         if ('freeUserLimited' in res) setFreeViewerLimited(!!res.freeUserLimited);
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load profile");
+      if (!(err instanceof ApiError && err.status === 404)) {
+        setError(err instanceof Error ? err.message : "Failed to load profile");
+      }
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -339,7 +384,8 @@ export default function Profile() {
       // Refresh auth context so the avatar is updated globally
       await refreshUser();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed to upload avatar");
+      setError(err instanceof Error ? err.message : "Failed to upload avatar");
+      setTimeout(() => setError(null), 4000);
     } finally {
       setAvatarUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -453,20 +499,26 @@ export default function Profile() {
 
   const handleBlock = async () => {
     if (blockLoading || !profile) return;
+    if (!isBlocked) {
+      // Show inline confirm instead of window.confirm
+      setShowBlockConfirm(true);
+      return;
+    }
     setBlockLoading(true);
     try {
-      const targetId = profile.id || paramUserId!;
-      if (isBlocked) {
-        await unblockUser(targetId);
-        setIsBlocked(false);
-      } else {
-        if (!window.confirm(`Block ${profile.firstName || profile.username || "this user"}? They won't be able to see your posts or send you messages.`)) {
-          setBlockLoading(false);
-          return;
-        }
-        await blockUser(targetId);
-        setIsBlocked(true);
-      }
+      await unblockUser(profile.id || paramUserId!);
+      setIsBlocked(false);
+    } catch { /* silent */ }
+    setBlockLoading(false);
+  };
+
+  const handleBlockConfirmed = async () => {
+    if (!profile) return;
+    setShowBlockConfirm(false);
+    setBlockLoading(true);
+    try {
+      await blockUser(profile.id || paramUserId!);
+      setIsBlocked(true);
     } catch { /* silent */ }
     setBlockLoading(false);
   };
@@ -1241,11 +1293,12 @@ export default function Profile() {
                 </button>
                 <div className="relative" ref={overflowRef}>
                   <button
+                    ref={overflowTriggerRef}
                     onClick={() => setOverflowOpen((v) => !v)}
                     aria-haspopup="menu"
                     aria-expanded={overflowOpen}
                     aria-label="More actions"
-                    className="min-w-[40px] min-h-[40px] px-3 rounded-lg transition-colors flex items-center justify-center"
+                    className="min-w-[44px] min-h-[44px] px-3 rounded-lg transition-colors flex items-center justify-center"
                     style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", border: "1px solid rgba(255,255,255,0.12)" }}
                   >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1255,8 +1308,8 @@ export default function Profile() {
                   {overflowOpen && (
                     <div
                       role="menu"
-                      className="absolute right-0 top-full mt-2 w-56 rounded-xl overflow-hidden shadow-2xl z-40"
-                      style={{ background: "rgba(28,28,30,0.97)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)" }}
+                      className="absolute right-0 top-full mt-2 w-56 rounded-xl shadow-2xl z-[60]"
+                      style={{ background: "rgba(28,28,30,0.97)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)", maxHeight: "calc(100dvh - 120px)", overflowY: "auto" }}
                     >
                       {profile.creatorStatus === "active" && (() => {
                         const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
@@ -1265,7 +1318,7 @@ export default function Profile() {
                             <button
                               role="menuitem"
                               onClick={() => { setOverflowOpen(false); navigate("/creator"); }}
-                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left hover:bg-white/5 transition-colors"
+                              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-white/5 transition-colors"
                               style={{ color: tc.color }}
                             >
                               <span aria-hidden="true">{tc.emoji}</span>
@@ -1277,7 +1330,7 @@ export default function Profile() {
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={() => setOverflowOpen(false)}
-                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/85 hover:bg-white/5 transition-colors"
+                              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/85 hover:bg-white/5 transition-colors"
                             >
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>
                               Studio
@@ -1286,7 +1339,7 @@ export default function Profile() {
                               role="menuitem"
                               href="/live"
                               onClick={() => setOverflowOpen(false)}
-                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/85 hover:bg-white/5 transition-colors"
+                              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/85 hover:bg-white/5 transition-colors"
                             >
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                               Bookings
@@ -1304,7 +1357,7 @@ export default function Profile() {
                               try { localStorage.setItem("pnp:creator-interest", "1"); } catch {}
                               setCreatorInterestShown(true);
                             }}
-                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/85 hover:bg-white/5 transition-colors"
+                            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/85 hover:bg-white/5 transition-colors"
                             style={{ color: "#D4007A" }}
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -1316,7 +1369,7 @@ export default function Profile() {
                       <button
                         role="menuitem"
                         onClick={() => { setOverflowOpen(false); navigate("/settings"); }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/85 hover:bg-white/5 transition-colors"
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/85 hover:bg-white/5 transition-colors"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         Settings
@@ -1324,7 +1377,7 @@ export default function Profile() {
                       <button
                         role="menuitem"
                         onClick={() => { setOverflowOpen(false); resetAllTutorials(); window.location.reload(); }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/85 hover:bg-white/5 transition-colors"
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/85 hover:bg-white/5 transition-colors"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
                         {p.resetTutorials}
@@ -1332,7 +1385,7 @@ export default function Profile() {
                       <button
                         role="menuitem"
                         onClick={() => { setOverflowOpen(false); setShowBugModal(true); }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/85 hover:bg-white/5 transition-colors"
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/85 hover:bg-white/5 transition-colors"
                       >
                         <svg className="w-4 h-4 text-red-400/90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 12.75c1.148 0 2.278.08 3.383.237 1.037.146 1.866.966 1.866 2.013 0 3.728-2.35 6.75-5.25 6.75S6.75 18.728 6.75 15c0-1.046.83-1.867 1.866-2.013A24.204 24.204 0 0112 12.75zm0 0c2.883 0 5.647.508 8.207 1.44a23.91 23.91 0 01-1.152-6.135 23.863 23.863 0 01.497-5.93c.15-.667-.107-1.358-.661-1.755a1.908 1.908 0 00-1.902-.098L12 3.75 6.99.375a1.91 1.91 0 00-1.902.098c-.554.397-.81 1.088-.66 1.755.27 1.215.426 2.47.496 5.93a23.91 23.91 0 01-1.152 6.135A24.087 24.087 0 0112 12.75z" /></svg>
                         {p.reportBug}
@@ -1341,7 +1394,7 @@ export default function Profile() {
                       <button
                         role="menuitem"
                         onClick={() => { setOverflowOpen(false); logout(); }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>
                         {p.signOut}
@@ -1495,8 +1548,25 @@ export default function Profile() {
         const accentRgb     = modalTc.rgb;
         const gradientBg    = modalTc.gradient;
         return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}>
-          <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4" style={{ background: "var(--pnp-surface)", border: "1px solid rgba(255,255,255,0.08)" }}>
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
+          style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
+          onClick={() => { setShowSubscribeModal(false); setSubscribeAwaitingPayment(false); setSubscribePaymentId(null); setSubscribeError(null); }}
+        >
+          <div
+            className="w-full max-w-sm rounded-t-2xl sm:rounded-2xl flex flex-col gap-4"
+            style={{
+              background: "var(--pnp-surface)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              maxHeight: "90dvh",
+              overflowY: "auto",
+              padding: "1.5rem 1.5rem max(1.5rem, env(safe-area-inset-bottom)) 1.5rem",
+            }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Subscribe to creator"
+          >
             {/* Header */}
             <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold text-white">
@@ -1972,7 +2042,7 @@ export default function Profile() {
                   }}
                   canCancel={String(event.creatorId) === String(user?.dbId || user?.id) || (user?.role === "admin" || user?.role === "superadmin")}
                   onCancel={async (eventId) => {
-                    if (!window.confirm("Cancel this event?")) return;
+                    // EventCard's own confirm UI handles confirmation before calling onCancel
                     try {
                       await cancelEvent(eventId);
                       setMyEvents((prev) => prev.filter((e) => e.id !== eventId));
@@ -2069,6 +2139,56 @@ export default function Profile() {
         />
       )}
 
+      {/* ── Block Confirm Dialog (replaces window.confirm) ── */}
+      {showBlockConfirm && profile && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center"
+          onClick={() => setShowBlockConfirm(false)}
+        >
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            className="relative w-full sm:max-w-sm mx-auto bg-pnp-surface rounded-t-2xl sm:rounded-2xl shadow-2xl border border-white/10 animate-in slide-in-from-bottom duration-200"
+            style={{ padding: "1.5rem 1.5rem max(1.5rem, env(safe-area-inset-bottom)) 1.5rem" }}
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Block user confirmation"
+          >
+            <div
+              className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4"
+              style={{ background: "rgba(255,59,48,0.12)", border: "1px solid rgba(255,59,48,0.25)" }}
+            >
+              <svg className="w-6 h-6" style={{ color: "#FF453A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+              </svg>
+            </div>
+            <h2 className="text-base font-bold text-white text-center mb-2">
+              Block {profile.firstName || profile.username || "this user"}?
+            </h2>
+            <p className="text-sm text-center mb-6" style={{ color: "var(--pnp-text-secondary)" }}>
+              They won't be able to see your posts or send you messages.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowBlockConfirm(false)}
+                className="flex-1 min-h-[44px] py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", border: "1px solid rgba(255,255,255,0.12)" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBlockConfirmed}
+                disabled={blockLoading}
+                className="flex-1 min-h-[44px] py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                style={{ background: "rgba(255,59,48,0.15)", color: "#FF453A", border: "1px solid rgba(255,59,48,0.3)" }}
+              >
+                {blockLoading ? "..." : "Block"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── User Report Modal ── */}
       {showReportModal && profile && (
         <div
@@ -2077,8 +2197,12 @@ export default function Profile() {
         >
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
-            className="relative w-full sm:max-w-md mx-auto bg-pnp-surface rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl border border-white/10 animate-in slide-in-from-bottom duration-200"
+            className="relative w-full sm:max-w-md mx-auto bg-pnp-surface rounded-t-2xl sm:rounded-2xl shadow-2xl border border-white/10 animate-in slide-in-from-bottom duration-200"
+            style={{ maxHeight: "92dvh", overflowY: "auto", padding: "1.25rem 1.25rem max(1.25rem, env(safe-area-inset-bottom)) 1.25rem" }}
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={p.reportTitle}
           >
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-pnp-textPrimary flex items-center gap-2">
@@ -2180,8 +2304,12 @@ export default function Profile() {
         >
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
-            className="relative w-full sm:max-w-md mx-auto bg-pnp-surface rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl border border-white/10 animate-in slide-in-from-bottom duration-200"
+            className="relative w-full sm:max-w-md mx-auto bg-pnp-surface rounded-t-2xl sm:rounded-2xl shadow-2xl border border-white/10 animate-in slide-in-from-bottom duration-200"
+            style={{ maxHeight: "92dvh", overflowY: "auto", padding: "1.25rem 1.25rem max(1.25rem, env(safe-area-inset-bottom)) 1.25rem" }}
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t.support.reportBugTitle}
           >
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-pnp-textPrimary flex items-center gap-2">
@@ -2195,8 +2323,9 @@ export default function Profile() {
               <button
                 onClick={() => !bugSending && setShowBugModal(false)}
                 className="p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 transition-colors"
+                aria-label="Close bug report"
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
