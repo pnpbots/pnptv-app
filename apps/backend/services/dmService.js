@@ -585,29 +585,43 @@ class DmService {
       if (!hasSeenIntro) {
         await bot.telegram.sendMessage(
           recipientTelegramId,
-          `💬 *PNPtv DMs in Telegram*\n\nYou now receive PNPtv direct messages here.\n\n✏️ *Reply* to any message to respond — your reply goes back to that person in the app.\n\n🌐 Or open https://app.pnptv.app to view the full conversation.`,
-          { parse_mode: 'Markdown' }
+          `📱 *PNPtv\\! — Notificaciones de mensajes activadas*\n\n` +
+          `Este bot te entrega aquí los mensajes que recibes en la app de PNPtv\\!\n\n` +
+          `*\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-*\n` +
+          `_Esto NO es un chat de Telegram\\. Los mensajes que ves debajo fueron enviados dentro de la app pnptv\\.app \\— este bot solo te avisa aquí para que no te los pierdas\\._\n` +
+          `*\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-*\n\n` +
+          `↩️ *Responde* a cualquier notificación para contestar directamente desde aquí\\.\n` +
+          `🌐 O abre [pnptv\\.app](https://pnptv.app) para ver la conversación completa\\.`,
+          { parse_mode: 'MarkdownV2', disable_web_page_preview: true }
         ).catch(() => {});
-        await redis.set(introKey, '1', 'EX', 604800).catch(() => {}); // 7 days
+        await redis.set(introKey, '2', 'EX', 604800).catch(() => {}); // 7 days — version 2
       }
 
       let tgMsg;
-      const APP_PUBLIC_URL = (process.env.APP_PUBLIC_URL || process.env.WEB_APP_URL || 'https://app.pnptv.app').replace(/\/+$/, '');
+      const APP_PUBLIC_URL = (process.env.APP_PUBLIC_URL || process.env.WEB_APP_URL || 'https://pnptv.app').replace(/\/+$/, '');
+      const notifHeader = `📱 *PNPtv\\!* — mensaje de *${senderName.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')}*\n`;
+      const notifFooter = `\n_↩️ Responde aquí · Abre [pnptv\\.app](${APP_PUBLIC_URL}/messages)_`;
 
       if (mediaUrl && mediaType) {
         const fullMediaUrl = mediaUrl.startsWith('/') ? `${APP_PUBLIC_URL}${mediaUrl}` : mediaUrl;
-        const caption = content ? `💬 ${senderName}: ${content}` : `💬 ${senderName}`;
+        const escapedContent = content ? content.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&') : '';
+        const caption = `${notifHeader}${escapedContent}${notifFooter}`;
         if (mediaType === 'image') {
-          tgMsg = await bot.telegram.sendPhoto(recipientTelegramId, fullMediaUrl, { caption });
+          tgMsg = await bot.telegram.sendPhoto(recipientTelegramId, fullMediaUrl, { caption, parse_mode: 'MarkdownV2' });
         } else if (mediaType === 'video') {
-          tgMsg = await bot.telegram.sendVideo(recipientTelegramId, fullMediaUrl, { caption });
+          tgMsg = await bot.telegram.sendVideo(recipientTelegramId, fullMediaUrl, { caption, parse_mode: 'MarkdownV2' });
         } else if (mediaType === 'audio') {
-          tgMsg = await bot.telegram.sendVoice(recipientTelegramId, fullMediaUrl, { caption });
+          tgMsg = await bot.telegram.sendVoice(recipientTelegramId, fullMediaUrl, { caption, parse_mode: 'MarkdownV2' });
         } else {
-          tgMsg = await bot.telegram.sendMessage(recipientTelegramId, `💬 ${senderName}: ${fullMediaUrl}`);
+          tgMsg = await bot.telegram.sendMessage(recipientTelegramId, `${notifHeader}${escapedContent || fullMediaUrl}${notifFooter}`, { parse_mode: 'MarkdownV2', disable_web_page_preview: true });
         }
       } else if (content) {
-        tgMsg = await bot.telegram.sendMessage(recipientTelegramId, `💬 ${senderName}: ${content}`);
+        const escapedContent = content.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+        tgMsg = await bot.telegram.sendMessage(
+          recipientTelegramId,
+          `${notifHeader}${escapedContent}${notifFooter}`,
+          { parse_mode: 'MarkdownV2', disable_web_page_preview: true }
+        );
       }
 
       // Store mapping so Telegram replies can be bridged back
