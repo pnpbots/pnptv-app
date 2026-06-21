@@ -7,6 +7,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://checkout.epayco.co">
+    <link rel="preconnect" href="https://multimedia.epayco.co">
+    <link rel="dns-prefetch" href="https://checkout.epayco.co">
+    <link rel="dns-prefetch" href="https://multimedia.epayco.co">
     <style>
         * {
             box-sizing: border-box;
@@ -637,12 +641,25 @@
                 if (paymentData.showDocFields) {
                     document.getElementById('docFields').style.display = 'flex';
                 }
-                // Pre-fill email if the checkout was created with one
-                if (paymentData.metadata && paymentData.metadata.email) {
-                    const emailEl = document.getElementById('email');
-                    if (emailEl && !emailEl.value) emailEl.value = paymentData.metadata.email;
-                }
+                // Pre-fill user fields from payment metadata
+                const meta = paymentData.metadata || {};
+                const userEmail = meta.customerEmail || meta.customer_email || meta.email;
+                const userFirstName = meta.firstName || meta.first_name || paymentData.userFirstName;
+                const userLastName = meta.lastName || meta.last_name || paymentData.userLastName;
+                const userPhone = meta.phone || paymentData.userPhone;
+                if (userEmail) { const el = document.getElementById('email'); if (el && !el.value) el.value = userEmail; }
+                if (userFirstName) { const el = document.getElementById('name'); if (el && !el.value) el.value = userFirstName; }
+                if (userLastName) { const el = document.getElementById('lastName'); if (el && !el.value) el.value = userLastName; }
+                if (userPhone) { const el = document.getElementById('phone'); if (el && !el.value) el.value = userPhone; }
                 showState('form');
+
+                // Warn before navigating away — abandoning the page wastes a payment session
+                window.addEventListener('beforeunload', function(e) {
+                    if (currentState === 'form') {
+                        e.preventDefault();
+                        e.returnValue = '';
+                    }
+                });
             } catch (err) {
                 showState('fatal');
                 document.getElementById('fatal-detail').textContent =
@@ -654,8 +671,8 @@
         function renderPlanSummary() {
             const p = paymentData;
             const plan = p.plan;
-            const priceDisplay = formatCOP(p.amountCOP);
             const usdDisplay = formatUSD(p.amountUSD);
+            const copDisplay = formatCOP(p.amountCOP);
 
             let promoHtml = '';
             if (p.isPromo && p.promoCode) {
@@ -666,13 +683,13 @@
             document.getElementById('plan-summary').innerHTML =
                 '<div class="plan-icon">' + escapeHtml(plan.icon) + '</div>' +
                 '<div class="plan-name">' + escapeHtml(plan.name) + '</div>' +
-                '<div class="plan-price">' + priceDisplay + '</div>' +
-                '<div style="font-size:12px;color:#8E8E93;">' + usdDisplay + ' USD</div>' +
+                '<div class="plan-price">' + usdDisplay + ' USD</div>' +
+                '<div style="font-size:12px;color:#8E8E93;">≈ ' + copDisplay + ' COP (charged amount)</div>' +
                 promoHtml +
                 '<div class="plan-ref">Ref: ' + escapeHtml(p.paymentRef) + '</div>';
 
-            // Update pay button with amount
-            document.getElementById('btn-pay-text').textContent = 'Pay ' + priceDisplay;
+            // Button shows USD so users know exactly what they're paying
+            document.getElementById('btn-pay-text').textContent = 'Pay ' + usdDisplay + ' USD';
         }
 
         function escapeHtml(str) {

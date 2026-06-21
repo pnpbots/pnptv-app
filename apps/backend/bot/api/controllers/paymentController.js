@@ -513,6 +513,24 @@ class PaymentController {
       const geo = geoip.lookup(clientIp);
       basePaymentData.showDocFields = geo?.country === 'CO';
 
+      // Pre-fill user fields so the checkout form requires less manual entry
+      try {
+        const { rows: userRows } = await query(
+          'SELECT first_name, last_name, email, phone FROM users WHERE id = $1::text LIMIT 1',
+          [String(userId)]
+        );
+        if (userRows[0]) {
+          const u = userRows[0];
+          basePaymentData.userFirstName = u.first_name || null;
+          basePaymentData.userLastName  = u.last_name  || null;
+          basePaymentData.userPhone     = u.phone      || null;
+          if (!basePaymentData.metadata) basePaymentData.metadata = {};
+          if (!basePaymentData.metadata.email && u.email && !u.email.includes('@telegram.pnptv.app')) {
+            basePaymentData.metadata.email = u.email;
+          }
+        }
+      } catch { /* non-critical — checkout still works without pre-fill */ }
+
       const responseData = {
         success: true,
         payment: basePaymentData,
