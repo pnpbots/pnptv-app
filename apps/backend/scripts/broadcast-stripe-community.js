@@ -36,8 +36,8 @@ const ENTITY_ID  = 'stripe-community-2026-06';
 const DONATE_URL = 'https://pnptv.app/donate';
 const TG_DELAY_MS = 120; // slightly slower — photos are heavier
 
-const SCREENSHOT_1 = '/tmp/screenshots/Screenshot_20260621-063713_Chrome.jpg'; // Stripe Atlas receipt $500
-const SCREENSHOT_2 = '/tmp/screenshots/Screenshot_20260621-063825_Chrome.jpg'; // cancelled payout $1,149.22
+const SCREENSHOT_1 = '/app/public/uploads/Screenshot_20260621-063713_Chrome.jpg'; // Stripe Atlas receipt $500
+const SCREENSHOT_2 = '/app/public/uploads/Screenshot_20260621-063825_Chrome.jpg'; // cancelled payout $1,149.22
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isEn  = (lang) => typeof lang === 'string' && lang.toLowerCase().startsWith('en');
