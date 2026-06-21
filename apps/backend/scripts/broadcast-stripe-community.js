@@ -336,25 +336,37 @@ async function main() {
   console.log(`3/4  Telegram to ${withTelegram.length} users...`);
   if (!SKIP_TELEGRAM && !DRY_RUN) {
     const tg = new Telegram(process.env.BOT_TOKEN);
-    for (let i = 0; i < withTelegram.length; i++) {
-      const u = withTelegram[i];
-      const msg = isEn(u.language) ? TG.en : TG.es;
+
+    // Upload photos once to get file_ids — avoids re-uploading 365KB+334KB per user
+    let fileId1 = null, fileId2 = null;
+    if (s1Exists && s2Exists && withTelegram.length > 0) {
       try {
-        // Send screenshots as a media group first (if available), then the text message
-        if (s1Exists && s2Exists) {
+        const SEED_CHAT = withTelegram[0].telegram;
+        const mediaResult = await tg.sendMediaGroup(SEED_CHAT, [
+          { type: 'photo', media: { source: fs.createReadStream(SCREENSHOT_1) }, caption: 'Stripe Atlas receipt — $500 paid Apr 29, 2026' },
+          { type: 'photo', media: { source: fs.createReadStream(SCREENSHOT_2) }, caption: 'Cancelled payout — $1,149.22 frozen by Stripe' },
+        ]);
+        fileId1 = mediaResult[0]?.photo?.at(-1)?.file_id;
+        fileId2 = mediaResult[1]?.photo?.at(-1)?.file_id;
+        stats.telegram++;
+        console.log(`     ✓ Photos uploaded (file_ids cached)`);
+        await sleep(500);
+      } catch (err) {
+        console.warn(`     ⚠ Photo pre-upload failed: ${err.message} — will send text-only`);
+      }
+    }
+
+    for (let i = (fileId1 ? 1 : 0); i < withTelegram.length; i++) {
+      const u = withTelegram[i];
+      const en = isEn(u.language);
+      const msg = en ? TG.en : TG.es;
+      try {
+        if (fileId1 && fileId2) {
           await tg.sendMediaGroup(u.telegram, [
-            {
-              type: 'photo',
-              media: { source: fs.createReadStream(SCREENSHOT_1) },
-              caption: isEn(u.language) ? 'Stripe Atlas receipt — $500 paid Apr 29, 2026' : 'Recibo Stripe Atlas — $500 pagados el 29 de abril de 2026',
-            },
-            {
-              type: 'photo',
-              media: { source: fs.createReadStream(SCREENSHOT_2) },
-              caption: isEn(u.language) ? 'Cancelled payout — $1,149.22 frozen by Stripe' : 'Pago cancelado — $1,149.22 retenidos por Stripe',
-            },
+            { type: 'photo', media: fileId1, caption: en ? 'Stripe Atlas receipt — $500 paid Apr 29, 2026' : 'Recibo Stripe Atlas — $500 pagados el 29 de abril de 2026' },
+            { type: 'photo', media: fileId2, caption: en ? 'Cancelled payout — $1,149.22 frozen by Stripe' : 'Pago cancelado — $1,149.22 retenidos por Stripe' },
           ]);
-          await sleep(300); // brief pause between media group and text
+          await sleep(200);
         }
         await tg.sendMessage(u.telegram, msg, { parse_mode: 'HTML', disable_web_page_preview: true });
         stats.telegram++;
