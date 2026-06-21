@@ -11926,6 +11926,7 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
 
   app.post('/api/webapp/admin/prime-videos/upload',
     adminGuard,
+    (req, _res, next) => { req.socket.setTimeout(0); next(); },
     primeUpload.single('file'),
     asyncHandler(async (req, res) => {
       if (!req.file) return res.status(400).json({ success: false, error: 'file required' });

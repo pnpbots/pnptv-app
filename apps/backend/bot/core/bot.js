@@ -250,7 +250,8 @@ const startApiServer = (modeLabel) => {
 
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
-  server.timeout = 120000;
+  server.timeout = 0;          // disabled — large file uploads can take many minutes
+  server.requestTimeout = 0;   // disabled — prevents 408 auto-abort on slow uploads
   apiServer = server;
   return server;
 };
