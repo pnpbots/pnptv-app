@@ -1138,7 +1138,7 @@ async function getBookingPaymentStatus(req, res) {
       // NOW flow: no booking was pre-created (caller passed payment UUID directly).
       // Fall back to checking the payments table so the modal can detect completion.
       const paymentResult = await query(
-        `SELECT id, user_id, status FROM payments WHERE id = $1 AND type = 'call_package'`,
+        `SELECT id, user_id, status FROM payments WHERE id = $1 AND metadata->>'type' = 'call_package'`,
         [bookingId]
       );
       if (paymentResult.rows.length === 0) {

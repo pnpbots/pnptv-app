@@ -844,7 +844,7 @@ class PaymentRecoveryService {
       const stuck = await query(
         `SELECT id, btcpay_invoice_id as order_id, user_id, plan_id, status, notes, created_at, creator_id, usd_amount, metadata
          FROM dash_subscription_orders
-         WHERE btcpay_invoice_id LIKE 'pnptv-nowp-%'
+         WHERE (btcpay_invoice_id LIKE 'pnptv-nowp-%' OR btcpay_invoice_id LIKE 'call-%')
            AND status IN ('pending', 'confirming', 'confirmed', 'partially_paid')
            AND created_at < NOW() - INTERVAL '15 minutes'
            AND created_at > NOW() - INTERVAL '24 hours'
@@ -853,13 +853,14 @@ class PaymentRecoveryService {
 
       results.checked = stuck.rows.length;
 
-      // Reset stuck 'processing' orders older than 30 min (bot crash mid-grant)
+      // Reset stuck 'processing' orders (bot crash mid-grant). 5-min threshold: grants are
+      // sub-second; anything older is definitely a crash, not slow work.
       await query(
         `UPDATE dash_subscription_orders SET status = 'pending', notes = COALESCE(notes || ' ', '') || '[reset_from_processing]'
-         WHERE btcpay_invoice_id LIKE 'pnptv-nowp-%'
+         WHERE (btcpay_invoice_id LIKE 'pnptv-nowp-%' OR btcpay_invoice_id LIKE 'call-%')
            AND status = 'processing'
            AND completed_at IS NULL
-           AND created_at < NOW() - INTERVAL '30 minutes'
+           AND created_at < NOW() - INTERVAL '5 minutes'
            AND created_at > NOW() - INTERVAL '24 hours'`
       ).catch((err) => logger.warn('NOWPayments reconciler: processing reset failed', { error: err.message }));
 
