@@ -11903,9 +11903,20 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
 
   // POST /api/webapp/admin/prime-videos/upload — multipart video upload
   // Forwards file to Directus, creates prime_videos row, mirrors to social_posts.
+  // diskStorage keeps the file on disk so Node never holds a large Buffer in
+  // memory; we stream it to Directus and unlink on every exit path.
   const FormData = require('form-data');
+  const fsSync = require('fs');
+  const PRIME_TMP_DIR = '/tmp/pnp-prime-uploads';
+  try { require('fs').mkdirSync(PRIME_TMP_DIR, { recursive: true }); } catch (_) { /* ignore */ }
   const primeUpload = multer({
-    storage: multer.memoryStorage(),
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, PRIME_TMP_DIR),
+      filename: (_req, file, cb) => {
+        const ext = require('path').extname(file.originalname || '') || '';
+        cb(null, `${require('crypto').randomUUID()}${ext}`);
+      },
+    }),
     limits: { fileSize: 4 * 1024 * 1024 * 1024 }, // 4 GB
     fileFilter: (req, file, cb) => {
       if (/^video\//i.test(file.mimetype || '')) return cb(null, true);
@@ -11919,18 +11930,22 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
     asyncHandler(async (req, res) => {
       if (!req.file) return res.status(400).json({ success: false, error: 'file required' });
 
+      const tmpPath = req.file.path;
       const titleInput = (req.body?.title || req.file.originalname || 'Untitled').toString().trim();
       const description = req.body?.description ? String(req.body.description).trim() : null;
       const status = ['draft', 'published'].includes(req.body?.status) ? req.body.status : 'published';
 
-      // Step 1 — upload file to Directus
+      try {
+
+      // Step 1 — stream file from disk to Directus (never loads the whole file into Node memory)
       let fileId;
       try {
         const fd = new FormData();
         fd.append('title', titleInput.slice(0, 255));
-        fd.append('file', req.file.buffer, {
+        fd.append('file', fsSync.createReadStream(tmpPath), {
           filename: req.file.originalname,
           contentType: req.file.mimetype,
+          knownLength: req.file.size,
         });
         const { data } = await axios.post(
           `${directusBaseUrl()}/files`,
@@ -11939,7 +11954,7 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
             headers: { ...fd.getHeaders(), Authorization: `Bearer ${process.env.DIRECTUS_ADMIN_TOKEN}` },
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
-            timeout: 600000,
+            timeout: 1800000, // 30 min — large files on slow internal links
           }
         );
         fileId = data?.data?.id;
@@ -12037,6 +12052,13 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
         },
         note: 'Thumbnail will appear within 10 minutes (cron generates it).',
       });
+
+      } finally {
+        // Always unlink the temp file — regardless of success, error, or early return
+        require('fs').promises.unlink(tmpPath).catch((e) => {
+          if (e.code !== 'ENOENT') logger.warn('prime-videos: failed to unlink tmp file', { tmpPath, error: e.message });
+        });
+      }
     })
   );
 }
