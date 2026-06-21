@@ -401,7 +401,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
             <p className="text-sm font-semibold text-white">Accept new memberships</p>
             <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {subscriptionPaused
-                ? "New memberships are paused. Existing subscribers are unaffected."
+                ? "New memberships are paused. You need 5 exclusive videos of 5 minutes or more before charging."
                 : "Fans can subscribe to your profile."}
             </p>
           </div>

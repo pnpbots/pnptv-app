@@ -12,6 +12,41 @@ const fs = require('fs');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_GROK_MODES = new Set(['xPost', 'broadcast', 'salesPost']);
 const VALID_LANGUAGES = new Set(['en', 'es', 'bilingual']);
+const MIN_MONETIZATION_VIDEO_COUNT = 5;
+const MIN_MONETIZATION_VIDEO_DURATION_SEC = 5 * 60;
+const MONETIZATION_INELIGIBLE_MESSAGE =
+  'Upload at least 5 exclusive videos of 5 minutes or more before charging for memberships or paid channels.';
+
+async function getCreatorMonetizationEligibility(creatorId) {
+  const result = await query(
+    `SELECT COUNT(*)::int AS eligible_count
+       FROM channel_videos cv
+       JOIN creator_channels cc ON cc.id = cv.channel_id
+      WHERE cc.creator_id = $1
+        AND cc.is_active = true
+        AND cc.access_type IN ('subscription', 'paid')
+        AND cv.status = 'published'
+        AND COALESCE(cv.duration_sec, 0) >= $2`,
+    [creatorId, MIN_MONETIZATION_VIDEO_DURATION_SEC]
+  );
+  const eligibleVideoCount = Number(result.rows[0]?.eligible_count || 0);
+  return {
+    eligible: eligibleVideoCount >= MIN_MONETIZATION_VIDEO_COUNT,
+    eligibleVideoCount,
+    requiredVideoCount: MIN_MONETIZATION_VIDEO_COUNT,
+    requiredDurationSec: MIN_MONETIZATION_VIDEO_DURATION_SEC,
+  };
+}
+
+function sendMonetizationEligibilityError(res, eligibility) {
+  return res.status(403).json({
+    error: MONETIZATION_INELIGIBLE_MESSAGE,
+    code: 'CREATOR_MONETIZATION_CONTENT_REQUIRED',
+    eligibleVideoCount: eligibility.eligibleVideoCount,
+    requiredVideoCount: eligibility.requiredVideoCount,
+    requiredDurationSec: eligibility.requiredDurationSec,
+  });
+}
 
 // GET /api/webapp/creator/eligibility
 const getEligibility = async (req, res) => {
@@ -277,6 +312,12 @@ const toggleSubscription = async (req, res) => {
       return res.status(403).json({ error: 'Creator profile not active' });
     }
     const paused = !user.creator_subscription_paused;
+    if (!paused) {
+      const eligibility = await getCreatorMonetizationEligibility(req.user.id);
+      if (!eligibility.eligible) {
+        return sendMonetizationEligibilityError(res, eligibility);
+      }
+    }
     await query(
       'UPDATE users SET creator_subscription_paused = $1 WHERE id = $2',
       [paused, req.user.id]
@@ -750,6 +791,10 @@ const createChannel = async (req, res) => {
         return res.status(400).json({ error: 'Paid channel price must be between $0.99 and $999.99' });
       }
       safePriceUsd = Math.round(parsed * 100) / 100;
+      const eligibility = await getCreatorMonetizationEligibility(req.user.id);
+      if (!eligibility.eligible) {
+        return sendMonetizationEligibilityError(res, eligibility);
+      }
     }
 
     try {
@@ -931,6 +976,12 @@ const updateChannel = async (req, res) => {
           return res.status(400).json({ error: 'Paid channel price must be between $0.99 and $999.99' });
         }
         newPrice = Math.round(parsed * 100) / 100;
+        if (chRes.rows[0].access_type !== 'paid') {
+          const eligibility = await getCreatorMonetizationEligibility(req.user.id);
+          if (!eligibility.eligible) {
+            return sendMonetizationEligibilityError(res, eligibility);
+          }
+        }
       }
       if (accessType !== undefined) {
         updates.push(`access_type = $${idx++}`); params.push(newAccessType);

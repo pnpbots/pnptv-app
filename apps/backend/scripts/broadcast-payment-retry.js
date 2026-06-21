@@ -30,7 +30,7 @@ const SKIP_TELEGRAM = process.argv.includes('--skip-telegram');
 const EMAIL_ONLY    = process.argv.includes('--email-only');
 const FORCE         = process.argv.includes('--force');
 
-const ENTITY_ID      = 'payment-retry-guide-2026-05';
+const ENTITY_ID      = 'payment-retry-guide-2026-06';
 const HOW_TO_PAY_URL = 'https://pnptv.app/how-to-pay';
 const SUBSCRIBE_URL  = 'https://pnptv.app/subscribe';
 const LIFETIME_URL   = 'https://pnptv.app/lifetime100';
@@ -280,28 +280,6 @@ async function main() {
   console.log(`4/4  Email to ${withEmail.length} users...`);
   if (DRY_RUN || SKIP_EMAIL) {
     console.log(`     [${SKIP_EMAIL ? 'SKIPPED' : 'DRY'}] Would send to ${withEmail.length} users`);
-  } else if (process.env.RESEND_API_KEY) {
-    console.log('     Using Resend (1/220ms)...');
-    for (let i = 0; i < withEmail.length; i++) {
-      const u = withEmail[i];
-      const lang = isEn(u.language) ? 'en' : 'es';
-      const name = u.first_name || u.username || (lang === 'en' ? 'Member' : 'Miembro');
-      try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method:  'POST',
-          headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ from: 'PNPtv! <support@pnptv.app>', to: [u.email], subject: EMAIL_SUBJECT[lang], html: buildEmailHtml(lang, name) }),
-        });
-        if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-        stats.email++;
-      } catch (err) {
-        stats.emailFailed++;
-        if (stats.emailFailed <= 5 || stats.emailFailed % 50 === 0) console.warn(`     Email err [${u.email}]: ${err.message}`);
-      }
-      await sleep(220);
-      if ((i + 1) % 100 === 0 || i + 1 === withEmail.length) console.log(`     Email progress: ${i + 1}/${withEmail.length}`);
-    }
-    console.log(`     ✓ ${stats.email} sent / ${stats.emailFailed} failed`);
   } else {
     console.log('     Using Hostinger SMTP (1 msg/sec)...');
     const transporter = nodemailer.createTransport({

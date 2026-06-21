@@ -153,6 +153,7 @@ const CreatorSubscribers = lazy(() => import("@/components/creators/CreatorLayou
 const CreatorConsents = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorConsents })));
 const CreatorXCampaignsPage = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorXCampaigns })));
 const CreatorGuidelines = lazy(() => import("@/pages/creators/CreatorGuidelines"));
+const Donate = lazy(() => import("@/pages/Donate"));
 
 export const router = createBrowserRouter([
   {
@@ -821,6 +822,14 @@ export const router = createBrowserRouter([
     element: (
       <ModuleLoader>
         <Appeal />
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/donate",
+    element: (
+      <ModuleLoader>
+        <Donate />
       </ModuleLoader>
     ),
   },

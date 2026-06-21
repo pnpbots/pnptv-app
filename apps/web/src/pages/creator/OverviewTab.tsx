@@ -31,7 +31,7 @@ const GUIDE_STEPS = [
   {
     icon: "💵",
     title: "Turn on your membership fee",
-    body: "Once you have at least 3 exclusive videos live, go to Settings and flip the \"Accept new memberships\" toggle on. Fans pay $5–$15/month depending on your tier and get instant access to everything behind your wall.",
+    body: "Once you have at least 5 exclusive videos live, each 5 minutes or longer, go to Settings and flip the \"Accept new memberships\" toggle on. Fans pay $5-$15/month depending on your tier and get instant access to everything behind your wall.",
   },
   {
     icon: "📸",

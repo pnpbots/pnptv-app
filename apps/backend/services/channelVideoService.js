@@ -72,7 +72,7 @@ const TAG_TAXONOMY = [
   // ethnicity
   'latino', 'black', 'asian', 'white', 'mixed',
   // substance play
-  'clouds', 'parTy', 'sober',
+  'clouds', 'party', 'sober',
   // sex type
   'breeding', 'raw', 'condom', 'oral', 'rim',
   // kink & fetish
