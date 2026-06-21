@@ -1284,9 +1284,7 @@ export default function Profile() {
                             </a>
                             <a
                               role="menuitem"
-                              href={import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app"}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                              href="/live"
                               onClick={() => setOverflowOpen(false)}
                               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/85 hover:bg-white/5 transition-colors"
                             >
@@ -1445,39 +1443,16 @@ export default function Profile() {
               </div>
               {isPerformer && (
                 <div className="flex gap-2">
-                  {/* Cal.com booking — opens creator's booking page on booking.pnptv.app */}
-                  {profile.username ? (
-                    <a
-                      href={`${import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app"}/${profile.username}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
-                      style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                      Book a Session
-                    </a>
-                  ) : isCreatorPayLocked(profile.username) ? (
-                    <button
-                      disabled
-                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 opacity-50 cursor-not-allowed bg-white/5 border border-white/10 text-pnp-textSecondary"
-                    >
-                      🔒 Launches June 1st
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => setShowBookCall(true)}
-                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
-                      style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                      </svg>
-                      Book a Call
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setShowBookCall(true)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
+                    style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    Book a Session
+                  </button>
                 </div>
               )}
               {/* Block / Report — authenticated, other profiles only */}
