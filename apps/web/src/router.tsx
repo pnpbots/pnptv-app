@@ -152,6 +152,7 @@ const Appeal = lazy(() => import("@/pages/Appeal"));
 const CreatorSubscribers = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorSubscribers })));
 const CreatorConsents = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorConsents })));
 const CreatorXCampaignsPage = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorXCampaigns })));
+const CreatorGuidelines = lazy(() => import("@/pages/creators/CreatorGuidelines"));
 
 export const router = createBrowserRouter([
   {
@@ -795,6 +796,7 @@ export const router = createBrowserRouter([
       { path: "subscribers", element: <ModuleLoader><CreatorSubscribers /></ModuleLoader> },
       { path: "consents", element: <ModuleLoader><CreatorConsents /></ModuleLoader> },
       { path: "x-campaigns", element: <ModuleLoader><CreatorXCampaignsPage /></ModuleLoader> },
+      { path: "guidelines", element: <ModuleLoader><CreatorGuidelines /></ModuleLoader> },
     ],
   },
   // Main Stage guest join — public, no auth, no Layout shell
