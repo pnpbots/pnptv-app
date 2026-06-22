@@ -9,8 +9,8 @@ set -euo pipefail
 APP_DIR="/opt/pnptvapp"
 LOG_PREFIX="[$(date -Iseconds)] [sync-secrets]"
 INFISICAL_URL="http://127.0.0.1:8200"
-CLIENT_ID="36440965-7996-47ce-bdf8-9a64c163d811"
-CLIENT_SECRET="c0f7a3fb9ac8360fe3310d4f6f683d57d3ab5d804337aca26347b36227dff5cd"
+CLIENT_ID="__ROTATE_ME__"
+CLIENT_SECRET="__ROTATE_ME__"
 PROJECT_SLUG="pn-ptv-app-yigo"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
