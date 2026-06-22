@@ -6830,6 +6830,7 @@ export interface MainStageState {
   cams: {
     volume: number;
   };
+  autoplay_enabled: boolean;
   counts: {
     participants: number;
     guests: number;
@@ -6950,6 +6951,10 @@ export function setMainStageVolume(payload: {
   media?: number;
 }): Promise<{ success: boolean }> {
   return request("/api/main-stage/volume", { method: "POST", body: payload });
+}
+
+export function setMainStageAutoplay(enabled: boolean): Promise<{ success: boolean }> {
+  return request("/api/main-stage/autoplay", { method: "POST", body: { enabled } });
 }
 
 export function setMainStageSpotlight(cammer: string): Promise<{ success: boolean }> {

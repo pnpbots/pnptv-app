@@ -316,6 +316,37 @@ export function AdminPanelContent({
         >
 
         <section>
+          <div className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 bg-white/[0.04] border border-white/10">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold text-white/85 leading-tight">Auto-play music</p>
+              <p className="text-[10px] text-white/45 leading-snug mt-0.5">
+                {state.autoplay_enabled
+                  ? "Rotates videos every 10 minutes"
+                  : "Manual only — pick media to start"}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={state.autoplay_enabled}
+              aria-label="Toggle auto-play"
+              onClick={() => admin.setAutoplay(!state.autoplay_enabled)}
+              className="flex-shrink-0 relative w-11 h-6 rounded-full transition-colors active:scale-[0.96]"
+              style={{
+                background: state.autoplay_enabled
+                  ? "linear-gradient(135deg,#D4007A,#7B61FF)"
+                  : "rgba(255,255,255,0.12)",
+              }}
+            >
+              <span
+                className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all"
+                style={{ left: state.autoplay_enabled ? "calc(100% - 22px)" : "2px" }}
+              />
+            </button>
+          </div>
+        </section>
+
+        <section>
           <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">
             {t.live.mainStageAdminSectionPrimeVideos}{primeVideos.length > 0 ? ` (${primeVideos.length})` : ""}
           </h3>

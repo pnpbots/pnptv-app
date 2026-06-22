@@ -255,6 +255,7 @@ async function getState() {
     queue,
     media,
     camsVolRaw,
+    autoplayRaw,
   ] = await Promise.all([
     redis.get('mainstage:mode'),
     redis.get('mainstage:spotlight:cammer'),
@@ -262,6 +263,7 @@ async function getState() {
     redis.lrange('mainstage:spotlight:queue', 0, -1),
     readMedia(),
     redis.get('mainstage:cams:volume'),
+    redis.get('mainstage:autoplay:enabled'),
   ]);
 
   return {
@@ -275,6 +277,9 @@ async function getState() {
     cams: {
       volume: camsVolRaw !== null ? parseInt(camsVolRaw, 10) : 80,
     },
+    // Server-side music/video auto-rotation. Defaults to enabled (legacy behavior).
+    // When false, autoRotateMedia is a no-op — admin must pick media manually.
+    autoplay_enabled: autoplayRaw === null ? true : autoplayRaw !== '0',
     counts: {
       participants: queue.length,
       guests: queue.filter((identity) => String(identity).startsWith('guest_')).length,
@@ -847,6 +852,13 @@ function broadcastSkipVoteUpdate(src, count, threshold) {
 
 async function autoRotateMedia() {
   try {
+    const redis = getRedis();
+
+    // Admin-controlled auto-play toggle. When disabled, the rotation timer
+    // still fires but is a no-op — the admin must pick media manually.
+    const autoplayRaw = await redis.get('mainstage:autoplay:enabled');
+    if (autoplayRaw === '0') return;
+
     const current = await readMedia();
 
     if (current.kind !== 'off') return;   // don't interrupt admin-set media
@@ -856,6 +868,22 @@ async function autoRotateMedia() {
   } catch (err) {
     logger.error('[MainStage] autoRotateMedia error', { error: err.message });
   }
+}
+
+// ── Auto-play toggle ──────────────────────────────────────────────────────────
+
+/**
+ * Enable or disable server-side media auto-rotation. When disabled, the
+ * rotation timer is a no-op until re-enabled. Persisted in Redis with no
+ * TTL so the choice survives restarts. Broadcasts state to all clients.
+ *
+ * @param {boolean} enabled
+ */
+async function setAutoplay(enabled) {
+  const redis = getRedis();
+  await redis.set('mainstage:autoplay:enabled', enabled ? '1' : '0');
+  logger.info('[MainStage] autoplay set', { enabled: Boolean(enabled) });
+  await emitState();
 }
 
 /**
@@ -1136,6 +1164,7 @@ module.exports = {
   logAdminAction,
   notifyViewersChanged,
   autoRotateMedia,
+  setAutoplay,
   advanceVideo,
   voteSkip,
   getSkipVotes,

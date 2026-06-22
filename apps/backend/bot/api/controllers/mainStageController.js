@@ -416,6 +416,27 @@ const setMedia = asyncHandler(async (req, res) => {
 });
 
 /**
+ * POST /api/main-stage/autoplay
+ * Admin only. Body: { enabled: boolean }
+ *
+ * Toggles the server-side music/video auto-rotation. When disabled, the
+ * rotation timer is a no-op until re-enabled. Persists in Redis so the
+ * choice survives bot restarts.
+ */
+const setAutoplay = asyncHandler(async (req, res) => {
+  const { enabled } = req.body || {};
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'enabled (boolean) is required' });
+  }
+
+  await mainStageService.setAutoplay(enabled);
+  await mainStageService.logAdminAction(req.user.id, 'set_autoplay', { enabled });
+
+  logger.info('[MainStage] autoplay toggled by admin', { userId: req.user.id, enabled });
+  return res.json({ success: true, enabled });
+});
+
+/**
  * POST /api/main-stage/volume
  * Admin only. Body: { cams?: number, media?: number }
  */
@@ -708,6 +729,7 @@ module.exports = {
   acceptConsents,
   setMode,
   setMedia,
+  setAutoplay,
   setVolume,
   setSpotlight,
   moderate,

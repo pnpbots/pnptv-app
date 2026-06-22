@@ -8,6 +8,7 @@ import {
   setMainStageMode,
   setMainStageMedia,
   setMainStageVolume,
+  setMainStageAutoplay,
   setMainStageSpotlight,
   moderateMainStage,
   shuffleMainStageCammers,
@@ -41,6 +42,7 @@ interface UseMainStageReturn {
       adminLocked?: boolean;
     }) => Promise<void>;
     setVolume: (payload: { cams?: number; media?: number }) => Promise<void>;
+    setAutoplay: (enabled: boolean) => Promise<void>;
     setSpotlight: (cammer: string) => Promise<void>;
     moderate: (action: "skip" | "mute" | "kick", identity: string) => Promise<void>;
   };
@@ -72,6 +74,10 @@ export function useMainStage(): UseMainStageReturn {
 
   const adminSetVolume = useCallback(async (payload: { cams?: number; media?: number }) => {
     await setMainStageVolume(payload);
+  }, []);
+
+  const adminSetAutoplay = useCallback(async (enabled: boolean) => {
+    await setMainStageAutoplay(enabled);
   }, []);
 
   const adminSetSpotlight = useCallback(async (cammer: string) => {
@@ -108,6 +114,7 @@ export function useMainStage(): UseMainStageReturn {
       setMode: adminSetMode,
       setMedia: adminSetMedia,
       setVolume: adminSetVolume,
+      setAutoplay: adminSetAutoplay,
       setSpotlight: adminSetSpotlight,
       moderate: adminModerate,
     },
