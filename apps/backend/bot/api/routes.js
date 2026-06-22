@@ -127,7 +127,10 @@ const requireSessionAuth = async (req, res, next) => {
       await cache.set(banKey, 'true', 120);
       return res.status(403).json({ success: false, error: 'Account suspended.', code: 'BANNED' });
     }
-  } catch (_) { /* fail open — don't block on ban-check error */ }
+  } catch (err) {
+    logger.error('requireSessionAuth ban check failed — failing closed', { userId, error: err.message });
+    return res.status(503).json({ success: false, error: 'Service temporarily unavailable', code: 'SERVICE_UNAVAILABLE' });
+  }
   next();
 };
 
@@ -2765,12 +2768,15 @@ const OIDC_ALLOWED_RETURN_HOSTS = new Set([
 
 function sanitizeOidcReturnTo(raw) {
   if (typeof raw !== 'string' || !raw) return '/';
-  if (/^\/[a-z0-9/_-]*/i.test(raw)) return raw;
+  // Require alphanumeric second char to block protocol-relative URLs (//evil.com).
+  // Anchor with $ so the test covers the full string.
+  if (/^\/[a-z0-9][a-z0-9/_\-?=#&%.]*$/i.test(raw)) return raw;
   try {
     const parsed = new URL(raw);
     if (parsed.protocol !== 'https:') return '/';
     if (!OIDC_ALLOWED_RETURN_HOSTS.has(parsed.hostname)) return '/';
-    return parsed.toString();
+    // Strip query/fragment from external URLs to prevent reflected-content issues.
+    return `${parsed.origin}${parsed.pathname}`;
   } catch {
     return '/';
   }
@@ -4903,7 +4909,15 @@ const { ensureEmailCredentials } = require('../../services/userService');
 
 // Get a random available Meru link for a product
 // Verifies the link is actually unpaid on Meru before serving it
-app.get('/api/meru/random-link', asyncHandler(async (req, res) => {
+const meruRandomLinkLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (req, res) => res.status(429).json({ success: false, error: 'Too many requests. Try again later.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.get('/api/meru/random-link', requireSessionAuth, meruRandomLinkLimiter, asyncHandler(async (req, res) => {
   // Default to the consolidated 'lifetime100' pool — see migration 195.
   const { product = 'lifetime100' } = req.query;
   const meruLinkService = require('../../services/meruLinkService');
@@ -6690,7 +6704,6 @@ app.get('/api/webapp/social/wof-feed', pageLimiter, asyncHandler(socialControlle
 app.get('/api/webapp/social/hashtag-feed', requireSessionAuth, asyncHandler(socialController.getHashtagFeed));
 app.get('/api/webapp/social/wall/:userId', asyncHandler(socialController.getWall));
 app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getPublicProfile));
-app.post('/api/webapp/social/posts', requireSessionAuth, asyncHandler(socialController.createPost));
 // M-10: 2257 compliance check middleware — enforced for active creators only
 const require2257ForCreators = asyncHandler(async (req, res, next) => {
   const userId = req.session?.user?.id;
@@ -6715,6 +6728,7 @@ const require2257ForCreators = asyncHandler(async (req, res, next) => {
   return next();
 });
 
+app.post('/api/webapp/social/posts', requireSessionAuth, require2257ForCreators, asyncHandler(socialController.createPost));
 app.post('/api/webapp/social/posts/with-media', requireSessionAuth, uploadLimiter, attachCreatorStatus, postMediaUploadMiddleware, verifyDiskFileType, require2257ForCreators, asyncHandler(socialController.createPostWithMedia));
 app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, uploadLimiter, attachCreatorStatus, postMultiMediaUploadMiddleware, verifyDiskFileType, require2257ForCreators, asyncHandler(socialController.createPostWithMultiMedia));
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));

@@ -146,7 +146,8 @@ async function requireActiveCreator(req, res) {
   if (!userId) { res.status(401).json({ error: 'Not authenticated' }); return null; }
 
   const result = await query(
-    `SELECT pnptv_id, creator_status, username, first_name, photo_file_id, bio FROM users WHERE id = $1`,
+    `SELECT pnptv_id, creator_status, username, first_name, photo_file_id, bio,
+            identity_verified, identity_verification_required_by FROM users WHERE id = $1`,
     [userId]
   );
   const user = result.rows[0];
@@ -268,6 +269,10 @@ const createContent = async (req, res) => {
     const user = await requireActiveCreator(req, res);
     if (!user) return;
 
+    if (!IdentityVerificationService.is2257Compliant(user)) {
+      return res.status(403).json({ success: false, error: 'Identity verification required before creating content.', code: '2257_REQUIRED' });
+    }
+
     const performer = await getOrCreatePerformer(user.pnptv_id, user);
 
     const allowed = ['title', 'description', 'type', 'media_url', 'duration_seconds',
@@ -386,6 +391,10 @@ const createShow = async (req, res) => {
   try {
     const user = await requireActiveCreator(req, res);
     if (!user) return;
+
+    if (!IdentityVerificationService.is2257Compliant(user)) {
+      return res.status(403).json({ success: false, error: 'Identity verification required before creating shows.', code: '2257_REQUIRED' });
+    }
 
     const performer = await getOrCreatePerformer(user.pnptv_id, user);
 
