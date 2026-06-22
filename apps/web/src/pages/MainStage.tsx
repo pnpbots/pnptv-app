@@ -1148,10 +1148,12 @@ export default function MainStage() {
         />
       )}
       <header
-        className="flex-shrink-0 flex items-center justify-between px-4 gap-3"
+        className="flex-shrink-0 flex items-center justify-between px-2 sm:px-4 gap-2 sm:gap-3"
         style={{
           minHeight: "54px",
           paddingTop: "env(safe-area-inset-top, 0px)",
+          paddingLeft: "calc(0.5rem + env(safe-area-inset-left, 0px))",
+          paddingRight: "calc(0.5rem + env(safe-area-inset-right, 0px))",
           background: "rgba(10,10,15,0.85)",
           backdropFilter: "blur(16px)",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
@@ -1161,24 +1163,27 @@ export default function MainStage() {
         <img
           src="/logo-login.png"
           alt="PNPtv!"
-          className="h-7 w-auto object-contain brightness-110"
+          className="h-7 w-auto object-contain brightness-110 flex-shrink-0"
         />
 
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-white/[0.06] border border-white/10 text-white/80">
-          <span className="text-pnp-accent">{MODE_ICONS[mode]}</span>
-          <span>{t.live.mainStageTitle}</span>
-          <span className="text-white/30 mx-0.5">·</span>
-          <span className="text-white/55">{modeLabels[mode]}</span>
+        {/* Mode chip — flex-shrink + min-w-0 so on 360px screens it yields
+            space to the right-side action buttons instead of pushing them
+            off the edge. Mode label hides below sm. */}
+        <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-full text-xs font-semibold bg-white/[0.06] border border-white/10 text-white/80 min-w-0 flex-shrink overflow-hidden">
+          <span className="text-pnp-accent flex-shrink-0">{MODE_ICONS[mode]}</span>
+          <span className="truncate">{t.live.mainStageTitle}</span>
+          <span className="hidden sm:inline text-white/30 mx-0.5">·</span>
+          <span className="hidden sm:inline text-white/55 truncate">{modeLabels[mode]}</span>
           {liveParticipants > 0 && (
             <>
               <span className="text-white/20 mx-0.5">·</span>
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-              <span className="tabular-nums text-white/70">{liveParticipants}</span>
+              <span className="tabular-nums text-white/70 flex-shrink-0">{liveParticipants}</span>
             </>
           )}
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
           {isViewerMode && (
             <span
               className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"

@@ -151,57 +151,59 @@ if (!resetInProgress) {
   });
 }
 
-// ── Service Worker update detection (silent auto-update) ──────────────────
-// New SW finishes installing → wait a 5s grace period for any in-flight user
-// action, then SKIP_WAITING so the new SW activates. controllerchange below
-// catches that event and reloads the page automatically. No user click needed.
-if (!resetInProgress && "serviceWorker" in navigator) {
-  const GRACE_MS = 5_000;
-  const activateSoon = (sw: ServiceWorker) => {
-    setTimeout(() => sw.postMessage({ type: "SKIP_WAITING" }), GRACE_MS);
-  };
+// ── Service Worker update detection (user-driven via UpdateAvailableModal) ──
+// New SW finishes installing → mark pending and dispatch `pnptv:update-available`.
+// The UpdateAvailableModal in App.tsx renders a non-dismissible modal (or a
+// non-blocking toast if a realtime session is active) and the user clicks
+// "Update now" to post SKIP_WAITING. controllerchange below then reloads.
+function dispatchUpdateAvailable(): void {
+  try {
+    window.dispatchEvent(new CustomEvent("pnptv:update-available"));
+  } catch {
+    // ignore event dispatch failures
+  }
+}
 
+if (!resetInProgress && "serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((reg) => {
-    const maybeActivateWaitingWorker = () => {
+    const announceWaitingWorker = (origin: string) => {
       if (!reg.waiting) return;
+      markSwUpdatePending();
       if (hasActiveRealtimeSession()) {
-        markSwUpdatePending();
-        dispatchSwUpdateStatus("deferred-active-session");
-        return;
+        dispatchSwUpdateStatus(`${origin}-deferred-active-session`);
+      } else {
+        dispatchSwUpdateStatus(`${origin}-available`);
       }
-      clearSwUpdatePending();
-      dispatchSwUpdateStatus("activating");
-      activateSoon(reg.waiting);
+      // Modal/toast decides whether to render based on realtime session state
+      // and listens for `pnptv:realtime-session-change` to promote toast → modal.
+      dispatchUpdateAvailable();
     };
 
     // Poll for updates every 60s while the tab is open
     setInterval(() => {
       reg.update();
-      maybeActivateWaitingWorker();
+      if (reg.waiting) announceWaitingWorker("poll");
     }, 60_000);
 
     const watchInstalling = (sw: ServiceWorker) => {
       sw.addEventListener("statechange", () => {
         if (sw.state === "installed" && navigator.serviceWorker.controller) {
-          if (hasActiveRealtimeSession()) {
-            markSwUpdatePending();
-            dispatchSwUpdateStatus("installed-deferred-active-session");
-            return;
-          }
-          clearSwUpdatePending();
-          dispatchSwUpdateStatus("installed-activating");
-          activateSoon(sw);
+          announceWaitingWorker("installed");
         }
       });
     };
 
-    if (reg.waiting) maybeActivateWaitingWorker();
+    if (reg.waiting) announceWaitingWorker("initial");
     if (reg.installing) watchInstalling(reg.installing);
     reg.addEventListener("updatefound", () => {
       if (reg.installing) watchInstalling(reg.installing);
     });
 
-    window.addEventListener("pnptv:realtime-session-change", maybeActivateWaitingWorker);
+    // When realtime session ends, re-announce so a previously-deferred toast
+    // can promote to the full-screen modal.
+    window.addEventListener("pnptv:realtime-session-change", () => {
+      if (reg.waiting) announceWaitingWorker("session-end");
+    });
   });
 
   let refreshing = false;

@@ -463,8 +463,8 @@ const moderate = asyncHandler(async (req, res) => {
   if (!action || !identity) {
     return res.status(400).json({ success: false, error: 'action and identity are required' });
   }
-  if (!['skip', 'mute', 'kick'].includes(action)) {
-    return res.status(400).json({ success: false, error: 'action must be skip, mute, or kick' });
+  if (!['skip', 'mute', 'unmute', 'kick'].includes(action)) {
+    return res.status(400).json({ success: false, error: 'action must be skip, mute, unmute, or kick' });
   }
   if (typeof identity !== 'string' || identity.length > 255) {
     return res.status(400).json({ success: false, error: 'identity must be a string ≤255 chars' });
@@ -483,10 +483,11 @@ const moderate = asyncHandler(async (req, res) => {
       try {
         const participant = await roomClient.getParticipant(ROOM_NAME, String(identity));
         const tracks = (participant && participant.tracks) ? participant.tracks : [];
-        if (tracks.length === 0) {
-          logger.warn('[MainStage] mute: participant has no published tracks', { identity });
-          return res.json({ success: false, error: 'participant has no published tracks' });
-        }
+        // Mute any currently-published audio tracks. Even if there are none
+        // (e.g. mic already off) we still need to revoke canPublishAudio so
+        // the user can't simply unmute or re-publish a fresh audio track —
+        // the per-track mute is just a UX shortcut, the permission revoke
+        // below is the real enforcement.
         let mutedCount = 0;
         for (const track of tracks) {
           try {
@@ -498,11 +499,45 @@ const moderate = asyncHandler(async (req, res) => {
             });
           }
         }
+        // Revoke canPublishAudio so the user cannot re-unmute or re-publish
+        // a new audio track. Keep video + screen-share + subscribe intact so
+        // mute is strictly an audio-only sanction (kick is a separate action).
+        try {
+          await roomClient.updateParticipant(ROOM_NAME, String(identity), undefined, {
+            canPublish: true,
+            canPublishVideo: true,
+            canPublishAudio: false,
+            canSubscribe: true,
+          });
+        } catch (permErr) {
+          logger.warn('[MainStage] mute: updateParticipant (revoke audio) failed', {
+            error: permErr.message, identity,
+          });
+        }
         await mainStageService.logAdminAction(req.user.id, 'moderate_mute', { identity, mutedCount });
         logger.info('[MainStage] moderation action', { userId: req.user.id, action, identity, mutedCount });
         return res.json({ success: true, action, identity, mutedTrackCount: mutedCount });
       } catch (err) {
         logger.error('[MainStage] mute: getParticipant failed', { error: err.message, identity });
+        return res.status(500).json({ success: false, error: err.message });
+      }
+    }
+    case 'unmute': {
+      // Inverse of mute: restore canPublishAudio so the user can unmute /
+      // republish a new audio track. We do NOT auto-unmute existing tracks —
+      // user must explicitly toggle their mic on, matching native LiveKit UX.
+      try {
+        await roomClient.updateParticipant(ROOM_NAME, String(identity), undefined, {
+          canPublish: true,
+          canPublishVideo: true,
+          canPublishAudio: true,
+          canSubscribe: true,
+        });
+        await mainStageService.logAdminAction(req.user.id, 'moderate_unmute', { identity });
+        logger.info('[MainStage] moderation action', { userId: req.user.id, action, identity });
+        return res.json({ success: true, action, identity });
+      } catch (err) {
+        logger.error('[MainStage] unmute: updateParticipant failed', { error: err.message, identity });
         return res.status(500).json({ success: false, error: err.message });
       }
     }

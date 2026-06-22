@@ -10,6 +10,9 @@ import { useI18n } from "@/lib/i18n";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
 import { PermissionOnboarding } from "@/components/PermissionOnboarding";
+import { InstallPill } from "@/components/InstallPill";
+import { PushNotificationPill } from "@/components/PushNotificationPill";
+import { UpdateAvailableModal } from "@/components/UpdateAvailableModal";
 import { useAuth } from "@/hooks/useAuth";
 import { getSocket, connectSocket, disconnectSocket } from "@/lib/socket";
 import { redeemReferralCode } from "@/lib/api";
@@ -270,6 +273,9 @@ function AppOverlays() {
     <>
       <PermissionOnboarding isAuthenticated={isAuthenticated} />
       <NotificationPermissionPrompt isAuthenticated={isAuthenticated} />
+      <InstallPill />
+      <PushNotificationPill />
+      <UpdateAvailableModal />
       {suspendedMsg && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-6">
           <div className="bg-[#1C1C1E] border border-red-500/40 rounded-2xl p-6 max-w-sm w-full text-center space-y-3">

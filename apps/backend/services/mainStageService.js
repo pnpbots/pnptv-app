@@ -110,6 +110,129 @@ function notifyViewersChanged() {
   emitState().catch(() => {});
 }
 
+// ── Media hash helpers ────────────────────────────────────────────────────────
+
+/**
+ * Reconstruct the media JSON object the frontend expects from a Redis HGETALL.
+ * Each field is stored JSON-stringified so booleans/nulls/numbers round-trip
+ * correctly. Missing fields fall back to MEDIA_DEFAULTS.
+ */
+function decodeMediaHash(hash) {
+  const out = { ...MEDIA_DEFAULTS };
+  if (!hash || typeof hash !== 'object') return out;
+  for (const [k, v] of Object.entries(hash)) {
+    if (v === undefined) continue;
+    try {
+      out[k] = JSON.parse(v);
+    } catch (_) {
+      out[k] = v; // raw string fallback (defensive — shouldn't happen)
+    }
+  }
+  return out;
+}
+
+/**
+ * Encode a JS value as a JSON string suitable for HSET. Returns null for
+ * undefined so the caller can skip writing it.
+ */
+function encodeMediaValue(v) {
+  if (v === undefined) return null;
+  return JSON.stringify(v);
+}
+
+/**
+ * Build an HSET arg pair-array from an object of patches. Undefined values
+ * are skipped. Returns null if no fields to write.
+ */
+function buildHsetArgs(patch) {
+  const args = [];
+  for (const [k, v] of Object.entries(patch)) {
+    const enc = encodeMediaValue(v);
+    if (enc !== null) args.push(k, enc);
+  }
+  return args.length ? args : null;
+}
+
+/**
+ * One-shot legacy migration. If mainstage:media exists as a STRING (old JSON
+ * blob layout), parse it, DEL, then HSET its fields. Idempotent: subsequent
+ * runs see a hash and return immediately. Safe to call on every boot.
+ */
+async function migrateMediaKeyIfNeeded() {
+  const redis = getRedis();
+  let type;
+  try {
+    type = await redis.type(MEDIA_KEY);
+  } catch (err) {
+    logger.warn('[MainStage] migrateMediaKeyIfNeeded: TYPE failed', { error: err.message });
+    return;
+  }
+  if (type !== 'string') return; // already hash or missing
+
+  let raw;
+  try {
+    raw = await redis.get(MEDIA_KEY);
+  } catch (_) {
+    return;
+  }
+  let parsed = {};
+  if (raw) { try { parsed = JSON.parse(raw); } catch (_) {} }
+
+  // DEL + HSET in a MULTI so a concurrent setter can't observe an empty key.
+  const args = buildHsetArgs({ ...MEDIA_DEFAULTS, ...parsed });
+  try {
+    const multi = redis.multi();
+    multi.del(MEDIA_KEY);
+    if (args) multi.hset(MEDIA_KEY, ...args);
+    multi.expire(MEDIA_KEY, STATE_CACHE_TTL_S);
+    await multi.exec();
+    logger.info('[MainStage] migrated mainstage:media from string to hash', { fields: args ? args.length / 2 : 0 });
+  } catch (err) {
+    logger.warn('[MainStage] migrateMediaKeyIfNeeded: migration failed', { error: err.message });
+  }
+}
+
+/**
+ * Read the media state — handles both new hash layout and (defensively) the
+ * legacy string layout, in case migration hasn't run yet on this replica.
+ */
+async function readMedia() {
+  const redis = getRedis();
+  let type;
+  try {
+    type = await redis.type(MEDIA_KEY);
+  } catch (_) {
+    return { ...MEDIA_DEFAULTS };
+  }
+  if (type === 'hash') {
+    const hash = await redis.hgetall(MEDIA_KEY);
+    return decodeMediaHash(hash);
+  }
+  if (type === 'string') {
+    // Legacy path — parse and lazily kick off migration.
+    const raw = await redis.get(MEDIA_KEY);
+    let parsed = { ...MEDIA_DEFAULTS };
+    if (raw) { try { parsed = { ...MEDIA_DEFAULTS, ...JSON.parse(raw) }; } catch (_) {} }
+    migrateMediaKeyIfNeeded().catch(() => {});
+    return parsed;
+  }
+  return { ...MEDIA_DEFAULTS };
+}
+
+/**
+ * Write a partial media patch atomically — uses HSET with multiple fields in
+ * a single command so concurrent writers each apply their own fields without
+ * losing other writers' fields (no read-modify-write race).
+ * Skips undefined values.
+ */
+async function patchMediaHash(patch) {
+  const redis = getRedis();
+  const args = buildHsetArgs(patch);
+  if (!args) return;
+  await redis.hset(MEDIA_KEY, ...args);
+  await redis.expire(MEDIA_KEY, STATE_CACHE_TTL_S);
+}
+
 // ── State accessors ───────────────────────────────────────────────────────────
 
 /**
@@ -130,29 +253,16 @@ async function getState() {
     spotlightCammer,
     spotlightNextAt,
     queue,
-    mediaRaw,
+    media,
     camsVolRaw,
   ] = await Promise.all([
     redis.get('mainstage:mode'),
     redis.get('mainstage:spotlight:cammer'),
     redis.get('mainstage:spotlight:nextAt'),
     redis.lrange('mainstage:spotlight:queue', 0, -1),
-    redis.get('mainstage:media'),
+    readMedia(),
     redis.get('mainstage:cams:volume'),
   ]);
-
-  let media = {
-    kind: 'off',
-    src: null,
-    title: null,
-    playing: false,
-    volume: 70,
-    startedAt: null,
-    adminLocked: false,   // If true, autoRotateMedia skips until admin unlocks
-  };
-  if (mediaRaw) {
-    try { media = { ...media, ...JSON.parse(mediaRaw) }; } catch (_) {}
-  }
 
   return {
     mode:      mode || 'equal',
@@ -205,67 +315,68 @@ async function setMode(mode) {
  * }} opts
  */
 async function setMedia({ kind, src, title, playing, volume, adminLocked, _fromAutoRotate } = {}) {
-  const redis  = getRedis();
-  const rawNow = await redis.get('mainstage:media');
-  let current  = {
-    kind: 'off', src: null, title: null, playing: false, volume: 70,
-    startedAt: null, elapsedMs: 0, playbackRate: 1.25, adminLocked: false,
-  };
-  if (rawNow) { try { current = { ...current, ...JSON.parse(rawNow) }; } catch (_) {} }
+  // Read-modify-write only for fields whose new value depends on the current
+  // value (playing transitions, default-title reset). Independent fields
+  // (kind, src, volume, adminLocked) are written via patchMediaHash so two
+  // concurrent volume-only setters don't clobber each other.
+  const current = await readMedia();
+
+  const patch = {};
 
   if (kind !== undefined) {
     if (!VALID_MEDIA_KINDS.has(kind)) throw new Error(`Invalid media kind: ${kind}`);
-    current.kind = kind;
+    patch.kind = kind;
     // When the kind changes (or admin clears with kind='off'), reset the
     // title so stale metadata doesn't linger from the previous pick.
-    if (title === undefined) current.title = null;
+    if (title === undefined) patch.title = null;
   }
-  if (src    !== undefined) current.src    = src || null;
-  if (title  !== undefined) current.title  = title || null;
-  if (volume !== undefined) current.volume = clampVolume(volume);
+  if (src    !== undefined) patch.src    = src || null;
+  if (title  !== undefined) patch.title  = title || null;
+  if (volume !== undefined) patch.volume = clampVolume(volume);
 
   // Admin-lock semantics: any human call to setMedia (kind/src change) locks
   // auto-rotation so admin intent (including "silence") is respected. Only
   // autoRotateMedia itself bypasses the lock via _fromAutoRotate. An admin
   // can explicitly unlock by passing { adminLocked: false }.
   if (adminLocked !== undefined) {
-    current.adminLocked = Boolean(adminLocked);
+    patch.adminLocked = Boolean(adminLocked);
   } else if (!_fromAutoRotate && (kind !== undefined || src !== undefined)) {
-    current.adminLocked = true;
+    patch.adminLocked = true;
   }
 
   if (playing !== undefined) {
-    const wasPlaying = current.playing;
-    current.playing  = Boolean(playing);
-    if (current.playing && !wasPlaying) {
+    const wasPlaying = Boolean(current.playing);
+    const nextPlaying = Boolean(playing);
+    patch.playing = nextPlaying;
+    if (nextPlaying && !wasPlaying) {
       // Resuming: shift startedAt back by accumulated elapsed time so
       // clients can seek to the correct position mid-video.
-      current.startedAt = Date.now() - (current.elapsedMs || 0);
-      current.elapsedMs = 0;
-    } else if (!current.playing && wasPlaying) {
+      patch.startedAt = Date.now() - (current.elapsedMs || 0);
+      patch.elapsedMs = 0;
+    } else if (!nextPlaying && wasPlaying) {
       // Pausing: record how far we got so resume can restore position.
-      current.elapsedMs = current.startedAt ? Date.now() - current.startedAt : (current.elapsedMs || 0);
-      current.startedAt = null;
+      patch.elapsedMs = current.startedAt ? Date.now() - current.startedAt : (current.elapsedMs || 0);
+      patch.startedAt = null;
     }
   }
   // Source change resets position tracking
   if (src !== undefined) {
-    current.startedAt = null;
-    current.elapsedMs = 0;
+    patch.startedAt = null;
+    patch.elapsedMs = 0;
   }
 
-  await redis.set('mainstage:media', JSON.stringify(current), 'EX', STATE_CACHE_TTL_S);
-  logger.info('[MainStage] media updated', { kind: current.kind, playing: current.playing });
+  await patchMediaHash(patch);
+  logger.info('[MainStage] media updated', {
+    kind: patch.kind !== undefined ? patch.kind : current.kind,
+    playing: patch.playing !== undefined ? patch.playing : current.playing,
+  });
   await emitState();
 }
 
 async function setMediaVolume(v) {
-  const redis  = getRedis();
-  const rawNow = await redis.get('mainstage:media');
-  let current  = { kind: 'off', src: null, playing: false, volume: 70, startedAt: null };
-  if (rawNow) { try { current = { ...current, ...JSON.parse(rawNow) }; } catch (_) {} }
-  current.volume = clampVolume(v);
-  await redis.set('mainstage:media', JSON.stringify(current), 'EX', STATE_CACHE_TTL_S);
+  // Volume is an independent field — write only that key so we don't clobber
+  // a concurrent kind/src/playing update from another admin.
+  await patchMediaHash({ volume: clampVolume(v) });
   await emitState();
 }
 
@@ -634,16 +745,13 @@ async function advanceVideo() {
 
   // Identify currently playing fileId from Redis media state
   let currentFileId = null;
-  const rawMedia = await redis.get(MEDIA_KEY);
-  if (rawMedia) {
-    try {
-      const m = JSON.parse(rawMedia);
-      if (m.src) {
-        const match = m.src.match(/\/assets\/([0-9a-f-]{36})/i);
-        if (match) currentFileId = match[1];
-      }
-    } catch (_) {}
-  }
+  try {
+    const m = await readMedia();
+    if (m && m.src) {
+      const match = String(m.src).match(/\/assets\/([0-9a-f-]{36})/i);
+      if (match) currentFileId = match[1];
+    }
+  } catch (_) {}
 
   // Fetch entire playlist sorted by score ascending (lowest = oldest / never played)
   const all = await redis.zrange(PLAYLIST_KEY, 0, -1, 'WITHSCORES');
@@ -739,10 +847,7 @@ function broadcastSkipVoteUpdate(src, count, threshold) {
 
 async function autoRotateMedia() {
   try {
-    const redis    = getRedis();
-    const rawMedia = await redis.get(MEDIA_KEY);
-    let current = { kind: 'off', adminLocked: false };
-    if (rawMedia) { try { current = { ...current, ...JSON.parse(rawMedia) }; } catch (_) {} }
+    const current = await readMedia();
 
     if (current.kind !== 'off') return;   // don't interrupt admin-set media
     if (current.adminLocked) return;      // admin chose silence explicitly
@@ -863,6 +968,11 @@ let _lockToken        = null;
 async function startRotation() {
   _lockToken = `${process.pid}-${Date.now()}`;
   const redis = getRedis();
+
+  // One-shot legacy migration — convert mainstage:media STRING → HASH if it
+  // hasn't been done yet on this Redis. Safe to run on every replica boot;
+  // becomes a no-op once the key is already a hash.
+  try { await migrateMediaKeyIfNeeded(); } catch (_) { /* best-effort */ }
 
   async function tryAcquire() {
     const result = await redis.set(LOCK_KEY, _lockToken, 'NX', 'EX', LOCK_TTL_S);

@@ -258,14 +258,30 @@ async function start() {
   stopping  = false;
   backoffMs = MIN_BACKOFF_MS;
 
-  // Read initial state so a bot restart picks up in-progress playback
+  // Read initial state so a bot restart picks up in-progress playback.
+  // mainstage:media may be a Hash (new) or a String (legacy/in-flight migration);
+  // handle both layouts defensively so the worker doesn't crash on cold boot.
   try {
     const redis = getRedis();
-    const raw   = await redis.get('mainstage:media');
-    if (raw) {
-      const media = JSON.parse(raw);
-      currentSrc = media.src || null;
-      isPlaying  = Boolean(media.playing) && media.kind !== 'off';
+    const keyType = await redis.type('mainstage:media');
+    if (keyType === 'hash') {
+      const hash = await redis.hgetall('mainstage:media');
+      const decode = (v, fallback) => {
+        if (v === undefined) return fallback;
+        try { return JSON.parse(v); } catch (_) { return v; }
+      };
+      const src     = decode(hash.src, null);
+      const playing = decode(hash.playing, false);
+      const kind    = decode(hash.kind, 'off');
+      currentSrc = src || null;
+      isPlaying  = Boolean(playing) && kind !== 'off';
+    } else if (keyType === 'string') {
+      const raw = await redis.get('mainstage:media');
+      if (raw) {
+        const media = JSON.parse(raw);
+        currentSrc = media.src || null;
+        isPlaying  = Boolean(media.playing) && media.kind !== 'off';
+      }
     }
   } catch (err) {
     logger.warn('[MainStageMedia] failed to read initial state', { error: err.message });

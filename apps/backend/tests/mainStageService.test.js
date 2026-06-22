@@ -50,12 +50,36 @@ const mockRedis = {
     redisMem[k] = redisMem[k].filter((x) => x !== String(val));
     return before - redisMem[k].length;
   }),
-  hset: jest.fn(async (k, field, value) => {
+  hset: jest.fn(async (k, ...rest) => {
+    // ioredis supports HSET key field value [field value ...] — emulate that
+    // so callers passing many pairs (mainStageService.patchMediaHash) work.
     if (redisMem[k] == null || typeof redisMem[k] !== 'object' || Array.isArray(redisMem[k])) {
       redisMem[k] = {};
     }
-    redisMem[k][String(field)] = String(value);
-    return 1;
+    let written = 0;
+    for (let i = 0; i + 1 < rest.length; i += 2) {
+      redisMem[k][String(rest[i])] = String(rest[i + 1]);
+      written++;
+    }
+    return written;
+  }),
+  type: jest.fn(async (k) => {
+    const v = redisMem[k];
+    if (v === undefined) return 'none';
+    if (Array.isArray(v)) return 'list';
+    if (typeof v === 'object') return 'hash';
+    return 'string';
+  }),
+  multi: jest.fn(() => {
+    // Minimal MULTI/EXEC pipeline — buffers ops, runs them on exec().
+    const ops = [];
+    const pipe = {
+      del:    (...args) => { ops.push(() => mockRedis.del(...args));    return pipe; },
+      hset:   (...args) => { ops.push(() => mockRedis.hset(...args));   return pipe; },
+      expire: (...args) => { ops.push(() => mockRedis.expire(...args)); return pipe; },
+      exec:   async ()   => { const out = []; for (const op of ops) out.push([null, await op()]); return out; },
+    };
+    return pipe;
   }),
   hdel: jest.fn(async (k, field) => {
     if (!redisMem[k] || typeof redisMem[k] !== 'object' || Array.isArray(redisMem[k])) return 0;
@@ -185,35 +209,43 @@ describe('setMode', () => {
 
 // ── 2. setMedia — volume clamping ─────────────────────────────────────────────
 
+// mainstage:media is now stored as a Redis Hash, with each field
+// JSON-stringified for round-trip type safety. Helper decodes the hash
+// back to a plain JS object for assertion purposes.
+function readMediaHash() {
+  const h = redisMem['mainstage:media'];
+  if (!h || typeof h !== 'object' || Array.isArray(h)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(h)) {
+    try { out[k] = JSON.parse(v); } catch (_) { out[k] = v; }
+  }
+  return out;
+}
+
 describe('setMedia — volume clamping', () => {
   it('should clamp volume above 100 to 100', async () => {
     await svc.setMedia({ volume: 200 });
-    const stored = JSON.parse(redisMem['mainstage:media'] || '{}');
-    expect(stored.volume).toBe(100);
+    expect(readMediaHash().volume).toBe(100);
   });
 
   it('should clamp volume below 0 to 0', async () => {
     await svc.setMedia({ volume: -99 });
-    const stored = JSON.parse(redisMem['mainstage:media'] || '{}');
-    expect(stored.volume).toBe(0);
+    expect(readMediaHash().volume).toBe(0);
   });
 
   it('should accept volume=0 exactly', async () => {
     await svc.setMedia({ volume: 0 });
-    const stored = JSON.parse(redisMem['mainstage:media'] || '{}');
-    expect(stored.volume).toBe(0);
+    expect(readMediaHash().volume).toBe(0);
   });
 
   it('should accept volume=100 exactly', async () => {
     await svc.setMedia({ volume: 100 });
-    const stored = JSON.parse(redisMem['mainstage:media'] || '{}');
-    expect(stored.volume).toBe(100);
+    expect(readMediaHash().volume).toBe(100);
   });
 
   it('should use default volume 50 for non-numeric input', async () => {
     await svc.setMedia({ volume: 'loud' });
-    const stored = JSON.parse(redisMem['mainstage:media'] || '{}');
-    expect(stored.volume).toBe(50);
+    expect(readMediaHash().volume).toBe(50);
   });
 
   it('should reject invalid media kind', async () => {

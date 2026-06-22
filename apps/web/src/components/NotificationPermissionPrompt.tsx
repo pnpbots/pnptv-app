@@ -1,26 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { subscribeToPush } from "@/lib/pushNotifications";
 import { useI18n } from "@/lib/i18n";
+import { useInstallPrompt, isStandalonePWA } from "@/hooks/useInstallPrompt";
 
 const DISMISS_KEY = "push_notif_prompt_dismissed_v2";
 const IOS_DISMISS_KEY = "ios_install_prompt_dismissed_v1";
 const DISMISS_DAYS = 3;
 const IOS_DISMISS_DAYS = 7;
 const SHOW_DELAY_MS = 4000;
-
-// BeforeInstallPromptEvent isn't in the standard lib types; define a minimal shape.
-type DeferredInstallPrompt = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
-
-function isStandalonePWA(): boolean {
-  if (typeof window === "undefined") return false;
-  return (
-    window.matchMedia?.("(display-mode: standalone)").matches ||
-    (window.navigator as unknown as { standalone?: boolean }).standalone === true
-  );
-}
 
 function isDismissed(key: string): boolean {
   const until = localStorage.getItem(key);
@@ -56,28 +43,15 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
   const [mode, setMode] = useState<"browser" | "ios">("browser");
   const [requesting, setRequesting] = useState(false);
   const [granted, setGranted] = useState(false);
-  const [installEvent, setInstallEvent] = useState<DeferredInstallPrompt | null>(null);
   const [installing, setInstalling] = useState(false);
+
+  // Shared install-prompt hook — coordinates with InstallPill so we don't
+  // double-capture beforeinstallprompt (browser only fires it once).
+  const { installEvent, clear: clearInstallEvent } = useInstallPrompt();
 
   // Store the setTimeout handle so it can be cleared on unmount
   const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Capture the native install prompt as soon as the browser fires it.
-  // Stash the event so the user can trigger it later from inside the modal.
-  useEffect(() => {
-    const onBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setInstallEvent(e as DeferredInstallPrompt);
-    };
-    const onAppInstalled = () => setInstallEvent(null);
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    window.addEventListener("appinstalled", onAppInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", onAppInstalled);
-    };
-  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -121,7 +95,7 @@ export function NotificationPermissionPrompt({ isAuthenticated }: Props) {
       await installEvent.prompt();
       const choice = await installEvent.userChoice;
       if (choice.outcome === "accepted") {
-        setInstallEvent(null);
+        clearInstallEvent();
         // Stay on the modal so we can chain into the push opt-in next.
       }
     } catch {

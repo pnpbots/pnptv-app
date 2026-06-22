@@ -90,6 +90,43 @@ const strings = {
     notifTarget: "Target",
     confirmSendTitle: "Send Push Notification",
     sendNow: "Send Now",
+    // Floating install pill (InstallPill)
+    installPillLabel: "Install app",
+    installPillAria: "Install PNPtv on your device",
+    installPillClose: "Dismiss install prompt",
+    installSheetTitle: "Install PNPtv on your device",
+    installSheetDescription:
+      "Add PNPtv to your home screen for faster access, push notifications, and a full-screen experience.",
+    installSheetButton: "Install",
+    installSheetCancel: "Maybe later",
+    installSheetIOSTitle: "Add PNPtv to your Home Screen",
+    installSheetIOSDescription:
+      "Tap the Share button in Safari, then choose Add to Home Screen.",
+    installSheetIOSOk: "Got it",
+    // Floating push pill (PushNotificationPill)
+    pushPillLabel: "Notifications",
+    pushPillAria: "Enable push notifications",
+    pushPillClose: "Dismiss notifications prompt",
+    pushSheetTitle: "Turn on notifications",
+    pushSheetDescription:
+      "Get notified about live broadcasts, hangouts, and new content from creators you follow.",
+    pushSheetEnable: "Enable notifications",
+    pushSheetMaybeLater: "Maybe later",
+    pushSheetEnabling: "Enabling…",
+    pushSheetGrantedTitle: "You're all set",
+    pushSheetGrantedBody: "We'll keep you in the loop.",
+    pushSheetBlockedTitle: "Notifications blocked",
+    pushSheetBlockedBody:
+      "Enable notifications for PNPtv in your browser settings to receive alerts.",
+    pushSheetBlockedOk: "OK",
+    // Forced update modal (UpdateAvailableModal)
+    updateModalTitle: "A new version is available",
+    updateModalDescription:
+      "We've shipped fixes and improvements. Update now to get the latest version of PNPtv.",
+    updateModalButton: "Update now",
+    updateModalUpdating: "Updating…",
+    updateToastTitle: "Update available",
+    updateToastBody: "Will install after your current session ends.",
   },
   es: {
     // Dropdown header
@@ -182,6 +219,43 @@ const strings = {
     notifTarget: "Objetivo",
     confirmSendTitle: "Enviar notificación push",
     sendNow: "Enviar ahora",
+    // Floating install pill (InstallPill)
+    installPillLabel: "Instalar app",
+    installPillAria: "Instala PNPtv en tu dispositivo",
+    installPillClose: "Cerrar aviso de instalación",
+    installSheetTitle: "Instala PNPtv en tu dispositivo",
+    installSheetDescription:
+      "Añade PNPtv a tu pantalla de inicio para acceso rápido, notificaciones y experiencia pantalla completa.",
+    installSheetButton: "Instalar",
+    installSheetCancel: "Quizás luego",
+    installSheetIOSTitle: "Añade PNPtv a tu pantalla de inicio",
+    installSheetIOSDescription:
+      "Toca el botón Compartir en Safari y luego elige Añadir a pantalla de inicio.",
+    installSheetIOSOk: "Entendido",
+    // Floating push pill (PushNotificationPill)
+    pushPillLabel: "Notificaciones",
+    pushPillAria: "Activar notificaciones push",
+    pushPillClose: "Cerrar aviso de notificaciones",
+    pushSheetTitle: "Activa las notificaciones",
+    pushSheetDescription:
+      "Recibe avisos de transmisiones en vivo, hangouts y contenido nuevo de los creadores que sigues.",
+    pushSheetEnable: "Activar notificaciones",
+    pushSheetMaybeLater: "Quizás luego",
+    pushSheetEnabling: "Activando…",
+    pushSheetGrantedTitle: "¡Listo!",
+    pushSheetGrantedBody: "Te mantendremos al tanto.",
+    pushSheetBlockedTitle: "Notificaciones bloqueadas",
+    pushSheetBlockedBody:
+      "Activa las notificaciones para PNPtv en los ajustes de tu navegador para recibir avisos.",
+    pushSheetBlockedOk: "Entendido",
+    // Forced update modal (UpdateAvailableModal)
+    updateModalTitle: "Hay una nueva versión disponible",
+    updateModalDescription:
+      "Lanzamos mejoras y correcciones. Actualiza ahora para tener la última versión de PNPtv.",
+    updateModalButton: "Actualizar ahora",
+    updateModalUpdating: "Actualizando…",
+    updateToastTitle: "Actualización disponible",
+    updateToastBody: "Se instalará cuando termine tu sesión actual.",
   },
   pt: {
     notifications: "Notificações",

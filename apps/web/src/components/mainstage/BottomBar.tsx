@@ -136,12 +136,20 @@ export function BottomBarInner({
 
   return (
     <div
-      className="relative flex-shrink-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2"
+      // On 360px portrait the full set of action buttons (leave, skip-vote,
+      // play-next, reactions, screen-share, mic, camera) can total >360px.
+      // overflow-x-auto lets the row scroll instead of forcing buttons off
+      // the edge, and `justify-start sm:justify-center` keeps the leave
+      // button anchored to the visible edge on narrow screens.
+      className="relative flex-shrink-0 flex items-center justify-start sm:justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 overflow-x-auto"
       style={{
         background: "rgba(10,10,15,0.95)",
         backdropFilter: "blur(16px)",
         borderTop: "1px solid rgba(255,255,255,0.07)",
+        paddingLeft: "calc(0.5rem + env(safe-area-inset-left, 0px))",
+        paddingRight: "calc(0.5rem + env(safe-area-inset-right, 0px))",
         paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))",
+        scrollbarWidth: "none",
         zIndex: 45,
       }}
     >

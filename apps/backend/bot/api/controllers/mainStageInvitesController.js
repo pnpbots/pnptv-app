@@ -209,6 +209,36 @@ const guestToken = asyncHandler(async (req, res) => {
     });
   }
 
+  // ── Kicked-set check ──
+  // A guest who was kicked previously holds a `mainstage:kicked:<lkIdentity>`
+  // key for 24h. If they redeem another invite (or this invite a second time
+  // before TTL expiry) we must refuse to mint a fresh token using the same
+  // identity. The lkIdentity is freshly generated per redemption, so a kick
+  // only blocks the specific identity issued for the previous join. This
+  // still meaningfully blocks the most common abuse path: a guest who was
+  // kicked attempting to immediately rejoin via the same redemption (same
+  // browser/tab keeps the same redeem result, and re-redemption would only
+  // succeed for unlimited-use invites — in that case the new identity is
+  // unkicked, which is the correct semantics: kicks target identities).
+  try {
+    const redis = getRedis();
+    const isKicked = await redis.get(`mainstage:kicked:${String(redeem.lkIdentity)}`);
+    if (isKicked) {
+      return res.status(403).json({
+        success: false,
+        error: 'You have been removed from Main Stage.',
+        code: 'MAIN_STAGE_KICKED',
+      });
+    }
+  } catch (redisErr) {
+    logger.error('[MainStage] guestToken: Redis unavailable (kicked-set check)', { error: redisErr.message });
+    return res.status(503).json({
+      success: false,
+      error: 'Service temporarily unavailable.',
+      code: 'SESSION_BACKEND_UNAVAILABLE',
+    });
+  }
+
   // ── Reserve a stage slot + mint LiveKit token ──
   // Guest entrants join the same room model as authenticated participants,
   // so they also consume a rotation/visibility slot.
