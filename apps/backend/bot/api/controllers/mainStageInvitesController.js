@@ -279,7 +279,7 @@ const guestToken = asyncHandler(async (req, res) => {
     displayName: name,
   });
 
-  // Fire-and-forget welcome + lifetime100 promo. Never blocks the join.
+  // Fire-and-forget welcome with re-entry link + lifetime100 promo. Never blocks the join.
   if (typeof emailService.sendMainStageGuestPromoEmail === 'function') {
     setImmediate(() => {
       emailService
@@ -287,9 +287,10 @@ const guestToken = asyncHandler(async (req, res) => {
           to: normalizedEmail,
           displayName: name,
           language: guestLanguage,
+          inviteCode: code, // raw URL code so the email can render /main-stage/join/<code>
         })
         .catch((err) => {
-          logger.warn('[MainStage] guest promo email failed', {
+          logger.warn('[MainStage] guest welcome email failed', {
             email: normalizedEmail,
             err: err?.message || String(err),
           });

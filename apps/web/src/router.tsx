@@ -55,6 +55,23 @@ import { ModuleLoader } from "@/components/ModuleLoader";
 import { VerificationGate } from "@/components/VerificationGate";
 import { TierGate } from "@/components/TierGate";
 
+// Main Stage accepts unauthenticated guests when they arrive via a redeemed
+// invite (credentials in sessionStorage at `pnptv:ms:guest`). Wrap the page so
+// VerificationGate is bypassed in that case — guests already accepted terms +
+// confirmed age on the invite form.
+function MainStageRouteGate({ children }: { children: React.ReactNode }) {
+  const hasGuestCreds = (() => {
+    try {
+      const raw = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("pnptv:ms:guest") : null;
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      return !!(parsed?.token && parsed?.livekitUrl && parsed?.roomName);
+    } catch { return false; }
+  })();
+  if (hasGuestCreds) return <>{children}</>;
+  return <VerificationGate>{children}</VerificationGate>;
+}
+
 const Home = lazy(() => import("@/pages/Home"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Live = lazy(() => import("@/pages/Live"));
@@ -260,9 +277,9 @@ export const router = createBrowserRouter([
         path: "main-stage",
         element: (
           <ModuleLoader>
-            <VerificationGate>
+            <MainStageRouteGate>
               <MainStage />
-            </VerificationGate>
+            </MainStageRouteGate>
           </ModuleLoader>
         ),
         // Per-route boundary: if a grid or overlay throws, keep the app shell
