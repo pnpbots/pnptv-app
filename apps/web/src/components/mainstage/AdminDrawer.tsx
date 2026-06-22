@@ -300,21 +300,8 @@ export function AdminPanelContent({
           </div>
         )}
 
-        {/* Video / audio / participants — admins get full controls,
-            non-admins see them greyed-out (visible but uninteractive) so
-            they understand what the host can do without being able to
-            broadcast changes themselves. The server still enforces
-            admin-only on the underlying API regardless of UI state. */}
-        <div
-          aria-hidden={!isAdmin}
-          style={
-            !isAdmin
-              ? { opacity: 0.4, pointerEvents: "none", filter: "grayscale(70%)" }
-              : undefined
-          }
-          className="space-y-5"
-        >
-
+        {/* Auto-play toggle — open to all members, not just admins. Any
+            logged-in member can pause/resume the room's music rotation. */}
         <section>
           <div className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 bg-white/[0.04] border border-white/10">
             <div className="min-w-0">
@@ -345,6 +332,21 @@ export function AdminPanelContent({
             </button>
           </div>
         </section>
+
+        {/* Video / audio / participants — admins get full controls,
+            non-admins see them greyed-out (visible but uninteractive) so
+            they understand what the host can do without being able to
+            broadcast changes themselves. The server still enforces
+            admin-only on the underlying API regardless of UI state. */}
+        <div
+          aria-hidden={!isAdmin}
+          style={
+            !isAdmin
+              ? { opacity: 0.4, pointerEvents: "none", filter: "grayscale(70%)" }
+              : undefined
+          }
+          className="space-y-5"
+        >
 
         <section>
           <h3 className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-2.5">

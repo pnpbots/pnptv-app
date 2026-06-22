@@ -12328,13 +12328,14 @@ app.post(
   mainStageController.setMedia
 );
 
-// Auto-play toggle — admin-only. Disables the 10-minute video rotation
-// so the room stays silent until media is picked manually.
+// Auto-play toggle — open to any logged-in member. Anyone in the room can
+// pause or resume the music auto-rotation. Rate-limited by mainStageMutatorLimiter
+// to prevent toggle-spam griefing.
 app.post(
   '/api/main-stage/autoplay',
   authenticateUser,
-  roleGuard('admin', 'superadmin'),
-  mainStageAdminLimiter,
+  requireMemberTier,
+  mainStageMutatorLimiter,
   mainStageController.setAutoplay
 );
 
