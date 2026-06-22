@@ -59,15 +59,20 @@ import { TierGate } from "@/components/TierGate";
 // invite (credentials in sessionStorage at `pnptv:ms:guest`). Wrap the page so
 // VerificationGate is bypassed in that case — guests already accepted terms +
 // confirmed age on the invite form.
+//
+// IMPORTANT: lock the decision in on initial mount via useState initializer.
+// MainStage consumes (deletes) the sessionStorage key when it reads creds, so
+// any subsequent re-render of this gate would see an empty sessionStorage and
+// fall through to VerificationGate → /login. The useState snapshot prevents that.
 function MainStageRouteGate({ children }: { children: React.ReactNode }) {
-  const hasGuestCreds = (() => {
+  const [hasGuestCreds] = useState(() => {
     try {
       const raw = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("pnptv:ms:guest") : null;
       if (!raw) return false;
       const parsed = JSON.parse(raw);
       return !!(parsed?.token && parsed?.livekitUrl && parsed?.roomName);
     } catch { return false; }
-  })();
+  });
   if (hasGuestCreds) return <>{children}</>;
   return <VerificationGate>{children}</VerificationGate>;
 }

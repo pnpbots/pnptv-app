@@ -724,6 +724,11 @@ export function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const t = useI18n();
+  // Latches to true on first render at /main-stage with a valid guest session
+  // in sessionStorage. Stays true for the life of the Layout instance so
+  // subsequent re-renders don't bounce the guest to /login after MainStage
+  // consumes (deletes) the sessionStorage key.
+  const mainStageGuestLatchRef = useRef<boolean>(false);
   const [dmUnread, setDmUnread] = useState(0);
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [hangoutGroups, setHangoutGroups] = useState<HangoutGroup[]>([]);
@@ -902,9 +907,30 @@ export function Layout() {
 
   // Unauthenticated: send users to the real login screen, preserving where
   // they were trying to go so post-login return still works.
+  // Exception: /main-stage with a valid guest session in sessionStorage —
+  // guests redeemed an invite and already accepted terms + confirmed age on
+  // the invite form, so they must not be bounced to /login. We latch the
+  // decision in a ref because MainStage clears sessionStorage on mount; a
+  // subsequent re-render of Layout would otherwise see an empty storage and
+  // bounce the guest mid-session.
   if (!isAuthenticated) {
-    const returnTo = `${location.pathname}${location.search}${location.hash}`;
-    return <Navigate to={`/login?returnTo=${encodeURIComponent(returnTo)}`} replace />;
+    if (location.pathname === "/main-stage") {
+      if (!mainStageGuestLatchRef.current) {
+        try {
+          const raw = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("pnptv:ms:guest") : null;
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed?.token && parsed?.livekitUrl && parsed?.roomName) {
+              mainStageGuestLatchRef.current = true;
+            }
+          }
+        } catch { /* noop */ }
+      }
+    }
+    if (!mainStageGuestLatchRef.current) {
+      const returnTo = `${location.pathname}${location.search}${location.hash}`;
+      return <Navigate to={`/login?returnTo=${encodeURIComponent(returnTo)}`} replace />;
+    }
   }
 
   return (
