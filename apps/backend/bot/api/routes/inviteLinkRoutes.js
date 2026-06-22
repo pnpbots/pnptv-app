@@ -63,14 +63,14 @@ router.get('/invite/:code', checkLimiter, asyncHandler(async (req, res) => {
   if (!code) return res.status(400).json({ valid: false, error: 'Missing code' });
 
   const link = await inviteLinkService.getLink(code);
-  if (!link) return res.json({ valid: false });
+  if (!link) return res.status(404).json({ valid: false });
 
   const now = new Date();
   if (link.expires_at && new Date(link.expires_at) < now) {
-    return res.json({ valid: false, reason: 'expired' });
+    return res.status(410).json({ valid: false, reason: 'expired' });
   }
   if (link.max_uses !== null && link.use_count >= link.max_uses) {
-    return res.json({ valid: false, reason: 'exhausted' });
+    return res.status(410).json({ valid: false, reason: 'exhausted' });
   }
 
   return res.json({

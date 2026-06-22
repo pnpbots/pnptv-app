@@ -1543,6 +1543,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [pgProvider] = useState<'dash'>('dash');
   const [pgLoading, setPgLoading] = useState(false);
   const [pgPolling, setPgPolling] = useState(false);
+  const pgIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pgTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Join requests management (for creators)
   const [joinRequests, setJoinRequests] = useState<Record<number, JoinRequest[]>>({});
@@ -1963,6 +1965,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     loadDiscover();
   }, [loadGroups, loadHangoutEvents, loadDiscover]);
 
+  // Cleanup payment polling on unmount
+  useEffect(() => () => {
+    if (pgIntervalRef.current) clearInterval(pgIntervalRef.current);
+    if (pgTimeoutRef.current) clearTimeout(pgTimeoutRef.current);
+  }, []);
+
   // Deep-link: auto-open group from /chat/:groupId
   const deepLinkHandled = useRef(false);
   useEffect(() => {
@@ -2117,11 +2125,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       }
       setPgPolling(true);
       const pollId = res.paymentId;
-      const interval = setInterval(async () => {
+      pgIntervalRef.current = setInterval(async () => {
         try {
           const status = await getPaymentStatus(pollId);
           if (['completed', 'paid', 'success'].includes(status.status)) {
-            clearInterval(interval);
+            if (pgIntervalRef.current) { clearInterval(pgIntervalRef.current); pgIntervalRef.current = null; }
+            if (pgTimeoutRef.current) { clearTimeout(pgTimeoutRef.current); pgTimeoutRef.current = null; }
             setPgPolling(false);
             setShowPaymentGate(false);
             setPaymentGateInfo(null);
@@ -2130,7 +2139,11 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           }
         } catch {}
       }, 5000);
-      setTimeout(() => { clearInterval(interval); setPgPolling(false); }, 600000);
+      pgTimeoutRef.current = setTimeout(() => {
+        if (pgIntervalRef.current) { clearInterval(pgIntervalRef.current); pgIntervalRef.current = null; }
+        pgTimeoutRef.current = null;
+        setPgPolling(false);
+      }, 600000);
     } catch (err: any) {
       setDiscoverError(err?.message || 'Payment failed');
       setShowPaymentGate(false);

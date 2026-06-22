@@ -55,8 +55,8 @@ class MembershipCleanupService {
     logger.info(`MembershipCleanupService: daily cleanup scheduled at ${nextFire} (03:00 UTC)`);
 
     const timeoutRef = setTimeout(() => {
-      MembershipCleanupService.runFullCleanup();
-      setInterval(() => MembershipCleanupService.runFullCleanup(), 24 * 60 * 60 * 1000);
+      MembershipCleanupService.runFullCleanup().catch(err => logger.error('MembershipCleanupService.runFullCleanup failed', { error: err.message }));
+      setInterval(() => MembershipCleanupService.runFullCleanup().catch(err => logger.error('MembershipCleanupService.runFullCleanup failed', { error: err.message })), 24 * 60 * 60 * 1000);
     }, delay);
 
     return timeoutRef;

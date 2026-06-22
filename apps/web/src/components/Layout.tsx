@@ -324,11 +324,11 @@ function SidebarDmChat({ userId, myDbId, onBack }: SidebarDmChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const lastTypingEmit = useRef(0);
-  const hasFetched = useRef(false);
+  const hasFetched = useRef<string | null>(null);
 
   useEffect(() => {
-    if (hasFetched.current) return;
-    hasFetched.current = true;
+    if (hasFetched.current === userId) return;
+    hasFetched.current = userId;
 
     // Fetch partner info
     fetch(`${SIDEBAR_DM_BASE}/api/webapp/dm/user/${userId}`, { credentials: "include" })
@@ -1440,9 +1440,7 @@ export function Layout() {
            = ~44px AnnouncementStrip (no bottom nav on lg). Without this, the
            strip overlays the bottom of any video <controls> bar in the feed. */}
       <main className="flex-1 overflow-y-auto overscroll-contain lg:pl-72 lg:overflow-visible lg:pb-12 pb-28">
-        <VerificationGate>
-          <Outlet />
-        </VerificationGate>
+        <Outlet />
       </main>
 
       {/* Global announcement strip — only after verification */}

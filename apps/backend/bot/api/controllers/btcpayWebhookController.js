@@ -431,7 +431,7 @@ async function handleBtcpayWebhook(req, res) {
             actualPaid,
             shortfall: expectedAmount - actualPaid,
           });
-          return res.status(200).json({ success: false, error: 'underpayment', invoiceId });
+          return res.status(422).json({ success: false, error: 'underpayment', invoiceId });
         }
       } catch (invoiceCheckErr) {
         // Log but do NOT block — if BTCPay API is unreachable we still trust the webhook signature
@@ -557,7 +557,7 @@ async function handleBtcpayWebhook(req, res) {
           paidAmount: metaPaidAmount,
           shortfall: metaPlanPrice - metaPaidAmount,
         });
-        return res.status(200).json({ success: false, error: 'underpayment', invoiceId });
+        return res.status(422).json({ success: false, error: 'underpayment', invoiceId });
       }
 
       // For the Greenfield flow we don't have a DB order row — use grantEntitlementsForPlan

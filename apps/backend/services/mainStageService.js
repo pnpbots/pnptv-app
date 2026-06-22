@@ -881,7 +881,7 @@ async function autoRotateMedia() {
  */
 async function setAutoplay(enabled) {
   const redis = getRedis();
-  await redis.set('mainstage:autoplay:enabled', enabled ? '1' : '0');
+  await redis.set('mainstage:autoplay:enabled', enabled ? '1' : '0', 'EX', STATE_CACHE_TTL_S);
   logger.info('[MainStage] autoplay set', { enabled: Boolean(enabled) });
   await emitState();
 }

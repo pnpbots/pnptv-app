@@ -254,7 +254,7 @@ function useGlobalSocketEvents() {
       socket.off("dm:call:incoming", onDmCallIncoming);
       socket.off("dm:call:missed", onDmCallMissed);
     };
-  }, [isAuthenticated, user?.dbId, user?.id]);
+  }, [isAuthenticated, logout, user?.dbId, user?.id]);
 
   const dismissIncomingCall = () => {
     setIncomingCall(null);

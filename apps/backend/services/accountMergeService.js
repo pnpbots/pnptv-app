@@ -77,7 +77,7 @@ async function invalidateUserCaches(userId) {
   try {
     await EntitlementAccessService.invalidateCache(userId);
     // Also clear plans cache (affects plan-listing queries that may reference this user)
-    await cache.delPattern('pnpapp:plans:*');
+    await cache.delPattern('plans:*');
     logger.debug('accountMergeService: cache invalidated', { userId });
   } catch (err) {
     // Non-fatal — caches will expire naturally

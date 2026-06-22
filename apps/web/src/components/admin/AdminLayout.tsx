@@ -99,7 +99,7 @@ export function AdminLayout() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !isCreatorAdmin) {
     return (
       <div className="min-h-dvh bg-pnp-background flex items-center justify-center">
         <div className="text-center">

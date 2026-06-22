@@ -391,15 +391,15 @@ async function checkInvite(req, res) {
   const invite = rows[0];
 
   if (!invite.is_active) {
-    return res.json({ valid: false, error: 'This invite link is no longer active' });
+    return res.status(410).json({ valid: false, error: 'This invite link is no longer active' });
   }
 
   if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
-    return res.json({ valid: false, error: 'This invite link has expired' });
+    return res.status(410).json({ valid: false, error: 'This invite link has expired' });
   }
 
   if (invite.max_uses > 0 && invite.uses_count >= invite.max_uses) {
-    return res.json({ valid: false, error: 'This invite link has reached its maximum uses' });
+    return res.status(410).json({ valid: false, error: 'This invite link has reached its maximum uses' });
   }
 
   const creatorName =

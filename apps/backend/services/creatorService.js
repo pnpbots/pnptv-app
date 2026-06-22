@@ -599,20 +599,27 @@ class CreatorService {
 
     // Revoke user_entitlements for all expired subscriptions and invalidate caches
     const EntitlementAccessService = require('./entitlementAccessService');
-    for (const { subscriber_id: subscriberId, creator_id: creatorId } of rows) {
+    if (rows.length > 0) {
+      const userIds    = rows.map(r => String(r.subscriber_id));
+      const creatorIds2 = rows.map(r => String(r.creator_id));
       try {
         await query(
           `UPDATE user_entitlements
            SET expires_at = NOW(), updated_at = NOW()
-           WHERE user_id = $1 AND add_on_id = 'creator-subscription' AND creator_id = $2
+           WHERE (user_id, creator_id) IN (
+             SELECT unnest($1::uuid[]), unnest($2::uuid[])
+           )
+             AND add_on_id = 'creator-subscription'
              AND expires_at > NOW()`,
-          [String(subscriberId), String(creatorId)]
+          [userIds, creatorIds2]
         );
       } catch (entErr) {
-        logger.warn('expireCreatorSubscriptions: failed to revoke entitlement', {
-          subscriberId, creatorId, error: entErr.message,
+        logger.warn('expireCreatorSubscriptions: failed to bulk-revoke entitlements', {
+          count: rows.length, error: entErr.message,
         });
       }
+    }
+    for (const { subscriber_id: subscriberId } of rows) {
       try {
         await EntitlementAccessService.invalidateCache(String(subscriberId));
       } catch (cacheErr) {

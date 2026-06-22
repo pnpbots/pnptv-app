@@ -382,7 +382,9 @@ export const router = createBrowserRouter([
         path: "profile/:userId",
         element: (
           <ModuleLoader>
-            <Profile />
+            <VerificationGate>
+              <Profile />
+            </VerificationGate>
           </ModuleLoader>
         ),
       },
@@ -456,7 +458,9 @@ export const router = createBrowserRouter([
         path: "wellness",
         element: (
           <ModuleLoader>
-            <WellnessShell />
+            <VerificationGate>
+              <WellnessShell />
+            </VerificationGate>
           </ModuleLoader>
         ),
       },
@@ -467,7 +471,9 @@ export const router = createBrowserRouter([
         path: "self-care",
         element: (
           <ModuleLoader>
-            <SelfCareCenter />
+            <VerificationGate>
+              <SelfCareCenter />
+            </VerificationGate>
           </ModuleLoader>
         ),
       },
@@ -477,7 +483,9 @@ export const router = createBrowserRouter([
         path: "cristina",
         element: (
           <ModuleLoader>
-            <CristinaPage mode="page" />
+            <VerificationGate>
+              <CristinaPage mode="page" />
+            </VerificationGate>
           </ModuleLoader>
         ),
       },

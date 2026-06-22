@@ -8,6 +8,9 @@ const { generateToken, LIVEKIT_WS_URL } = require('./livekitService');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
+const callNotificationService = require('./callNotificationService');
+
+const APP_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
 
 /**
  * Private Call Booking Service
@@ -442,6 +445,44 @@ class PrivateCallBookingService {
         { ...booking, performerName: performer?.displayName },
         performer?.userId
       );
+
+      // Fire-and-forget: send immediate confirmation emails + Telegram to both parties
+      const _bookingId = payment.bookingId;
+      const _performer = performer;
+      const _booking = booking;
+      ;(async () => {
+        try {
+          const { rows } = await query(
+            `SELECT username, display_name FROM users WHERE id = $1`,
+            [_booking.userId]
+          );
+          const memberInfo = rows[0] || {};
+          const joinUrl = `${APP_URL}/call/${_bookingId}`;
+          const callInfo = { meetingUrl: joinUrl };
+
+          await Promise.allSettled([
+            callNotificationService.sendBookingConfirmationToMember(
+              String(_booking.userId),
+              {
+                creator_name: _performer?.displayName,
+                start_at: _booking.startTimeUtc,
+                duration_minutes: _booking.durationMinutes,
+              },
+              callInfo
+            ),
+            callNotificationService.sendBookingConfirmationToCreator(
+              String(_performer?.userId),
+              { start_at: _booking.startTimeUtc, duration_minutes: _booking.durationMinutes },
+              { username: memberInfo.username, display_name: memberInfo.display_name },
+              callInfo
+            ),
+          ]);
+        } catch (notifErr) {
+          logger.warn('[privateCallBookingService] booking confirmation notification failed (non-fatal)', {
+            bookingId: _bookingId, error: notifErr.message,
+          });
+        }
+      })();
 
       logger.info('Payment completed, booking confirmed', { paymentId, bookingId: payment.bookingId });
 
