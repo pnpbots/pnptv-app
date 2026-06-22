@@ -21,7 +21,7 @@ const strings = {
 
     // ── Plan tier section labels ──────────────────────────────────────────────
     communityMember: "Community Member",
-    communityMemberDesc: "Access to the app and social features — does not include PRIME or exclusive content",
+    communityMemberDesc: "Access to the app and social features — PRIME channel content and creator exclusive profiles not included",
     prime: "PRIME",
     primeDesc: "Full access — PRIME media, Nearby Premium, hangouts, exclusive content & more",
 
@@ -192,7 +192,7 @@ const strings = {
     showPricesInCOP: "Ver precios en COP",
 
     communityMember: "Miembro de comunidad",
-    communityMemberDesc: "Acceso a la app y funciones sociales — no incluye PRIME ni contenido exclusivo",
+    communityMemberDesc: "Acceso a la app y funciones sociales — contenido del canal PRIME y perfiles exclusivos de creadores no incluidos",
     prime: "PRIME",
     primeDesc: "Acceso completo — media PRIME, Nearby Premium, hangouts, contenido exclusivo y más",
 
@@ -349,7 +349,7 @@ const strings = {
     showPricesInCOP: "Ver preços em COP",
 
     communityMember: "Membro da Comunidade",
-    communityMemberDesc: "Acesso ao app e recursos sociais — não inclui PRIME nem conteúdo exclusivo",
+    communityMemberDesc: "Acesso ao app e recursos sociais — conteúdo do canal PRIME e perfis exclusivos de criadores não incluídos",
     prime: "PRIME",
     primeDesc: "Acesso completo — mídia PRIME, Nearby Premium, hangouts, conteúdo exclusivo e mais",
 
@@ -506,7 +506,7 @@ const strings = {
     showPricesInCOP: "以哥伦比亚比索显示价格",
 
     communityMember: "社区会员",
-    communityMemberDesc: "访问应用和社交功能 — 不包含 PRIME 或独家内容",
+    communityMemberDesc: "访问应用和社交功能 — 不包含 PRIME 频道内容和创作者独家资料",
     prime: "PRIME",
     primeDesc: "完整访问 — PRIME 媒体、Nearby Premium、Hangouts、独家内容等",
 
@@ -662,7 +662,7 @@ const strings = {
     showPricesInCOP: "以哥倫比亞披索顯示價格",
 
     communityMember: "社群會員",
-    communityMemberDesc: "存取應用程式和社交功能 — 不含 PRIME 或獨家內容",
+    communityMemberDesc: "存取應用程式和社交功能 — 不含 PRIME 頻道內容及創作者獨家個人資料",
     prime: "PRIME",
     primeDesc: "完整存取 — PRIME 媒體、Nearby Premium、Hangouts、獨家內容等",
 
@@ -818,7 +818,7 @@ const strings = {
     showPricesInCOP: "Voir les prix en COP",
 
     communityMember: "Membre de la Communauté",
-    communityMemberDesc: "Accès à l'app et aux fonctionnalités sociales — n'inclut pas PRIME ni le contenu exclusif",
+    communityMemberDesc: "Accès à l'app et aux fonctionnalités sociales — contenu du canal PRIME et profils exclusifs des créateurs non inclus",
     prime: "PRIME",
     primeDesc: "Accès complet — médias PRIME, Nearby Premium, hangouts, contenu exclusif et plus",
 
@@ -974,7 +974,7 @@ const strings = {
     showPricesInCOP: "Preise in COP anzeigen",
 
     communityMember: "Community-Mitglied",
-    communityMemberDesc: "Zugang zur App und sozialen Funktionen — enthält kein PRIME oder exklusive Inhalte",
+    communityMemberDesc: "Zugang zur App und sozialen Funktionen — PRIME-Kanalinhalte und exklusive Erstellerprofile nicht enthalten",
     prime: "PRIME",
     primeDesc: "Vollzugang — PRIME-Medien, Nearby Premium, Hangouts, exklusive Inhalte & mehr",
 
@@ -1130,7 +1130,7 @@ const strings = {
     showPricesInCOP: "แสดงราคาเป็น COP",
 
     communityMember: "สมาชิกชุมชน",
-    communityMemberDesc: "เข้าถึงแอปและฟีเจอร์สังคม — ไม่รวม PRIME หรือเนื้อหาพิเศษ",
+    communityMemberDesc: "เข้าถึงแอปและฟีเจอร์สังคม — ไม่รวมเนื้อหาช่อง PRIME และโปรไฟล์พิเศษของผู้สร้าง",
     prime: "PRIME",
     primeDesc: "เข้าถึงครบถ้วน — สื่อ PRIME, Nearby Premium, hangouts, เนื้อหาพิเศษและอื่นๆ",
 
@@ -1286,7 +1286,7 @@ const strings = {
     showPricesInCOP: "Mostra prezzi in COP",
 
     communityMember: "Membro della Community",
-    communityMemberDesc: "Accesso all'app e alle funzionalità social — non include PRIME o contenuti esclusivi",
+    communityMemberDesc: "Accesso all'app e alle funzionalità social — contenuto del canale PRIME e profili esclusivi dei creator non inclusi",
     prime: "PRIME",
     primeDesc: "Accesso completo — media PRIME, Nearby Premium, hangout, contenuti esclusivi e altro",
 
@@ -1442,7 +1442,7 @@ const strings = {
     showPricesInCOP: "Fiyatları COP olarak göster",
 
     communityMember: "Topluluk Üyesi",
-    communityMemberDesc: "Uygulamaya ve sosyal özelliklere erişim — PRIME veya özel içerik dahil değil",
+    communityMemberDesc: "Uygulamaya ve sosyal özelliklere erişim — PRIME kanal içeriği ve yaratıcı özel profiller dahil değil",
     prime: "PRIME",
     primeDesc: "Tam erişim — PRIME medya, Nearby Premium, hangoutlar, özel içerik ve daha fazlası",
 
@@ -1598,7 +1598,7 @@ const strings = {
     showPricesInCOP: "Показать цены в COP",
 
     communityMember: "Участник сообщества",
-    communityMemberDesc: "Доступ к приложению и социальным функциям — не включает PRIME или эксклюзивный контент",
+    communityMemberDesc: "Доступ к приложению и социальным функциям — контент канала PRIME и эксклюзивные профили авторов не включены",
     prime: "PRIME",
     primeDesc: "Полный доступ — PRIME-медиа, Nearby Premium, hangout'ы, эксклюзивный контент и больше",
 
@@ -1754,7 +1754,7 @@ const strings = {
     showPricesInCOP: "Prijzen in COP weergeven",
 
     communityMember: "Community-lid",
-    communityMemberDesc: "Toegang tot de app en sociale functies — geen PRIME of exclusieve content",
+    communityMemberDesc: "Toegang tot de app en sociale functies — PRIME-kanaalcontent en exclusieve creatorprofielen niet inbegrepen",
     prime: "PRIME",
     primeDesc: "Volledige toegang — PRIME-media, Nearby Premium, hangouts, exclusieve content & meer",
 
@@ -1910,7 +1910,7 @@ const strings = {
     showPricesInCOP: "Hiển thị giá bằng COP",
 
     communityMember: "Thành viên Cộng đồng",
-    communityMemberDesc: "Truy cập ứng dụng và tính năng xã hội — không bao gồm PRIME hay nội dung độc quyền",
+    communityMemberDesc: "Truy cập ứng dụng và tính năng xã hội — không bao gồm nội dung kênh PRIME và hồ sơ độc quyền của người tạo nội dung",
     prime: "PRIME",
     primeDesc: "Truy cập đầy đủ — phương tiện PRIME, Nearby Premium, hangouts, nội dung độc quyền và nhiều hơn",
 
@@ -2066,7 +2066,7 @@ const strings = {
     showPricesInCOP: "COP で価格を表示",
 
     communityMember: "コミュニティメンバー",
-    communityMemberDesc: "アプリとソーシャル機能へのアクセス — PRIME や限定コンテンツは含まれません",
+    communityMemberDesc: "アプリとソーシャル機能へのアクセス — PRIMEチャンネルコンテンツとクリエイター限定プロファイルは含まれません",
     prime: "PRIME",
     primeDesc: "完全アクセス — PRIME メディア、Nearby Premium、ハングアウト、限定コンテンツ等",
 
@@ -2222,7 +2222,7 @@ const strings = {
     showPricesInCOP: "Tampilkan harga dalam COP",
 
     communityMember: "Anggota Komunitas",
-    communityMemberDesc: "Akses ke aplikasi dan fitur sosial — tidak termasuk PRIME atau konten eksklusif",
+    communityMemberDesc: "Akses ke aplikasi dan fitur sosial — konten saluran PRIME dan profil eksklusif kreator tidak termasuk",
     prime: "PRIME",
     primeDesc: "Akses penuh — media PRIME, Nearby Premium, hangouts, konten eksklusif & lebih",
 
@@ -2378,7 +2378,7 @@ const strings = {
     showPricesInCOP: "عرض الأسعار بالبيزو الكولومبي",
 
     communityMember: "عضو المجتمع",
-    communityMemberDesc: "الوصول إلى التطبيق والميزات الاجتماعية — لا يشمل PRIME أو المحتوى الحصري",
+    communityMemberDesc: "الوصول إلى التطبيق والميزات الاجتماعية — محتوى قناة PRIME والملفات الشخصية الحصرية للمبدعين غير مشمولة",
     prime: "PRIME",
     primeDesc: "وصول كامل — وسائط PRIME، Nearby Premium، hangouts، محتوى حصري والمزيد",
 
