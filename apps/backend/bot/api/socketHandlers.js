@@ -343,7 +343,7 @@ function initSocketIO(io) {
     if (!user) return next(new Error('Unauthorized'));
     try {
       const { rows: banRows } = await query(
-        `SELECT 1 FROM users WHERE id = $1 AND tier = 'banned' LIMIT 1`,
+        `SELECT 1 FROM users WHERE id = $1 AND (tier = 'banned' OR role = 'banned') LIMIT 1`,
         [String(user.id)]
       );
       if (banRows.length > 0) return next(new Error('Account suspended'));
@@ -396,7 +396,7 @@ function initSocketIO(io) {
         }
         // Also re-check ban status on every revalidation tick
         const { rows: banRows } = await query(
-          `SELECT 1 FROM users WHERE id = $1 AND tier = 'banned' LIMIT 1`,
+          `SELECT 1 FROM users WHERE id = $1 AND (tier = 'banned' OR role = 'banned') LIMIT 1`,
           [String(freshUser.id)]
         );
         if (banRows.length > 0) {

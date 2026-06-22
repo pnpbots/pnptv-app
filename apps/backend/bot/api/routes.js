@@ -2553,6 +2553,14 @@ const magicLinkLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+const magicLinkVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.ip,
+  handler: (req, res) => res.status(429).json({ success: false, error: 'Too many verification attempts. Try again later.' }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Web App Authentication
 app.get('/api/webapp/auth/telegram/start', asyncHandler(webAppController.telegramStart));
@@ -2565,7 +2573,7 @@ app.post('/api/webapp/auth/email/register', authLimiter, asyncHandler(webAppCont
 app.post('/api/webapp/auth/email/login', authLimiter, asyncHandler(webAppController.emailLogin));
 app.post('/api/webapp/auth/oidc/token-exchange', authLimiter, asyncHandler(webAppController.oidcTokenExchange));
 app.post('/api/webapp/auth/magic/start', magicLinkLimiter, asyncHandler(webAppController.magicLinkStart));
-app.get('/api/webapp/auth/magic/verify', asyncHandler(webAppController.magicLinkVerify));
+app.get('/api/webapp/auth/magic/verify', magicLinkVerifyLimiter, asyncHandler(webAppController.magicLinkVerify));
 app.get('/api/webapp/auth/passkey/begin', authLimiter, asyncHandler(webAppController.passkeyBegin));
 app.post('/api/webapp/auth/passkey/finish', authLimiter, asyncHandler(webAppController.passkeyFinish));
 
@@ -10430,10 +10438,12 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       return res.status(400).json({ error: 'payment_not_found' });
     }
     if (!verifyRes.ok) {
-      logger.warn('[NOWPayments] IPN: could not verify payment via API (non-404), proceeding', { payment_id, status: verifyRes.status });
+      logger.error('[NOWPayments] IPN: payment verification API error — rejecting for retry', { payment_id, status: verifyRes.status });
+      return res.status(500).json({ error: 'payment_verification_unavailable' });
     }
   } catch (verifyErr) {
-    logger.warn('[NOWPayments] IPN: payment verification request failed, proceeding', { payment_id, error: verifyErr.message });
+    logger.error('[NOWPayments] IPN: payment verification request failed — rejecting for retry', { payment_id, error: verifyErr.message });
+    return res.status(500).json({ error: 'payment_verification_unavailable' });
   }
 
   // NP-H-01: atomic processing lock — prevents double-grant on concurrent IPN deliveries
@@ -10481,10 +10491,12 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
           return res.status(400).json({ error: 'payment_not_found' });
         }
         if (!renewalVerifyRes.ok) {
-          logger.warn('[NOWPayments] IPN: renewal payment verification non-404, proceeding', { payment_id, status: renewalVerifyRes.status });
+          logger.error('[NOWPayments] IPN: renewal payment verification API error — rejecting for retry', { payment_id, status: renewalVerifyRes.status });
+          return res.status(500).json({ error: 'payment_verification_unavailable' });
         }
       } catch (renewalVerifyErr) {
-        logger.warn('[NOWPayments] IPN: renewal payment verification failed, proceeding', { payment_id, error: renewalVerifyErr.message });
+        logger.error('[NOWPayments] IPN: renewal payment verification failed — rejecting for retry', { payment_id, error: renewalVerifyErr.message });
+        return res.status(500).json({ error: 'payment_verification_unavailable' });
       }
 
       await dbQuery(
@@ -11493,6 +11505,7 @@ app.get('/api/public/social/posts/:postId', asyncHandler(socialController.getPub
 const { spawn: spawnProcess } = require('child_process');
 
 let stageTvProcess = null;
+let stageTvStarting = false;
 let stageTvState = { running: false, videos: [], pid: null, startedAt: null, startedBy: null, hlsUrl: null };
 
 // Admin: list available video files
@@ -11510,12 +11523,16 @@ app.get('/api/webapp/admin/stage-tv/videos', adminGuard, asyncHandler(async (req
 
 // Admin: start Stage TV
 app.post('/api/webapp/admin/stage-tv/start', adminGuard, asyncHandler(async (req, res) => {
-  if (stageTvProcess) {
-    return res.status(409).json({ success: false, error: 'Stage TV is already running' });
+  if (stageTvProcess || stageTvStarting) {
+    return res.status(409).json({ success: false, error: 'Stage TV is already running or starting' });
   }
+  // Set synchronously before first await to close the race window between the
+  // guard check above and when stageTvProcess is assigned after spawn.
+  stageTvStarting = true;
 
   const { videos } = req.body;
   if (!Array.isArray(videos) || videos.length === 0) {
+    stageTvStarting = false;
     return res.status(400).json({ success: false, error: 'No videos selected' });
   }
 
@@ -11535,6 +11552,7 @@ app.post('/api/webapp/admin/stage-tv/start', adminGuard, asyncHandler(async (req
   }
 
   if (validVideos.length === 0) {
+    stageTvStarting = false;
     return res.status(400).json({ success: false, error: 'No valid video files found' });
   }
 
@@ -11582,6 +11600,7 @@ app.post('/api/webapp/admin/stage-tv/start', adminGuard, asyncHandler(async (req
   });
 
   stageTvProcess = proc;
+  stageTvStarting = false;
   stageTvState = {
     running: true,
     videos: validVideos.map(p => path.basename(p)),
