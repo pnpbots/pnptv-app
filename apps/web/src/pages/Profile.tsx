@@ -1512,7 +1512,7 @@ export default function Profile() {
                   )}
                 </button>
               </div>
-              {isPerformer && (
+              {isPerformer && profile.performerData?.isAvailable && (
                 <div className="flex gap-2">
                   <button
                     onClick={() => setShowBookCall(true)}

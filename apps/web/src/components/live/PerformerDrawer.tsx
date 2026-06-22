@@ -707,8 +707,8 @@ export function PerformerDrawer({ performer, liveStreamId, onClose, currentUserI
               </button>
             )}
 
-            {/* Book Call */}
-            {isCreatorPayLocked(performer.slug) ? (
+            {/* Book Call — only when creator is available */}
+            {performer.isAvailable && (isCreatorPayLocked(performer.slug) ? (
               <button
                 disabled
                 className="col-span-1 py-2.5 rounded-xl text-xs font-bold opacity-50 cursor-not-allowed bg-white/5 border border-white/10 text-pnp-textSecondary"
@@ -722,7 +722,7 @@ export function PerformerDrawer({ performer, liveStreamId, onClose, currentUserI
               >
                 Book Call
               </button>
-            )}
+            ))}
 
             {/* Subscribe */}
             {isCreatorPayLocked(performer.slug) ? (

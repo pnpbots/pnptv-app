@@ -968,10 +968,10 @@ export default function Live() {
         );
       })()}
 
-      {/* ── Book a Private Session ── */}
-      {isAuthenticated && (
+      {/* ── Book a Private Session — only when at least one performer is available ── */}
+      {isAuthenticated && performers.some((p) => p.isAvailable) && (
         <CallPackageCards
-          performers={performers}
+          performers={performers.filter((p) => p.isAvailable)}
           className="mb-4"
         />
       )}
