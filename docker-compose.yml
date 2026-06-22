@@ -103,7 +103,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "81:81"
+      - "127.0.0.1:81:81"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -331,7 +331,7 @@ services:
       AUTH_AUTHENTIK_ICON: "lock"
       AUTH_AUTHENTIK_LABEL: "Sign in with PNPTV"
       CORS_ENABLED: "true"
-      CORS_ORIGIN: "true"
+      CORS_ORIGIN: "https://cms.pnptv.app,https://pnptv.app"
       FILES_MAX_SIZE: "2147483648"
       MAX_PAYLOAD_SIZE: "2gb"
       # Both storage backends configured. "local" first so it is the default
@@ -549,7 +549,7 @@ services:
     image: redis:7-alpine
     container_name: redis-pnptv
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PNPTV_PASSWORD} --maxmemory 384mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PNPTV_PASSWORD} --maxmemory 384mb --maxmemory-policy allkeys-lru --appendonly yes --appendfsync everysec
     volumes:
       - vol_redis_pnptv:/data
     networks:
