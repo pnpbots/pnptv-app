@@ -465,6 +465,20 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // ── Creator payout readiness reminder — 28th of month at 18:00 UTC ─────────
+    // Notifies creators who have available earnings but no Dash address or fiat
+    // method that the 1st-of-month payout batch runs in ~3 days, giving them time
+    // to add a payout method before they get skipped.
+    cron.schedule(process.env.CREATOR_PAYOUT_REMIND_CRON || '0 18 28 * *', async () => {
+      try {
+        logger.info('Running creator payout readiness reminders...');
+        const results = await CreatorPayoutService.runPayoutReadinessReminders();
+        logger.info('Creator payout readiness reminders completed', results);
+      } catch (error) {
+        logger.error('Error in creator payout readiness reminder cron:', error);
+      }
+    });
+
     // ── Creator earnings maturation — hourly ─────────────────────────────────
     // Flips 'holding' earnings rows to 'available' once their available_at has passed.
     // This enforces the 72-hour hold window between earning record insertion and payout eligibility.

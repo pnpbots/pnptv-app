@@ -120,6 +120,65 @@ class CreatorPayoutService {
   }
 
   /**
+   * Remind creators with available earnings but no configured payout method that
+   * the monthly payout batch runs in ~3 days. Called on the 28th of each month.
+   */
+  static async runPayoutReadinessReminders() {
+    let rows;
+    try {
+      const result = await query(`
+        SELECT
+          ce.creator_id,
+          COALESCE(SUM(ce.amount_creator), 0)::numeric AS total_available,
+          MAX(u.creator_dash_address) AS creator_dash_address,
+          MAX(u.payout_method)        AS payout_method,
+          MAX(u.fiat_payout_method)   AS fiat_payout_method,
+          MAX(u.fiat_payout_account)  AS fiat_payout_account
+        FROM creator_earnings ce
+        LEFT JOIN users u ON u.id = ce.creator_id
+        WHERE ce.status  = 'available'
+          AND ce.paid_at IS NULL
+        GROUP BY ce.creator_id
+        HAVING COALESCE(SUM(ce.amount_creator), 0) >= $1
+      `, [MINIMUM_PAYOUT_USD]);
+      rows = result.rows;
+    } catch (err) {
+      logger.error('CreatorPayoutService: failed to fetch payout readiness batch', { error: err.message });
+      return { success: false, error: err.message };
+    }
+
+    let reminded = 0;
+    for (const creator of rows) {
+      const hasFiatMethod = creator.payout_method === 'fiat' && !!creator.fiat_payout_method && !!creator.fiat_payout_account;
+      const hasDashAddress = !!creator.creator_dash_address;
+      if (hasFiatMethod || hasDashAddress) continue;
+
+      const amountUsd = parseFloat(creator.total_available);
+      try {
+        await NotificationEmitter.emit({
+          type: 'system',
+          category: 'commerce',
+          priority: 'high',
+          actorId: null,
+          targetUserId: creator.creator_id,
+          entityType: 'creator',
+          entityId: String(creator.creator_id),
+          message: `Tu pago de $${amountUsd.toFixed(2)} se procesa el 1ro del mes — agrega tu dirección Dash en Configuración de Creador para recibirlo.`,
+          metadata: { pendingAmountUsd: amountUsd },
+        });
+        reminded++;
+      } catch (err) {
+        logger.warn('CreatorPayoutService: payout readiness reminder emit failed', {
+          creatorId: creator.creator_id, error: err.message,
+        });
+      }
+    }
+
+    logger.info('CreatorPayoutService: payout readiness reminders sent', { reminded, total: rows.length });
+    return { success: true, reminded, total: rows.length };
+  }
+
+  /**
    * Process a single creator's payout.
    *
    * Routing order (first match wins):
@@ -584,13 +643,22 @@ class CreatorPayoutService {
         btcpayInvoiceId: invoice.invoiceId,
       });
     } catch (err) {
-      // Payment creation failed — cancel subscription and notify subscriber
-      logger.error('CreatorPayoutService: renewal payment creation failed, cancelling subscription', {
+      // Transient infrastructure errors (network down, BTCPay 5xx) should not
+      // permanently cancel the subscription — the daily cron will retry tomorrow.
+      const isTransient = /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET|ECONNABORTED|socket hang up|502|503|504/i
+        .test(err.message || '');
+
+      logger.error('CreatorPayoutService: renewal payment creation failed', {
         subscriptionId: subscription_id,
         subscriberId: subscriber_id,
         creatorId: creator_id,
         error: err.message,
+        transient: isTransient,
       });
+
+      if (isTransient) {
+        return { renewed: false };
+      }
 
       await this._cancelAndNotify({
         subscription_id,

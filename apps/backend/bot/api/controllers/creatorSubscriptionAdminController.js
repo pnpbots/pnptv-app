@@ -39,7 +39,7 @@ const creatorSubscriptionAdminController = {
         LEFT JOIN LATERAL (
           SELECT SUM(ce.amount_creator) AS pending_payout
           FROM creator_earnings ce
-          WHERE ce.creator_id = u.id AND ce.paid_at IS NULL
+          WHERE ce.creator_id = u.id AND ce.paid_at IS NULL AND ce.status = 'available'
         ) pending ON true
         WHERE u.creator_status = 'active'
         ORDER BY live.active_subscribers DESC NULLS LAST, rev.total_revenue DESC NULLS LAST
@@ -63,7 +63,8 @@ const creatorSubscriptionAdminController = {
       const { rows: creatorRows } = await query(
         `SELECT
            id, username, first_name, avatar_url, creator_type, creator_price_usd,
-           creator_subscriber_count, creator_dash_address, payout_method, email
+           creator_subscriber_count, creator_dash_address, payout_method,
+           fiat_payout_method, fiat_payout_account, email
          FROM users
          WHERE id = $1 AND creator_status = 'active'`,
         [creatorId]
@@ -148,7 +149,8 @@ const creatorSubscriptionAdminController = {
       const { creatorId } = req.params;
 
       const { rows: creatorInfo } = await query(
-        `SELECT id, username, creator_dash_address, payout_method, email
+        `SELECT id, username, creator_dash_address, payout_method,
+                fiat_payout_method, fiat_payout_account, email
          FROM users WHERE id = $1 AND creator_status = 'active'`,
         [creatorId]
       );
@@ -160,7 +162,7 @@ const creatorSubscriptionAdminController = {
       const { rows: pendingRows } = await query(
         `SELECT SUM(amount_creator) AS pending, COUNT(*)::int AS count
          FROM creator_earnings
-         WHERE creator_id = $1 AND paid_at IS NULL`,
+         WHERE creator_id = $1 AND paid_at IS NULL AND status IN ('available', 'holding')`,
         [creatorId]
       );
 
@@ -178,7 +180,7 @@ const creatorSubscriptionAdminController = {
       const { rowCount } = await query(
         `UPDATE creator_earnings
          SET paid_at = NOW(), status = 'paid_out'
-         WHERE creator_id = $1 AND paid_at IS NULL`,
+         WHERE creator_id = $1 AND paid_at IS NULL AND status IN ('available', 'holding')`,
         [creatorId]
       );
 
@@ -189,6 +191,8 @@ const creatorSubscriptionAdminController = {
         earningsCount: rowCount,
         method: creatorInfo[0].payout_method || 'manual',
         walletAddress: creatorInfo[0].creator_dash_address || null,
+        fiatPayoutMethod: creatorInfo[0].fiat_payout_method || null,
+        fiatPayoutAccount: creatorInfo[0].fiat_payout_account || null,
         processedBy: req.session?.user?.id,
       });
 
@@ -199,6 +203,8 @@ const creatorSubscriptionAdminController = {
         creator: creatorInfo[0].username,
         method: creatorInfo[0].payout_method || 'manual',
         walletAddress: creatorInfo[0].creator_dash_address || null,
+        fiatPayoutMethod: creatorInfo[0].fiat_payout_method || null,
+        fiatPayoutAccount: creatorInfo[0].fiat_payout_account || null,
       });
     } catch (err) {
       logger.error('processCreatorPayout admin error', { error: err.message, creatorId: req.params.creatorId });
@@ -217,7 +223,7 @@ const creatorSubscriptionAdminController = {
         `SELECT ce.creator_id, u.username, SUM(ce.amount_creator) AS pending
          FROM creator_earnings ce
          JOIN users u ON u.id = ce.creator_id
-         WHERE ce.paid_at IS NULL
+         WHERE ce.paid_at IS NULL AND ce.status IN ('available', 'holding')
          GROUP BY ce.creator_id, u.username
          HAVING SUM(ce.amount_creator) > 0`
       );
@@ -231,7 +237,7 @@ const creatorSubscriptionAdminController = {
         await query(
           `UPDATE creator_earnings
            SET paid_at = NOW(), status = 'paid_out'
-           WHERE creator_id = $1 AND paid_at IS NULL`,
+           WHERE creator_id = $1 AND paid_at IS NULL AND status IN ('available', 'holding')`,
           [c.creator_id]
         );
         results.push({
