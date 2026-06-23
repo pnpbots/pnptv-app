@@ -158,6 +158,7 @@ const CryptoGuide = lazy(() => import("@/pages/CryptoGuide"));
 const GamificationPage = lazy(() => import("@/pages/GamificationPage"));
 const ReferralCenter = lazy(() => import("@/pages/ReferralCenter"));
 const InvitePage = lazy(() => import("@/pages/InvitePage"));
+const ConfirmPayment = lazy(() => import("@/pages/ConfirmPayment"));
 
 // Creator Studio pages
 const CreatorLayout = lazy(() => import("@/components/creators/CreatorLayout"));
@@ -1043,6 +1044,14 @@ export const router = createBrowserRouter([
         <VerificationGate>
           <TokenCheckout />
         </VerificationGate>
+      </ModuleLoader>
+    ),
+  },
+  {
+    path: "/confirm-payment/:token",
+    element: (
+      <ModuleLoader>
+        <ConfirmPayment />
       </ModuleLoader>
     ),
   },

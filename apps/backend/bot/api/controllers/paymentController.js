@@ -594,20 +594,20 @@ class PaymentController {
         });
       }
 
-      // Get payment and plan details for display
-      const payment = await PaymentModel.getById(tokenData.payment_id);
+      // Get plan details (always present); payment row is optional (nullable FK)
       const plan = await PlanModel.getById(tokenData.plan_id);
 
-      if (!payment || !plan) {
-        logger.error('Payment or plan not found after token verification', {
-          paymentId: tokenData.payment_id,
+      if (!plan) {
+        logger.error('Plan not found after token verification', {
           planId: tokenData.plan_id,
         });
         return res.status(404).json({
           success: false,
-          error: 'Payment or plan information not found.',
+          error: 'Plan information not found.',
         });
       }
+
+      const payment = tokenData.payment_id ? await PaymentModel.getById(tokenData.payment_id) : null;
 
       logger.info('Payment confirmation token verified', {
         paymentId: tokenData.payment_id,
@@ -618,12 +618,9 @@ class PaymentController {
       res.json({
         success: true,
         message: 'Payment confirmed successfully',
-        payment: {
-          id: payment.id,
-          status: payment.status,
-          amount: payment.amount,
-          provider: tokenData.provider,
-        },
+        payment: payment
+          ? { id: payment.id, status: payment.status, amount: payment.amount, provider: tokenData.provider }
+          : { provider: tokenData.provider },
         plan: {
           id: plan.id,
           name: plan.display_name || plan.name,
