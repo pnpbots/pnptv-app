@@ -60,9 +60,10 @@ class PaymentNotificationService {
         return false;
       }
 
-      // Generate one-time confirmation token
+      // Generate one-time confirmation token (confirmation_tokens.payment_id is UUID type)
+      const { randomUUID } = require('crypto');
       const token = await ConfirmationTokenService.generateToken({
-        paymentId: paymentId || `${provider}-${userId}-${Date.now()}`,
+        paymentId: paymentId || randomUUID(),
         userId,
         planId,
         provider,
@@ -461,6 +462,84 @@ class PaymentNotificationService {
         error: error.message,
       });
       return false;
+    }
+  }
+
+  /**
+   * Unified delivery: email (noreply@pnptv.app) with PDF invoice, falling back to
+   * Telegram DM when the user has no registered email. Called from every payment
+   * webhook after a successful grant so all providers behave identically.
+   *
+   * @param {string} userId
+   * @param {Object} opts
+   * @param {string} opts.planId
+   * @param {string} opts.planName
+   * @param {number} opts.amount
+   * @param {string} opts.transactionId
+   * @param {string} opts.provider
+   * @param {string} [opts.language]
+   * @param {Date}   [opts.expiryDate]
+   * @param {boolean}[opts.isLifetime]
+   */
+  static async deliverPurchaseConfirmation(userId, {
+    planId, planName, amount, transactionId, provider,
+    language, expiryDate = null, isLifetime = false,
+  }) {
+    try {
+      const { query } = require('../config/postgres');
+      const row = await query(
+        'SELECT email, telegram, first_name, language AS lang FROM users WHERE id = $1',
+        [userId]
+      );
+      const u = row.rows[0];
+      if (!u) {
+        logger.warn('[deliverPurchaseConfirmation] user not found', { userId });
+        return;
+      }
+
+      const lang = language || u.lang || 'es';
+      const customerName = u.first_name || userId;
+
+      if (u.email) {
+        try {
+          const EmailService = require('./emailservice');
+          await EmailService.sendPurchaseConfirmationEmail({
+            to: u.email,
+            customerName,
+            planName: planName || planId,
+            amount,
+            transactionId,
+            provider,
+            language: lang,
+            expiryDate,
+            isLifetime,
+          });
+        } catch (emailErr) {
+          logger.warn('[deliverPurchaseConfirmation] email failed', { userId, error: emailErr.message });
+        }
+      }
+
+      // Telegram DM — always sent when available (primary channel for bot users)
+      if (u.telegram) {
+        try {
+          await PaymentNotificationService.sendPaymentConfirmation(userId, {
+            planId,
+            planName,
+            amount,
+            provider,
+            language: lang,
+            expiryDate,
+          });
+        } catch (tgErr) {
+          logger.warn('[deliverPurchaseConfirmation] telegram DM failed', { userId, error: tgErr.message });
+        }
+      }
+
+      if (!u.email && !u.telegram) {
+        logger.warn('[deliverPurchaseConfirmation] user has no email or telegram', { userId, planId, transactionId });
+      }
+    } catch (err) {
+      logger.error('[deliverPurchaseConfirmation] fatal', { userId, error: err.message });
     }
   }
 }

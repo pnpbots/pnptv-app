@@ -1947,19 +1947,20 @@ class PaymentService {
               }
             }
 
-            // Send Telegram DM with membership info + PRIME channel invite link
+            // Unified purchase confirmation: email (noreply@pnptv.app) + Telegram fallback
             try {
-              await PaymentService.sendPaymentConfirmationNotification({
-                userId,
-                plan,
-                transactionId: x_ref_payco,
+              await PaymentNotificationService.deliverPurchaseConfirmation(userId, {
+                planId: plan.id,
+                planName: plan.display_name || plan.name,
                 amount: parseFloat(x_amount),
-                expiryDate,
-                language: userLanguage,
+                transactionId: x_ref_payco,
                 provider: 'epayco',
+                language: userLanguage,
+                expiryDate,
+                isLifetime: plan.is_lifetime || false,
               });
             } catch (confirmError) {
-              logger.error('Error sending payment confirmation DM (non-critical):', {
+              logger.error('Error sending purchase confirmation (non-critical):', {
                 error: confirmError.message,
                 userId,
                 refPayco: x_ref_payco,

@@ -189,6 +189,143 @@ class EmailService {
   }
 
   /**
+   * Unified purchase confirmation email — sent from noreply@pnptv.app for every
+   * completed payment regardless of provider. Generates a PDF invoice inline.
+   */
+  async sendPurchaseConfirmationEmail({
+    to, customerName, planName, amount, currency = 'USD',
+    transactionId, provider = 'payment', language = 'es',
+    expiryDate = null, isLifetime = false,
+  }) {
+    try {
+      if (!this.transporters.pnptv) {
+        logger.warn('[PurchaseConfirmation] pnptv transporter not configured, skipping');
+        return { success: false, error: 'Transporter not configured' };
+      }
+      if (!to) {
+        return { success: false, error: 'No recipient email' };
+      }
+
+      const InvoiceService = require('./invoiceservice');
+      let invoicePdf = null;
+      try {
+        const inv = await InvoiceService.generateInvoice({
+          invoiceNumber: transactionId || `PNP-${Date.now()}`,
+          customerName: customerName || 'Valued Customer',
+          planName,
+          amount,
+          currency,
+          provider,
+          transactionId,
+          purchaseDate: new Date(),
+          expiryDate: isLifetime ? null : expiryDate,
+          language,
+        });
+        invoicePdf = inv.buffer;
+      } catch (pdfErr) {
+        logger.warn('[PurchaseConfirmation] PDF generation failed, sending without attachment', { error: pdfErr.message });
+      }
+
+      const isEs = language === 'es';
+      const subject = isEs
+        ? `Confirmación de compra — PNPtv #${transactionId || ''}`
+        : `Purchase confirmation — PNPtv #${transactionId || ''}`;
+
+      const expiryLine = isLifetime
+        ? (isEs ? '<p><strong>Duración:</strong> Permanente ♾️</p>' : '<p><strong>Duration:</strong> Permanent ♾️</p>')
+        : expiryDate
+          ? (isEs
+              ? `<p><strong>Vence:</strong> ${new Date(expiryDate).toLocaleDateString('es-ES')}</p>`
+              : `<p><strong>Expires:</strong> ${new Date(expiryDate).toLocaleDateString('en-US')}</p>`)
+          : '';
+
+      const html = isEs ? `
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+<style>
+  body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0}
+  .wrap{max-width:600px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.1)}
+  .hdr{background:#1C1C1E;padding:24px 30px;text-align:center}
+  .hdr h1{color:#fff;margin:0;font-size:26px}.hdr span{color:#D4007A}
+  .body{padding:30px}
+  .box{background:#f8f9fa;border-left:4px solid #D4007A;padding:16px 20px;border-radius:4px;margin:20px 0}
+  .box p{margin:6px 0}
+  .btn{display:inline-block;margin:20px 0;padding:12px 28px;background:#D4007A;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold}
+  .ftr{text-align:center;padding:20px;color:#888;font-size:12px;border-top:1px solid #eee}
+</style></head><body>
+<div class="wrap">
+  <div class="hdr"><h1>PNPtv<span>!</span></h1></div>
+  <div class="body">
+    <p>Hola <strong>${customerName || 'amig@'}</strong>,</p>
+    <p>¡Gracias por tu compra! Tu membresía está <strong>activa ahora mismo</strong>.</p>
+    <div class="box">
+      <p><strong>Plan:</strong> ${planName}</p>
+      <p><strong>Monto:</strong> $${parseFloat(amount || 0).toFixed(2)} ${currency}</p>
+      <p><strong>Referencia:</strong> ${transactionId || '—'}</p>
+      <p><strong>Fecha:</strong> ${new Date().toLocaleDateString('es-ES')}</p>
+      ${expiryLine}
+    </div>
+    <p>Accede a tu cuenta en <a href="https://pnptv.app">pnptv.app</a></p>
+    <a class="btn" href="https://pnptv.app">Ir a PNPtv</a>
+    <p>Si tienes preguntas, escríbenos a <a href="mailto:support@pnptv.app">support@pnptv.app</a>.</p>
+  </div>
+  <div class="ftr"><p>PNPtv | noreply@pnptv.app</p></div>
+</div>
+</body></html>` : `
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<style>
+  body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0}
+  .wrap{max-width:600px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.1)}
+  .hdr{background:#1C1C1E;padding:24px 30px;text-align:center}
+  .hdr h1{color:#fff;margin:0;font-size:26px}.hdr span{color:#D4007A}
+  .body{padding:30px}
+  .box{background:#f8f9fa;border-left:4px solid #D4007A;padding:16px 20px;border-radius:4px;margin:20px 0}
+  .box p{margin:6px 0}
+  .btn{display:inline-block;margin:20px 0;padding:12px 28px;background:#D4007A;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold}
+  .ftr{text-align:center;padding:20px;color:#888;font-size:12px;border-top:1px solid #eee}
+</style></head><body>
+<div class="wrap">
+  <div class="hdr"><h1>PNPtv<span>!</span></h1></div>
+  <div class="body">
+    <p>Hi <strong>${customerName || 'there'}</strong>,</p>
+    <p>Thank you for your purchase! Your membership is <strong>active right now</strong>.</p>
+    <div class="box">
+      <p><strong>Plan:</strong> ${planName}</p>
+      <p><strong>Amount:</strong> $${parseFloat(amount || 0).toFixed(2)} ${currency}</p>
+      <p><strong>Reference:</strong> ${transactionId || '—'}</p>
+      <p><strong>Date:</strong> ${new Date().toLocaleDateString('en-US')}</p>
+      ${expiryLine}
+    </div>
+    <p>Access your account at <a href="https://pnptv.app">pnptv.app</a></p>
+    <a class="btn" href="https://pnptv.app">Go to PNPtv</a>
+    <p>Questions? Email us at <a href="mailto:support@pnptv.app">support@pnptv.app</a>.</p>
+  </div>
+  <div class="ftr"><p>PNPtv | noreply@pnptv.app</p></div>
+</div>
+</body></html>`;
+
+      const attachments = invoicePdf ? [{
+        filename: `pnptv-invoice-${transactionId || Date.now()}.pdf`,
+        content: invoicePdf,
+        contentType: 'application/pdf',
+      }] : [];
+
+      const result = await this.transporters.pnptv.sendMail({
+        from: '"PNPtv" <noreply@pnptv.app>',
+        to,
+        subject,
+        html,
+        attachments,
+      });
+
+      logger.info('[PurchaseConfirmation] Email sent', { to, transactionId, messageId: result.messageId });
+      return { success: true, messageId: result.messageId };
+    } catch (error) {
+      logger.error('[PurchaseConfirmation] Email failed', { to, transactionId, error: error.message });
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
    * Send SSO credentials email when a new Authentik account is provisioned.
    * @param {Object} options
    * @param {string} options.to - Recipient email

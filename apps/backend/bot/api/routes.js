@@ -10603,6 +10603,17 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       [order_id, `nowpayments:call:${payment_id}`]
     );
     logger.info('[NOWPayments] IPN: call_package credits granted', { order_id, callPaymentId, userId: order.user_id });
+    // Confirmation notification for call_package (was missing before — path exited early)
+    try {
+      const PaymentNotifSvcCall = require('../../services/paymentNotificationService');
+      await PaymentNotifSvcCall.deliverPurchaseConfirmation(order.user_id, {
+        planId: 'call_package',
+        planName: 'Call Package',
+        amount: parseFloat(order.usd_amount) || 0,
+        transactionId: String(payment_id),
+        provider: 'nowpayments',
+      });
+    } catch (_) { /* non-fatal */ }
     return res.json({ received: true });
   }
 
@@ -10683,58 +10694,22 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
 
   // Send confirmation notifications (non-fatal)
   try {
-    const { query: pgQuery } = require('../../config/postgres');
-    const userData = await pgQuery('SELECT email, language, telegram FROM users WHERE id = $1', [order.user_id]);
-    const u = userData.rows[0];
-    if (u) {
-      const PlanModelNP = require('../../models/planModel');
-      const planForNotif = await PlanModelNP.getById(order.plan_id).catch(() => null);
-      const planName = planForNotif?.display_name || planForNotif?.name || order.plan_id;
-      const language = u.language || 'es';
-      if (u.telegram) {
-        try {
-          const PaymentNotificationService = require('../../services/paymentNotificationService');
-          await PaymentNotificationService.sendPaymentConfirmation(order.user_id, {
-            planId: order.plan_id,
-            planName,
-            amount: parseFloat(order.usd_amount) || 0,
-            currency: 'USD',
-            provider: 'nowpayments',
-            language,
-          });
-        } catch (dmErr) {
-          logger.warn('[NOWPayments] IPN: Telegram DM failed (non-fatal)', { userId: order.user_id, error: dmErr.message });
-        }
-      }
-      if (u.email) {
-        try {
-          const InvoiceService = require('../../services/invoiceservice');
-          const EmailService = require('../../services/emailservice');
-          const { buffer: invoicePdf } = await InvoiceService.generateInvoice({
-            invoiceNumber: order_id,
-            customerName: u.telegram || order.user_id,
-            customerEmail: u.email,
-            planName,
-            amount: parseFloat(order.usd_amount) || 0,
-            currency: 'USD',
-            paymentDate: new Date(),
-            provider: 'NOWPayments/USDC',
-            language,
-          });
-          await EmailService.sendInvoiceEmail({
-            to: u.email,
-            invoicePdf,
-            invoiceNumber: order_id,
-            customerName: u.telegram || order.user_id,
-            amount: parseFloat(order.usd_amount) || 0,
-            currency: 'USD',
-            planName,
-          });
-        } catch (emailErr) {
-          logger.warn('[NOWPayments] IPN: invoice email failed (non-fatal)', { userId: order.user_id, error: emailErr.message });
-        }
-      }
-    }
+    const PlanModelNP = require('../../models/planModel');
+    const planForNotif = await PlanModelNP.getById(order.plan_id).catch(() => null);
+    const planName = planForNotif?.display_name || planForNotif?.name || order.plan_id;
+    const isLifetime = planForNotif?.is_lifetime || false;
+    const durationDays = planForNotif?.duration_days || 30;
+    const expiryDate = isLifetime ? null : new Date(Date.now() + durationDays * 86400000);
+    const PaymentNotifSvcNP = require('../../services/paymentNotificationService');
+    await PaymentNotifSvcNP.deliverPurchaseConfirmation(order.user_id, {
+      planId: order.plan_id,
+      planName,
+      amount: parseFloat(order.usd_amount) || 0,
+      transactionId: String(payment_id),
+      provider: 'nowpayments',
+      expiryDate,
+      isLifetime,
+    });
   } catch (notifErr) {
     logger.warn('[NOWPayments] IPN: notification block failed (non-fatal)', { userId: order.user_id, error: notifErr.message });
   }
