@@ -832,18 +832,54 @@ class CreatorService {
 
   static async listApplications(statusFilter) {
     const params = [];
-    let whereClause = '';
+    // Application rows from model_applications
+    let appWhere = '';
     if (statusFilter) {
       params.push(statusFilter);
-      whereClause = 'WHERE ma.status = $1';
+      appWhere = 'WHERE ma.status = $1';
     }
 
+    // Manually-promoted creators (no model_applications row) always show as
+    // 'approved' — only include them when no status filter or filter = 'approved'
+    const includeManual = !statusFilter || statusFilter === 'approved';
+
     const { rows } = await query(
-      `SELECT ma.*, u.username, u.first_name, u.photo_file_id
+      `SELECT ma.id, ma.user_id, ma.application_type, ma.stage_name, ma.bio,
+              ma.status, ma.admin_notes, ma.reviewed_by, ma.reviewed_at,
+              ma.requested_price_usd, ma.call_scheduled, ma.call_scheduled_at,
+              ma.created_at, ma.updated_at,
+              u.username, u.first_name, u.photo_file_id
        FROM model_applications ma
        JOIN users u ON ma.user_id = u.id
-       ${whereClause}
-       ORDER BY ma.created_at DESC`,
+       ${appWhere}
+
+       ${includeManual ? `
+       UNION ALL
+
+       SELECT
+         NULL::uuid          AS id,
+         u.id                AS user_id,
+         'both'              AS application_type,
+         COALESCE(u.first_name, u.username) AS stage_name,
+         NULL                AS bio,
+         'approved'          AS status,
+         'Manually assigned by admin' AS admin_notes,
+         NULL::text          AS reviewed_by,
+         u.creator_enabled_at AS reviewed_at,
+         NULL::numeric       AS requested_price_usd,
+         false               AS call_scheduled,
+         NULL::timestamptz   AS call_scheduled_at,
+         COALESCE(u.creator_enabled_at, u.created_at) AS created_at,
+         u.updated_at,
+         u.username,
+         u.first_name,
+         u.photo_file_id
+       FROM users u
+       WHERE u.creator_status = 'active'
+         AND NOT EXISTS (SELECT 1 FROM model_applications ma2 WHERE ma2.user_id = u.id)
+       ` : ''}
+
+       ORDER BY created_at DESC`,
       params
     );
 
