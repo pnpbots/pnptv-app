@@ -12,7 +12,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { getXLoginUrl, getXStatus, sharePostToX, getHangoutGroups, sharePostToHangouts, getDmThreads, sharePostToDm, type XStatus, type HangoutGroup, type MessageThread } from "@/lib/api";
+import { ApiError, getXLoginUrl, getXStatus, sharePostToX, getHangoutGroups, sharePostToHangouts, getDmThreads, sharePostToDm, type XStatus, type HangoutGroup, type MessageThread } from "@/lib/api";
 
 const APP_BASE = "https://pnptv.app";
 
@@ -211,6 +211,12 @@ export function SharePostModal({
       if (res.tweetUrl) setTweetUrl(res.tweetUrl);
       setXShareState("success");
     } catch (err: unknown) {
+      if (err instanceof ApiError && err.code === "reconnect_required") {
+        // Token was revoked or expired — show the reconnect UI instead of a raw error.
+        setXStatus((prev) => ({ linked: true, hasWriteScope: false, handle: prev?.handle ?? null }));
+        setXShareState("idle");
+        return;
+      }
       const msg = err instanceof Error ? err.message : "Failed to post to X";
       setXShareError(msg);
       setXShareState("error");

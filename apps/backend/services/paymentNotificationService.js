@@ -289,10 +289,11 @@ class PaymentNotificationService {
     customerEmail,
   }) {
     try {
-      // Fall back to SUPERADMIN_IDS (comma-separated) when ADMIN_ID is not set.
-      const adminIds = process.env.ADMIN_ID
-        ? [process.env.ADMIN_ID]
-        : (process.env.SUPERADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+      // Merge ADMIN_ID + SUPERADMIN_IDS so all admins receive payment DMs.
+      const adminIds = [
+        ...(process.env.ADMIN_ID ? [process.env.ADMIN_ID] : []),
+        ...(process.env.SUPERADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
+      ].filter((id, i, arr) => id && arr.indexOf(id) === i);
       const supportGroupId = process.env.SUPPORT_GROUP_ID;
 
       if (adminIds.length === 0 && !supportGroupId) {

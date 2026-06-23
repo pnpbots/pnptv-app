@@ -427,17 +427,28 @@ const shareToX = async (req, res) => {
         accessToken = decryptToken(dbUser.x_access_token_encrypted);
       }
     } catch (tokenErr) {
-      logger.warn('[X Share] Token error, updating log to failed', {
+      logger.warn('[X Share] Token error, clearing tokens and updating log to failed', {
         userId: sessionUser.id,
         postId,
         error: tokenErr.message,
       });
-      await query(
-        `UPDATE x_cross_post_log SET status = 'failed', error_message = $1, updated_at = NOW()
-         WHERE social_post_id = $2 AND user_id = $3`,
-        [tokenErr.message, postId, sessionUser.id],
-        { cache: false }
-      );
+      await Promise.all([
+        query(
+          `UPDATE x_cross_post_log SET status = 'failed', error_message = $1, updated_at = NOW()
+           WHERE social_post_id = $2 AND user_id = $3`,
+          [tokenErr.message, postId, sessionUser.id],
+          { cache: false }
+        ),
+        // Clear the stale tokens so getXStatus returns hasWriteScope:false on next modal open,
+        // immediately showing the "Reconnect X" button without requiring another failed attempt.
+        query(
+          `UPDATE users SET x_access_token_encrypted = NULL, x_refresh_token_encrypted = NULL,
+                            x_token_expires_at = NULL
+           WHERE id = $1`,
+          [sessionUser.id],
+          { cache: false }
+        ),
+      ]);
       return res.status(401).json({
         success: false,
         code: 'reconnect_required',
@@ -513,11 +524,11 @@ const shareToX = async (req, res) => {
             logger.warn('[X Share] Failed to set media alt_text', { mediaId, error: altErr.message });
           }
 
-          xResponse = await axios.post(
+          xResponse = (await axios.post(
             `${X_API_BASE}/tweets`,
             { text: tweetText, media: { media_ids: [String(mediaId)] } },
             { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 30000 }
-          );
+          )).data;
         } else {
           xResponse = await postTweetText(accessToken, tweetText);
         }
