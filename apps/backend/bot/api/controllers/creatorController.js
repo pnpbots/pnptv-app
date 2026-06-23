@@ -184,10 +184,16 @@ const subscribeToCreator = async (req, res) => {
     const result = await CreatorService.subscribeToCreator(req.user.id, creatorId, paymentId);
     return res.json({ success: true, ...result });
   } catch (err) {
-    logger.error('subscribeToCreator error', err);
     if (err.code === 'CREATOR_LOCKED') {
       return res.status(err.statusCode || 423).json({ error: err.message, code: 'CREATOR_LOCKED' });
     }
+    if (err.code === 'SUBSCRIPTIONS_PAUSED') {
+      return res.status(err.statusCode || 423).json({ error: err.message, code: 'SUBSCRIPTIONS_PAUSED' });
+    }
+    if (err.code === 'MEMBER_REQUIRED') {
+      return res.status(err.statusCode || 403).json({ error: err.message, code: 'MEMBER_REQUIRED' });
+    }
+    logger.error('subscribeToCreator error', { error: err.message, stack: err.stack });
     return res.status(400).json({ error: err.message });
   }
 };

@@ -143,14 +143,8 @@ class PNPLiveNotificationService {
           `• Camera and mic ready\n\n` +
           `🆔 Booking #${bookingId}`;
 
-      const ALLOWED_ROOM_ORIGINS = ['https://meet.jit.si', 'https://8x8.vc', 'https://app.pnptv.app'];
-      let roomUrl = 'https://meet.jit.si';
-      try {
-        const parsed = new URL(booking.video_room_url || '');
-        if (parsed.protocol === 'https:' && ALLOWED_ROOM_ORIGINS.some(o => booking.video_room_url.startsWith(o))) {
-          roomUrl = booking.video_room_url;
-        }
-      } catch { /* invalid URL — fall back to default */ }
+      const appUrl = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
+      const roomUrl = `${appUrl}/booking/${bookingId}/confirm`;
 
       const keyboard = Markup.inlineKeyboard([
         [Markup.button.url(
@@ -183,10 +177,13 @@ class PNPLiveNotificationService {
           `📹 Your show with *${booking.model_name}* is about to start\n\n` +
           `👆 Tap the button to join now`;
 
+      const appUrl5m = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
+      const joinUrl5m = `${appUrl5m}/booking/${bookingId}/confirm`;
+
       const userKeyboard = Markup.inlineKeyboard([
         [Markup.button.url(
           lang === 'es' ? '🎥 UNIRME AHORA' : '🎥 JOIN NOW',
-          booking.video_room_url || 'https://meet.jit.si'
+          joinUrl5m
         )]
       ]);
 
@@ -207,7 +204,7 @@ class PNPLiveNotificationService {
         const modelKeyboard = Markup.inlineKeyboard([
           [Markup.button.url(
             lang === 'es' ? '🎥 ENTRAR AHORA' : '🎥 JOIN NOW',
-            booking.video_room_url || 'https://meet.jit.si'
+            joinUrl5m
           )]
         ]);
 

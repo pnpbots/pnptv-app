@@ -298,7 +298,8 @@ class PaymentSettlementService {
 
     try {
       const CreatorService = require('./creatorService');
-      await CreatorService.subscribeToCreator(order.user_id, order.creator_id, invoiceToUUID(invoiceId));
+      const subscribeResult = await CreatorService.subscribeToCreator(order.user_id, order.creator_id, invoiceToUUID(invoiceId));
+      const subscriptionExpiresAt = subscribeResult?.expiresAt || new Date(Date.now() + 30 * 86400000);
 
       logger.info('BTCPay: creator subscription activated', {
         userId: order.user_id, creatorId: order.creator_id, invoiceId,
@@ -326,8 +327,8 @@ class PaymentSettlementService {
 
       // FIX 7: Insert a payments row so the purchase appears in payment history and admin views.
       try {
-        const amount = Number(order.amount_usd || order.amount || 0);
-        const txId = order.invoice_id || order.id;
+        const amount = Number(order.usd_amount || order.amount || 0);
+        const txId = order.btcpay_invoice_id || order.id;
         await dbQuery(
           `INSERT INTO payments (user_id, plan_id, amount, provider, status, transaction_id, created_at, updated_at)
            VALUES ($1, $2, $3, 'btcpay', 'completed', $4, NOW(), NOW())
@@ -344,10 +345,10 @@ class PaymentSettlementService {
         await PaymentNotificationService.deliverPurchaseConfirmation(order.user_id, {
           planId:        order.plan_id,
           planName:      'Creator Subscription',
-          amount:        Number(order.amount_usd || order.amount || 0),
-          transactionId: order.invoice_id || order.id,
+          amount:        Number(order.usd_amount || order.amount || 0),
+          transactionId: order.btcpay_invoice_id || order.id,
           provider:      'btcpay',
-          expiryDate:    new Date(Date.now() + 30 * 86400000),
+          expiryDate:    subscriptionExpiresAt,
           isLifetime:    false,
         });
       } catch (notifErr) {
@@ -361,9 +362,9 @@ class PaymentSettlementService {
           bot:           (() => { try { const m = require('../bot/core/bot'); return (typeof m.getBotInstance === 'function' ? m.getBotInstance() : null) || new (require('telegraf').Telegraf)(process.env.BOT_TOKEN); } catch (_) { return new (require('telegraf').Telegraf)(process.env.BOT_TOKEN); } })(),
           userId:        order.user_id,
           planName:      'Creator Subscription',
-          amount:        Number(order.amount_usd || order.amount || 0),
+          amount:        Number(order.usd_amount || order.amount || 0),
           provider:      'btcpay',
-          transactionId: order.invoice_id || order.id,
+          transactionId: order.btcpay_invoice_id || order.id,
           customerName:  order.user_id,
           customerEmail: 'N/A',
         });

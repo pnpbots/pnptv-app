@@ -423,15 +423,20 @@ class CreatorService {
       // Write creator-subscription entitlement so entitlement-based access checks work
       await client.query(`
         INSERT INTO user_entitlements (user_id, add_on_id, creator_id, expires_at, source_plan_id, source_payment_id)
-        VALUES ($1, 'creator-subscription', $2, NOW() + INTERVAL '30 days', 'creator_monthly', $3)
+        VALUES ($1, 'creator-subscription', $2, $4::timestamptz, 'creator_monthly', $3)
         ON CONFLICT (user_id, add_on_id, creator_id)
         DO UPDATE SET
-          expires_at = GREATEST(user_entitlements.expires_at, NOW() + INTERVAL '30 days'),
+          expires_at = CASE
+            WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+            WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
+              THEN user_entitlements.expires_at + ($5::integer * INTERVAL '1 day')
+            ELSE $4::timestamptz
+          END,
           is_consumed = false,
           source_payment_id = COALESCE(EXCLUDED.source_payment_id, user_entitlements.source_payment_id),
           updated_at = NOW()
         WHERE NOT user_entitlements.is_lifetime
-      `, [String(subscriberId), String(creatorId), paymentId || null]);
+      `, [String(subscriberId), String(creatorId), paymentId || null, expiresAt, durationDays]);
 
       // Record earnings (70/30 split) — held for EARNINGS_HOLD_HOURS before maturing to 'available'
       const amountCreator = Math.round(priceUsd * CREATOR_REVENUE_RATE * 100) / 100;
@@ -478,7 +483,7 @@ class CreatorService {
       });
     }
 
-    // Notify creator of new subscriber
+    // Notify creator of new subscriber (in-app notification)
     try {
       const subscriberRes = await query(
         'SELECT username, first_name FROM users WHERE id = $1',
@@ -505,6 +510,37 @@ class CreatorService {
         creatorId,
         error: notifyErr.message,
       });
+    }
+
+    // Notify creator via Telegram DM (non-fatal)
+    try {
+      const creatorNotifRes = await query(
+        'SELECT telegram, first_name FROM users WHERE id = $1', [creatorId]
+      );
+      const subscriberRes = await query(
+        'SELECT first_name, username FROM users WHERE id = $1', [subscriberId]
+      );
+      const creatorRow = creatorNotifRes.rows[0];
+      const subscriberRow = subscriberRes.rows[0];
+      if (creatorRow?.telegram) {
+        const bot = (() => {
+          try {
+            const m = require('../bot/core/bot');
+            const inst = typeof m.getBotInstance === 'function' ? m.getBotInstance() : null;
+            if (inst) return inst;
+          } catch (_) {}
+          const { Telegraf } = require('telegraf');
+          return new Telegraf(process.env.BOT_TOKEN);
+        })();
+        const subName = subscriberRow?.first_name || subscriberRow?.username || 'Someone';
+        await bot.telegram.sendMessage(
+          creatorRow.telegram,
+          `💸 *New subscriber!* ${subName} just subscribed to your creator profile for $${priceUsd}/mo.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+    } catch (notifErr) {
+      logger.warn('subscribeToCreator: failed to notify creator via Telegram', { creatorId, error: notifErr.message });
     }
 
     return { subscriptionId: rows[0].id, expiresAt, price: priceUsd };
@@ -544,6 +580,18 @@ class CreatorService {
     } catch (err) {
       logger.error('Failed to revoke entitlement on cancel', { subscriberId, creatorId, error: err.message });
     }
+
+    // Void any earnings still in 'holding' for this subscription so the creator
+    // is not paid out for a cancelled/refunded subscription within the hold window.
+    await query(
+      `UPDATE creator_earnings SET status = 'void', updated_at = NOW()
+       WHERE subscription_id = (
+         SELECT id FROM creator_subscriptions
+         WHERE creator_id = $1 AND subscriber_id = $2
+         LIMIT 1
+       ) AND status = 'holding'`,
+      [creatorId, subscriberId]
+    ).catch(err => logger.warn('unsubscribeFromCreator: failed to void holding earnings', { error: err.message }));
 
     // Notify creator that a subscriber left
     try {
@@ -609,8 +657,8 @@ class CreatorService {
         await query(
           `UPDATE user_entitlements
            SET expires_at = NOW(), updated_at = NOW()
-           WHERE (user_id, creator_id) IN (
-             SELECT unnest($1::uuid[]), unnest($2::uuid[])
+           WHERE (user_id::text, creator_id::text) IN (
+             SELECT unnest($1::text[]), unnest($2::text[])
            )
              AND add_on_id = 'creator-subscription'
              AND expires_at > NOW()`,
@@ -693,7 +741,7 @@ class CreatorService {
     // Owner always sees their own exclusive content
     if (viewerId === creatorId) return { status: 'unlocked', reason: 'owner' };
 
-    // Check viewer's PRIME status via live entitlement (not stale users.tier)
+    // Check viewer's role and entitlements via live data (not stale users.tier)
     const viewerRes = await query(
       "SELECT role FROM users WHERE id = $1",
       [viewerId]
@@ -701,27 +749,27 @@ class CreatorService {
     const viewerRole = viewerRes.rows[0]?.role || '';
     const isAdminRole = viewerRole === 'admin' || viewerRole === 'superadmin';
     const EntitlementAccessService = require('./entitlementAccessService');
-    const hasPrimeEnt = isAdminRole || await EntitlementAccessService.hasEntitlement(viewerId, 'prime');
 
-    if (!hasPrimeEnt) {
-      return { status: 'locked', reason: 'not_prime' };
+    // Admin always unlocked
+    if (isAdminRole) {
+      return { status: 'unlocked', reason: 'admin' };
     }
 
-    // Check active subscription
-    const subRes = await query(
-      `SELECT id FROM creator_subscriptions
-       WHERE creator_id = $1 AND subscriber_id = $2 AND status = 'active'
-         AND (expires_at IS NULL OR expires_at > NOW())`,
-      [creatorId, viewerId]
+    // Check creator-subscription entitlement first (subscriber wins unconditionally)
+    const hasCreatorSub = await EntitlementAccessService.hasEntitlement(
+      viewerId, 'creator-subscription', { creatorId }
     );
-
-    if (subRes.rows.length > 0) {
+    if (hasCreatorSub) {
       return { status: 'unlocked', reason: 'subscribed' };
     }
 
-    // Teaser: ~20% of posts, keyed to viewer so enumeration by post ID is not possible
-    if (isTeaserPost(postId, viewerId)) {
-      return { status: 'teaser', reason: 'prime_preview' };
+    // PRIME users get a teaser preview (not full unlock without subscribing)
+    const hasPrimeEnt = await EntitlementAccessService.hasEntitlement(viewerId, 'prime');
+    if (hasPrimeEnt) {
+      if (isTeaserPost(postId, viewerId)) {
+        return { status: 'teaser', reason: 'prime_preview' };
+      }
+      return { status: 'locked', reason: 'not_subscribed' };
     }
 
     return { status: 'locked', reason: 'not_subscribed' };
@@ -735,39 +783,25 @@ class CreatorService {
 
     const isPrime = (viewerTier || '').toLowerCase() === 'prime';
 
-    // If not PRIME, lock all exclusive posts — EXCEPT posts owned by the viewer themselves
-    // (creators who are not yet prime-tier must still see their own exclusive content)
-    if (!isPrime) {
-      return posts.map(p => {
-        if (!p.is_exclusive) return p;
-        const postCreatorId = p.author_id || p.user_id;
-        // Owner always sees their own exclusive posts regardless of tier
-        if (viewerId && String(postCreatorId) === String(viewerId)) {
-          return { ...p, exclusive_status: 'unlocked' };
-        }
-        return {
-          ...p,
-          exclusive_status: 'locked',
-          locked_reason: 'not_prime',
-          content: null,
-          media_url: null,
-          media_urls: null,
-        };
-      });
-    }
-
-    // For PRIME users, batch-check subscriptions
+    // Batch-check subscriptions unconditionally — subscribers without PRIME must
+    // still see content from creators they pay for.
     const creatorIds = [...new Set(exclusivePosts.map(p => p.author_id || p.user_id))];
     let subscribedCreatorIds = new Set();
 
-    if (creatorIds.length > 0) {
-      const subsRes = await query(
-        `SELECT creator_id FROM creator_subscriptions
-         WHERE subscriber_id = $1 AND creator_id = ANY($2) AND status = 'active'
-           AND (expires_at IS NULL OR expires_at > NOW())`,
-        [viewerId, creatorIds]
-      );
-      subscribedCreatorIds = new Set(subsRes.rows.map(r => r.creator_id));
+    if (creatorIds.length > 0 && viewerId) {
+      try {
+        const subsRes = await query(
+          `SELECT creator_id FROM creator_subscriptions
+           WHERE subscriber_id = $1 AND creator_id = ANY($2) AND status = 'active'
+             AND (expires_at IS NULL OR expires_at > NOW())`,
+          [viewerId, creatorIds]
+        );
+        subscribedCreatorIds = new Set(subsRes.rows.map(r => String(r.creator_id)));
+      } catch (subsErr) {
+        logger.warn('filterFeedExclusivePosts: subscription batch-check failed (non-fatal)', {
+          viewerId, error: subsErr.message,
+        });
+      }
     }
 
     return posts.map(p => {
@@ -775,22 +809,32 @@ class CreatorService {
 
       const postCreatorId = p.author_id || p.user_id;
 
-      // Owner sees their own posts
-      if (String(postCreatorId) === String(viewerId)) {
+      // Owner sees their own posts regardless of tier
+      if (viewerId && String(postCreatorId) === String(viewerId)) {
         return { ...p, exclusive_status: 'unlocked' };
       }
 
-      // Subscribed
+      // Active subscriber always gets full access
       if (subscribedCreatorIds.has(String(postCreatorId))) {
         return { ...p, exclusive_status: 'unlocked' };
       }
 
-      // Teaser (~20% — keyed to viewer so post IDs cannot be enumerated to find teasers)
-      if (isTeaserPost(p.id, viewerId)) {
-        return { ...p, exclusive_status: 'teaser' };
+      // PRIME users (non-subscribed) get a teaser preview
+      if (isPrime) {
+        if (isTeaserPost(p.id, viewerId)) {
+          return { ...p, exclusive_status: 'teaser' };
+        }
+        return {
+          ...p,
+          exclusive_status: 'locked',
+          locked_reason: 'not_subscribed',
+          content: null,
+          media_url: null,
+          media_urls: null,
+        };
       }
 
-      // Locked for non-subscribed PRIME users
+      // Non-PRIME, non-subscribed: locked
       return {
         ...p,
         exclusive_status: 'locked',

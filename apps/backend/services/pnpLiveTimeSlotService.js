@@ -100,7 +100,7 @@ class PNPLiveTimeSlotService {
         modelId,
         count: slots.length,
         durationMinutes,
-        startDate: generationStartDate,
+        startDate: generationStartMoment.toDate(),
       });
 
       return slots;
@@ -245,12 +245,10 @@ class PNPLiveTimeSlotService {
    * @returns {boolean} True if within operating hours
    */
   static isWithinOperatingHours(dateTime) {
-    const hours = dateTime.getHours();
-    const minutes = dateTime.getMinutes();
-    const totalMinutes = hours * 60 + minutes;
-    
-    // Operating hours: 10 AM (600 minutes) to 10 PM (1320 minutes)
-    return totalMinutes >= 600 && totalMinutes <= 1320;
+    const d = new Date(dateTime);
+    const totalMinutes = d.getUTCHours() * 60 + d.getUTCMinutes();
+    // Operating hours: 10:00–21:59 UTC (slots ending at 22:00 are excluded via strict <)
+    return totalMinutes >= 600 && totalMinutes < 1320;
   }
 
   /**

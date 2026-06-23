@@ -6,7 +6,7 @@ import { useTier } from "@/hooks/useTier";
 import { useI18n } from "@/lib/i18n";
 import { useTutorial, resetAllTutorials } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Badge, Skeleton } from "@pnptv/ui-kit";
 import { PostComposer } from "@/components/PostComposer";
 import {
@@ -51,7 +51,6 @@ import {
   type EventItem,
   type HangoutActivity,
   type MentionUser,
-  isCreatorPayLocked,
 } from "@/lib/api";
 import { EventCard } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
@@ -88,9 +87,10 @@ function formatDate(dateStr: string): string {
 
 export default function Profile() {
   const { isAuthenticated, user, login, logout, refreshUser } = useAuth();
-  const { isPrime: currentUserIsPrime } = useTier();
+  const { isMember: currentUserIsMember } = useTier();
   const { userId: paramUserId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const t = useI18n();
   const p = t.profile;
@@ -199,8 +199,11 @@ export default function Profile() {
 
   // Creator subscription state
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string | null>(null);
+  const [showUnsubscribeConfirm, setShowUnsubscribeConfirm] = useState(false);
   const [subscribeLoading, setSubscribeLoading] = useState(false);
   const [subscribeError, setSubscribeError] = useState<string | null>(null);
+  const [paymentConfirmedBanner, setPaymentConfirmedBanner] = useState(false);
   // Payment-gated subscribe modal state
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [subscribeEmail, setSubscribeEmail] = useState("");
@@ -257,22 +260,37 @@ export default function Profile() {
     error: nowpaymentsError,
   } = useNowPayments({
     storageKey: "pnp_pending_creator_sub_order",
-    onSuccess: () => {
-      setIsSubscribed(true);
-      setShowSubscribeModal(false);
+    onSuccess: async () => {
+      // Webhook may not have fired yet — poll subscription status up to 5 times
+      // Use paramUserId (stable from useParams) since profile state may be stale in this closure
+      const creatorId = paramUserId || "";
+      if (!creatorId) { setShowSubscribeModal(false); return; }
+      for (let i = 0; i < 5; i++) {
+        await new Promise(r => setTimeout(r, i === 0 ? 2000 : 3000));
+        try {
+          const subRes = await getCreatorSubscriptionStatus(creatorId);
+          if (subRes.subscribed) {
+            setIsSubscribed(true);
+            setSubscriptionExpiresAt(subRes.subscription?.expires_at ?? null);
+            setShowSubscribeModal(false);
+            return;
+          }
+        } catch (_) { /* continue polling */ }
+      }
+      setShowSubscribeModal(false); // close regardless after retries
     },
   });
 
   // Scroll lock — applies whenever any local modal is open
   useEffect(() => {
-    const anyModalOpen = showReportModal || showBugModal || showSubscribeModal || showBlockConfirm;
+    const anyModalOpen = showReportModal || showBugModal || showSubscribeModal || showBlockConfirm || showUnsubscribeConfirm;
     if (anyModalOpen) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
     }
     return () => { document.body.style.overflow = ""; };
-  }, [showReportModal, showBugModal, showSubscribeModal, showBlockConfirm]);
+  }, [showReportModal, showBugModal, showSubscribeModal, showBlockConfirm, showUnsubscribeConfirm]);
 
   // Escape key handler — closes the topmost open modal/menu
   useEffect(() => {
@@ -284,6 +302,7 @@ export default function Profile() {
         return;
       }
       if (showBlockConfirm) { setShowBlockConfirm(false); return; }
+      if (showUnsubscribeConfirm) { setShowUnsubscribeConfirm(false); return; }
       if (showSubscribeModal) {
         setShowSubscribeModal(false); setSubscribeAwaitingPayment(false); setSubscribePaymentId(null); setSubscribeError(null);
         return;
@@ -292,7 +311,7 @@ export default function Profile() {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [showBugModal, showReportModal, reportSending, showBlockConfirm, showSubscribeModal, overflowOpen]);
+  }, [showBugModal, showReportModal, reportSending, showBlockConfirm, showUnsubscribeConfirm, showSubscribeModal, overflowOpen]);
 
   // Reset state when navigating between profiles
   useEffect(() => {
@@ -303,6 +322,7 @@ export default function Profile() {
     setFollowersCount(0);
     setFollowingCount(0);
     setIsSubscribed(false);
+    setSubscriptionExpiresAt(null);
     setIsBlocked(false);
     setMyEvents([]);
     setError(null);
@@ -369,7 +389,12 @@ export default function Profile() {
           // Load creator subscription status if the user is an active creator
           if (isAuthenticated && res.profile.creatorStatus === "active") {
             getCreatorSubscriptionStatus(targetUserId)
-              .then((subRes) => { if (subRes.success) setIsSubscribed(subRes.subscribed); })
+              .then((subRes) => {
+                if (subRes.success) {
+                  setIsSubscribed(subRes.subscribed);
+                  setSubscriptionExpiresAt(subRes.subscription?.expires_at ?? null);
+                }
+              })
               .catch(() => {});
           }
           // Check block status
@@ -404,6 +429,33 @@ export default function Profile() {
     loadProfile();
   }, [loadProfile]);
 
+  // M7: Handle return from ePayco payment — check `?payment=confirmed` URL param
+  useEffect(() => {
+    if (searchParams.get("payment") !== "confirmed") return;
+    if (!targetUserId) return;
+    // Remove the param from the URL without a full reload
+    const newUrl = window.location.pathname;
+    window.history.replaceState(null, "", newUrl);
+    // Poll subscription status to confirm payment went through
+    (async () => {
+      for (let i = 0; i < 5; i++) {
+        await new Promise(r => setTimeout(r, i === 0 ? 1500 : 3000));
+        try {
+          const subRes = await getCreatorSubscriptionStatus(targetUserId);
+          if (subRes.subscribed) {
+            setIsSubscribed(true);
+            setSubscriptionExpiresAt(subRes.subscription?.expires_at ?? null);
+            setPaymentConfirmedBanner(true);
+            setTimeout(() => setPaymentConfirmedBanner(false), 6000);
+            break;
+          }
+        } catch (_) { /* continue polling */ }
+      }
+      // Clean up sessionStorage regardless
+      try { sessionStorage.removeItem("pnp_epayco_creator_return"); } catch { /* noop */ }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount only
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -587,10 +639,10 @@ export default function Profile() {
   const handleSubscribe = () => {
     if (!profile) return;
     if (isSubscribed) {
-      handleUnsubscribe();
+      setShowUnsubscribeConfirm(true);
       return;
     }
-    if (!currentUserIsPrime) {
+    if (!currentUserIsMember) {
       setSubscribeError(p.primeRequiredForCreator);
       setTimeout(() => setSubscribeError(null), 4000);
       return;
@@ -620,11 +672,13 @@ export default function Profile() {
 
   const handleUnsubscribe = async () => {
     if (subscribeLoading || !profile) return;
+    setShowUnsubscribeConfirm(false);
     setSubscribeLoading(true);
     setSubscribeError(null);
     try {
       await unsubscribeFromCreator(profile.id || paramUserId!);
       setIsSubscribed(false);
+      setSubscriptionExpiresAt(null);
     } catch (err) {
       setSubscribeError(err instanceof Error ? err.message : p.failedToUnsubscribe);
     }
@@ -648,6 +702,8 @@ export default function Profile() {
       if (subscribeProvider === "epayco") {
         const res = await initiateCreatorSubscriptionPayment(creatorId, "epayco", trimmed);
         if (res.success && res.paymentUrl) {
+          // Store creatorId so we can verify subscription when the user returns
+          try { sessionStorage.setItem("pnp_epayco_creator_return", creatorId); } catch { /* noop */ }
           window.location.href = assertPaymentUrl(res.paymentUrl);
           return; // page navigates away
         } else {
@@ -700,6 +756,7 @@ export default function Profile() {
       const subRes = await getCreatorSubscriptionStatus(creatorId);
       if (subRes.success && subRes.subscribed) {
         setIsSubscribed(true);
+        setSubscriptionExpiresAt(subRes.subscription?.expires_at ?? null);
         setShowSubscribeModal(false);
         setSubscribeAwaitingPayment(false);
         setSubscribePaymentId(null);
@@ -872,6 +929,12 @@ export default function Profile() {
   const userLabel = getUserLabel(profile);
   const isPrime = userLabel === 'PRIME';
   const isPerformer = !!profile.performerData;
+
+  // M6: Subscription expiry helpers
+  const daysUntilExpiry = subscriptionExpiresAt
+    ? Math.ceil((new Date(subscriptionExpiresAt).getTime() - Date.now()) / 86400000)
+    : null;
+  const expiringSoon = daysUntilExpiry !== null && daysUntilExpiry <= 7;
 
   // Per-user profile themes & masked roles
   const profileThemes: Record<string, { gradient: string; color: string; border: string; borderColor?: string; roleBadge?: string; roleStyle?: React.CSSProperties }> = {
@@ -1531,25 +1594,46 @@ export default function Profile() {
                 )}
                 {profile.creatorStatus === "active" && isAuthenticated && !isOwnProfile && (() => {
                   const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
-                  if (isCreatorPayLocked(profile.username)) {
-                    return (
-                      <button disabled className="flex-1 min-w-[100px] min-h-[40px] py-2 rounded-lg text-sm font-semibold opacity-50 cursor-not-allowed bg-white/5 border border-white/10 text-pnp-textSecondary">
-                        🔒 Launches June 1st
-                      </button>
-                    );
-                  }
                   return (
-                    <button
-                      onClick={handleSubscribe}
-                      disabled={subscribeLoading}
-                      className="flex-1 min-w-[100px] min-h-[40px] py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
-                      style={isSubscribed
-                        ? { background: `rgba(${tc.rgb},0.12)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.35)` }
-                        : { background: tc.gradient, color: "#fff" }
-                      }
-                    >
-                      {subscribeLoading ? "..." : isSubscribed ? `${tc.emoji} ${p.subscribed}` : `${tc.emoji} ${p.subscribe} $${profile.creatorPriceUsd || tc.price}/mo`}
-                    </button>
+                    <div className="flex flex-col gap-1 flex-1 min-w-[100px]">
+                      <button
+                        onClick={handleSubscribe}
+                        disabled={subscribeLoading}
+                        className="w-full min-h-[40px] py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                        style={isSubscribed
+                          ? { background: `rgba(${tc.rgb},0.12)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.35)` }
+                          : { background: tc.gradient, color: "#fff" }
+                        }
+                      >
+                        {subscribeLoading ? "..." : isSubscribed ? `${tc.emoji} ${p.subscribed}` : `${tc.emoji} ${p.subscribe} $${profile.creatorPriceUsd ?? tc.price}/mo`}
+                      </button>
+                      {/* H8: Show expiry date when subscribed */}
+                      {isSubscribed && subscriptionExpiresAt && (
+                        <p className="text-[10px] text-center" style={{ color: expiringSoon ? "#FFB454" : "var(--pnp-text-secondary)" }}>
+                          {expiringSoon
+                            ? p.expiringSoonWarning.replace("{days}", String(daysUntilExpiry))
+                            : `${p.subscriptionActiveUntil} ${new Date(subscriptionExpiresAt).toLocaleDateString()}`}
+                        </p>
+                      )}
+                      {/* M6: Show renew button when expiring within 7 days */}
+                      {isSubscribed && expiringSoon && (
+                        <button
+                          onClick={() => {
+                            setSubscribeEmail("");
+                            setSubscribeEmailError(null);
+                            setSubscribeError(null);
+                            setSubscribeAwaitingPayment(false);
+                            setSubscribePaymentId(null);
+                            setSubscribeProvider("usdc");
+                            setShowSubscribeModal(true);
+                          }}
+                          className="w-full min-h-[36px] py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                          style={{ background: tc.gradient, color: "#fff", opacity: 0.85 }}
+                        >
+                          {p.renewSubscription}
+                        </button>
+                      )}
+                    </div>
                   );
                 })()}
                 {/* Tag in a post — active creators viewing another active creator */}
@@ -1636,8 +1720,69 @@ export default function Profile() {
         {subscribeError && (
           <p className="text-xs text-red-400 mt-2 text-center">{subscribeError}</p>
         )}
+        {/* M7: Payment confirmed banner */}
+        {paymentConfirmedBanner && (
+          <div
+            className="mt-2 rounded-xl px-4 py-2.5 text-sm font-medium text-center"
+            style={{ background: "rgba(52,199,89,0.12)", color: "#34C759", border: "1px solid rgba(52,199,89,0.3)" }}
+            role="status"
+            aria-live="polite"
+          >
+            {p.paymentConfirmedSuccess}
+          </div>
+        )}
         </div>
       </div>
+
+      {/* ── Unsubscribe Confirm Dialog (H9) ── */}
+      {showUnsubscribeConfirm && profile && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center"
+          onClick={() => setShowUnsubscribeConfirm(false)}
+        >
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            className="relative w-full sm:max-w-sm mx-auto bg-pnp-surface rounded-t-2xl sm:rounded-2xl shadow-2xl border border-white/10 animate-in slide-in-from-bottom duration-200"
+            style={{ padding: "1.5rem 1.5rem max(1.5rem, env(safe-area-inset-bottom)) 1.5rem" }}
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-label={p.unsubscribeConfirmTitle}
+          >
+            <div
+              className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4"
+              style={{ background: "rgba(255,180,84,0.12)", border: "1px solid rgba(255,180,84,0.25)" }}
+            >
+              <svg className="w-6 h-6" style={{ color: "#FFB454" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+              </svg>
+            </div>
+            <h2 className="text-base font-bold text-white text-center mb-2">
+              {p.unsubscribeConfirmTitle}
+            </h2>
+            <p className="text-sm text-center mb-6" style={{ color: "var(--pnp-text-secondary)" }}>
+              {p.unsubscribeConfirmBody}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowUnsubscribeConfirm(false)}
+                className="flex-1 min-h-[44px] py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", border: "1px solid rgba(255,255,255,0.12)" }}
+              >
+                {p.unsubscribeConfirmNo}
+              </button>
+              <button
+                onClick={handleUnsubscribe}
+                disabled={subscribeLoading}
+                className="flex-1 min-h-[44px] py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                style={{ background: "rgba(255,180,84,0.12)", color: "#FFB454", border: "1px solid rgba(255,180,84,0.3)" }}
+              >
+                {subscribeLoading ? "..." : p.unsubscribeConfirmYes}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Creator Subscription Payment Modal ── */}
       {showSubscribeModal && profile && (() => {
@@ -1689,7 +1834,7 @@ export default function Profile() {
                 </svg>
               </div>
               <div>
-                <p className="text-sm font-semibold text-white">${profile.creatorPriceUsd || 15}{p.perMonth}</p>
+                <p className="text-sm font-semibold text-white">${profile.creatorPriceUsd ?? 15}{p.perMonth}</p>
                 <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>{p.exclusiveCreatorAccess}</p>
               </div>
             </div>
@@ -1788,7 +1933,7 @@ export default function Profile() {
                   className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-50"
                   style={{ background: gradientBg }}
                 >
-                  {subscribePaymentLoading ? p.openingPayment : p.payPerMonth.replace('${price}', String(profile.creatorPriceUsd || 15))}
+                  {subscribePaymentLoading ? p.openingPayment : p.payPerMonth.replace('${price}', String(profile.creatorPriceUsd ?? 15))}
                 </button>
               </>
             ) : (
@@ -2036,9 +2181,9 @@ export default function Profile() {
                   disabled={subscribeLoading}
                   className="inline-flex items-center justify-center px-6 py-2.5 rounded-lg text-sm font-semibold text-white transition-all duration-150 active:scale-[0.97] disabled:opacity-50 min-h-[44px]"
                   style={{ background: profile.creatorType === "ice" ? "linear-gradient(135deg, #A8D8EA, #73B4D4)" : "linear-gradient(135deg, #D4007A, #E69138)" }}
-                  aria-label={`Subscribe for $${profile.creatorPriceUsd || 15}/mo`}
+                  aria-label={`Subscribe for $${profile.creatorPriceUsd ?? 15}/mo`}
                 >
-                  {subscribeLoading ? p.processing : `${p.subscribe} $${profile.creatorPriceUsd || 15}/mo`}
+                  {subscribeLoading ? p.processing : `${p.subscribe} $${profile.creatorPriceUsd ?? 15}/mo`}
                 </button>
               ) : (
                 <p className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>{p.signInToSubscribe}</p>

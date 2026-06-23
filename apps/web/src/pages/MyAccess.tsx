@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
-import { getMyAccess, type MyAccessResponse } from "@/lib/api";
+import { getMyAccess, unsubscribeFromCreator, type MyAccessResponse } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -66,31 +66,58 @@ function AccessRow({
   expiryText,
   thumbnailUrl,
   onClick,
+  onCancel,
+  cancelLoading,
 }: {
   title: string;
   subtitle?: string;
   expiryText: string;
   thumbnailUrl: string | null;
   onClick?: () => void;
+  onCancel?: () => void;
+  cancelLoading?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-[0.99] transition-all text-left disabled:opacity-60 disabled:cursor-default"
-    >
-      <div className="w-12 h-12 rounded-lg overflow-hidden bg-neutral-800 flex-shrink-0">
-        {thumbnailUrl
-          ? <img src={thumbnailUrl} alt="" className="w-full h-full object-cover" />
-          : <div className="w-full h-full flex items-center justify-center text-pnp-textSecondary text-xs">—</div>}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-pnp-textPrimary truncate">{title}</p>
-        {subtitle ? <p className="text-xs text-pnp-textSecondary truncate">{subtitle}</p> : null}
-      </div>
-      <span className="text-xs text-pnp-textSecondary whitespace-nowrap">{expiryText}</span>
-    </button>
+    <div className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 transition-all">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={!onClick}
+        className="flex items-center gap-3 flex-1 min-w-0 text-left hover:bg-white/5 active:scale-[0.99] transition-all rounded-lg disabled:opacity-60 disabled:cursor-default"
+      >
+        <div className="w-12 h-12 rounded-lg overflow-hidden bg-neutral-800 flex-shrink-0">
+          {thumbnailUrl
+            ? <img src={thumbnailUrl} alt="" className="w-full h-full object-cover" />
+            : <div className="w-full h-full flex items-center justify-center text-pnp-textSecondary text-xs">—</div>}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-pnp-textPrimary truncate">{title}</p>
+          {subtitle ? <p className="text-xs text-pnp-textSecondary truncate">{subtitle}</p> : null}
+        </div>
+        <span className="text-xs text-pnp-textSecondary whitespace-nowrap mr-1">{expiryText}</span>
+      </button>
+      {onCancel && (
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={cancelLoading}
+          aria-label={`Cancel subscription to ${title}`}
+          className="flex-shrink-0 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-lg transition-colors disabled:opacity-50"
+          style={{ background: "rgba(255,59,48,0.08)", color: "#FF453A", border: "1px solid rgba(255,59,48,0.2)" }}
+        >
+          {cancelLoading ? (
+            <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          ) : (
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          )}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -102,6 +129,24 @@ export default function MyAccess() {
   const [data, setData] = useState<MyAccessResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cancellingCreatorId, setCancellingCreatorId] = useState<string | null>(null);
+
+  const handleCancelCreatorSub = async (creatorId: string, displayName: string) => {
+    const confirmed = window.confirm(
+      `Cancel subscription to ${displayName}? Your access will end immediately.`
+    );
+    if (!confirmed) return;
+    setCancellingCreatorId(creatorId);
+    try {
+      await unsubscribeFromCreator(creatorId);
+      setData((prev) =>
+        prev
+          ? { ...prev, creators: prev.creators.filter((c) => c.id !== creatorId) }
+          : prev
+      );
+    } catch { /* silent — row stays if it fails */ }
+    setCancellingCreatorId(null);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -228,6 +273,8 @@ export default function MyAccess() {
                   expiryText={formatExpiry(cr.expiresAt, cr.isLifetime, t)}
                   thumbnailUrl={cr.avatarUrl}
                   onClick={() => navigate(cr.url)}
+                  onCancel={!cr.isLifetime ? () => handleCancelCreatorSub(cr.id, cr.displayName || t.myAccess.defaultCreatorName) : undefined}
+                  cancelLoading={cancellingCreatorId === cr.id}
                 />
               ))}
             </Section>

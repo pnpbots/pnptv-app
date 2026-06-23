@@ -24,6 +24,8 @@ const REFERRAL_TOKEN_REWARD_DEFAULT = 3;
  */
 function tokenRewardForPlan(planId) {
   if (!planId) return 0;
+  // creator_monthly is a per-creator payment, not a platform plan — no referral reward
+  if (planId === 'creator_monthly') return 0;
   if (Object.prototype.hasOwnProperty.call(REFERRAL_TOKEN_REWARD, planId)) {
     return REFERRAL_TOKEN_REWARD[planId];
   }

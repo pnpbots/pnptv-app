@@ -172,13 +172,34 @@ class PNPLiveTipsService {
       // collides if two tips are sent in the same millisecond by the same user
       // and breaks the idempotency contract of source_payment_id on creator_earnings.
       const txId = `TOKEN-${require('crypto').randomUUID()}`;
+      // ON CONFLICT on idempotency_key (partial unique index WHERE NOT NULL) makes the
+      // INSERT idempotent — concurrent retries with the same key yield exactly one row.
       const tipResult = await client.query(
         `INSERT INTO pnp_tips
-         (user_id, model_id, performer_id, booking_id, amount, message, payment_status, payment_method, transaction_id, created_at, completed_at)
-         VALUES ($1, NULL, $2, NULL, $3, $4, 'completed', 'tokens', $5, NOW(), NOW())
+         (user_id, model_id, performer_id, booking_id, amount, message, payment_status, payment_method, transaction_id, idempotency_key, created_at, completed_at)
+         VALUES ($1, NULL, $2, NULL, $3, $4, 'completed', 'tokens', $5, $6, NOW(), NOW())
+         ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
          RETURNING *`,
-        [userId, String(performerId), amount, (message || '').slice(0, 200), txId]
+        [userId, String(performerId), amount, (message || '').slice(0, 200), txId, idempotencyKey || null]
       );
+
+      // If ON CONFLICT fired (duplicate key), fetch the existing tip and return it
+      // without debiting the wallet again — the wallet UPDATE above will be rolled back.
+      if (tipResult.rows.length === 0 && idempotencyKey) {
+        await client.query('ROLLBACK');
+        const existing = await require('../config/postgres').query(
+          `SELECT * FROM pnp_tips WHERE idempotency_key = $1 LIMIT 1`,
+          [idempotencyKey]
+        );
+        if (existing.rows.length > 0) {
+          const existingTip = existing.rows[0];
+          return { tip: existingTip, newBalance: null, duplicate: true };
+        }
+        // Key not found after conflict — should not happen, but fail safe
+        const dupErr = new Error('Duplicate tip detected');
+        dupErr.name = 'DuplicateTipError';
+        throw dupErr;
+      }
 
       const tip = tipResult.rows[0];
 

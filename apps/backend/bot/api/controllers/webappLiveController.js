@@ -395,12 +395,13 @@ const provisionChannel = async (req, res) => {
       const safeRef = sanitizeRefId(dbUser.live_channel);
       const hlsUrl = safeRef ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8` : null;
 
+      const existingStreamKey = safeRef && safeRef.startsWith('pnptv-') ? safeRef.slice('pnptv-'.length) : safeRef;
       logger.info(`provisionChannel: user ${user.id} already has channel '${dbUser.live_channel}' — returning existing`);
       return res.json({
         success: true,
         alreadyProvisioned: true,
         rtmpUrl,
-        streamKey: dbUser.live_channel, // RTMP name equals refId
+        streamKey: existingStreamKey,
         channelRef: dbUser.live_channel,
         hlsUrl,
       });
@@ -459,12 +460,13 @@ const provisionChannel = async (req, res) => {
     const safeRef = sanitizeRefId(finalRef);
     const hlsUrl = safeRef ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8` : null;
 
+    const newStreamKey = safeRef && safeRef.startsWith('pnptv-') ? safeRef.slice('pnptv-'.length) : safeRef;
     logger.info(`provisionChannel: user ${user.id} provisioned channel '${finalRef}'`);
     return res.json({
       success: true,
       alreadyProvisioned: false,
       rtmpUrl,
-      streamKey: finalRef,
+      streamKey: newStreamKey,
       channelRef: finalRef,
       hlsUrl,
     });
@@ -520,6 +522,13 @@ const assignChannel = async (req, res) => {
       }
     }
 
+    // Clear the old owner first to avoid unique constraint violation when re-assigning
+    if (channelRef) {
+      await getPool().query(
+        `UPDATE users SET live_channel = NULL WHERE live_channel = $1 AND id != $2`,
+        [channelRef, userId]
+      );
+    }
     const { rows } = await getPool().query(
       `UPDATE users SET live_channel = $1 WHERE id = $2
        RETURNING id, username, live_channel`,

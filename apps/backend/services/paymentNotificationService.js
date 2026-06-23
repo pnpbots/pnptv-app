@@ -58,7 +58,7 @@ class PaymentNotificationService {
 
       // Get plan details
       const plan = await PlanModel.getById(planId);
-      if (!plan) {
+      if (!plan && !planNameOverride) {
         logger.warn('Plan not found for payment confirmation', { planId, paymentId });
         return false;
       }
@@ -72,7 +72,7 @@ class PaymentNotificationService {
       });
 
       const confirmationLink = ConfirmationTokenService.getConfirmationLink(token);
-      const planName = planNameOverride || plan.display_name || plan.name;
+      const planName = planNameOverride || plan?.display_name || plan?.name;
       const formattedAmount = parseFloat(amount).toFixed(2);
 
       // Determine language (default to Spanish if not set)
@@ -96,9 +96,9 @@ class PaymentNotificationService {
         message += `• Proveedor: ${this.getProviderName(provider, lang)}\n`;
         message += `• Fecha de compra: ${new Date().toLocaleDateString('es-ES')}\n`;
 
-        if (expiryDate && !plan.is_lifetime) {
+        if (expiryDate && !plan?.is_lifetime) {
           message += `• Vence: ${expiryDate.toLocaleDateString('es-ES')}\n`;
-        } else if (plan.is_lifetime) {
+        } else if (plan?.is_lifetime) {
           message += `• Duración: Permanente ♾️\n`;
         }
 
@@ -130,9 +130,9 @@ class PaymentNotificationService {
         message += `• Provider: ${this.getProviderName(provider, lang)}\n`;
         message += `• Purchase Date: ${new Date().toLocaleDateString('en-US')}\n`;
 
-        if (expiryDate && !plan.is_lifetime) {
+        if (expiryDate && !plan?.is_lifetime) {
           message += `• Expires: ${expiryDate.toLocaleDateString('en-US')}\n`;
-        } else if (plan.is_lifetime) {
+        } else if (plan?.is_lifetime) {
           message += `• Duration: Permanent ♾️\n`;
         }
 

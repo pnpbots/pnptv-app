@@ -8273,41 +8273,8 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
 
     // --- Token-based instant tip ---
     if (paymentMethod === 'tokens') {
-      // --- Idempotency check (Fix 4) ---
-      // If an idempotencyKey is supplied, check for a matching tip created within the last 5 seconds
-      // from the same user to the same performer for the same amount. Return the existing tip if found.
-      if (idempotencyKey && typeof idempotencyKey === 'string') {
-        try {
-          const dupCheck = await getPool().query(
-            `SELECT id, amount, created_at FROM pnp_tips
-             WHERE user_id = $1
-               AND performer_id = $2
-               AND amount = $3
-               AND payment_method = 'tokens'
-               AND created_at > NOW() - INTERVAL '60 seconds'
-             ORDER BY created_at DESC
-             LIMIT 1`,
-            [userId, String(resolvedPerformerId), numAmount]
-          );
-          if (dupCheck.rows.length > 0) {
-            const existing = dupCheck.rows[0];
-            logger.info(`Tips: idempotency hit — returning existing tip ${existing.id} for user ${userId}`);
-            return res.json({
-              success: true,
-              tipId: existing.id,
-              paymentUrl: null,
-              amount: parseFloat(existing.amount),
-              paymentMethod: 'tokens',
-              duplicate: true,
-            });
-          }
-        } catch (idempErr) {
-          // Non-fatal: if the idempotency check errors, proceed with normal creation
-          logger.warn(`Tips: idempotency check failed: ${idempErr.message}`);
-        }
-      }
-
       // processTipWithTokens atomically debits wallet + inserts tip + emits sockets in one transaction.
+      // ON CONFLICT on idempotency_key inside processTipWithTokens makes this dedup-safe atomically.
       let tokenTipResult;
       try {
         tokenTipResult = await PNPLiveTipsService.processTipWithTokens(
@@ -9342,13 +9309,19 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
       return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
     }
     const creatorRes = await dbQuery(
-      'SELECT id, username, first_name, creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
+      'SELECT id, username, first_name, creator_price_usd, creator_locked, creator_subscription_paused FROM users WHERE id = $1 AND creator_status = $2',
       [String(creatorId), 'active']
     );
     if (creatorRes.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Creator not found or not active' });
     }
     const creator = creatorRes.rows[0];
+    if (creator.creator_locked) {
+      return res.status(423).json({ success: false, error: 'This creator is completing onboarding and cannot accept new subscriptions yet.', code: 'CREATOR_LOCKED' });
+    }
+    if (creator.creator_subscription_paused) {
+      return res.status(423).json({ success: false, error: 'This creator has paused new memberships.', code: 'SUBSCRIPTIONS_PAUSED' });
+    }
     const price = parseFloat(creator.creator_price_usd);
     if (!Number.isFinite(price) || price <= 0) {
       return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
@@ -9557,6 +9530,10 @@ app.post('/api/webapp/payments/lightning/create', requireSessionAuth, paymentCre
     });
   }
 
+  if (creatorId && String(creatorId) === userId) {
+    return res.status(400).json({ success: false, error: 'You cannot subscribe to yourself' });
+  }
+
   let planDisplayName;
   let usdAmount;
   let discountInfo = null;
@@ -9566,13 +9543,19 @@ app.post('/api/webapp/payments/lightning/create', requireSessionAuth, paymentCre
       return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
     }
     const creatorRes = await dbQuery(
-      'SELECT id, username, first_name, creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
+      'SELECT id, username, first_name, creator_price_usd, creator_locked, creator_subscription_paused FROM users WHERE id = $1 AND creator_status = $2',
       [String(creatorId), 'active']
     );
     if (creatorRes.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Creator not found or not active' });
     }
     const creator = creatorRes.rows[0];
+    if (creator.creator_locked) {
+      return res.status(423).json({ success: false, error: 'This creator is completing onboarding and cannot accept new subscriptions yet.', code: 'CREATOR_LOCKED' });
+    }
+    if (creator.creator_subscription_paused) {
+      return res.status(423).json({ success: false, error: 'This creator has paused new memberships.', code: 'SUBSCRIPTIONS_PAUSED' });
+    }
     const price = parseFloat(creator.creator_price_usd);
     if (!Number.isFinite(price) || price <= 0) {
       return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
@@ -10173,11 +10156,17 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
     if (!creatorId) return res.status(400).json({ success: false, error: 'creatorId is required for creator subscriptions' });
     if (String(creatorId) === userId) return res.status(400).json({ success: false, error: 'You cannot subscribe to yourself' });
     const creatorRes = await dbQuery(
-      'SELECT id, username, first_name, creator_price_usd FROM users WHERE id = $1 AND creator_status = $2',
+      'SELECT id, username, first_name, creator_price_usd, creator_locked, creator_subscription_paused FROM users WHERE id = $1 AND creator_status = $2',
       [String(creatorId), 'active']
     );
     if (creatorRes.rows.length === 0) return res.status(404).json({ success: false, error: 'Creator not found or not active' });
     const creator = creatorRes.rows[0];
+    if (creator.creator_locked) {
+      return res.status(423).json({ success: false, error: 'This creator is completing onboarding and cannot accept new subscriptions yet.', code: 'CREATOR_LOCKED' });
+    }
+    if (creator.creator_subscription_paused) {
+      return res.status(423).json({ success: false, error: 'This creator has paused new memberships.', code: 'SUBSCRIPTIONS_PAUSED' });
+    }
     const price = parseFloat(creator.creator_price_usd);
     if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
     usdAmount = price;
@@ -10541,6 +10530,21 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
         `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
         [renewalOrderId, `nowpayments:renewal:${payment_id}`]
       );
+
+      // Record creator earnings on renewal — intentionally non-fatal (entitlement already extended)
+      if (existing.plan_id === 'creator_monthly' && existing.creator_id) {
+        try {
+          const CreatorServiceRenewal = require('../../services/creatorService');
+          await CreatorServiceRenewal.subscribeToCreator(
+            existing.user_id, String(existing.creator_id), renewalOrderId || order_id
+          );
+        } catch (renewalCreatorErr) {
+          logger.warn('[NOWPayments] IPN: subscribeToCreator failed on renewal (earnings not recorded — manual reconciliation needed)', {
+            userId: existing.user_id, creatorId: existing.creator_id, error: renewalCreatorErr.message,
+          });
+        }
+      }
+
       try {
         const { cache: renewalCache } = require('../../config/redis');
         await renewalCache.del(`user:${existing.user_id}`);
@@ -10618,6 +10622,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
   }
 
   // Grant FIRST — if this throws, roll back to pending so NOWPayments retries
+  let creatorSubExpiresAt = null;
   try {
     const PaymentServiceGf = require('../../services/paymentService');
     const grantResult = await PaymentServiceGf.grantEntitlementsForPlan(
@@ -10638,15 +10643,11 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     }
 
     // NP-H-02: wire up creator subscription relationship for creator_monthly orders
+    // No try/catch — let failure propagate to outer catch so order rolls back to 'pending' for retry
     if (order.plan_id === 'creator_monthly' && order.creator_id) {
-      try {
-        const CreatorService = require('../../services/creatorService');
-        await CreatorService.subscribeToCreator(order.user_id, String(order.creator_id), order_id);
-      } catch (creatorErr) {
-        logger.warn('[NOWPayments] IPN: subscribeToCreator failed (non-fatal)', {
-          userId: order.user_id, creatorId: order.creator_id, error: creatorErr.message,
-        });
-      }
+      const CreatorService = require('../../services/creatorService');
+      const subResult = await CreatorService.subscribeToCreator(order.user_id, String(order.creator_id), order_id);
+      creatorSubExpiresAt = subResult?.expiresAt || null;
     }
   } catch (grantErr) {
     // Roll back lock so this IPN delivery can be retried
@@ -10699,7 +10700,9 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     const planName = planForNotif?.display_name || planForNotif?.name || order.plan_id;
     const isLifetime = planForNotif?.is_lifetime || false;
     const durationDays = planForNotif?.duration_days || 30;
-    const expiryDate = isLifetime ? null : new Date(Date.now() + durationDays * 86400000);
+    const expiryDate = order.plan_id === 'creator_monthly' && creatorSubExpiresAt
+      ? creatorSubExpiresAt
+      : (isLifetime ? null : new Date(Date.now() + durationDays * 86400000));
     const PaymentNotifSvcNP = require('../../services/paymentNotificationService');
     await PaymentNotifSvcNP.deliverPurchaseConfirmation(order.user_id, {
       planId: order.plan_id,

@@ -380,7 +380,11 @@ class PNPLiveService {
    */
   static async getBookingsForUser(userId, status = null, limit = 50, offset = 0) {
     try {
-      let queryText = `SELECT * FROM pnp_bookings WHERE user_id = $1`;
+      let queryText = `SELECT id, user_id, model_id, duration_minutes, price_usd, booking_time,
+                payment_method, payment_status, status, video_room_name, video_room_url,
+                notes, refund_reason, cancelled_at, completed_at,
+                reminder_1h_sent, reminder_5m_sent, created_at, updated_at
+         FROM pnp_bookings WHERE user_id = $1`;
       let params = [userId];
       let paramIndex = 2;
 
@@ -411,7 +415,11 @@ class PNPLiveService {
    */
   static async getBookingsForModel(modelId, status = null, limit = 50, offset = 0) {
     try {
-      let queryText = `SELECT * FROM pnp_bookings WHERE model_id = $1`;
+      let queryText = `SELECT id, user_id, model_id, duration_minutes, price_usd, booking_time,
+                payment_method, payment_status, status, video_room_name, video_room_url,
+                notes, refund_reason, cancelled_at, completed_at,
+                reminder_1h_sent, reminder_5m_sent, created_at, updated_at
+         FROM pnp_bookings WHERE model_id = $1`;
       let params = [modelId];
       let paramIndex = 2;
 

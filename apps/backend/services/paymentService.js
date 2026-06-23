@@ -779,6 +779,18 @@ class PaymentService {
         }
       }
 
+      // C6: Require active pnp-member entitlement before accepting creator_monthly payment.
+      if (planId === 'creator_monthly') {
+        const EntitlementAccessService = require('./entitlementAccessService');
+        const hasMembership = await EntitlementAccessService.hasEntitlement(userId, 'pnp-member');
+        if (!hasMembership) {
+          const err = new Error('A Basic membership is required to subscribe to creators.');
+          err.code = 'MEMBER_REQUIRED';
+          err.statusCode = 403;
+          throw err;
+        }
+      }
+
       const mergedMetadata = {
         ...(creatorId ? { creatorId } : {}),
         ...(extraMetadata && typeof extraMetadata === 'object' ? extraMetadata : {}),
@@ -4175,37 +4187,6 @@ class PaymentService {
                 updated_at = NOW()
               WHERE NOT user_entitlements.is_lifetime
             `, [userId, row.add_on_id, scopeCreatorId, parseInt(durationDays, 10), planId, resolvedPaymentId]);
-          }
-
-          // Dual-write to legacy creator_subscriptions so old read paths stay working.
-          // Phase-out happens in a later PR after monitoring shows no legacy reads.
-          if (row.add_on_id === 'creator-subscription' && scopeCreatorId) {
-            try {
-              const durationSql = isLifetime
-                ? null // legacy table has no lifetime flag; use a far-future expiry
-                : parseInt(durationDays, 10);
-              await txClient.query(`
-                INSERT INTO creator_subscriptions (creator_id, subscriber_id, status, started_at, expires_at)
-                VALUES ($1, $2, 'active', NOW(),
-                        CASE WHEN $3::integer IS NULL
-                             THEN NOW() + INTERVAL '100 years'
-                             ELSE NOW() + ($3::integer * INTERVAL '1 day')
-                        END)
-                ON CONFLICT (creator_id, subscriber_id) DO UPDATE SET
-                  status = 'active',
-                  expires_at = CASE
-                    WHEN $3::integer IS NULL THEN NOW() + INTERVAL '100 years'
-                    WHEN creator_subscriptions.expires_at > NOW()
-                      THEN creator_subscriptions.expires_at + ($3::integer * INTERVAL '1 day')
-                    ELSE NOW() + ($3::integer * INTERVAL '1 day')
-                  END,
-                  updated_at = NOW()
-              `, [scopeCreatorId, userId, durationSql]);
-            } catch (dualWriteErr) {
-              logger.warn('Creator subscription dual-write failed (non-critical)', {
-                userId, creatorId: scopeCreatorId, error: dualWriteErr.message,
-              });
-            }
           }
 
           result.granted++;
