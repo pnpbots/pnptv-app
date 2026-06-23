@@ -223,7 +223,7 @@ async function getBooking(req, res) {
       return res.status(403).json({ success: false, error: 'Booking is not yet confirmed.' });
     }
 
-    const roomName = `booking-${credit.id}`;
+    const roomName = `booking-${credit.booking_uuid || credit.id}`;
     const isModerator = userId === String(credit.creator_id);
 
     const booking = {
@@ -286,7 +286,7 @@ async function joinBooking(req, res) {
       return res.status(403).json({ success: false, error: 'This booking is no longer active' });
     }
 
-    const roomName = `booking-${credit.id}`;
+    const roomName = `booking-${credit.booking_uuid || credit.id}`;
     const isModerator = userId === String(credit.creator_id);
 
     // Enforce join window when a scheduled time exists
@@ -1254,8 +1254,8 @@ async function getBookingPaymentStatus(req, res) {
       }
     }
 
-    // roomName is always booking-{credit_id} — consistent with joinBooking and getBooking
-    const roomName = row.credit_id ? `booking-${row.credit_id}` : row.room_name;
+    // Room name: prefer credit_id (legacy), fall back to booking UUID for credit-less bookings
+    const roomName = row.credit_id ? `booking-${row.credit_id}` : (row.booking_id ? `booking-${row.booking_id}` : row.room_name);
 
     return res.json({
       success: true,
