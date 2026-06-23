@@ -633,7 +633,7 @@ class PNPLiveAvailabilityService {
              updated_at = NOW()
          WHERE model_id = $1
          AND available_from = $2
-         AND (hold_user_id = $3 OR hold_user_id IS NULL)
+         AND hold_user_id = $3
          RETURNING *`,
         [modelId, slotStart, userId, bookingId]
       );

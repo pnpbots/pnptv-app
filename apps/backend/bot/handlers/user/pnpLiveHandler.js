@@ -1134,9 +1134,15 @@ Select your payment method:`;
         'credit_card'
       );
 
-      // Convert hold to confirmed booking record
-      // confirmSlotBooking(modelId, slotStart, userId, bookingId)
-      await PNPLiveAvailabilityService.confirmSlotBooking(selectedModel, slotStart, userId, booking.id);
+      // Convert hold to confirmed booking record — returns undefined if hold expired/stolen
+      const confirmedSlot = await PNPLiveAvailabilityService.confirmSlotBooking(selectedModel, slotStart, userId, booking.id);
+      if (!confirmedSlot) {
+        const expiredMsg = lang === 'es'
+          ? '❌ Tu reserva expiró o fue tomada por otro usuario. Por favor selecciona otro horario.'
+          : '❌ Your hold expired or was taken by another user. Please select a different time slot.';
+        await safeEditMessage(ctx, expiredMsg);
+        return;
+      }
 
       // Store booking ID in session for webhook callback
       ctx.session.pnpLive.bookingId = booking.id;
@@ -1226,9 +1232,15 @@ Select your payment method:`;
         'crypto'
       );
 
-      // Convert hold to confirmed booking record
-      // confirmSlotBooking(modelId, slotStart, userId, bookingId)
-      await PNPLiveAvailabilityService.confirmSlotBooking(selectedModel, slotStart, userId, booking.id);
+      // Convert hold to confirmed booking record — returns undefined if hold expired/stolen
+      const confirmedSlotCrypto = await PNPLiveAvailabilityService.confirmSlotBooking(selectedModel, slotStart, userId, booking.id);
+      if (!confirmedSlotCrypto) {
+        const expiredMsg = lang === 'es'
+          ? '❌ Tu reserva expiró o fue tomada por otro usuario. Por favor selecciona otro horario.'
+          : '❌ Your hold expired or was taken by another user. Please select a different time slot.';
+        await safeEditMessage(ctx, expiredMsg);
+        return;
+      }
 
       // Store booking ID in session for webhook callback
       ctx.session.pnpLive.bookingId = booking.id;
