@@ -42,9 +42,18 @@ export default function Join() {
   const [memberPlan, setMemberPlan] = useState<SubscriptionPlan | null>(null);
   const [primePlan, setPrimePlan] = useState<SubscriptionPlan | null>(null);
   const [stats, setStats] = useState<{ totalUsers: number; newUsersLast30Days: number } | null>(null);
+  const [refCode, setRefCode] = useState<string | null>(null);
 
   // Referral capture from ?ref is handled globally in App.tsx (useReferralCapture)
   // so it works on any landing path, not only /join.
+  // We separately read it here only to show the invitation banner.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const ref = params.get("ref");
+      if (ref?.trim()) setRefCode(ref.trim().toUpperCase());
+    } catch (_) { /* non-critical */ }
+  }, []);
 
   useEffect(() => {
     getFeaturedPerformers().catch(() => null).then((res) => {
@@ -153,6 +162,19 @@ export default function Join() {
             )}
           </div>
         </div>
+
+        {/* ── Referral invitation banner ── */}
+        {refCode && (
+          <div className="mx-4 mt-4 rounded-2xl px-4 py-3.5 flex items-center gap-3" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.14), rgba(155,0,176,0.10))", border: "1px solid rgba(212,0,122,0.35)" }}>
+            <span className="text-2xl flex-shrink-0" aria-hidden="true">🎁</span>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-white">You've been invited!</p>
+              <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.65)" }}>
+                Sign up now to claim <span className="font-bold" style={{ color: "#D4007A" }}>24 hours of PRIME</span> — on us.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Hero ── */}
         <div className="relative overflow-hidden">

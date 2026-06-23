@@ -97,6 +97,14 @@ async function redeemReferral(code, refereeId) {
     throw err;
   }
 
+  // Check if this is the referee's first-ever referral redemption (any code).
+  // Used to gate the one-time 24h PRIME trial — prevents stacking multiple codes.
+  const { rows: existingReferrals } = await query(
+    'SELECT id FROM referrals WHERE referee_id = $1 LIMIT 1',
+    [String(refereeId)]
+  );
+  const isFirstReferral = existingReferrals.length === 0;
+
   // Idempotent attribution. Reward stays at 0 until the referee buys a plan.
   const { rows: inserted } = await query(
     `INSERT INTO referrals (code, referrer_id, referee_id, status, reward_tokens, reward_days)
@@ -111,7 +119,36 @@ async function redeemReferral(code, refereeId) {
   }
 
   logger.info('Referral attributed (pending reward)', { referrerId, refereeId, code: upperCode });
-  return { success: true, pending: true, referrerId };
+
+  // Grant 24-hour PRIME trial on first-ever referral redemption.
+  let primeGranted = false;
+  if (isFirstReferral) {
+    try {
+      const EntitlementModel = require('../models/entitlementModel');
+      await EntitlementModel.grantEntitlement(String(refereeId), 'prime', {
+        isLifetime: false,
+        durationDays: 1,
+        sourcePlanId: 'referral_24h_prime',
+        source: 'system',
+        actorId: 'system',
+        reason: `Referral 24h trial — code ${upperCode}`,
+      });
+      await EntitlementModel.grantEntitlement(String(refereeId), 'pnp-member', {
+        isLifetime: false,
+        durationDays: 1,
+        sourcePlanId: 'referral_24h_prime',
+        source: 'system',
+        actorId: 'system',
+        reason: `Referral 24h trial — code ${upperCode}`,
+      });
+      primeGranted = true;
+      logger.info('Referral 24h PRIME granted', { refereeId, code: upperCode });
+    } catch (err) {
+      logger.warn('Referral PRIME grant failed (non-fatal)', { refereeId, code: upperCode, error: err.message });
+    }
+  }
+
+  return { success: true, pending: true, referrerId, primeGranted };
 }
 
 /**

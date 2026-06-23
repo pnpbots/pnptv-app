@@ -180,12 +180,12 @@ export default function ReferralCenter() {
             {(es
               ? [
                   { step: "1", title: "Comparte tu enlace", body: "Envíalo por WhatsApp, Instagram, Telegram — donde quieras." },
-                  { step: "2", title: "Tu amigo se registra", body: "Crea su cuenta en PNPtv usando tu enlace de referido." },
+                  { step: "2", title: "Tu amigo se registra y obtiene PRIME gratis", body: "Al crear su cuenta con tu enlace recibe 24 horas de PRIME automáticamente, sin pagar nada." },
                   { step: "3", title: "Paga su primer plan", body: "En cuanto completa su primera compra, tú recibes tokens PNP Live automáticamente." },
                 ]
               : [
                   { step: "1", title: "Share your link", body: "Send it via WhatsApp, Instagram, Telegram — wherever." },
-                  { step: "2", title: "Your friend signs up", body: "They create their PNPtv account using your referral link." },
+                  { step: "2", title: "Your friend signs up and gets free PRIME", body: "As soon as they join with your link they get 24 hours of PRIME automatically — no payment needed." },
                   { step: "3", title: "They buy a plan", body: "Once they complete their first purchase, you get PNP Live tokens automatically." },
                 ]
             ).map(({ step, title, body }) => (

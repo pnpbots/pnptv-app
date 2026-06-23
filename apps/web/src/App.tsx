@@ -22,9 +22,11 @@ const REFERRAL_STORAGE_KEY = "pnptv:pendingRef";
 // Capture a ?ref=<code> from the landing URL on any path (not only /join),
 // store it in localStorage, and redeem it as soon as the user is
 // authenticated. Idempotent — only fires once per page load.
+// Returns { primeGranted } so AppOverlays can surface the success banner.
 function useReferralCapture() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, refreshUser } = useAuth();
   const redeemedRef = useRef(false);
+  const [primeGranted, setPrimeGranted] = useState(false);
 
   // 1. On first mount, read the URL once and persist any ?ref= for later.
   useEffect(() => {
@@ -57,13 +59,20 @@ function useReferralCapture() {
       (result) => {
         // eslint-disable-next-line no-console
         console.info("[referral] redeemed", { code, result });
+        if (result?.primeGranted) {
+          setPrimeGranted(true);
+          // Refresh session so PRIME tier badge appears immediately.
+          refreshUser().catch(() => {});
+        }
       },
       (err) => {
         // eslint-disable-next-line no-console
         console.error("[referral] redemption failed", { code, error: err?.message || err });
       }
     );
-  }, [isAuthenticated]);
+  }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { primeGranted, dismissPrime: () => setPrimeGranted(false) };
 }
 
 function useScreenCaptureGuard() {
@@ -267,8 +276,8 @@ function useGlobalSocketEvents() {
 function AppOverlays() {
   const { isAuthenticated } = useAuth();
   const { suspendedMsg, incomingCall, dismissIncomingCall } = useGlobalSocketEvents();
+  const { primeGranted, dismissPrime } = useReferralCapture();
   useDocumentDir();
-  useReferralCapture();
   return (
     <>
       <PermissionOnboarding isAuthenticated={isAuthenticated} />
@@ -276,6 +285,28 @@ function AppOverlays() {
       <InstallPill />
       <PushNotificationPill />
       <UpdateAvailableModal />
+      {primeGranted && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9997] w-[calc(100%-2rem)] max-w-sm animate-slide-in-top">
+          <div
+            className="flex items-center gap-3 px-4 py-3.5 rounded-2xl shadow-2xl"
+            style={{ background: "linear-gradient(135deg, #D4007A, #9B00B0)", border: "1px solid rgba(255,255,255,0.2)" }}
+          >
+            <span className="text-xl flex-shrink-0" aria-hidden="true">🎉</span>
+            <p className="flex-1 text-sm font-semibold text-white leading-snug">
+              You got 24 hours of PRIME — enjoy!
+            </p>
+            <button
+              onClick={dismissPrime}
+              className="flex-shrink-0 text-white/70 hover:text-white transition-colors"
+              aria-label="Dismiss"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
       {suspendedMsg && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-6">
           <div className="bg-[#1C1C1E] border border-red-500/40 rounded-2xl p-6 max-w-sm w-full text-center space-y-3">
