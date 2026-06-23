@@ -8,7 +8,10 @@ const { Telegraf } = require('telegraf');
 function _getBot() {
   try {
     const { getBotInstance } = require('../bot/core/bot');
-    if (typeof getBotInstance === 'function') return getBotInstance();
+    if (typeof getBotInstance === 'function') {
+      const instance = getBotInstance();
+      if (instance) return instance;
+    }
   } catch (_) {}
   return new Telegraf(process.env.BOT_TOKEN);
 }
@@ -60,10 +63,9 @@ class PaymentNotificationService {
         return false;
       }
 
-      // Generate one-time confirmation token (confirmation_tokens.payment_id is UUID type)
-      const { randomUUID } = require('crypto');
+      // Generate one-time confirmation token (confirmation_tokens.payment_id is nullable UUID)
       const token = await ConfirmationTokenService.generateToken({
-        paymentId: paymentId || randomUUID(),
+        paymentId: paymentId || null,
         userId,
         planId,
         provider,
