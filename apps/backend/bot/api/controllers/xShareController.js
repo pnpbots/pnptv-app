@@ -477,14 +477,15 @@ const shareToX = async (req, res) => {
     // ── 8. Post to X (with media upload if available) ────────────────────
     let xResponse;
     try {
-      // Resolve thumbnail URL for native X upload (prefer video_thumbnail_url).
-      // For video posts we upload the thumbnail image (small, reliable) so the
-      // tweet has a visual — the UTM link in text drives viewers to the full video.
+      // Resolve media URL for native X upload.
+      // Video posts upload the actual video file so it plays inline on X.
+      // Image posts upload the image directly.
       let thumbnailUrl = null;
-      if (post.media_type === 'video' && post.video_thumbnail_url) {
-        thumbnailUrl = post.video_thumbnail_url.startsWith('http')
-          ? post.video_thumbnail_url
-          : `${PNPTV_APP_URL}${post.video_thumbnail_url}`;
+      const isVideoPost = post.media_type === 'video';
+      if (isVideoPost && post.media_url) {
+        thumbnailUrl = post.media_url.startsWith('http')
+          ? post.media_url
+          : `${PNPTV_APP_URL}${post.media_url}`;
       } else if (post.media_type === 'image' && post.media_url) {
         thumbnailUrl = post.media_url.startsWith('http')
           ? post.media_url
@@ -511,17 +512,19 @@ const shareToX = async (req, res) => {
         }
 
         if (mediaId) {
-          // Set descriptive alt text for accessibility + SEO (fire-and-forget)
-          const altText = [post.video_title, post.video_description || post.content]
-            .filter(Boolean).join(' — ').slice(0, 1000) || 'PNPtv! community video';
-          try {
-            await axios.post(
-              'https://upload.twitter.com/1.1/media/metadata/create.json',
-              { media_id: String(mediaId), alt_text: { text: altText } },
-              { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 5000 }
-            );
-          } catch (altErr) {
-            logger.warn('[X Share] Failed to set media alt_text', { mediaId, error: altErr.message });
+          // Alt text only applies to images — X API rejects metadata for videos
+          if (!isVideoPost) {
+            const altText = [post.video_title, post.video_description || post.content]
+              .filter(Boolean).join(' — ').slice(0, 1000) || 'PNPtv! community video';
+            try {
+              await axios.post(
+                'https://upload.twitter.com/1.1/media/metadata/create.json',
+                { media_id: String(mediaId), alt_text: { text: altText } },
+                { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+              );
+            } catch (altErr) {
+              logger.warn('[X Share] Failed to set media alt_text', { mediaId, error: altErr.message });
+            }
           }
 
           xResponse = (await axios.post(
