@@ -13,7 +13,9 @@ import {
   requestWofDeletion,
   editSocialPost,
   createUserReport,
+  searchCreators,
   type SocialPostItem,
+  type MentionUser,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { translateText } from "@/lib/feedI18n";
@@ -134,8 +136,11 @@ export default function SocialPostCard({
   const [loadingReplies, setLoadingReplies] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [sendingReply, setSendingReply] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [replyLikes, setReplyLikes] = useState<Record<number, { liked: boolean; count: number }>>({});
   const [deleting, setDeleting] = useState(false);
   const [localReplyCount, setLocalReplyCount] = useState(post.replies_count || 0);
+  const optimisticIdRef = useRef(-Date.now());
   const [wofDeleting, setWofDeleting] = useState(false);
   const [wofDeleted, setWofDeleted] = useState(false);
   const [isWof, setIsWof] = useState(post.is_wof ?? false);
@@ -147,6 +152,16 @@ export default function SocialPostCard({
   const [savingEdit, setSavingEdit] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const [localContent, setLocalContent] = useState<string | null>(null);
+  const [localVideoTitle, setLocalVideoTitle] = useState<string | null>(null);
+  const [localVideoDescription, setLocalVideoDescription] = useState<string | null>(null);
+  const [editVideoTitle, setEditVideoTitle] = useState("");
+  const [editVideoDescription, setEditVideoDescription] = useState("");
+  const [editTaggedPerformers, setEditTaggedPerformers] = useState<MentionUser[]>([]);
+  const [editTagQuery, setEditTagQuery] = useState("");
+  const [editTagResults, setEditTagResults] = useState<MentionUser[]>([]);
+  const [editTagSearching, setEditTagSearching] = useState(false);
+  const [showEditTagPicker, setShowEditTagPicker] = useState(false);
+  const [localTaggedPerformers, setLocalTaggedPerformers] = useState<typeof post.tagged_performers>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [reportSent, setReportSent] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -206,19 +221,64 @@ export default function SocialPostCard({
     }
   }, [showReplies, replies.length, loadReplies, isOwn, post.author_username, post.author_first_name]);
 
-  const handleSendReply = useCallback(async () => {
-    if (!replyText.trim() || sendingReply) return;
-    setSendingReply(true);
+  const toggleReplyLike = useCallback(async (reply: SocialPostItem) => {
+    const id = reply.id;
+    const current = replyLikes[id] ?? { liked: !!reply.liked_by_me, count: reply.likes_count || 0 };
+    const next = { liked: !current.liked, count: current.count + (current.liked ? -1 : 1) };
+    setReplyLikes((m) => ({ ...m, [id]: next }));
     try {
-      const res = await createReply(post.id, replyText.trim());
-      if (res.success) {
-        setReplies((prev) => [...prev, res.post]);
-        setReplyText("");
-        setLocalReplyCount((c) => c + 1);
+      const res = await togglePostLike(id);
+      if (typeof res?.likes_count === "number") {
+        setReplyLikes((m) => ({ ...m, [id]: { liked: res.liked, count: res.likes_count! } }));
+      } else {
+        setReplyLikes((m) => ({ ...m, [id]: { ...next, liked: res.liked } }));
       }
-    } catch { /* silent */ }
+    } catch {
+      setReplyLikes((m) => ({ ...m, [id]: current }));
+    }
+  }, [replyLikes]);
+
+  const handleSendReply = useCallback(async () => {
+    const text = replyText.trim();
+    if (!text || sendingReply) return;
+    setSendingReply(true);
+    setReplyError(null);
+
+    const tempId = optimisticIdRef.current--;
+    const optimistic: SocialPostItem = {
+      ...post,
+      id: tempId,
+      content: text,
+      likes_count: 0,
+      replies_count: 0,
+      liked_by_me: false,
+      created_at: new Date().toISOString(),
+      author_id: currentUserId,
+      author_username: post.author_username,
+      author_first_name: undefined,
+      author_photo: undefined,
+      ...({ __pending: true } as object),
+    } as unknown as SocialPostItem;
+
+    setReplies((prev) => [...prev, optimistic]);
+    setReplyText("");
+    setLocalReplyCount((c) => c + 1);
+
+    try {
+      const res = await createReply(post.id, text);
+      if (res.success && res.post) {
+        setReplies((prev) => prev.map((r) => (r.id === tempId ? res.post : r)));
+      } else {
+        throw new Error(t.replyFailed);
+      }
+    } catch (err) {
+      setReplies((prev) => prev.filter((r) => r.id !== tempId));
+      setLocalReplyCount((c) => Math.max(0, c - 1));
+      setReplyText(text);
+      setReplyError(err instanceof Error && err.message ? err.message : t.replyFailed);
+    }
     setSendingReply(false);
-  }, [replyText, sendingReply, post]);
+  }, [replyText, sendingReply, post, currentUserId, t.replyFailed]);
 
   const handleShare = useCallback(() => {
     setShowShareModal(true);
@@ -257,6 +317,19 @@ export default function SocialPostCard({
     return () => document.removeEventListener("mousedown", handler);
   }, [showMenu]);
 
+  useEffect(() => {
+    if (!isEditing || !editTagQuery.trim()) { setEditTagResults([]); return; }
+    setEditTagSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await searchCreators(editTagQuery.trim());
+        if (res.success) setEditTagResults(res.users.filter(u => !editTaggedPerformers.some(tp => tp.id === u.id)));
+      } catch { /* silent */ }
+      setEditTagSearching(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [editTagQuery, isEditing, editTaggedPerformers]);
+
   const handleReport = useCallback(async () => {
     if (reporting || reportSent) return;
     setReporting(true);
@@ -292,12 +365,26 @@ export default function SocialPostCard({
 
   const handleStartEdit = useCallback(() => {
     setEditContent(localContent ?? post.content ?? "");
+    setEditVideoTitle(localVideoTitle ?? post.video_title ?? "");
+    setEditVideoDescription(localVideoDescription ?? post.video_description ?? "");
+    setEditTaggedPerformers(
+      (localTaggedPerformers ?? post.tagged_performers ?? []).map(tp => ({
+        id: tp.id, username: tp.username, avatar_url: tp.avatar_url, creator_status: 'active',
+      }))
+    );
+    setEditTagQuery("");
+    setEditTagResults([]);
+    setShowEditTagPicker(false);
     setIsEditing(true);
-  }, [localContent, post.content]);
+  }, [localContent, localVideoTitle, localVideoDescription, localTaggedPerformers, post.content, post.video_title, post.video_description, post.tagged_performers]);
 
   const handleCancelEdit = useCallback(() => {
     setIsEditing(false);
     setEditContent(localContent ?? post.content ?? "");
+    setEditTaggedPerformers([]);
+    setEditTagQuery("");
+    setEditTagResults([]);
+    setShowEditTagPicker(false);
   }, [localContent, post.content]);
 
   const handleSaveEdit = useCallback(async () => {
@@ -306,15 +393,26 @@ export default function SocialPostCard({
     if (!trimmed) return;
     setSavingEdit(true);
     try {
-      const res = await editSocialPost(post.id, trimmed);
+      const res = await editSocialPost(post.id, trimmed, {
+        ...(post.media_type === 'video' && {
+          videoTitle: editVideoTitle.trim() || null,
+          videoDescription: editVideoDescription.trim() || null,
+        }),
+        taggedPerformerIds: editTaggedPerformers.map(p => p.id),
+      });
       if (res.success) {
         setLocalContent(res.content ?? trimmed);
+        if (res.videoTitle !== undefined) setLocalVideoTitle(res.videoTitle ?? null);
+        if (res.videoDescription !== undefined) setLocalVideoDescription(res.videoDescription ?? null);
+        setLocalTaggedPerformers(
+          editTaggedPerformers.map(tp => ({ id: tp.id, username: tp.username, avatar_url: tp.avatar_url }))
+        );
         setTranslatedContent(null);
         setIsEditing(false);
       }
     } catch { /* silent */ }
     setSavingEdit(false);
-  }, [post.id, editContent, savingEdit]);
+  }, [post.id, post.media_type, editContent, editVideoTitle, editVideoDescription, editTaggedPerformers, savingEdit]);
 
   const authorPath =
     String(post.author_id) === currentUserId
@@ -514,7 +612,7 @@ export default function SocialPostCard({
             )}
 
             {/* 3-dots post menu */}
-            {hasRealPostId && !post.is_promoted && (canDelete || (!isOwn && !isAdmin)) && (
+            {hasRealPostId && !post.is_promoted && (canDelete || !isOwn) && (
               <div className="relative ml-auto" ref={menuRef}>
                 <button
                   onClick={(e) => { e.stopPropagation(); setShowMenu((v) => !v); }}
@@ -557,7 +655,7 @@ export default function SocialPostCard({
                         {deleting ? "Deleting…" : "Delete"}
                       </button>
                     )}
-                    {!isOwn && !isAdmin && (
+                    {!isOwn && (
                       <button
                         className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-white/10 transition-colors text-left"
                         style={{ color: reportSent ? "#34D399" : "#FFB454" }}
@@ -575,6 +673,30 @@ export default function SocialPostCard({
               </div>
             )}
           </div>
+
+          {/* Tagged performers */}
+          {(() => {
+            const tagged = localTaggedPerformers ?? post.tagged_performers;
+            if (!Array.isArray(tagged) || tagged.length === 0) return null;
+            return (
+              <div className="flex items-center flex-wrap gap-x-1 gap-y-0.5 mt-0.5 mb-0.5">
+                <span className="text-[11px]" style={{ color: "#8E8E93" }}>with</span>
+                {tagged.map((tp, i) => (
+                  <span key={tp.id} className="inline-flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onNavigate(`/profile/${tp.id}`); }}
+                      className="text-[11px] font-medium hover:underline transition-colors"
+                      style={{ color: "#5ED1C4" }}
+                    >
+                      @{tp.username}
+                    </button>
+                    {i < tagged.length - 1 && <span className="text-[11px]" style={{ color: "#8E8E93" }}>,</span>}
+                  </span>
+                ))}
+              </div>
+            );
+          })()}
 
           {/* Tier-blurred content overlay */}
           {post.blurred ? (
@@ -675,7 +797,7 @@ export default function SocialPostCard({
               )}
 
               {isEditing ? (
-                <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+                <div className="mt-1.5 space-y-2" onClick={(e) => e.stopPropagation()}>
                   <textarea
                     value={editContent}
                     onChange={(e) => setEditContent(e.target.value)}
@@ -684,14 +806,85 @@ export default function SocialPostCard({
                     placeholder="Edit your post..."
                     disabled={savingEdit}
                   />
-                  <div className="flex items-center gap-2 mt-1.5">
+                  {post.media_type === 'video' && (
+                    <>
+                      <input
+                        type="text"
+                        value={editVideoTitle}
+                        onChange={(e) => setEditVideoTitle(e.target.value)}
+                        maxLength={120}
+                        placeholder="Video title…"
+                        disabled={savingEdit}
+                        className="w-full rounded-lg px-2 py-1.5 text-sm text-white bg-white/5 border border-white/15 focus:outline-none focus:border-pink-500"
+                      />
+                      <textarea
+                        value={editVideoDescription}
+                        onChange={(e) => setEditVideoDescription(e.target.value)}
+                        rows={2}
+                        maxLength={500}
+                        placeholder="Video description…"
+                        disabled={savingEdit}
+                        className="w-full rounded-lg px-2 py-1.5 text-sm text-white bg-white/5 border border-white/15 focus:outline-none focus:border-pink-500 resize-none"
+                      />
+                    </>
+                  )}
+                  {/* Tagged performers */}
+                  <div>
+                    {editTaggedPerformers.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-1.5">
+                        {editTaggedPerformers.map(tp => (
+                          <span key={tp.id} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>
+                            @{tp.username}
+                            <button type="button" onClick={() => setEditTaggedPerformers(p => p.filter(t => t.id !== tp.id))} className="opacity-60 hover:opacity-100 ml-0.5">×</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {showEditTagPicker && (
+                      <div className="relative mb-1.5">
+                        <input
+                          type="text"
+                          value={editTagQuery}
+                          onChange={(e) => setEditTagQuery(e.target.value)}
+                          placeholder="Search creators to tag…"
+                          className="w-full rounded-lg px-2 py-1.5 text-sm text-white bg-white/5 border border-white/15 focus:outline-none focus:border-teal-500"
+                        />
+                        {(editTagResults.length > 0 || editTagSearching) && (
+                          <div className="absolute top-full left-0 right-0 z-50 mt-0.5 rounded-lg overflow-hidden shadow-xl" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.08)" }}>
+                            {editTagSearching && <p className="px-3 py-2 text-xs" style={{ color: "#8E8E93" }}>Searching…</p>}
+                            {editTagResults.map(u => (
+                              <button
+                                key={u.id}
+                                type="button"
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 transition-colors text-left"
+                                style={{ color: "#fff" }}
+                                onClick={() => { setEditTaggedPerformers(p => [...p, u]); setEditTagQuery(""); setEditTagResults([]); }}
+                              >
+                                <span className="text-white/90">@{u.username}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleSaveEdit(); }}
+                      type="button"
+                      onClick={() => setShowEditTagPicker(v => !v)}
+                      className="text-xs transition-colors"
+                      style={{ color: showEditTagPicker ? "#5ED1C4" : "#8E8E93" }}
+                    >
+                      {showEditTagPicker ? "Hide tag picker" : "Tag performers"}
+                      {editTaggedPerformers.length > 0 && ` (${editTaggedPerformers.length})`}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); void handleSaveEdit(); }}
                       disabled={savingEdit || !editContent.trim()}
                       className="px-3 py-1 rounded-full text-xs font-semibold transition-all disabled:opacity-40"
                       style={{ background: "#D4007A", color: "#fff" }}
                     >
-                      {savingEdit ? "Saving..." : "Save"}
+                      {savingEdit ? "Saving…" : "Save"}
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleCancelEdit(); }}
@@ -883,16 +1076,16 @@ export default function SocialPostCard({
                 <div className="mt-3">
                   {post.media_type === "video" ? (
                     <>
-                      {(post.video_title || post.video_description) && (
+                      {((localVideoTitle ?? post.video_title) || (localVideoDescription ?? post.video_description)) && (
                         <div className="mb-2 px-1">
-                          {post.video_title && (
+                          {(localVideoTitle ?? post.video_title) && (
                             <h4 className="text-sm font-semibold text-white">
-                              {post.video_title}
+                              {localVideoTitle ?? post.video_title}
                             </h4>
                           )}
-                          {post.video_description && (
+                          {(localVideoDescription ?? post.video_description) && (
                             <p className="text-xs text-white/60 mt-0.5 line-clamp-2">
-                              {post.video_description}
+                              {localVideoDescription ?? post.video_description}
                             </p>
                           )}
                         </div>
@@ -1090,9 +1283,17 @@ export default function SocialPostCard({
           {showReplies && (
             <div className="mt-3 pt-3 border-t border-white/10" onClick={(e) => e.stopPropagation()}>
               {loadingReplies ? (
-                <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                  {t.loadingComments}
-                </p>
+                <div className="space-y-3 mb-3" aria-label={t.loadingReplies} role="status">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="flex gap-2 animate-pulse">
+                      <div className="w-7 h-7 rounded-full bg-white/10 flex-shrink-0" />
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-2.5 bg-white/10 rounded w-1/3" />
+                        <div className="h-2 bg-white/10 rounded w-2/3" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : replies.length === 0 ? (
                 <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {t.noCommentsYet}
@@ -1100,19 +1301,22 @@ export default function SocialPostCard({
               ) : (
                 <div className="space-y-3 mb-3">
                   {replies.map((reply) => {
+                    const pending = (reply as unknown as { __pending?: boolean }).__pending === true;
                     const replyIsOwn = String(reply.author_id) === currentUserId;
                     const replyPhoto = replyIsOwn && user?.photoUrl ? user.photoUrl : reply.author_photo;
+                    const likeState = replyLikes[reply.id] ?? { liked: !!reply.liked_by_me, count: reply.likes_count || 0 };
                     return (
-                    <div key={reply.id} className="flex gap-2">
+                    <div key={reply.id} className={`flex gap-2 transition-opacity ${pending ? "opacity-60" : ""}`}>
                       <button
                         onClick={() =>
-                          onNavigate(
+                          !pending && onNavigate(
                             replyIsOwn
                               ? "/profile"
                               : `/profile/${reply.author_id}`
                           )
                         }
                         className="flex-shrink-0"
+                        disabled={pending}
                       >
                         {isValidPhotoUrl(replyPhoto) ? (
                           <img
@@ -1150,32 +1354,52 @@ export default function SocialPostCard({
                             {reply.author_first_name || reply.author_username}
                           </span>
                           <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                            {timeAgo(reply.created_at, t.translating)}
+                            {pending ? t.sending : timeAgo(reply.created_at, t.translating)}
                           </span>
                         </div>
                         <MentionText
                           text={reply.content}
                           className="text-xs text-white/80 mt-0.5 whitespace-pre-wrap block"
                         />
-                        {/* Reply-to-reply: prefills composer with the reply author's @handle */}
-                        {currentUserId && String(reply.author_id) !== currentUserId && (reply.author_username || reply.author_first_name) && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const handle = reply.author_username || reply.author_first_name || "";
-                              const mention = `@${handle} `;
-                              setReplyText((prev) => {
-                                if (prev.startsWith(mention)) return prev;
-                                const cleaned = prev.replace(/^@\S+\s+/, "");
-                                return mention + cleaned;
-                              });
-                            }}
-                            className="mt-1 text-[11px] font-medium hover:underline"
-                            style={{ color: "#5ED1C4" }}
-                          >
-                            {t.reply || "Reply"}
-                          </button>
+                        {/* Per-reply actions — hidden while row is pending (no real id yet) */}
+                        {!pending && (
+                          <div className="mt-1 flex items-center gap-3 text-[11px]">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); void toggleReplyLike(reply); }}
+                              className="inline-flex items-center gap-1 transition-colors active:scale-95"
+                              style={{ color: likeState.liked ? "#D4007A" : "#8E8E93" }}
+                              aria-pressed={likeState.liked}
+                            >
+                              <svg className="w-3.5 h-3.5" fill={likeState.liked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                              </svg>
+                              {likeState.count > 0 && <span>{likeState.count}</span>}
+                            </button>
+                            {/* Reply-to-reply: prefills composer with the reply author's @handle */}
+                            {!replyIsOwn && (reply.author_username || reply.author_first_name) && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const handle = reply.author_username || reply.author_first_name || "";
+                                  const mention = `@${handle} `;
+                                  setReplyText((prev) => {
+                                    if (prev.startsWith(mention)) return prev;
+                                    const cleaned = prev.replace(/^@\S+\s+/, "");
+                                    return mention + cleaned;
+                                  });
+                                }}
+                                className="inline-flex items-center gap-1 transition-colors hover:text-white/80"
+                                style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                                </svg>
+                                <span>{t.reply}</span>
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1187,38 +1411,24 @@ export default function SocialPostCard({
               {/* Reply composer */}
               {currentUserId && (
                 <>
-                  {/* "Replying to @username" context banner */}
-                  {post.author_username && (
-                    <div className="flex items-center gap-1.5 mb-2 text-xs">
-                      <svg
-                        className="w-3 h-3 flex-shrink-0"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"
-                        />
+                  {/* "Reply to @author" pill — only when composer is empty and post has an author username on non-own posts */}
+                  {post.author_username && !replyText.trim() && !isOwn && (
+                    <button
+                      type="button"
+                      onClick={() => setReplyText(`@${post.author_username} `)}
+                      className="inline-flex items-center gap-1.5 mb-2 px-2 py-0.5 rounded-full text-xs transition-colors hover:bg-white/10"
+                      style={{ background: "rgba(94,209,196,0.10)", color: "#5ED1C4" }}
+                    >
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
                       </svg>
-                      <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                        {t.replyingTo}{" "}
-                        <span
-                          className="font-medium"
-                          style={{ color: "#5ED1C4" }}
-                        >
-                          @{post.author_username}
-                        </span>
-                      </span>
-                    </div>
+                      <span>Reply to @{post.author_username}</span>
+                    </button>
                   )}
                   <div className="flex gap-2 items-end">
                     <MentionInput
                       value={replyText}
-                      onChange={setReplyText}
+                      onChange={(v) => { setReplyText(v); if (replyError) setReplyError(null); }}
                       placeholder={t.writeReply}
                       maxLength={500}
                       rows={2}
@@ -1235,6 +1445,25 @@ export default function SocialPostCard({
                       {sendingReply ? "..." : t.reply}
                     </button>
                   </div>
+                  {/* Inline error pill — appears under composer on reply failure */}
+                  {replyError && (
+                    <div
+                      role="alert"
+                      className="mt-1.5 flex items-center justify-between gap-2 px-2.5 py-1 rounded-lg text-[11px]"
+                      style={{ background: "rgba(239,68,68,0.10)", color: "#FCA5A5" }}
+                    >
+                      <span className="truncate">{replyError}</span>
+                      <button
+                        type="button"
+                        onClick={() => { setReplyError(null); void handleSendReply(); }}
+                        disabled={!replyText.trim()}
+                        className="font-semibold disabled:opacity-50"
+                        style={{ color: "#FCA5A5" }}
+                      >
+                        {t.retry}
+                      </button>
+                    </div>
+                  )}
                 </>
               )}
             </div>

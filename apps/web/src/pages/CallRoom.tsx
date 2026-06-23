@@ -461,7 +461,8 @@ export default function CallRoom() {
 
       <iframe
         src={joinData.jaasUrl}
-        allow="camera; microphone; fullscreen; display-capture; autoplay"
+        allow="camera *; microphone *; fullscreen *; display-capture *; autoplay *; speaker *; clipboard-write *; hid *"
+        allowFullScreen
         style={{ width: "100%", height: "100dvh", border: "none" }}
         title="Private call"
       />

@@ -5,7 +5,12 @@ import {
   getReplies,
   createReply,
   editSocialPost,
+  searchCreators,
+  adminFlagWofPost,
+  adminUnflagWofPost,
+  requestWofDeletion,
   type SocialPostItem,
+  type MentionUser,
 } from "@/lib/api";
 import { translateText } from "@/lib/feedI18n";
 import { SharePostModal } from "@/components/SharePostModal";
@@ -120,6 +125,22 @@ export default function PostCard({
 
   const canDelete = isOwn || isAdmin;
 
+  const [localVideoTitle, setLocalVideoTitle] = useState<string | null>(null);
+  const [localVideoDescription, setLocalVideoDescription] = useState<string | null>(null);
+  const [editVideoTitle, setEditVideoTitle] = useState("");
+  const [editVideoDescription, setEditVideoDescription] = useState("");
+  const [editTaggedPerformers, setEditTaggedPerformers] = useState<MentionUser[]>([]);
+  const [editTagQuery, setEditTagQuery] = useState("");
+  const [editTagResults, setEditTagResults] = useState<MentionUser[]>([]);
+  const [editTagSearching, setEditTagSearching] = useState(false);
+  const [showEditTagPicker, setShowEditTagPicker] = useState(false);
+  const [localTaggedPerformers, setLocalTaggedPerformers] = useState<typeof post.tagged_performers>(null);
+
+  const [videoError, setVideoError] = useState(false);
+  const [isWof, setIsWof] = useState(post.is_wof ?? false);
+  const [wofToggling, setWofToggling] = useState(false);
+  const [wofDeleting, setWofDeleting] = useState(false);
+  const [wofDeleted, setWofDeleted] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -132,14 +153,41 @@ export default function PostCard({
     return () => document.removeEventListener("mousedown", handler);
   }, [showMenu]);
 
+  useEffect(() => {
+    if (!isEditing || !editTagQuery.trim()) { setEditTagResults([]); return; }
+    setEditTagSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await searchCreators(editTagQuery.trim());
+        if (res.success) setEditTagResults(res.users.filter(u => !editTaggedPerformers.some(tp => tp.id === u.id)));
+      } catch { /* silent */ }
+      setEditTagSearching(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [editTagQuery, isEditing, editTaggedPerformers]);
+
   const handleStartEdit = useCallback(() => {
     setEditContent(localContent ?? post.content ?? "");
+    setEditVideoTitle(localVideoTitle ?? post.video_title ?? "");
+    setEditVideoDescription(localVideoDescription ?? post.video_description ?? "");
+    setEditTaggedPerformers(
+      (localTaggedPerformers ?? post.tagged_performers ?? []).map(tp => ({
+        id: tp.id, username: tp.username, avatar_url: tp.avatar_url, creator_status: 'active',
+      }))
+    );
+    setEditTagQuery("");
+    setEditTagResults([]);
+    setShowEditTagPicker(false);
     setIsEditing(true);
-  }, [localContent, post.content]);
+  }, [localContent, localVideoTitle, localVideoDescription, localTaggedPerformers, post.content, post.video_title, post.video_description, post.tagged_performers]);
 
   const handleCancelEdit = useCallback(() => {
     setIsEditing(false);
     setEditContent(localContent ?? post.content ?? "");
+    setEditTaggedPerformers([]);
+    setEditTagQuery("");
+    setEditTagResults([]);
+    setShowEditTagPicker(false);
   }, [localContent, post.content]);
 
   const handleSaveEdit = useCallback(async () => {
@@ -148,15 +196,26 @@ export default function PostCard({
     if (!trimmed) return;
     setSavingEdit(true);
     try {
-      const res = await editSocialPost(post.id, trimmed);
+      const res = await editSocialPost(post.id, trimmed, {
+        ...(post.media_type === 'video' && {
+          videoTitle: editVideoTitle.trim() || null,
+          videoDescription: editVideoDescription.trim() || null,
+        }),
+        taggedPerformerIds: editTaggedPerformers.map(p => p.id),
+      });
       if (res.success) {
         setLocalContent(res.content ?? trimmed);
+        if (res.videoTitle !== undefined) setLocalVideoTitle(res.videoTitle ?? null);
+        if (res.videoDescription !== undefined) setLocalVideoDescription(res.videoDescription ?? null);
+        setLocalTaggedPerformers(
+          editTaggedPerformers.map(tp => ({ id: tp.id, username: tp.username, avatar_url: tp.avatar_url }))
+        );
         setTranslatedContent(null);
         setIsEditing(false);
       }
     } catch { /* silent */ }
     setSavingEdit(false);
-  }, [post.id, editContent, savingEdit]);
+  }, [post.id, post.media_type, editContent, editVideoTitle, editVideoDescription, editTaggedPerformers, savingEdit]);
 
   const handleShare = useCallback(() => {
     setShowShareModal(true);
@@ -174,6 +233,35 @@ export default function PostCard({
     if (result) setTranslatedContent(result);
     setIsTranslating(false);
   }, [isTranslating, translatedContent, post.content, userLang]);
+
+  const handleWofToggle = useCallback(async () => {
+    if (wofToggling) return;
+    setWofToggling(true);
+    try {
+      if (isWof) {
+        await adminUnflagWofPost(post.id);
+        setIsWof(false);
+      } else {
+        await adminFlagWofPost(post.id);
+        setIsWof(true);
+      }
+    } catch { /* silent */ }
+    setWofToggling(false);
+  }, [post.id, isWof, wofToggling]);
+
+  const handleRequestWofDeletion = useCallback(async () => {
+    if (wofDeleting || wofDeleted) return;
+    if (!confirm("Remove this Wall of Fame post from the feed?")) return;
+    setWofDeleting(true);
+    try {
+      const res = await requestWofDeletion(post.id);
+      if (res.success) {
+        setWofDeleted(true);
+        onDelete(post.id);
+      }
+    } catch { /* silent */ }
+    setWofDeleting(false);
+  }, [post.id, wofDeleting, wofDeleted, onDelete]);
 
   const loadReplies = useCallback(async () => {
     if (loadingReplies) return;
@@ -510,6 +598,32 @@ export default function PostCard({
               </span>
             )}
 
+            {/* Admin: WoF flag toggle */}
+            {isAdmin && (
+              <button
+                onClick={handleWofToggle}
+                disabled={wofToggling}
+                className="text-xs transition-colors disabled:opacity-40"
+                style={{ color: isWof ? "#FFB454" : "#8E8E93" }}
+                title={isWof ? "Remove from Wall of Fame" : "Add to Wall of Fame"}
+                aria-label={isWof ? "Remove from Wall of Fame" : "Add to Wall of Fame"}
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill={isWof ? "currentColor" : "none"}
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"
+                  />
+                </svg>
+              </button>
+            )}
+
             {/* 3-dots post menu */}
             {(canDelete || (!isOwn && !!onReport)) && (
               <div className="relative ml-auto" ref={menuRef}>
@@ -573,10 +687,10 @@ export default function PostCard({
           </div>
 
           {/* Tagged performers */}
-          {Array.isArray(post.tagged_performers) && post.tagged_performers.length > 0 && (
+          {Array.isArray(localTaggedPerformers ?? post.tagged_performers) && (localTaggedPerformers ?? post.tagged_performers)!.length > 0 && (
             <div className="flex items-center flex-wrap gap-x-1 gap-y-0.5 mt-0.5 mb-0.5">
               <span className="text-[11px]" style={{ color: "#8E8E93" }}>with</span>
-              {post.tagged_performers.map((tp, i) => (
+              {(localTaggedPerformers ?? post.tagged_performers)!.map((tp, i) => (
                 <span key={tp.id} className="inline-flex items-center gap-0.5">
                   <button
                     type="button"
@@ -586,7 +700,7 @@ export default function PostCard({
                   >
                     @{tp.username}
                   </button>
-                  {i < post.tagged_performers!.length - 1 && (
+                  {i < (localTaggedPerformers ?? post.tagged_performers)!.length - 1 && (
                     <span className="text-[11px]" style={{ color: "#8E8E93" }}>,</span>
                   )}
                 </span>
@@ -596,7 +710,7 @@ export default function PostCard({
 
           {/* Post body — inline editor when editing, otherwise @mentions/URLs clickable */}
           {isEditing ? (
-            <div className="mt-1.5">
+            <div className="mt-1.5 space-y-2">
               <textarea
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
@@ -606,7 +720,78 @@ export default function PostCard({
                 disabled={savingEdit}
                 autoFocus
               />
-              <div className="flex gap-2 mt-2 justify-end">
+              {post.media_type === 'video' && (
+                <>
+                  <input
+                    type="text"
+                    value={editVideoTitle}
+                    onChange={(e) => setEditVideoTitle(e.target.value)}
+                    maxLength={120}
+                    placeholder="Video title…"
+                    disabled={savingEdit}
+                    className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-1.5 outline-none border border-white/10 focus:border-white/30"
+                  />
+                  <textarea
+                    value={editVideoDescription}
+                    onChange={(e) => setEditVideoDescription(e.target.value)}
+                    rows={2}
+                    maxLength={500}
+                    placeholder="Video description…"
+                    disabled={savingEdit}
+                    className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-1.5 outline-none border border-white/10 focus:border-white/30 resize-none"
+                  />
+                </>
+              )}
+              {/* Tagged performers */}
+              <div>
+                {editTaggedPerformers.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-1.5">
+                    {editTaggedPerformers.map(tp => (
+                      <span key={tp.id} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>
+                        @{tp.username}
+                        <button type="button" onClick={() => setEditTaggedPerformers(p => p.filter(t => t.id !== tp.id))} className="opacity-60 hover:opacity-100 ml-0.5">×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {showEditTagPicker && (
+                  <div className="relative mb-1.5">
+                    <input
+                      type="text"
+                      value={editTagQuery}
+                      onChange={(e) => setEditTagQuery(e.target.value)}
+                      placeholder="Search creators to tag…"
+                      className="w-full bg-white/5 text-white text-sm rounded-lg px-3 py-1.5 outline-none border border-white/10 focus:border-teal-500"
+                    />
+                    {(editTagResults.length > 0 || editTagSearching) && (
+                      <div className="absolute top-full left-0 right-0 z-50 mt-0.5 rounded-lg overflow-hidden shadow-xl" style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.08)" }}>
+                        {editTagSearching && <p className="px-3 py-2 text-xs" style={{ color: "#8E8E93" }}>Searching…</p>}
+                        {editTagResults.map(u => (
+                          <button
+                            key={u.id}
+                            type="button"
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 transition-colors text-left"
+                            style={{ color: "#fff" }}
+                            onClick={() => { setEditTaggedPerformers(p => [...p, u]); setEditTagQuery(""); setEditTagResults([]); }}
+                          >
+                            @{u.username}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowEditTagPicker(v => !v)}
+                  className="text-xs transition-colors"
+                  style={{ color: showEditTagPicker ? "#5ED1C4" : "#8E8E93" }}
+                >
+                  {showEditTagPicker ? "Hide tag picker" : "Tag performers"}
+                  {editTaggedPerformers.length > 0 && ` (${editTaggedPerformers.length})`}
+                </button>
+              </div>
+              <div className="flex gap-2 justify-end">
                 <button
                   onClick={handleCancelEdit}
                   disabled={savingEdit}
@@ -673,16 +858,40 @@ export default function PostCard({
           {post.media_url && (
             <div className="mt-3">
               {post.media_type === "video" ? (
-                <video
-                  src={post.media_url}
-                  controls
-                  controlsList="nodownload"
-                  onContextMenu={(e) => e.preventDefault()}
-                  playsInline
-                  className="w-full max-h-[480px] rounded-lg object-contain bg-black"
-                  preload="metadata"
-                  poster={post.video_thumbnail_url || undefined}
-                />
+                <>
+                  {((localVideoTitle ?? post.video_title) || (localVideoDescription ?? post.video_description)) && (
+                    <div className="mb-2 px-1">
+                      {(localVideoTitle ?? post.video_title) && (
+                        <h4 className="text-sm font-semibold text-white">{localVideoTitle ?? post.video_title}</h4>
+                      )}
+                      {(localVideoDescription ?? post.video_description) && (
+                        <p className="text-xs text-white/60 mt-0.5 line-clamp-2">{localVideoDescription ?? post.video_description}</p>
+                      )}
+                    </div>
+                  )}
+                  {videoError ? (
+                    <div className="w-full rounded-lg bg-white/5 flex flex-col items-center justify-center gap-2 py-10 text-white/40">
+                      <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                      </svg>
+                      <span className="text-xs">
+                        {userLang === "es" ? "Este video ya no está disponible" : "Video no longer available"}
+                      </span>
+                    </div>
+                  ) : (
+                    <video
+                      src={post.media_url}
+                      controls
+                      controlsList="nodownload"
+                      onContextMenu={(e) => e.preventDefault()}
+                      playsInline
+                      className="w-full max-h-[480px] rounded-lg object-contain bg-black"
+                      preload="metadata"
+                      poster={post.video_thumbnail_url || undefined}
+                      onError={() => setVideoError(true)}
+                    />
+                  )}
+                </>
               ) : (
                 <img
                   src={post.media_url}
@@ -802,6 +1011,37 @@ export default function PostCard({
                   </svg>
                 )}
               </button>
+            )}
+
+            {/* Request Deletion — shown on WoF posts for the post author */}
+            {isWof && isOwn && !wofDeleted && (
+              <button
+                onClick={handleRequestWofDeletion}
+                disabled={wofDeleting}
+                className="flex items-center gap-1.5 text-xs ml-auto hover:text-red-400 transition-colors"
+                style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
+                title="Request removal from feed"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
+                  />
+                </svg>
+                {wofDeleting ? ft.removing : ft.remove}
+              </button>
+            )}
+            {isWof && isOwn && wofDeleted && (
+              <span className="text-xs ml-auto" style={{ color: "#34D399" }}>
+                Removed
+              </span>
             )}
 
           </div>

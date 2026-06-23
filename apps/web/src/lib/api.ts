@@ -1396,11 +1396,24 @@ export function deleteSocialPost(postId: number): Promise<{ success: boolean }> 
   return request(`/api/webapp/social/posts/${postId}`, { method: "DELETE" });
 }
 
-export function editSocialPost(postId: number, content: string): Promise<{ success: boolean; content: string }> {
+export function editSocialPost(
+  postId: number,
+  content: string,
+  opts?: {
+    videoTitle?: string | null;
+    videoDescription?: string | null;
+    taggedPerformerIds?: string[];
+  }
+): Promise<{ success: boolean; content: string; videoTitle?: string | null; videoDescription?: string | null }> {
   return request(`/api/webapp/social/posts/${postId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({
+      content,
+      ...(opts?.videoTitle !== undefined && { video_title: opts.videoTitle }),
+      ...(opts?.videoDescription !== undefined && { video_description: opts.videoDescription }),
+      ...(opts?.taggedPerformerIds !== undefined && { tagged_performer_ids: opts.taggedPerformerIds }),
+    }),
   });
 }
 

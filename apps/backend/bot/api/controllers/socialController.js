@@ -460,7 +460,7 @@ const deletePost = async (req, res) => {
 const editPost = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const postId = parsePostId(req, res); if (!postId) return;
-  const { content } = req.body;
+  const { content, video_title, video_description, tagged_performer_ids } = req.body;
   if (!content || typeof content !== 'string' || !content.trim()) {
     return res.status(400).json({ error: 'Content is required' });
   }
@@ -476,13 +476,34 @@ const editPost = async (req, res) => {
   }
   try {
     const result = await dbQuery(
-      `UPDATE social_posts SET content = $1, updated_at = NOW()
+      `UPDATE social_posts
+       SET content = $1,
+           video_title = $4::text,
+           video_description = $5::text,
+           updated_at = NOW()
        WHERE id = $2 AND user_id = $3 AND is_deleted = false
-       RETURNING id, content`,
-      [trimmed, postId, user.id]
+       RETURNING id, content, video_title, video_description`,
+      [trimmed, postId, user.id,
+       typeof video_title === 'string' ? video_title.trim() || null : null,
+       typeof video_description === 'string' ? video_description.trim() || null : null]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Post not found or not yours' });
-    return res.json({ success: true, content: result.rows[0].content });
+
+    if (Array.isArray(tagged_performer_ids)) {
+      await dbQuery('DELETE FROM post_mentions WHERE post_id = $1 AND mention_type = $2', [postId, 'tag']);
+      const validIds = tagged_performer_ids.filter(id => id && typeof id === 'string').slice(0, 10);
+      if (validIds.length > 0) {
+        const { createPostTags } = require('../../../services/mentionService');
+        await createPostTags(postId, user.id, validIds);
+      }
+    }
+
+    return res.json({
+      success: true,
+      content: result.rows[0].content,
+      videoTitle: result.rows[0].video_title || null,
+      videoDescription: result.rows[0].video_description || null,
+    });
   } catch (err) {
     logger.error('editPost error', err);
     return res.status(500).json({ error: 'Failed to edit post' });
