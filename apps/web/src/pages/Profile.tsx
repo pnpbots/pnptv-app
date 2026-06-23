@@ -130,6 +130,7 @@ export default function Profile() {
   const [bugSent, setBugSent] = useState(false);
   const bugTextareaRef = useRef<HTMLTextAreaElement>(null);
   const overflowTriggerRef = useRef<HTMLButtonElement>(null);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
 
   // Inline block-confirm state (replaces window.confirm)
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
@@ -221,7 +222,10 @@ export default function Profile() {
   useEffect(() => {
     if (!overflowOpen) return;
     const handler = (e: MouseEvent | TouchEvent) => {
-      if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inTrigger = overflowRef.current?.contains(target);
+      const inMenu = overflowMenuRef.current?.contains(target);
+      if (!inTrigger && !inMenu) {
         setOverflowOpen(false);
         overflowTriggerRef.current?.focus();
       }
@@ -1325,6 +1329,7 @@ export default function Profile() {
                   </button>
                   {overflowOpen && menuPos && (
                     <div
+                      ref={overflowMenuRef}
                       role="menu"
                       className="fixed w-56 rounded-xl shadow-2xl z-[60]"
                       style={{ top: menuPos.top, right: menuPos.right, background: "rgba(28,28,30,0.97)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)", maxHeight: `calc(100dvh - ${menuPos.top + 8}px)`, overflowY: "auto" }}
