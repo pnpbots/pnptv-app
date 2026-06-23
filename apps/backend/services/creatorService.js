@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
 const NotificationEmitter = require('./notificationEmitter');
+const sendSystemDM = require('./sendSystemDM');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
 
 const TEASER_SECRET = process.env.TEASER_SECRET || 'pnptv-teaser-salt-2026';
@@ -203,6 +204,8 @@ class CreatorService {
       logger.warn('activateCreator: Authentik group sync failed (non-fatal)', { userId, error: authErr.message });
     }
 
+    CreatorService.notifyCreatorActivated(userId, { actorId: String(userId), source: 'self' });
+
     return { success: true, type: tier, price };
   }
 
@@ -277,16 +280,7 @@ class CreatorService {
       logger.warn('approveApplication: Authentik group sync failed (non-fatal)', { userId: app.user_id, error: authErr.message });
     }
 
-    NotificationEmitter.emit({
-      type: 'creator_approved',
-      category: 'commerce',
-      priority: 'high',
-      actorId: adminId,
-      targetUserId: app.user_id,
-      entityType: 'model_application',
-      entityId: applicationId,
-      message: 'Your full-time creator application has been approved!',
-    });
+    CreatorService.notifyCreatorActivated(app.user_id, { actorId: String(adminId), source: 'application' });
 
     return { success: true };
   }
@@ -1367,6 +1361,85 @@ class CreatorService {
     } catch (_) {}
 
     return { success: true };
+  }
+
+  /**
+   * Send creator-activation notifications on all three channels.
+   * Fire-and-forget — never throws, never blocks the caller.
+   *
+   * @param {string} userId
+   * @param {object} opts
+   * @param {string} [opts.actorId]   - Admin or 'system'
+   * @param {string} [opts.source]    - 'admin' | 'self' | 'application'
+   */
+  static notifyCreatorActivated(userId, { actorId = 'system', source = 'admin' } = {}) {
+    setImmediate(async () => {
+      try {
+        const { rows } = await query(
+          'SELECT first_name, username, email, language FROM users WHERE id = $1',
+          [userId]
+        );
+        const user = rows[0];
+        if (!user) return;
+
+        const name = user.first_name || user.username || 'Creator';
+        const isEs = (user.language || 'en').startsWith('es');
+
+        // ── 1. In-app notification + Telegram (via NotificationEmitter) ─────
+        NotificationEmitter.emit({
+          type: 'creator_activated',
+          category: 'system',
+          priority: 'high',
+          actorId,
+          targetUserId: String(userId),
+          entityType: 'user',
+          entityId: String(userId),
+          message: isEs
+            ? '¡Felicidades! Ya eres creador en PNPtv!'
+            : 'Congratulations! You are now a creator on PNPtv!',
+          metadata: {
+            url: '/profile',
+            pushTitle: isEs ? '¡Eres creador en PNPtv! 🎉' : 'You\'re a PNPtv creator! 🎉',
+            pushBody: isEs
+              ? 'Tu cuenta de creador ha sido activada. ¡Empieza a publicar!'
+              : 'Your creator account is live. Start posting!',
+          },
+        }).catch(() => {});
+
+        // ── 2. In-app DM from Cristina ───────────────────────────────────────
+        const dmContent = isEs
+          ? [
+              `¡Hola ${name}! 🎉 Tu cuenta de creador en PNPtv ha sido activada.`,
+              ``,
+              `Ahora puedes publicar contenido exclusivo, configurar suscripciones y conectar con tu audiencia. ¡Bienvenido al equipo creador!`,
+              ``,
+              `Visita tu perfil para completar tu configuración: nombre artístico, precio de suscripción y enlace de canal en vivo.`,
+            ].join('\n')
+          : [
+              `Hey ${name}! 🎉 Your PNPtv creator account has just been activated.`,
+              ``,
+              `You can now post exclusive content, set up subscriptions, and connect with your audience. Welcome to the creator team!`,
+              ``,
+              `Visit your profile to complete your setup: display name, subscription price, and live channel link.`,
+            ].join('\n');
+
+        await sendSystemDM('cristina-ai', String(userId), dmContent, query);
+
+        // ── 3. Email ─────────────────────────────────────────────────────────
+        if (user.email && user.email.includes('@')) {
+          const emailService = require('./emailService');
+          await emailService.sendCreatorActivatedEmail({
+            to: user.email,
+            name,
+            language: user.language || 'en',
+          });
+        }
+
+        logger.info('notifyCreatorActivated: all channels delivered', { userId, source });
+      } catch (err) {
+        logger.warn('notifyCreatorActivated: delivery error (non-fatal)', { userId, error: err.message });
+      }
+    });
   }
 }
 

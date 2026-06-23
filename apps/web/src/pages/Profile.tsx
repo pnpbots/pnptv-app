@@ -47,6 +47,7 @@ import {
   type SocialPostItem,
   type EventItem,
   type HangoutActivity,
+  type MentionUser,
   isCreatorPayLocked,
 } from "@/lib/api";
 import { EventCard } from "@/components/events/EventCard";
@@ -189,6 +190,7 @@ export default function Profile() {
 
   // Book a Call modal state
   const [showBookCall, setShowBookCall] = useState(false);
+  const [showTagComposer, setShowTagComposer] = useState(false);
 
   // Creator subscription state
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -1495,6 +1497,24 @@ export default function Profile() {
                     </button>
                   );
                 })()}
+                {/* Tag in a post — active creators viewing another active creator */}
+                {!isOwnProfile && profile.creatorStatus === "active" && user?.creator_status === "active" && (
+                  <button
+                    onClick={() => setShowTagComposer(v => !v)}
+                    className="flex items-center justify-center min-w-[40px] min-h-[40px] w-10 h-10 rounded-lg flex-shrink-0 transition-all"
+                    style={showTagComposer
+                      ? { background: "rgba(94,209,196,0.12)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.35)" }
+                      : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.12)" }
+                    }
+                    title="Tag in a post"
+                    aria-label="Tag this creator in a post"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
+                    </svg>
+                  </button>
+                )}
                 {/* Share profile — icon-only button */}
                 <button
                   onClick={handleShareProfile}
@@ -1727,6 +1747,22 @@ export default function Profile() {
         </div>
         );
       })()}
+
+      {/* ── Tag-in-a-post composer (active creator → active creator only) ── */}
+      {showTagComposer && profile && !isOwnProfile && (
+        <div className="mb-4">
+          <PostComposer
+            onPostCreated={() => setShowTagComposer(false)}
+            placeholder={`Post with @${profile.username || "creator"}…`}
+            initialTaggedPerformers={[{
+              id: profile.id,
+              username: profile.username || "",
+              avatar_url: resolvePhotoUrl(profile.photoUrl),
+              creator_status: profile.creatorStatus ?? null,
+            } as MentionUser]}
+          />
+        </div>
+      )}
 
       {/* ── Tabs (sticky) ── */}
       <div

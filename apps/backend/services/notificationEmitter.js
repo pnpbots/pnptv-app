@@ -170,6 +170,7 @@ function buildPushTitle(type, row) {
     case 'mention_chat':  return actor ? `${actor} mentioned you` : 'You were mentioned';
     case 'payment':       return 'Payment Confirmed';
     case 'wof_winner':    return 'Wall of Fame';
+    case 'creator_activated':      return 'Creator Account Activated!';
     case 'creator_approved':       return 'Creator Approved!';
     case 'creator_rejected':       return 'Creator Application';
     case 'creator_new_subscriber': return 'New Subscriber';

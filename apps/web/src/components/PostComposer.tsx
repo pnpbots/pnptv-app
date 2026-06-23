@@ -81,6 +81,8 @@ export interface PostComposerProps {
   className?: string;
   /** When set, posts are scoped to this hangout group's feed */
   hangoutGroupId?: number;
+  /** Pre-tag these performers when the composer first opens */
+  initialTaggedPerformers?: MentionUser[];
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -251,6 +253,7 @@ export function PostComposer({
   placeholder,
   className = "",
   hangoutGroupId,
+  initialTaggedPerformers,
 }: PostComposerProps) {
   const { user, isAuthenticated } = useAuth();
   const { feed: tFeed, profile: tProfile } = useI18n();
@@ -281,7 +284,7 @@ export function PostComposer({
   const [channels, setChannels] = useState<CreatorChannel[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
   const [category, setCategory] = useState<PostCategory | null>(null);
-  const [taggedPerformers, setTaggedPerformers] = useState<MentionUser[]>([]);
+  const [taggedPerformers, setTaggedPerformers] = useState<MentionUser[]>(() => initialTaggedPerformers ?? []);
   const [showTagPicker, setShowTagPicker] = useState(false);
   const [tagQuery, setTagQuery] = useState("");
   const [tagResults, setTagResults] = useState<MentionUser[]>([]);

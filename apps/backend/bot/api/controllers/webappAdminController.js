@@ -1951,6 +1951,9 @@ const makeCreator = async (req, res) => {
       grantMonetization,
     });
 
+    const CreatorService = require('../../../services/creatorService');
+    CreatorService.notifyCreatorActivated(userId, { actorId: String(admin?.id || 'admin'), source: 'admin' });
+
     return res.json({ success: true, user: updatedUser });
   } catch (error) {
     logger.error('makeCreator error:', error);

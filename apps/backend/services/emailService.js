@@ -372,6 +372,57 @@ class EmailService {
      * @param {Object} data - Reactivation email data
      * @returns {Promise<Object>} Send result
      */
+    async sendCreatorActivatedEmail({ to, name = 'Creator', language = 'en' }) {
+        const isEs = language.startsWith('es');
+        const safeName = this.escapeHtml(name);
+        const subject = isEs
+            ? '🎉 ¡Tu cuenta de creador en PNPtv ha sido activada!'
+            : '🎉 Your PNPtv creator account is now live!';
+
+        const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#0d0d0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <div style="max-width:560px;margin:0 auto;padding:32px 16px;">
+    <div style="text-align:center;margin-bottom:28px;">
+      <span style="font-size:40px">🎉</span>
+      <h1 style="color:#ffffff;font-size:22px;font-weight:700;margin:12px 0 4px;">
+        ${isEs ? `¡Bienvenido al equipo, ${safeName}!` : `Welcome to the team, ${safeName}!`}
+      </h1>
+      <p style="color:#8E8E93;font-size:14px;margin:0;">
+        ${isEs ? 'Tu cuenta de creador en PNPtv está activa' : 'Your PNPtv creator account is active'}
+      </p>
+    </div>
+
+    <div style="background:#1C1C1E;border-radius:16px;padding:24px;margin-bottom:20px;border:1px solid rgba(255,255,255,0.08);">
+      <p style="color:#E5E5EA;font-size:15px;line-height:1.6;margin:0 0 16px;">
+        ${isEs
+            ? `Tu perfil de creador ha sido activado. Ya puedes publicar contenido exclusivo, configurar tu precio de suscripción y conectar con tu audiencia en PNPtv.`
+            : `Your creator profile has been activated. You can now post exclusive content, set your subscription price, and connect with your audience on PNPtv.`}
+      </p>
+      <ul style="color:#E5E5EA;font-size:14px;line-height:1.8;margin:0;padding-left:20px;">
+        <li>${isEs ? 'Publica contenido exclusivo para tus suscriptores' : 'Post exclusive content for your subscribers'}</li>
+        <li>${isEs ? 'Configura tu precio de suscripción mensual' : 'Set your monthly subscription price'}</li>
+        <li>${isEs ? 'Transmite en vivo desde tu canal personal' : 'Go live on your personal channel'}</li>
+        <li>${isEs ? 'Ofrece llamadas privadas y sesiones personalizadas' : 'Offer private calls and personalized sessions'}</li>
+      </ul>
+    </div>
+
+    <div style="text-align:center;margin-bottom:28px;">
+      <a href="https://pnptv.app/profile"
+         style="display:inline-block;background:linear-gradient(135deg,#D4007A,#E69138);color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:12px;">
+        ${isEs ? 'Ver mi perfil' : 'View my profile'}
+      </a>
+    </div>
+
+    <p style="color:#8E8E93;font-size:12px;text-align:center;margin:0;">
+      PNPtv! &mdash; ${isEs ? 'La comunidad queer PNP' : 'The queer PNP community'}
+    </p>
+  </div>
+</body></html>`;
+
+        return await this.send({ to, subject, html, from: 'PNPtv! <noreply@pnptv.app>' });
+    }
+
     async sendReactivationEmail(data) {
         const { email, userName = 'PNPtv! Member', lifetimeDealLink, telegramLink, userLanguage = 'en' } = data;
 

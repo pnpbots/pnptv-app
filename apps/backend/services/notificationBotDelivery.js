@@ -45,6 +45,8 @@ const TYPE_EMOJI = {
   system: '\u{1F514}',
   hangout_call: '\u{1F4F9}',
   hangout_creator_joined: '\u2B50',
+  creator_activated: '\u{1F389}',
+  creator_approved: '\u{1F389}',
 };
 
 function buildUrl(type, entityType, entityId) {
@@ -68,6 +70,9 @@ function buildUrl(type, entityType, entityId) {
     case 'hangout_call':
     case 'hangout_creator_joined':
       return entityId ? `${base}/chat/${entityId}` : `${base}/chat`;
+    case 'creator_activated':
+    case 'creator_approved':
+      return `${base}/profile`;
     case 'wof_winner':
       return `${base}/social`;
     case 'payment':
