@@ -1842,7 +1842,7 @@ export default function Profile() {
                 <PostCard
                   key={post.id}
                   post={post}
-                  isOwn={String(user?.id) === post.author_id}
+                  isOwn={String(user?.dbId) === post.author_id}
                   isAdmin={user?.role === "admin" || user?.role === "superadmin"}
                   isOwnProfile={isOwnProfile}
                   isSubscribed={isSubscribed}
@@ -1985,7 +1985,7 @@ export default function Profile() {
                   <PostCard
                     key={post.id}
                     post={post}
-                    isOwn={String(user?.id) === post.author_id}
+                    isOwn={String(user?.dbId) === post.author_id}
                     isAdmin={user?.role === "admin" || user?.role === "superadmin"}
                     isOwnProfile={isOwnProfile}
                     isSubscribed={isSubscribed}

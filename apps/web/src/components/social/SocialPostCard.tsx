@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { MentionText } from "@/components/MentionText";
 import { MentionInput } from "@/components/MentionInput";
 import { SharePostModal } from "@/components/SharePostModal";
@@ -12,6 +12,7 @@ import {
   adminUnflagWofPost,
   requestWofDeletion,
   editSocialPost,
+  createUserReport,
   type SocialPostItem,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -146,6 +147,10 @@ export default function SocialPostCard({
   const [savingEdit, setSavingEdit] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const [localContent, setLocalContent] = useState<string | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [reportSent, setReportSent] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const isOwn = String(post.author_id) === currentUserId;
   const hasRealPostId = Number.isFinite(post.id) && post.id > 0;
@@ -242,6 +247,30 @@ export default function SocialPostCard({
     } catch { /* silent */ }
     setWofDeleting(false);
   }, [post.id, wofDeleting, wofDeleted, onDelete]);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showMenu]);
+
+  const handleReport = useCallback(async () => {
+    if (reporting || reportSent) return;
+    setReporting(true);
+    try {
+      await createUserReport({
+        reportedUserId: String(post.author_id),
+        category: "other",
+        evidenceType: "post",
+        evidenceId: String(post.id),
+      });
+      setReportSent(true);
+    } catch { /* silent */ }
+    setReporting(false);
+  }, [post.author_id, post.id, reporting, reportSent]);
 
   // handleLike delegates upward so parent can sync all feed slices
   const handleLike = useCallback(() => {
@@ -484,29 +513,66 @@ export default function SocialPostCard({
               </button>
             )}
 
-            {/* Edit (own posts only) */}
-            {hasRealPostId && isOwn && !isEditing && !post.blurred && (
-              <button
-                onClick={(e) => { e.stopPropagation(); handleStartEdit(); }}
-                className="ml-auto text-xs hover:text-cyan-400 transition-colors"
-                style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
-                aria-label="Edit post"
-                title="Edit post"
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
+            {/* 3-dots post menu */}
+            {hasRealPostId && !post.is_promoted && (canDelete || (!isOwn && !isAdmin)) && (
+              <div className="relative ml-auto" ref={menuRef}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowMenu((v) => !v); }}
+                  className="p-1 rounded-full transition-colors hover:bg-white/10"
+                  style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
+                  aria-label="Post options"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"
-                  />
-                </svg>
-              </button>
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+                  </svg>
+                </button>
+                {showMenu && (
+                  <div
+                    className="absolute right-0 top-7 z-50 w-40 rounded-xl shadow-xl py-1 overflow-hidden"
+                    style={{ background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.08)" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {isOwn && !isEditing && !post.blurred && (
+                      <button
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-white/10 transition-colors text-left"
+                        style={{ color: "#fff" }}
+                        onClick={() => { setShowMenu(false); handleStartEdit(); }}
+                      >
+                        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                        </svg>
+                        Edit
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-white/10 transition-colors text-left"
+                        style={{ color: "#ef4444" }}
+                        onClick={() => { setShowMenu(false); void handleDelete(); }}
+                        disabled={deleting}
+                      >
+                        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                        </svg>
+                        {deleting ? "Deleting…" : "Delete"}
+                      </button>
+                    )}
+                    {!isOwn && !isAdmin && (
+                      <button
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-white/10 transition-colors text-left"
+                        style={{ color: reportSent ? "#34D399" : "#FFB454" }}
+                        onClick={() => { setShowMenu(false); void handleReport(); }}
+                        disabled={reporting || reportSent}
+                      >
+                        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v1.5M3 21v-6m0 0l2.77-.693a9 9 0 016.208.682l.108.054a9 9 0 006.086.71l3.114-.732a48.524 48.524 0 01-.005-10.499l-3.11.732a9 9 0 01-6.085-.711l-.108-.054a9 9 0 00-6.208-.682L3 4.5M3 15V4.5" />
+                        </svg>
+                        {reportSent ? "Reported" : reporting ? "Reporting…" : "Report"}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -984,22 +1050,6 @@ export default function SocialPostCard({
                     />
                   </svg>
                 )}
-              </button>
-            )}
-
-            {/* Delete (own posts or admin) */}
-            {canDelete && (
-              <button
-                onClick={(e) => { e.stopPropagation(); void handleDelete(); }}
-                disabled={deleting}
-                className="ml-auto flex items-center gap-1 text-xs font-medium hover:opacity-80 transition-opacity disabled:opacity-40 px-2 py-1 rounded-md"
-                style={{ color: "#ef4444", background: "rgba(239,68,68,0.10)" }}
-                aria-label={isAdmin && !isOwn ? "Delete post (admin)" : "Delete post"}
-              >
-                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                </svg>
-                {deleting ? "Deleting…" : "Delete"}
               </button>
             )}
 
