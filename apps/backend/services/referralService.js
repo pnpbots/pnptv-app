@@ -132,7 +132,7 @@ async function redeemReferral(code, refereeId) {
       await EntitlementModel.grantEntitlement(String(refereeId), 'prime', {
         isLifetime: false,
         durationDays: 1,
-        sourcePlanId: 'referral_24h_prime',
+        sourcePlanId: null,
         source: 'system',
         actorId: 'system',
         reason: `Referral 24h trial — code ${upperCode}`,
@@ -140,7 +140,7 @@ async function redeemReferral(code, refereeId) {
       await EntitlementModel.grantEntitlement(String(refereeId), 'pnp-member', {
         isLifetime: false,
         durationDays: 1,
-        sourcePlanId: 'referral_24h_prime',
+        sourcePlanId: null,
         source: 'system',
         actorId: 'system',
         reason: `Referral 24h trial — code ${upperCode}`,
@@ -159,7 +159,7 @@ async function redeemReferral(code, refereeId) {
     await EntitlementModel.grantEntitlement(String(referrerId), 'prime', {
       isLifetime: false,
       durationDays: 1,
-      sourcePlanId: 'referral_24h_prime',
+      sourcePlanId: null,
       source: 'system',
       actorId: 'system',
       reason: `Referral reward — user ${refereeId} joined with code ${upperCode}`,
@@ -167,7 +167,7 @@ async function redeemReferral(code, refereeId) {
     await EntitlementModel.grantEntitlement(String(referrerId), 'pnp-member', {
       isLifetime: false,
       durationDays: 1,
-      sourcePlanId: 'referral_24h_prime',
+      sourcePlanId: null,
       source: 'system',
       actorId: 'system',
       reason: `Referral reward — user ${refereeId} joined with code ${upperCode}`,
