@@ -91,9 +91,8 @@ class PNPLiveMediaService {
    * @param {number} modelId - Model ID
    * @returns {Promise<Array>} Array of gallery images
    */
-  static async getModelGalleryImages(modelId) {
-    // Future implementation for model galleries
-    // For now, return empty array
+  static async getModelGalleryImages(_modelId) {
+    // Not yet implemented — callers should handle an empty array gracefully
     return [];
   }
 

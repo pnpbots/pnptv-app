@@ -2266,6 +2266,8 @@ function initSocketIO(io) {
         // rare and short-lived on this stack. Acceptable risk: prefer availability
         // over throttling enforcement during infrastructure incidents.
         logger.warn('live:message rate-limit check failed (Redis error)', { streamId, userId: user.id, error: rateErr.message });
+        // Increment metric so Redis downtime is detectable from monitoring
+        getRedis()?.incr('metrics:live:chat:rate_limit_bypass').catch(() => {});
       }
 
       if (!content || !String(content).trim()) {

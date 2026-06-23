@@ -234,6 +234,8 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     // Raid handler — broadcast to all viewers in the source stream room
     const onRaid = (data: LiveRaidEvent) => {
       setRaidEvent(data);
+      // Auto-dismiss after 30s if the viewer hasn't acted
+      setTimeout(() => setRaidEvent((cur) => (cur === data ? null : cur)), 30_000);
     };
 
     socket.on("connect", onConnectForStream);

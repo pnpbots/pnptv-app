@@ -86,8 +86,8 @@ class PNPLiveAvailabilityService {
     try {
       await query(
         `UPDATE performers
-         SET is_available = TRUE
-         WHERE id = $1 AND is_available = TRUE`,
+         SET is_available = TRUE, updated_at = NOW()
+         WHERE id = $1`,
         [modelId]
       );
       return true;

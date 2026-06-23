@@ -91,8 +91,7 @@ class PNPLiveTipsService {
       // their block was effective). The reverse check (tipper blocked the
       // performer) is intentionally NOT enforced — if a viewer tipped someone
       // they later blocked, that's their choice.
-      const { query: q } = require('../config/postgres');
-      const { rows: blocks } = await q(
+      const { rows: blocks } = await query(
         `SELECT 1 FROM blocked_users
          WHERE user_id = $1 AND blocked_user_id = $2 LIMIT 1`,
         [String(performerId), String(userId)]
@@ -187,7 +186,7 @@ class PNPLiveTipsService {
       // without debiting the wallet again — the wallet UPDATE above will be rolled back.
       if (tipResult.rows.length === 0 && idempotencyKey) {
         await client.query('ROLLBACK');
-        const existing = await require('../config/postgres').query(
+        const existing = await query(
           `SELECT * FROM pnp_tips WHERE idempotency_key = $1 LIMIT 1`,
           [idempotencyKey]
         );
