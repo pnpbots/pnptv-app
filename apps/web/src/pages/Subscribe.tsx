@@ -777,6 +777,7 @@ export default function Subscribe() {
           const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
+          const planDays = plan.duration_days || plan.duration || 30;
           const isBtcPanelActive = !!(btcOrder && selectedPlan === plan.id);
           const isPanelActive = !!(usdcOrder && selectedPlan === plan.id) || isBtcPanelActive;
           const isDimmed = (!!(usdcOrder && !usdcPaymentSuccess) || !!(btcOrder && !btcSuccess)) && selectedPlan !== plan.id;
@@ -810,7 +811,10 @@ export default function Subscribe() {
                       {s.launchRate}
                     </span>
                   </div>
-                  <div className="text-xs text-pnp-textSecondary">{s.monthly}</div>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <span className="text-xs text-pnp-textSecondary">{durationLabel(planDays)}</span>
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">{s.oneTimePayment}</span>
+                  </div>
                 </div>
                 <span className="flex flex-col items-end">
                   <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
@@ -1004,9 +1008,10 @@ export default function Subscribe() {
                       {s.launchRate}
                     </span>
                   </div>
-                  <span className="text-xs text-pnp-textSecondary">
-                    {durationLabel(planDays)}
-                  </span>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <span className="text-xs text-pnp-textSecondary">{durationLabel(planDays)}</span>
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">{s.oneTimePayment}</span>
+                  </div>
                 </div>
                 <div className="text-right">
                   <div className="flex flex-col items-end">

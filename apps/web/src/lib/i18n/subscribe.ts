@@ -21,14 +21,15 @@ const strings = {
 
     // ── Plan tier section labels ──────────────────────────────────────────────
     communityMember: "Community Member",
-    communityMemberDesc: "Access to the app and social features — PRIME channel content, creator exclusive profiles, and tokens for live shows not included",
+    communityMemberDesc: "Social features, PNP Live & Radio, Hangouts, Nearby — PRIME channel, exclusive creator profiles, show tokens & private calls cost extra",
     prime: "PRIME",
-    primeDesc: "Full access — PRIME media, Nearby Premium, hangouts, exclusive content & more",
+    primeDesc: "All Basic features + PNPtv! PRIME channel — exclusive creator profiles, show tokens & private calls cost extra",
 
     // ── Plan duration labels ──────────────────────────────────────────────────
     lifetime: "Lifetime",
     monthly: "Monthly",
     perMonth: "/mo",
+    oneTimePayment: "One-time · no auto-renewal",
 
     // ── Plan badge ────────────────────────────────────────────────────────────
     bestValue: "Best Value",
@@ -192,13 +193,14 @@ const strings = {
     showPricesInCOP: "Ver precios en COP",
 
     communityMember: "Miembro de comunidad",
-    communityMemberDesc: "Acceso a la app y funciones sociales — contenido del canal PRIME, perfiles exclusivos de creadores y tokens para shows en vivo no incluidos",
+    communityMemberDesc: "Funciones sociales, PNP Live & Radio, Hangouts, Nearby — canal PRIME, perfiles exclusivos de creadores, tokens de shows y llamadas privadas tienen costo adicional",
     prime: "PRIME",
-    primeDesc: "Acceso completo — media PRIME, Nearby Premium, hangouts, contenido exclusivo y más",
+    primeDesc: "Todo lo de Basic + canal PNPtv! PRIME — perfiles exclusivos de creadores, tokens de shows y llamadas privadas tienen costo adicional",
 
     lifetime: "De por vida",
     monthly: "Mensual",
     perMonth: "/mes",
+    oneTimePayment: "Pago único · sin renovación automática",
 
     bestValue: "Mejor precio",
     launchRate: "✦ Intro",
@@ -349,13 +351,14 @@ const strings = {
     showPricesInCOP: "Ver preços em COP",
 
     communityMember: "Membro da Comunidade",
-    communityMemberDesc: "Acesso ao app e recursos sociais — conteúdo do canal PRIME, perfis exclusivos de criadores e tokens para shows ao vivo não incluídos",
+    communityMemberDesc: "Recursos sociais, PNP Live & Radio, Hangouts, Nearby — canal PRIME, perfis exclusivos de criadores, tokens de shows e chamadas privadas têm custo adicional",
     prime: "PRIME",
-    primeDesc: "Acesso completo — mídia PRIME, Nearby Premium, hangouts, conteúdo exclusivo e mais",
+    primeDesc: "Tudo do Basic + canal PNPtv! PRIME — perfis exclusivos de criadores, tokens de shows e chamadas privadas têm custo adicional",
 
     lifetime: "Vitalício",
     monthly: "Mensal",
     perMonth: "/mês",
+    oneTimePayment: "Pagamento único · sem renovação automática",
 
     bestValue: "Melhor Custo-Benefício",
     launchRate: "✦ Intro",
@@ -506,13 +509,14 @@ const strings = {
     showPricesInCOP: "以哥伦比亚比索显示价格",
 
     communityMember: "社区会员",
-    communityMemberDesc: "访问应用和社交功能 — 不包含 PRIME 频道内容、创作者独家资料及直播节目代币",
+    communityMemberDesc: "社交功能、PNP Live & Radio、Hangouts、Nearby — PRIME频道、创作者独家资料、节目代币和私人通话需额外付费",
     prime: "PRIME",
-    primeDesc: "完整访问 — PRIME 媒体、Nearby Premium、Hangouts、独家内容等",
+    primeDesc: "所有Basic功能 + PNPtv! PRIME频道 — 创作者独家资料、节目代币和私人通话需额外付费",
 
     lifetime: "终身",
     monthly: "月付",
     perMonth: "/月",
+    oneTimePayment: "一次性付款 · 不自动续费",
 
     bestValue: "最超值",
     launchRate: "✦ Intro",
@@ -662,13 +666,14 @@ const strings = {
     showPricesInCOP: "以哥倫比亞披索顯示價格",
 
     communityMember: "社群會員",
-    communityMemberDesc: "存取應用程式和社交功能 — 不含 PRIME 頻道內容、創作者獨家個人資料及直播節目代幣",
+    communityMemberDesc: "社交功能、PNP Live & Radio、Hangouts、Nearby — PRIME頻道、創作者獨家資料、節目代幣和私人通話需額外付費",
     prime: "PRIME",
-    primeDesc: "完整存取 — PRIME 媒體、Nearby Premium、Hangouts、獨家內容等",
+    primeDesc: "所有Basic功能 + PNPtv! PRIME頻道 — 創作者獨家資料、節目代幣和私人通話需額外付費",
 
     lifetime: "終身",
     monthly: "月付",
     perMonth: "/月",
+    oneTimePayment: "一次性付款 · 不自動續費",
 
     bestValue: "最超值",
     launchRate: "✦ Intro",
@@ -818,13 +823,14 @@ const strings = {
     showPricesInCOP: "Voir les prix en COP",
 
     communityMember: "Membre de la Communauté",
-    communityMemberDesc: "Accès à l'app et aux fonctionnalités sociales — contenu du canal PRIME, profils exclusifs des créateurs et tokens pour les shows en direct non inclus",
+    communityMemberDesc: "Fonctionnalités sociales, PNP Live & Radio, Hangouts, Nearby — canal PRIME, profils exclusifs de créateurs, tokens de shows et appels privés en supplément",
     prime: "PRIME",
-    primeDesc: "Accès complet — médias PRIME, Nearby Premium, hangouts, contenu exclusif et plus",
+    primeDesc: "Tout le Basic + canal PNPtv! PRIME — profils exclusifs de créateurs, tokens de shows et appels privés en supplément",
 
     lifetime: "À vie",
     monthly: "Mensuel",
     perMonth: "/mois",
+    oneTimePayment: "Paiement unique · sans renouvellement automatique",
 
     bestValue: "Meilleur Rapport Qualité-Prix",
     launchRate: "✦ Intro",
@@ -974,13 +980,14 @@ const strings = {
     showPricesInCOP: "Preise in COP anzeigen",
 
     communityMember: "Community-Mitglied",
-    communityMemberDesc: "Zugang zur App und sozialen Funktionen — PRIME-Kanalinhalte, exklusive Erstellerprofile und Tokens für Live-Shows nicht enthalten",
+    communityMemberDesc: "Soziale Funktionen, PNP Live & Radio, Hangouts, Nearby — PRIME-Kanal, exklusive Erstellerprofile, Show-Tokens und private Anrufe kosten extra",
     prime: "PRIME",
-    primeDesc: "Vollzugang — PRIME-Medien, Nearby Premium, Hangouts, exklusive Inhalte & mehr",
+    primeDesc: "Alle Basic-Funktionen + PNPtv! PRIME-Kanal — exklusive Erstellerprofile, Show-Tokens und private Anrufe kosten extra",
 
     lifetime: "Lebenslang",
     monthly: "Monatlich",
     perMonth: "/Monat",
+    oneTimePayment: "Einmalzahlung · keine automatische Verlängerung",
 
     bestValue: "Bestes Angebot",
     launchRate: "✦ Intro",
@@ -1130,13 +1137,14 @@ const strings = {
     showPricesInCOP: "แสดงราคาเป็น COP",
 
     communityMember: "สมาชิกชุมชน",
-    communityMemberDesc: "เข้าถึงแอปและฟีเจอร์สังคม — ไม่รวมเนื้อหาช่อง PRIME โปรไฟล์พิเศษของผู้สร้าง และโทเค็นสำหรับการแสดงสด",
+    communityMemberDesc: "ฟีเจอร์สังคม, PNP Live & Radio, Hangouts, Nearby — ช่อง PRIME, โปรไฟล์พิเศษของผู้สร้าง, โทเค็นโชว์และการโทรส่วนตัวมีค่าใช้จ่ายเพิ่มเติม",
     prime: "PRIME",
-    primeDesc: "เข้าถึงครบถ้วน — สื่อ PRIME, Nearby Premium, hangouts, เนื้อหาพิเศษและอื่นๆ",
+    primeDesc: "ทุกฟีเจอร์ Basic + ช่อง PNPtv! PRIME — โปรไฟล์พิเศษของผู้สร้าง, โทเค็นโชว์และการโทรส่วนตัวมีค่าใช้จ่ายเพิ่มเติม",
 
     lifetime: "ตลอดชีพ",
     monthly: "รายเดือน",
     perMonth: "/เดือน",
+    oneTimePayment: "ชำระครั้งเดียว · ไม่ต่ออายุอัตโนมัติ",
 
     bestValue: "คุ้มที่สุด",
     launchRate: "✦ Intro",
@@ -1286,13 +1294,14 @@ const strings = {
     showPricesInCOP: "Mostra prezzi in COP",
 
     communityMember: "Membro della Community",
-    communityMemberDesc: "Accesso all'app e alle funzionalità social — contenuto del canale PRIME, profili esclusivi dei creator e token per show dal vivo non inclusi",
+    communityMemberDesc: "Funzionalità social, PNP Live & Radio, Hangouts, Nearby — canale PRIME, profili esclusivi dei creator, token per show e chiamate private a pagamento extra",
     prime: "PRIME",
-    primeDesc: "Accesso completo — media PRIME, Nearby Premium, hangout, contenuti esclusivi e altro",
+    primeDesc: "Tutto di Basic + canale PNPtv! PRIME — profili esclusivi dei creator, token per show e chiamate private a pagamento extra",
 
     lifetime: "A vita",
     monthly: "Mensile",
     perMonth: "/mese",
+    oneTimePayment: "Pagamento unico · nessun rinnovo automatico",
 
     bestValue: "Miglior Rapporto Qualità-Prezzo",
     launchRate: "✦ Intro",
@@ -1442,13 +1451,14 @@ const strings = {
     showPricesInCOP: "Fiyatları COP olarak göster",
 
     communityMember: "Topluluk Üyesi",
-    communityMemberDesc: "Uygulamaya ve sosyal özelliklere erişim — PRIME kanal içeriği, yaratıcı özel profiller ve canlı show tokenleri dahil değil",
+    communityMemberDesc: "Sosyal özellikler, PNP Live & Radio, Hangouts, Nearby — PRIME kanal, özel yaratıcı profilleri, show tokenleri ve özel aramalar ek ücretlidir",
     prime: "PRIME",
-    primeDesc: "Tam erişim — PRIME medya, Nearby Premium, hangoutlar, özel içerik ve daha fazlası",
+    primeDesc: "Tüm Basic özellikleri + PNPtv! PRIME kanalı — özel yaratıcı profilleri, show tokenleri ve özel aramalar ek ücretlidir",
 
     lifetime: "Ömür Boyu",
     monthly: "Aylık",
     perMonth: "/ay",
+    oneTimePayment: "Tek seferlik ödeme · otomatik yenileme yok",
 
     bestValue: "En İyi Değer",
     launchRate: "✦ Intro",
@@ -1598,13 +1608,14 @@ const strings = {
     showPricesInCOP: "Показать цены в COP",
 
     communityMember: "Участник сообщества",
-    communityMemberDesc: "Доступ к приложению и социальным функциям — контент канала PRIME, эксклюзивные профили авторов и токены для живых шоу не включены",
+    communityMemberDesc: "Социальные функции, PNP Live & Radio, Hangouts, Nearby — канал PRIME, эксклюзивные профили авторов, токены шоу и приватные звонки — за отдельную плату",
     prime: "PRIME",
-    primeDesc: "Полный доступ — PRIME-медиа, Nearby Premium, hangout'ы, эксклюзивный контент и больше",
+    primeDesc: "Все функции Basic + канал PNPtv! PRIME — эксклюзивные профили авторов, токены шоу и приватные звонки за отдельную плату",
 
     lifetime: "Пожизненно",
     monthly: "Ежемесячно",
     perMonth: "/мес",
+    oneTimePayment: "Единовременная оплата · без автопродления",
 
     bestValue: "Лучшая Цена",
     launchRate: "✦ Intro",
@@ -1754,13 +1765,14 @@ const strings = {
     showPricesInCOP: "Prijzen in COP weergeven",
 
     communityMember: "Community-lid",
-    communityMemberDesc: "Toegang tot de app en sociale functies — PRIME-kanaalcontent, exclusieve creatorprofielen en tokens voor live shows niet inbegrepen",
+    communityMemberDesc: "Sociale functies, PNP Live & Radio, Hangouts, Nearby — PRIME-kanaal, exclusieve creatorprofielen, show-tokens en privégesprekken kosten extra",
     prime: "PRIME",
-    primeDesc: "Volledige toegang — PRIME-media, Nearby Premium, hangouts, exclusieve content & meer",
+    primeDesc: "Alle Basic-functies + PNPtv! PRIME-kanaal — exclusieve creatorprofielen, show-tokens en privégesprekken kosten extra",
 
     lifetime: "Levenslang",
     monthly: "Maandelijks",
     perMonth: "/mnd",
+    oneTimePayment: "Eenmalige betaling · geen automatische verlenging",
 
     bestValue: "Beste Prijs-Kwaliteit",
     launchRate: "✦ Intro",
@@ -1910,13 +1922,14 @@ const strings = {
     showPricesInCOP: "Hiển thị giá bằng COP",
 
     communityMember: "Thành viên Cộng đồng",
-    communityMemberDesc: "Truy cập ứng dụng và tính năng xã hội — không bao gồm nội dung kênh PRIME, hồ sơ độc quyền của người tạo và token cho các buổi biểu diễn trực tiếp",
+    communityMemberDesc: "Tính năng xã hội, PNP Live & Radio, Hangouts, Nearby — kênh PRIME, hồ sơ độc quyền của người tạo, token show và cuộc gọi riêng tư tính thêm phí",
     prime: "PRIME",
-    primeDesc: "Truy cập đầy đủ — phương tiện PRIME, Nearby Premium, hangouts, nội dung độc quyền và nhiều hơn",
+    primeDesc: "Tất cả tính năng Basic + kênh PNPtv! PRIME — hồ sơ độc quyền của người tạo, token show và cuộc gọi riêng tư tính thêm phí",
 
     lifetime: "Trọn đời",
     monthly: "Hàng tháng",
     perMonth: "/tháng",
+    oneTimePayment: "Thanh toán một lần · không tự động gia hạn",
 
     bestValue: "Giá Trị Nhất",
     launchRate: "✦ Intro",
@@ -2066,13 +2079,14 @@ const strings = {
     showPricesInCOP: "COP で価格を表示",
 
     communityMember: "コミュニティメンバー",
-    communityMemberDesc: "アプリとソーシャル機能へのアクセス — PRIMEチャンネルコンテンツ、クリエイター限定プロファイル、ライブショートークンは含まれません",
+    communityMemberDesc: "ソーシャル機能、PNP Live & Radio、Hangouts、Nearby — PRIMEチャンネル、クリエイター限定プロファイル、ショートークン、プライベート通話は別途料金",
     prime: "PRIME",
-    primeDesc: "完全アクセス — PRIME メディア、Nearby Premium、ハングアウト、限定コンテンツ等",
+    primeDesc: "すべてのBasic機能 + PNPtv! PRIMEチャンネル — クリエイター限定プロファイル、ショートークン、プライベート通話は別途料金",
 
     lifetime: "生涯",
     monthly: "月払い",
     perMonth: "/月",
+    oneTimePayment: "一回払い・自動更新なし",
 
     bestValue: "最もお得",
     launchRate: "✦ Intro",
@@ -2222,13 +2236,14 @@ const strings = {
     showPricesInCOP: "Tampilkan harga dalam COP",
 
     communityMember: "Anggota Komunitas",
-    communityMemberDesc: "Akses ke aplikasi dan fitur sosial — konten saluran PRIME, profil eksklusif kreator, dan token untuk pertunjukan langsung tidak termasuk",
+    communityMemberDesc: "Fitur sosial, PNP Live & Radio, Hangouts, Nearby — saluran PRIME, profil eksklusif kreator, token show dan panggilan pribadi biaya tambahan",
     prime: "PRIME",
-    primeDesc: "Akses penuh — media PRIME, Nearby Premium, hangouts, konten eksklusif & lebih",
+    primeDesc: "Semua fitur Basic + saluran PNPtv! PRIME — profil eksklusif kreator, token show dan panggilan pribadi biaya tambahan",
 
     lifetime: "Seumur Hidup",
     monthly: "Bulanan",
     perMonth: "/bln",
+    oneTimePayment: "Pembayaran satu kali · tanpa perpanjangan otomatis",
 
     bestValue: "Nilai Terbaik",
     launchRate: "✦ Intro",
@@ -2378,13 +2393,14 @@ const strings = {
     showPricesInCOP: "عرض الأسعار بالبيزو الكولومبي",
 
     communityMember: "عضو المجتمع",
-    communityMemberDesc: "الوصول إلى التطبيق والميزات الاجتماعية — محتوى قناة PRIME والملفات الشخصية الحصرية للمبدعين ورموز العروض المباشرة غير مشمولة",
+    communityMemberDesc: "الميزات الاجتماعية، PNP Live & Radio، Hangouts، Nearby — قناة PRIME والملفات الشخصية الحصرية للمبدعين ورموز العروض والمكالمات الخاصة بتكلفة إضافية",
     prime: "PRIME",
-    primeDesc: "وصول كامل — وسائط PRIME، Nearby Premium، hangouts، محتوى حصري والمزيد",
+    primeDesc: "جميع ميزات Basic + قناة PNPtv! PRIME — الملفات الشخصية الحصرية للمبدعين ورموز العروض والمكالمات الخاصة بتكلفة إضافية",
 
     lifetime: "مدى الحياة",
     monthly: "شهري",
     perMonth: "/شهر",
+    oneTimePayment: "دفعة واحدة · بدون تجديد تلقائي",
 
     bestValue: "أفضل قيمة",
     launchRate: "✦ Intro",
