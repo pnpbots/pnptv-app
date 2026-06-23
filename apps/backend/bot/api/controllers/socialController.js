@@ -171,12 +171,31 @@ function emitNewPost(io, post, authorId) {
   });
 }
 
+function parseTaggedPerformerIds(raw) {
+  if (!raw) return [];
+  try {
+    const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(arr)) return [];
+    return arr.slice(0, 10).map(String).filter(s => s.trim());
+  } catch { return []; }
+}
+
+async function resolveTaggedPerformers(ids) {
+  if (!ids.length) return [];
+  const { rows } = await dbQuery(
+    `SELECT id::text AS id, username, photo_file_id AS avatar_url FROM users WHERE id = ANY($1::text[]) AND subscription_status != 'banned' LIMIT 10`,
+    [ids]
+  );
+  return rows;
+}
+
 // ── Create Post ───────────────────────────────────────────────────────────────
 
 const createPost = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, isExclusive, isShareable, hangoutGroupId: rawHangoutGroupId, category: rawCategory } = req.body;
+  const { content, isExclusive, isShareable, hangoutGroupId: rawHangoutGroupId, category: rawCategory, taggedPerformerIds: rawTaggedIds } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
+  const taggedPerformerIds = parseTaggedPerformerIds(rawTaggedIds);
 
   try {
     const { assertCleanText } = require('../../../services/contentModerationFilter');
@@ -319,7 +338,10 @@ const createPost = async (req, res) => {
       }
     }
 
-    const authorPhoto = await getUserPhotoFromDb(user.id) || user.photoUrl || null;
+    const [authorPhoto, taggedPerformers] = await Promise.all([
+      getUserPhotoFromDb(user.id).then(p => p || user.photoUrl || null),
+      resolveTaggedPerformers(taggedPerformerIds),
+    ]);
     const fullPost = {
       ...post,
       author_id: user.id,
@@ -327,11 +349,14 @@ const createPost = async (req, res) => {
       author_first_name: user.firstName || user.first_name,
       author_photo: authorPhoto,
       liked_by_me: false,
+      tagged_performers: taggedPerformers,
     };
 
-    // Parse @mentions and notify tagged users (non-blocking)
     setImmediate(() => {
       mentionService.createPostMentions(post.id, user.id, content.trim()).catch(() => {});
+      if (taggedPerformerIds.length) {
+        mentionService.createPostTags(post.id, user.id, taggedPerformerIds).catch(() => {});
+      }
     });
 
     const io = req.app.get('io');
@@ -528,7 +553,8 @@ const postToMastodon = async (req, res) => {
 
 const createPostWithMedia = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, isExclusive, isShareable, videoTitle, videoDescription, category: rawCategory } = req.body;
+  const { content, isExclusive, isShareable, videoTitle, videoDescription, category: rawCategory, taggedPerformerIds: rawTaggedIds } = req.body;
+  const taggedPerformerIds = parseTaggedPerformerIds(rawTaggedIds);
 
   // Media-attached post: content may be empty (caption-less photo/video is valid).
   const hasContent = content && content.toString().trim().length > 0;
@@ -800,7 +826,10 @@ const createPostWithMedia = async (req, res) => {
       }
     }
 
-    const authorPhoto = await getUserPhotoFromDb(user.id) || user.photoUrl || null;
+    const [authorPhoto, taggedPerformers] = await Promise.all([
+      getUserPhotoFromDb(user.id).then(p => p || user.photoUrl || null),
+      resolveTaggedPerformers(taggedPerformerIds),
+    ]);
     const fullPost = {
       ...post,
       author_id: user.id,
@@ -808,7 +837,15 @@ const createPostWithMedia = async (req, res) => {
       author_first_name: user.firstName || user.first_name,
       author_photo: authorPhoto,
       liked_by_me: false,
+      tagged_performers: taggedPerformers,
     };
+
+    setImmediate(() => {
+      if (content) mentionService.createPostMentions(post.id, user.id, content.toString().trim()).catch(() => {});
+      if (taggedPerformerIds.length) {
+        mentionService.createPostTags(post.id, user.id, taggedPerformerIds).catch(() => {});
+      }
+    });
 
     const io = req.app.get('io');
     emitNewPost(io, fullPost, user.id);
@@ -844,7 +881,8 @@ const VIDEO_EXT_MAP = { 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/3
 
 const createPostWithMultiMedia = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const { content, isExclusive, isShareable, category: rawCategory } = req.body;
+  const { content, isExclusive, isShareable, category: rawCategory, taggedPerformerIds: rawTaggedIds } = req.body;
+  const taggedPerformerIds = parseTaggedPerformerIds(rawTaggedIds);
 
   // Media-attached post: content may be empty (caption-less multi-photo post is valid).
   const hasContent = content && content.toString().trim().length > 0;
@@ -1105,7 +1143,10 @@ const createPostWithMultiMedia = async (req, res) => {
       }
     }
 
-    const authorPhoto = await getUserPhotoFromDb(user.id) || user.photoUrl || null;
+    const [authorPhoto, taggedPerformers] = await Promise.all([
+      getUserPhotoFromDb(user.id).then(p => p || user.photoUrl || null),
+      resolveTaggedPerformers(taggedPerformerIds),
+    ]);
     const fullPost = {
       ...post,
       media_urls: mediaItems,
@@ -1114,7 +1155,15 @@ const createPostWithMultiMedia = async (req, res) => {
       author_first_name: user.firstName || user.first_name,
       author_photo: authorPhoto,
       liked_by_me: false,
+      tagged_performers: taggedPerformers,
     };
+
+    setImmediate(() => {
+      if (content) mentionService.createPostMentions(post.id, user.id, content.toString().trim()).catch(() => {});
+      if (taggedPerformerIds.length) {
+        mentionService.createPostTags(post.id, user.id, taggedPerformerIds).catch(() => {});
+      }
+    });
 
     const io = req.app.get('io');
     emitNewPost(io, fullPost, user.id);
@@ -1619,7 +1668,10 @@ const searchMentions = async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q || q.length < 1) return res.json({ success: true, users: [] });
   try {
-    const users = await mentionService.searchUsersForMention(q, 8);
+    const creatorsOnly = req.query.creators_only === '1' || req.query.creators_only === 'true';
+    const users = creatorsOnly
+      ? await mentionService.searchCreatorsForTag(q, 8)
+      : await mentionService.searchUsersForMention(q, 8);
     return res.json({ success: true, users });
   } catch (err) {
     logger.error('searchMentions error', err);

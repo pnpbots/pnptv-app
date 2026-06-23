@@ -968,6 +968,8 @@ export interface SocialPostItem {
   metadata?: ChannelPromoMetadata | Record<string, unknown> | null;
   // Synthetic "New on PRIME" carousel — backend injects at top of feed page 1
   is_carousel?: boolean;
+  // Explicitly tagged performers (distinct from text @mentions)
+  tagged_performers?: Array<{ id: string; username: string; avatar_url: string | null }> | null;
   carousel_total?: number;
   carousel_items?: Array<{
     id: number;
@@ -1452,6 +1454,14 @@ export function searchMentions(
 ): Promise<{ success: boolean; users: MentionUser[] }> {
   return request(
     `/api/webapp/social/mentions/search?q=${encodeURIComponent(q)}`
+  );
+}
+
+export function searchCreators(
+  q: string
+): Promise<{ success: boolean; users: MentionUser[] }> {
+  return request(
+    `/api/webapp/social/mentions/search?q=${encodeURIComponent(q)}&creators_only=1`
   );
 }
 

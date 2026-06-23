@@ -69,7 +69,8 @@ class SocialPostService {
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,
               rp.content as repost_content, rp.created_at as repost_created_at,
               ru.username as repost_author_username, ru.first_name as repost_author_first_name,
-              hg.name as hangout_group_name, hg.avatar_url as hangout_group_avatar
+              hg.name as hangout_group_name, hg.avatar_url as hangout_group_avatar,
+              (SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('id', u2.id::text, 'username', u2.username, 'avatar_url', u2.photo_file_id) ORDER BY pm2.created_at), '[]'::json) FROM post_mentions pm2 JOIN users u2 ON u2.id = pm2.mentioned_user_id WHERE pm2.post_id = sp.id AND pm2.mention_type = 'tag') AS tagged_performers
        FROM social_posts sp
        JOIN users u ON sp.user_id = u.id
        LEFT JOIN social_posts rp ON sp.repost_of_id = rp.id
@@ -831,7 +832,8 @@ class SocialPostService {
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
                 COALESCE(sp.content_tier, 'free') as content_tier,
                 u.id as author_id, u.username as author_username,
-                u.first_name as author_first_name, u.photo_file_id as author_photo
+                u.first_name as author_first_name, u.photo_file_id as author_photo,
+                (SELECT COALESCE(JSON_AGG(JSON_BUILD_OBJECT('id', u2.id::text, 'username', u2.username, 'avatar_url', u2.photo_file_id) ORDER BY pm2.created_at), '[]'::json) FROM post_mentions pm2 JOIN users u2 ON u2.id = pm2.mentioned_user_id WHERE pm2.post_id = sp.id AND pm2.mention_type = 'tag') AS tagged_performers
                 ${likedSubquery}
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id

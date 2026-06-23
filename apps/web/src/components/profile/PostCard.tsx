@@ -499,6 +499,28 @@ export default function PostCard({
             )}
           </div>
 
+          {/* Tagged performers */}
+          {Array.isArray(post.tagged_performers) && post.tagged_performers.length > 0 && (
+            <div className="flex items-center flex-wrap gap-x-1 gap-y-0.5 mt-0.5 mb-0.5">
+              <span className="text-[11px]" style={{ color: "#8E8E93" }}>with</span>
+              {post.tagged_performers.map((tp, i) => (
+                <span key={tp.id} className="inline-flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => onAuthorTap?.(tp.id)}
+                    className="text-[11px] font-medium hover:underline transition-colors"
+                    style={{ color: "#5ED1C4" }}
+                  >
+                    @{tp.username}
+                  </button>
+                  {i < post.tagged_performers!.length - 1 && (
+                    <span className="text-[11px]" style={{ color: "#8E8E93" }}>,</span>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+
           {/* Post body — inline editor when editing, otherwise @mentions/URLs clickable */}
           {isEditing ? (
             <div className="mt-1.5">

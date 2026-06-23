@@ -116,10 +116,67 @@ async function searchUsersForMention(searchQuery, limit = 8) {
   return rows;
 }
 
+/**
+ * Save explicit performer tag records for a post and fire notifications.
+ * Different from createPostMentions: tags are UI-selected, not text-parsed.
+ */
+async function createPostTags(postId, taggerId, performerIds) {
+  if (!performerIds || !performerIds.length) return;
+
+  const { rows: performers } = await query(
+    `SELECT id, username FROM users WHERE id = ANY($1::text[]) AND subscription_status != 'banned'`,
+    [performerIds.map(String)]
+  );
+  if (!performers.length) return;
+
+  const NotificationEmitter = require('./notificationEmitter');
+  const actorRow = await query('SELECT username FROM users WHERE id=$1', [taggerId]);
+  const actorName = actorRow.rows[0]?.username || 'Someone';
+
+  for (const performer of performers) {
+    if (String(performer.id) === String(taggerId)) continue;
+    try {
+      await query(
+        'INSERT INTO post_mentions (post_id, mentioned_user_id, mentioner_id, mention_type) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING',
+        [postId, performer.id, taggerId, 'tag']
+      );
+      await NotificationEmitter.emit({
+        type: 'tag_post',
+        category: 'social',
+        priority: 'normal',
+        actorId: taggerId,
+        targetUserId: performer.id,
+        entityType: 'post',
+        entityId: String(postId),
+        message: `@${actorName} tagged you in a post`,
+        metadata: { post_id: postId },
+      });
+    } catch (err) {
+      logger.warn('mentionService: post tag failed', { err: err.message, performer: performer.id });
+    }
+  }
+}
+
+/** Search only active creators — used by the tag-performers picker in the composer. */
+async function searchCreatorsForTag(searchQuery, limit = 8) {
+  if (!searchQuery || searchQuery.length < 1) return [];
+  const { rows } = await query(
+    `SELECT id, username, photo_file_id AS avatar_url, creator_status
+     FROM users
+     WHERE LOWER(username) LIKE $1 AND subscription_status != 'banned' AND creator_status = 'active'
+     ORDER BY COALESCE(followers_count, 0) DESC, username
+     LIMIT $2`,
+    [`${searchQuery.toLowerCase()}%`, limit]
+  );
+  return rows;
+}
+
 module.exports = {
   parseMentions,
   resolveUsernames,
   createPostMentions,
   createChatMentions,
+  createPostTags,
   searchUsersForMention,
+  searchCreatorsForTag,
 };

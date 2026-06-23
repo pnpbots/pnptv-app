@@ -23,7 +23,7 @@ import React, {
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { checkAuthStatus, getXStatus, sharePostToX, getOwnChannels, getProfile, type SocialPostItem, type CreatorChannel } from "@/lib/api";
+import { checkAuthStatus, getXStatus, sharePostToX, getOwnChannels, getProfile, searchCreators, type SocialPostItem, type CreatorChannel, type MentionUser } from "@/lib/api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -281,6 +281,11 @@ export function PostComposer({
   const [channels, setChannels] = useState<CreatorChannel[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
   const [category, setCategory] = useState<PostCategory | null>(null);
+  const [taggedPerformers, setTaggedPerformers] = useState<MentionUser[]>([]);
+  const [showTagPicker, setShowTagPicker] = useState(false);
+  const [tagQuery, setTagQuery] = useState("");
+  const [tagResults, setTagResults] = useState<MentionUser[]>([]);
+  const [tagSearching, setTagSearching] = useState(false);
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -346,6 +351,22 @@ export function PostComposer({
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [text]);
+
+  // ── Tag performer search — debounced ───────────────────────────────────────
+  useEffect(() => {
+    if (!tagQuery.trim()) { setTagResults([]); return; }
+    const id = setTimeout(async () => {
+      setTagSearching(true);
+      try {
+        const res = await searchCreators(tagQuery.trim());
+        if (res.success) {
+          setTagResults(res.users.filter(u => !taggedPerformers.some(t => t.id === u.id)));
+        }
+      } catch { /* silent */ }
+      setTagSearching(false);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [tagQuery, taggedPerformers]);
 
   // ── Cleanup object URLs on unmount ─────────────────────────────────────────
   useEffect(() => {
@@ -506,6 +527,10 @@ export function PostComposer({
     setVideoDescription("");
     setSelectedChannelId(null);
     setCategory(null);
+    setTaggedPerformers([]);
+    setShowTagPicker(false);
+    setTagQuery("");
+    setTagResults([]);
     if (compact) setIsExpanded(false);
   }, [compact]);
 
@@ -533,6 +558,7 @@ export function PostComposer({
             if (selectedChannelId !== null) formData.append("channelId", String(selectedChannelId));
             if (hangoutGroupId) formData.append("hangoutGroupId", String(hangoutGroupId));
             if (category) formData.append("category", category);
+            if (taggedPerformers.length) formData.append("taggedPerformerIds", JSON.stringify(taggedPerformers.map(p => p.id)));
 
             const xhr = new XMLHttpRequest();
             xhr.open("POST", `${API_BASE}/api/webapp/social/posts/with-multi-media`);
@@ -580,6 +606,7 @@ export function PostComposer({
             if (selectedChannelId !== null) formData.append("channelId", String(selectedChannelId));
             if (hangoutGroupId) formData.append("hangoutGroupId", String(hangoutGroupId));
             if (category) formData.append("category", category);
+            if (taggedPerformers.length) formData.append("taggedPerformerIds", JSON.stringify(taggedPerformers.map(p => p.id)));
 
             const xhr = new XMLHttpRequest();
             xhr.open("POST", `${API_BASE}/api/webapp/social/posts/with-media`);
@@ -626,6 +653,7 @@ export function PostComposer({
             ...(selectedChannelId !== null ? { channelId: selectedChannelId } : {}),
             ...(hangoutGroupId ? { hangoutGroupId } : {}),
             ...(category ? { category } : {}),
+            ...(taggedPerformers.length ? { taggedPerformerIds: taggedPerformers.map(p => p.id) } : {}),
           }),
         });
         if (!res.ok) {
@@ -651,7 +679,7 @@ export function PostComposer({
     } finally {
       setIsPosting(false);
     }
-  }, [text, files, isPosting, isExclusive, isShareable, crossPostX, videoTitle, videoDescription, selectedChannelId, hangoutGroupId, onPostCreated, clearForm]);
+  }, [text, files, isPosting, isExclusive, isShareable, crossPostX, videoTitle, videoDescription, selectedChannelId, hangoutGroupId, taggedPerformers, onPostCreated, clearForm]);
 
   // ── Keyboard submit (Ctrl/Cmd + Enter) ────────────────────────────────────
   const handleKeyDown = useCallback(
@@ -905,6 +933,87 @@ export function PostComposer({
             })}
           </div>
 
+          {/* Tag performers section */}
+          {(showTagPicker || taggedPerformers.length > 0) && (
+            <div
+              className="mb-3 rounded-lg px-3 py-2.5"
+              style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)" }}
+            >
+              {/* Tagged performer chips */}
+              {taggedPerformers.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {taggedPerformers.map((p) => (
+                    <span
+                      key={p.id}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                      style={{ background: "rgba(94,209,196,0.12)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.25)" }}
+                    >
+                      @{p.username}
+                      <button
+                        type="button"
+                        onClick={() => setTaggedPerformers(prev => prev.filter(t => t.id !== p.id))}
+                        className="ml-0.5 hover:text-white transition-colors"
+                        aria-label={`Remove @${p.username}`}
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {/* Search input */}
+              {showTagPicker && (
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={tagQuery}
+                    onChange={(e) => setTagQuery(e.target.value)}
+                    placeholder="Search performers…"
+                    autoFocus
+                    disabled={isPosting}
+                    className="w-full bg-white/5 text-white text-xs rounded-lg px-3 py-2 border border-white/10 outline-none placeholder:text-white/30 focus:border-white/30 disabled:opacity-60 transition-colors"
+                    style={{ fontSize: "14px" }}
+                  />
+                  {/* Dropdown results */}
+                  {(tagResults.length > 0 || tagSearching) && (
+                    <div
+                      className="absolute left-0 right-0 top-full mt-1 rounded-xl overflow-hidden z-20"
+                      style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}
+                    >
+                      {tagSearching && !tagResults.length ? (
+                        <div className="px-3 py-2.5 text-xs" style={{ color: "#8E8E93" }}>Searching…</div>
+                      ) : (
+                        tagResults.map((u) => (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onClick={() => {
+                              setTaggedPerformers(prev => [...prev, u]);
+                              setTagQuery("");
+                              setTagResults([]);
+                            }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/5 text-left transition-colors"
+                          >
+                            {u.avatar_url ? (
+                              <img src={u.avatar_url} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+                            ) : (
+                              <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }}>
+                                {(u.username || "?")[0].toUpperCase()}
+                              </div>
+                            )}
+                            <span className="text-xs text-white truncate">@{u.username}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Action row — media buttons + post button */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
@@ -949,6 +1058,30 @@ export function PostComposer({
                   <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
                 </svg>
                 <span className="hidden sm:inline">{tFeed.video}</span>
+              </button>
+
+              {/* Tag performers button */}
+              <button
+                type="button"
+                onClick={() => setShowTagPicker(v => !v)}
+                disabled={isPosting}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+                style={{
+                  color: (showTagPicker || taggedPerformers.length > 0) ? "#5ED1C4" : "#8E8E93",
+                  borderColor: (showTagPicker || taggedPerformers.length > 0) ? "rgba(94,209,196,0.35)" : "rgba(255,255,255,0.1)",
+                  background: (showTagPicker || taggedPerformers.length > 0) ? "rgba(94,209,196,0.06)" : "transparent",
+                  minHeight: "36px",
+                }}
+                aria-label="Tag performers"
+                title="Tag performers"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
+                </svg>
+                <span className="hidden sm:inline">
+                  {taggedPerformers.length > 0 ? `${taggedPerformers.length} tagged` : "Tag"}
+                </span>
               </button>
             </div>
 
