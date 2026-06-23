@@ -208,7 +208,7 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     id: "referrals",
     emoji: "🎁",
     steps: [
-      { title: "What is the Referral Program?", description: "Earn free PRIME days by inviting friends to PNPtv! When someone joins using your referral link, both of you benefit. It's the easiest way to get PRIME without paying." },
+      { title: "What is the Referral Program?", description: "Share your referral link and earn free PRIME every time someone signs up! Both you and the new user get 24 hours of PRIME free — instantly, no payment required. When they buy their first plan, you also earn PNP Live tokens." },
       { title: "Find Your Referral Link", description: "Go to your Profile page. In the stats or settings section, you'll find your unique referral link and a 'Copy' button. Each user has a unique code that tracks referrals.", action: "Go to Profile" },
       { title: "Share Your Link", description: "Copy your referral link and share it anywhere — on social media, in messages, or with friends directly. When someone signs up using your link, the system tracks it automatically." },
       { title: "Earn Rewards", description: "When a referred friend joins PNPtv, you earn free PRIME days added to your subscription. The more friends you invite, the more free PRIME time you accumulate." },

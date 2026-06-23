@@ -122,11 +122,13 @@ async function redeemReferral(code, refereeId) {
 
   logger.info('Referral attributed (pending reward)', { referrerId, refereeId, code: upperCode });
 
-  // Grant 24-hour PRIME trial on first-ever referral redemption.
+  const EntitlementModel = require('../models/entitlementModel');
+
+  // Grant 24h PRIME trial to referee on their first-ever referral redemption.
+  // Gated on isFirstReferral to prevent stacking multiple codes.
   let primeGranted = false;
   if (isFirstReferral) {
     try {
-      const EntitlementModel = require('../models/entitlementModel');
       await EntitlementModel.grantEntitlement(String(refereeId), 'prime', {
         isLifetime: false,
         durationDays: 1,
@@ -144,13 +146,39 @@ async function redeemReferral(code, refereeId) {
         reason: `Referral 24h trial — code ${upperCode}`,
       });
       primeGranted = true;
-      logger.info('Referral 24h PRIME granted', { refereeId, code: upperCode });
+      logger.info('Referral 24h PRIME granted to referee', { refereeId, code: upperCode });
     } catch (err) {
-      logger.warn('Referral PRIME grant failed (non-fatal)', { refereeId, code: upperCode, error: err.message });
+      logger.warn('Referral PRIME grant to referee failed (non-fatal)', { refereeId, code: upperCode, error: err.message });
     }
   }
 
-  return { success: true, pending: true, referrerId, primeGranted };
+  // Grant 24h PRIME to the referrer every time someone signs up with their code.
+  // Unconditional — each new signup extends or refreshes their PRIME by 1 day.
+  let referrerPrimeGranted = false;
+  try {
+    await EntitlementModel.grantEntitlement(String(referrerId), 'prime', {
+      isLifetime: false,
+      durationDays: 1,
+      sourcePlanId: 'referral_24h_prime',
+      source: 'system',
+      actorId: 'system',
+      reason: `Referral reward — user ${refereeId} joined with code ${upperCode}`,
+    });
+    await EntitlementModel.grantEntitlement(String(referrerId), 'pnp-member', {
+      isLifetime: false,
+      durationDays: 1,
+      sourcePlanId: 'referral_24h_prime',
+      source: 'system',
+      actorId: 'system',
+      reason: `Referral reward — user ${refereeId} joined with code ${upperCode}`,
+    });
+    referrerPrimeGranted = true;
+    logger.info('Referral 24h PRIME granted to referrer', { referrerId, refereeId, code: upperCode });
+  } catch (err) {
+    logger.warn('Referral PRIME grant to referrer failed (non-fatal)', { referrerId, code: upperCode, error: err.message });
+  }
+
+  return { success: true, pending: true, referrerId, primeGranted, referrerPrimeGranted };
 }
 
 /**

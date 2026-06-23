@@ -96,12 +96,12 @@ export default function ReferralCenter() {
             {es ? "Centro de Referidos" : "Referral Center"}
           </p>
           <h1 className="text-2xl font-bold text-white" style={{ lineHeight: 1.25, marginBottom: 8 }}>
-            {es ? "Invita amigos, gana tokens" : "Invite friends, earn tokens"}
+            {es ? "Invita amigos, gana PRIME + tokens" : "Invite friends, earn PRIME + tokens"}
           </h1>
           <p className="text-sm" style={{ color: "rgba(255,255,255,0.50)", marginBottom: 20 }}>
             {es
-              ? "Comparte tu enlace. Cuando alguien pague su primer plan, tú ganas tokens PNP Live."
-              : "Share your link. When someone buys their first plan, you earn PNP Live tokens."}
+              ? "Cada vez que alguien se registra con tu enlace, ambos reciben 24 horas de PRIME gratis. Si además pagan un plan, tú ganas tokens PNP Live."
+              : "Every time someone signs up with your link, you both get 24 hours of PRIME free. When they buy a plan, you also earn PNP Live tokens."}
           </p>
 
           {/* Referral link box */}
@@ -180,12 +180,12 @@ export default function ReferralCenter() {
             {(es
               ? [
                   { step: "1", title: "Comparte tu enlace", body: "Envíalo por WhatsApp, Instagram, Telegram — donde quieras." },
-                  { step: "2", title: "Tu amigo se registra y obtiene PRIME gratis", body: "Al crear su cuenta con tu enlace recibe 24 horas de PRIME automáticamente, sin pagar nada." },
+                  { step: "2", title: "Ambos obtienen 24h de PRIME gratis", body: "En cuanto se registra con tu enlace, tú y tu amigo reciben 24 horas de PRIME automáticamente — sin pagar nada." },
                   { step: "3", title: "Paga su primer plan", body: "En cuanto completa su primera compra, tú recibes tokens PNP Live automáticamente." },
                 ]
               : [
                   { step: "1", title: "Share your link", body: "Send it via WhatsApp, Instagram, Telegram — wherever." },
-                  { step: "2", title: "Your friend signs up and gets free PRIME", body: "As soon as they join with your link they get 24 hours of PRIME automatically — no payment needed." },
+                  { step: "2", title: "You both get 24h of PRIME free", body: "As soon as they sign up with your link, both of you get 24 hours of PRIME automatically — no payment needed." },
                   { step: "3", title: "They buy a plan", body: "Once they complete their first purchase, you get PNP Live tokens automatically." },
                 ]
             ).map(({ step, title, body }) => (
