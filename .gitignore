@@ -16,6 +16,9 @@ public/uploads/
 *.tsbuildinfo
 .codex
 
+# Private key files — never commit
+*.pem
+
 # Runtime-downloaded binaries
 apps/backend/yt-dlp_linux
 .claude/

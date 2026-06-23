@@ -14,7 +14,7 @@ const { query, getPool } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
 const callCheckoutService = require('../../../services/callCheckoutService');
 const callPackageService = require('../../../services/callPackageService');
-const { generateToken, LIVEKIT_WS_URL } = require('../../../services/livekitService');
+const { generateJaasToken, getJaasRoomUrl } = require('../../../services/jaasService');
 const CallBookingService = require('../../../services/CallBookingService');
 const moment = require('moment-timezone');
 const logger = require('../../../utils/logger');
@@ -36,28 +36,44 @@ const INT_RE = /^\d+$/;
 async function resolveBooking(rawId, callerUserId) {
   if (UUID_RE.test(rawId)) {
     const result = await query(
-      `SELECT cc.*,
-              cp.duration_minutes, cp.title AS package_title,
+      `SELECT
+              -- credit fields (null when booking has no linked credit)
+              cc.id            AS id,
+              cc.status        AS status,
+              COALESCE(cc.creator_id, prf.user_id) AS creator_id,
+              COALESCE(cc.member_id,  b.user_id)   AS member_id,
+              COALESCE(cp.duration_minutes, b.duration_minutes) AS duration_minutes,
+              cp.title AS package_title,
+              -- user display info
               u_creator.username AS creator_username,
               COALESCE(u_creator.first_name, u_creator.username) AS creator_display_name,
               u_creator.photo_file_id AS creator_photo,
-              u_member.username AS member_username,
+              u_member.username  AS member_username,
               COALESCE(u_member.first_name, u_member.username) AS member_display_name,
               u_member.photo_file_id AS member_photo,
+              -- booking times
+              b.id             AS booking_uuid,
               b.start_time_utc AS start_at,
-              b.end_time_utc AS end_at,
-              b.status AS booking_status
+              b.end_time_utc   AS end_at,
+              COALESCE(b.status, cc.status) AS booking_status
        FROM bookings b
-       LEFT JOIN call_credits cc ON cc.id = b.credit_id
-       JOIN call_packages cp ON cp.id = cc.package_id
-       JOIN users u_creator ON u_creator.id = cc.creator_id
-       JOIN users u_member  ON u_member.id  = cc.member_id
+       LEFT JOIN call_credits  cc  ON cc.id        = b.credit_id
+       LEFT JOIN call_packages cp  ON cp.id         = cc.package_id
+       LEFT JOIN performers    prf ON prf.id        = b.performer_id
+       JOIN users u_creator ON u_creator.id = COALESCE(cc.creator_id, prf.user_id)
+       JOIN users u_member  ON u_member.id  = COALESCE(cc.member_id,  b.user_id)
        WHERE b.id = $1
          AND b.status IN ('confirmed', 'held', 'awaiting_payment')
-         AND (cc.member_id = $2 OR cc.creator_id = $2)`,
+         AND (
+           COALESCE(cc.member_id,  b.user_id)   = $2
+           OR COALESCE(cc.creator_id, prf.user_id) = $2
+         )`,
       [rawId, callerUserId]
     );
-    return result.rows[0] || null;
+    // Surface a usable status even for credit-less bookings
+    const row = result.rows[0];
+    if (row && !row.status) row.status = row.booking_status || 'confirmed';
+    return row || null;
   }
 
   if (INT_RE.test(rawId)) {
@@ -111,7 +127,7 @@ async function createCheckout(req, res) {
     }
     const memberId = String(sessionUser.id);
 
-    const { packageId, provider, email, startTimeUtc, endTimeUtc } = req.body;
+    const { packageId, provider, email, startTimeUtc, endTimeUtc, clientNotes } = req.body;
 
     if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
@@ -143,12 +159,17 @@ async function createCheckout(req, res) {
       slotTimes = { startTimeUtc, endTimeUtc };
     }
 
+    const safeClientNotes = clientNotes && typeof clientNotes === 'string'
+      ? clientNotes.trim().slice(0, 1000) || null
+      : null;
+
     const result = await callCheckoutService.createCallCheckout(
       memberId,
       Number(packageId),
       'epayco',
       email ? email.trim().toLowerCase() : null,
-      slotTimes
+      slotTimes,
+      safeClientNotes
     );
 
     return res.status(201).json({ success: true, ...result });
@@ -204,21 +225,6 @@ async function getBooking(req, res) {
 
     const roomName = `booking-${credit.id}`;
     const isModerator = userId === String(credit.creator_id);
-    const displayName = (isModerator ? credit.creator_display_name : credit.member_display_name) || userId;
-
-    let livekitInfo = null;
-    try {
-      const token = await generateToken(roomName, userId, displayName, isModerator, {
-        canPublishAudio: true,
-        canPublishVideo: true,
-      });
-      livekitInfo = { token, roomName, livekitUrl: LIVEKIT_WS_URL };
-    } catch (livekitErr) {
-      logger.warn('[callBookingController] LiveKit token generation failed', {
-        creditId: credit.id,
-        error: livekitErr.message,
-      });
-    }
 
     const booking = {
       id: credit.id,
@@ -240,7 +246,7 @@ async function getBooking(req, res) {
       member_photo: credit.member_photo,
     };
 
-    return res.json({ success: true, booking, livekit: livekitInfo });
+    return res.json({ success: true, booking });
   } catch (err) {
     logger.error('[callBookingController] getBooking error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to retrieve booking' });
@@ -280,14 +286,18 @@ async function joinBooking(req, res) {
       return res.status(403).json({ success: false, error: 'This booking is no longer active' });
     }
 
+    const roomName = `booking-${credit.id}`;
+    const isModerator = userId === String(credit.creator_id);
+
     // Enforce join window when a scheduled time exists
     if (credit.start_at) {
       const startMs = new Date(credit.start_at).getTime();
       const durationMs = (credit.duration_minutes || 60) * 60 * 1000;
       const nowMs = Date.now();
-      const EARLY_MS = 15 * 60 * 1000;  // allow joining 15 min before
+      const EARLY_MS = 15 * 60 * 1000;  // host may join 15 min before to set up
       const GRACE_MS = 30 * 60 * 1000;  // allow joining up to 30 min after end
 
+      // Everyone blocked before T-15 min
       if (nowMs < startMs - EARLY_MS) {
         return res.status(403).json({
           success: false,
@@ -295,13 +305,20 @@ async function joinBooking(req, res) {
           startAt: credit.start_at,
         });
       }
+
+      // Client (non-host) gets a waiting room between T-15 min and T-0
+      if (!isModerator && nowMs < startMs) {
+        return res.json({
+          waiting: true,
+          startAt: credit.start_at,
+          creatorUsername: credit.creator_display_name || credit.creator_username || 'your host',
+        });
+      }
+
       if (nowMs > startMs + durationMs + GRACE_MS) {
         return res.status(410).json({ success: false, error: 'This call has ended' });
       }
     }
-
-    const roomName = `booking-${credit.id}`;
-    const isModerator = userId === String(credit.creator_id);
     const displayName = isModerator
       ? (credit.creator_display_name || credit.creator_username || userId)
       : (credit.member_display_name || credit.member_username || userId);
@@ -309,20 +326,30 @@ async function joinBooking(req, res) {
     // TTL = booking duration + 30 min buffer so the token outlasts the call
     const ttlSeconds = (credit.duration_minutes || 60) * 60 + 30 * 60;
 
-    const token = await generateToken(roomName, userId, displayName, isModerator, {
-      canPublishAudio: true,
-      canPublishVideo: true,
-      ttlSeconds,
-    });
+    const jaasToken = generateJaasToken(roomName, userId, displayName, isModerator, ttlSeconds);
+    const jaasUrl = getJaasRoomUrl(roomName, jaasToken);
 
-    logger.info('[callBookingController] joinBooking token issued', {
+    logger.info('[callBookingController] joinBooking JaaS token issued', {
       creditId: credit.id,
       userId,
       roomName,
       isModerator,
       ttlSeconds,
     });
-    return res.json({ token, livekitUrl: LIVEKIT_WS_URL, roomName, ttlSeconds });
+
+    // M-02: Transition the call_sessions row to 'live' on first join.
+    // Fire-and-forget — a session lookup failure must never break the join response.
+    try {
+      const CallSessionModel = require('../../../models/callSessionModel');
+      const sess = await CallSessionModel.getByBookingId(credit.booking_uuid || credit.id);
+      if (sess && sess.status === 'scheduled') {
+        await CallSessionModel.start(sess.id);
+      }
+    } catch (sessErr) {
+      logger.warn('[callBookingController] could not start session on join (non-fatal)', { error: sessErr.message });
+    }
+
+    return res.json({ jaasUrl, jaasToken, roomName, ttlSeconds });
   } catch (err) {
     logger.error('[callBookingController] joinBooking error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to join call' });
@@ -346,14 +373,23 @@ async function submitSurvey(req, res) {
     }
     const memberId = String(sessionUser.id);
     const rawBookingId = String(req.params.bookingId || '');
-    if (rawBookingId.length > 15) {
-      return res.status(400).json({ success: false, error: 'Invalid bookingId' });
-    }
-    const creditId = Number(rawBookingId);
 
-    if (!Number.isInteger(creditId) || creditId < 1) {
+    // L-01: Accept both UUID (bookings.id) and positive integer (call_credits.id)
+    if (!UUID_RE.test(rawBookingId) && !INT_RE.test(rawBookingId)) {
       return res.status(400).json({ success: false, error: 'Invalid bookingId' });
     }
+    // For integer path, validate range; for UUID path, resolve credit_id via bookings
+    const isUuidId = UUID_RE.test(rawBookingId);
+    const isIntId = !isUuidId && INT_RE.test(rawBookingId);
+    let creditId;
+    if (isIntId) {
+      const parsed = Number(rawBookingId);
+      if (!Number.isInteger(parsed) || parsed < 1 || rawBookingId.length > 15) {
+        return res.status(400).json({ success: false, error: 'Invalid bookingId' });
+      }
+      creditId = parsed;
+    }
+    // UUID resolution happens below after rating validation
 
     const { rating, feedback } = req.body;
     const numRating = Number(rating);
@@ -361,13 +397,26 @@ async function submitSurvey(req, res) {
       return res.status(400).json({ success: false, error: 'rating must be an integer from 1 to 5' });
     }
 
-    // Validate the credit belongs to this member and has been used at least once
-    const creditResult = await query(
-      `SELECT cc.id, cc.creator_id, cc.quantity_used
-       FROM call_credits cc
-       WHERE cc.id = $1 AND cc.member_id = $2`,
-      [creditId, memberId]
-    );
+    // Validate the credit belongs to this member and has been used at least once.
+    // When caller passes a UUID (bookings.id), resolve credit_id through the bookings join.
+    let creditResult;
+    if (isUuidId) {
+      creditResult = await query(
+        `SELECT cc.id, cc.creator_id, cc.quantity_used
+         FROM call_credits cc
+         JOIN bookings b ON b.credit_id = cc.id
+         WHERE b.id = $1 AND cc.member_id = $2`,
+        [rawBookingId, memberId]
+      );
+      if (creditResult.rows[0]) creditId = creditResult.rows[0].id;
+    } else {
+      creditResult = await query(
+        `SELECT cc.id, cc.creator_id, cc.quantity_used
+         FROM call_credits cc
+         WHERE cc.id = $1 AND cc.member_id = $2`,
+        [creditId, memberId]
+      );
+    }
     const credit = creditResult.rows[0];
     if (!credit) {
       return res.status(404).json({ success: false, error: 'Booking not found or not accessible' });
@@ -952,7 +1001,7 @@ async function createCheckoutNowPayments(req, res) {
     }
     const userId = String(sessionUser.id);
 
-    const { packageId, startTimeUtc, endTimeUtc, payCurrency: rawPayCurrency } = req.body;
+    const { packageId, startTimeUtc, endTimeUtc, payCurrency: rawPayCurrency, clientNotes: rawClientNotesNp } = req.body;
 
     if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
@@ -985,12 +1034,16 @@ async function createCheckoutNowPayments(req, res) {
       slotTimes = { startTimeUtc, endTimeUtc };
     }
 
+    const clientNotesNp = rawClientNotesNp && typeof rawClientNotesNp === 'string'
+      ? rawClientNotesNp.trim().slice(0, 1000) || null : null;
+
     const result = await callCheckoutService.createCallCheckoutNowPayments({
       userId,
       packageId: Number(packageId),
       startTimeUtc: slotTimes?.startTimeUtc ?? null,
       endTimeUtc: slotTimes?.endTimeUtc ?? null,
       payCurrency,
+      clientNotes: clientNotesNp,
     });
 
     return res.status(201).json({ success: true, ...result });
@@ -1028,7 +1081,7 @@ async function createCheckoutBtc(req, res) {
     }
     const userId = String(sessionUser.id);
 
-    const { packageId, startTimeUtc, endTimeUtc } = req.body;
+    const { packageId, startTimeUtc, endTimeUtc, clientNotes: rawClientNotesBtc } = req.body;
 
     if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
@@ -1057,11 +1110,15 @@ async function createCheckoutBtc(req, res) {
       slotTimes = { startTimeUtc, endTimeUtc };
     }
 
+    const clientNotesBtc = rawClientNotesBtc && typeof rawClientNotesBtc === 'string'
+      ? rawClientNotesBtc.trim().slice(0, 1000) || null : null;
+
     const result = await callCheckoutService.createCallCheckoutBtc({
       userId,
       packageId: Number(packageId),
       startTimeUtc: slotTimes?.startTimeUtc ?? null,
       endTimeUtc: slotTimes?.endTimeUtc ?? null,
+      clientNotes: clientNotesBtc,
     });
 
     return res.status(201).json({ success: true, ...result });
@@ -1235,7 +1292,9 @@ async function getUpcomingBookings(req, res) {
          b.performer_id,
          u_creator.id          AS creator_id,
          u_creator.username    AS performer_username,
+         u_creator.username    AS creator_username,
          COALESCE(u_creator.first_name, u_creator.username) AS performer_name,
+         COALESCE(u_creator.first_name, u_creator.username) AS creator_name,
          u_creator.photo_file_id AS performer_photo,
          b.start_time_utc,
          b.end_time_utc,

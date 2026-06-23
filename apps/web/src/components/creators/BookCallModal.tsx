@@ -157,6 +157,7 @@ export function BookCallModal({
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
   const [provider, setProvider] = useState<Provider>("nowpayments");
   const [email, setEmail] = useState("");
+  const [clientNotes, setClientNotes] = useState("");
 
   // ── Data state ──────────────────────────────────────────────────────────────
   const [packages, setPackages] = useState<CallPackage[]>([]);
@@ -242,6 +243,7 @@ export function BookCallModal({
     setSelectedSlot(null);
     setProvider("nowpayments");
     setEmail("");
+    setClientNotes("");
     setCheckoutError(null);
     setConfirmedStartAt(null);
     setConfirmedRoomName(null);
@@ -454,11 +456,14 @@ export function BookCallModal({
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
           selectedSlot?.endUtc ?? undefined,
-          email.trim() || undefined
+          email.trim() || undefined,
+          clientNotes.trim() || undefined
         );
         if (epaycoRes.checkoutUrl || epaycoRes.paymentUrl) {
+          const url = epaycoRes.checkoutUrl || epaycoRes.paymentUrl;
+          const safeUrl = assertPaymentUrl(url);
           navigatingAway = true;
-          window.location.href = epaycoRes.checkoutUrl || epaycoRes.paymentUrl;
+          window.location.href = safeUrl;
           return;
         } else {
           setCheckoutError(t.creator.checkoutFailed);
@@ -471,7 +476,9 @@ export function BookCallModal({
         const npRes = await createCallCheckoutNowPayments(
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
-          selectedSlot?.endUtc ?? undefined
+          selectedSlot?.endUtc ?? undefined,
+          undefined,
+          clientNotes.trim() || undefined
         );
         if (npRes.invoiceUrl) {
           const safeUrl = assertPaymentUrl(npRes.invoiceUrl);
@@ -510,8 +517,9 @@ export function BookCallModal({
                 paymentPopupRef.current?.close();
                 paymentPopupRef.current = null;
                 setConfirmedRoomName(status.roomName ?? null);
-                // bookingId is null for NOW flow (credits-only, no pre-created booking)
-                setConfirmedBookingId(status.bookingId ?? null);
+                // Preserve an existing confirmedBookingId (e.g. from slot selection) if
+                // the poll response doesn't include one (credits-only NOW flow).
+                setConfirmedBookingId((prev) => status.bookingId ?? prev);
                 if (selectedSlot?.startUtc) setConfirmedStartAt(selectedSlot.startUtc);
                 setStep("SUCCESS");
                 setCheckoutLoading(false);
@@ -550,6 +558,7 @@ export function BookCallModal({
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
           selectedSlot?.endUtc ?? undefined,
+          clientNotes.trim() || undefined
         );
         if (btcRes.checkoutUrl) {
           const safeUrl = assertPaymentUrl(btcRes.checkoutUrl);
@@ -588,7 +597,8 @@ export function BookCallModal({
                 paymentPopupRef.current?.close();
                 paymentPopupRef.current = null;
                 setConfirmedRoomName(status.roomName ?? null);
-                setConfirmedBookingId(status.bookingId ?? null);
+                // Preserve an existing confirmedBookingId if poll response omits one.
+                setConfirmedBookingId((prev) => status.bookingId ?? prev);
                 if (selectedSlot?.startUtc) setConfirmedStartAt(selectedSlot.startUtc);
                 setStep("SUCCESS");
                 setCheckoutLoading(false);
@@ -1250,6 +1260,38 @@ export function BookCallModal({
         />
       </div>
 
+      {/* Client notes */}
+      <div>
+        <label
+          htmlFor="checkout-client-notes"
+          className="block text-xs font-semibold uppercase tracking-wider mb-1.5"
+          style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
+        >
+          Tell the model what you enjoy <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>(optional)</span>
+        </label>
+        <textarea
+          id="checkout-client-notes"
+          maxLength={1000}
+          rows={3}
+          value={clientNotes}
+          onChange={(e) => setClientNotes(e.target.value)}
+          placeholder="e.g. I love role-play, slow pace, I'm shy at first…"
+          className="w-full px-4 py-3 rounded-xl text-sm transition-colors focus:outline-none resize-none"
+          style={{
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.12)",
+            color: "#EBEBF5",
+          }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = "#D4007A"; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}
+        />
+        {clientNotes.length > 800 && (
+          <p className="text-xs mt-1 text-right" style={{ color: clientNotes.length >= 1000 ? "#FF453A" : "var(--pnp-text-secondary, #8E8E93)" }}>
+            {clientNotes.length}/1000
+          </p>
+        )}
+      </div>
+
       {/* Crypto: 15-min timeout recovery card */}
       {(provider === "nowpayments" || provider === "btc") && dashTimedOut && (
         <div
@@ -1434,8 +1476,9 @@ export function BookCallModal({
             )}
           </div>
 
-          {/* Join Call button — only within ±15min of start */}
-          {isWithinJoinWindow && confirmedBookingId ? (
+          {/* Join Call / scheduling actions — conditional on booking state */}
+          {confirmedBookingId && isWithinJoinWindow ? (
+            // Within ±15min of start — show Join Call button
             <div className="w-full space-y-2">
               {joinCallError && (
                 <p className="text-xs text-center" style={{ color: "#FF453A" }}>{joinCallError}</p>
@@ -1463,7 +1506,7 @@ export function BookCallModal({
               </button>
             </div>
           ) : confirmedBookingId ? (
-            // Future booking — send user to the confirmation page with countdown timer
+            // Future booking — show scheduled time + link to booking details page
             <div className="w-full space-y-2.5">
               <div
                 className="w-full rounded-xl px-4 py-3 text-sm text-center"
@@ -1471,7 +1514,7 @@ export function BookCallModal({
               >
                 {startTimeForJoin ? (
                   <>
-                    Scheduled for{" "}
+                    Call scheduled for{" "}
                     <span style={{ color: "#EBEBF5" }}>
                       {(() => { const { date, time } = formatSlotDate(startTimeForJoin); return `${date} at ${time}`; })()}
                     </span>. We'll send a reminder 15 min before.
@@ -1495,7 +1538,15 @@ export function BookCallModal({
                 View Booking Details
               </button>
             </div>
-          ) : null}
+          ) : (
+            // No bookingId — book-now credits flow with no pre-created booking
+            <div
+              className="w-full rounded-xl px-4 py-3 text-sm text-center"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+            >
+              Payment confirmed! You'll receive booking details by email.
+            </div>
+          )}
 
           <button
             type="button"

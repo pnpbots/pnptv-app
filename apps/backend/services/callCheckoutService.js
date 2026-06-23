@@ -53,7 +53,7 @@ function escapeHtml(str) {
  * @param {object|null} slotTimes - optional { startTimeUtc, endTimeUtc } for slot-locked bookings
  * @returns {{ paymentId: string, checkoutUrl: string, amount: number, currency: string, sku: string }}
  */
-async function createCallCheckout(memberId, packageId, provider, email, slotTimes = null) {
+async function createCallCheckout(memberId, packageId, provider, email, slotTimes = null, clientNotes = null) {
   // 1. Load and validate the package
   const pkgResult = await query(
     'SELECT * FROM call_packages WHERE id = $1 AND is_active = true',
@@ -149,6 +149,7 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
         endTimeUtc: slotTimes.endTimeUtc,
         durationMinutes: pkg.duration_minutes,
         priceUsd: pkg.price_usd,
+        clientNotes,
       });
       // Persist booking id into payment metadata so onCallPaymentSuccess
       // flips the right row to 'confirmed' when the webhook lands.
@@ -297,15 +298,16 @@ async function onCallPaymentSuccess(paymentId) {
             `INSERT INTO bookings
                (user_id, performer_id, package_id, payment_id, credit_id,
                 start_time_utc, end_time_utc, status, call_type,
-                duration_minutes, price_cents, currency)
+                duration_minutes, price_cents, currency, client_notes)
              VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$7::timestamptz,
-                     'confirmed','video',$8,$9,'USD')
+                     'confirmed','video',$8,$9,'USD',$10::text)
              ON CONFLICT DO NOTHING
              RETURNING id`,
             [
               payment.user_id, performerId, packageId, paymentId, credit.id,
               bookingMeta.startTimeUtc, bookingMeta.endTimeUtc,
               pkgForBooking.duration_minutes, priceCents,
+              meta.clientNotes ? String(meta.clientNotes).slice(0, 1000) : null,
             ]
           );
           confirmedBookingId = newBooking.rows[0]?.id || null;
@@ -429,15 +431,35 @@ async function onCallPaymentSuccess(paymentId) {
         const callJoinUrl = `${WEB_APP_URL}/call/${encodeURIComponent(String(credit.id))}`;
         // Send booking confirmation emails + Telegram to both parties (always, scheduled or NOW)
         const notifSvc = getCallNotificationService();
+
+        // H-01: fetch client_notes from confirmed booking row for notification context
+        let bookingClientNotes = null;
+        if (confirmedBookingId) {
+          const bookingRow = await query(
+            'SELECT client_notes FROM bookings WHERE id = $1 LIMIT 1',
+            [confirmedBookingId]
+          );
+          bookingClientNotes = bookingRow.rows[0]?.client_notes || null;
+        }
+
         const bookingSummary = {
           creator_name: creatorName,
           start_at: meta.startTimeUtc || null,
           duration_minutes: pkg.duration_minutes,
+          client_notes: bookingClientNotes,
         };
+
+        // H-03: fetch member display info for creator notification
+        const { rows: [memberRow] } = await query(
+          'SELECT display_name, username FROM users WHERE id = $1',
+          [payment.user_id]
+        );
+        const memberInfo = { display_name: memberRow?.display_name || memberRow?.username || 'a member' };
+
         const callInfo = { meetingUrl: callJoinUrl };
         await Promise.allSettled([
           notifSvc.sendBookingConfirmationToMember(payment.user_id, bookingSummary, callInfo),
-          notifSvc.sendBookingConfirmationToCreator(creator_id, bookingSummary, {}, callInfo),
+          notifSvc.sendBookingConfirmationToCreator(creator_id, bookingSummary, memberInfo, callInfo),
         ]);
 
         if (confirmedBookingId && meta.startTimeUtc) {
@@ -461,7 +483,7 @@ async function onCallPaymentSuccess(paymentId) {
             const CallSessionModel = require('../models/callSessionModel');
             await CallSessionModel.create({
               bookingId: confirmedBookingId,
-              roomProvider: 'livekit',
+              roomProvider: 'jitsi',
               roomId: `booking-${credit.id}`,
               roomName: `Private Call - ${safeCreatorName}`,
               maxParticipants: 2,
@@ -522,6 +544,7 @@ async function _lockSlotAndInsertBooking(client, {
   packageId,
   durationMinutes,
   priceUsd,
+  clientNotes = null,
 }) {
   // Acquire row-level lock on any overlapping active bookings.
   // FOR UPDATE blocks concurrent writers from confirming the same slot.
@@ -541,15 +564,16 @@ async function _lockSlotAndInsertBooking(client, {
   }
 
   const priceCents = Math.round(parseFloat(priceUsd) * 100);
+  const safeNotes = clientNotes ? String(clientNotes).slice(0, 1000) : null;
 
   const insertResult = await client.query(
     `INSERT INTO bookings
        (user_id, performer_id, package_id, payment_id, start_time_utc, end_time_utc,
-        status, call_type, duration_minutes, price_cents, currency)
+        status, call_type, duration_minutes, price_cents, currency, client_notes)
      VALUES ($1, $2, $3, $4, $5::timestamptz, $6::timestamptz,
-             'awaiting_payment', 'video', $7, $8, 'USD')
+             'awaiting_payment', 'video', $7, $8, 'USD', $9::text)
      RETURNING *`,
-    [memberId, performerId, packageId, paymentId, startTimeUtc, endTimeUtc, durationMinutes, priceCents]
+    [memberId, performerId, packageId, paymentId, startTimeUtc, endTimeUtc, durationMinutes, priceCents, safeNotes]
   );
   return insertResult.rows[0];
 }
@@ -585,7 +609,7 @@ async function _getPerformerId(client, creatorUserId) {
  * @param {string} [opts.payCurrency]  - Optional NowPayments pay_currency (e.g. 'btc', 'btcln')
  * @returns {{ invoiceUrl, paymentId, bookingId, amountUsd, expiresAt, orderId }}
  */
-async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, endTimeUtc, payCurrency = null }) {
+async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, endTimeUtc, payCurrency = null, clientNotes = null }) {
   const axios = require('axios');
   const NOWPAYMENTS_API_KEY = process.env.NOWPAYMENTS_API_KEY || '';
   if (!NOWPAYMENTS_API_KEY) {
@@ -652,6 +676,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
         packageId: pkg.id,
         durationMinutes: pkg.duration_minutes,
         priceUsd: pkg.price_usd,
+        clientNotes,
       });
     }
     await client.query('COMMIT');
@@ -764,7 +789,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
  * @param {string} [opts.endTimeUtc]   - ISO 8601
  * @returns {{ invoiceId, checkoutUrl, bookingId, usdAmount, orderId }}
  */
-async function createCallCheckoutBtc({ userId, packageId, startTimeUtc, endTimeUtc }) {
+async function createCallCheckoutBtc({ userId, packageId, startTimeUtc, endTimeUtc, clientNotes = null }) {
   const { createInvoice } = require('../config/btcpay');
 
   // 1. Load package
@@ -824,6 +849,7 @@ async function createCallCheckoutBtc({ userId, packageId, startTimeUtc, endTimeU
         packageId: pkg.id,
         durationMinutes: pkg.duration_minutes,
         priceUsd: pkg.price_usd,
+        clientNotes,
       });
     }
     await client.query('COMMIT');
@@ -950,6 +976,14 @@ async function expireAbandonedBookings() {
           [paymentIds],
         );
       }
+      // M-09: cancel pending booking_notifications for each expired booking
+      for (const row of result.rows) {
+        await query(
+          `UPDATE booking_notifications SET status = 'cancelled' WHERE booking_id = $1 AND status = 'pending'`,
+          [row.id]
+        ).catch(() => {});
+      }
+
       logger.info('[callCheckoutService] expireAbandonedBookings: expired stuck bookings', {
         count: expired,
         paymentIds,

@@ -17,20 +17,50 @@ const logger = require('../utils/logger');
 const APP_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
 
 // ---------------------------------------------------------------------------
+// Security helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Escape user-supplied strings before interpolation into HTML or Telegram
+ * HTML parse_mode messages. & must be escaped first to avoid double-encoding.
+ */
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Format a UTC ISO timestamp into a human-readable string for emails/Telegram. */
-function formatDateTime(isoString) {
+/**
+ * Format a UTC ISO timestamp for display.
+ * Uses the recipient's stored timezone when provided; otherwise shows relative
+ * time ("starts in X minutes") which is always correct regardless of locale.
+ */
+function formatDateTime(isoString, tz) {
+  if (!isoString) return 'Scheduled';
   const d = new Date(isoString);
+  const diffMs  = d.getTime() - Date.now();
+  const diffMin = Math.round(diffMs / 60000);
+  const rel = diffMin <= 0 ? 'right now'
+    : diffMin < 60 ? `in ${diffMin} minute${diffMin === 1 ? '' : 's'}`
+    : null; // for calls far in the future, use absolute time
+
+  if (tz) {
+    try {
+      const localStr = d.toLocaleString('en-US', {
+        timeZone: tz, year: 'numeric', month: 'long', day: 'numeric',
+        hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short',
+      });
+      return rel ? `${localStr} (${rel})` : localStr;
+    } catch { /* fall through */ }
+  }
+
+  // No timezone — use relative if < 60 min away, otherwise UTC absolute
+  if (rel) return `Starts ${rel}`;
   return d.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'UTC',
-    timeZoneName: 'short',
+    year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short',
   });
 }
 
@@ -41,13 +71,15 @@ function formatDateTime(isoString) {
 async function fetchUserInfo(userId) {
   try {
     const { rows } = await query(
-      `SELECT email, username, display_name FROM users WHERE id = $1`,
+      `SELECT email, username, timezone,
+              COALESCE(NULLIF(TRIM(first_name || ' ' || COALESCE(last_name, '')), ''), username) AS display_name
+       FROM users WHERE id = $1`,
       [userId]
     );
-    return rows[0] || { email: null, username: userId, display_name: null };
+    return rows[0] || { email: null, username: String(userId), display_name: null, timezone: null };
   } catch (err) {
     logger.warn('[callNotificationService] fetchUserInfo error', { userId, error: err.message });
-    return { email: null, username: userId, display_name: null };
+    return { email: null, username: String(userId), display_name: null, timezone: null };
   }
 }
 
@@ -124,8 +156,8 @@ function buildBaseEmailHtml({ title, headerSubtitle, contentHtml }) {
 </html>`.trim();
 }
 
-function memberConfirmationHtml({ creatorName, startAt, durationMinutes, joinUrl }) {
-  const formattedTime = formatDateTime(startAt);
+function memberConfirmationHtml({ creatorName, startAt, durationMinutes, joinUrl, timezone }) {
+  const formattedTime = formatDateTime(startAt, timezone);
   return buildBaseEmailHtml({
     headerSubtitle: 'Book a Call',
     title: 'Your call is booked!',
@@ -165,8 +197,11 @@ function memberConfirmationHtml({ creatorName, startAt, durationMinutes, joinUrl
   });
 }
 
-function creatorConfirmationHtml({ memberUsername, startAt, durationMinutes, joinUrl }) {
-  const formattedTime = formatDateTime(startAt);
+function creatorConfirmationHtml({ memberUsername, startAt, durationMinutes, joinUrl, timezone, clientNotes }) {
+  const formattedTime = formatDateTime(startAt, timezone);
+  const notesBlock = clientNotes
+    ? `<div class="info-block"><h3>Client notes</h3><p>${escHtml(clientNotes)}</p></div>`
+    : '';
   return buildBaseEmailHtml({
     headerSubtitle: 'Book a Call',
     title: 'New call booking!',
@@ -180,6 +215,7 @@ function creatorConfirmationHtml({ memberUsername, startAt, durationMinutes, joi
       <p><strong>Duration:</strong> ${durationMinutes} minutes</p>
       ${joinUrl ? `<p><strong>Join Link:</strong> <a href="${joinUrl}">${joinUrl}</a></p>` : ''}
     </div>
+    ${notesBlock}
 
     <div class="info-block">
       <h3>Creator guidelines</h3>
@@ -224,14 +260,15 @@ async function sendBookingConfirmationToMember(memberId, booking, callInfo) {
         startAt: booking.start_at,
         durationMinutes: booking.duration_minutes,
         joinUrl,
+        timezone: memberInfo.timezone,
       }),
     });
   }
 
   // Telegram
-  const formattedTime = booking.start_at ? formatDateTime(booking.start_at) : 'Now';
+  const formattedTime = booking.start_at ? formatDateTime(booking.start_at, memberInfo.timezone) : 'Now';
   const joinLine = joinUrl ? `\n\n🔗 Join your call:\n${joinUrl}` : '';
-  const tgMsg = `✅ Your 1-on-1 call with <b>${creatorName}</b> is confirmed!\n\n📅 ${formattedTime}\n⏱ ${booking.duration_minutes} min${joinLine}`;
+  const tgMsg = `✅ Your 1-on-1 call with <b>${creatorName}</b> is confirmed!\n\n⏰ ${formattedTime}\n⏱ ${booking.duration_minutes} min${joinLine}`;
   await sendNotificationViaTelegram(memberId, {
     type: 'hangout_call',
     message: tgMsg,
@@ -252,6 +289,7 @@ async function sendBookingConfirmationToCreator(creatorId, booking, memberInfo, 
   const creatorUserInfo = await fetchUserInfo(creatorId);
   const memberUsername = memberInfo?.display_name || memberInfo?.username || 'a member';
   const joinUrl = callInfo?.meetingUrl || null;
+  const clientNotes = booking.client_notes || null;
 
   // Email
   if (creatorUserInfo.email) {
@@ -263,14 +301,17 @@ async function sendBookingConfirmationToCreator(creatorId, booking, memberInfo, 
         startAt: booking.start_at,
         durationMinutes: booking.duration_minutes,
         joinUrl,
+        timezone: creatorUserInfo.timezone,
+        clientNotes,
       }),
     });
   }
 
   // Telegram
-  const formattedTime = booking.start_at ? formatDateTime(booking.start_at) : 'Now';
+  const formattedTime = booking.start_at ? formatDateTime(booking.start_at, creatorUserInfo.timezone) : 'Now';
   const joinLine = joinUrl ? `\n\n🔗 Join the call:\n${joinUrl}` : '';
-  const tgMsg = `🔔 New call booking from <b>${memberUsername}</b>!\n\n📅 ${formattedTime}\n⏱ ${booking.duration_minutes} min${joinLine}`;
+  const notesLine = clientNotes ? `\n\n📝 Notes from client:\n${escHtml(clientNotes)}` : '';
+  const tgMsg = `🔔 New call booking from <b>${memberUsername}</b>!\n\n⏰ ${formattedTime}\n⏱ ${booking.duration_minutes} min${notesLine}${joinLine}`;
   await sendNotificationViaTelegram(creatorId, {
     type: 'hangout_call',
     message: tgMsg,
@@ -374,17 +415,19 @@ async function reconcileReminders() {
       `SELECT b.id AS booking_id,
               b.user_id    AS member_id,
               p.user_id    AS creator_id,
-              b.scheduled_at AS start_at
-       FROM call_bookings b
+              b.start_time_utc AS start_at,
+              b.credit_id
+       FROM bookings b
        JOIN performers p ON p.id = b.performer_id
-       WHERE b.status IN ('confirmed', 'paid')
-         AND b.scheduled_at > NOW()`
+       WHERE b.status = 'confirmed'
+         AND b.start_time_utc > NOW()`
     );
 
     let count = 0;
     for (const row of rows) {
       try {
-        scheduleCallReminders(row.booking_id, row.creator_id, row.member_id, row.start_at, null);
+        const callInfo = { joinUrl: `${APP_URL}/call/${row.credit_id || row.booking_id}` };
+        scheduleCallReminders(row.booking_id, row.creator_id, row.member_id, row.start_at, callInfo);
         count++;
       } catch (schedErr) {
         logger.warn('[callNotificationService] reconcileReminders: failed to schedule reminder', {
@@ -457,10 +500,75 @@ async function sendPostCallSurveyPrompt(memberId, bookingId, creatorDisplayName)
   }
 }
 
+// ---------------------------------------------------------------------------
+// Dispatch pending DB-scheduled notifications (called by cron)
+// ---------------------------------------------------------------------------
+
+/**
+ * Flush all due `booking_notifications` rows. Called every 5 minutes by cron.js.
+ * Dispatches reminder_60 / reminder_15 / reminder_5 notifications via email + Telegram.
+ * Marks each row sent or failed; retries up to 3 times before giving up.
+ */
+async function sendPendingNotifications() {
+  const BookingNotificationModel = require('../models/bookingNotificationModel');
+  const pending = await BookingNotificationModel.getDuePending();
+  if (pending.length === 0) return;
+
+  logger.info('[callNotificationService] dispatching pending booking notifications', { count: pending.length });
+
+  for (const notif of pending) {
+    try {
+      const { userId, bookingId, type, performerName, startTimeUtc, durationMinutes, recipientType } = notif;
+      const userInfo = await fetchUserInfo(userId);
+      const joinUrl = bookingId ? `${APP_URL}/call/${encodeURIComponent(bookingId)}` : null;
+      const timeLabel = startTimeUtc ? formatDateTime(startTimeUtc, userInfo.timezone) : 'soon';
+      const joinLine = joinUrl ? `\n\n🔗 Join here:\n${joinUrl}` : '';
+
+      let minutesBefore = 60;
+      if (type === 'reminder_15') minutesBefore = 15;
+      if (type === 'reminder_5') minutesBefore = 5;
+
+      if (type === 'reminder_60' || type === 'reminder_15' || type === 'reminder_5') {
+        const label = minutesBefore === 60 ? '1 hour' : `${minutesBefore} minutes`;
+        const party = recipientType === 'performer' ? performerName || 'a member' : performerName || 'your creator';
+        const tgMsg = `⏰ Reminder: your call with <b>${party}</b> starts in <b>${label}</b>!\n\n${timeLabel}${joinLine}`;
+        await sendNotificationViaTelegram(userId, {
+          type: 'hangout_call',
+          message: tgMsg,
+          entityType: 'call',
+          entityId: bookingId,
+        }).catch(() => {});
+
+        if (userInfo.email) {
+          await sendBookingEmail({
+            to: userInfo.email,
+            subject: `Your call starts in ${label} — PNPtv`,
+            html: memberConfirmationHtml({
+              creatorName: party,
+              startAt: startTimeUtc,
+              durationMinutes,
+              joinUrl,
+              timezone: userInfo.timezone,
+            }),
+          });
+        }
+      }
+
+      await BookingNotificationModel.markSent(notif.id);
+    } catch (dispatchErr) {
+      logger.warn('[callNotificationService] notification dispatch failed', { notifId: notif.id, error: dispatchErr.message });
+      if ((notif.retryCount || 0) >= 3) {
+        await BookingNotificationModel.markFailed(notif.id, dispatchErr.message).catch(() => {});
+      }
+    }
+  }
+}
+
 module.exports = {
   sendBookingConfirmationToMember,
   sendBookingConfirmationToCreator,
   scheduleCallReminders,
   reconcileReminders,
   sendPostCallSurveyPrompt,
+  sendPendingNotifications,
 };

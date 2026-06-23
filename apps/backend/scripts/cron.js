@@ -26,6 +26,8 @@ const AppUserService = require(path.join(backendPath, 'services/userService'));
 const CristinaFeedService = require(path.join(backendPath, 'services/cristinaFeedService'));
 const StreamRecordingService = require(path.join(backendPath, 'services/streamRecordingService'));
 const { failStuckVideoUploads } = require(path.join(backendPath, 'services/channelVideoService'));
+const { sendPendingNotifications, reconcileReminders } = require(path.join(backendPath, 'services/callNotificationService'));
+const PrivateCallBookingService = require(path.join(backendPath, 'services/privateCallBookingService'));
 
 /**
  * Initialize and start cron jobs
@@ -37,6 +39,42 @@ const startCronJobs = async (bot = null) => {
     // Initialize dependencies
     initializeRedis();
     await initializePostgres();
+
+    // H-06: Re-schedule in-memory call reminders for all confirmed future bookings.
+    // Must run after DB is ready so setTimeout-based reminders lost during container
+    // restart are restored immediately on startup.
+    reconcileReminders().catch((err) =>
+      logger.error('[cron] reconcileReminders startup failed', { error: err.message })
+    );
+
+    // M-13: Reconcile call sessions that completed while the container was down.
+    // Flips 'scheduled' sessions that are 15+ min past their end time to 'completed'
+    // and fires the post-call hook for each so earnings and survey prompts are sent.
+    (async () => {
+      try {
+        const { query: pgQueryStartup } = require(path.join(backendPath, 'config/postgres'));
+        const { rows: staleSessions } = await pgQueryStartup(`
+          UPDATE call_sessions
+          SET status = 'completed', ended_at = NOW()
+          WHERE status = 'scheduled'
+            AND booking_id IN (
+              SELECT id FROM bookings
+              WHERE end_time_utc < NOW() - INTERVAL '15 minutes'
+            )
+          RETURNING booking_id
+        `);
+        if (staleSessions.length > 0) {
+          logger.info('[cron] reconciled stale call sessions on startup', { count: staleSessions.length });
+          for (const row of staleSessions) {
+            PrivateCallBookingService._onCallCompleted(row.booking_id).catch((err) =>
+              logger.warn('[cron] startup _onCallCompleted failed', { bookingId: row.booking_id, error: err.message })
+            );
+          }
+        }
+      } catch (err) {
+        logger.warn('[cron] startup session reconciliation failed', { error: err.message });
+      }
+    })();
 
     // Initialize services with bot if provided
     if (bot) {
@@ -674,6 +712,10 @@ const startCronJobs = async (bot = null) => {
                 [row.credit_id]
               );
             }
+            // M-03: Fire post-call hook — records earnings + sends survey prompt
+            PrivateCallBookingService._onCallCompleted(row.id).catch((err) =>
+              logger.error('[cron] _onCallCompleted failed', { creditId: row.id, error: err.message })
+            );
           } catch (innerErr) {
             logger.error('[Cron] Auto-complete booking error', { bookingId: row.id, error: innerErr.message });
           }
@@ -777,6 +819,38 @@ const startCronJobs = async (bot = null) => {
         if (total > 0) logger.info('[retention] user_access_logs purged', { deleted: total });
       } catch (err) {
         logger.error('[retention] user_access_logs purge error', { error: err.message });
+      }
+    });
+
+    // DB-scheduled call notification reminders — every 5 minutes
+    // Dispatches booking_notifications rows whose scheduled_for has passed.
+    // Covers reminder_60, reminder_15, reminder_5 for both member and performer.
+    cron.schedule('*/5 * * * *', async () => {
+      try {
+        await sendPendingNotifications();
+      } catch (err) {
+        logger.error('[callNotifications] sendPendingNotifications cron error', { error: err.message });
+      }
+    });
+
+    // H-05: Auto-end overdue live (and stuck-scheduled) call sessions — every 5 min.
+    // CallSessionModel.getOverdueSessions now catches both 'live' and 'scheduled' rows
+    // that are 15+ min past their end time (H-09 fix), so this single cron handles both.
+    cron.schedule('*/5 * * * *', async () => {
+      try {
+        await PrivateCallBookingService.autoEndOverdueCalls();
+      } catch (err) {
+        logger.error('[cron] autoEndOverdueCalls error', { error: err.message });
+      }
+    });
+
+    // H-05: Detect no-shows — every 15 min.
+    // Marks confirmed bookings as no_show when the grace period has elapsed with no join.
+    cron.schedule('*/15 * * * *', async () => {
+      try {
+        await PrivateCallBookingService.checkNoShows();
+      } catch (err) {
+        logger.error('[cron] checkNoShows error', { error: err.message });
       }
     });
 

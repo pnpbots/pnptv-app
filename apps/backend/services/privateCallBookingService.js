@@ -4,7 +4,7 @@ const CallSessionModel = require('../models/callSessionModel');
 const BookingNotificationModel = require('../models/bookingNotificationModel');
 const PerformerModel = require('../models/performerModel');
 const UserService = require('./userService');
-const { generateToken, LIVEKIT_WS_URL } = require('./livekitService');
+const { getJaasRoomUrl, JAAS_APP_ID } = require('./jaasService');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
@@ -59,14 +59,20 @@ class PrivateCallBookingService {
         reasons.push('private_calls_disabled');
       }
 
-      // Check membership (require prime for private calls)
-      const hasPrime = (user.tier || '').toLowerCase() === 'prime' || (user.tier || '').toLowerCase() === 'admin';
-      const membershipExpired = user.subscription_expires_at && new Date(user.subscription_expires_at) < new Date();
+      // Check membership (require prime for private calls).
+      // M-10: Use entitlement system as source of truth; fall back to users.tier on error.
+      let hasPrime = false;
+      try {
+        const EntitlementAccessService = require('./entitlementAccessService');
+        hasPrime = await EntitlementAccessService.hasEntitlement(userId, 'prime')
+          || (user.tier || '').toLowerCase() === 'admin';
+      } catch (entErr) {
+        logger.warn('[privateCallBookingService] entitlement check failed, falling back to users.tier', { userId, error: entErr.message });
+        hasPrime = (user.tier || '').toLowerCase() === 'prime' || (user.tier || '').toLowerCase() === 'admin';
+      }
 
       if (!hasPrime) {
         reasons.push('membership_required');
-      } else if (membershipExpired) {
-        reasons.push('membership_expired');
       }
 
       return {
@@ -425,6 +431,15 @@ class PrivateCallBookingService {
         return { success: false, error: 'payment_not_found' };
       }
 
+      // Idempotency: if booking is already confirmed, return success without re-processing
+      const existingBooking = await BookingModel.getById(payment.bookingId);
+      if (existingBooking && existingBooking.status === 'confirmed') {
+        logger.info('handlePaymentComplete: booking already confirmed, skipping (idempotent)', {
+          paymentId, bookingId: payment.bookingId,
+        });
+        return { success: true, booking: existingBooking, session: null, alreadyProcessed: true };
+      }
+
       // Update payment status
       await BookingModel.updatePaymentStatus(paymentId, 'paid', { providerPaymentId });
 
@@ -436,8 +451,11 @@ class PrivateCallBookingService {
 
       const booking = confirmResult.booking;
 
-      // Create call session
-      const session = await this.createCallSession(payment.bookingId);
+      // call_sessions row is now exclusively created by callCheckoutService.onCallPaymentSuccess
+      // (which runs in the payment webhook path and sets room_provider='livekit').
+      // Creating a second row here caused an ON CONFLICT DO UPDATE race where whichever
+      // service ran last would overwrite the other's provider/roomId, splitting participants
+      // across rooms. The session field in the return value is kept for API compatibility.
 
       // Schedule reminders
       const performer = await PerformerModel.getById(booking.performerId);
@@ -446,28 +464,93 @@ class PrivateCallBookingService {
         performer?.userId
       );
 
-      // Fire-and-forget: send immediate confirmation emails + Telegram to both parties
+      // Fire-and-forget: send immediate confirmation emails + Telegram + system DMs
       const _bookingId = payment.bookingId;
       const _performer = performer;
       const _booking = booking;
       ;(async () => {
         try {
-          const { rows } = await query(
-            `SELECT username, display_name FROM users WHERE id = $1`,
-            [_booking.userId]
+          const sendSystemDM = require('./sendSystemDM');
+          const SYSTEM_ID = process.env.SYSTEM_DM_SENDER_ID || '8552451957'; // PNPTVADMIN
+
+          // Fetch member info + both users' timezones in one query
+          const { rows: userRows } = await query(
+            `SELECT id, username,
+                    COALESCE(NULLIF(TRIM(first_name || ' ' || COALESCE(last_name,'')), ''), username) AS display_name,
+                    timezone
+             FROM users WHERE id = ANY($1::text[])`,
+            [[String(_booking.userId), String(_performer?.userId)]]
           );
-          const memberInfo = rows[0] || {};
+          const byId = Object.fromEntries(userRows.map(r => [String(r.id), r]));
+          const memberInfo  = byId[String(_booking.userId)]  || {};
+          const creatorInfo = byId[String(_performer?.userId)] || {};
+
           const joinUrl = `${APP_URL}/call/${_bookingId}`;
           const callInfo = { meetingUrl: joinUrl };
 
+          const creatorName = _performer?.displayName || 'the creator';
+          const memberName  = memberInfo.display_name || memberInfo.username || 'your client';
+
+          // Build a time label using the recipient's stored timezone,
+          // falling back to relative time when timezone is unknown.
+          function timeLabel(startUtc, tz) {
+            if (!startUtc) return 'Scheduled';
+            const start = new Date(startUtc);
+            const diffMs  = start.getTime() - Date.now();
+            const diffMin = Math.round(diffMs / 60000);
+            const rel = diffMin <= 0 ? 'right now'
+              : diffMin === 1 ? 'in 1 minute'
+              : `in ${diffMin} minutes`;
+            if (tz) {
+              try {
+                const localStr = start.toLocaleString('en-US', {
+                  timeZone: tz, weekday: 'short', month: 'short', day: 'numeric',
+                  hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short',
+                });
+                return `${localStr} (${rel})`;
+              } catch { /* fall through */ }
+            }
+            return `starts ${rel}`;
+          }
+
+          const creatorTimeLabel = timeLabel(_booking.startTimeUtc, creatorInfo.timezone);
+          const memberTimeLabel  = timeLabel(_booking.startTimeUtc, memberInfo.timezone);
+
+          const clientNotesBlock = _booking.clientNotes
+            ? `\n📝 Client notes:\n${_booking.clientNotes}\n`
+            : '';
+
+          const dmForCreator =
+`📞 New Private Call Booked!
+
+A 1-on-1 call with ${memberName} has been confirmed.
+
+⏰ ${creatorTimeLabel}
+⏱ ${_booking.durationMinutes} minutes
+${clientNotesBlock}
+🔗 Your join link:
+${joinUrl}
+
+You can enter the room 15 minutes early to set up. Your client will be held in a waiting room and admitted automatically when the call begins.`;
+
+          const dmForMember =
+`📞 Your Private Call is Confirmed!
+
+Your 1-on-1 call with ${creatorName} has been confirmed.
+
+⏰ ${memberTimeLabel}
+⏱ ${_booking.durationMinutes} minutes
+
+👉 Join here:
+${joinUrl}
+
+You can visit the link 15 minutes before the call. You will see a waiting room and be admitted automatically when the call begins.`;
+
           await Promise.allSettled([
+            // Email + Telegram confirmations
             callNotificationService.sendBookingConfirmationToMember(
               String(_booking.userId),
-              {
-                creator_name: _performer?.displayName,
-                start_at: _booking.startTimeUtc,
-                duration_minutes: _booking.durationMinutes,
-              },
+              { creator_name: creatorName, start_at: _booking.startTimeUtc, duration_minutes: _booking.durationMinutes },
               callInfo
             ),
             callNotificationService.sendBookingConfirmationToCreator(
@@ -476,6 +559,9 @@ class PrivateCallBookingService {
               { username: memberInfo.username, display_name: memberInfo.display_name },
               callInfo
             ),
+            // System DMs
+            sendSystemDM(SYSTEM_ID, String(_booking.userId),    dmForMember,  query),
+            sendSystemDM(SYSTEM_ID, String(_performer?.userId), dmForCreator, query),
           ]);
         } catch (notifErr) {
           logger.warn('[privateCallBookingService] booking confirmation notification failed (non-fatal)', {
@@ -489,7 +575,7 @@ class PrivateCallBookingService {
       return {
         success: true,
         booking,
-        session,
+        session: null,
       };
     } catch (error) {
       logger.error('Error handling payment completion:', error);
@@ -552,38 +638,16 @@ class PrivateCallBookingService {
       // Generate a cryptographically unpredictable room ID using a full UUID suffix
       const roomId = `pnptv-priv-${uuidv4()}`;
 
-      // Per-participant LiveKit tokens. TTL = booking duration + 5 min buffer
-      // (caps at 90 min) so a leaked token doesn't extend beyond the paid
-      // session window. Bookings reaching the cap should be re-issued tokens
-      // by the controller if a longer call is required.
-      const tokenTtlSec = Math.min(
-        Math.max(15 * 60, ((booking.durationMinutes || 30) * 60) + 300),
-        90 * 60
-      );
-      const userToken = await generateToken(
-        roomId,
-        String(booking.userId),
-        booking.userName || 'User',
-        false,
-        { ttlSeconds: tokenTtlSec }
-      );
-
-      const performerToken = await generateToken(
-        roomId,
-        `performer-${booking.performerId}`,
-        booking.performerName || 'Performer',
-        true,
-        { ttlSeconds: tokenTtlSec }
-      );
-
-      // Store LiveKit connection info as join URLs (JSON-encoded for the frontend)
-      const joinUrlUser = JSON.stringify({ token: userToken, livekitUrl: LIVEKIT_WS_URL, roomName: roomId });
-      const joinUrlPerformer = JSON.stringify({ token: performerToken, livekitUrl: LIVEKIT_WS_URL, roomName: roomId });
+      // Tokens are issued per-request at join time (see callBookingController joinBooking).
+      // Store the base room URL (without token) for reference.
+      const jaasRoomBase = `https://8x8.vc/${JAAS_APP_ID}/${encodeURIComponent(roomId)}`;
+      const joinUrlUser = JSON.stringify({ provider: 'jitsi', roomId, roomUrl: jaasRoomBase });
+      const joinUrlPerformer = JSON.stringify({ provider: 'jitsi', roomId, roomUrl: jaasRoomBase });
 
       // Create session
       const session = await CallSessionModel.create({
         bookingId,
-        roomProvider: 'livekit',
+        roomProvider: 'jitsi',
         roomId,
         roomName: `Private Call - ${booking.performerName}`,
         joinUrlUser,

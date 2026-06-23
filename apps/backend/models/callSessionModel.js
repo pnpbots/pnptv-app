@@ -54,6 +54,9 @@ class CallSessionModel {
           join_url_user, join_url_performer, token_user, token_performer,
           max_participants, recording_disabled, status
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'scheduled')
+        ON CONFLICT (booking_id) DO UPDATE
+          SET room_id = EXCLUDED.room_id,
+              room_name = EXCLUDED.room_name
         RETURNING *
       `;
 
@@ -277,7 +280,9 @@ class CallSessionModel {
   }
 
   /**
-   * Get sessions that should auto-end (past their scheduled end time)
+   * Get sessions that should auto-end (past their scheduled end time).
+   * Catches both 'live' sessions and 'scheduled' sessions that never
+   * transitioned to live — both are treated as overdue after T+15 min.
    */
   static async getOverdueSessions() {
     try {
@@ -286,8 +291,8 @@ class CallSessionModel {
                b.end_time_utc
         FROM ${TABLE} s
         LEFT JOIN bookings b ON s.booking_id = b.id
-        WHERE s.status = 'live'
-          AND b.end_time_utc < NOW()
+        WHERE s.status IN ('live', 'scheduled')
+          AND b.end_time_utc < NOW() - INTERVAL '15 minutes'
         ORDER BY b.end_time_utc ASC
       `;
       const result = await query(sql);

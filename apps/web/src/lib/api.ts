@@ -759,7 +759,8 @@ export function createCallCheckoutEpayco(
   packageId: number,
   startTimeUtc?: string,
   endTimeUtc?: string,
-  email?: string
+  email?: string,
+  clientNotes?: string
 ): Promise<{
   success: boolean;
   paymentId: string;
@@ -774,6 +775,7 @@ export function createCallCheckoutEpayco(
   if (startTimeUtc) body.startTimeUtc = startTimeUtc;
   if (endTimeUtc) body.endTimeUtc = endTimeUtc;
   if (email) body.email = email;
+  if (clientNotes) body.clientNotes = clientNotes;
   return request("/api/webapp/book-call/checkout", {
     method: "POST",
     body,
@@ -6114,12 +6116,14 @@ export function createCallCheckoutNowPayments(
   packageId: number,
   startTimeUtc?: string,
   endTimeUtc?: string,
-  payCurrency?: string
+  payCurrency?: string,
+  clientNotes?: string
 ): Promise<{ success: boolean; invoiceUrl: string; paymentId: string; amountUsd: number; expiresAt?: string; bookingId?: string; orderId?: string }> {
   const body: Record<string, unknown> = { packageId };
   if (startTimeUtc) body.startTimeUtc = startTimeUtc;
   if (endTimeUtc) body.endTimeUtc = endTimeUtc;
   if (payCurrency) body.payCurrency = payCurrency;
+  if (clientNotes) body.clientNotes = clientNotes;
   return request("/api/webapp/book-call/checkout/nowpayments", {
     method: "POST",
     body,
@@ -6128,11 +6132,13 @@ export function createCallCheckoutNowPayments(
 export function createCallCheckoutBtc(
   packageId: number,
   startTimeUtc?: string,
-  endTimeUtc?: string
+  endTimeUtc?: string,
+  clientNotes?: string
 ): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; amountUsd: number; bookingId?: string }> {
   const body: Record<string, unknown> = { packageId };
   if (startTimeUtc) body.startTimeUtc = startTimeUtc;
   if (endTimeUtc) body.endTimeUtc = endTimeUtc;
+  if (clientNotes) body.clientNotes = clientNotes;
   return request("/api/webapp/book-call/checkout/btc", { method: "POST", body });
 }
 
@@ -6183,6 +6189,8 @@ export interface UpcomingBooking {
   end_time_utc: string;
   room_name?: string | null;
   duration_minutes?: number;
+  creator_username?: string;
+  creator_name?: string;
 }
 
 export function getUpcomingBookings(): Promise<{ bookings: UpcomingBooking[] }> {

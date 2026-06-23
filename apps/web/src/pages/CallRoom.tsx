@@ -1,23 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import {
-  CarouselLayout,
-  ControlBar,
-  FocusLayout,
-  FocusLayoutContainer,
-  GridLayout,
-  LayoutContextProvider,
-  LiveKitRoom,
-  ParticipantTile,
-  RoomAudioRenderer,
-  useCreateLayoutContext,
-  useMaybeTrackRefContext,
-  usePinnedTracks,
-  useTracks,
-} from "@livekit/components-react";
-import type { TrackReferenceOrPlaceholder } from "@livekit/components-react";
-import { Track, VideoQuality } from "livekit-client";
-import type { RemoteTrackPublication } from "livekit-client";
 import { getCallBooking } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -28,15 +10,6 @@ const CALL_STRINGS = {
     bookingNotFound: "This call booking was not found or has already ended.",
     goBack: "Go Back",
     leaveCall: "Leave call",
-    modeGrid: "Grid",
-    modeGridTitle: "Everyone equally",
-    modeSpotlight: "Spotlight",
-    modeSpotlightTitle: "One large + thumbnails",
-    modeCinema: "Cinema",
-    modeCinemaTitle: "Focus one cam, full screen",
-    fullScreen: "Full screen",
-    exitFullScreen: "Exit full screen",
-    enterFullScreen: "Enter full screen",
   },
   es: {
     couldNotJoin: "No se pudo unir a la llamada",
@@ -44,38 +17,8 @@ const CALL_STRINGS = {
     bookingNotFound: "No se encontró la reserva o ya terminó.",
     goBack: "Atrás",
     leaveCall: "Salir de la llamada",
-    modeGrid: "Cuadrícula",
-    modeGridTitle: "Todos por igual",
-    modeSpotlight: "Destacado",
-    modeSpotlightTitle: "Uno grande + miniaturas",
-    modeCinema: "Cine",
-    modeCinemaTitle: "Enfoca una cámara, pantalla completa",
-    fullScreen: "Pantalla completa",
-    exitFullScreen: "Salir de pantalla completa",
-    enterFullScreen: "Entrar a pantalla completa",
   },
 };
-
-// ── View modes ───────────────────────────────────────────────────────────────
-
-type ViewMode = "grid" | "spotlight" | "cinema";
-const VIEW_MODE_STORAGE_KEY = "pnptv:call:viewMode";
-
-function readStoredMode(): ViewMode {
-  try {
-    const v = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
-    if (v === "grid" || v === "spotlight" || v === "cinema") return v;
-  } catch {
-    /* ignore */
-  }
-  return "spotlight";
-}
-
-function refKey(t: TrackReferenceOrPlaceholder | undefined): string {
-  if (!t) return "";
-  const src = (t.publication?.source as string | undefined) ?? (t.source as unknown as string);
-  return `${t.participant.identity}:${src}`;
-}
 
 // ── Skeleton ─────────────────────────────────────────────────────────────────
 
@@ -96,45 +39,13 @@ function CallRoomSkeleton() {
   );
 }
 
-// ── Tile quality wrappers ─────────────────────────────────────────────────────
-
-/**
- * Carousel strip tile: consumed as a child of `<CarouselLayout>` which injects
- * the trackRef via TrackRefContext. Requests VideoQuality.LOW to reduce decoder
- * pressure on the small thumbnail strip.
- */
-function CarouselStripTile() {
-  const trackRef = useMaybeTrackRefContext();
-  useEffect(() => {
-    if (!trackRef) return;
-    const pub = trackRef.publication as RemoteTrackPublication | undefined;
-    if (!pub || !("setVideoQuality" in pub)) return;
-    pub.setVideoQuality(VideoQuality.LOW);
-  }, [trackRef?.publication]);
-
-  return <ParticipantTile />;
-}
-
-/**
- * Focus/hero tile: receives trackRef directly (not via context).
- * Requests VideoQuality.HIGH for the primary spotlighted feed.
- */
-function FocusHeroTile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
-  useEffect(() => {
-    const pub = trackRef.publication as RemoteTrackPublication | undefined;
-    if (!pub || !("setVideoQuality" in pub)) return;
-    pub.setVideoQuality(VideoQuality.HIGH);
-  }, [trackRef.publication]);
-
-  return <ParticipantTile trackRef={trackRef} />;
-}
-
 // ── Countdown ────────────────────────────────────────────────────────────────
 
-function Countdown({ targetUtc, creatorUsername }: { targetUtc: string; creatorUsername: string }) {
+function Countdown({ targetUtc, creatorUsername, onReady }: { targetUtc: string; creatorUsername: string; onReady?: () => void }) {
   const [remaining, setRemaining] = useState(() => {
     return Math.max(0, Math.floor((new Date(targetUtc).getTime() - Date.now()) / 1000));
   });
+  const firedRef = useRef(false);
 
   useEffect(() => {
     if (remaining <= 0) return;
@@ -146,6 +57,13 @@ function Countdown({ targetUtc, creatorUsername }: { targetUtc: string; creatorU
     }, 1000);
     return () => clearInterval(iv);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (remaining <= 0 && onReady && !firedRef.current) {
+      firedRef.current = true;
+      setTimeout(onReady, 1000);
+    }
+  }, [remaining]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const h = Math.floor(remaining / 3600);
   const m = Math.floor((remaining % 3600) / 60);
@@ -229,11 +147,110 @@ function Countdown({ targetUtc, creatorUsername }: { targetUtc: string; creatorU
   );
 }
 
+// ── WaitingRoom ───────────────────────────────────────────────────────────────
+
+function WaitingRoom({
+  startAt,
+  creatorUsername,
+  onAdmit,
+}: {
+  startAt: string;
+  creatorUsername: string;
+  onAdmit: () => void;
+}) {
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, Math.floor((new Date(startAt).getTime() - Date.now()) / 1000))
+  );
+  const admittedRef = useRef(false);
+
+  useEffect(() => {
+    if (remaining <= 0) {
+      if (!admittedRef.current) { admittedRef.current = true; onAdmit(); }
+      return;
+    }
+    const iv = setInterval(() => {
+      setRemaining((r) => {
+        const next = r - 1;
+        if (next <= 0 && !admittedRef.current) { admittedRef.current = true; onAdmit(); }
+        return Math.max(0, next);
+      });
+    }, 1000);
+    return () => clearInterval(iv);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  return (
+    <div
+      className="fixed inset-0 flex flex-col items-center justify-center gap-6 px-6 text-center"
+      style={{ background: "#000" }}
+    >
+      <div className="relative flex items-center justify-center">
+        <div
+          className="absolute w-20 h-20 rounded-full animate-ping"
+          style={{ background: "rgba(212,0,122,0.18)" }}
+        />
+        <div
+          className="w-16 h-16 rounded-full flex items-center justify-center"
+          style={{ background: "rgba(212,0,122,0.22)", border: "2px solid rgba(212,0,122,0.5)" }}
+        >
+          <svg
+            className="w-7 h-7"
+            style={{ color: "#D4007A" }}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
+            />
+          </svg>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <p className="text-lg font-semibold" style={{ color: "#EBEBF5" }}>
+          @{creatorUsername} is getting ready
+        </p>
+        <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+          Your call starts in
+        </p>
+      </div>
+
+      <p className="text-4xl font-bold tabular-nums" style={{ color: "#EBEBF5" }}>
+        {pad(m)}:{pad(s)}
+      </p>
+
+      <p className="text-xs max-w-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+        You will be admitted automatically when the call begins. Make sure your camera and microphone are ready.
+      </p>
+
+      <button
+        type="button"
+        onClick={() => window.history.back()}
+        className="mt-2 min-h-[44px] px-6 rounded-2xl text-sm font-semibold transition-opacity hover:opacity-80"
+        style={{
+          background: "rgba(255,255,255,0.08)",
+          color: "var(--pnp-text-secondary, #8E8E93)",
+          border: "1px solid rgba(255,255,255,0.10)",
+        }}
+      >
+        Back
+      </button>
+    </div>
+  );
+}
+
 // ── CallRoom ─────────────────────────────────────────────────────────────────
 
 interface JoinData {
-  token: string;
-  livekitUrl: string;
+  jaasUrl: string;
   roomName: string;
   creatorUsername: string;
   startAt: string;
@@ -248,53 +265,24 @@ export default function CallRoom() {
   const [loading, setLoading] = useState(true);
   const [joinData, setJoinData] = useState<JoinData | null>(null);
   const [notYetTime, setNotYetTime] = useState<{ startAt: string; creatorUsername: string } | null>(null);
+  const [waitingRoom, setWaitingRoom] = useState<{ startAt: string; creatorUsername: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   const hasFetched = useRef(false);
   const mountedRef = useRef(true);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAdmitRef = useRef<number>(0);
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    };
-  }, []);
-
-  // Refresh the LiveKit token 5 min before it expires. ttlSeconds comes from /join response.
-  const scheduleTokenRefresh = useCallback((bId: string, ttlSeconds: number) => {
-    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    const BUFFER_S = 5 * 60;
-    const delayMs = Math.max((ttlSeconds - BUFFER_S) * 1000, 60_000);
-    refreshTimerRef.current = setTimeout(async () => {
-      if (!mountedRef.current) return;
-      try {
-        const r = await fetch(
-          `/api/webapp/bookings/${encodeURIComponent(bId)}/join`,
-          { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" } },
-        );
-        if (!r.ok) throw new Error("refresh failed");
-        const data = await r.json() as { token?: string; livekitUrl?: string; roomName?: string; ttlSeconds?: number };
-        if (!mountedRef.current) return;
-        if (data.token) {
-          setJoinData((prev) =>
-            prev
-              ? { ...prev, token: data.token!, livekitUrl: data.livekitUrl ?? prev.livekitUrl, roomName: data.roomName ?? prev.roomName }
-              : prev,
-          );
-          scheduleTokenRefresh(bId, data.ttlSeconds ?? ttlSeconds);
-        }
-      } catch {
-        // Retry in 5 minutes on failure.
-        refreshTimerRef.current = setTimeout(() => scheduleTokenRefresh(bId, ttlSeconds), 5 * 60 * 1000);
-      }
-    }, delayMs);
+    return () => { mountedRef.current = false; };
   }, []);
 
   useEffect(() => {
     if (!bookingId || hasFetched.current) return;
     hasFetched.current = true;
+    // eslint-disable-next-line no-unused-expressions
+    void retryKey;
 
     const controller = new AbortController();
 
@@ -303,7 +291,6 @@ export default function CallRoom() {
       .then((res) => {
         if (controller.signal.aborted) return;
         const booking = res.booking;
-        // null start_at = unscheduled credit, always within join window
         if (booking.start_at != null) {
           const startMs = new Date(booking.start_at).getTime();
           const nowMs = Date.now();
@@ -314,7 +301,7 @@ export default function CallRoom() {
           }
         }
 
-        // Step 2: call join endpoint to get LiveKit token
+        // Step 2: call join endpoint to get JaaS URL
         return fetch(
           `/api/webapp/bookings/${encodeURIComponent(String(bookingId))}/join`,
           {
@@ -328,7 +315,6 @@ export default function CallRoom() {
             if (!r.ok) {
               return r.json().then((body: unknown) => {
                 const b = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
-                // 403 with startAt = call hasn't started yet → show countdown instead of error
                 if (r.status === 403 && typeof b.startAt === "string") {
                   setNotYetTime({ startAt: b.startAt, creatorUsername: booking.creator_username });
                   setLoading(false);
@@ -338,31 +324,42 @@ export default function CallRoom() {
                 throw new Error(msg);
               });
             }
-            return r.json() as Promise<{ token?: string; livekitUrl?: string; roomName?: string; ttlSeconds?: number }>;
+            return r.json() as Promise<{
+              jaasUrl?: string;
+              roomName?: string;
+              ttlSeconds?: number;
+              waiting?: boolean;
+              startAt?: string;
+              creatorUsername?: string;
+            }>;
           })
           .then((data) => {
             if (!data || controller.signal.aborted) return;
-            if (!data.token || !data.livekitUrl) {
-              // Room not ready yet — show countdown
-              setNotYetTime({ startAt: booking.start_at, creatorUsername: booking.creator_username });
+            if (data.waiting) {
+              setWaitingRoom({
+                startAt: data.startAt ?? booking.start_at,
+                creatorUsername: data.creatorUsername ?? booking.creator_username,
+              });
+              setLoading(false);
+              return;
+            }
+            if (!data.jaasUrl) {
+              setError(cs.couldNotJoin);
               setLoading(false);
               return;
             }
             setJoinData({
-              token: data.token,
-              livekitUrl: data.livekitUrl,
+              jaasUrl: data.jaasUrl,
               roomName: data.roomName ?? "",
               creatorUsername: booking.creator_username,
               startAt: booking.start_at,
             });
             setLoading(false);
-            scheduleTokenRefresh(bookingId!, data.ttlSeconds ?? 5400);
           });
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
         const msg = err instanceof Error ? err.message : cs.couldNotLoad;
-        // 404 — booking not found or not belonging to this user
         if (msg.toLowerCase().includes("not found") || msg.includes("404")) {
           setError(cs.bookingNotFound);
         } else {
@@ -372,9 +369,30 @@ export default function CallRoom() {
       });
 
     return () => controller.abort();
-  }, [bookingId]);
+  }, [bookingId, retryKey]);
+
+  const handleAdmit = useCallback(() => {
+    if (!mountedRef.current) return;
+    const now = Date.now();
+    if (now - lastAdmitRef.current < 10_000) return; // 10s minimum between retries
+    lastAdmitRef.current = now;
+    setWaitingRoom(null);
+    setLoading(true);
+    hasFetched.current = false;
+    setRetryKey((k) => k + 1);
+  }, []);
 
   if (loading) return <CallRoomSkeleton />;
+
+  if (waitingRoom) {
+    return (
+      <WaitingRoom
+        startAt={waitingRoom.startAt}
+        creatorUsername={waitingRoom.creatorUsername}
+        onAdmit={handleAdmit}
+      />
+    );
+  }
 
   if (error) {
     return (
@@ -406,6 +424,7 @@ export default function CallRoom() {
       <Countdown
         targetUtc={notYetTime.startAt}
         creatorUsername={notYetTime.creatorUsername}
+        onReady={handleAdmit}
       />
     );
   }
@@ -413,8 +432,8 @@ export default function CallRoom() {
   if (!joinData) return <CallRoomSkeleton />;
 
   return (
-    <div className="fixed inset-0" data-call-container style={{ background: "#000" }}>
-      {/* Close button */}
+    <div className="fixed inset-0" style={{ background: "#000" }}>
+      {/* Leave button — positioned over the iframe */}
       <button
         type="button"
         onClick={() => navigate(-1)}
@@ -424,6 +443,8 @@ export default function CallRoom() {
           background: "rgba(255,69,58,0.15)",
           color: "#FF453A",
           border: "1px solid rgba(255,69,58,0.25)",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
         }}
       >
         <svg
@@ -438,259 +459,12 @@ export default function CallRoom() {
         </svg>
       </button>
 
-      <LiveKitRoom
-        token={joinData.token}
-        serverUrl={joinData.livekitUrl}
-        connect={true}
-        video={true}
-        audio={true}
-        options={{ adaptiveStream: true, dynacast: true }}
-        onDisconnected={() => {
-          try {
-            if (bookingId) sessionStorage.setItem(`pnptv:call:ended:${bookingId}`, '1');
-          } catch { /* private browsing */ }
-          navigate(-1);
-        }}
-        style={{ height: "100dvh" }}
-      >
-        <CallStage />
-      </LiveKitRoom>
-    </div>
-  );
-}
-
-// ── CallStage ────────────────────────────────────────────────────────────────
-
-export function CallStage() {
-  const [mode, setMode] = useState<ViewMode>(() => readStoredMode());
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
-    } catch {
-      /* ignore */
-    }
-  }, [mode]);
-
-  const tracks = useTracks(
-    [
-      { source: Track.Source.Camera, withPlaceholder: true },
-      { source: Track.Source.ScreenShare, withPlaceholder: false },
-    ],
-    { onlySubscribed: true },
-  );
-
-  const layoutContext = useCreateLayoutContext();
-  const pinnedTracks = usePinnedTracks(layoutContext);
-
-  const screenShareTracks = useMemo(
-    () => tracks.filter((t) => t.publication?.source === Track.Source.ScreenShare),
-    [tracks],
-  );
-
-  // Auto-pin the first incoming screen share (same behavior as LiveKit's VideoConference prefab)
-  const lastAutoPinnedRef = useRef<string | null>(null);
-  useEffect(() => {
-    const dispatch = layoutContext.pin.dispatch;
-    if (!dispatch) return;
-    const current = pinnedTracks?.[0];
-    if (screenShareTracks.length > 0) {
-      const ss = screenShareTracks[0];
-      const key = refKey(ss);
-      if (!current && lastAutoPinnedRef.current !== key) {
-        dispatch({ msg: "set_pin", trackReference: ss });
-        lastAutoPinnedRef.current = key;
-      }
-    } else if (lastAutoPinnedRef.current && current && refKey(current) === lastAutoPinnedRef.current) {
-      dispatch({ msg: "clear_pin" });
-      lastAutoPinnedRef.current = null;
-    }
-  }, [screenShareTracks, pinnedTracks, layoutContext.pin.dispatch]);
-
-  const focusTrack: TrackReferenceOrPlaceholder | undefined =
-    pinnedTracks?.[0] ??
-    screenShareTracks[0] ??
-    tracks.find((t) => !t.participant.isLocal) ??
-    tracks[0];
-
-  const focusKey = refKey(focusTrack);
-  const carouselTracks = useMemo(
-    () => tracks.filter((t) => refKey(t) !== focusKey),
-    [tracks, focusKey],
-  );
-
-  return (
-    <LayoutContextProvider value={layoutContext}>
-      <ViewModeToggle value={mode} onChange={setMode} />
-      <FullscreenButton />
-
-      <div
-        className="absolute inset-0"
-        style={{ paddingBottom: "96px" /* leave room for ControlBar */ }}
-      >
-        {mode === "grid" && (
-          <GridLayout tracks={tracks} style={{ height: "100%" }}>
-            <ParticipantTile />
-          </GridLayout>
-        )}
-
-        {mode === "spotlight" && focusTrack && (
-          <FocusLayoutContainer style={{ height: "100%" }}>
-            <CarouselLayout tracks={carouselTracks}>
-              <CarouselStripTile />
-            </CarouselLayout>
-            <FocusHeroTile trackRef={focusTrack} />
-          </FocusLayoutContainer>
-        )}
-
-        {mode === "cinema" && focusTrack && (
-          <div className="w-full h-full flex items-center justify-center">
-            <FocusHeroTile trackRef={focusTrack} />
-          </div>
-        )}
-      </div>
-
-      <RoomAudioRenderer />
-      <ControlBar
-        variation="minimal"
-        controls={{ chat: false, screenShare: true, leave: true }}
-        style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          zIndex: 40,
-        }}
+      <iframe
+        src={joinData.jaasUrl}
+        allow="camera; microphone; fullscreen; display-capture; autoplay"
+        style={{ width: "100%", height: "100dvh", border: "none" }}
+        title="Private call"
       />
-    </LayoutContextProvider>
-  );
-}
-
-// ── ViewModeToggle ───────────────────────────────────────────────────────────
-
-const MODE_ICONS: Record<ViewMode, JSX.Element> = {
-  grid: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="3" width="7" height="7" rx="1.5" />
-      <rect x="3" y="14" width="7" height="7" rx="1.5" />
-      <rect x="14" y="14" width="7" height="7" rx="1.5" />
-    </svg>
-  ),
-  spotlight: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-      <rect x="3" y="3" width="18" height="13" rx="1.8" />
-      <rect x="3" y="18" width="5" height="3" rx="0.8" />
-      <rect x="10" y="18" width="5" height="3" rx="0.8" />
-      <rect x="17" y="18" width="4" height="3" rx="0.8" />
-    </svg>
-  ),
-  cinema: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path strokeLinecap="round" d="M8 10l4 2.5L8 15z" fill="currentColor" />
-    </svg>
-  ),
-};
-
-// ── FullscreenButton ─────────────────────────────────────────────────────────
-
-function FullscreenButton() {
-  const i18n = useI18n();
-  const cs = CALL_STRINGS[i18n.lang === "es" ? "es" : "en"];
-  const btnRef = useRef<HTMLButtonElement | null>(null);
-  const [isFs, setIsFs] = useState(() =>
-    typeof document !== "undefined" && document.fullscreenElement !== null,
-  );
-
-  useEffect(() => {
-    const onChange = () => setIsFs(document.fullscreenElement !== null);
-    document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
-  }, []);
-
-  const toggle = () => {
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-      return;
-    }
-    const target = btnRef.current?.closest<HTMLElement>("[data-call-container]");
-    if (!target) return;
-    target.requestFullscreen().catch(() => {});
-  };
-
-  return (
-    <button
-      ref={btnRef}
-      type="button"
-      onClick={toggle}
-      aria-label={isFs ? cs.exitFullScreen : cs.enterFullScreen}
-      title={isFs ? cs.exitFullScreen : cs.fullScreen}
-      className="absolute top-4 z-50 w-9 h-9 rounded-xl flex items-center justify-center transition-opacity hover:opacity-80"
-      style={{
-        right: "calc(3.25rem + env(safe-area-inset-right, 0px))",
-        background: "rgba(0,0,0,0.55)",
-        color: "#EBEBF5",
-        border: "1px solid rgba(255,255,255,0.10)",
-        backdropFilter: "blur(10px)",
-        WebkitBackdropFilter: "blur(10px)",
-      }}
-    >
-      {isFs ? (
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 9H5V5m0 14h4v-4m10 4h-4v-4m0-6h4V5" />
-        </svg>
-      ) : (
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4h4m8 0h4v4m0 8v4h-4m-8 0H4v-4" />
-        </svg>
-      )}
-    </button>
-  );
-}
-
-function ViewModeToggle({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
-  const i18n = useI18n();
-  const cs = CALL_STRINGS[i18n.lang === "es" ? "es" : "en"];
-  const modes: Array<{ id: ViewMode; label: string; title: string }> = [
-    { id: "grid", label: cs.modeGrid, title: cs.modeGridTitle },
-    { id: "spotlight", label: cs.modeSpotlight, title: cs.modeSpotlightTitle },
-    { id: "cinema", label: cs.modeCinema, title: cs.modeCinemaTitle },
-  ];
-  return (
-    <div
-      className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1 rounded-2xl"
-      style={{
-        background: "rgba(0,0,0,0.55)",
-        backdropFilter: "blur(10px)",
-        WebkitBackdropFilter: "blur(10px)",
-        border: "1px solid rgba(255,255,255,0.10)",
-      }}
-      role="tablist"
-      aria-label={i18n.lang === "es" ? "Modo de vista de llamada" : "Call view mode"}
-    >
-      {modes.map((m) => {
-        const active = m.id === value;
-        return (
-          <button
-            key={m.id}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            title={m.title}
-            onClick={() => onChange(m.id)}
-            className="min-h-[36px] px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all"
-            style={{
-              background: active ? "#D4007A" : "transparent",
-              color: active ? "#FFFFFF" : "#EBEBF5",
-              opacity: active ? 1 : 0.75,
-            }}
-          >
-            {MODE_ICONS[m.id]}
-            <span className="hidden sm:inline">{m.label}</span>
-          </button>
-        );
-      })}
     </div>
   );
 }

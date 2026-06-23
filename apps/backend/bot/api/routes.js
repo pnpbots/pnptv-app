@@ -11277,18 +11277,28 @@ app.delete('/api/webapp/creator/call-packages/:packageId',
 // ── Book a Call: Checkout, Booking Management & Creator Availability ─────────
 const callBookingController = require('./controllers/callBookingController');
 
+// H-08: Rate limit checkout creation — 5 attempts per 60 seconds, keyed by user ID
+const checkoutLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many checkout attempts. Please wait before trying again.' },
+});
+
 app.post('/api/webapp/book-call/checkout',
-  requireSessionAuth,
+  requireSessionAuth, checkoutLimiter,
   asyncHandler(callBookingController.createCheckout));
 
 // NowPayments (crypto) checkout for call packages — accepts optional payCurrency ('btc', 'btcln', etc.)
 app.post('/api/webapp/book-call/checkout/nowpayments',
-  requireSessionAuth,
+  requireSessionAuth, checkoutLimiter,
   asyncHandler(callBookingController.createCheckoutNowPayments));
 
 // BTCPay BTC+Lightning checkout for call packages (hidden on frontend until BTC node is configured)
 app.post('/api/webapp/book-call/checkout/btc',
-  requireSessionAuth,
+  requireSessionAuth, checkoutLimiter,
   asyncHandler(callBookingController.createCheckoutBtc));
 
 // Member: upcoming confirmed bookings — must be before /:bookingId catch-all

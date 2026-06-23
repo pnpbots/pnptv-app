@@ -1,13 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CarouselLayout,
+  ControlBar,
+  FocusLayoutContainer,
+  GridLayout,
+  LayoutContextProvider,
   LiveKitRoom,
+  ParticipantTile,
+  RoomAudioRenderer,
+  useCreateLayoutContext,
+  useMaybeTrackRefContext,
+  usePinnedTracks,
   useRoomContext,
+  useTracks,
   useParticipants,
 } from "@livekit/components-react";
-import { CallStage } from "@/pages/CallRoom";
-import { ConnectionState, RoomEvent } from "livekit-client";
+import type { TrackReferenceOrPlaceholder } from "@livekit/components-react";
+import { ConnectionState, RoomEvent, Track, VideoQuality } from "livekit-client";
+import type { RemoteTrackPublication } from "livekit-client";
 import type { LocalUserChoices } from "@livekit/components-core";
 import { useHangoutMusic } from "@/hooks/useHangoutMusic";
+import { useI18n } from "@/lib/i18n";
 import { joinHangoutCall, muteHangoutCallParticipant, kickHangoutCallParticipant } from "@/lib/api";
 
 interface LiveKitCallPanelProps {
@@ -795,3 +808,223 @@ function LiveKitCallPanel({
 
 export const LiveKitCallDock = LiveKitCallPanel;
 export default LiveKitCallPanel;
+
+// ── CallStage (used by LiveKitCallDock and formerly by CallRoom) ──────────────
+
+type ViewMode = "grid" | "spotlight" | "cinema";
+const VIEW_MODE_STORAGE_KEY = "pnptv:call:viewMode";
+
+const STAGE_STRINGS = {
+  en: {
+    modeGrid: "Grid", modeGridTitle: "Everyone equally",
+    modeSpotlight: "Spotlight", modeSpotlightTitle: "One large + thumbnails",
+    modeCinema: "Cinema", modeCinemaTitle: "Focus one cam, full screen",
+    fullScreen: "Full screen", exitFullScreen: "Exit full screen",
+    enterFullScreen: "Enter full screen",
+  },
+  es: {
+    modeGrid: "Cuadrícula", modeGridTitle: "Todos por igual",
+    modeSpotlight: "Destacado", modeSpotlightTitle: "Uno grande + miniaturas",
+    modeCinema: "Cine", modeCinemaTitle: "Enfoca una cámara, pantalla completa",
+    fullScreen: "Pantalla completa", exitFullScreen: "Salir de pantalla completa",
+    enterFullScreen: "Entrar a pantalla completa",
+  },
+};
+
+function readStoredMode(): ViewMode {
+  try {
+    const v = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    if (v === "grid" || v === "spotlight" || v === "cinema") return v;
+  } catch { /* ignore */ }
+  return "spotlight";
+}
+
+function refKey(t: TrackReferenceOrPlaceholder | undefined): string {
+  if (!t) return "";
+  const src = (t.publication?.source as string | undefined) ?? (t.source as unknown as string);
+  return `${t.participant.identity}:${src}`;
+}
+
+function CarouselStripTile() {
+  const trackRef = useMaybeTrackRefContext();
+  useEffect(() => {
+    if (!trackRef) return;
+    const pub = trackRef.publication as RemoteTrackPublication | undefined;
+    if (!pub || !("setVideoQuality" in pub)) return;
+    pub.setVideoQuality(VideoQuality.LOW);
+  }, [trackRef?.publication]);
+  return <ParticipantTile />;
+}
+
+function FocusHeroTile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
+  useEffect(() => {
+    const pub = trackRef.publication as RemoteTrackPublication | undefined;
+    if (!pub || !("setVideoQuality" in pub)) return;
+    pub.setVideoQuality(VideoQuality.HIGH);
+  }, [trackRef.publication]);
+  return <ParticipantTile trackRef={trackRef} />;
+}
+
+const MODE_ICONS: Record<ViewMode, JSX.Element> = {
+  grid: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  ),
+  spotlight: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <rect x="3" y="3" width="18" height="13" rx="1.8" /><rect x="3" y="18" width="5" height="3" rx="0.8" />
+      <rect x="10" y="18" width="5" height="3" rx="0.8" /><rect x="17" y="18" width="4" height="3" rx="0.8" />
+    </svg>
+  ),
+  cinema: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path strokeLinecap="round" d="M8 10l4 2.5L8 15z" fill="currentColor" />
+    </svg>
+  ),
+};
+
+function ViewModeToggle({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
+  const i18n = useI18n();
+  const ss = STAGE_STRINGS[i18n.lang === "es" ? "es" : "en"];
+  const modes: Array<{ id: ViewMode; label: string; title: string }> = [
+    { id: "grid", label: ss.modeGrid, title: ss.modeGridTitle },
+    { id: "spotlight", label: ss.modeSpotlight, title: ss.modeSpotlightTitle },
+    { id: "cinema", label: ss.modeCinema, title: ss.modeCinemaTitle },
+  ];
+  return (
+    <div
+      className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1 rounded-2xl"
+      style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.10)" }}
+      role="tablist"
+      aria-label={i18n.lang === "es" ? "Modo de vista de llamada" : "Call view mode"}
+    >
+      {modes.map((m) => {
+        const active = m.id === value;
+        return (
+          <button
+            key={m.id} type="button" role="tab" aria-selected={active} title={m.title}
+            onClick={() => onChange(m.id)}
+            className="min-h-[36px] px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all"
+            style={{ background: active ? "#D4007A" : "transparent", color: active ? "#FFFFFF" : "#EBEBF5", opacity: active ? 1 : 0.75 }}
+          >
+            {MODE_ICONS[m.id]}
+            <span className="hidden sm:inline">{m.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function FullscreenButton() {
+  const i18n = useI18n();
+  const ss = STAGE_STRINGS[i18n.lang === "es" ? "es" : "en"];
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const [isFs, setIsFs] = useState(() => typeof document !== "undefined" && document.fullscreenElement !== null);
+  useEffect(() => {
+    const onChange = () => setIsFs(document.fullscreenElement !== null);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggle = () => {
+    if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
+    const target = btnRef.current?.closest<HTMLElement>("[data-call-container]");
+    if (!target) return;
+    target.requestFullscreen().catch(() => {});
+  };
+  return (
+    <button ref={btnRef} type="button" onClick={toggle}
+      aria-label={isFs ? ss.exitFullScreen : ss.enterFullScreen}
+      title={isFs ? ss.exitFullScreen : ss.fullScreen}
+      className="absolute top-4 z-50 w-9 h-9 rounded-xl flex items-center justify-center transition-opacity hover:opacity-80"
+      style={{ right: "calc(3.25rem + env(safe-area-inset-right, 0px))", background: "rgba(0,0,0,0.55)", color: "#EBEBF5", border: "1px solid rgba(255,255,255,0.10)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" }}
+    >
+      {isFs ? (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 9H5V5m0 14h4v-4m10 4h-4v-4m0-6h4V5" />
+        </svg>
+      ) : (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4h4m8 0h4v4m0 8v4h-4m-8 0H4v-4" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+export function CallStage() {
+  const [mode, setMode] = useState<ViewMode>(() => readStoredMode());
+  useEffect(() => {
+    try { localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode); } catch { /* ignore */ }
+  }, [mode]);
+
+  const tracks = useTracks(
+    [{ source: Track.Source.Camera, withPlaceholder: true }, { source: Track.Source.ScreenShare, withPlaceholder: false }],
+    { onlySubscribed: true },
+  );
+  const layoutContext = useCreateLayoutContext();
+  const pinnedTracks = usePinnedTracks(layoutContext);
+
+  const screenShareTracks = useMemo(
+    () => tracks.filter((t) => t.publication?.source === Track.Source.ScreenShare),
+    [tracks],
+  );
+
+  const lastAutoPinnedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const dispatch = layoutContext.pin.dispatch;
+    if (!dispatch) return;
+    const current = pinnedTracks?.[0];
+    if (screenShareTracks.length > 0) {
+      const ss = screenShareTracks[0];
+      const key = refKey(ss);
+      if (!current && lastAutoPinnedRef.current !== key) {
+        dispatch({ msg: "set_pin", trackReference: ss });
+        lastAutoPinnedRef.current = key;
+      }
+    } else if (lastAutoPinnedRef.current && current && refKey(current) === lastAutoPinnedRef.current) {
+      dispatch({ msg: "clear_pin" });
+      lastAutoPinnedRef.current = null;
+    }
+  }, [screenShareTracks, pinnedTracks, layoutContext.pin.dispatch]);
+
+  const focusTrack: TrackReferenceOrPlaceholder | undefined =
+    pinnedTracks?.[0] ?? screenShareTracks[0] ?? tracks.find((t) => !t.participant.isLocal) ?? tracks[0];
+
+  const focusKey = refKey(focusTrack);
+  const carouselTracks = useMemo(() => tracks.filter((t) => refKey(t) !== focusKey), [tracks, focusKey]);
+
+  return (
+    <LayoutContextProvider value={layoutContext}>
+      <ViewModeToggle value={mode} onChange={setMode} />
+      <FullscreenButton />
+      <div className="absolute inset-0" style={{ paddingBottom: "96px" }}>
+        {mode === "grid" && (
+          <GridLayout tracks={tracks} style={{ height: "100%" }}>
+            <ParticipantTile />
+          </GridLayout>
+        )}
+        {mode === "spotlight" && focusTrack && (
+          <FocusLayoutContainer style={{ height: "100%" }}>
+            <CarouselLayout tracks={carouselTracks}><CarouselStripTile /></CarouselLayout>
+            <FocusHeroTile trackRef={focusTrack} />
+          </FocusLayoutContainer>
+        )}
+        {mode === "cinema" && focusTrack && (
+          <div className="w-full h-full flex items-center justify-center">
+            <FocusHeroTile trackRef={focusTrack} />
+          </div>
+        )}
+      </div>
+      <RoomAudioRenderer />
+      <ControlBar
+        variation="minimal"
+        controls={{ chat: false, screenShare: true, leave: true }}
+        style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 40 }}
+      />
+    </LayoutContextProvider>
+  );
+}

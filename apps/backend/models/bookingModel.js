@@ -39,6 +39,7 @@ class BookingModel {
       rulesAcceptedAt: row.rules_accepted_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      clientNotes: row.client_notes || null,
       // Joined fields
       performerName: row.performer_name,
       performerPhoto: row.performer_photo,
@@ -441,7 +442,7 @@ class BookingModel {
       const params = [bookingId, reason, cancelledBy];
 
       if (userId !== null) {
-        sql += ` AND (user_id = $4 OR performer_id = $4)`;
+        sql += ` AND (user_id = $4 OR performer_id = (SELECT id FROM performers WHERE user_id = $4 LIMIT 1))`;
         params.push(String(userId));
       }
 
