@@ -14,7 +14,7 @@ const { query, getPool } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
 const callCheckoutService = require('../../../services/callCheckoutService');
 const callPackageService = require('../../../services/callPackageService');
-const { generateToken: generateLivekitToken, LIVEKIT_WS_URL } = require('../../../services/livekitService');
+const { generateJaasToken, getJaasRoomUrl } = require('../../../services/jaasService');
 const CallBookingService = require('../../../services/CallBookingService');
 const moment = require('moment-timezone');
 const logger = require('../../../utils/logger');
@@ -324,9 +324,10 @@ async function joinBooking(req, res) {
     // TTL = booking duration + 30 min buffer so the token outlasts the call
     const ttlSeconds = (credit.duration_minutes || 60) * 60 + 30 * 60;
 
-    const livekitToken = await generateLivekitToken(roomName, userId, displayName, isModerator, { ttlSeconds });
+    const jaasToken = generateJaasToken(roomName, userId, displayName, isModerator, ttlSeconds);
+    const jaasUrl = getJaasRoomUrl(roomName, jaasToken);
 
-    logger.info('[callBookingController] joinBooking LiveKit token issued', {
+    logger.info('[callBookingController] joinBooking JaaS token issued', {
       creditId: credit.id,
       userId,
       roomName,
@@ -346,7 +347,7 @@ async function joinBooking(req, res) {
       logger.warn('[callBookingController] could not start session on join (non-fatal)', { error: sessErr.message });
     }
 
-    return res.json({ livekitToken, livekitUrl: LIVEKIT_WS_URL, roomName, ttlSeconds });
+    return res.json({ jaasUrl, jaasToken, roomName, ttlSeconds });
   } catch (err) {
     logger.error('[callBookingController] joinBooking error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to join call' });

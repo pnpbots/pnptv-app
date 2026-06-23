@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import {
-  LiveKitRoom,
-  VideoConference,
-  RoomAudioRenderer,
-} from "@livekit/components-react";
-import "@livekit/components-styles";
 import { getCallBooking } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -256,8 +250,7 @@ function WaitingRoom({
 // ── CallRoom ─────────────────────────────────────────────────────────────────
 
 interface JoinData {
-  livekitToken: string;
-  livekitUrl: string;
+  jaasUrl: string;
   roomName: string;
   creatorUsername: string;
   startAt: string;
@@ -331,8 +324,7 @@ export default function CallRoom() {
               });
             }
             return r.json() as Promise<{
-              livekitToken?: string;
-              livekitUrl?: string;
+              jaasUrl?: string;
               roomName?: string;
               ttlSeconds?: number;
               waiting?: boolean;
@@ -350,14 +342,13 @@ export default function CallRoom() {
               setLoading(false);
               return;
             }
-            if (!data.livekitToken || !data.livekitUrl) {
+            if (!data.jaasUrl) {
               setError(cs.couldNotJoin);
               setLoading(false);
               return;
             }
             setJoinData({
-              livekitToken: data.livekitToken,
-              livekitUrl: data.livekitUrl,
+              jaasUrl: data.jaasUrl,
               roomName: data.roomName ?? "",
               creatorUsername: booking.creator_username,
               startAt: booking.start_at,
@@ -438,18 +429,39 @@ export default function CallRoom() {
 
   return (
     <div className="fixed inset-0" style={{ background: "#000" }}>
-      <LiveKitRoom
-        token={joinData.livekitToken}
-        serverUrl={joinData.livekitUrl}
-        connect
-        video
-        audio
-        onDisconnected={() => navigate(-1)}
-        style={{ height: "100dvh" }}
+      {/* Leave button — positioned over the iframe */}
+      <button
+        type="button"
+        onClick={() => navigate(-1)}
+        aria-label={cs.leaveCall}
+        className="absolute top-4 right-4 z-50 w-10 h-10 flex items-center justify-center rounded-xl transition-opacity hover:opacity-80"
+        style={{
+          background: "rgba(255,69,58,0.15)",
+          color: "#FF453A",
+          border: "1px solid rgba(255,69,58,0.25)",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
+        }}
       >
-        <VideoConference />
-        <RoomAudioRenderer />
-      </LiveKitRoom>
+        <svg
+          className="w-5 h-5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2.5}
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+
+      <iframe
+        src={joinData.jaasUrl}
+        allow="camera *; microphone *; fullscreen *; display-capture *; autoplay *; speaker *; clipboard-write *; hid *"
+        allowFullScreen
+        style={{ width: "100%", height: "100dvh", border: "none" }}
+        title="Private call"
+      />
     </div>
   );
 }
