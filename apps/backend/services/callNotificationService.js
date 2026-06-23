@@ -163,7 +163,7 @@ function memberConfirmationHtml({ creatorName, startAt, durationMinutes, joinUrl
     title: 'Your call is booked!',
     contentHtml: `
     <p>Hi there,</p>
-    <p>Great news — your 1-on-1 call with <strong>${creatorName}</strong> has been confirmed!</p>
+    <p>Your 1-on-1 call with <strong>${creatorName}</strong> is confirmed for <strong>${formattedTime}</strong> (${durationMinutes} min).</p>
 
     <div class="details">
       <p><strong>Creator:</strong> ${creatorName}</p>
@@ -172,26 +172,17 @@ function memberConfirmationHtml({ creatorName, startAt, durationMinutes, joinUrl
       ${joinUrl ? `<p><strong>Join Link:</strong> <a href="${joinUrl}">${joinUrl}</a></p>` : ''}
     </div>
 
-    <div class="info-block">
-      <h3>How to join your call</h3>
-      <ul>
-        <li>Click the join link above (or in your app) at the scheduled time.</li>
-        <li>Allow camera and microphone access when prompted.</li>
-        <li>Join a minute or two early to test your connection.</li>
-      </ul>
-    </div>
-
-    <div class="info-block">
-      <h3>Call etiquette</h3>
-      <ul>
-        <li>Be respectful and treat others as you would like to be treated.</li>
-        <li>Find a quiet, well-lit space before the call begins.</li>
-        <li>Calls are private — recording or sharing is not permitted.</li>
-        <li>If you need to cancel, please do so at least 2 hours in advance.</li>
-      </ul>
-    </div>
-
     ${joinUrl ? `<div style="text-align:center;"><a href="${joinUrl}" class="btn">Join Your Call</a></div>` : ''}
+
+    <div class="info-block">
+      <h3>Tips</h3>
+      <ul>
+        <li>Join a minute early — your camera &amp; mic will turn on automatically.</li>
+        <li>Find a quiet, well-lit space.</li>
+        <li>Calls are private — recording is not permitted.</li>
+      </ul>
+    </div>
+
     <p>See you soon!<br><strong>The PNPtv Team</strong></p>
     `,
   });
@@ -207,7 +198,7 @@ function creatorConfirmationHtml({ memberUsername, startAt, durationMinutes, joi
     title: 'New call booking!',
     contentHtml: `
     <p>Hi there,</p>
-    <p>You have a new 1-on-1 call booked with <strong>${memberUsername}</strong>.</p>
+    <p>New 1-on-1 call with <strong>${memberUsername}</strong> on <strong>${formattedTime}</strong> (${durationMinutes} min).</p>
 
     <div class="details">
       <p><strong>Member:</strong> ${memberUsername}</p>
@@ -217,18 +208,17 @@ function creatorConfirmationHtml({ memberUsername, startAt, durationMinutes, joi
     </div>
     ${notesBlock}
 
+    ${joinUrl ? `<div style="text-align:center;"><a href="${joinUrl}" class="btn">Open Call Room</a></div>` : ''}
+
     <div class="info-block">
-      <h3>Creator guidelines</h3>
+      <h3>Reminders</h3>
       <ul>
-        <li>Be on time — members appreciate punctuality.</li>
-        <li>Ensure your background is appropriate and lighting is good.</li>
-        <li>Keep the session focused on the member's questions or goals.</li>
-        <li>If you need to reschedule, notify support as soon as possible.</li>
+        <li>Be on time — your camera &amp; mic will turn on automatically.</li>
+        <li>Ensure good lighting and a quiet space.</li>
         <li>Calls are private — recording without consent is prohibited.</li>
       </ul>
     </div>
 
-    ${joinUrl ? `<div style="text-align:center;"><a href="${joinUrl}" class="btn">Open Call Room</a></div>` : ''}
     <p>Thank you for being part of PNPtv!<br><strong>The PNPtv Team</strong></p>
     `,
   });

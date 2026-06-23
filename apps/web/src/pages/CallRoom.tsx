@@ -271,7 +271,6 @@ export default function CallRoom() {
 
   const hasFetched = useRef(false);
   const mountedRef = useRef(true);
-  const lastAdmitRef = useRef<number>(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -307,7 +306,7 @@ export default function CallRoom() {
           {
             method: "POST",
             credentials: "include",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
             signal: controller.signal,
           }
         )
@@ -373,9 +372,6 @@ export default function CallRoom() {
 
   const handleAdmit = useCallback(() => {
     if (!mountedRef.current) return;
-    const now = Date.now();
-    if (now - lastAdmitRef.current < 10_000) return; // 10s minimum between retries
-    lastAdmitRef.current = now;
     setWaitingRoom(null);
     setLoading(true);
     hasFetched.current = false;

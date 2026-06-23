@@ -80,7 +80,8 @@ function generateJaasToken(roomName, userId, displayName, isModerator, ttlSecond
  * @returns {string} Full iframe src URL
  */
 function getJaasRoomUrl(roomName, jaasToken) {
-  return `https://8x8.vc/${JAAS_APP_ID}/${encodeURIComponent(roomName)}?jwt=${jaasToken}`;
+  const config = '#config.startWithVideoMuted=false&config.startWithAudioMuted=false';
+  return `https://8x8.vc/${JAAS_APP_ID}/${encodeURIComponent(roomName)}?jwt=${jaasToken}${config}`;
 }
 
 module.exports = { generateJaasToken, getJaasRoomUrl, JAAS_APP_ID };

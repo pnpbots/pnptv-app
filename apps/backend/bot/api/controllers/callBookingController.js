@@ -198,7 +198,7 @@ async function createCheckout(req, res) {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns credit details plus a fresh LiveKit token for the caller.
+ * Returns booking metadata for the caller.
  * :bookingId accepts call_credits.id (integer) or bookings.id (UUID).
  */
 async function getBooking(req, res) {
@@ -258,10 +258,8 @@ async function getBooking(req, res) {
 // ---------------------------------------------------------------------------
 
 /**
- * Generate a LiveKit access token for joining a booked private call.
+ * Generate a JaaS token and room URL for joining a booked private call.
  * :bookingId accepts call_credits.id (integer) or bookings.id (UUID).
- * Both the member and creator can join; both get publish rights so they
- * can send audio and video to each other.
  */
 async function joinBooking(req, res) {
   try {
