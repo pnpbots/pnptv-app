@@ -7265,7 +7265,7 @@ export interface AdminPrimeVideo {
 export function listAdminPrimeVideos(
   page = 1,
   limit = 100,
-): Promise<{ success: boolean; items: AdminPrimeVideo[]; total: number }> {
+): Promise<{ success: boolean; items: ChannelVideo[]; total: number }> {
   return request(`/api/webapp/admin/prime-videos?page=${page}&limit=${limit}`);
 }
 
@@ -7356,6 +7356,7 @@ export interface ChannelVideo {
   gif_url: string | null;
   video_url: string;
   status: "processing" | "published" | "draft" | "failed" | "removed";
+  is_featured: boolean;
   promo_post_id: number | null;
   ai_generated_meta: Record<string, "ai" | "human" | "mixed">;
   created_at: string;
@@ -7419,7 +7420,7 @@ export async function aiTagsChannelVideo(channelId: number, videoId: number) {
 }
 export async function updateChannelVideo(
   channelId: number, videoId: number,
-  fields: { title?: string; description?: string | null; tags?: string[] },
+  fields: { title?: string; description?: string | null; tags?: string[]; status?: string; is_featured?: boolean },
 ) {
   return request<{ success: boolean; video: ChannelVideo }>(
     `/api/webapp/channels/${channelId}/videos/${videoId}`,

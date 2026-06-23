@@ -295,6 +295,14 @@ async function updateVideo({ videoId, userId, isAdmin, fields }) {
     sets.push(`tags = $${params.length}::text[]`);
     if (cleanTags.length) humanizedFields.tags = 'human';
   }
+  if (typeof fields.status === 'string' && ['published', 'draft'].includes(fields.status)) {
+    params.push(fields.status);
+    sets.push(`status = $${params.length}`);
+  }
+  if (typeof fields.is_featured === 'boolean') {
+    params.push(fields.is_featured);
+    sets.push(`is_featured = $${params.length}`);
+  }
   if (sets.length === 0) return shapeForApi(v);
   if (Object.keys(humanizedFields).length) {
     params.push(JSON.stringify(humanizedFields));
@@ -644,6 +652,7 @@ function shapeForApi(row, channel, extra = {}) {
     video_url: directusFileUrl(row.directus_file_id),
     status: row.status,
     promo_post_id: row.promo_post_id ? Number(row.promo_post_id) : null,
+    is_featured: row.is_featured ?? false,
     ai_generated_meta: row.ai_generated_meta || {},
     created_at: row.created_at,
     channel: channel

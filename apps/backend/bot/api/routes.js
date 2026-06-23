@@ -10989,6 +10989,7 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
     windowMs: 60 * 60 * 1000,
     max: 5,
     keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+    skip: (req) => req.session?.user?.role === 'admin',
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Upload rate limit reached — try again in an hour' },
@@ -10998,6 +10999,7 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
     windowMs: 24 * 60 * 60 * 1000,
     max: 20,
     keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+    skip: (req) => req.session?.user?.role === 'admin',
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Publish rate limit reached — try again tomorrow' },
@@ -11653,154 +11655,76 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
 
 // ==========================================
 // PRIME CHANNEL — ADMIN MANAGEMENT
-// In-app editor for prime_videos (Directus-backed).
-// All edits go through Directus API so the existing Directus Flow webhook
-// (which fans out to social_posts) fires automatically.
+// Videos are read/written directly from channel_videos (channel_id=5).
+// The Directus prime_videos upload endpoint is kept as dead code for safety.
 // ==========================================
 {
-  const directusBaseUrl = () => (process.env.DIRECTUS_URL || process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055').replace(/\/$/, '');
-  const directusHeaders = () => {
-    const token = process.env.DIRECTUS_ADMIN_TOKEN;
-    if (!token) throw new Error('DIRECTUS_ADMIN_TOKEN not configured');
-    return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-  };
+  const channelVideoService = require('../../services/channelVideoService');
+  function handleSvcError(res, err) {
+    const status = err.status || 500;
+    return res.status(status).json({ success: false, error: err.message || 'Internal error', code: err.code });
+  }
 
-  // GET /api/webapp/admin/prime-videos — list all prime_videos with poster URLs + share links
+  // GET /api/webapp/admin/prime-videos — list all channel_videos for channel_id=5
   app.get('/api/webapp/admin/prime-videos', adminGuard, asyncHandler(async (req, res) => {
-    const limit = Math.min(Number(req.query.limit) || 100, 500);
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const fields = ['id', 'title', 'description', 'status', 'category', 'duration',
-                    'is_featured', 'is_explicit', 'tags', 'plays', 'likes',
-                    'video_file', 'thumbnail', 'date_created', 'date_updated'].join(',');
-    const url = `${directusBaseUrl()}/items/prime_videos?fields=${fields}&limit=${limit}&page=${page}&sort=-date_created&meta=filter_count`;
-    try {
-      const { data } = await axios.get(url, { headers: directusHeaders(), timeout: 8000 });
-      const directusItems = data?.data || [];
+    const page  = Math.max(1, parseInt(req.query.page  || '1',   10));
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '100', 10)));
+    const offset = (page - 1) * limit;
 
-      // Look up social_posts for share URL building. directus_id is the prime_videos.id.
-      const directusIds = directusItems.map((r) => r.id).filter(Boolean);
-      const postMap = new Map();
-      if (directusIds.length) {
-        const { rows } = await getPool().query(
-          `SELECT id, directus_id FROM social_posts
-            WHERE channel_id = 5 AND directus_id = ANY($1::int[])`,
-          [directusIds]
-        );
-        for (const r of rows) postMap.set(r.directus_id, r.id);
-      }
+    const { rows: items } = await getPool().query(
+      `SELECT cv.*
+         FROM channel_videos cv
+        WHERE cv.channel_id = 5
+        ORDER BY cv.created_at DESC
+        LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+    const { rows: countRows } = await getPool().query(
+      `SELECT COUNT(*) AS total FROM channel_videos WHERE channel_id = 5`
+    );
+    const total = parseInt(countRows[0]?.total || '0', 10);
 
-      const items = directusItems.map((row) => {
-        const postId = postMap.get(row.id) || null;
-        return {
-          ...row,
-          social_post_id: postId,
-          poster_url: row.video_file ? `https://cms.pnptv.app/video-thumb/${row.video_file}.jpg` : null,
-          preview_url: row.video_file ? `https://cms.pnptv.app/video-thumb/${row.video_file}_preview.mp4` : null,
-          video_url: row.video_file ? `https://cms.pnptv.app/assets/${row.video_file}` : null,
-          // Shareable link with OG preview — pretty slug appended for X cards
-          share_url: postId ? `https://pnptv.app/v/${postId}` : null,
-        };
-      });
-      res.json({ success: true, items, total: data?.meta?.filter_count ?? items.length });
-    } catch (err) {
-      logger.error('admin prime-videos list failed', { error: err.message });
-      res.status(502).json({ success: false, error: 'Directus fetch failed' });
-    }
+    const _directusBase = (process.env.DIRECTUS_URL || process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055').replace(/\/$/, '');
+    const shaped = items.map((row) => ({
+      id:            row.id,
+      title:         row.title,
+      description:   row.description,
+      status:        row.status,
+      tags:          row.tags || [],
+      duration_sec:  row.duration_sec,
+      is_featured:   row.is_featured ?? false,
+      thumbnail_url: row.thumbnail_url,
+      gif_url:       row.gif_url,
+      video_url:     row.video_url || (row.directus_file_id ? `https://cms.pnptv.app/assets/${row.directus_file_id}` : null),
+      filesize_bytes: row.filesize_bytes ? Number(row.filesize_bytes) : null,
+      channel_id:    row.channel_id,
+      promo_post_id: row.promo_post_id ? Number(row.promo_post_id) : null,
+      ai_generated_meta: row.ai_generated_meta || {},
+      created_at:    row.created_at,
+    }));
+
+    res.json({ success: true, items: shaped, total });
   }));
 
-  // PATCH /api/webapp/admin/prime-videos/:id — update title/description/status/is_featured
+  // PATCH /api/webapp/admin/prime-videos/:id — update fields via channelVideoService
   app.patch('/api/webapp/admin/prime-videos/:id', adminGuard, asyncHandler(async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
 
-    const allowed = ['title', 'description', 'status', 'is_featured', 'is_explicit', 'category', 'tags'];
-    const patch = {};
-    for (const key of allowed) {
-      if (Object.prototype.hasOwnProperty.call(req.body, key)) patch[key] = req.body[key];
-    }
-    if (!Object.keys(patch).length) return res.status(400).json({ success: false, error: 'no fields' });
-
-    if (patch.status && !['draft', 'published', 'archived'].includes(patch.status)) {
-      return res.status(400).json({ success: false, error: 'bad status' });
-    }
-    if (typeof patch.title === 'string' && patch.title.length > 255) {
-      patch.title = patch.title.slice(0, 255);
+    const allowedFields = ['title', 'description', 'tags', 'status', 'is_featured'];
+    const fields = {};
+    for (const f of allowedFields) {
+      if (req.body && Object.prototype.hasOwnProperty.call(req.body, f)) {
+        fields[f] = req.body[f];
+      }
     }
 
-    let updated;
     try {
-      const { data } = await axios.patch(
-        `${directusBaseUrl()}/items/prime_videos/${id}?fields=id,video_file,title,description,status,is_featured,is_explicit,category,tags`,
-        patch,
-        { headers: directusHeaders(), timeout: 8000 }
-      );
-      updated = data?.data;
+      const updated = await channelVideoService.updateVideo({ videoId: id, userId: null, isAdmin: true, fields });
+      res.json({ success: true, item: updated, video: updated });
     } catch (err) {
-      logger.error('admin prime-videos patch failed', { id, error: err.message });
-      const status = err.response?.status === 404 ? 404 : 502;
-      return res.status(status).json({ success: false, error: err.response?.data?.errors?.[0]?.message || err.message });
+      handleSvcError(res, err);
     }
-
-    // PRIME_SYNC_SECRET-bypass: mirror relevant fields to social_posts directly so
-    // the in-app editor doesn't depend on a Directus Flow webhook being configured.
-    try {
-      const syncFields = [];
-      const syncVals = [id];
-      let i = 2;
-      if (Object.prototype.hasOwnProperty.call(patch, 'title')) {
-        syncFields.push(`video_title = $${i++}`);
-        syncVals.push(updated.title);
-      }
-      if (Object.prototype.hasOwnProperty.call(patch, 'description')) {
-        syncFields.push(`video_description = $${i++}`, `content = $${i++}`);
-        const content = updated.description && String(updated.description).trim() ? updated.description : updated.title;
-        syncVals.push(updated.description || null, content);
-      }
-      if (Object.prototype.hasOwnProperty.call(patch, 'status')) {
-        syncFields.push(`is_deleted = $${i++}`);
-        syncVals.push(updated.status !== 'published');
-      }
-      if (syncFields.length) {
-        syncFields.push(`updated_at = NOW()`);
-        await getPool().query(
-          `UPDATE social_posts SET ${syncFields.join(', ')} WHERE directus_id = $1 AND channel_id = 5`,
-          syncVals
-        );
-      }
-    } catch (syncErr) {
-      logger.warn('admin prime-videos social_posts mirror failed (non-fatal)', { id, error: syncErr.message });
-    }
-
-    // Also sync channel_videos so the prime channel page reflects edits immediately.
-    if (updated.video_file) {
-      try {
-        const cvSets = ['updated_at = NOW()'];
-        const cvVals = [updated.video_file, 5];
-        let cvIdx = 3;
-        if (Object.prototype.hasOwnProperty.call(patch, 'title')) {
-          cvSets.push(`title = $${cvIdx++}`);
-          cvVals.push(updated.title);
-        }
-        if (Object.prototype.hasOwnProperty.call(patch, 'description')) {
-          cvSets.push(`description = $${cvIdx++}`);
-          cvVals.push(updated.description || null);
-        }
-        if (Object.prototype.hasOwnProperty.call(patch, 'status')) {
-          const cvStatus = updated.status === 'published' ? 'published'
-            : updated.status === 'archived' ? 'removed' : 'draft';
-          cvSets.push(`status = $${cvIdx++}`);
-          cvVals.push(cvStatus);
-        }
-        await getPool().query(
-          `UPDATE channel_videos SET ${cvSets.join(', ')} WHERE directus_file_id = $1 AND channel_id = $2`,
-          cvVals
-        );
-      } catch (cvErr) {
-        logger.warn('admin prime-videos channel_videos sync failed (non-fatal)', { id, error: cvErr.message });
-      }
-    }
-
-    res.json({ success: true, item: updated });
   }));
 
   // POST /api/webapp/admin/prime-videos/:id/generate-description — Grok-powered description
@@ -11808,24 +11732,19 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
 
-    let row;
-    try {
-      const { data } = await axios.get(
-        `${directusBaseUrl()}/items/prime_videos/${id}?fields=id,title,duration,tags,category`,
-        { headers: directusHeaders(), timeout: 5000 }
-      );
-      row = data?.data;
-    } catch (err) {
-      return res.status(502).json({ success: false, error: 'Directus fetch failed' });
-    }
+    const { rows } = await getPool().query(
+      `SELECT id, title, duration_sec AS duration, tags, description FROM channel_videos WHERE id = $1 AND channel_id = 5`,
+      [id]
+    );
+    const row = rows[0];
     if (!row) return res.status(404).json({ success: false, error: 'not found' });
 
     const grokService = require('../../services/grokService');
-    const tagPart = Array.isArray(row.tags) && row.tags.length ? `Tags: ${row.tags.join(', ')}.` : '';
-    const durPart = row.duration ? `Duration: ~${Math.round(row.duration / 60)} minutes.` : '';
+    const tagPart    = Array.isArray(row.tags) && row.tags.length ? `Tags: ${row.tags.join(', ')}.` : '';
+    const durPart    = row.duration ? `Duration: ~${Math.round(row.duration / 60)} minutes.` : '';
     const customHint = (req.body && typeof req.body.hint === 'string' ? req.body.hint.trim() : '').slice(0, 500);
-    const hintPart = customHint ? `Additional context from the editor: ${customHint}` : '';
-    const prompt = [`Title: "${row.title}".`, durPart, tagPart, hintPart].filter(Boolean).join(' ');
+    const hintPart   = customHint ? `Additional context from the editor: ${customHint}` : '';
+    const prompt     = [`Title: "${row.title}".`, durPart, tagPart, hintPart].filter(Boolean).join(' ');
 
     try {
       const result = await grokService.generateBilingualSafeVideoDescription({ prompt });
@@ -11834,7 +11753,7 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
       logger.error('grok generate-description failed', { id, error: err.message });
       const isSafetyBlock = /SAFETY_CHECK|usage guidelines/i.test(err.message || '');
       const friendly = isSafetyBlock
-        ? "Grok's safety filter blocked this title. Add neutral context (e.g. \"two adult men, gym setting\") in the Context for Grok field and try again, or rename the title to something less explicit."
+        ? "Grok's safety filter blocked this title. Add neutral context in the Context for Grok field and try again."
         : (err.message || 'grok failed');
       res.status(502).json({ success: false, error: friendly });
     }
@@ -11845,28 +11764,20 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
 
-    let row;
-    try {
-      const { data } = await axios.get(
-        `${directusBaseUrl()}/items/prime_videos/${id}?fields=id,title,duration,tags,description`,
-        { headers: directusHeaders(), timeout: 5000 }
-      );
-      row = data?.data;
-    } catch (err) {
-      return res.status(502).json({ success: false, error: 'Directus fetch failed' });
-    }
+    const { rows } = await getPool().query(
+      `SELECT id, title, duration_sec AS duration, tags, description FROM channel_videos WHERE id = $1 AND channel_id = 5`,
+      [id]
+    );
+    const row = rows[0];
     if (!row) return res.status(404).json({ success: false, error: 'not found' });
 
     const grokService = require('../../services/grokService');
-    const tagPart = Array.isArray(row.tags) && row.tags.length ? `Tags: ${row.tags.join(', ')}.` : '';
-    const durPart = row.duration ? `Duration: ~${Math.round(row.duration / 60)} minutes.` : '';
+    const tagPart     = Array.isArray(row.tags) && row.tags.length ? `Tags: ${row.tags.join(', ')}.` : '';
+    const durPart     = row.duration ? `Duration: ~${Math.round(row.duration / 60)} minutes.` : '';
     const descSnippet = row.description ? `Existing description excerpt: ${String(row.description).slice(0, 200)}` : '';
-    const customHint = (req.body && typeof req.body.hint === 'string' ? req.body.hint.trim() : '').slice(0, 500);
-    const hintPart = customHint ? `Editor context: ${customHint}` : '';
-    const prompt = [
-      `Current title: "${row.title}".`,
-      durPart, tagPart, descSnippet, hintPart,
-    ].filter(Boolean).join(' ');
+    const customHint  = (req.body && typeof req.body.hint === 'string' ? req.body.hint.trim() : '').slice(0, 500);
+    const hintPart    = customHint ? `Editor context: ${customHint}` : '';
+    const prompt      = [`Current title: "${row.title}".`, durPart, tagPart, descSnippet, hintPart].filter(Boolean).join(' ');
 
     try {
       const title = await grokService.generateSafeVideoTitle({ prompt });
@@ -11876,51 +11787,39 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
       const isSafetyBlock = /SAFETY_CHECK|usage guidelines/i.test(err.message || '');
       res.status(502).json({
         success: false,
-        error: isSafetyBlock
-          ? "Grok's safety filter blocked this. Add neutral context in the Context for Grok field."
-          : (err.message || 'grok failed'),
+        error: isSafetyBlock ? "Grok's safety filter blocked this. Add neutral context in the Context for Grok field." : (err.message || 'grok failed'),
       });
     }
   }));
 
-  // POST /api/webapp/admin/prime-videos/:id/suggest-tags — pick 3-5 from the Media.tsx taxonomy
-  const PRIME_TAG_TAXONOMY = [
-    'slam', 'clouds', 'outdoors', 'group',
-    'meth-daddy', 'twink', 'colombian', 'venezuelan',
-    'threesome', 'golden-rain',
-  ];
+  // POST /api/webapp/admin/prime-videos/:id/suggest-tags — pick 3-5 from the 27-tag taxonomy
   app.post('/api/webapp/admin/prime-videos/:id/suggest-tags', adminGuard, asyncHandler(async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
 
-    let row;
-    try {
-      const { data } = await axios.get(
-        `${directusBaseUrl()}/items/prime_videos/${id}?fields=id,title,duration,description`,
-        { headers: directusHeaders(), timeout: 5000 }
-      );
-      row = data?.data;
-    } catch (err) {
-      return res.status(502).json({ success: false, error: 'Directus fetch failed' });
-    }
+    const { rows } = await getPool().query(
+      `SELECT id, title, duration_sec AS duration, description FROM channel_videos WHERE id = $1 AND channel_id = 5`,
+      [id]
+    );
+    const row = rows[0];
     if (!row) return res.status(404).json({ success: false, error: 'not found' });
 
     const grokService = require('../../services/grokService');
-    const durPart = row.duration ? `Duration: ~${Math.round(row.duration / 60)} minutes.` : '';
+    const taxonomy    = channelVideoService.TAG_TAXONOMY;
+    const durPart     = row.duration ? `Duration: ~${Math.round(row.duration / 60)} minutes.` : '';
     const descSnippet = row.description ? `Description: ${String(row.description).slice(0, 300)}` : '';
-    const customHint = (req.body && typeof req.body.hint === 'string' ? req.body.hint.trim() : '').slice(0, 500);
-    const hintPart = customHint ? `Editor context: ${customHint}` : '';
-    const prompt = [`Title: "${row.title}".`, durPart, descSnippet, hintPart].filter(Boolean).join(' ');
+    const customHint  = (req.body && typeof req.body.hint === 'string' ? req.body.hint.trim() : '').slice(0, 500);
+    const hintPart    = customHint ? `Editor context: ${customHint}` : '';
+    const prompt      = [`Title: "${row.title}".`, durPart, descSnippet, hintPart].filter(Boolean).join(' ');
 
     try {
-      const tags = await grokService.suggestSafeTags({ prompt, taxonomy: PRIME_TAG_TAXONOMY });
-      res.json({ success: true, tags, taxonomy: PRIME_TAG_TAXONOMY });
+      const tags = await grokService.suggestSafeTags({ prompt, taxonomy });
+      res.json({ success: true, tags, taxonomy });
     } catch (err) {
       logger.error('grok suggest-tags failed', { id, error: err.message });
-      // Fall back to keyword heuristics so the UI still gets something useful
       const t = (row.title + ' ' + (row.description || '') + ' ' + customHint).toLowerCase();
-      const fallback = PRIME_TAG_TAXONOMY.filter((tag) => t.includes(tag.replace('-', ' ')) || t.includes(tag));
-      res.json({ success: true, tags: fallback.slice(0, 5), taxonomy: PRIME_TAG_TAXONOMY, fallback: true });
+      const fallback = taxonomy.filter((tag) => t.includes(tag.replace('-', ' ')) || t.includes(tag));
+      res.json({ success: true, tags: fallback.slice(0, 5), taxonomy, fallback: true });
     }
   }));
 

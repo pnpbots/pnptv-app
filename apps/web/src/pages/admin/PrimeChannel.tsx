@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  ChannelVideo,
   listAdminPrimeVideos,
-  updateAdminPrimeVideo,
+  updateChannelVideo,
   generatePrimeVideoDescription,
   generatePrimeVideoTitle,
   suggestPrimeVideoTags,
-  uploadAdminPrimeVideo,
-  PRIME_TAG_TAXONOMY,
-  type AdminPrimeVideo,
+  getChannelTagTaxonomy,
 } from "@/lib/api";
+import { UploadVideoButton } from "@/components/channels/UploadVideoButton";
 
 function fmtDuration(seconds: number | null): string {
   if (!seconds || !Number.isFinite(seconds)) return "—";
@@ -17,33 +17,37 @@ function fmtDuration(seconds: number | null): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-const STATUS_LABEL: Record<AdminPrimeVideo["status"], string> = {
+const STATUS_LABEL: Record<string, string> = {
   draft: "Draft",
   published: "Published",
-  archived: "Archived",
+  processing: "Processing",
+  failed: "Failed",
+  removed: "Removed",
 };
 
-const STATUS_COLORS: Record<AdminPrimeVideo["status"], string> = {
+const STATUS_COLORS: Record<string, string> = {
   draft: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
   published: "bg-green-500/15 text-green-300 border-green-500/30",
-  archived: "bg-gray-500/15 text-gray-300 border-gray-500/30",
+  processing: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  failed: "bg-red-500/15 text-red-300 border-red-500/30",
+  removed: "bg-gray-500/15 text-gray-400 border-gray-500/30",
 };
 
 interface DraftEdits {
   title: string;
   description: string;
-  status: AdminPrimeVideo["status"];
-  is_featured: boolean;
   tags: string[];
+  is_featured: boolean;
+  status: string;
 }
 
-function buildDraft(item: AdminPrimeVideo): DraftEdits {
+function buildDraft(item: ChannelVideo): DraftEdits {
   return {
-    title: item.title || "",
+    title:       item.title || "",
     description: item.description || "",
-    status: item.status,
-    is_featured: !!item.is_featured,
-    tags: Array.isArray(item.tags) ? [...item.tags] : [],
+    tags:        Array.isArray(item.tags) ? [...item.tags] : [],
+    is_featured: item.is_featured ?? false,
+    status:      item.status || "draft",
   };
 }
 
@@ -54,28 +58,29 @@ function arraysEqualSets(a: string[], b: string[]) {
   return true;
 }
 
-function diffPatch(orig: AdminPrimeVideo, draft: DraftEdits) {
-  const patch: Record<string, unknown> = {};
+function diffPatch(orig: ChannelVideo, draft: DraftEdits) {
+  const patch: Partial<DraftEdits> = {};
   if (draft.title !== (orig.title || "")) patch.title = draft.title;
   if (draft.description !== (orig.description || "")) patch.description = draft.description;
-  if (draft.status !== orig.status) patch.status = draft.status;
-  if (draft.is_featured !== !!orig.is_featured) patch.is_featured = draft.is_featured;
   const origTags = Array.isArray(orig.tags) ? orig.tags : [];
   if (!arraysEqualSets(draft.tags, origTags)) patch.tags = draft.tags;
+  if (draft.is_featured !== (orig.is_featured ?? false)) patch.is_featured = draft.is_featured;
+  if (draft.status !== orig.status) patch.status = draft.status;
   return patch;
 }
 
 export default function PrimeChannel() {
-  const [items, setItems] = useState<AdminPrimeVideo[]>([]);
+  const [items, setItems] = useState<ChannelVideo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<number, DraftEdits>>({});
+  const [taxonomy, setTaxonomy] = useState<string[]>([]);
   const [hints, setHints] = useState<Record<number, string>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
   const [genId, setGenId] = useState<number | null>(null);
   const [genTitleId, setGenTitleId] = useState<number | null>(null);
   const [genTagsId, setGenTagsId] = useState<number | null>(null);
-  const [filterStatus, setFilterStatus] = useState<"all" | AdminPrimeVideo["status"]>("all");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [hoverId, setHoverId] = useState<number | null>(null);
   const [gridCols, setGridColsState] = useState<1 | 2>(() => {
@@ -92,58 +97,6 @@ export default function PrimeChannel() {
   };
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
 
-  // Upload modal state
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadTitle, setUploadTitle] = useState("");
-  const [uploadDescription, setUploadDescription] = useState("");
-  const [uploadStatus, setUploadStatus] = useState<"draft" | "published">("published");
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploading, setUploading] = useState(false);
-
-  function resetUpload() {
-    setUploadFile(null);
-    setUploadTitle("");
-    setUploadDescription("");
-    setUploadStatus("published");
-    setUploadProgress(0);
-    setUploading(false);
-  }
-
-  function pickFile(f: File | null) {
-    setUploadFile(f);
-    if (f && !uploadTitle) {
-      // Default title to filename without extension
-      const base = f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
-      setUploadTitle(base);
-    }
-  }
-
-  async function performUpload() {
-    if (!uploadFile) return;
-    setUploading(true);
-    setUploadProgress(0);
-    try {
-      const res = await uploadAdminPrimeVideo(uploadFile, {
-        title: uploadTitle.trim() || undefined,
-        description: uploadDescription.trim() || undefined,
-        status: uploadStatus,
-        onProgress: setUploadProgress,
-      });
-      const newItem = res.item as AdminPrimeVideo;
-      setItems((prev) => [newItem, ...prev]);
-      setDrafts((prev) => ({ ...prev, [newItem.id]: buildDraft(newItem) }));
-      setToast({ kind: "ok", msg: `Uploaded "${newItem.title}". ${res.note || ""}`.trim() });
-      setUploadOpen(false);
-      resetUpload();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Upload failed";
-      setToast({ kind: "err", msg });
-    } finally {
-      setUploading(false);
-    }
-  }
-
   useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(null), 3500);
@@ -154,14 +107,17 @@ export default function PrimeChannel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await listAdminPrimeVideos(1, 200);
-      setItems(res.items);
+      const [videosRes, taxRes] = await Promise.all([
+        listAdminPrimeVideos(1, 200),
+        getChannelTagTaxonomy(5),
+      ]);
+      setItems(videosRes.items);
       const newDrafts: Record<number, DraftEdits> = {};
-      for (const it of res.items) newDrafts[it.id] = buildDraft(it);
+      for (const it of videosRes.items) newDrafts[it.id] = buildDraft(it);
       setDrafts(newDrafts);
+      if (taxRes.tags) setTaxonomy(taxRes.tags);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to load videos";
-      setError(msg);
+      setError(err instanceof Error ? err.message : "Failed to load videos");
     } finally {
       setLoading(false);
     }
@@ -175,7 +131,7 @@ export default function PrimeChannel() {
     setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
   }
 
-  async function save(item: AdminPrimeVideo) {
+  async function save(item: ChannelVideo) {
     const draft = drafts[item.id];
     if (!draft) return;
     const patch = diffPatch(item, draft);
@@ -185,19 +141,19 @@ export default function PrimeChannel() {
     }
     setSavingId(item.id);
     try {
-      const res = await updateAdminPrimeVideo(item.id, patch);
-      setItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, ...res.item } : p)));
-      setDrafts((prev) => ({ ...prev, [item.id]: buildDraft({ ...item, ...res.item }) }));
-      setToast({ kind: "ok", msg: `Saved "${res.item.title}"` });
+      const res = await updateChannelVideo(5, item.id, patch);
+      const updated = res.video;
+      setItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, ...updated } : p)));
+      setDrafts((prev) => ({ ...prev, [item.id]: buildDraft({ ...item, ...updated }) }));
+      setToast({ kind: "ok", msg: `Saved "${updated.title}"` });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Save failed";
-      setToast({ kind: "err", msg });
+      setToast({ kind: "err", msg: err instanceof Error ? err.message : "Save failed" });
     } finally {
       setSavingId(null);
     }
   }
 
-  async function generateDescription(item: AdminPrimeVideo) {
+  async function generateDescription(item: ChannelVideo) {
     setGenId(item.id);
     try {
       const hint = (hints[item.id] || "").trim().slice(0, 500);
@@ -212,7 +168,7 @@ export default function PrimeChannel() {
     }
   }
 
-  async function generateTitle(item: AdminPrimeVideo) {
+  async function generateTitle(item: ChannelVideo) {
     setGenTitleId(item.id);
     try {
       const hint = (hints[item.id] || "").trim().slice(0, 500);
@@ -227,7 +183,7 @@ export default function PrimeChannel() {
     }
   }
 
-  async function suggestTags(item: AdminPrimeVideo) {
+  async function suggestTags(item: ChannelVideo) {
     setGenTagsId(item.id);
     try {
       const hint = (hints[item.id] || "").trim().slice(0, 500);
@@ -246,7 +202,7 @@ export default function PrimeChannel() {
     }
   }
 
-  function toggleTag(item: AdminPrimeVideo, tag: string) {
+  function toggleTag(item: ChannelVideo, tag: string) {
     const current = drafts[item.id]?.tags || [];
     const next = current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag];
     setField(item.id, "tags", next);
@@ -262,8 +218,11 @@ export default function PrimeChannel() {
   }, [items, filterStatus, search]);
 
   const counts = useMemo(() => {
-    const acc = { all: items.length, draft: 0, published: 0, archived: 0 };
-    for (const it of items) acc[it.status]++;
+    const acc: Record<string, number> = { all: items.length, draft: 0, published: 0 };
+    for (const it of items) {
+      if (acc[it.status] !== undefined) acc[it.status]++;
+      else acc[it.status] = (acc[it.status] || 0) + 1;
+    }
     return acc;
   }, [items]);
 
@@ -274,16 +233,23 @@ export default function PrimeChannel() {
         <div>
           <h1 className="text-2xl font-bold text-pnp-textPrimary">Prime Channel</h1>
           <p className="text-sm text-pnp-textSecondary">
-            Edit titles & descriptions, toggle featured, and generate copy with Grok.
+            Edit titles, descriptions, tags, toggle featured, and generate copy with Grok.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setUploadOpen(true)}
-            className="px-3 py-2 text-sm rounded-lg bg-pnp-accent text-white font-medium hover:opacity-90"
-          >
-            + Upload Video
-          </button>
+          <UploadVideoButton
+            channelId={5}
+            channelName="PNPtv! PRIME"
+            channelSlug="pnptv-prime"
+            accessType="prime"
+            pricePerMonth={null}
+            creatorUsername="santino"
+            onPublished={(video) => {
+              setItems((prev) => [video, ...prev]);
+              setDrafts((prev) => ({ ...prev, [video.id]: buildDraft(video) }));
+              setToast({ kind: "ok", msg: `"${video.title}" published to PRIME channel.` });
+            }}
+          />
           <button
             onClick={load}
             className="px-3 py-2 text-sm rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:bg-pnp-surfaceHover"
@@ -296,7 +262,7 @@ export default function PrimeChannel() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 rounded-lg bg-pnp-surface border border-pnp-border p-1">
-          {(["all", "published", "draft", "archived"] as const).map((s) => (
+          {(["all", "published", "draft"] as const).map((s) => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}
@@ -306,13 +272,13 @@ export default function PrimeChannel() {
                   : "text-pnp-textSecondary hover:text-pnp-textPrimary"
               }`}
             >
-              {s === "all" ? "All" : STATUS_LABEL[s]} ({counts[s]})
+              {s === "all" ? "All" : STATUS_LABEL[s]} ({counts[s] ?? 0})
             </button>
           ))}
         </div>
         <input
           type="search"
-          placeholder="Search title or description…"
+          placeholder="Search title or description..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 min-w-[200px] px-3 py-2 text-sm rounded-lg bg-pnp-surface border border-pnp-border text-pnp-textPrimary placeholder-pnp-textSecondary"
@@ -366,7 +332,7 @@ export default function PrimeChannel() {
 
       {/* Body */}
       {loading && (
-        <div className="text-center py-12 text-pnp-textSecondary">Loading prime videos…</div>
+        <div className="text-center py-12 text-pnp-textSecondary">Loading prime videos...</div>
       )}
       {error && (
         <div className="rounded-lg bg-red-500/15 border border-red-500/40 text-red-200 p-4">
@@ -385,6 +351,7 @@ export default function PrimeChannel() {
           const isSaving = savingId === item.id;
           const isGenerating = genId === item.id;
           const isHovered = hoverId === item.id;
+          const canEditStatus = ["published", "draft", "processing"].includes(item.status);
           return (
             <div
               key={item.id}
@@ -395,44 +362,35 @@ export default function PrimeChannel() {
                 onMouseEnter={() => setHoverId(item.id)}
                 onMouseLeave={() => setHoverId(null)}
               >
-                {item.video_file ? (
-                  isHovered && item.preview_url ? (
-                    <video
-                      src={item.preview_url}
-                      autoPlay
-                      muted
-                      loop
-                      playsInline
-                      className="w-full h-full object-contain"
-                    />
-                  ) : item.poster_url ? (
-                    <img
-                      src={item.poster_url}
-                      alt={item.title}
-                      loading="lazy"
-                      className="w-full h-full object-contain"
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-pnp-textSecondary text-sm">
-                      no thumbnail
-                    </div>
-                  )
+                {isHovered && item.gif_url ? (
+                  <img
+                    src={item.gif_url}
+                    alt={item.title}
+                    className="w-full h-full object-contain"
+                  />
+                ) : item.thumbnail_url ? (
+                  <img
+                    src={item.thumbnail_url}
+                    alt={item.title}
+                    loading="lazy"
+                    className="w-full h-full object-contain"
+                  />
                 ) : (
                   <div className="flex items-center justify-center h-full text-pnp-textSecondary text-sm">
-                    no video file
+                    no thumbnail
                   </div>
                 )}
-                <span className={`absolute top-2 left-2 px-2 py-0.5 text-[10px] rounded-md border ${STATUS_COLORS[item.status]}`}>
-                  {STATUS_LABEL[item.status]}
+                <span className={`absolute top-2 left-2 px-2 py-0.5 text-[10px] rounded-md border ${STATUS_COLORS[item.status] || "bg-gray-500/15 text-gray-300 border-gray-500/30"}`}>
+                  {STATUS_LABEL[item.status] || item.status}
                 </span>
-                {item.duration && (
+                {item.duration_sec != null && (
                   <span className="absolute bottom-2 right-2 bg-black/75 text-white text-[10px] px-1.5 py-0.5 rounded">
-                    {fmtDuration(item.duration)}
+                    {fmtDuration(item.duration_sec)}
                   </span>
                 )}
                 {item.is_featured && (
                   <span className="absolute top-2 right-2 bg-pnp-accent text-white text-[10px] px-2 py-0.5 rounded-md">
-                    ★ Featured
+                    Featured
                   </span>
                 )}
               </div>
@@ -447,7 +405,7 @@ export default function PrimeChannel() {
                       className="px-2 py-0.5 text-[11px] rounded-md bg-purple-500/20 border border-purple-500/40 text-purple-200 hover:bg-purple-500/30 disabled:opacity-50"
                       title="Rewrite title with Grok using description, duration, tags + your context"
                     >
-                      {genTitleId === item.id ? "✦ Rewriting…" : "✦ Grok"}
+                      {genTitleId === item.id ? "Rewriting..." : "Grok"}
                     </button>
                   </div>
                   <input
@@ -473,7 +431,7 @@ export default function PrimeChannel() {
                     onChange={(e) =>
                       setHints((prev) => ({ ...prev, [item.id]: e.target.value }))
                     }
-                    placeholder="Tell Grok about cast, location, kinks, mood, hashtags to include, anything that should shape the description…"
+                    placeholder="Tell Grok about cast, location, kinks, mood, hashtags to include, anything that should shape the description..."
                     className="mt-1 w-full px-2 py-1.5 text-xs rounded-md bg-pnp-background border border-purple-500/30 text-pnp-textPrimary placeholder-pnp-textSecondary"
                   />
                 </label>
@@ -487,14 +445,14 @@ export default function PrimeChannel() {
                       className="px-2 py-0.5 text-[11px] rounded-md bg-purple-500/20 border border-purple-500/40 text-purple-200 hover:bg-purple-500/30 disabled:opacity-50"
                       title="Generate bilingual description with Grok using title, duration, tags + your context"
                     >
-                      {isGenerating ? "✦ Generating…" : "✦ Grok"}
+                      {isGenerating ? "Generating..." : "Grok"}
                     </button>
                   </div>
                   <textarea
                     value={draft.description}
                     rows={6}
                     onChange={(e) => setField(item.id, "description", e.target.value)}
-                    placeholder="Enter description, or click ✦ Grok to generate one"
+                    placeholder="Enter description, or click Grok to generate one"
                     className="mt-1 w-full px-2 py-1.5 text-sm rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary font-mono"
                   />
                 </label>
@@ -510,23 +468,23 @@ export default function PrimeChannel() {
                       className="px-2 py-0.5 text-[11px] rounded-md bg-purple-500/20 border border-purple-500/40 text-purple-200 hover:bg-purple-500/30 disabled:opacity-50"
                       title="Suggest tags from the catalog taxonomy with Grok"
                     >
-                      {genTagsId === item.id ? "✦ Picking…" : "✦ Grok"}
+                      {genTagsId === item.id ? "Picking..." : "Grok"}
                     </button>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1">
-                    {PRIME_TAG_TAXONOMY.map((t) => {
-                      const active = draft.tags.includes(t.key);
+                    {taxonomy.map((tag) => {
+                      const active = draft.tags.includes(tag);
                       return (
                         <button
-                          key={t.key}
-                          onClick={() => toggleTag(item, t.key)}
+                          key={tag}
+                          onClick={() => toggleTag(item, tag)}
                           className={`px-2 py-0.5 text-[11px] rounded-full border transition ${
                             active
                               ? "bg-pnp-accent/20 border-pnp-accent text-pnp-accent"
                               : "bg-pnp-background border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary"
                           }`}
                         >
-                          {t.label}
+                          {tag}
                         </button>
                       );
                     })}
@@ -535,13 +493,16 @@ export default function PrimeChannel() {
 
                 <div className="flex items-center justify-between gap-2">
                   <select
-                    value={draft.status}
-                    onChange={(e) => setField(item.id, "status", e.target.value as AdminPrimeVideo["status"])}
-                    className="px-2 py-1.5 text-xs rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary"
+                    value={["published", "draft"].includes(draft.status) ? draft.status : draft.status}
+                    onChange={(e) => setField(item.id, "status", e.target.value)}
+                    disabled={!canEditStatus}
+                    className="px-2 py-1.5 text-xs rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary disabled:opacity-50"
                   >
                     <option value="published">Published</option>
                     <option value="draft">Draft</option>
-                    <option value="archived">Archived</option>
+                    {item.status === "processing" && <option value="processing" disabled>Processing...</option>}
+                    {item.status === "failed" && <option value="failed" disabled>Failed</option>}
+                    {item.status === "removed" && <option value="removed" disabled>Removed</option>}
                   </select>
                   <label className="flex items-center gap-1.5 text-xs text-pnp-textSecondary">
                     <input
@@ -562,166 +523,24 @@ export default function PrimeChannel() {
                         : "bg-pnp-background text-pnp-textSecondary cursor-not-allowed"
                     } disabled:opacity-50`}
                   >
-                    {isSaving ? "Saving…" : "Save"}
+                    {isSaving ? "Saving..." : "Save"}
                   </button>
                 </div>
 
                 <div className="flex flex-wrap gap-2 text-[11px] text-pnp-textSecondary border-t border-pnp-border pt-2">
-                  <span>▶ {item.plays || 0}</span>
-                  <span>♥ {item.likes || 0}</span>
-                  {item.category && <span>· {item.category}</span>}
+                  {item.duration_sec != null && (
+                    <span>{Math.floor(item.duration_sec / 60)}:{String(item.duration_sec % 60).padStart(2, "0")}</span>
+                  )}
+                  <span>· {new Date(item.created_at).toLocaleDateString()}</span>
                   {Array.isArray(item.tags) && item.tags.length > 0 && (
-                    <span>· {item.tags.slice(0, 3).join(", ")}{item.tags.length > 3 ? "…" : ""}</span>
+                    <span>· {item.tags.slice(0, 3).join(", ")}{item.tags.length > 3 ? "..." : ""}</span>
                   )}
                 </div>
-
-                {item.share_url && (
-                  <div className="flex items-center gap-2 pt-1">
-                    <input
-                      type="text"
-                      readOnly
-                      value={item.share_url}
-                      onFocus={(e) => e.currentTarget.select()}
-                      className="flex-1 min-w-0 px-2 py-1 text-[11px] rounded-md bg-pnp-background border border-pnp-border text-pnp-textSecondary font-mono"
-                    />
-                    <button
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(item.share_url!);
-                          setToast({ kind: "ok", msg: "Share link copied." });
-                        } catch {
-                          setToast({ kind: "err", msg: "Copy failed — select & copy manually." });
-                        }
-                      }}
-                      className="px-2 py-1 text-[11px] rounded-md bg-pnp-surface border border-pnp-border text-pnp-textPrimary hover:bg-pnp-surfaceHover whitespace-nowrap"
-                      title="Copy shareable link with social-media preview"
-                    >
-                      📋 Copy
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           );
         })}
       </div>
-
-      {/* Upload modal */}
-      {uploadOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-          onClick={() => !uploading && setUploadOpen(false)}
-        >
-          <div
-            className="bg-pnp-surface border border-pnp-border rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4 border-b border-pnp-border flex items-center justify-between">
-              <h2 className="text-lg font-bold text-pnp-textPrimary">Upload Video to Prime</h2>
-              <button
-                onClick={() => !uploading && setUploadOpen(false)}
-                disabled={uploading}
-                className="text-pnp-textSecondary hover:text-pnp-textPrimary disabled:opacity-50"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-4 space-y-4">
-              <label className="block">
-                <span className="text-xs font-medium text-pnp-textSecondary">Video file (MP4, MOV, WebM — up to 4 GB)</span>
-                <input
-                  type="file"
-                  accept="video/*"
-                  disabled={uploading}
-                  onChange={(e) => pickFile(e.target.files?.[0] || null)}
-                  className="mt-1 w-full text-sm text-pnp-textPrimary file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-pnp-accent file:text-white file:cursor-pointer file:text-xs"
-                />
-                {uploadFile && (
-                  <p className="mt-1 text-[11px] text-pnp-textSecondary">
-                    {uploadFile.name} · {(uploadFile.size / 1024 / 1024).toFixed(1)} MB
-                  </p>
-                )}
-              </label>
-
-              <label className="block">
-                <span className="text-xs font-medium text-pnp-textSecondary">Title</span>
-                <input
-                  type="text"
-                  value={uploadTitle}
-                  maxLength={255}
-                  disabled={uploading}
-                  onChange={(e) => setUploadTitle(e.target.value)}
-                  placeholder="Defaults to filename if empty"
-                  className="mt-1 w-full px-2 py-1.5 text-sm rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary disabled:opacity-50"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-xs font-medium text-pnp-textSecondary">Description (optional — you can generate later with ✦ Grok)</span>
-                <textarea
-                  value={uploadDescription}
-                  rows={4}
-                  disabled={uploading}
-                  onChange={(e) => setUploadDescription(e.target.value)}
-                  placeholder="Leave blank and use Grok after upload, or write it now"
-                  className="mt-1 w-full px-2 py-1.5 text-sm rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary disabled:opacity-50"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-xs font-medium text-pnp-textSecondary">Status</span>
-                <select
-                  value={uploadStatus}
-                  disabled={uploading}
-                  onChange={(e) => setUploadStatus(e.target.value as "draft" | "published")}
-                  className="mt-1 w-full px-2 py-1.5 text-sm rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary disabled:opacity-50"
-                >
-                  <option value="published">Published — visible to users immediately</option>
-                  <option value="draft">Draft — hidden until you publish</option>
-                </select>
-              </label>
-
-              {uploading && (
-                <div>
-                  <div className="flex justify-between text-[11px] text-pnp-textSecondary mb-1">
-                    <span>Uploading…</span>
-                    <span>{uploadProgress}%</span>
-                  </div>
-                  <div className="h-2 bg-pnp-background rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-pnp-accent transition-all"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                  {uploadProgress === 100 && (
-                    <p className="mt-2 text-[11px] text-pnp-textSecondary">
-                      Upload finished. Directus is processing the file… (this can take a moment for large videos)
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 border-t border-pnp-border flex justify-end gap-2">
-              <button
-                onClick={() => !uploading && setUploadOpen(false)}
-                disabled={uploading}
-                className="px-3 py-1.5 text-sm rounded-md bg-pnp-background border border-pnp-border text-pnp-textPrimary disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={performUpload}
-                disabled={!uploadFile || uploading}
-                className="px-4 py-1.5 text-sm rounded-md bg-pnp-accent text-white font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {uploading ? "Uploading…" : "Upload"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
