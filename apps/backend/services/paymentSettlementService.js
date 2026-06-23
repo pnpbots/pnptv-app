@@ -304,6 +304,73 @@ class PaymentSettlementService {
         userId: order.user_id, creatorId: order.creator_id, invoiceId,
       });
 
+      // FIX 1: Grant platform entitlements (pnp-member etc.) that grantEntitlementsForPlan handles.
+      // subscribeToCreator only writes the creator-subscription entitlement row; this adds the rest.
+      try {
+        const PaymentService = require('./paymentService');
+        await PaymentService.grantEntitlementsForPlan(
+          order.user_id,
+          order.plan_id,
+          'btcpay',
+          { creatorId: String(order.creator_id) },
+          order.id,
+        );
+        logger.info('BTCPay: platform entitlements granted for creator subscription', {
+          userId: order.user_id, planId: order.plan_id,
+        });
+      } catch (grantErr) {
+        logger.warn('BTCPay: grantEntitlementsForPlan failed for creator_monthly (non-fatal — creator-subscription entitlement already written)', {
+          error: grantErr.message, userId: order.user_id, planId: order.plan_id,
+        });
+      }
+
+      // FIX 7: Insert a payments row so the purchase appears in payment history and admin views.
+      try {
+        const amount = Number(order.amount_usd || order.amount || 0);
+        const txId = order.invoice_id || order.id;
+        await dbQuery(
+          `INSERT INTO payments (user_id, plan_id, amount, provider, status, transaction_id, created_at, updated_at)
+           VALUES ($1, $2, $3, 'btcpay', 'completed', $4, NOW(), NOW())
+           ON CONFLICT (provider, transaction_id) WHERE transaction_id IS NOT NULL DO NOTHING`,
+          [order.user_id, order.plan_id, amount, txId]
+        );
+      } catch (pmtErr) {
+        logger.warn('BTCPay: settleCreatorSubscription payments row insert failed (non-fatal)', { error: pmtErr.message });
+      }
+
+      // FIX 4: Send purchase confirmation to buyer.
+      try {
+        const PaymentNotificationService = require('./paymentNotificationService');
+        await PaymentNotificationService.deliverPurchaseConfirmation(order.user_id, {
+          planId:        order.plan_id,
+          planName:      'Creator Subscription',
+          amount:        Number(order.amount_usd || order.amount || 0),
+          transactionId: order.invoice_id || order.id,
+          provider:      'btcpay',
+          expiryDate:    new Date(Date.now() + 30 * 86400000),
+          isLifetime:    false,
+        });
+      } catch (notifErr) {
+        logger.warn('BTCPay: settleCreatorSubscription purchase confirmation failed (non-fatal)', { error: notifErr.message });
+      }
+
+      // FIX 4: Send admin payment alert.
+      try {
+        const PaymentNotificationService = require('./paymentNotificationService');
+        await PaymentNotificationService.sendAdminPaymentNotification({
+          bot:           (() => { try { const m = require('../bot/core/bot'); return (typeof m.getBotInstance === 'function' ? m.getBotInstance() : null) || new (require('telegraf').Telegraf)(process.env.BOT_TOKEN); } catch (_) { return new (require('telegraf').Telegraf)(process.env.BOT_TOKEN); } })(),
+          userId:        order.user_id,
+          planName:      'Creator Subscription',
+          amount:        Number(order.amount_usd || order.amount || 0),
+          provider:      'btcpay',
+          transactionId: order.invoice_id || order.id,
+          customerName:  order.user_id,
+          customerEmail: 'N/A',
+        });
+      } catch (adminErr) {
+        logger.warn('BTCPay: settleCreatorSubscription admin notification failed (non-fatal)', { error: adminErr.message });
+      }
+
       const { markInvoiceProcessed } = require('../config/btcpay');
       await markInvoiceProcessed(invoiceId, {
         userId: order.user_id,

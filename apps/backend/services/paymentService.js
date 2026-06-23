@@ -764,6 +764,21 @@ class PaymentService {
       // The order here matters: extraMetadata wins over creatorId so an explicit
       // { channelId, hangoutGroupId } supplied by the channel-purchase route
       // survives merge without being overwritten.
+      // FIX 8: Validate that the creator is not locked or paused before creating a payment record.
+      if (planId === 'creator_monthly' && creatorId) {
+        const { rows: creatorRows } = await query(
+          `SELECT creator_locked, creator_subscription_paused FROM users WHERE id = $1`,
+          [String(creatorId)]
+        );
+        const creator = creatorRows[0];
+        if (creator?.creator_locked) {
+          throw Object.assign(new Error('This creator is not accepting subscriptions right now'), { code: 'CREATOR_LOCKED', status: 403 });
+        }
+        if (creator?.creator_subscription_paused) {
+          throw Object.assign(new Error('This creator has paused subscriptions'), { code: 'CREATOR_SUBSCRIPTION_PAUSED', status: 403 });
+        }
+      }
+
       const mergedMetadata = {
         ...(creatorId ? { creatorId } : {}),
         ...(extraMetadata && typeof extraMetadata === 'object' ? extraMetadata : {}),
@@ -1744,6 +1759,14 @@ class PaymentService {
           return { success: true, type: 'live_show_ticket' };
         }
 
+        // FIX 3: Guard against missing creatorId for creator_monthly before any grants.
+        if (payment?.plan_id === 'creator_monthly' && !payment?.metadata?.creatorId) {
+          logger.error('processEpaycoWebhook: creator_monthly payment missing metadata.creatorId', {
+            paymentId: payment?.id, transactionId,
+          });
+          return { success: false, code: 'MISSING_CREATOR_ID', message: 'creator_monthly payment has no creatorId in metadata' };
+        }
+
         // Activate user subscription inside a DB transaction
         if (userId && planIdOrBookingId) {
           const plan = await PlanModel.getById(planIdOrBookingId);
@@ -1793,10 +1816,11 @@ class PaymentService {
             }
             MetricsService.recordGrantSucceeded('epayco', planIdOrBookingId);
 
-            // Mark payment completed immediately after core activation (before notifications)
-            // to prevent recovery cron from re-activating on crash during notification phase
-            if (payment) {
-              const completedMeta = {
+            // FIX 2: For creator_monthly, defer updateStatus('completed') to AFTER subscribeToCreator
+            // so that if subscribeToCreator throws, ePayco's retry will re-run the full flow.
+            // For all other plans mark completed now (before notifications, as before).
+            const buildCompletedMeta = () => {
+              const m = {
                 transaction_id: x_transaction_id,
                 approval_code: x_approval_code,
                 reference: x_ref_payco,
@@ -1805,7 +1829,7 @@ class PaymentService {
                 amount_currency_validated: true,
               };
               if (threeDSFields.hasData) {
-                completedMeta.three_ds = {
+                m.three_ds = {
                   cavv: threeDSFields.cavv,
                   eci: threeDSFields.eci,
                   xid: threeDSFields.xid,
@@ -1814,7 +1838,10 @@ class PaymentService {
                   liability_shift: threeDSFields.liabilityShift,
                 };
               }
-              await PaymentModel.updateStatus(paymentIdOrType, 'completed', completedMeta);
+              return m;
+            };
+            if (payment && planIdOrBookingId !== 'creator_monthly') {
+              await PaymentModel.updateStatus(paymentIdOrType, 'completed', buildCompletedMeta());
             }
 
             logger.info('User subscription activated via webhook', {
@@ -1879,7 +1906,9 @@ class PaymentService {
               }
             }
 
-            // Creator subscription activation — failure is critical since the user paid
+            // Creator subscription activation — failure is critical since the user paid.
+            // FIX 2: updateStatus('completed') runs INSIDE this block, after subscribeToCreator,
+            // so a failure here keeps the payment in its prior state and ePayco will retry.
             if (planIdOrBookingId === 'creator_monthly' && payment?.metadata?.creatorId) {
               try {
                 const CreatorService = require('./creatorService');
@@ -1890,6 +1919,10 @@ class PaymentService {
                   paymentId: payment.id,
                   refPayco: x_ref_payco,
                 });
+                // Mark payment completed only after both grants succeed
+                if (payment) {
+                  await PaymentModel.updateStatus(paymentIdOrType, 'completed', buildCompletedMeta());
+                }
               } catch (creatorError) {
                 logger.error('Creator subscription activation failed — ePayco will retry', {
                   error: creatorError.message,

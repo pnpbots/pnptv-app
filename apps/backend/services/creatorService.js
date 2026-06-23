@@ -374,8 +374,17 @@ class CreatorService {
 
     const EntitlementAccessService = require('./entitlementAccessService');
     const priceUsd = parseFloat(creator.creator_price_usd);
+
+    // FIX 5: Read duration from plan_add_ons instead of hardcoding 30 days.
+    let durationDays = 30; // safe default
+    try {
+      const { rows: durationRows } = await query(
+        `SELECT duration_days FROM plan_add_ons WHERE plan_id = 'creator_monthly' AND add_on_id = 'creator-subscription' LIMIT 1`
+      );
+      if (durationRows[0]?.duration_days) durationDays = durationRows[0].duration_days;
+    } catch (_) { /* non-fatal, use default */ }
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
+    expiresAt.setDate(expiresAt.getDate() + durationDays);
 
     // Wrap all DB writes in a transaction so a mid-flight crash leaves no partial state
     const { getPool } = require('../config/postgres');

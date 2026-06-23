@@ -27,6 +27,11 @@ const EPAYCO_SUBSCRIPTION_PLANS = {
 
   // Lifetime PRIME - LIFETIME - $249.99 USD (one-time payment)
   'lifetime-pass': 'LIFETIME',
+
+  // Creator Monthly — enables SubscriberModel.create for ePayco recurring charge recovery.
+  // creator_monthly uses the tokenized checkout flow (no hosted ePayco page), so this entry
+  // participates in isSubscriptionPlan() only — getEpaycoSubscriptionUrl() returns null for it.
+  'creator_monthly': null,
 };
 
 /**
