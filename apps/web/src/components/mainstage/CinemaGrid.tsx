@@ -175,7 +175,7 @@ function UrlMediaPlayer({ src, kind, playing, volume, startedAt }: UrlMediaPlaye
             {decodeURIComponent(src.split("/").pop() || src)}
           </p>
         </div>
-        {muted && canPlay && playing && (
+        {muted && canPlay && (
           <button
             type="button"
             onClick={handleUnmute}
@@ -210,7 +210,7 @@ function UrlMediaPlayer({ src, kind, playing, volume, startedAt }: UrlMediaPlaye
           />
         </div>
       )}
-      {muted && canPlay && playing && (
+      {muted && canPlay && (
         <button
           type="button"
           onClick={handleUnmute}

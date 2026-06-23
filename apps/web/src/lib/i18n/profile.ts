@@ -25,6 +25,11 @@ const strings = {
     resetTutorials: "Reset Tutorials",
     reportBug: "Report Bug",
     creatorDashboard: "Creator Dashboard",
+    studio: "Studio",
+    bookings: "Bookings",
+    settings: "Settings",
+    menuCreator: "Creator",
+    menuAccount: "Account",
     changePhoto: "Change photo",
 
     // ── Follow / message buttons ──────────────────────────────────────────────
@@ -463,6 +468,11 @@ const strings = {
     resetTutorials: "Reiniciar tutoriales",
     reportBug: "Reportar Bug",
     creatorDashboard: "Panel de creador",
+    studio: "Studio",
+    bookings: "Reservas",
+    settings: "Configuración",
+    menuCreator: "Creador",
+    menuAccount: "Cuenta",
     changePhoto: "Cambiar foto",
 
     // ── Follow / message buttons ──────────────────────────────────────────────

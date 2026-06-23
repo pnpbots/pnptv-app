@@ -78,11 +78,11 @@ export function SharedPostCard({ postId, snapshot, isMe = false }: Props) {
   };
   const goToPost = (e: React.MouseEvent | React.KeyboardEvent) => {
     e.stopPropagation();
-    navigate(`/post/${postId}`);
+    navigate(`/social/post/${postId}`);
   };
   const goToReplies = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigate(`/post/${postId}#replies`);
+    navigate(`/social/post/${postId}#replies`);
   };
 
   const handleLike = async (e: React.MouseEvent) => {
