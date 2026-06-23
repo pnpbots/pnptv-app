@@ -802,9 +802,6 @@ const checkScheduleNotify = async (req, res) => {
 //   Validates the source stream is live and the user owns it.
 //   Emits `live:raid` to the source Socket.IO room via io attached to req.app.
 // ---------------------------------------------------------------------------
-const RAID_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes between raids
-const raidCooldowns = new Map(); // userId -> lastRaidTs
-
 const initiateRaid = async (req, res) => {
   if (!req.session?.user) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -822,12 +819,17 @@ const initiateRaid = async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid targetChannelRef' });
   }
 
-  // Cooldown check (in-process — prevents rapid-fire raids from REST endpoint)
-  const now = Date.now();
-  const lastRaid = raidCooldowns.get(String(user.id)) || 0;
-  if (now - lastRaid < RAID_COOLDOWN_MS) {
-    const remaining = Math.ceil((RAID_COOLDOWN_MS - (now - lastRaid)) / 1000);
-    return res.status(429).json({ success: false, error: `Raid on cooldown. Try again in ${remaining}s.` });
+  // Redis-based cooldown — shared across HTTP and WebSocket, survives restarts
+  try {
+    const raidRedis = getRedis();
+    const cooldownKey = `pnp:raid:cooldown:${user.id}`;
+    const set = await raidRedis.set(cooldownKey, '1', 'NX', 'EX', 300);
+    if (set === null) {
+      const ttl = await raidRedis.ttl(cooldownKey).catch(() => 300);
+      return res.status(429).json({ success: false, error: `Raid on cooldown. Try again in ${ttl > 0 ? ttl : 300}s.` });
+    }
+  } catch (cooldownErr) {
+    logger.warn('initiateRaid: Redis cooldown check failed (continuing)', { userId: user.id, error: cooldownErr.message });
   }
 
   const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
@@ -872,8 +874,6 @@ const initiateRaid = async (req, res) => {
     const redis = getRedis();
     const viewerCountRaw = await redis.get(`live:viewers:${sourceChannelRef}`).catch(() => '0');
     const viewerCount = parseInt(viewerCountRaw, 10) || 0;
-
-    raidCooldowns.set(String(user.id), now);
 
     // Emit raid event to everyone in the source stream room
     const io = req.app.get('io');

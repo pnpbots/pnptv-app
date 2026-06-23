@@ -4,7 +4,7 @@ const CallSessionModel = require('../models/callSessionModel');
 const BookingNotificationModel = require('../models/bookingNotificationModel');
 const PerformerModel = require('../models/performerModel');
 const UserService = require('./userService');
-const { getJaasRoomUrl, JAAS_APP_ID } = require('./jaasService');
+const { LIVEKIT_WS_URL } = require('./livekitService');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
 const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
@@ -635,19 +635,15 @@ You can visit the link 15 minutes before the call. You will see a waiting room a
         return { success: false, error: 'booking_not_found' };
       }
 
-      // Generate a cryptographically unpredictable room ID using a full UUID suffix
+      // Room name is deterministic from the booking ID — tokens are issued per-request at join time.
       const roomId = `pnptv-priv-${uuidv4()}`;
-
-      // Tokens are issued per-request at join time (see callBookingController joinBooking).
-      // Store the base room URL (without token) for reference.
-      const jaasRoomBase = `https://8x8.vc/${JAAS_APP_ID}/${encodeURIComponent(roomId)}`;
-      const joinUrlUser = JSON.stringify({ provider: 'jitsi', roomId, roomUrl: jaasRoomBase });
-      const joinUrlPerformer = JSON.stringify({ provider: 'jitsi', roomId, roomUrl: jaasRoomBase });
+      const joinUrlUser = JSON.stringify({ provider: 'livekit', roomId, roomUrl: LIVEKIT_WS_URL });
+      const joinUrlPerformer = JSON.stringify({ provider: 'livekit', roomId, roomUrl: LIVEKIT_WS_URL });
 
       // Create session
       const session = await CallSessionModel.create({
         bookingId,
-        roomProvider: 'jitsi',
+        roomProvider: 'livekit',
         roomId,
         roomName: `Private Call - ${booking.performerName}`,
         joinUrlUser,

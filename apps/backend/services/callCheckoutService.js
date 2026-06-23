@@ -483,7 +483,7 @@ async function onCallPaymentSuccess(paymentId) {
             const CallSessionModel = require('../models/callSessionModel');
             await CallSessionModel.create({
               bookingId: confirmedBookingId,
-              roomProvider: 'jitsi',
+              roomProvider: 'livekit',
               roomId: `booking-${credit.id}`,
               roomName: `Private Call - ${safeCreatorName}`,
               maxParticipants: 2,

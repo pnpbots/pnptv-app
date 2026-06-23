@@ -8294,6 +8294,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
         amount: numAmount,
         paymentMethod: 'tokens',
         newBalance: tokenTipResult.newBalance,
+        duplicate: tokenTipResult.duplicate || false,
       });
     }
 

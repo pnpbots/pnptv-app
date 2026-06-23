@@ -2236,18 +2236,26 @@ function initSocketIO(io) {
         return;
       }
 
-      // SOCK-L3: Per-user sliding-window rate limit — max 5 messages per 10 s.
-      // Checked before content validation so the limit fires even on empty/long
-      // payloads, preventing a client from burning through rate budget for free.
+      // Per-stream rate limit (5/10s) + global per-user rate limit (10/10s).
+      // TTL is set on every INCR to prevent key leakage on Redis failover.
       try {
         const redis = getRedis();
         const rateKey = `live:chat:rate:${streamId}:${user.id}`;
-        const count = await redis.incr(rateKey);
-        if (count === 1) {
-          await redis.expire(rateKey, 10);
-        }
+        const globalKey = `live:chat:rate:user:${user.id}`;
+        const [count, globalCount] = await Promise.all([
+          redis.incr(rateKey),
+          redis.incr(globalKey),
+        ]);
+        await Promise.all([
+          redis.expire(rateKey, 10),
+          globalCount === 1 ? redis.expire(globalKey, 10) : Promise.resolve(),
+        ]);
         if (count > 5) {
-          socket.emit('live:error', { code: 'rate_limited', message: 'Slow down — max 5 messages per 10 seconds' });
+          socket.emit('live:error', { code: 'rate_limited', message: 'Slow down — max 5 messages per 10 seconds per stream' });
+          return;
+        }
+        if (globalCount > 10) {
+          socket.emit('live:error', { code: 'rate_limited', message: 'Slow down — max 10 messages per 10 seconds' });
           return;
         }
       } catch (rateErr) {
@@ -2459,6 +2467,16 @@ function initSocketIO(io) {
         }
 
         const redis = getRedis();
+
+        // Redis-based cooldown — survives restarts and socket cycling
+        const cooldownKey = `pnp:raid:cooldown:${user.id}`;
+        const cooldownSet = await redis.set(cooldownKey, '1', 'NX', 'EX', 300).catch(() => null);
+        if (cooldownSet === null) {
+          const ttl = await redis.ttl(cooldownKey).catch(() => -1);
+          socket.emit('live:error', { code: 'raid_cooldown', message: `Raid on cooldown. Try again in ${ttl > 0 ? ttl : 300}s.` });
+          return;
+        }
+
         const viewerCountRaw = await redis.get(`live:viewers:${streamId}`).catch(() => '0');
         const viewerCount = parseInt(viewerCountRaw, 10) || 0;
 
