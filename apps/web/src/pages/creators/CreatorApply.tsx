@@ -220,25 +220,22 @@ export default function CreatorApply() {
 
       <div className="p-4 lg:p-6 max-w-2xl mx-auto">
 
-        {/* ── Already active ── */}
+        {/* ── Active creator — Setup Hub ── */}
         {isActive && (
-          <div className="glass-card-sm p-6 text-center space-y-4">
-            <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl mx-auto" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-              ✓
+          <div className="mb-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))", border: "1px solid rgba(212,0,122,0.3)" }}>
+                <svg className="w-5 h-5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-white">Creator Setup</h1>
+                <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                  Complete the steps below to unlock all creator features.
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-white mb-1">You're an active creator!</h1>
-              <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                Your creator account is live. Head to your dashboard to manage content, earnings, and more.
-              </p>
-            </div>
-            <button
-              onClick={() => navigate("/creators")}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-            >
-              Go to Creator Studio
-            </button>
           </div>
         )}
 
@@ -281,10 +278,12 @@ export default function CreatorApply() {
                 ))}
               </ul>
             </div>
+          </>
+        )}
 
-            {/* ── 2257 Identity Verification Section ── */}
-            {isAuthenticated && !identityLoading && (
-              <>
+        {/* ── 2257 Identity Verification Section ── */}
+        {isAuthenticated && !identityLoading && (
+          <>
                 {/* Verified badge — shown when approved */}
                 {idApproved && (
                   <div
@@ -569,9 +568,11 @@ export default function CreatorApply() {
                     )}
                   </div>
                 )}
-              </>
-            )}
+          </>
+        )}
 
+        {!isActive && (
+          <>
             {loading && (
               <div className="animate-pulse space-y-3">
                 <div className="h-32 bg-white/5 rounded-lg" />
@@ -742,6 +743,38 @@ export default function CreatorApply() {
               </div>
             )}
           </>
+        )}
+
+        {/* ── Active creator — post-2257 CTA ── */}
+        {isActive && idApproved && (
+          <div className="mt-4 glass-card-sm p-5 text-center space-y-2">
+            <div className="flex items-center justify-center gap-2 mb-1">
+              <svg className="w-5 h-5" style={{ color: "#5ED1C4" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-sm font-semibold text-white">Setup complete!</p>
+            </div>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+              Your identity is verified. You're all set to create and earn.
+            </p>
+            <button
+              onClick={() => navigate("/creators")}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white mt-1"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        )}
+        {isActive && !idApproved && !idPending && (
+          <div className="mt-4 px-4 py-3 rounded-xl text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+              Complete identity verification above, then{" "}
+              <button onClick={() => navigate("/creators")} className="underline font-medium" style={{ color: "#D4007A" }}>
+                return to your dashboard
+              </button>.
+            </p>
+          </div>
         )}
 
         {/* ── Activation Modal ── */}

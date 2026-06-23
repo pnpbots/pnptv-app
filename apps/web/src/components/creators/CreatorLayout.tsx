@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Outlet, NavLink, Navigate, useNavigate, useLocation } from "react-router-dom";
 import CreatorEnrollmentWizard, { type TierId } from "@/components/profile/CreatorEnrollmentWizard";
 import { useAuth } from "@/hooks/useAuth";
 import { Toast } from "@/components/Toast";
 import {
+  get2257Status,
   getCreatorMySubscribers,
   getCreatorConsents,
   getCreatorXAccount,
@@ -32,6 +33,11 @@ const navItems = [
     label: "Dashboard",
     end: true,
     icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4",
+  },
+  {
+    to: "/creators/apply",
+    label: "Setup",
+    icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2",
   },
   {
     to: "/creators/content",
@@ -95,6 +101,14 @@ export default function CreatorLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [identityVerified, setIdentityVerified] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (user?.creator_status !== "active") return;
+    get2257Status().then((res) => {
+      if (res) setIdentityVerified(res.identity_verified);
+    }).catch(() => {});
+  }, [user?.creator_status]);
 
   if (isLoading) {
     return (
@@ -170,7 +184,10 @@ export default function CreatorLayout() {
             <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
             </svg>
-            {item.label}
+            <span className="flex-1">{item.label}</span>
+            {item.to === "/creators/apply" && identityVerified === false && (
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "#D4007A" }} />
+            )}
           </NavLink>
         ))}
       </div>
