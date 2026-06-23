@@ -10,6 +10,7 @@ const LiveStreamModel = require('../../models/liveStreamModel');
 const DmService = require('../../services/dmService');
 const streamAnalyticsService = require('../../services/streamAnalyticsService');
 const streamRecordingService = require('../../services/streamRecordingService');
+const IdentityVerificationService = require('../../services/identityVerificationService');
 
 // ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
 // H4: Replaces the non-atomic decr + conditional set(0) pattern.
@@ -1562,22 +1563,8 @@ function initSocketIO(io) {
 
     // Anyone in the hangout room can (re-)attach Cristina. The call lifecycle
     // is what matters — startCall/endCall also attach/detach server-side.
-    socket.on('hangout:cristina:attach', async ({ groupId } = {}) => {
-      if (!groupId) return;
-      const gid = parseInt(groupId, 10);
-      if (!Number.isFinite(gid)) return;
-      try {
-        const member = await query(
-          `SELECT 1 FROM hangout_group_members WHERE group_id = $1 AND user_id = $2 LIMIT 1`,
-          [gid, user.id]
-        );
-        if (!member.rows.length) return;
-        cristinaStartSession(io, gid);
-        const s = hangoutCristinaState.get(gid);
-        if (s?.latestTip) socket.emit('hangout:cristina:tip', s.latestTip);
-        if (s?.latestVideo) socket.emit('hangout:cristina:video', { groupId: gid, video: s.latestVideo, at: s.latestVideo.at });
-      } catch (err) { logger.error('hangout:cristina:attach error', err); }
-    });
+    // hangout:cristina:attach — disabled; in-call Cristina removed from UI.
+    socket.on('hangout:cristina:attach', () => {});
 
     // User asks Cristina a question during the call. Rate-limited per user.
     socket.on('hangout:cristina:ask', async ({ groupId, prompt } = {}) => {
@@ -2303,9 +2290,9 @@ function initSocketIO(io) {
           return;
         }
       } catch (banCheckErr) {
-        // Fail-open: Redis rate-limit is still in place; ban-check DB failure
-        // should not silence all chat during an outage.
-        logger.warn('live:message ban check failed (non-fatal)', { streamId, userId: user.id, error: banCheckErr.message });
+        logger.warn('live:message ban check failed', { streamId, userId: user.id, error: banCheckErr.message });
+        socket.emit('live:error', { code: 'CHAT_ERROR', message: 'Unable to verify chat status. Please try again.' });
+        return;
       }
 
       try {
@@ -2568,6 +2555,21 @@ function initSocketIO(io) {
         if (!isAdmin && assignedChannel !== channelRef) {
           socket.emit('stream:error', { message: 'channelRef does not match your assigned channel.' });
           return;
+        }
+
+        // 2257 compliance gate — mirrors getRtmpKey and provisionChannel HTTP endpoints
+        if (!isAdmin) {
+          const { rows: compRows } = await query(
+            'SELECT identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+            [user.id]
+          );
+          if (!IdentityVerificationService.is2257Compliant(compRows[0] || {})) {
+            socket.emit('stream:error', {
+              code: 'identity_verification_required',
+              message: 'Complete identity verification (18 U.S.C. § 2257) before going live.',
+            });
+            return;
+          }
         }
 
         // Derive the RTMP stream key from the channel slug.
