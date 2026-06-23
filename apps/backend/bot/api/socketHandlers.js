@@ -2656,6 +2656,7 @@ function initSocketIO(io) {
             socket.data.ffmpegProcess = null;
             socket.data.streamChannelRef = null;
             socket.emit('stream:stopped', { channelRef, reason: code !== 0 ? 'ffmpeg_error' : 'completed' });
+            io.to(`live:${channelRef}`).emit('live:ended', { channelRef });
 
             // Analytics: close session on unexpected FFmpeg exit
             if (socket.data.viewerSamplerInterval) {
@@ -2906,6 +2907,9 @@ function initSocketIO(io) {
         socket.data.streamChannelRef = null;
         logger.info(`Browser stream stopped: user ${user.id}, channel '${channelRef}'`);
         socket.emit('stream:stopped', { channelRef, reason: 'user_stopped' });
+
+        // Notify all viewers immediately so they see "stream ended" without waiting for HLS timeout
+        io.to(`live:${channelRef}`).emit('live:ended', { channelRef });
 
         // Analytics: close session
         if (socket.data.viewerSamplerInterval) {

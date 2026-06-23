@@ -2047,6 +2047,9 @@ const saveScenePreset = async (req, res) => {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
     return res.status(400).json({ success: false, error: 'config must be a JSON object' });
   }
+  if (JSON.stringify(config).length > 64_000) {
+    return res.status(400).json({ success: false, error: 'config exceeds maximum allowed size' });
+  }
 
   const trimmedName = name.trim().slice(0, 100);
   const pool = getPool();
@@ -2135,6 +2138,9 @@ const saveMixerPreset = async (req, res) => {
   }
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
     return res.status(400).json({ success: false, error: 'config must be a JSON object' });
+  }
+  if (JSON.stringify(config).length > 64_000) {
+    return res.status(400).json({ success: false, error: 'config exceeds maximum allowed size' });
   }
 
   const trimmedName = name.trim().slice(0, 100);

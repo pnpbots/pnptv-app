@@ -650,11 +650,13 @@ class PNPLiveNotificationService {
         ? `📢 *Anuncio PNP Live*\n\n${message}`
         : `📢 *PNP Live Announcement*\n\n${message}`;
 
+      const RATE_LIMIT_DELAY = 50; // ms between Telegram sends — matches processPendingNotifications
       let sent = 0;
       for (const model of models.rows || []) {
         if (model.user_id) {
           const success = await this.sendMessage(model.user_id, broadcastMsg);
           if (success) sent++;
+          await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY));
         }
       }
 

@@ -2042,6 +2042,9 @@ app.post(
 // looped to enumerate paymentIds or harvest plan/email data via x_extra3 polls.
 app.get('/api/payment-response', webhookLimiter, webhookController.handlePaymentResponse);
 
+// One-time payment confirmation link sent via Telegram DM after purchase
+app.get('/api/confirm-payment/:token', asyncHandler(paymentController.confirmPaymentToken));
+
 // Cal.com webhook — booking lifecycle events (C-03)
 // Rate-limited at 10 req/min; verified via HMAC-SHA256 (no session auth).
 // express.raw() preserves the raw body required for signature verification.
@@ -4656,7 +4659,7 @@ app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, roleGuard('mo
 app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), autoStreamLimiter, asyncHandler(streamAutoController.stopAutoMessages));
 
 // Connection quality test — measures round-trip latency and upload throughput
-app.post('/api/webapp/live/connection-test', requireSessionAuth, connectionTestLimiter, asyncHandler(async (req, res) => {
+app.post('/api/webapp/live/connection-test', requireSessionAuth, connectionTestLimiter, express.json({ limit: '50kb' }), asyncHandler(async (req, res) => {
   const start = Date.now();
   const payloadSize = req.body?.payload?.length || 0;
   const latencyMs = Date.now() - start;
@@ -8537,7 +8540,7 @@ app.delete('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'crea
 }));
 
 // GET /api/proxy/live/goal/:channelRef — public, returns current goal state (30s cache)
-app.get('/api/proxy/live/goal/:channelRef', asyncHandler(async (req, res) => {
+app.get('/api/proxy/live/goal/:channelRef', overlayPublicLimiter, asyncHandler(async (req, res) => {
   const channelRef = String(req.params.channelRef || '').trim();
   if (!channelRef || !/^[a-zA-Z0-9-]+$/.test(channelRef)) {
     return res.status(400).json({ success: false, error: 'Invalid channelRef' });
@@ -8612,7 +8615,7 @@ app.get('/api/webapp/live/tip-menu', requireSessionAuth, roleGuard('model', 'cre
 }));
 
 // GET /api/webapp/live/tip-menu/:performerId — public, get performer's active tip menu items
-app.get('/api/webapp/live/tip-menu/:performerId', asyncHandler(async (req, res) => {
+app.get('/api/webapp/live/tip-menu/:performerId', overlayPublicLimiter, asyncHandler(async (req, res) => {
   const performerId = String(req.params.performerId || '').trim();
   if (!performerId) {
     return res.status(400).json({ success: false, error: 'performerId required' });

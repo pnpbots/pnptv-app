@@ -125,7 +125,8 @@ class PNPLiveMediaService {
    * @returns {string} Default placeholder image
    */
   static getDefaultPlaceholderImage() {
-    return 'https://via.placeholder.com/300x300/000000/FFFFFF?text=PNP+Live';
+    // Self-contained SVG — no external dependency
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="300" height="300" fill="#000"/><text x="150" y="160" font-family="sans-serif" font-size="20" fill="#fff" text-anchor="middle">PNP Live</text></svg>')}`;
   }
 
   /**
@@ -134,8 +135,8 @@ class PNPLiveMediaService {
    */
   static getBrandingAssets() {
     return {
-      logo: 'https://via.placeholder.com/200x100/000000/FFFFFF?text=PNP+Latino+Live',
-      banner: 'https://via.placeholder.com/800x200/000000/FFFFFF?text=Private+Shows+📹',
+      logo: `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#000"/><text x="100" y="56" font-family="sans-serif" font-size="14" fill="#fff" text-anchor="middle">PNP Latino Live</text></svg>')}`,
+      banner: `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="200"><rect width="800" height="200" fill="#000"/><text x="400" y="110" font-family="sans-serif" font-size="24" fill="#fff" text-anchor="middle">Private Shows</text></svg>')}`,
       icon: '📹'
     };
   }
