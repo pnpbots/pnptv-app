@@ -25,9 +25,11 @@ import {
   createDashSubscription,
   getDashAvailable,
   prepareUsdcSubscription,
+  getUsdcAvailable,
   getBtcAvailable,
   createBtcSubscription,
   getBtcSubscriptionStatus,
+  initiateCreatorSubscriptionPayment,
   getUserLabel,
   getLabelColor,
   assertPaymentUrl,
@@ -62,6 +64,8 @@ import { BookCallModal } from "@/components/creators/BookCallModal";
 import type { CreatorCardCreator } from "@/components/creators/CreatorCard";
 import { NearbyBadge, useNearbyToggle } from "@/components/NearbyBadge";
 import { getDistanceToUser } from "@/lib/api";
+import { useNowPayments } from "@/hooks/useNowPayments";
+import { NowPaymentsWaitingPanel } from "@/components/payments/NowPaymentsWaitingPanel";
 
 const STUDIO_LOGIN_URL = `/login?returnTo=${encodeURIComponent("https://studio.pnptv.app/")}`;
 
@@ -200,9 +204,10 @@ export default function Profile() {
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [subscribeEmail, setSubscribeEmail] = useState("");
   const [subscribeEmailError, setSubscribeEmailError] = useState<string | null>(null);
-  const [subscribeProvider, setSubscribeProvider] = useState<"dash" | "btc">("dash");
+  const [subscribeProvider, setSubscribeProvider] = useState<"usdc" | "epayco" | "dash" | "btc">("usdc");
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
   const [btcAvailable, setBtcAvailable] = useState(false);
+  const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
   const [subscribePaymentLoading, setSubscribePaymentLoading] = useState(false);
   const [subscribePaymentId, setSubscribePaymentId] = useState<string | null>(null);
   const [subscribeAwaitingPayment, setSubscribeAwaitingPayment] = useState(false);
@@ -242,6 +247,20 @@ export default function Profile() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const subscribeButtonRef = useRef<HTMLDivElement>(null);
+
+  const {
+    order: usdcOrder,
+    isSuccess: usdcPaymentSuccess,
+    startPayment: startNowPayments,
+    cancelOrder: cancelNowPayments,
+    error: nowpaymentsError,
+  } = useNowPayments({
+    storageKey: "pnp_pending_creator_sub_order",
+    onSuccess: () => {
+      setIsSubscribed(true);
+      setShowSubscribeModal(false);
+    },
+  });
 
   // Scroll lock — applies whenever any local modal is open
   useEffect(() => {
@@ -580,9 +599,9 @@ export default function Profile() {
     setSubscribeError(null);
     setSubscribeAwaitingPayment(false);
     setSubscribePaymentId(null);
-    setSubscribeProvider("dash");
+    setSubscribeProvider("usdc");
     setShowSubscribeModal(true);
-    // Probe Dash availability lazily — if BTCPay is down we'll hide the Dash option.
+    // Probe all payment provider availability lazily on first open.
     if (dashAvailable === null) {
       getDashAvailable()
         .then((res) => setDashAvailable(res.available === true && res.configured === true))
@@ -590,6 +609,11 @@ export default function Profile() {
       getBtcAvailable()
         .then((res) => setBtcAvailable(res.available === true))
         .catch(() => setBtcAvailable(false));
+    }
+    if (usdcAvailable === null) {
+      getUsdcAvailable()
+        .then((res) => setUsdcAvailable(res.available === true))
+        .catch(() => setUsdcAvailable(false));
     }
   };
 
@@ -620,7 +644,21 @@ export default function Profile() {
       }
       setSubscribeEmailError(null);
 
-      if (subscribeProvider === "btc") {
+      if (subscribeProvider === "epayco") {
+        const res = await initiateCreatorSubscriptionPayment(creatorId, "epayco", trimmed);
+        if (res.success && res.paymentUrl) {
+          window.location.href = assertPaymentUrl(res.paymentUrl);
+          return; // page navigates away
+        } else {
+          setSubscribeError(res.error || p.failedToCreatePayment);
+        }
+      } else if (subscribeProvider === "usdc") {
+        const res = await startNowPayments("creator_monthly", trimmed, creatorId);
+        if (!res?.success) {
+          setSubscribeError((res as any)?.error || nowpaymentsError || p.failedToCreatePayment);
+        }
+        // On success: usdcOrder is set and NowPaymentsWaitingPanel renders automatically
+      } else if (subscribeProvider === "btc") {
         // Bitcoin via BTCPay Server
         const btcRes = await createBtcSubscription("creator_monthly", creatorId);
         if (btcRes.success && btcRes.checkoutUrl) {
@@ -1639,17 +1677,47 @@ export default function Profile() {
               </div>
             </div>
 
-            {!subscribeAwaitingPayment ? (
+            {usdcOrder ? (
+              /* NowPayments waiting panel — auto-closes on success via onSuccess callback */
+              <NowPaymentsWaitingPanel
+                order={usdcOrder}
+                isSuccess={usdcPaymentSuccess}
+                onCancel={() => { cancelNowPayments(); setSubscribeError(null); }}
+                lang={t.lang}
+              />
+            ) : !subscribeAwaitingPayment ? (
               <>
                 {/* Payment method selector */}
                 <div>
                   <p className="text-xs font-medium mb-2" style={{ color: "var(--pnp-text-secondary)" }}>{p.paymentMethod}</p>
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    {usdcAvailable !== false && (
+                      <button
+                        type="button"
+                        onClick={() => setSubscribeProvider("usdc")}
+                        className="py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
+                        style={subscribeProvider === "usdc"
+                          ? { background: "rgba(38,161,123,0.20)", color: "#26a17b", borderColor: "rgba(38,161,123,0.5)" }
+                          : { background: "rgba(38,161,123,0.06)", color: "#26a17b", borderColor: "rgba(38,161,123,0.2)" }}
+                      >
+                        🪙 Crypto −20%
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSubscribeProvider("epayco")}
+                      className="py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
+                      style={subscribeProvider === "epayco"
+                        ? { background: "rgba(230,77,77,0.20)", color: "#e64d4d", borderColor: "rgba(230,77,77,0.5)" }
+                        : { background: "rgba(230,77,77,0.06)", color: "#e64d4d", borderColor: "rgba(230,77,77,0.2)" }}
+                    >
+                      💳 ePayco
+                    </button>
                     {dashAvailable !== false && (
                       <button
                         type="button"
                         onClick={() => setSubscribeProvider("dash")}
-                        className="flex-1 py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
+                        className="py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
                         style={subscribeProvider === "dash"
                           ? { background: "rgba(0,141,228,0.20)", color: "#008DE4", borderColor: "rgba(0,141,228,0.5)" }
                           : { background: "rgba(0,141,228,0.06)", color: "#008DE4", borderColor: "rgba(0,141,228,0.2)" }}
@@ -1661,18 +1729,18 @@ export default function Profile() {
                       <button
                         type="button"
                         onClick={() => setSubscribeProvider("btc")}
-                        className="flex-1 py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
+                        className="py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
                         style={subscribeProvider === "btc"
                           ? { background: "rgba(247,147,26,0.20)", color: "#F7931A", borderColor: "rgba(247,147,26,0.5)" }
                           : { background: "rgba(247,147,26,0.06)", color: "#F7931A", borderColor: "rgba(247,147,26,0.2)" }}
                       >
-                        ₿ Bitcoin −20%
+                        ₿ Bitcoin
                       </button>
                     )}
                   </div>
                 </div>
 
-                {/* Email input — required for Dash */}
+                {/* Email input */}
                 <div>
                   <label className="text-xs font-medium block mb-1.5" style={{ color: "var(--pnp-text-secondary)" }}>{p.emailForReceipt}</label>
                   <input
@@ -1693,8 +1761,8 @@ export default function Profile() {
                   )}
                 </div>
 
-                {subscribeError && (
-                  <p className="text-xs text-center" style={{ color: "#FF453A" }}>{subscribeError}</p>
+                {(subscribeError || nowpaymentsError) && (
+                  <p className="text-xs text-center" style={{ color: "#FF453A" }}>{subscribeError || nowpaymentsError}</p>
                 )}
 
                 <button
@@ -1708,7 +1776,7 @@ export default function Profile() {
               </>
             ) : (
               <>
-                {/* Awaiting payment state */}
+                {/* Awaiting payment state (Dash / BTC via BTCPay) */}
                 <div className="flex flex-col items-center gap-3 py-2">
                   <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: `rgba(${accentRgb},0.12)`, border: `1px solid rgba(${accentRgb},0.25)` }}>
                     <svg className="w-6 h-6 animate-spin" style={{ color: accentColor }} fill="none" viewBox="0 0 24 24">
