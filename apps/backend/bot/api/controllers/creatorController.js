@@ -1190,6 +1190,105 @@ const getMyConsents = async (req, res) => {
   }
 };
 
+const getSetupStatus = async (req, res) => {
+  try {
+    const userId = req.user.id || req.user.telegram_id;
+    const { rows } = await query(`
+      SELECT
+        u.identity_verified,
+        u.fiat_payout_method,
+        (u.creator_dash_address IS NOT NULL AND u.creator_dash_address <> '') AS wallet_set,
+        r.verification_status                                                  AS identity_record_status,
+        COALESCE(ma.terms_agreed, FALSE)                                       AS creator_terms,
+        (ma.stage_name IS NOT NULL AND ma.stage_name <> '')                    AS has_stage_name,
+        (ma.bio IS NOT NULL AND ma.bio <> '')                                  AS has_bio,
+        COALESCE(ma.call_scheduled, FALSE)                                     AS onboarding_call,
+        EXISTS(
+          SELECT 1 FROM social_posts sp
+          WHERE sp.user_id = u.id::text
+            AND sp.is_exclusive = TRUE
+            AND sp.is_deleted = FALSE
+        )                                                                       AS has_exclusive_post
+      FROM users u
+      LEFT JOIN creator_2257_records r ON r.user_id = u.id::text
+      LEFT JOIN LATERAL (
+        SELECT * FROM model_applications
+        WHERE user_id = u.id::text
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) ma ON TRUE
+      WHERE u.id = $1
+    `, [userId]);
+
+    if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+    const d = rows[0];
+
+    const identityDone = d.identity_verified === true;
+    const payoutDone   = !!(d.fiat_payout_method || d.wallet_set);
+    const profileDone  = !!(d.has_stage_name && d.has_bio);
+
+    const items = [
+      {
+        key: 'identity',
+        label: 'Identity Verification (18 U.S.C. § 2257)',
+        required: true,
+        done: identityDone,
+        status: d.identity_record_status || 'none',
+      },
+      {
+        key: 'creator_terms',
+        label: 'Creator Agreement',
+        required: true,
+        done: d.creator_terms === true,
+        status: d.creator_terms ? 'done' : 'none',
+      },
+      {
+        key: 'payout',
+        label: 'Payout Method',
+        required: true,
+        done: payoutDone,
+        status: payoutDone ? 'done' : 'none',
+      },
+      {
+        key: 'profile',
+        label: 'Stage Name & Bio',
+        required: false,
+        done: profileDone,
+        status: profileDone ? 'done' : 'none',
+      },
+      {
+        key: 'onboarding_call',
+        label: 'Onboarding Call',
+        required: false,
+        done: d.onboarding_call === true,
+        status: d.onboarding_call ? 'done' : 'none',
+      },
+      {
+        key: 'first_post',
+        label: 'First Exclusive Post',
+        required: false,
+        done: d.has_exclusive_post === true,
+        status: d.has_exclusive_post ? 'done' : 'none',
+      },
+    ];
+
+    const doneCount    = items.filter(i => i.done).length;
+    const requiredDone = items.filter(i => i.required).every(i => i.done);
+    const completionPct = Math.round((doneCount / items.length) * 100);
+
+    return res.json({
+      success: true,
+      completion_pct: completionPct,
+      required_done: requiredDone,
+      setup_complete: items.every(i => i.done),
+      items,
+    });
+  } catch (err) {
+    logger.error('getSetupStatus error', err);
+    return res.status(500).json({ error: 'Failed to load setup status' });
+  }
+};
+
 const getMyXAccount = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -1365,6 +1464,7 @@ module.exports = {
   removeCollaborator,
   getMySubscribers,
   getMyConsents,
+  getSetupStatus,
   getMyXAccount,
   getMyXCampaigns,
   createMyXCampaign,

@@ -4,7 +4,7 @@ import CreatorEnrollmentWizard, { type TierId } from "@/components/profile/Creat
 import { useAuth } from "@/hooks/useAuth";
 import { Toast } from "@/components/Toast";
 import {
-  get2257Status,
+  getCreatorSetupStatus,
   getCreatorMySubscribers,
   getCreatorConsents,
   getCreatorXAccount,
@@ -101,12 +101,14 @@ export default function CreatorLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [identityVerified, setIdentityVerified] = useState<boolean | null>(null);
+  const [pendingRequiredCount, setPendingRequiredCount] = useState(0);
 
   useEffect(() => {
     if (user?.creator_status !== "active") return;
-    get2257Status().then((res) => {
-      if (res) setIdentityVerified(res.identity_verified);
+    getCreatorSetupStatus().then((res) => {
+      if (res?.items) {
+        setPendingRequiredCount(res.items.filter(i => i.required && !i.done).length);
+      }
     }).catch(() => {});
   }, [user?.creator_status]);
 
@@ -185,8 +187,13 @@ export default function CreatorLayout() {
               <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
             </svg>
             <span className="flex-1">{item.label}</span>
-            {item.to === "/creators/apply" && identityVerified === false && (
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "#D4007A" }} />
+            {item.to === "/creators/apply" && pendingRequiredCount > 0 && (
+              <span
+                className="min-w-[18px] h-[18px] rounded-full px-1 text-[10px] font-bold text-white flex items-center justify-center shrink-0"
+                style={{ background: "#D4007A" }}
+              >
+                {pendingRequiredCount}
+              </span>
             )}
           </NavLink>
         ))}

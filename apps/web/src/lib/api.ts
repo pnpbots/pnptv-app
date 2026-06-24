@@ -3575,6 +3575,25 @@ export function get2257Status(): Promise<{
   return request("/api/webapp/creator/identity/status");
 }
 
+export type SetupItemKey = "identity" | "creator_terms" | "payout" | "profile" | "onboarding_call" | "first_post";
+export interface CreatorSetupItem {
+  key: SetupItemKey;
+  label: string;
+  required: boolean;
+  done: boolean;
+  status: string;
+}
+export interface CreatorSetupStatus {
+  success: boolean;
+  completion_pct: number;
+  required_done: boolean;
+  setup_complete: boolean;
+  items: CreatorSetupItem[];
+}
+export function getCreatorSetupStatus(): Promise<CreatorSetupStatus> {
+  return request("/api/webapp/creator/setup/status");
+}
+
 // ── Persona hosted-flow identity verification ─────────────────────────────────
 
 export function startPersonaInquiry(): Promise<{
