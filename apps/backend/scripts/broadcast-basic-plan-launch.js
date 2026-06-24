@@ -29,8 +29,10 @@ const DRY_RUN       = process.argv.includes('--dry-run');
 const SKIP_EMAIL    = process.argv.includes('--skip-email');
 const SKIP_TELEGRAM = process.argv.includes('--skip-telegram');
 const FORCE         = process.argv.includes('--force');
+const EMAIL_RETRY   = process.argv.includes('--email-retry'); // resend email only to all real-email users
 
 const ENTITY_ID          = 'basic-plan-launch-june-2026';
+const EMAIL_RETRY_ID     = 'basic-plan-launch-june-2026-email-retry';
 const APP_URL            = 'https://pnptv.app';
 const SUBSCRIBE_URL      = 'https://pnptv.app/subscribe';
 const TG_DELAY_MS        = 80;
@@ -207,9 +209,101 @@ function buildEmailHtml(lang, name) {
 </html>`;
 }
 
+// ── Email-retry fast-path ─────────────────────────────────────────────────────
+
+async function emailRetry() {
+  console.log('\n═══════════════════════════════════════════════════');
+  console.log(' Basic Plan Launch — EMAIL RETRY');
+  console.log('═══════════════════════════════════════════════════');
+  if (DRY_RUN) console.log(' MODE: DRY RUN — nothing will be sent\n');
+
+  // All real-email users not already covered by a previous retry run
+  const { rows: alreadyRetried } = await query(`
+    SELECT target_user_id FROM notifications
+    WHERE entity_id = $1 AND entity_type = 'system' AND actor_id IS NULL
+  `, [EMAIL_RETRY_ID]);
+  const retried = new Set(alreadyRetried.map(r => r.target_user_id));
+
+  const { rows: users } = await query(`
+    SELECT u.id, u.first_name, u.username, u.email, u.language
+    FROM users u
+    WHERE COALESCE(u.is_deleted, false) = false
+      AND u.role != 'banned'
+      AND u.email IS NOT NULL
+      AND u.email NOT LIKE '%@telegram.pnptv.app'
+    ORDER BY u.id
+  `);
+
+  const targets = users.filter(u => !retried.has(u.id));
+  console.log(`   Real-email users: ${users.length}`);
+  console.log(`   Already retried:  ${retried.size}`);
+  console.log(`   To send now:      ${targets.length}\n`);
+
+  if (!targets.length) { console.log('Nothing to do.'); process.exit(0); }
+
+  let sent = 0, failed = 0;
+
+  if (!DRY_RUN) {
+    const transporter = nodemailer.createTransport({
+      host:           process.env.PNPTV_SMTP_HOST,
+      port:           parseInt(process.env.PNPTV_SMTP_SECURE === 'true' ? '465' : process.env.PNPTV_SMTP_PORT || '587', 10),
+      secure:         process.env.PNPTV_SMTP_SECURE === 'true',
+      auth:           { user: process.env.PNPTV_SMTP_USER, pass: process.env.PNPTV_SMTP_PASS },
+      pool:           true,
+      maxConnections: 1,
+      maxMessages:    Infinity,
+      rateDelta:      Math.floor(1000 / EMAIL_RATE_PER_SEC),
+      rateLimit:      EMAIL_RATE_PER_SEC,
+    });
+
+    await new Promise((resolveAll) => {
+      let completed = 0;
+      for (let i = 0; i < targets.length; i++) {
+        const u = targets[i];
+        const lang = isEn(u.language) ? 'en' : 'es';
+        const name = u.first_name || u.username || (lang === 'en' ? 'Member' : 'Miembro');
+        transporter.sendMail({
+          from: '"PNPtv!" <support@pnptv.app>', to: u.email,
+          subject: EMAIL_SUBJECT[lang], html: buildEmailHtml(lang, name),
+        }, async (err) => {
+          completed++;
+          if (err) {
+            failed++;
+            if (failed <= 10 || failed % 50 === 0) console.warn(`  ✗ [${u.email}]: ${err.message}`);
+          } else {
+            sent++;
+            // Mark as retried so this user is skipped on any subsequent run
+            try {
+              await query(`
+                INSERT INTO notifications
+                  (type, category, priority, actor_id, target_user_id, entity_type, entity_id, message, metadata)
+                VALUES ('announcement', 'system', 'normal', NULL, $1, 'system', $2, $3, $4::jsonb)
+                ON CONFLICT DO NOTHING
+              `, [u.id, EMAIL_RETRY_ID, NOTIFICATION_MSG[lang], JSON.stringify({ url: SUBSCRIBE_URL })]);
+            } catch (_) {}
+          }
+          if (completed % 100 === 0) console.log(`  Progress: ${completed}/${targets.length} (sent ${sent}, failed ${failed})`);
+          if (completed === targets.length) { transporter.close(); resolveAll(); }
+        });
+      }
+    });
+  } else {
+    console.log(`  [DRY] Would email ${targets.length} users`);
+    targets.slice(0, 3).forEach(u => console.log(`    ${u.email} (${u.language || 'es'})`));
+  }
+
+  console.log('\n═══════════════════════════════════════════════════');
+  console.log(` EMAIL RETRY ${DRY_RUN ? 'DRY RUN' : 'COMPLETE'}`);
+  if (!DRY_RUN) console.log(` Sent: ${sent}   Failed: ${failed}`);
+  console.log('═══════════════════════════════════════════════════\n');
+  process.exit(0);
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
+  if (EMAIL_RETRY) return emailRetry();
+
   console.log('\n═══════════════════════════════════════════════════');
   console.log(' Basic Plan Launch Broadcast — June 2026');
   console.log('═══════════════════════════════════════════════════');
