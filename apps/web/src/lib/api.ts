@@ -3266,14 +3266,6 @@ export function submitModelApplication(
   return request("/api/apply/submit", { method: "POST", body: payload });
 }
 
-export function markCallScheduled(
-  applicationId?: string
-): Promise<{ success: boolean; applicationId: string }> {
-  return request("/api/apply/mark-scheduled", {
-    method: "POST",
-    body: { applicationId },
-  });
-}
 
 // ============================================================================
 // Creator Monetization API
@@ -3579,7 +3571,7 @@ export function get2257Status(): Promise<{
   return request("/api/webapp/creator/identity/status");
 }
 
-export type SetupItemKey = "identity" | "creator_terms" | "payout" | "profile" | "onboarding_call" | "first_post";
+export type SetupItemKey = "identity" | "creator_terms" | "payout" | "profile" | "first_post";
 export interface CreatorSetupItem {
   key: SetupItemKey;
   label: string;

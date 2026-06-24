@@ -13,7 +13,6 @@ const strings = {
     stepBasicInfo: "Basic Info",
     stepLegalInfo: "Legal Info",
     stepAgreement: "Agreement",
-    stepScheduleCall: "Schedule Call",
     stepConfirmation: "Confirmation",
 
     // Step 1 — Choose Type
@@ -95,16 +94,7 @@ const strings = {
     submitApplicationBtn: "Submit Application",
     errorSubmit: "Failed to submit application",
 
-    // Step 5 — Schedule Call
-    step5Heading: "Schedule Your Onboarding Call",
-    step5Subtitle: "Book a short video call with Santino to complete your onboarding. This helps us verify your identity and walk you through the platform.",
-    calendarNotLoading: "Calendar not loading?",
-    openInNewTab: "Open in a new tab",
-    calendarIframeTitle: "Schedule onboarding call",
-    skipForNow: "Skip for now",
-    scheduledCallBtn: "I Scheduled My Call",
-
-    // Step 6 — Confirmation
+    // Step 5 — Confirmation
     applicationSubmittedTitle: "Application Submitted!",
     applicationSubmittedBody: "Thank you for applying to become a creator on PNPtv. Our team will review your application and reach out to you via Telegram within 1-3 business days.",
     whatsNextTitle: "What happens next?",
@@ -149,7 +139,6 @@ const strings = {
     stepBasicInfo: "Info Básica",
     stepLegalInfo: "Info Legal",
     stepAgreement: "Acuerdo",
-    stepScheduleCall: "Llamada",
     stepConfirmation: "Confirmación",
 
     step1Heading: "¿Qué te gustaría hacer?",
@@ -225,13 +214,6 @@ const strings = {
     submitApplicationBtn: "Enviar Solicitud",
     errorSubmit: "Error al enviar la solicitud",
 
-    step5Heading: "Programa tu Llamada de Incorporación",
-    step5Subtitle: "Reserva una breve videollamada con Santino para completar tu incorporación. Esto nos ayuda a verificar tu identidad y guiarte por la plataforma.",
-    calendarNotLoading: "¿El calendario no carga?",
-    openInNewTab: "Abrir en una nueva pestaña",
-    calendarIframeTitle: "Programar llamada de incorporación",
-    skipForNow: "Omitir por ahora",
-    scheduledCallBtn: "Programé mi Llamada",
 
     applicationSubmittedTitle: "¡Solicitud Enviada!",
     applicationSubmittedBody: "Gracias por solicitar ser creador en PNPtv. Nuestro equipo revisará tu solicitud y te contactará por Telegram en 1 a 3 días hábiles.",

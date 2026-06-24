@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
-import Cal, { getCalApi } from "@calcom/embed-react";
 import { Button, Card, Input } from "@pnptv/ui-kit";
 import { useI18n } from "@/lib/i18n";
 import {
@@ -9,7 +8,6 @@ import {
   uploadApplicationProfilePhoto,
   uploadApplicationIdDocuments,
   submitModelApplication,
-  markCallScheduled,
   type ModelApplication,
   type ModelApplicationPayload,
 } from "@/lib/api";
@@ -56,9 +54,6 @@ const INITIAL_DATA: WizardData = {
   termsAgreed: false,
 };
 
-const CAL_INTERVIEW_SLUG = import.meta.env.VITE_CALCOM_INTERVIEW_SLUG ?? "santino/model-interview";
-const CAL_BOOKING_BASE = import.meta.env.VITE_CALCOM_URL ?? "https://booking.pnptv.app";
-const CAL_LINK_URL = `${CAL_BOOKING_BASE}/${CAL_INTERVIEW_SLUG}`;
 
 function ProgressBar({ step, labels }: { step: number; labels: string[] }) {
   return (
@@ -245,7 +240,6 @@ export default function Apply() {
     t.stepBasicInfo,
     t.stepLegalInfo,
     t.stepAgreement,
-    t.stepScheduleCall,
     t.stepConfirmation,
   ];
 
@@ -268,7 +262,7 @@ export default function Apply() {
     setError(null);
   };
 
-  const goNext = () => setStep((s) => Math.min(s + 1, 6));
+  const goNext = () => setStep((s) => Math.min(s + 1, 5));
   const goBack = () => {
     setStep((s) => Math.max(s - 1, 1));
     setError(null);
@@ -363,19 +357,7 @@ export default function Apply() {
     }
   }
 
-  // Step 5: mark call scheduled
-  async function handleMarkScheduled() {
-    setSubmitting(true);
-    setError(null);
-    try {
-      await markCallScheduled(appId || undefined);
-      goNext();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : t.errorSubmit);
-    } finally {
-      setSubmitting(false);
-    }
-  }
+
 
   if (loading) {
     return (
@@ -680,48 +662,8 @@ export default function Apply() {
         </div>
       )}
 
-      {/* Step 5: Schedule Call */}
+      {/* Step 5: Confirmation */}
       {step === 5 && (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-pnp-textPrimary">
-            {t.step5Heading}
-          </h2>
-          <p className="text-sm text-pnp-textSecondary">
-            {t.step5Subtitle}
-          </p>
-          <div className="rounded-xl border border-pnp-border overflow-hidden">
-            <Cal
-              calLink={CAL_INTERVIEW_SLUG}
-              config={{ theme: "dark" }}
-              calOrigin={CAL_BOOKING_BASE}
-              embedJsUrl={`${CAL_BOOKING_BASE}/embed/embed.js`}
-              style={{ width: "100%", minHeight: "600px" }}
-            />
-          </div>
-          <p className="text-xs text-pnp-textSecondary text-center">
-            {t.calendarNotLoading}{" "}
-            <a
-              href={CAL_LINK_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-pnp-accent hover:underline"
-            >
-              {t.openInNewTab}
-            </a>
-          </p>
-          <div className="flex justify-between pt-4">
-            <Button variant="ghost" onClick={goNext}>
-              {t.skipForNow}
-            </Button>
-            <Button onClick={handleMarkScheduled} loading={submitting}>
-              {t.scheduledCallBtn}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Step 6: Confirmation */}
-      {step === 6 && (
         <div className="text-center space-y-4 py-8">
           <div className="w-16 h-16 mx-auto rounded-full bg-green-500/20 flex items-center justify-center">
             <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -91,12 +91,6 @@ const SETUP_META: Record<string, { description: string; actionLabel?: string; hr
     actionLabel: "Edit Profile",
     href: "/creators/settings",
   },
-  onboarding_call: {
-    description: "30-minute intro call with the PNPtv! team to walk you through the platform.",
-    actionLabel: "Book Call",
-    href: "https://booking.pnptv.app/santino/model-interview",
-    external: true,
-  },
   first_post: {
     description: "Publish your first exclusive post so new subscribers see content right away.",
     actionLabel: "Create Post",

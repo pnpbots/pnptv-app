@@ -660,12 +660,6 @@ export function CreatorConsents() {
         : { actionLabel: "Start Enrollment", onAction: () => setShowWizard(true) }),
     },
     {
-      label: "Onboarding Call",
-      status: consents.call_scheduled ? "accepted" : "pending",
-      detail: consents.call_scheduled ? "Scheduled" : "Not scheduled",
-      date: consents.call_scheduled_at,
-    },
-    {
       label: "Fiat Payout Method",
       status: consents.fiat_payout_method ? "info" : "missing",
       detail: consents.fiat_payout_method
