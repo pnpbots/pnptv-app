@@ -8,19 +8,23 @@
  * Regular browsers get proxied to the SPA as normal.
  *
  * Supported routes:
- *   /social/post/:postId  → post content + media
- *   /profile/:userId      → user profile
- *   /live/:streamId       → live stream
- *   /chat/:groupId        → hangout group
- *   /*                    → default PNPtv card
+ *   /social/post/:postId        → post content + media
+ *   /profile/:userId            → user profile
+ *   /live/:streamId             → live stream
+ *   /chat/:groupId              → hangout group
+ *   /main-stage                 → Main Stage generic card
+ *   /main-stage/join/:code      → Main Stage invite card (host name + branded image)
+ *   /*                          → default PNPtv card
  */
 
 const { getPool } = require('../../../config/postgres');
+const mainStageInviteService = require('../../../services/mainStageInviteService');
 const logger = require('../../../utils/logger');
 
 const CRAWLER_UA = /Twitterbot|facebookexternalhit|LinkedInBot|Slackbot|Discordbot|WhatsApp|TelegramBot|Pinterest|Googlebot|bingbot/i;
 const BASE_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
 const DEFAULT_IMAGE = `${BASE_URL}/og-image.png`;
+const MAIN_STAGE_IMAGE = `${BASE_URL}/og-main-stage.png`;
 const DEFAULT_TITLE = 'PNPtv!';
 const DEFAULT_DESC = 'PNPtv! is a private social platform for gay men into the party and play lifestyle.';
 
@@ -184,10 +188,44 @@ function getMainStageOg() {
   return {
     title: '🔴 LIVE on PNPtv! Main Stage',
     description: 'Drop into the always-on community video room. Real guys, real PNP, every night. Members only — join at pnptv.app/join.',
-    image: DEFAULT_IMAGE,
+    image: MAIN_STAGE_IMAGE,
     url: `${BASE_URL}/main-stage`,
     type: 'video.other',
   };
+}
+
+async function getMainStageInviteOg(code) {
+  try {
+    const preview = await mainStageInviteService.previewInvite(code);
+    if (!preview || !preview.valid) {
+      return {
+        title: 'Main Stage Invite — PNPtv!',
+        description: 'You were invited to join PNPtv! Main Stage — the live adult community video room.',
+        image: MAIN_STAGE_IMAGE,
+        url: `${BASE_URL}/main-stage/join/${code}`,
+        type: 'video.other',
+      };
+    }
+    const host = preview.hostName;
+    return {
+      title: host ? `${host} invites you to Main Stage` : "You're invited to Main Stage!",
+      description: host
+        ? `${host} is hosting on PNPtv! Main Stage — the live adult community video room. Join now.`
+        : "You're invited to PNPtv! Main Stage — the live adult community video room. Join now.",
+      image: MAIN_STAGE_IMAGE,
+      url: `${BASE_URL}/main-stage/join/${code}`,
+      type: 'video.other',
+    };
+  } catch (err) {
+    logger.warn('OG prerender: main-stage invite lookup failed', { code, error: err.message });
+    return {
+      title: 'Main Stage Invite — PNPtv!',
+      description: 'You were invited to join PNPtv! Main Stage — the live adult community video room.',
+      image: MAIN_STAGE_IMAGE,
+      url: `${BASE_URL}/main-stage/join/${code}`,
+      type: 'video.other',
+    };
+  }
 }
 
 /**
@@ -206,6 +244,7 @@ function ogPrerenderMiddleware(req, res, next) {
   const liveMatch = path.match(/^\/live\/([^/]+)$/);
   const chatMatch = path.match(/^\/chat\/(\d+)$/);
   const hMatch = path.match(/^\/h\/(\d+)$/);
+  const mainStageInviteMatch = path.match(/^\/main-stage\/join\/([A-Za-z0-9_-]{8,32})$/);
   const mainStageMatch = /^\/main-stage\/?$/.test(path);
 
   let ogPromise;
@@ -219,6 +258,8 @@ function ogPrerenderMiddleware(req, res, next) {
     ogPromise = getGroupOg(chatMatch[1]);
   } else if (hMatch) {
     ogPromise = getGroupOg(hMatch[1]);
+  } else if (mainStageInviteMatch) {
+    ogPromise = getMainStageInviteOg(mainStageInviteMatch[1]);
   } else if (mainStageMatch) {
     const html = renderOgHtml(getMainStageOg());
     return res.type('html').send(html);
