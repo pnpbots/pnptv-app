@@ -57,7 +57,7 @@ async function sendSystemDM(senderId, recipientId, content, pgQuery) {
             senderName,
             messageId: message.id,
             preview: text.slice(0, 100),
-            url: `/messages/${senderId}`
+            url: `/dm/${senderId}`
           }
         });
       } catch (notifErr) {

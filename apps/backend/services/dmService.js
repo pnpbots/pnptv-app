@@ -210,7 +210,7 @@ class DmService {
           entityType: 'user',
           entityId: String(senderId),
           message: `${senderName} sent you a message`,
-          metadata: { senderId, senderName, messageId: message.id, preview: threadPreview, url: `/messages/${senderId}` }
+          metadata: { senderId, senderName, messageId: message.id, preview: threadPreview, url: `/dm/${senderId}` }
         });
       } catch (notifErr) {
         logger.warn('DM push notification error', { error: notifErr.message, messageId: message.id });
