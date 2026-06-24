@@ -18,28 +18,10 @@ export interface TokenPurchase {
 
 export interface TokenCheckoutData {
   success: boolean;
-  provider: "epayco" | "daimo";
+  provider: "btcpay" | "nowpayments";
   tokens: number;
   usd: number;
   status: string;
-  epayco?: {
-    publicKey: string;
-    amount: number;
-    currency: string;
-    description: string;
-    invoice: string;
-    signature: string | null;
-    extra1: string;
-    extra2: string;
-    extra3: string;
-    test: boolean;
-    response: string;
-    confirmation: string;
-  };
-  daimo?: {
-    sessionId: string;
-    clientSecret: string;
-  };
 }
 
 export interface SubscriptionPlan {

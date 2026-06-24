@@ -44,38 +44,6 @@ function StatusPill({ count, label }: { count: number; label: string }) {
   );
 }
 
-function StuckEpaycoTable({ items }: { items: PaymentHealthStuckPayment[] }) {
-  if (!items.length) return <p className="text-sm text-zinc-400 italic">No stuck ePayco payments.</p>;
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="text-left text-zinc-400 border-b border-zinc-700">
-          <tr>
-            <th className="py-2 pr-3">User</th>
-            <th className="py-2 pr-3">Plan</th>
-            <th className="py-2 pr-3">Amount</th>
-            <th className="py-2 pr-3">Reference</th>
-            <th className="py-2 pr-3">Age</th>
-            <th className="py-2 pr-3">Created</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((p) => (
-            <tr key={p.id} className="border-b border-zinc-800 hover:bg-zinc-800/40">
-              <td className="py-2 pr-3 font-mono text-xs">{truncate(p.user_id, 24)}</td>
-              <td className="py-2 pr-3">{p.plan_id || "—"}</td>
-              <td className="py-2 pr-3">${p.amount} {p.currency}</td>
-              <td className="py-2 pr-3 font-mono text-xs">{truncate(p.reference, 20)}</td>
-              <td className="py-2 pr-3">{fmtAge(p.hours_pending, undefined)}</td>
-              <td className="py-2 pr-3">{fmtTime(p.created_at)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function StuckMeruTable({ items }: { items: PaymentHealthStuckPayment[] }) {
   if (!items.length) return <p className="text-sm text-zinc-400 italic">No stuck Meru links. Reconciler is keeping up.</p>;
   return (
@@ -214,7 +182,7 @@ export default function PaymentHealth() {
   }
   if (!data) return null;
 
-  const total = data.stuck.epayco.count + data.stuck.meru.count + data.stuck.dash.count;
+  const total = data.stuck.meru.count + data.stuck.dash.count;
 
   return (
     <div className="p-6 space-y-6">
@@ -235,9 +203,8 @@ export default function PaymentHealth() {
       </div>
 
       {/* Summary tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <StatusPill count={total} label="Stuck Total" />
-        <StatusPill count={data.stuck.epayco.count} label="ePayco Stuck" />
         <StatusPill count={data.stuck.meru.count} label="Meru Stuck" />
         <StatusPill count={data.stuck.dash.count} label="Dash Stuck" />
       </div>
@@ -245,8 +212,7 @@ export default function PaymentHealth() {
       {/* 7-day activity */}
       <div className="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
         <h2 className="text-sm uppercase tracking-wide text-zinc-400 mb-3">7-day Activity</h2>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-          <div><div className="text-zinc-400 text-xs">ePayco completed</div><div className="text-lg font-mono">{data.activity.epayco_completed_7d ?? 0}</div></div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div><div className="text-zinc-400 text-xs">Dash completed</div><div className="text-lg font-mono">{data.activity.dash_completed_7d ?? 0}</div></div>
           <div><div className="text-zinc-400 text-xs">Meru completed</div><div className="text-lg font-mono">{data.activity.meru_completed_7d ?? 0}</div></div>
           <div><div className="text-zinc-400 text-xs">Video fetches</div><div className="text-lg font-mono">{data.activity.video_views_7d ?? 0}</div></div>
@@ -260,13 +226,6 @@ export default function PaymentHealth() {
           Suspicious Access (last 7d) — {data.leaks.count}
         </h2>
         <LeaksTable items={data.leaks.items} />
-      </div>
-
-      <div className="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
-        <h2 className="text-sm uppercase tracking-wide text-zinc-400 mb-3">
-          Stuck ePayco — {data.stuck.epayco.count}
-        </h2>
-        <StuckEpaycoTable items={data.stuck.epayco.items} />
       </div>
 
       <div className="rounded-lg bg-zinc-900 border border-zinc-800 p-4">

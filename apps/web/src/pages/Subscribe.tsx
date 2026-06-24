@@ -5,7 +5,6 @@ import { Card, Skeleton } from "@pnptv/ui-kit";
 import {
   getSubscriptionPlans,
   getPaymentStatus,
-  createPayment,
   getUsdcAvailable,
   getBtcAvailable,
   createBtcSubscription,
@@ -24,22 +23,6 @@ import { useI18n } from "@/lib/i18n";
 
 import { useNowPayments } from "@/hooks/useNowPayments";
 import { NowPaymentsWaitingPanel } from "@/components/payments/NowPaymentsWaitingPanel";
-
-const EPAYCO_ERROR_MESSAGES: Record<string, string> = {
-  "Error validando datos": "Los datos de tu tarjeta son incorrectos. Verifica el número, fecha y CVV, e intenta con otra tarjeta.\n\nThe card details you entered are incorrect. Please check the number, expiry date and CVV, and try a different card.",
-  "Payment was rejected or failed": "Tu banco rechazó el pago. Intenta con otra tarjeta o pídele a tu banco que autorice pagos internacionales.\n\nYour bank declined the payment. Try a different card or contact your bank to authorize international transactions.",
-  "BANK_URL_MISSING": "Tu banco no soporta pagos 3D Secure. Prueba con otra tarjeta Visa o Mastercard.\n\nYour bank does not support 3D Secure payments. Please try a different Visa or Mastercard.",
-  "Rechazada eControl": "Superaste el límite de tarjetas por documento por hoy. Intenta mañana o usa otra tarjeta.\n\nYou have reached the card limit per ID for today. Try again tomorrow or use a different card.",
-  "3DS timeout": "La verificación del banco expiró. Por favor intenta de nuevo y completa la verificación rápidamente.\n\nThe 3D Secure verification timed out. Please try again and complete the bank verification promptly.",
-};
-
-function mapEpaycoError(epaycoError?: string | null): string | null {
-  if (!epaycoError) return null;
-  for (const [key, msg] of Object.entries(EPAYCO_ERROR_MESSAGES)) {
-    if (epaycoError.includes(key)) return msg;
-  }
-  return null;
-}
 
 const MEMBER_PLAN_IDS = new Set(["member_monthly"]);
 
@@ -114,11 +97,11 @@ export default function Subscribe() {
   const [promoError, setPromoError] = useState<string | null>(null);
   const [promoValidating, setPromoValidating] = useState(false);
 
-  // Polling payment ID (legacy/epayco)
+  // Polling payment ID (legacy fallback)
   const [pollingPaymentId, setPollingPaymentId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
-  // Crypto nudge — shown after any ePayco failure/timeout/abandon
+  // Crypto nudge — shown after any payment failure
   const [showCryptoNudge, setShowCryptoNudge] = useState(false);
 
   function failWithNudge(msg: string) {
@@ -373,7 +356,7 @@ export default function Subscribe() {
         if (data.status === "failed" || data.status === "refunded" || data.status === "abandoned") {
           setPollingPaymentId(null);
           try { sessionStorage.removeItem("pnp_pending_payment"); } catch {}
-          failWithNudge(mapEpaycoError(data.epaycoError) || data.message || s.paymentNotSuccessful);
+          failWithNudge(data.message || s.paymentNotSuccessful);
           return;
         }
         if (!cancelled) timerId = setTimeout(poll, interval);
@@ -389,28 +372,16 @@ export default function Subscribe() {
     };
   }, [pollingPaymentId, refreshUser]);
 
-  async function handleQuickCheckout(planId: string, chosenProvider: "epayco" | "usdc") {
+  async function handleQuickCheckout(planId: string) {
     if (submitting) return;
     setSelectedPlan(planId);
     setError(null);
     setShowCryptoNudge(false);
     setSubmitting(true);
     try {
-      if (chosenProvider === "epayco") {
-        const result = await createPayment(planId, "epayco", undefined, appliedPromo?.code || undefined);
-        if (result.success && result.paymentUrl) {
-          // Keep submitting=true — page is navigating away, button must stay disabled
-          // to prevent duplicate payments from double-clicks during navigation.
-          window.location.href = result.paymentUrl;
-          return;
-        } else {
-          failWithNudge(result.error || result.message || s.paymentErrorGeneric);
-        }
-      } else if (chosenProvider === "usdc") {
-        const result = await startNowPayments(planId, user?.email || undefined);
-        if (!result.success) {
-          setError(result.error || s.failedToCreateUsdcInvoice);
-        }
+      const result = await startNowPayments(planId, user?.email || undefined);
+      if (!result.success) {
+        setError(result.error || s.failedToCreateUsdcInvoice);
       }
     } catch (err: unknown) {
       failWithNudge(err instanceof Error ? err.message : s.paymentErrorGeneric);
@@ -862,7 +833,6 @@ export default function Subscribe() {
           const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
           const planLabel = getPlanLabel(plan, true);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
-          const planDiscountPct = 20;
           const cryptoPriceUSD = Math.round(plan.priceUSD * 0.80 * 100) / 100;
           const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
@@ -957,17 +927,10 @@ export default function Subscribe() {
 
               {/* Quick-pay buttons */}
               <div className="mt-3 pt-3 border-t border-white/5 flex gap-2" onClick={(e) => e.stopPropagation()}>
-                <button
-                  disabled={submitting}
-                  onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "epayco"); }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold text-white bg-[#D4007A] hover:bg-[#B8006A] disabled:opacity-50 transition-colors"
-                >
-                  <span>💳</span> {t.lang === "es" ? "Tarjeta" : "Card"}
-                </button>
                 {usdcAvailable !== false && (
                   <button
                     disabled={submitting}
-                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdc"); }}
+                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id); }}
                     className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
@@ -1095,7 +1058,6 @@ export default function Subscribe() {
           const planLabel = getPlanLabel(plan, false);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
           const planDays = plan.duration_days || plan.duration || 30;
-          const planDiscountPct = 20;
           const cryptoPriceUSD = Math.round(plan.priceUSD * 0.80 * 100) / 100;
           const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
@@ -1210,13 +1172,6 @@ export default function Subscribe() {
 
               {/* Quick-pay buttons */}
               <div className="mt-3 pt-3 border-t border-white/5 flex gap-2" onClick={(e) => e.stopPropagation()}>
-                <button
-                  disabled={submitting}
-                  onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "epayco"); }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold text-white bg-[#D4007A] hover:bg-[#B8006A] disabled:opacity-50 transition-colors"
-                >
-                  <span>💳</span> {t.lang === "es" ? "Tarjeta" : "Card"}
-                </button>
                 {usdcAvailable !== false && (
                   RECURRING_PLANS.has(plan.id) ? (
                     <button
@@ -1234,7 +1189,7 @@ export default function Subscribe() {
                   ) : (
                     <button
                       disabled={submitting}
-                      onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdc"); }}
+                      onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id); }}
                       className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
                     >
                       <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
@@ -1370,7 +1325,7 @@ export default function Subscribe() {
         </div>
       )}
 
-      {/* Crypto nudge — shown after ePayco failure/timeout/abandon */}
+      {/* Crypto nudge — shown after payment failure */}
       {showCryptoNudge && usdcAvailable && selectedPlan && !usdcOrder && (
         <div className="mb-3 rounded-xl border border-green-500/40 bg-green-500/10 p-4">
           <p className="text-sm font-bold text-green-300 mb-0.5">

@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useNowPayments } from "@/hooks/useNowPayments";
 import { NowPaymentsWaitingPanel } from "@/components/payments/NowPaymentsWaitingPanel";
-import { createPayment, createDashSubscription } from "@/lib/api";
+import { createDashSubscription } from "@/lib/api";
 
 const AMOUNTS = [
   { planId: "donation-5",  usd: 5  },
@@ -13,7 +13,7 @@ const AMOUNTS = [
   { planId: "donation-50", usd: 50 },
 ];
 
-type Method = "crypto" | "dash" | "epayco";
+type Method = "crypto" | "dash";
 
 export default function Donate() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -25,7 +25,6 @@ export default function Donate() {
   const [method, setMethod] = useState<Method | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [dashUrl, setDashUrl] = useState<string | null>(null);
-  const [epaycoUrl, setEpaycoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
@@ -40,13 +39,6 @@ export default function Donate() {
       window.location.href = dashUrl;
     }
   }, [dashUrl]);
-
-  // ePayco: redirect as soon as URL is available
-  useEffect(() => {
-    if (epaycoUrl) {
-      window.location.href = epaycoUrl;
-    }
-  }, [epaycoUrl]);
 
   const selected = AMOUNTS[selectedIdx];
 
@@ -68,14 +60,6 @@ export default function Donate() {
         } else {
           setError(res.error || (es ? "Error al crear el pago Dash." : "Failed to create Dash payment."));
         }
-      } else if (method === "epayco") {
-        const res = await createPayment(selected.planId, "epayco");
-        if (res.paymentUrl) {
-          setEpaycoUrl(res.paymentUrl);
-        } else {
-          setError(es ? "Error al crear el pago con tarjeta." : "Failed to create card payment.");
-        }
-      }
     } catch (e: any) {
       setError(e.message || (es ? "Algo salió mal." : "Something went wrong."));
     } finally {
@@ -136,20 +120,8 @@ export default function Donate() {
             </h1>
             <p className="text-sm text-pnp-textSecondary leading-relaxed max-w-xs mx-auto">
               {es
-                ? "Stripe bloqueó nuestra cuenta y retuvo nuestros fondos. Tu donación nos ayuda a recuperarnos y seguir construyendo."
-                : "Stripe blocked our account and froze our funds. Your donation helps us recover and keep building."}
-            </p>
-          </div>
-
-          {/* Context card */}
-          <div className="mb-6 p-4 rounded-xl border border-amber-500/30 bg-amber-500/5">
-            <p className="text-xs font-semibold text-amber-400 mb-1">
-              {es ? "¿Por qué necesitamos tu ayuda?" : "Why do we need your help?"}
-            </p>
-            <p className="text-xs text-pnp-textSecondary leading-relaxed">
-              {es
-                ? "Stripe nos bloqueó, no reembolsó los $500 que pagamos por la cuenta Atlas y canceló un pago de $1,149.22 que nos correspondía. Total retenido: $1,649.22. Esto retrasó funciones y el onboarding de nuevos creadores."
-                : "Stripe blocked us, kept the $500 we paid for the Atlas account, and cancelled a $1,149.22 payout. Total frozen: $1,649.22. This delayed features and new creator onboarding."}
+                ? "Tu donación nos ayuda a seguir construyendo PNPtv! para esta comunidad."
+                : "Your donation helps us keep building PNPtv! for this community."}
             </p>
           </div>
 
@@ -189,7 +161,6 @@ export default function Donate() {
               {([
                 { id: "crypto" as Method, label: es ? "Cripto (BTC, ETH, USDC, SOL…)" : "Crypto (BTC, ETH, USDC, SOL…)", sub: es ? "Más de 100 monedas · Sin cuenta requerida" : "100+ coins · No account required", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
                 { id: "dash" as Method, label: "Dash (BTCPay)", sub: es ? "Dash via BTCPay · Sin custodio" : "Dash via BTCPay · Non-custodial", icon: "M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" },
-                { id: "epayco" as Method, label: es ? "Tarjeta (América Latina)" : "Card (Latin America)", sub: es ? "Visa, Mastercard vía ePayco" : "Visa, Mastercard via ePayco", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
               ] as { id: Method; label: string; sub: string; icon: string }[]).map((m) => (
                 <button
                   key={m.id}

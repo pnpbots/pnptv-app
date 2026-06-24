@@ -5,7 +5,6 @@ import {
   getWalletBalance,
   getTokenPackages,
   buyTokens,
-  buyTokensWithCard,
   buyTokensWithBtc,
   getBtcAvailable,
   getBtcSubscriptionStatus,
@@ -24,7 +23,7 @@ interface BuyTokensModalProps {
 
 export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTokensModalProps) {
   const t = useI18n();
-  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'card' | 'btc'>('select');
+  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'btc'>('select');
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
@@ -116,23 +115,6 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
       }
     };
   }, [dashPayment]);
-
-  const handleBuyTokensCard = async (pkg: TokenPackage) => {
-    setBuyingPackage(pkg.id);
-    setBuyError(null);
-    try {
-      const result = await buyTokensWithCard(pkg.id);
-      if (result.success && result.paymentUrl) {
-        window.location.href = result.paymentUrl;
-      } else {
-        setBuyError(result.error || "Failed to start card payment.");
-        setBuyingPackage(null);
-      }
-    } catch (err: unknown) {
-      setBuyError(err instanceof Error ? err.message : "Unexpected error.");
-      setBuyingPackage(null);
-    }
-  };
 
   const handleBuyTokens = async (pkg: TokenPackage) => {
     setBuyingPackage(pkg.id);
@@ -300,25 +282,6 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
             <p className="text-xs text-pnp-textSecondary mb-3">
               Select how you want to pay for your tokens.
             </p>
-
-            {/* Card via ePayco */}
-            <button
-              onClick={() => setBuyMethod('card')}
-              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-pink-500/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
-            >
-              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(212,0,122,0.15)" }}>
-                <svg className="w-5 h-5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                </svg>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-pnp-textPrimary">Credit / Debit Card</p>
-                <p className="text-xs text-pnp-textSecondary truncate">Visa &amp; Mastercard via ePayco</p>
-              </div>
-              <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
 
             {/* Dash crypto */}
             <button
@@ -554,9 +517,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           <>
             {/* Method explanation */}
             <p className="text-xs text-pnp-textSecondary mb-4 leading-relaxed">
-              {buyMethod === 'card'
-                ? 'Pay with Visa or Mastercard via ePayco. You\'ll be redirected to a secure checkout page.'
-                : buyMethod === 'btc'
+              {buyMethod === 'btc'
                 ? 'Pay with Bitcoin (on-chain or Lightning) via NowPayments. 20% discount applied automatically. A popup will open for checkout.'
                 : 'Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed.'}
             </p>
@@ -573,7 +534,6 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                   <button
                     key={pkg.id}
                     onClick={() => {
-                      if (buyMethod === 'card') return handleBuyTokensCard(pkg);
                       if (buyMethod === 'btc') return handleBuyTokensBtc(pkg);
                       return handleBuyTokens(pkg);
                     }}
@@ -583,7 +543,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
                     <p className="text-xs text-pnp-textSecondary">{t.live.tokensLabel}</p>
                     <p className="text-sm font-semibold mt-1" style={{
-                      color: buyMethod === 'card' ? '#D4007A' : buyMethod === 'btc' ? '#F7931A' : '#008CE7'
+                      color: buyMethod === 'btc' ? '#F7931A' : '#008CE7'
                     }}>
                       {buyMethod === 'btc'
                         ? `$${(Math.round(pkg.usd * 0.80 * 100) / 100).toFixed(2)}`

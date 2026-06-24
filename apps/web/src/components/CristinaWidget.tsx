@@ -130,7 +130,7 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     steps: [
       { title: "What PRIME Unlocks", description: "PRIME is the premium tier. It unlocks: exclusive creator content, priority in Connect, HD live streaming, Hangout hosting, and VIP support." },
       { title: "Choose Your Plan", description: "Go to the Subscribe page. Available plans: PRIME Week Pass ($15.00, 7 days), Monthly ($25.00, 30 days), Crystal ($49.99, 6 months), Diamond ($99.99, 1 year — best value), and Lifetime ($249.99, pay once, forever).", action: "Go to Subscribe" },
-      { title: "Pay with Credit/Debit Card", description: "On the Subscribe page, select your plan and tap 'Pay with Card'. This uses ePayco and supports Visa, Mastercard, and other major cards. You can pay in USD or COP (Colombian pesos). Follow the secure checkout form." },
+      { title: "Pay with Crypto", description: "On the Subscribe page, select your plan and tap any crypto button (Crypto, Bitcoin, or Dash). Each opens a checkout flow — NowPayments for crypto/BTC, BTCPay for Dash. All crypto payments include a 20% discount." },
       { title: "Pay with Dash (Crypto)", description: "Select your plan and tap 'Pay with Dash'. The in-app widget shows a QR code, the exact Dash amount, and the destination address. Open your Dash wallet, scan the code, and send the amount. The system polls for confirmation and activates your PRIME automatically — usually within a few minutes." },
       { title: "Use an Activation Code", description: "Have a Meru activation code? On the Subscribe page, enter it in the activation code field. If you forgot your code, you must provide a bank statement screenshot showing the amount, date, and exact hour of payment via support ticket." },
       { title: "Check Your Membership Status", description: "Go to Profile → Settings → Membership section. You'll see your current tier (FREE, Member, or PRIME), your plan name, expiry date, and subscription status. This refreshes automatically from the database.", action: "Go to Profile" },
@@ -154,15 +154,15 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     id: "payments",
     emoji: "💳",
     steps: [
-      { title: "Payment Methods Overview", description: "PNPtv accepts four payment methods: ePayco (credit/debit cards), Dash via BTCPay (private crypto), Bitcoin/Lightning via NowPayments (20% discount), and Meru activation codes. Choose whichever is most convenient for you." },
+      { title: "Payment Methods Overview", description: "PNPtv accepts three payment methods: Dash via BTCPay (private crypto, 20% discount), Bitcoin/Lightning via NowPayments (20% discount), and Meru activation codes. Choose whichever is most convenient for you." },
       { title: "Step 1: Choose Your Plan", description: "Go to the Subscribe page from the bottom nav or the upgrade banner on Home. Browse available plans — each shows the price, duration, and what's included. Tap a plan card to select it.", action: "Go to Subscribe" },
-      { title: "Credit/Debit Card via ePayco", description: "After selecting a plan, tap 'Pay with Card'. The ePayco secure checkout opens. Enter your card number, expiry date, CVV, and name. Supports Visa, Mastercard, Amex. Payments can be in USD or COP (auto-detected by your region)." },
-      { title: "ePayco: Completing Payment", description: "After entering your card details, tap 'Pay'. You may need to complete 3D Secure verification (a popup from your bank). Once approved, your PRIME status activates automatically and you're redirected back to PNPtv." },
+      { title: "Crypto via NowPayments", description: "Tap 'Crypto' on any plan card. A NowPayments invoice opens — pay with BTC, ETH, USDC, or 100+ other coins. A 20% discount is applied automatically. The page polls for confirmation and activates your plan automatically." },
+      { title: "Bitcoin / Lightning via NowPayments", description: "Tap 'Bitcoin'. A NowPayments hosted checkout opens — pay on-chain or Lightning Network (Lightning is instant). You get a 20% discount. The system polls for confirmation and activates automatically." },
       { title: "Anonymous Crypto via Dash/BTCPay", description: "Tap 'Pay with Dash'. A BTCPay invoice is generated with a QR code, the exact Dash amount, and the destination address. Open your Dash wallet, scan the code, and send the amount. The system polls for confirmation. Good for maximum privacy — no personal info required." },
       { title: "Dash: Payment Confirmation", description: "After sending Dash, the app polls BTCPay for confirmation. Once confirmed (usually 2–5 minutes thanks to InstantSend), your PRIME activates automatically. You'll see a confirmation screen." },
       { title: "Bitcoin / Lightning via NowPayments", description: "Tap 'Pay with Bitcoin'. A NowPayments hosted checkout opens in a popup — pay with BTC on-chain or Lightning Network (Lightning is instant). You get a 20% discount on all plans. This page polls for confirmation and activates automatically once the payment is detected." },
       { title: "Activation Codes (Meru)", description: "If you have a Meru code (from email, promotions, or referrals), go to Subscribe and enter it in the activation code field. Tap 'Activate'. If you forgot your code, you must provide a bank statement screenshot showing the amount, date, and hour of payment via support ticket to recover it." },
-      { title: "Payment Issues?", description: "If your payment fails: check your card has sufficient funds, ensure 3D Secure popup wasn't blocked, or try a different payment method. For crypto, make sure you sent the exact amount to the correct address. Contact Cristina AI or email support@pnptv.app for help." },
+      { title: "Payment Issues?", description: "If your crypto payment fails, make sure you sent the exact amount to the correct address and waited for confirmation. For Dash, wait for InstantSend (usually under 2 minutes). For NowPayments, the popup must stay open. Contact Cristina AI or email support@pnptv.app for help." },
     ],
   },
   {
@@ -171,7 +171,7 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     steps: [
       { title: "What are PNP Tokens?", description: "PNP Tokens are the in-app currency. You can use tokens to tip creators, make in-app purchases, and unlock special features. Tokens are separate from your PRIME subscription." },
       { title: "Buy Tokens", description: "Go to the Token Checkout page. You'll see available token packages at different price points. Select a package to proceed to payment.", action: "Go to Token Checkout" },
-      { title: "Pay for Tokens", description: "Token purchases support ePayco (credit/debit cards), Dash via BTCPay (5% crypto discount), and Bitcoin/Lightning via NowPayments (20% crypto discount). Select your preferred method and complete the payment flow." },
+      { title: "Pay for Tokens", description: "Token purchases support Dash via BTCPay (private crypto), and Bitcoin/Lightning via NowPayments (20% crypto discount). Select your preferred method and complete the payment flow." },
       { title: "Check Your Balance", description: "Your token balance is shown in your wallet. You can access it from your Profile or the token section. The balance updates in real time after purchases." },
       { title: "View Purchase History", description: "Your token transaction history shows all purchases and spending. Each entry includes the amount, date, and type of transaction." },
     ],
@@ -443,7 +443,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
 
   // Payment verification state (admin-only)
   const [pvUserId, setPvUserId] = useState("");
-  const [pvProvider, setPvProvider] = useState("epayco");
+  const [pvProvider, setPvProvider] = useState("btcpay");
   const [pvReference, setPvReference] = useState("");
   const [pvAmount, setPvAmount] = useState("");
   const [pvPlanId, setPvPlanId] = useState("");
@@ -1435,7 +1435,6 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
                   onChange={(e) => setPvProvider(e.target.value)}
                   className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500/50"
                 >
-                  <option value="epayco">ePayco (Card)</option>
                   <option value="btcpay">BTCPay (Dash)</option>
                   <option value="visa">Visa Cybersource</option>
                 </select>
@@ -1641,7 +1640,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
                     setPvResult(null);
                     setPvActivated(null);
                     setPvUserId("");
-                    setPvProvider("epayco");
+                    setPvProvider("btcpay");
                     setPvReference("");
                     setPvAmount("");
                     setPvPlanId("");
