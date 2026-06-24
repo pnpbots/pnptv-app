@@ -3001,7 +3001,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                             <input
                               ref={avatarInputRef}
                               type="file"
-                              accept="image/jpeg,image/png,image/webp,image/gif"
+                              accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif"
                               className="hidden"
                               onChange={(e) => {
                                 const file = e.target.files?.[0];

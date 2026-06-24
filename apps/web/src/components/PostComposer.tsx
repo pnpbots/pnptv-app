@@ -42,7 +42,7 @@ type PostCategory = (typeof POST_CATEGORIES)[number]["value"];
 const MAX_IMAGES = 4;
 const MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024; // 512 MB
 const MAX_CHARS = 5000;
-const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"];
 const ACCEPTED_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
