@@ -51,8 +51,8 @@ function renderOgHtml({ title, description, image, url, type = 'website' }) {
   <meta property="og:description" content="${safeDesc}" />
   <meta property="og:url" content="${safeUrl}" />
   <meta property="og:image" content="${safeImage}" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
+  <meta property="og:image:width" content="1920" />
+  <meta property="og:image:height" content="1080" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${safeTitle}" />
   <meta name="twitter:description" content="${safeDesc}" />
