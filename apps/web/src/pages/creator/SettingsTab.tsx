@@ -21,6 +21,16 @@ import {
   type StreamRecording,
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
+import { getCreatorEligibilityStatus } from "@/lib/api";
+
+interface CreatorLiveEligibility {
+  success: boolean;
+  canGoLive: boolean;
+  canPostExclusive: boolean;
+  creatorStatus: string;
+  followersCount?: number;
+  issues: string[];
+}
 
 function fmtDuration(seconds: number | null): string {
   if (!seconds) return "--";
@@ -65,6 +75,15 @@ const DASH_ADDRESS_RE = /^[X7][1-9A-HJ-NP-Za-km-z]{33}$/;
 
 export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   const { user: authUser } = useAuth();
+
+  // Live eligibility state — drives membership toggle gate
+  const [liveEligibility, setLiveEligibility] = useState<CreatorLiveEligibility | null>(null);
+  useEffect(() => {
+    getCreatorEligibilityStatus()
+      .then((res) => setLiveEligibility(res as CreatorLiveEligibility))
+      .catch(() => {});
+  }, []);
+
   // Payout method state — USDC retired; Dash is the only crypto option.
   const [payoutMethod, setPayoutMethod] = useState<"dash" | "meru" | "fiat">("dash");
   const [dashAddress, setDashAddress] = useState<string>("");
@@ -462,34 +481,75 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
 
       {/* Membership toggle */}
       <div className="glass-card-sm p-5">
-        <div className="flex items-center justify-between">
+        {liveEligibility && !liveEligibility.canPostExclusive ? (
+          /* Ice tier — show locked state with progress indicator */
           <div>
-            <p className="text-sm font-semibold text-white">Accept new memberships</p>
-            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-              {subscriptionPaused
-                ? "New memberships are paused. You need 5 exclusive videos of 5 minutes or more before charging."
-                : "Fans can subscribe to your profile."}
-            </p>
+            <div className="flex items-start gap-3">
+              <div
+                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: "rgba(212,0,122,0.12)", border: "1px solid rgba(212,0,122,0.25)" }}
+              >
+                <svg className="w-4 h-4" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-white">Accept new memberships</p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                  Reach <strong className="text-white">10 followers</strong> on your free profile to unlock exclusive content monetization
+                </p>
+              </div>
+            </div>
+            {/* Follower progress bar */}
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Follower progress</span>
+                <span className="text-[11px] font-semibold text-white">{liveEligibility.followersCount ?? 0}/10</span>
+              </div>
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                <div
+                  className="h-full rounded-full transition-all duration-700"
+                  style={{
+                    width: `${Math.min(((liveEligibility.followersCount ?? 0) / 10) * 100, 100)}%`,
+                    background: "linear-gradient(to right, #D4007A, #E69138)",
+                  }}
+                />
+              </div>
+            </div>
           </div>
-          <button
-            onClick={handleToggleSubscription}
-            disabled={subToggling}
-            aria-pressed={!subscriptionPaused}
-            className="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:opacity-50 focus:outline-none"
-            style={{
-              background: subscriptionPaused
-                ? "rgba(255,255,255,0.12)"
-                : "linear-gradient(135deg, #D4007A, #E69138)",
-            }}
-          >
-            <span
-              className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200"
-              style={{ transform: subscriptionPaused ? "translateX(0)" : "translateX(24px)" }}
-            />
-          </button>
-        </div>
-        {subToggleError && (
-          <p className="mt-2 text-xs text-red-300">{subToggleError}</p>
+        ) : (
+          /* Crystal / Diamond tier — show toggle */
+          <div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white">Accept new memberships</p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                  {subscriptionPaused
+                    ? "New memberships are paused."
+                    : "Fans can subscribe to your profile."}
+                </p>
+              </div>
+              <button
+                onClick={handleToggleSubscription}
+                disabled={subToggling}
+                aria-pressed={!subscriptionPaused}
+                className="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:opacity-50 focus:outline-none"
+                style={{
+                  background: subscriptionPaused
+                    ? "rgba(255,255,255,0.12)"
+                    : "linear-gradient(135deg, #D4007A, #E69138)",
+                }}
+              >
+                <span
+                  className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200"
+                  style={{ transform: subscriptionPaused ? "translateX(0)" : "translateX(24px)" }}
+                />
+              </button>
+            </div>
+            {subToggleError && (
+              <p className="mt-2 text-xs text-red-300">{subToggleError}</p>
+            )}
+          </div>
         )}
       </div>
 

@@ -2362,8 +2362,8 @@ const getCreatorEligibility = async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `SELECT role, creator_status, creator_locked, identity_verified,
-              identity_verification_required_by, live_channel
+      `SELECT role, creator_status, identity_verified,
+              identity_verification_required_by, live_channel, followers_count
        FROM users WHERE id = $1`,
       [userId]
     );
@@ -2382,14 +2382,15 @@ const getCreatorEligibility = async (req, res) => {
         isLocked: false,
         is2257Compliant: true,
         hasLiveChannel: !!user.live_channel,
+        followersCount: user.followers_count ?? 0,
         issues: [],
       });
     }
 
     const creatorStatus = user.creator_status || 'none';
-    const isLocked = !!user.creator_locked;
     const is2257Compliant = IdentityVerificationService.is2257Compliant(user);
     const hasLiveChannel = !!user.live_channel;
+    const followersCount = user.followers_count ?? 0;
 
     const issues = [];
 
@@ -2399,25 +2400,29 @@ const getCreatorEligibility = async (req, res) => {
       issues.push('Your creator application is under review. You\'ll be notified when approved.');
     }
 
-    if (isLocked) {
-      issues.push('Complete your creator onboarding setup to unlock streaming and exclusive content.');
-    }
-
     if (!is2257Compliant) {
       issues.push('Identity verification (18 U.S.C. § 2257) required. Visit your settings to complete it.');
     }
 
-    const canGoLive = creatorStatus === 'active' && !isLocked && is2257Compliant;
-    const canPostExclusive = creatorStatus === 'active' && !isLocked && is2257Compliant;
+    // Live is always available for active creators — tier does NOT affect go-live
+    const canGoLive = creatorStatus === 'active';
+
+    // Exclusive content monetization requires Ice tier threshold (10 followers)
+    const canPostExclusive = creatorStatus === 'active' && followersCount >= 10;
+
+    if (!canPostExclusive && creatorStatus === 'active') {
+      issues.push('Reach 10 followers on your free profile to unlock exclusive content monetization.');
+    }
 
     return res.json({
       success: true,
       canGoLive,
       canPostExclusive,
       creatorStatus,
-      isLocked,
+      isLocked: false,
       is2257Compliant,
       hasLiveChannel,
+      followersCount,
       issues,
     });
   } catch (err) {

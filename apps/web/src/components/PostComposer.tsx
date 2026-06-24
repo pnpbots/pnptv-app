@@ -23,7 +23,7 @@ import React, {
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { getCreatorEligibility, getXStatus, sharePostToX, getOwnChannels, getProfile, searchCreators, type SocialPostItem, type CreatorChannel, type MentionUser } from "@/lib/api";
+import { getCreatorEligibilityStatus, getXStatus, sharePostToX, getOwnChannels, getProfile, searchCreators, type SocialPostItem, type CreatorChannel, type MentionUser } from "@/lib/api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -275,6 +275,7 @@ export function PostComposer({
   const [isDragging, setIsDragging] = useState(false);
   const [isExpanded, setIsExpanded] = useState(!compact);
   const [isActiveCreator, setIsActiveCreator] = useState(false);
+  const [canPostExclusive, setCanPostExclusive] = useState(false);
   const [isExclusive, setIsExclusive] = useState(false);
   const [isShareable, setIsShareable] = useState(true);
   const [xHasWriteScope, setXHasWriteScope] = useState(false);
@@ -299,9 +300,12 @@ export function PostComposer({
   // ── Creator status + X write-scope check ──────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated) return;
-    getCreatorEligibility()
+    getCreatorEligibilityStatus()
       .then((eligibility) => {
-        setIsActiveCreator(eligibility.canPostExclusive);
+        // Show the exclusive toggle for all active creators (Ice tier sees it disabled)
+        const isCreatorActive = eligibility.creatorStatus === 'active';
+        setIsActiveCreator(isCreatorActive);
+        setCanPostExclusive(eligibility.canPostExclusive ?? false);
       })
       .catch(() => {
         // Non-critical — exclusive toggle stays hidden
@@ -1089,14 +1093,14 @@ export function PostComposer({
             </button>
           </div>
 
-          {/* Exclusive toggle — active creators only */}
+          {/* Exclusive toggle — active creators only; disabled for Ice tier (<10 followers) */}
           {isActiveCreator && (
             <div className="mt-3">
               <ToggleSwitch
                 id={exclusiveId}
                 checked={isExclusive}
-                onChange={setIsExclusive}
-                disabled={isPosting}
+                onChange={canPostExclusive ? setIsExclusive : () => {}}
+                disabled={isPosting || !canPostExclusive}
                 activeColor="#D4007A"
                 label={tFeed.exclusiveToggle}
                 icon={
@@ -1105,6 +1109,11 @@ export function PostComposer({
                   </svg>
                 }
               />
+              {!canPostExclusive && (
+                <p className="mt-1 text-[11px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                  Reach 10 followers to unlock exclusive posts
+                </p>
+              )}
             </div>
           )}
 

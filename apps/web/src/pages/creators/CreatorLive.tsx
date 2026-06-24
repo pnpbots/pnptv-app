@@ -13,10 +13,8 @@ import {
   clearLiveGoal,
   getMyTipMenu,
   saveTipMenu,
-  getCreatorEligibility,
   type TipGoal,
   type TipMenuItem,
-  type CreatorEligibility,
 } from "@/lib/api";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 
@@ -25,9 +23,6 @@ const STUDIO_URL = `/login?returnTo=${encodeURIComponent("https://studio.pnptv.a
 export default function CreatorLive() {
   const { user } = useAuth();
   const t = useI18n().creator;
-
-  const [eligibility, setEligibility] = useState<CreatorEligibility | null>(null);
-  const [eligibilityLoading, setEligibilityLoading] = useState(true);
 
   const [rtmpInfo, setRtmpInfo] = useState<{ rtmpUrl: string; streamKey: string } | null>(null);
   // "idle" | "loading" | "provisioning" | "ready" | "error"
@@ -45,13 +40,6 @@ export default function CreatorLive() {
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   useEffect(() => {
     getWalletBalance().then((res) => { if (typeof res.balance === "number") setTokenBalance(res.balance); }).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    getCreatorEligibility()
-      .then(setEligibility)
-      .catch(() => setEligibility(null))
-      .finally(() => setEligibilityLoading(false));
   }, []);
 
   // ── Channel ref (populated after credentials load) ─────────────────────────
@@ -337,45 +325,8 @@ export default function CreatorLive() {
           )}
         </Card>
 
-        {/* How do you want to stream? — locked if not eligible */}
-        {!eligibilityLoading && eligibility && !eligibility.canGoLive ? (
-          <Card className="p-6 space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)" }}>
-                <svg className="w-5 h-5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-              </div>
-              <div>
-                <h2 className="text-sm font-semibold text-white">Streaming Locked</h2>
-                <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                  Complete the steps below to unlock go live.
-                </p>
-              </div>
-            </div>
-            {eligibility.issues.length > 0 && (
-              <ul className="space-y-2">
-                {eligibility.issues.map((issue, i) => (
-                  <li key={i} className="flex items-start gap-2 text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                    <span style={{ color: "#FFD60A" }} className="mt-0.5 flex-shrink-0">•</span>
-                    {issue}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <a
-              href="/settings"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white btn-gradient"
-            >
-              Go to Settings
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-              </svg>
-            </a>
-          </Card>
-        ) : (
-          <Card className="p-5 space-y-4">
+        {/* How do you want to stream? — always visible for active creators */}
+        <Card className="p-5 space-y-4">
             <div>
               <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                 <svg className="w-4 h-4" style={{ color: "#5ED1C4" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -458,8 +409,7 @@ export default function CreatorLive() {
                 </p>
               </button>
             </div>
-          </Card>
-        )}
+        </Card>
 
         {/* Hero */}
         <div
@@ -526,9 +476,9 @@ export default function CreatorLive() {
           </div>
         </Card>
 
-        {/* RTMP Credentials — hidden when streaming is locked */}
-        {(!eligibility || eligibility.canGoLive) && <div id="rtmp-credentials" />}
-        {(!eligibility || eligibility.canGoLive) && <Card className="p-5 space-y-4">
+        {/* RTMP Credentials — always shown for active creators */}
+        <div id="rtmp-credentials" />
+        <Card className="p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
               <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -649,7 +599,7 @@ export default function CreatorLive() {
               {error}
             </div>
           )}
-        </Card>}
+        </Card>
 
         {/* Recommended Settings */}
         <Card className="p-5 space-y-3">
