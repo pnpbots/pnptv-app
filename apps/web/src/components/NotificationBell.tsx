@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useI18n } from "@/lib/i18n";
 import { NotificationDropdown } from "./NotificationDropdown";
@@ -7,34 +8,45 @@ export function NotificationBell() {
   const { unreadCount } = useNotifications();
   const t = useI18n();
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    const onMouse = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!buttonRef.current?.contains(target) && !panelRef.current?.contains(target)) {
+        setOpen(false);
+      }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", onMouse);
+    return () => document.removeEventListener("mousedown", onMouse);
   }, [open]);
 
-  // Close on Escape key
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [open]);
+
+  const handleToggle = () => {
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+    }
+    setOpen(v => !v);
+  };
 
   const badge = unreadCount > 99 ? "99+" : unreadCount > 0 ? String(unreadCount) : null;
+  const isMobile = window.innerWidth < 640;
 
   return (
-    <div ref={ref} className="relative">
+    <>
       <button
-        onClick={() => setOpen((v) => !v)}
+        ref={buttonRef}
+        onClick={handleToggle}
         aria-label={t.notifications.notifications}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -54,7 +66,6 @@ export function NotificationBell() {
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
         </svg>
-
         {badge && (
           <span
             aria-live="polite"
@@ -65,7 +76,23 @@ export function NotificationBell() {
         )}
       </button>
 
-      {open && <NotificationDropdown onClose={() => setOpen(false)} />}
-    </div>
+      {open && createPortal(
+        <>
+          <div
+            className={`fixed inset-0 z-40 ${isMobile ? "bg-black/60" : ""}`}
+            onClick={() => setOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            ref={panelRef}
+            className={isMobile ? "fixed bottom-0 left-0 right-0 z-50 animate-slide-up" : ""}
+            style={!isMobile ? { position: "fixed", top: dropdownPos.top, right: dropdownPos.right, zIndex: 50 } : undefined}
+          >
+            <NotificationDropdown onClose={() => setOpen(false)} isMobile={isMobile} />
+          </div>
+        </>,
+        document.body
+      )}
+    </>
   );
 }

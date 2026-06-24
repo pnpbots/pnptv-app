@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useI18n } from "@/lib/i18n";
@@ -18,11 +18,43 @@ function timeAgo(date: string): string {
   return `${days}d`;
 }
 
-interface Props {
-  onClose: () => void;
+function CategoryIcon({ id }: { id: Category }) {
+  const cls = "w-5 h-5";
+  if (id === "all") return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className={cls} aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>
+    </svg>
+  );
+  if (id === "social") return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className={cls} aria-hidden="true">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+    </svg>
+  );
+  if (id === "messaging") return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className={cls} aria-hidden="true">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+  );
+  if (id === "hangouts") return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className={cls} aria-hidden="true">
+      <polygon points="23 7 16 12 23 17 23 7"/>
+      <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+    </svg>
+  );
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className={cls} aria-hidden="true">
+      <circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>
+    </svg>
+  );
 }
 
-export function NotificationDropdown({ onClose }: Props) {
+interface Props {
+  onClose: () => void;
+  isMobile?: boolean;
+}
+
+export function NotificationDropdown({ onClose, isMobile = false }: Props) {
   const { notifications, markAllRead, markRead, isLoading, error, fetchMore, hasMore } = useNotifications();
   const t = useI18n();
   const [activeCategory, setActiveCategory] = useState<Category>("all");
@@ -36,77 +68,112 @@ export function NotificationDropdown({ onClose }: Props) {
     { key: "other", label: t.notifications.other },
   ];
 
+  const unreadByCategory = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const n of notifications) {
+      if (n.isRead) continue;
+      const cat = ["social", "messaging", "hangouts"].includes(n.category ?? "") ? n.category! : "other";
+      counts.all = (counts.all ?? 0) + 1;
+      counts[cat] = (counts[cat] ?? 0) + 1;
+    }
+    return counts;
+  }, [notifications]);
+
   const filtered = notifications.filter((n) => {
     if (activeCategory === "all") return true;
-    if (activeCategory === "other") {
-      return !["social", "messaging", "hangouts"].includes(n.category || "");
-    }
+    if (activeCategory === "other") return !["social", "messaging", "hangouts"].includes(n.category ?? "");
     return n.category === activeCategory;
   });
 
   const hasUnread = notifications.some((n) => !n.isRead);
 
   const handleTap = (notif: Notification) => {
-    // Mark as read on click
-    if (!notif.isRead) {
-      markRead([Number(notif.id)]);
-    }
+    if (!notif.isRead) markRead([Number(notif.id)]);
     onClose();
     navigate(getNotificationDeepLink(notif));
   };
 
-  const handleMarkAllRead = async () => {
-    await markAllRead();
-  };
+  const focusRing = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background";
 
-  const focusRing =
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background";
+  const containerCls = isMobile
+    ? "w-full max-h-[82svh] flex flex-col rounded-t-2xl bg-pnp-background border-t border-pnp-border shadow-2xl overflow-hidden"
+    : "w-[400px] max-w-[calc(100vw-2rem)] max-h-[82svh] flex flex-col rounded-xl bg-pnp-background border border-pnp-border shadow-xl overflow-hidden";
 
   return (
     <div
       role="dialog"
       aria-label={t.notifications.notifications}
-      className="absolute right-0 top-12 w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] flex flex-col rounded-xl bg-pnp-background border border-pnp-border shadow-xl z-50 overflow-hidden"
+      className={containerCls}
     >
+      {/* Drag handle — mobile only */}
+      {isMobile && (
+        <div className="flex justify-center pt-3 pb-1 shrink-0" aria-hidden="true">
+          <div className="w-10 h-1 rounded-full bg-pnp-border" />
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-pnp-border shrink-0">
         <h3 className="text-sm font-semibold text-pnp-textPrimary">
           {t.notifications.notifications}
         </h3>
-        {hasUnread && (
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className={`w-8 h-8 flex items-center justify-center rounded-full text-pnp-textSecondary hover:bg-white/10 hover:text-pnp-textPrimary transition-colors ${focusRing}`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      {/* Category grid — 3+2 layout */}
+      <div className="grid grid-cols-3 gap-2 p-3 border-b border-pnp-border shrink-0">
+        {CATEGORIES.map((cat) => {
+          const count = unreadByCategory[cat.key] ?? 0;
+          const isActive = activeCategory === cat.key;
+          return (
+            <button
+              key={cat.key}
+              onClick={() => setActiveCategory(cat.key)}
+              className={`relative flex flex-col items-center justify-center gap-1.5 py-3 px-1 rounded-xl text-xs font-medium transition-all ${focusRing} ${
+                isActive
+                  ? "bg-pnp-accent text-white"
+                  : "bg-white/5 text-pnp-textSecondary hover:bg-white/10 hover:text-pnp-textPrimary"
+              }`}
+            >
+              <CategoryIcon id={cat.key} />
+              <span className="leading-tight text-center">{cat.label}</span>
+              {count > 0 && !isActive && (
+                <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold px-0.5 leading-none pointer-events-none">
+                  {count > 99 ? "99+" : count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Mark all read */}
+      {hasUnread && !isLoading && !error && (
+        <div className="px-4 py-2 border-b border-pnp-border/50 shrink-0">
           <button
-            onClick={handleMarkAllRead}
-            className={`text-xs text-pnp-accent hover:underline rounded ${focusRing}`}
+            onClick={async () => { await markAllRead(); }}
+            className={`w-full text-center text-xs text-pnp-accent hover:underline rounded py-0.5 ${focusRing}`}
           >
             {t.notifications.markAllRead}
           </button>
-        )}
-      </div>
-
-      {/* Category tabs */}
-      <div className="flex gap-1 px-3 py-2 border-b border-pnp-border overflow-x-auto no-scrollbar shrink-0">
-        {CATEGORIES.map((cat) => (
-          <button
-            key={cat.key}
-            onClick={() => setActiveCategory(cat.key)}
-            className={`px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${focusRing} ${
-              activeCategory === cat.key
-                ? "bg-pnp-accent text-white"
-                : "text-pnp-textSecondary hover:bg-white/10"
-            }`}
-          >
-            {cat.label}
-          </button>
-        ))}
-      </div>
+        </div>
+      )}
 
       {/* Loading state */}
       {isLoading && (
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="flex items-start gap-3 px-1 py-1 animate-pulse">
-              <div className="flex-shrink-0 w-9 h-9 rounded-full bg-pnp-surface" />
-              <div className="flex-1 space-y-2">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-pnp-surface" />
+              <div className="flex-1 space-y-2 pt-1">
                 <div className="h-3 bg-pnp-surface rounded w-3/4" />
                 <div className="h-2.5 bg-pnp-surface rounded w-1/3" />
               </div>
@@ -118,20 +185,8 @@ export function NotificationDropdown({ onClose }: Props) {
       {/* Error state */}
       {!isLoading && error && (
         <div className="flex-1 flex flex-col items-center justify-center py-10 px-4 gap-3 text-center">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="w-8 h-8 text-pnp-error"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
-            />
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-pnp-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
           </svg>
           <p className="text-sm text-pnp-textSecondary">{t.notifications.failedToLoad}</p>
           <button
@@ -148,9 +203,7 @@ export function NotificationDropdown({ onClose }: Props) {
         <div className="flex-1 overflow-y-auto no-scrollbar">
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-pnp-textSecondary text-sm">
-              {activeCategory === "all"
-                ? t.notifications.noNotifications
-                : t.notifications.noNotificationsInCategory}
+              {activeCategory === "all" ? t.notifications.noNotifications : t.notifications.noNotificationsInCategory}
             </div>
           ) : (
             <>
@@ -158,35 +211,27 @@ export function NotificationDropdown({ onClose }: Props) {
                 <button
                   key={notif.id}
                   onClick={() => handleTap(notif)}
-                  className={`w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-white/5 active:bg-white/10 transition-colors border-b border-pnp-border/50 ${focusRing} ${
-                    !notif.isRead ? "bg-white/[0.03]" : ""
+                  className={`w-full flex items-start gap-3 px-4 py-3.5 text-left hover:bg-white/5 active:bg-white/10 transition-colors border-b border-pnp-border/50 border-l-2 ${focusRing} ${
+                    !notif.isRead
+                      ? "bg-white/[0.04] border-l-pnp-accent"
+                      : "border-l-transparent"
                   }`}
                 >
                   {/* Actor avatar */}
                   <div
-                    className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-[#D4007A] to-[#E69138] text-white overflow-hidden cursor-pointer"
+                    className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-[#D4007A] to-[#E69138] text-white overflow-hidden cursor-pointer"
                     aria-hidden="true"
                     onClick={(e) => { e.stopPropagation(); onClose(); navigate(`/profile/${notif.actorId}`); }}
                   >
                     {notif.actorPhotoUrl ? (
-                      <img
-                        src={notif.actorPhotoUrl}
-                        alt=""
-                        className="w-9 h-9 rounded-full object-cover"
-                      />
+                      <img src={notif.actorPhotoUrl} alt="" className="w-10 h-10 rounded-full object-cover" />
                     ) : (
                       (notif.actorFirstName || notif.actorUsername || "?")[0].toUpperCase()
                     )}
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <p
-                      className={`text-[13px] leading-snug ${
-                        !notif.isRead
-                          ? "text-pnp-textPrimary font-medium"
-                          : "text-pnp-textSecondary"
-                      }`}
-                    >
+                    <p className={`text-[13px] leading-snug ${!notif.isRead ? "text-pnp-textPrimary font-medium" : "text-pnp-textSecondary"}`}>
                       {notif.message}
                     </p>
                     <span className="text-[11px] text-pnp-textSecondary mt-1 block">
@@ -195,15 +240,11 @@ export function NotificationDropdown({ onClose }: Props) {
                   </div>
 
                   {!notif.isRead && (
-                    <span
-                      className="flex-shrink-0 w-2.5 h-2.5 rounded-full bg-pnp-accent mt-1.5"
-                      aria-hidden="true"
-                    />
+                    <span className="flex-shrink-0 w-2 h-2 rounded-full bg-pnp-accent mt-2.5" aria-hidden="true" />
                   )}
                 </button>
               ))}
 
-              {/* Load more — only show when there are more to fetch */}
               {hasMore && (
                 <div className="p-3 flex justify-center">
                   <button
