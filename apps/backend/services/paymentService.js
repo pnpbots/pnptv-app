@@ -4245,10 +4245,10 @@ class PaymentService {
       if (bonusTokens && bonusTokens > 0) {
         try {
           await query(`
-            INSERT INTO user_token_wallets (user_id, balance_tokens)
+            INSERT INTO user_token_wallets (user_id, gifted_balance)
             VALUES ($1, $2)
             ON CONFLICT (user_id) DO UPDATE
-              SET balance_tokens = user_token_wallets.balance_tokens + $2,
+              SET gifted_balance = user_token_wallets.gifted_balance + $2,
                   updated_at    = NOW()
           `, [userId, bonusTokens]);
           logger.info('Bonus tokens credited', { userId, planId, bonusTokens });
