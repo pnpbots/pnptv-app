@@ -6,6 +6,7 @@ import {
   getProfile,
   getBlockedUsers,
   unblockUser,
+  acceptTerms,
   type BlockedUser,
 } from "@/lib/api";
 
@@ -22,6 +23,9 @@ export default function PrivacySettings() {
   const [unblockingId, setUnblockingId] = useState<string | null>(null);
   const [creatorStatus, setCreatorStatus] = useState<string>("");
   const [expandedAgreement, setExpandedAgreement] = useState<string | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState<boolean | null>(null);
+  const [reconfirming, setReconfirming] = useState(false);
+  const [reconfirmed, setReconfirmed] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -34,12 +38,26 @@ export default function PrivacySettings() {
     ]).then(([blockedRes, profileRes]) => {
       if (cancelled) return;
       if (blockedRes?.success) setBlockedUsers(blockedRes.blockedUsers);
-      if (profileRes?.profile) setCreatorStatus(profileRes.profile.creatorStatus ?? "");
+      if (profileRes?.profile) {
+        setCreatorStatus(profileRes.profile.creatorStatus ?? "");
+        setTermsAccepted(profileRes.profile.acceptedTerms ?? null);
+      }
       setBlockedLoading(false);
     });
 
     return () => { cancelled = true; };
   }, [isAuthenticated]);
+
+  const handleReconfirm = useCallback(async () => {
+    if (reconfirming || reconfirmed) return;
+    setReconfirming(true);
+    try {
+      await acceptTerms();
+      setTermsAccepted(true);
+      setReconfirmed(true);
+    } catch { /* silent */ }
+    setReconfirming(false);
+  }, [reconfirming, reconfirmed]);
 
   const handleUnblock = useCallback(async (userId: string) => {
     if (unblockingId) return;
@@ -156,8 +174,16 @@ export default function PrivacySettings() {
           className="flex items-center justify-between rounded-lg px-3 py-3 mb-3 group"
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", textDecoration: "none" }}
         >
-          <p className="text-sm font-medium text-white">{p.platformTOS}</p>
-          <svg className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary)" }} aria-hidden="true">
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="text-sm font-medium text-white">{p.platformTOS}</p>
+            {termsAccepted === true && (
+              <span className="text-xs font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(74,222,128,0.12)", color: "#4ADE80" }}>Accepted</span>
+            )}
+            {termsAccepted === false && (
+              <span className="text-xs font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(251,191,36,0.12)", color: "#FBBF24" }}>Pending</span>
+            )}
+          </div>
+          <svg className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary)" }} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
           </svg>
         </a>
@@ -170,11 +196,47 @@ export default function PrivacySettings() {
           className="flex items-center justify-between rounded-lg px-3 py-3 mb-3 group"
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", textDecoration: "none" }}
         >
-          <p className="text-sm font-medium text-white">{p.privacyPolicy}</p>
-          <svg className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary)" }} aria-hidden="true">
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="text-sm font-medium text-white">{p.privacyPolicy}</p>
+            {termsAccepted === true && (
+              <span className="text-xs font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(74,222,128,0.12)", color: "#4ADE80" }}>Accepted</span>
+            )}
+            {termsAccepted === false && (
+              <span className="text-xs font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(251,191,36,0.12)", color: "#FBBF24" }}>Pending</span>
+            )}
+          </div>
+          <svg className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: "var(--pnp-text-secondary)" }} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
           </svg>
         </a>
+
+        {/* Re-confirm agreements */}
+        {reconfirmed ? (
+          <div className="flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 mb-3" style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.2)" }}>
+            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#4ADE80" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+            <span className="text-sm font-medium" style={{ color: "#4ADE80" }}>Agreements re-confirmed</span>
+          </div>
+        ) : (
+          <button
+            onClick={handleReconfirm}
+            disabled={reconfirming}
+            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 mb-3 text-sm font-medium disabled:opacity-50 transition-opacity hover:opacity-80"
+            style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.2)", color: "#D4007A" }}
+          >
+            {reconfirming ? (
+              <span>Confirming…</span>
+            ) : (
+              <>
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+                <span>Re-confirm all agreements</span>
+              </>
+            )}
+          </button>
+        )}
 
         {/* Creator Program Terms */}
         {(() => {

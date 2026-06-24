@@ -891,6 +891,8 @@ export interface UserProfile {
   colombiaBadge?: boolean;
   // Gamification badges earned by this user
   gamificationBadges?: UserBadgeEntry[];
+  // Consent state
+  acceptedTerms?: boolean;
 }
 
 /** Sidecar metadata stored on social_posts.metadata for channel-promo rows. */
