@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   LiveKitRoom,
+  RoomAudioRenderer,
   useRoomContext,
 } from "@livekit/components-react";
 import { ConnectionState, RoomEvent } from "livekit-client";
@@ -1474,6 +1475,7 @@ export default function MainStage() {
             }
           }}
         >
+          <RoomAudioRenderer />
           <ForceCamMicEnforcer active />
           <MainStageInner
             mode={mode as ModeId}
@@ -1515,6 +1517,7 @@ export default function MainStage() {
             video={false}
             className="contents"
           >
+            <RoomAudioRenderer />
             <ForceCamMicEnforcer active={false} />
             <MainStageInner
               mode={mode as ModeId}
@@ -1593,6 +1596,7 @@ export default function MainStage() {
             }
           }}
         >
+          <RoomAudioRenderer />
           <ForceCamMicEnforcer active={false} />
           <MainStageInner
             mode={mode as ModeId}

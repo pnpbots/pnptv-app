@@ -152,7 +152,11 @@ function UrlMediaPlayer({ src, kind, playing, volume, startedAt }: UrlMediaPlaye
           el.currentTime = Math.min(expectedPos, el.duration - 0.5);
         }
       }
-      el.play().catch(() => {
+      el.play().catch((err: unknown) => {
+        // AbortError means our own cleanup pause() interrupted play() — harmless,
+        // the element will resume correctly. Do NOT mute for this case.
+        if ((err as DOMException)?.name === "AbortError") return;
+        // NotAllowedError / anything else → autoplay blocked; fall back to muted.
         setMuted(true);
         if (el) el.muted = true;
         el.play().catch(() => {});
@@ -160,11 +164,6 @@ function UrlMediaPlayer({ src, kind, playing, volume, startedAt }: UrlMediaPlaye
     } else {
       el.pause();
     }
-
-    const wasPlaying = shouldPlay;
-    return () => {
-      if (wasPlaying) el.pause();
-    };
   }, [playing, userOptedIn, volume, muted, canPlay, kind, startedAt]);
 
   const handlePlay = () => {
