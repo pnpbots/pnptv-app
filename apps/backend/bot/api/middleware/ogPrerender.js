@@ -186,8 +186,8 @@ async function getGroupOg(groupId) {
 
 function getMainStageOg() {
   return {
-    title: '🔴 LIVE on PNPtv! Main Stage',
-    description: 'Drop into the always-on community video room. Real guys, real PNP, every night. Members only — join at pnptv.app/join.',
+    title: 'Bye Zoom. Join Main Stage.',
+    description: 'Hottest PNP Streaming Party. By PNPtv!',
     image: MAIN_STAGE_IMAGE,
     url: `${BASE_URL}/main-stage`,
     type: 'video.other',
@@ -199,8 +199,8 @@ async function getMainStageInviteOg(code) {
     const preview = await mainStageInviteService.previewInvite(code);
     if (!preview || !preview.valid) {
       return {
-        title: 'Main Stage Invite — PNPtv!',
-        description: 'You were invited to join PNPtv! Main Stage — the live adult community video room.',
+        title: 'Bye Zoom. Join Main Stage.',
+        description: 'Hottest PNP Streaming Party. By PNPtv!',
         image: MAIN_STAGE_IMAGE,
         url: `${BASE_URL}/main-stage/join/${code}`,
         type: 'video.other',
@@ -208,10 +208,10 @@ async function getMainStageInviteOg(code) {
     }
     const host = preview.hostName;
     return {
-      title: host ? `${host} invites you to Main Stage` : "You're invited to Main Stage!",
+      title: 'Bye Zoom. Join Main Stage.',
       description: host
-        ? `${host} is hosting on PNPtv! Main Stage — the live adult community video room. Join now.`
-        : "You're invited to PNPtv! Main Stage — the live adult community video room. Join now.",
+        ? `${host} is hosting. Hottest PNP Streaming Party. By PNPtv!`
+        : 'Hottest PNP Streaming Party. By PNPtv!',
       image: MAIN_STAGE_IMAGE,
       url: `${BASE_URL}/main-stage/join/${code}`,
       type: 'video.other',
@@ -219,8 +219,8 @@ async function getMainStageInviteOg(code) {
   } catch (err) {
     logger.warn('OG prerender: main-stage invite lookup failed', { code, error: err.message });
     return {
-      title: 'Main Stage Invite — PNPtv!',
-      description: 'You were invited to join PNPtv! Main Stage — the live adult community video room.',
+      title: 'Bye Zoom. Join Main Stage.',
+      description: 'Hottest PNP Streaming Party. By PNPtv!',
       image: MAIN_STAGE_IMAGE,
       url: `${BASE_URL}/main-stage/join/${code}`,
       type: 'video.other',
