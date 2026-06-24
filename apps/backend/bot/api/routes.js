@@ -9034,8 +9034,17 @@ app.get('/api/webapp/dash/btcpay-status', requireSessionAuth, asyncHandler(async
 app.get('/api/wallet/balance', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const userId = String(user.telegram_id || user.id);
-  const wallet = await DashTokenService.getWallet(userId);
-  res.json({ success: true, balance: wallet.balance_tokens, dpnsHandle: wallet.dash_dpns || null });
+  const { rows } = await getPool().query(
+    `INSERT INTO user_token_wallets (user_id)
+     VALUES ($1)
+     ON CONFLICT (user_id) DO UPDATE SET updated_at = NOW()
+     RETURNING balance_tokens, gifted_balance, dash_dpns`,
+    [userId]
+  );
+  const row = rows[0] || { balance_tokens: 0, gifted_balance: 0, dash_dpns: null };
+  const regular = Number(row.balance_tokens) || 0;
+  const gifted  = Number(row.gifted_balance)  || 0;
+  res.json({ success: true, balance: regular + gifted, regularBalance: regular, giftedBalance: gifted, dpnsHandle: row.dash_dpns || null });
 }));
 
 // GET /api/wallet/packages — available token packages (auth required to prevent
