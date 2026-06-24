@@ -10,6 +10,9 @@ import {
   getBtcAvailable,
   createBtcSubscription,
   getBtcSubscriptionStatus,
+  getDashAvailable,
+  createDashSubscription,
+  getDashSubscriptionStatus,
   getLabelColor,
   validatePromoCode,
   type SubscriptionPlan,
@@ -133,6 +136,14 @@ export default function Subscribe() {
   const [btcSuccess, setBtcSuccess] = useState(false);
   const btcPopupRef = useRef<Window | null>(null);
   const btcPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // BTCPay Dash state
+  const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
+  const [dashOrder, setDashOrder] = useState<{ invoiceId: string; checkoutUrl: string; planName: string; usdAmount: number } | null>(null);
+  const [dashPolling, setDashPolling] = useState(false);
+  const [dashSuccess, setDashSuccess] = useState(false);
+  const dashPopupRef = useRef<Window | null>(null);
+  const dashPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const {
     order: usdcOrder,
     isPolling: usdcPolling,
@@ -182,6 +193,10 @@ export default function Subscribe() {
       .then((res) => setBtcAvailable(res.available === true))
       .catch(() => setBtcAvailable(false));
 
+    getDashAvailable()
+      .then((res) => setDashAvailable(res.available === true && res.configured === true))
+      .catch(() => setDashAvailable(false));
+
     // Resume BTC polling if user navigated away mid-payment
     try {
       const stored = sessionStorage.getItem("pnp_pending_btc_order");
@@ -192,6 +207,20 @@ export default function Subscribe() {
           setBtcPolling(true);
         } else {
           sessionStorage.removeItem("pnp_pending_btc_order");
+        }
+      }
+    } catch {}
+
+    // Resume Dash polling if user navigated away mid-payment
+    try {
+      const storedDash = sessionStorage.getItem("pnp_pending_dash_order");
+      if (storedDash) {
+        const parsed = JSON.parse(storedDash);
+        if (parsed?.invoiceId && Date.now() - (parsed.createdAt || 0) < 3600000) {
+          setDashOrder(parsed);
+          setDashPolling(true);
+        } else {
+          sessionStorage.removeItem("pnp_pending_dash_order");
         }
       }
     } catch {}
@@ -430,6 +459,29 @@ export default function Subscribe() {
     }
   }, [submitting, btcAvailable]);
 
+  const handleDashCheckout = useCallback(async (planId: string) => {
+    if (submitting || !dashAvailable) return;
+    setSelectedPlan(planId);
+    setError(null);
+    try {
+      const result = await createDashSubscription(planId, undefined);
+      if (!result.success || !result.checkoutUrl) {
+        setError(result.error || "Failed to create Dash invoice.");
+        return;
+      }
+      const order = { invoiceId: result.invoiceId, checkoutUrl: result.checkoutUrl, planName: result.planName || planId, usdAmount: result.usdAmount || 0 };
+      setDashOrder(order);
+      setDashPolling(true);
+      setDashSuccess(false);
+      sessionStorage.setItem("pnp_pending_dash_order", JSON.stringify({ ...order, createdAt: Date.now() }));
+      const w = window.screen.width, h = window.screen.height;
+      const pw = Math.min(560, w), ph = Math.min(780, h);
+      dashPopupRef.current = window.open(result.checkoutUrl, "btcpay_dash", `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes`);
+    } catch (err: any) {
+      setError(err.message || "Failed to create Dash invoice.");
+    }
+  }, [submitting, dashAvailable]);
+
   // BTC polling effect
   useEffect(() => {
     if (!btcOrder || !btcPolling || btcSuccess) return;
@@ -467,6 +519,44 @@ export default function Subscribe() {
       if (btcPollRef.current) clearInterval(btcPollRef.current);
     };
   }, [btcOrder, btcPolling, btcSuccess]);
+
+  // Dash polling effect
+  useEffect(() => {
+    if (!dashOrder || !dashPolling || dashSuccess) return;
+    let cancelled = false;
+    const startedAt = Date.now();
+    const maxMs = 60 * 60 * 1000;
+    dashPollRef.current = setInterval(async () => {
+      if (cancelled || Date.now() - startedAt > maxMs) {
+        clearInterval(dashPollRef.current!);
+        setDashPolling(false);
+        return;
+      }
+      try {
+        const data = await getDashSubscriptionStatus(dashOrder.invoiceId);
+        if (cancelled) return;
+        if (data.status === 'completed') {
+          clearInterval(dashPollRef.current!);
+          setDashPolling(false);
+          setDashSuccess(true);
+          dashPopupRef.current?.close();
+          dashPopupRef.current = null;
+          sessionStorage.removeItem("pnp_pending_dash_order");
+          await refreshUser();
+          setTimeout(() => setPaymentSuccess(true), 500);
+        } else if (data.status === 'failed' || data.status === 'expired') {
+          clearInterval(dashPollRef.current!);
+          setDashPolling(false);
+          sessionStorage.removeItem("pnp_pending_dash_order");
+          setError("Dash payment failed or expired. Please try again.");
+        }
+      } catch {}
+    }, 10000);
+    return () => {
+      cancelled = true;
+      if (dashPollRef.current) clearInterval(dashPollRef.current);
+    };
+  }, [dashOrder, dashPolling, dashSuccess]);
 
   // Derive current tier display from user object
   function renderTierBanner() {
@@ -779,8 +869,9 @@ export default function Subscribe() {
 
           const planDays = plan.duration_days || plan.duration || 30;
           const isBtcPanelActive = !!(btcOrder && selectedPlan === plan.id);
-          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id) || isBtcPanelActive;
-          const isDimmed = (!!(usdcOrder && !usdcPaymentSuccess) || !!(btcOrder && !btcSuccess)) && selectedPlan !== plan.id;
+          const isDashPanelActive = !!(dashOrder && selectedPlan === plan.id);
+          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id) || isBtcPanelActive || isDashPanelActive;
+          const isDimmed = (!!(usdcOrder && !usdcPaymentSuccess) || !!(btcOrder && !btcSuccess) || !!(dashOrder && !dashSuccess)) && selectedPlan !== plan.id;
           return (
             <div key={plan.id} className={`transition-all duration-200 ${isDimmed ? "opacity-50 pointer-events-none" : ""}`}>
             <button
@@ -901,6 +992,20 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-orange-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
+                {dashAvailable && (
+                  <button
+                    disabled={submitting}
+                    onClick={(e) => { e.stopPropagation(); handleDashCheckout(plan.id); }}
+                    className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-[#008DE4]/40 bg-[#008DE4]/10 hover:bg-[#008DE4]/20 disabled:opacity-50 transition-colors"
+                  >
+                    <span className="flex items-center gap-1 text-xs font-semibold text-[#4DB8FF]">
+                      <span>Ð</span>
+                      <span>Dash</span>
+                      <span className="text-[9px] font-black text-white px-1 py-0.5 rounded leading-none" style={{ background: "#008DE4" }}>−20%</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
+                  </button>
+                )}
               </div>
             </button>
             {usdcOrder && selectedPlan === plan.id && (
@@ -940,6 +1045,33 @@ export default function Subscribe() {
                 <p className="text-green-400 font-semibold">Bitcoin payment confirmed!</p>
               </div>
             )}
+            {dashOrder && selectedPlan === plan.id && !dashSuccess && (
+              <div className="mt-0 rounded-t-none rounded-b-xl border border-t-0 p-4" style={{ borderColor: "rgba(0,141,228,0.3)", background: "rgba(0,141,228,0.05)" }}>
+                <p className="text-sm font-semibold mb-2" style={{ color: "#4DB8FF" }}>
+                  {dashPolling ? (t.lang === "es" ? "Esperando pago en Dash..." : "Waiting for Dash payment...") : "Dash Invoice"}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { dashPopupRef.current = window.open(dashOrder.checkoutUrl, "btcpay_dash", "width=560,height=780"); }}
+                    className="flex-1 text-xs rounded-lg py-2 px-3 transition-colors"
+                    style={{ background: "rgba(0,141,228,0.2)", color: "#4DB8FF" }}
+                  >
+                    Open BTCPay
+                  </button>
+                  <button
+                    onClick={() => { setDashOrder(null); setDashPolling(false); sessionStorage.removeItem("pnp_pending_dash_order"); if (dashPollRef.current) clearInterval(dashPollRef.current); }}
+                    className="text-xs text-gray-500 px-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {dashOrder && selectedPlan === plan.id && dashSuccess && (
+              <div className="mt-0 rounded-t-none rounded-b-xl border border-t-0 border-green-500/30 bg-green-500/5 p-4 text-center">
+                <p className="text-green-400 font-semibold">Dash payment confirmed!</p>
+              </div>
+            )}
             </div>
           );
         })}
@@ -969,8 +1101,9 @@ export default function Subscribe() {
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
           const isBtcPanelActive = !!(btcOrder && selectedPlan === plan.id);
-          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id) || isBtcPanelActive;
-          const isDimmed = (!!(usdcOrder && !usdcPaymentSuccess) || !!(btcOrder && !btcSuccess)) && selectedPlan !== plan.id;
+          const isDashPanelActive = !!(dashOrder && selectedPlan === plan.id);
+          const isPanelActive = !!(usdcOrder && selectedPlan === plan.id) || isBtcPanelActive || isDashPanelActive;
+          const isDimmed = (!!(usdcOrder && !usdcPaymentSuccess) || !!(btcOrder && !btcSuccess) || !!(dashOrder && !dashSuccess)) && selectedPlan !== plan.id;
           const primeBtnClass = [
             "w-full text-left p-4 border-2 transition-all duration-200",
             isPanelActive ? "rounded-t-xl rounded-b-none" : "rounded-xl",
@@ -1127,6 +1260,20 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-orange-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
+                {dashAvailable && (
+                  <button
+                    disabled={submitting}
+                    onClick={(e) => { e.stopPropagation(); handleDashCheckout(plan.id); }}
+                    className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-[#008DE4]/40 bg-[#008DE4]/10 hover:bg-[#008DE4]/20 disabled:opacity-50 transition-colors"
+                  >
+                    <span className="flex items-center gap-1 text-xs font-semibold text-[#4DB8FF]">
+                      <span>Ð</span>
+                      <span>Dash</span>
+                      <span className="text-[9px] font-black text-white px-1 py-0.5 rounded leading-none" style={{ background: "#008DE4" }}>−20%</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
+                  </button>
+                )}
               </div>
             </button>
             {usdcOrder && selectedPlan === plan.id && (
@@ -1164,6 +1311,33 @@ export default function Subscribe() {
             {btcOrder && selectedPlan === plan.id && btcSuccess && (
               <div className="mt-0 rounded-t-none rounded-b-xl border border-t-0 border-green-500/30 bg-green-500/5 p-4 text-center">
                 <p className="text-green-400 font-semibold">Bitcoin payment confirmed!</p>
+              </div>
+            )}
+            {dashOrder && selectedPlan === plan.id && !dashSuccess && (
+              <div className="mt-0 rounded-t-none rounded-b-xl border border-t-0 p-4" style={{ borderColor: "rgba(0,141,228,0.3)", background: "rgba(0,141,228,0.05)" }}>
+                <p className="text-sm font-semibold mb-2" style={{ color: "#4DB8FF" }}>
+                  {dashPolling ? (t.lang === "es" ? "Esperando pago en Dash..." : "Waiting for Dash payment...") : "Dash Invoice"}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { dashPopupRef.current = window.open(dashOrder.checkoutUrl, "btcpay_dash", "width=560,height=780"); }}
+                    className="flex-1 text-xs rounded-lg py-2 px-3 transition-colors"
+                    style={{ background: "rgba(0,141,228,0.2)", color: "#4DB8FF" }}
+                  >
+                    Open BTCPay
+                  </button>
+                  <button
+                    onClick={() => { setDashOrder(null); setDashPolling(false); sessionStorage.removeItem("pnp_pending_dash_order"); if (dashPollRef.current) clearInterval(dashPollRef.current); }}
+                    className="text-xs text-gray-500 px-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {dashOrder && selectedPlan === plan.id && dashSuccess && (
+              <div className="mt-0 rounded-t-none rounded-b-xl border border-t-0 border-green-500/30 bg-green-500/5 p-4 text-center">
+                <p className="text-green-400 font-semibold">Dash payment confirmed!</p>
               </div>
             )}
             </div>
