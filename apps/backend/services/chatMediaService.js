@@ -88,13 +88,16 @@ async function processImage(buffer, userId) {
   const mainPath = path.join(UPLOAD_BASE, mainFilename);
   const thumbPath = path.join(UPLOAD_BASE, thumbFilename);
 
+  // failOn:'none' tolerates progressive/sequential JPEGs that libvips rejects by default
+  const sharpOpts = { failOn: 'none' };
+
   // Get original dimensions before processing
-  const meta = await sharp(buffer).metadata();
+  const meta = await sharp(buffer, sharpOpts).metadata();
   const origWidth = meta.width || 0;
   const origHeight = meta.height || 0;
 
   // Process main image — strip ALL metadata including EXIF/GPS for privacy
-  const mainSharp = sharp(buffer)
+  const mainSharp = sharp(buffer, sharpOpts)
     .rotate() // auto-orient from EXIF before stripping
     .withMetadata(false) // STRIP ALL METADATA (EXIF, GPS, ICC profiles)
     .resize(IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION, {
@@ -106,7 +109,7 @@ async function processImage(buffer, userId) {
   const mainInfo = await mainSharp.toFile(mainPath);
 
   // Process thumbnail — also strip metadata
-  await sharp(buffer)
+  await sharp(buffer, sharpOpts)
     .rotate()
     .withMetadata(false)
     .resize(IMAGE_THUMB_DIMENSION, IMAGE_THUMB_DIMENSION, {
