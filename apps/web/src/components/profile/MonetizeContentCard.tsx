@@ -24,7 +24,7 @@ export default function MonetizeContentCard({ creatorStatus, interestExpressed =
 
   // Only fetch eligibility/enrollment when the user has actively opted in
   // (via the "Become a Creator" menu entry) or is already in a pipeline state.
-  const hasSignal = interestExpressed || creatorStatus === "pending_review";
+  const hasSignal = interestExpressed || creatorStatus === "pending_review" || creatorStatus === "eligible";
 
   useEffect(() => {
     if (!hasSignal) {
