@@ -42,9 +42,9 @@ const enrollmentUpload = multer({
   }),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
     if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Only image files are allowed for ID document'));
+    else cb(new Error('Only JPEG, PNG, or WebP images are allowed for ID document'));
   },
 });
 
@@ -63,9 +63,9 @@ const identity2257Upload = multer({
   }),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
     if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Only image files are allowed for ID document'));
+    else cb(new Error('Only JPEG, PNG, or WebP images are allowed for ID document'));
   },
 });
 
@@ -166,10 +166,9 @@ router.post('/2257/records/:userId/approve', adminGuard, creatorController.appro
 router.post('/2257/records/:userId/reject', adminGuard, creatorController.reject2257);
 
 // ── Param routes LAST ─────────────────────────────────────────────────────────
+// Note: /:creatorId/subscription-status, /:creatorId/subscribe, and /:creatorId/unsubscribe
+// are registered in routes.js (with rate limiting) and must NOT be duplicated here.
 router.get('/:creatorId/strikes', authGuard, roleGuard('admin', 'superadmin'), creatorController.getStrikes);
 router.post('/:creatorId/strike', authGuard, roleGuard('admin', 'superadmin'), creatorController.issueStrike);
-router.get('/:creatorId/subscription-status', authGuard, creatorController.getSubscriptionStatus);
-router.post('/:creatorId/subscribe', authGuard, creatorController.subscribeToCreator);
-router.post('/:creatorId/unsubscribe', authGuard, creatorController.unsubscribeFromCreator);
 
 module.exports = router;

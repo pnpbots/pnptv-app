@@ -4,8 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
 import { useCreatorData } from "@/hooks/useCreatorData";
+import CreatorEnrollmentWizard from "@/components/profile/CreatorEnrollmentWizard";
 import {
-  activateCreator,
   get2257Status,
   submit2257Identity,
   startPersonaInquiry,
@@ -140,12 +140,6 @@ export default function CreatorApply() {
   const { creator: t } = useI18n();
   const { eligibility, dashboard, loading, reload } = useCreatorData();
 
-  // Activation modal
-  const [showActivateModal, setShowActivateModal] = useState(false);
-  const [activateTerms, setActivateTerms] = useState(false);
-  const [activating, setActivating] = useState(false);
-  const [activateError, setActivateError] = useState<string | null>(null);
-
   // 2257 identity verification
   const [identityStatus, setIdentityStatus] = useState<IdentityStatus>(null);
   const [identityLoading, setIdentityLoading] = useState(false);
@@ -170,9 +164,16 @@ export default function CreatorApply() {
   const [setupStatus, setSetupStatus] = useState<CreatorSetupStatus | null>(null);
   const [setupLoading, setSetupLoading] = useState(false);
 
+  // Enrollment wizard (replaces activation modal)
+  const [showWizard, setShowWizard] = useState(false);
+
   const isActive   = dashboard?.creatorStatus === "active";
   const isEligible = dashboard?.creatorStatus === "eligible";
   const isPending  = dashboard?.creatorStatus === "pending_review";
+
+  // Ref so Persona polling effect can read the latest isActive without a stale closure
+  const isActiveRef = useRef(isActive);
+  useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
 
   // Fetch 2257 + Persona on mount
   useEffect(() => {
@@ -206,7 +207,7 @@ export default function CreatorApply() {
         if (updated?.identity_verified || attempts >= 10) {
           clearInterval(poll);
           setPersonaProcessing(false);
-          if (isActive) {
+          if (isActiveRef.current) {
             const s = await getCreatorSetupStatus().catch(() => null);
             if (s) setSetupStatus(s);
           }
@@ -234,22 +235,6 @@ export default function CreatorApply() {
     const res = await getCreatorSetupStatus().catch(() => null);
     if (res) setSetupStatus(res);
   }, [isActive]);
-
-  const handleConfirmActivate = useCallback(async () => {
-    if (!activateTerms) { setActivateError(t.errorMustAcceptTerms); return; }
-    setActivating(true);
-    setActivateError(null);
-    try {
-      await activateCreator("ice", true);
-      setShowActivateModal(false);
-      await reload();
-      navigate("/creators", { replace: true });
-    } catch (err) {
-      setActivateError(err instanceof Error ? err.message : t.errorActivationFailed);
-    } finally {
-      setActivating(false);
-    }
-  }, [activateTerms, t, reload, navigate]);
 
   const handleSubmitIdentity = useCallback(async () => {
     setIdSubmitError(null);
@@ -584,8 +569,16 @@ export default function CreatorApply() {
 
         {/* ════════════════════════════════════════════════════════════════════
             NON-ACTIVE CREATOR — JOIN FLOW
+            Gated on !loading to prevent flash of join flow for active creators.
             ════════════════════════════════════════════════════════════════ */}
-        {!isActive && (
+        {loading && (
+          <div className="animate-pulse space-y-4 mt-6">
+            <div className="h-20 bg-white/5 rounded-xl" />
+            <div className="h-32 bg-white/5 rounded-xl" />
+            <div className="h-24 bg-white/5 rounded-xl" />
+          </div>
+        )}
+        {!loading && !isActive && (
           <>
             {/* Hero */}
             <div className="text-center mb-8">
@@ -683,13 +676,6 @@ export default function CreatorApply() {
               </>
             )}
 
-            {loading && (
-              <div className="animate-pulse space-y-3">
-                <div className="h-32 bg-white/5 rounded-lg" />
-                <div className="h-24 bg-white/5 rounded-lg" />
-              </div>
-            )}
-
             {/* Eligible — Activate */}
             {!loading && isEligible && (
               <div className="glass-card-sm p-5 mb-4" style={{ borderColor: "rgba(94,209,196,0.3)" }}>
@@ -708,7 +694,7 @@ export default function CreatorApply() {
                     </div>
                     <p className="text-xs mt-1 mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.iceDesc}</p>
                     <button
-                      onClick={() => { if (!enrollBlocked) { setActivateError(null); setActivateTerms(false); setShowActivateModal(true); } }}
+                      onClick={() => { if (!enrollBlocked) setShowWizard(true); }}
                       disabled={enrollBlocked || idPending}
                       className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
@@ -819,34 +805,17 @@ export default function CreatorApply() {
           </>
         )}
 
-        {/* ── Activation Modal ── */}
-        {showActivateModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70" onClick={() => setShowActivateModal(false)}>
-            <div className="w-full max-w-sm rounded-2xl p-6 space-y-4" style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.1)" }} onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold text-white">{t.activateTitle}</h2>
-              <div className="rounded-xl px-4 py-3" style={{ background: "rgba(94,209,196,0.07)", border: "1px solid rgba(94,209,196,0.2)" }}>
-                <p className="text-sm font-semibold text-white mb-1">❄ {t.activateIceTierLabel}</p>
-                <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.activateIceTierDesc}</p>
-              </div>
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input type="checkbox" checked={activateTerms} onChange={e => { setActivateTerms(e.target.checked); setActivateError(null); }} className="mt-0.5 w-4 h-4 accent-[#D4007A]" />
-                <span className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                  {t.activateTermsLabel}{" "}
-                  <a href="/creator-terms" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: "#D4007A" }}>{t.activateTermsLink}</a>
-                  {" "}{t.activateTermsAnd}
-                </span>
-              </label>
-              {activateError && <p className="text-xs text-red-400">{activateError}</p>}
-              <div className="flex gap-3 pt-1">
-                <button onClick={() => setShowActivateModal(false)} className="flex-1 py-2.5 rounded-xl text-sm font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "var(--pnp-text-secondary, #8E8E93)" }} disabled={activating}>
-                  {t.cancelBtn}
-                </button>
-                <button onClick={handleConfirmActivate} disabled={activating || !activateTerms} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-                  {activating ? t.activatingBtn : t.activateBtn}
-                </button>
-              </div>
-            </div>
-          </div>
+        {/* ── Enrollment Wizard ── */}
+        {showWizard && (
+          <CreatorEnrollmentWizard
+            tier="ice"
+            onClose={() => setShowWizard(false)}
+            onSubmitted={async () => {
+              setShowWizard(false);
+              await reload();
+              navigate("/creators", { replace: true });
+            }}
+          />
         )}
       </div>
     </>

@@ -15,10 +15,11 @@ export default function CreatorOverview() {
   const [identityVerified, setIdentityVerified] = React.useState<boolean | null>(null);
 
   React.useEffect(() => {
+    if (user?.creator_status !== "active") return;
     get2257Status().then((res) => {
       if (res) setIdentityVerified(res.identity_verified);
     }).catch(() => {});
-  }, []);
+  }, [user?.creator_status]);
 
   return (
     <>

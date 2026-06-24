@@ -110,7 +110,7 @@ export default function CreatorLayout() {
         setPendingRequiredCount(res.items.filter(i => i.required && !i.done).length);
       }
     }).catch(() => {});
-  }, [user?.creator_status]);
+  }, [user?.creator_status, location.pathname]);
 
   if (isLoading) {
     return (
@@ -132,8 +132,7 @@ export default function CreatorLayout() {
   }
 
   if (!isApplyPath && !hasCreatorAccess) {
-    navigate("/creators/apply", { replace: true });
-    return null;
+    return <Navigate to="/creators/apply" replace />;
   }
 
   const tierInfo = user?.creator_type ? TIER_BADGE[user.creator_type] : null;

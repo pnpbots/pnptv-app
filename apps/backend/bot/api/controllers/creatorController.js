@@ -1192,6 +1192,9 @@ const getMyConsents = async (req, res) => {
 
 const getSetupStatus = async (req, res) => {
   try {
+    if (req.user.creator_status !== 'active') {
+      return res.status(403).json({ error: 'Creator account not active' });
+    }
     const userId = req.user.id || req.user.telegram_id;
     const { rows } = await query(`
       SELECT
@@ -1200,8 +1203,8 @@ const getSetupStatus = async (req, res) => {
         (u.creator_dash_address IS NOT NULL AND u.creator_dash_address <> '') AS wallet_set,
         r.verification_status                                                  AS identity_record_status,
         COALESCE(ma.terms_agreed, FALSE)                                       AS creator_terms,
-        (ma.stage_name IS NOT NULL AND ma.stage_name <> '')                    AS has_stage_name,
-        (ma.bio IS NOT NULL AND ma.bio <> '')                                  AS has_bio,
+        (COALESCE(ma.stage_name, u.first_name, '') <> '')                       AS has_stage_name,
+        (COALESCE(ma.bio, u.bio, '') <> '')                                    AS has_bio,
         COALESCE(ma.call_scheduled, FALSE)                                     AS onboarding_call,
         EXISTS(
           SELECT 1 FROM social_posts sp
@@ -1339,7 +1342,9 @@ const createMyXCampaign = async (req, res) => {
     const acctResult = await query('SELECT 1 FROM x_accounts WHERE account_id = $1 AND created_by = $2 AND is_active = TRUE', [accountId, creatorId]);
     if (acctResult.rows.length === 0) return res.status(403).json({ error: 'X account not found or not yours' });
 
-    // Enforce campaign limit with advisory lock to prevent TOCTOU race
+    // Enforce campaign limit with advisory lock to prevent TOCTOU race.
+    // The INSERT happens inside the same transaction so the advisory lock covers it.
+    let campaignId;
     const client = await getPool().connect();
     try {
       await client.query('BEGIN');
@@ -1349,6 +1354,20 @@ const createMyXCampaign = async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: `Campaign limit reached (max ${CREATOR_CAMPAIGN_LIMIT})` });
       }
+      const insertResult = await client.query(
+        `INSERT INTO x_auto_campaigns
+          (name, account_id, topic, grok_mode, language, custom_prompt,
+           interval_minutes, active_hours_start, active_hours_end, max_posts,
+           created_by, created_by_username, media_folder_id, persona_type)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         RETURNING campaign_id`,
+        [String(name).substring(0, 200), accountId, String(topic).substring(0, 2000),
+         grokMode || 'xPost', language || 'en', null,
+         Math.max(30, Number(intervalMinutes) || 60),
+         safeStart, safeEnd, null,
+         creatorId, creatorUsername, null, 'generic']
+      );
+      campaignId = insertResult.rows[0].campaign_id;
       await client.query('COMMIT');
     } catch (lockErr) {
       await client.query('ROLLBACK').catch(() => {});
@@ -1356,15 +1375,6 @@ const createMyXCampaign = async (req, res) => {
     } finally {
       client.release();
     }
-
-    const campaignId = await XAutoCampaignService.createCampaign({
-      name: String(name).substring(0, 200), accountId, topic: String(topic).substring(0, 2000),
-      grokMode: grokMode || 'xPost', language: language || 'en',
-      intervalMinutes: Math.max(30, Number(intervalMinutes) || 60),
-      activeHoursStart: safeStart, activeHoursEnd: safeEnd,
-      maxPosts: null, createdBy: creatorId, createdByUsername: creatorUsername,
-      mediaFolderId: null, personaType: 'generic',
-    });
     return res.json({ success: true, campaignId });
   } catch (err) {
     logger.error('createMyXCampaign error', err);
