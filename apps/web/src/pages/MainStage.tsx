@@ -352,10 +352,14 @@ export default function MainStage() {
   const isParticipant = isGuestMode || role === "member" || role === "admin";
 
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
+  const [giftedBalance, setGiftedBalance] = useState<number>(0);
   const [showBuyTokens, setShowBuyTokens] = useState(false);
   useEffect(() => {
     if (isGuestMode) return;
-    getWalletBalance().then((res) => { if (typeof res.balance === "number") setTokenBalance(res.balance); }).catch(() => {});
+    getWalletBalance().then((res) => {
+      if (typeof res.balance === "number") setTokenBalance(res.balance);
+      setGiftedBalance(res.giftedBalance ?? 0);
+    }).catch(() => {});
   }, [isGuestMode]);
 
   // ── In-room chat ─────────────────────────────────────────────────────────────
@@ -1210,6 +1214,12 @@ export default function MainStage() {
                 <svg viewBox="0 0 24 24" className="w-2 h-2 fill-white"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/></svg>
               </div>
               <span className="text-[11px] font-semibold text-white/80 tabular-nums">{tokenBalance}</span>
+              {giftedBalance > 0 && (
+                <span className="flex items-center gap-0.5 px-1 py-0.5 rounded-full text-[9px] font-bold" style={{ background: "rgba(212,0,122,0.20)", color: "#FF69B4", border: "1px solid rgba(212,0,122,0.30)" }}>
+                  <svg viewBox="0 0 24 24" className="w-2 h-2 fill-current flex-shrink-0"><path d="M20 7h-3.17A3 3 0 0 0 12 4.17 3 3 0 0 0 7.17 7H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9h1a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1zm-8-1a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm-3 2a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm3 13H7v-8h5v8zm5 0h-3v-8h3v8z"/></svg>
+                  +{giftedBalance}
+                </span>
+              )}
             </button>
           )}
           {/* Guest badge + 15-min countdown */}
