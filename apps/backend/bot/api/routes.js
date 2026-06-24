@@ -4882,7 +4882,7 @@ app.post('/api/webapp/support/ticket/upload', requireSessionAuth, handleSupportA
     if (isPdf) {
       await fs.promises.writeFile(dest, file.buffer);
     } else {
-      await sharp(file.buffer).webp({ quality: 85 }).toFile(dest);
+      await sharp(file.buffer, { failOn: 'none' }).webp({ quality: 85 }).toFile(dest);
     }
 
     attachments.push({

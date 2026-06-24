@@ -377,15 +377,16 @@ async function processMedia(file, userId, options = {}) {
       const mainFilename = `img-${userId}-${ts}.webp`;
       const thumbFilename = `img-${userId}-${ts}-thumb.webp`;
 
-      const meta = await sharp(file.buffer).metadata();
-      const mainInfo = await sharp(file.buffer)
+      const sharpOpts = { failOn: 'none' };
+      const meta = await sharp(file.buffer, sharpOpts).metadata();
+      const mainInfo = await sharp(file.buffer, sharpOpts)
         .rotate()
         .withMetadata(false)
         .resize(maxDimension, maxDimension, { fit: 'inside', withoutEnlargement: true })
         .webp({ quality: imageQuality })
         .toFile(path.join(uploadDir, mainFilename));
 
-      await sharp(file.buffer)
+      await sharp(file.buffer, sharpOpts)
         .rotate()
         .withMetadata(false)
         .resize(IMAGE_THUMB_DIMENSION, IMAGE_THUMB_DIMENSION, { fit: 'inside', withoutEnlargement: true })

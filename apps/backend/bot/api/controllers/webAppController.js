@@ -2432,7 +2432,7 @@ const uploadAvatar = async (req, res) => {
     await fs.mkdir(uploadDir, { recursive: true });
 
     // Step 1: Process image with sharp and write to disk
-    await sharp(buffer)
+    await sharp(buffer, { failOn: 'none' })
       .rotate()
       .withMetadata(false)
       .resize(256, 256, { fit: 'cover', position: 'center' })
@@ -2696,7 +2696,7 @@ async function uploadEventCover(req, res) {
     const url = `/uploads/events/${filename}`;
 
     await fs.mkdir(uploadDir, { recursive: true });
-    await sharp(buffer)
+    await sharp(buffer, { failOn: 'none' })
       .rotate()
       .withMetadata(false)
       .resize(1200, 630, { fit: 'cover', position: 'center' })

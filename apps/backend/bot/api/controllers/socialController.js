@@ -717,7 +717,7 @@ const createPostWithMedia = async (req, res) => {
         const filePath = path.join(uploadDir, filename);
         // Images are small enough for memory — read from buffer or disk
         const imgBuffer = hasBuffer ? req.file.buffer : await fs.readFile(tempPath);
-        await sharp(imgBuffer)
+        await sharp(imgBuffer, { failOn: 'none' })
           .rotate()
           .withMetadata(false)
           .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
@@ -1029,7 +1029,7 @@ const createPostWithMultiMedia = async (req, res) => {
         const filename = `img-${user.id}-${timestamp}-${i}.webp`;
         const destPath = path.join(uploadDir, filename);
         const imgBuffer = hasBuffer ? file.buffer : await fs.readFile(fileTempPath);
-        await sharp(imgBuffer)
+        await sharp(imgBuffer, { failOn: 'none' })
           .rotate()
           .withMetadata(false)
           .resize(800, 800, { fit: 'inside', withoutEnlargement: true })

@@ -76,9 +76,10 @@ async function processImage(buffer, hangoutId, userId) {
   const mainPath = path.join(dir, mainFilename);
   const thumbPath = path.join(dir, thumbFilename);
 
-  const meta = await sharp(buffer).metadata();
+  const sharpOpts = { failOn: 'none' };
+  const meta = await sharp(buffer, sharpOpts).metadata();
 
-  const mainInfo = await sharp(buffer)
+  const mainInfo = await sharp(buffer, sharpOpts)
     .rotate()
     .withMetadata(false)
     .resize(IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION, {
@@ -88,7 +89,7 @@ async function processImage(buffer, hangoutId, userId) {
     .webp({ quality: IMAGE_QUALITY })
     .toFile(mainPath);
 
-  await sharp(buffer)
+  await sharp(buffer, sharpOpts)
     .rotate()
     .withMetadata(false)
     .resize(IMAGE_THUMB_DIMENSION, IMAGE_THUMB_DIMENSION, {
