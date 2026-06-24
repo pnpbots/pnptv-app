@@ -17,6 +17,9 @@ export function VerificationGate({ children }: VerificationGateProps) {
   const [ageChecked, setAgeChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Local confirmed flags: gate dismisses even if refreshUser() fails silently.
+  const [verifiedAge, setVerifiedAge] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   // Still loading: show spinner (don't leak children)
   if (isLoading) {
@@ -28,14 +31,14 @@ export function VerificationGate({ children }: VerificationGateProps) {
     return <Navigate to="/login" replace />;
   }
 
-  // Both verified: show content
-  if (user.ageVerified && user.termsAccepted) {
+  // Both verified: show content (context OR local confirmed flags)
+  if ((user.ageVerified || verifiedAge) && (user.termsAccepted || acceptedTerms)) {
     return <>{children}</>;
   }
 
-  // Determine which step to show
-  const needsAge = !user.ageVerified;
-  const needsTerms = !user.termsAccepted;
+  // Determine which step to show (use local flags as fallback)
+  const needsAge = !user.ageVerified && !verifiedAge;
+  const needsTerms = !user.termsAccepted && !acceptedTerms;
 
   let currentStep: "age" | "terms" | "guidelines";
   if (needsAge && step === "age") {
@@ -55,8 +58,9 @@ export function VerificationGate({ children }: VerificationGateProps) {
     setError(null);
     try {
       await verifyAgeSelf();
-      await refreshUser();
-      if (needsTerms) {
+      setVerifiedAge(true);
+      await refreshUser().catch(() => {});
+      if (!user.termsAccepted && !acceptedTerms) {
         setStep("terms");
       }
     } catch (err: any) {
@@ -75,7 +79,8 @@ export function VerificationGate({ children }: VerificationGateProps) {
     setError(null);
     try {
       await acceptTerms();
-      await refreshUser();
+      setAcceptedTerms(true);
+      await refreshUser().catch(() => {});
     } catch (err: any) {
       setError(err.message || v.failedToAcceptTerms);
     } finally {

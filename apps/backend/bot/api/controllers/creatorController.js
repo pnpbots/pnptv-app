@@ -368,19 +368,6 @@ const changeTier = async (req, res) => {
 // POST /api/webapp/creator/enroll
 const submitEnrollment = async (req, res) => {
   try {
-    // ── 2257 compliance gate ──────────────────────────────────────────────────
-    // A creator must have an approved identity record OR be within the grace
-    // period (existing active creators given 30 days) before they can enroll.
-    const idRecord = await IdentityVerificationService.get2257Record(req.user.id);
-    const graceCompliant = IdentityVerificationService.is2257Compliant(req.user);
-    if (!graceCompliant && (!idRecord || idRecord.verification_status !== 'approved')) {
-      return res.status(403).json({
-        error: 'identity_verification_required',
-        message: 'You must complete identity verification (18 U.S.C. § 2257) before enrolling as a creator.',
-      });
-    }
-    // ─────────────────────────────────────────────────────────────────────────
-
     const { tier, paymentMethod, paymentAddress, paymentNetwork, signatureData } = req.body || {};
     const idDocumentPath = req.file
       ? `/uploads/creator-enrollments/${req.file.filename}`
