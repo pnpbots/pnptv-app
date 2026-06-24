@@ -861,10 +861,12 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
 
   // FAB button (widget mode only)
   if (mode === "widget" && !isOpen) {
-    const isTopCorner = fabCorner.startsWith("t");
-    const isLeftCorner = fabCorner.endsWith("l");
+    // On Main Stage, lock to top-right so the FAB never covers the cammer strip at the bottom
+    const effectiveCorner = isOnMainStage ? "tr" : fabCorner;
+    const isTopCorner = effectiveCorner.startsWith("t");
+    const isLeftCorner = effectiveCorner.endsWith("l");
     const fabPosStyle = {
-      [isTopCorner ? "top" : "bottom"]: "5rem",
+      [isTopCorner ? "top" : "bottom"]: isOnMainStage ? "3.5rem" : "5rem",
       [isLeftCorner ? "left" : "right"]: "0.75rem",
       touchAction: "none" as const,
     };
@@ -873,13 +875,13 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
         ref={fabRef}
         className={`fixed z-[38] flex flex-col ${isLeftCorner ? "items-start" : "items-end"} gap-2`}
         style={fabPosStyle}
-        onPointerDown={handleFabPointerDown}
-        onPointerMove={handleFabPointerMove}
-        onPointerUp={handleFabPointerUp}
+        onPointerDown={isOnMainStage ? undefined : handleFabPointerDown}
+        onPointerMove={isOnMainStage ? undefined : handleFabPointerMove}
+        onPointerUp={isOnMainStage ? undefined : handleFabPointerUp}
       >
         <button
           onClick={() => { if (!dragState.current.moved) { setIsOpen(true); setHasUnreadReply(false); } }}
-          className="relative w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl transition-all hover:scale-110 active:scale-95"
+          className={`relative ${isOnMainStage ? "w-10 h-10" : "w-12 h-12"} rounded-full shadow-lg flex items-center justify-center text-xl transition-all hover:scale-110 active:scale-95`}
           style={{ background: fabGradient }}
           aria-label={t.openWidgetAriaLabel}
         >
