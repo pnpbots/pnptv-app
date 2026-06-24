@@ -23,11 +23,6 @@ const OPTIONAL_ENV_VARS = [
   'REDIS_PASSWORD',
   'REDIS_DB',
   'REDIS_TTL',
-  'EPAYCO_PUBLIC_KEY',
-  'EPAYCO_PRIVATE_KEY',
-  'EPAYCO_P_CUST_ID',
-  'EPAYCO_P_KEY',
-  'EPAYCO_TEST_MODE',
   'DAIMO_API_KEY',
   'DAIMO_WEBHOOK_SECRET',
   'NOWPAYMENTS_API_KEY',
@@ -39,7 +34,6 @@ const OPTIONAL_ENV_VARS = [
 ];
 
 const ENV_VAR_GROUPS = {
-  payment_epayco: ['EPAYCO_PUBLIC_KEY', 'EPAYCO_PRIVATE_KEY'],
   payment_daimo: ['DAIMO_API_KEY', 'DAIMO_WEBHOOK_SECRET'],
   payment_btcpay: ['BTCPAY_URL', 'BTCPAY_API_KEY', 'BTCPAY_WEBHOOK_SECRET'],
   payment_nowpayments: ['NOWPAYMENTS_API_KEY', 'NOWPAYMENTS_PUBLIC_KEY', 'NOWPAYMENTS_IPN_SECRET'],
@@ -126,12 +120,11 @@ function getEnv(key, defaultValue = null, required = false) {
 
 /**
  * Check if a feature is enabled based on environment variables
- * @param {string} feature - Feature name (epayco, daimo, sentry, openai)
+ * @param {string} feature - Feature name (daimo, sentry, openai)
  * @returns {boolean} True if feature is configured
  */
 function isFeatureEnabled(feature) {
   const featureMap = {
-    epayco: ENV_VAR_GROUPS.payment_epayco,
     daimo: ENV_VAR_GROUPS.payment_daimo,
     sentry: ENV_VAR_GROUPS.monitoring,
     openai: ENV_VAR_GROUPS.ai,
@@ -156,7 +149,6 @@ function printEnvSummary() {
   console.log(`Webhook Mode: ${process.env.BOT_WEBHOOK_DOMAIN ? 'Yes' : 'No (polling)'}`);
   console.log(`Redis: ${process.env.REDIS_HOST}:${process.env.REDIS_PORT || 6379}`);
   console.log('\nFeature Configuration:');
-  console.log(`  - ePayco Payments: ${isFeatureEnabled('epayco') ? '✓' : '✗'}`);
   console.log(`  - Daimo Payments: ${isFeatureEnabled('daimo') ? '✓' : '✗'}`);
   console.log(`  - Sentry Monitoring: ${isFeatureEnabled('sentry') ? '✓' : '✗'}`);
   console.log(`  - OpenAI Integration: ${isFeatureEnabled('openai') ? '✓' : '✗'}`);

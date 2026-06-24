@@ -28,7 +28,6 @@
     "csv-parser": "^3.2.0",
     "dotenv": "^16.6.1",
     "dotenv-safe": "^9.1.0",
-    "epayco-sdk-node": "^1.4.4",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "express-session": "^1.18.2",

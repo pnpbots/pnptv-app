@@ -66,9 +66,9 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     throw err;
   }
 
-  // Only ePayco (card) and nowpayments (crypto) are supported for call checkouts.
-  if (provider !== 'nowpayments' && provider !== 'epayco') {
-    const err = new Error(`Invalid payment provider: ${provider}. Supported: epayco, nowpayments.`);
+  // Only nowpayments (crypto) is supported for call checkouts.
+  if (provider !== 'nowpayments') {
+    const err = new Error(`Invalid payment provider: ${provider}. Supported: nowpayments.`);
     err.code = 'INVALID_PROVIDER';
     throw err;
   }
@@ -104,27 +104,6 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
   // Set payment timeout (1-hour window to complete), same as subscription checkout.
   // Without this, the tokenized-charge endpoint returns 400 "expired" immediately.
   PaymentSecurityService.setPaymentTimeout(payment.id, 3600).catch(() => {});
-
-  // 2b. For ePayco: stamp the expected COP amount so the webhook amount
-  //     validator can verify the charge without a live FX API call at
-  //     delivery time. Mirrors the pattern used for subscription checkouts
-  //     (paymentService.js ~line 806). Non-fatal: if the FX lookup fails the
-  //     webhook validator falls back to a dynamic FX fetch.
-  if (provider === 'epayco') {
-    try {
-      const { getEpaycoCopRate } = require('./paymentService');
-      const usdToCopRate = await getEpaycoCopRate();
-      const expectedCOP = String(Math.round(parseFloat(pkg.price_usd) * usdToCopRate));
-      await PaymentModel.updateStatus(payment.id, 'pending', {
-        expected_epayco_amount: expectedCOP,
-        expected_epayco_currency: 'COP',
-      });
-    } catch (fxErr) {
-      logger.warn('[callCheckoutService] could not stamp expected COP amount — webhook will use dynamic FX fallback', {
-        paymentId: payment.id, error: fxErr.message,
-      });
-    }
-  }
 
   // 2c. If slot times are provided, lock the slot + create awaiting_payment
   //     booking row. Same pattern as createCallCheckoutDash so the two
@@ -171,13 +150,9 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
     }
   }
 
-  // Build the checkout URL based on provider
-  let checkoutUrl;
-  if (provider === 'epayco') {
-    checkoutUrl = `${CHECKOUT_DOMAIN}/payment/${payment.id}`;
-  }
-  // Dash provider reaches here only via the legacy _createCheckout_retired path;
-  // normal Dash flow uses createCallCheckoutDash() which constructs its own BTCPay URL.
+  // NowPayments checkout URL is returned by the invoice API; set a placeholder here.
+  // The calling route handler replaces this with the actual invoice_url from NowPayments.
+  let checkoutUrl = null;
 
   logger.info('[callCheckoutService] checkout created', {
     paymentId: payment.id,

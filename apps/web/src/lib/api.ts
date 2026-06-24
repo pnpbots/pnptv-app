@@ -771,7 +771,7 @@ export function createCallCheckoutEpayco(
   sku: string;
   bookingId?: string;
 }> {
-  const body: Record<string, unknown> = { packageId, provider: "epayco" };
+  const body: Record<string, unknown> = { packageId, provider: "nowpayments" };
   if (startTimeUtc) body.startTimeUtc = startTimeUtc;
   if (endTimeUtc) body.endTimeUtc = endTimeUtc;
   if (email) body.email = email;
@@ -2728,7 +2728,7 @@ export function getMyAccess(): Promise<MyAccessResponse> {
 
 export function createPayment(
   planId: string,
-  provider: "epayco" | "dash",
+  provider: "dash" | "nowpayments",
   email?: string,
   promoCode?: string
 ): Promise<{
@@ -2784,7 +2784,7 @@ export function validatePromoCode(
 
 export function initiateCreatorSubscriptionPayment(
   creatorId: string,
-  provider: "epayco" | "dash",
+  provider: "dash" | "nowpayments",
   email: string
 ): Promise<{
   success: boolean;
@@ -2809,8 +2809,6 @@ export function getPaymentStatus(
   transactionId?: string;
   message?: string;
   error?: string;
-  epaycoError?: string | null;
-  epaycoDeclineCode?: string | null;
 }> {
   return request(`/api/payment/${encodeURIComponent(paymentId)}/status`);
 }
@@ -4645,13 +4643,12 @@ export interface PaymentHealthLeak {
 export interface PaymentHealth {
   success: boolean;
   stuck: {
-    epayco: { count: number; items: PaymentHealthStuckPayment[] };
     meru: { count: number; items: PaymentHealthStuckPayment[] };
     dash: { count: number; items: PaymentHealthStuckPayment[] };
+    nowpayments: { count: number; items: PaymentHealthStuckPayment[] };
   };
   leaks: { count: number; items: PaymentHealthLeak[] };
   activity: {
-    epayco_completed_7d?: string | number;
     dash_completed_7d?: string | number;
     meru_completed_7d?: string | number;
     video_views_7d?: string | number;
@@ -5801,7 +5798,6 @@ const ALLOWED_PAYMENT_HOSTS = [
   "pnptv.app",
   "app.pnptv.app",
   "btcpay.pnptv.app",
-  "checkout.epayco.co",
   "nowpayments.io",
 ];
 
@@ -6137,7 +6133,7 @@ export interface CreatorCallEarnings {
 
 export interface CallCheckoutPayload {
   packageId: number;
-  provider: "epayco";
+  provider: "nowpayments";
   email: string;
   quantity?: number;
   selectedSlot?: string | null;

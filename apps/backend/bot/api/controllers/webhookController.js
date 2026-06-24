@@ -1,73 +1,12 @@
-const { schemas } = require('../../../validation/schemas/payment.schema');
-const PaymentService = require('../../../services/paymentService');
-const PaymentSecurityService = require('../../../services/paymentSecurityService');
 const logger = require('../../../utils/logger');
 // Daimo retired — DaimoConfig require removed. handleDaimoWebhook below is a
 // tiny 200-OK stub kept only so the routes.js import resolves. The active
 // route registration is inline in routes.js with the same retired no-op.
-const PaymentWebhookEventModel = require('../../../models/paymentWebhookEventModel');
 const PaymentModel = require('../../../models/paymentModel');
 
 const { cache } = require('../../../config/redis');
 
 const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || ''));
-
-// In-memory cache for webhook idempotency (prevents duplicate processing within 5 minutes)
-// In production, use Redis for this
-// const webhookCache = new Map();
-// const IDEMPOTENCY_TTL = 5 * 60 * 1000; // 5 minutes
-
-// Cleanup interval to prevent memory leaks - runs every 10 minutes
-// if (process.env.NODE_ENV !== 'test') {
-//   const cleanupInterval = setInterval(() => {
-//     const now = Date.now();
-//     for (const [key, timestamp] of webhookCache.entries()) {
-//       if (now - timestamp >= IDEMPOTENCY_TTL) {
-//         webhookCache.delete(key);
-//       }
-//     }
-//     logger.debug(`Webhook cache cleanup: ${webhookCache.size} entries remaining`);
-//   }, 10 * 60 * 1000); // Run every 10 minutes
-//   cleanupInterval.unref();
-// }
-
-/**
- * Check if webhook was already processed using idempotency key
- * @param {string} idempotencyKey - Unique key for this webhook
- * @returns {boolean} True if already processed
- */
-// const isWebhookProcessed = (idempotencyKey) => {
-//   if (webhookCache.has(idempotencyKey)) {
-//     const timestamp = webhookCache.get(idempotencyKey);
-//     if (Date.now() - timestamp < IDEMPOTENCY_TTL) {
-//       return true;
-//     }
-//     // Expired, remove from cache
-//     webhookCache.delete(idempotencyKey);
-//   }
-//   return false;
-// };
-
-/**
- * Mark webhook as processed
- * @param {string} idempotencyKey - Unique key for this webhook
- */
-// const markWebhookProcessed = (idempotencyKey) => {
-//   webhookCache.set(idempotencyKey, Date.now());
-// };
-
-/**
- * Send a normalized error response
- * @param {Response} res
- * @param {number} status
- * @param {string} code
- * @param {string} message
- */
-const sendError = (res, status, code, message) => res.status(status).json({
-  success: false,
-  code,
-  message,
-});
 
 /**
  * Sanitize bot username for safe HTML insertion
@@ -80,235 +19,6 @@ const sanitizeBotUsername = (username) => {
   return username.replace(/[^a-zA-Z0-9_]/g, '') || 'pnplatinotv_bot';
 };
 
-/**
- * Validate ePayco webhook payload
- * @param {Object} payload - Webhook payload
- * @returns {Object} { valid: boolean, error?: string }
- */
-const validateEpaycoPayload = (payload) => {
-  const normalizedPayload = {
-    ...payload,
-    x_transaction_state: PaymentService.normalizeEpaycoTransactionState(
-      payload?.x_transaction_state,
-      payload?.x_cod_transaction_state,
-    ) || payload?.x_transaction_state,
-    x_currency_code: PaymentService.normalizeEpaycoCurrencyCode(payload?.x_currency_code)
-      || payload?.x_currency_code,
-  };
-
-  const { error } = schemas.epaycoWebhook.validate(normalizedPayload);
-  if (error) {
-    return {
-      valid: false,
-      error: error.details.map((d) => d.message).join(', '),
-    };
-  }
-  return { valid: true, payload: normalizedPayload };
-};
-
-const handleEpaycoWebhook = async (req, res) => {
-  try {
-    const normalizedState = PaymentService.normalizeEpaycoTransactionState(
-      req.body?.x_transaction_state,
-      req.body?.x_cod_transaction_state,
-    );
-
-    // Ensure ref_payco is present to build a stable idempotency key
-    if (!req.body.x_ref_payco) {
-      logger.warn('ePayco webhook missing ref_payco', {
-        transactionId: req.body.x_transaction_id,
-        signaturePresent: Boolean(req.body.x_signature || req.headers['x-signature']),
-        provider: 'epayco',
-      });
-      return sendError(res, 400, 'MISSING_REF_PAYCO', 'x_ref_payco is required');
-    }
-
-    // Verify webhook signature BEFORE acquiring any Redis locks
-    // This prevents unauthenticated requests from consuming lock resources
-    const signatureCheck = verifyEpaycoSignature(req);
-    if (!signatureCheck.valid) {
-      logger.error('ePayco webhook signature rejected', {
-        refPayco: req.body.x_ref_payco,
-        reason: signatureCheck.reason,
-        provider: 'epayco',
-      });
-      const status = signatureCheck.reason === 'missing_signature' ? 400 : 401;
-      return sendError(res, status, 'INVALID_SIGNATURE', signatureCheck.error || 'Invalid signature');
-    }
-
-    // Use ref_payco + transaction state as idempotency key
-    // This allows pending -> accepted transitions to be processed
-    // x_cod_transaction_state: 1=Accepted, 2=Rejected, 3=Pending, 4=Failed, 5=Cancelled, 6=Reversed, 10=Abandoned
-    const stateCode = req.body.x_cod_transaction_state || normalizedState || req.body.x_transaction_state || 'unknown';
-    const idempotencyKey = `epayco_${req.body.x_ref_payco}_${stateCode}`;
-
-    const acquired = await cache.acquireLock(idempotencyKey, 180);
-    if (!acquired) {
-      logger.info('Duplicate ePayco webhook detected (already processed)', {
-        refPayco: req.body.x_ref_payco,
-        state: normalizedState || req.body.x_transaction_state,
-        stateCode: req.body.x_cod_transaction_state,
-        idempotencyKey,
-        provider: 'epayco',
-      });
-      return res.status(200).json({ success: true, duplicate: true });
-    }
-
-    try {
-      const paymentId = isUuid(req.body.x_extra3) ? req.body.x_extra3 : null;
-
-      // x_extra3 is often empty — fall back to looking up the payment by x_ref_payco
-      // which ePayco reliably populates (x_id_invoice e.g. "PAY-F780D02C" is our own reference)
-      let resolvedPaymentId = paymentId;
-      if (!resolvedPaymentId && req.body.x_ref_payco) {
-        try {
-          const found = await PaymentModel.getById(String(req.body.x_ref_payco));
-          if (found?.id) resolvedPaymentId = found.id;
-        } catch (_) { /* non-fatal */ }
-      }
-
-      const eventMeta = {
-        provider: 'epayco',
-        eventId: req.body.x_ref_payco || req.body.x_transaction_id,
-        paymentId: resolvedPaymentId,
-        status: normalizedState || req.body.x_transaction_state,
-        stateCode: req.body.x_cod_transaction_state || normalizedState || req.body.x_transaction_state,
-        payload: req.body,
-      };
-
-      // Signature already verified above — log valid event
-      await PaymentWebhookEventModel.logEvent({
-        ...eventMeta,
-        isValidSignature: true,
-        signatureMethod: signatureCheck.method,
-      });
-
-      // Security: Replay attack detection (30-day Redis retention)
-      try {
-        const replayKey = `${req.body.x_ref_payco}_${stateCode}`;
-        const replay = await PaymentSecurityService.checkReplayAttack(replayKey, 'epayco');
-        if (replay.isReplay) {
-          logger.warn('ePayco replay attack detected', { refPayco: req.body.x_ref_payco, stateCode });
-          return res.status(200).json({ success: true, duplicate: true });
-        }
-      } catch (err) {
-        logger.error('Replay check failed (non-critical)', { error: err.message });
-      }
-
-      logger.info('ePayco webhook received', {
-        transactionId: req.body.x_ref_payco,
-        state: normalizedState || req.body.x_transaction_state,
-        idempotencyKey,
-        provider: 'epayco',
-        signaturePresent: Boolean(req.body.x_signature),
-      });
-
-      // Validate payload structure
-      const validation = validateEpaycoPayload(req.body);
-      if (!validation || !validation.valid) {
-        const errorMsg = validation?.error || 'Invalid webhook payload';
-        logger.warn('Invalid ePayco webhook payload', { error: errorMsg });
-        return sendError(res, 400, 'INVALID_PAYLOAD', errorMsg);
-      }
-
-      const result = await PaymentService.processEpaycoWebhook(validation.payload || req.body);
-
-      if (result.success) {
-        return res.status(200).json({ success: true });
-      }
-
-      logger.warn('ePayco webhook rejected during processing', {
-        transactionId: req.body.x_ref_payco,
-        error: result.error || result.message,
-        idempotencyKey,
-        provider: 'epayco',
-        signaturePresent: Boolean(req.body.x_signature),
-      });
-      const rejectionMessage = result.message || result.error || 'Webhook processing failed';
-      const rejectionCode = result.code || 'EPAYCO_REJECTED';
-      return sendError(res, 400, rejectionCode, rejectionMessage);
-    } finally {
-      await cache.releaseLock(idempotencyKey);
-    }
-  } catch (error) {
-    logger.error('Error handling ePayco webhook:', error);
-
-    PaymentSecurityService.logPaymentError({
-      paymentId: req.body?.x_extra3,
-      userId: req.body?.x_extra1,
-      provider: 'epayco',
-      errorCode: 'EPAYCO_WEBHOOK_HANDLER_ERROR',
-      errorMessage: error.message,
-      stackTrace: error.stack,
-    }).catch(() => {});
-
-    return sendError(res, 500, 'INTERNAL_ERROR', 'Internal server error');
-  }
-};
-
-/**
- * Validate and verify ePayco webhook signature before processing
- * @param {Request} req
- * @returns {boolean} True when signature is valid
- */
-function verifyEpaycoSignature(req) {
-  // Preferred: Check x-signature HTTP header (HMAC SHA256 — newer ePayco format)
-  const headerSignature = req.headers['x-signature'];
-  if (headerSignature) {
-    const hmacResult = PaymentService.verifyEpaycoHmacSignature(req.body, headerSignature);
-    if (hmacResult.valid) {
-      return { valid: true, method: 'hmac_header' };
-    }
-    // HMAC header present but verification failed — fail closed, do NOT fall through.
-    // Allowing a failed HMAC to downgrade to the weaker body SHA256 check would let an
-    // attacker forge requests by presenting any x-signature header value and then crafting
-    // a body with a matching x_signature hash.
-    logger.error('ePayco x-signature header HMAC verification failed — rejecting request', {
-      transactionId: req.body?.x_ref_payco,
-    });
-    return { valid: false, reason: 'invalid_hmac_header', error: 'Invalid HMAC signature' };
-  }
-
-  // Fallback: Check x_signature in body (existing SHA256 hash method)
-  // H5: In strict HMAC mode, reject any request that did not supply an x-signature header.
-  // Set EPAYCO_REQUIRE_HMAC=true in production once ePayco has been configured to send
-  // the x-signature header on every webhook delivery.
-  if (process.env.EPAYCO_REQUIRE_HMAC === 'true') {
-    logger.error('ePayco webhook rejected: EPAYCO_REQUIRE_HMAC is set but no x-signature header was present', {
-      transactionId: req.body?.x_ref_payco,
-    });
-    return { valid: false, reason: 'hmac_required', error: 'HMAC header required in strict mode' };
-  }
-
-  const hasSignature = Boolean(req.body?.x_signature);
-  if (!hasSignature) {
-    logger.error('ePayco webhook rejected: missing signature', {
-      transactionId: req.body?.x_ref_payco,
-    });
-    return { valid: false, reason: 'missing_signature', error: 'Missing signature' };
-  }
-
-  // H5: Log a warning every time the weaker body SHA256 path is used so operators
-  // can detect when ePayco switches to sending HMAC headers.
-  logger.warn('ePayco webhook verified via body SHA256 (weaker path) — consider enabling EPAYCO_REQUIRE_HMAC', {
-    transactionId: req.body?.x_ref_payco,
-  });
-
-  const signatureResult = PaymentService.verifyEpaycoSignature(req.body);
-  const isValid = typeof signatureResult === 'object' && signatureResult !== null
-    ? signatureResult.valid === true
-    : Boolean(signatureResult);
-
-  if (!isValid) {
-    logger.error('Invalid ePayco webhook signature', {
-      transactionId: req.body?.x_ref_payco,
-    });
-    return { valid: false, reason: 'invalid_signature', error: 'Invalid signature' };
-  }
-
-  return { valid: true, method: 'body_sha256' };
-}
-
 // handleDaimoWebhook — RETIRED stub (route in routes.js is also no-op).
 // Kept here only because module.exports below still references the symbol.
 const handleDaimoWebhook = async (_req, res) => res.status(200).json({ ok: true, retired: true });
@@ -316,12 +26,12 @@ const handleDaimoWebhook = async (_req, res) => res.status(200).json({ ok: true,
 const handlePaymentResponse = async (req, res) => {
   try {
     const {
-      ref_payco, x_ref_payco, x_transaction_state,
+      x_ref_payco, x_transaction_state,
       status, x_extra2, x_extra3,
     } = req.query;
 
-    const refPayco = ref_payco || x_ref_payco || null;
-    const epaycoState = x_transaction_state || status || null;
+    const legacyRef = x_ref_payco || null;
+    const legacyState = x_transaction_state || status || null;
 
     // C3: Validate x_extra3 is a well-formed UUID before using it as paymentId.
     // Rejecting anything that isn't a UUID prevents XSS via injected JS/HTML in the
@@ -335,8 +45,8 @@ const handlePaymentResponse = async (req, res) => {
     const planIdFromQuery = rawExtra2 ? rawExtra2.trim().replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64) : null;
 
     logger.info('Payment response page hit', {
-      refPayco,
-      epaycoState,
+      legacyRef,
+      legacyState,
       paymentIdFromQuery,
       rawExtra3HasValue: !!rawExtra3,
       queryKeys: Object.keys(req.query),
@@ -345,25 +55,14 @@ const handlePaymentResponse = async (req, res) => {
     const botUsername = sanitizeBotUsername(process.env.BOT_USERNAME);
     const botLink = botUsername ? `https://t.me/${botUsername}` : '#';
 
-    // C4: isSuccess variable removed — we must never display a fake success state based on
-    // client-controlled URL query parameters. The polling loop is the single source of truth.
-    // The page always starts in "verifying" state; showConfirmation/showError are only reached
-    // via the /api/payment/:id/status API response.
-
     // Serve a confirmation page that polls payment status and shows results on-screen
-    // Allow 3DS bank redirects to frame/load this page
     res.removeHeader('X-Frame-Options');
     res.removeHeader('Cross-Origin-Embedder-Policy');
     res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
     res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
-    // Phase 3: Mirror CHECKOUT_CSP wildcards used by /payment/:id. The previous
-    // header only set frame-ancestors and let the page fall back to helmet's
-    // exact-match list — that list misses ePayco-rotated 3DS sub-hosts (e.g.
-    // apiflow-blue.epayco.co), which would silently break the post-3DS landing.
-    // H8 frame-ancestors restriction kept (banks + ePayco only, not all of https:).
     const RESPONSE_CSP = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com https://*.epayco.co https://*.epayco.com https://*.epayco.io https://*.payco.co https://*.cardinalcommerce.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com",
       "style-src 'self' 'unsafe-inline' https:",
       "font-src 'self' https: data:",
       "img-src 'self' https: data:",
@@ -372,7 +71,7 @@ const handlePaymentResponse = async (req, res) => {
       "object-src 'none'",
       "base-uri 'self'",
       "form-action 'self' https:",
-      "frame-ancestors 'self' https://*.epayco.co https://*.payco.co https://*.cardinalcommerce.com",
+      "frame-ancestors 'self'",
     ].join('; ');
     res.setHeader('Content-Security-Policy', RESPONSE_CSP);
     res.send(`<!DOCTYPE html>
@@ -463,13 +162,9 @@ const handlePaymentResponse = async (req, res) => {
   </div>
   <script>
     (function() {
-      // C3: paymentIdFromQuery is UUID-validated server-side before being embedded here.
-      // It is either a valid UUID string or the literal null — no other values are possible.
       var pid = ${paymentIdFromQuery ? `'${paymentIdFromQuery}'` : 'null'};
       try { if (!pid) pid = sessionStorage.getItem('pnptv_3ds_payment_id'); } catch(e) {}
 
-      // C4: isSuccess removed — we never trust client-supplied URL parameters to decide
-      // what to display. The polling API response is the sole source of payment truth.
       var attempts = 0;
       var maxAttempts = 40;
       var pollInterval = 3000;
@@ -479,7 +174,6 @@ const handlePaymentResponse = async (req, res) => {
         document.getElementById('checkIcon').style.display = 'block';
         document.getElementById('subtitle').textContent = 'Payment received';
         document.getElementById('title').textContent = 'We received your payment!';
-        // M4: use dynamic plan name — do not hardcode "PRIME subscription"
         document.getElementById('msg').textContent = (data && data.planName)
           ? 'Your ' + data.planName + ' subscription is now active. Check your Telegram for your invite link.'
           : 'Your subscription is now active. Check your Telegram for your invite link.';
@@ -497,31 +191,14 @@ const handlePaymentResponse = async (req, res) => {
         document.getElementById('footer').textContent = 'You can close this page safely.';
       }
 
-      var EPAYCO_ERROR_MESSAGES = {
-        'Error validando datos': 'Los datos de tu tarjeta son incorrectos (número, fecha de vencimiento o CVV). Verifica e intenta de nuevo con otra tarjeta.\n\nThe card details you entered are incorrect (number, expiry date or CVV). Please try again with another card.',
-        'Payment was rejected or failed': 'Tu banco rechazó el pago. Intenta con otra tarjeta o contacta a tu banco para autorizar pagos internacionales.\n\nYour bank declined the payment. Try a different card or contact your bank to authorize international transactions.',
-        'BANK_URL_MISSING': 'Tu banco no soporta pagos 3D Secure. Intenta con una tarjeta Visa o Mastercard de otro banco.\n\nYour bank does not support 3D Secure payments. Please try a Visa or Mastercard from a different bank.',
-        'Rechazada eControl': 'Has superado el límite de tarjetas permitidas por documento hoy. Intenta mañana o usa otra tarjeta.\n\nYou have exceeded the card limit per document for today. Try again tomorrow or use a different card.',
-        '3DS timeout': 'La sesión de verificación 3D Secure expiró. Por favor intenta de nuevo y completa la verificación del banco rápidamente.\n\nThe 3D Secure verification session expired. Please try again and complete the bank verification promptly.',
-      };
-      function getEpaycoMessage(epaycoError) {
-        if (!epaycoError) return null;
-        for (var key in EPAYCO_ERROR_MESSAGES) {
-          if (epaycoError.indexOf(key) !== -1) return EPAYCO_ERROR_MESSAGES[key];
-        }
-        return null;
-      }
-      function showError(msg, epaycoError) {
+      function showError(msg) {
         document.getElementById('spinner').style.display = 'none';
         document.getElementById('errorIcon').style.display = 'block';
         document.getElementById('subtitle').textContent = 'Payment issue';
         document.getElementById('title').textContent = 'Payment Not Completed';
-        var mappedMsg = getEpaycoMessage(epaycoError);
-        var displayMsg = mappedMsg || msg || 'There was an issue with your payment. Please try again or contact support.';
-        // Render newlines as line breaks
-        document.getElementById('msg').innerHTML = displayMsg.replace(/\n/g, '<br>');
+        document.getElementById('msg').innerHTML = (msg || 'There was an issue with your payment. Please try again or contact support.').replace(/\n/g, '<br>');
         document.getElementById('actions').style.display = 'block';
-        document.getElementById('mainBtn').textContent = 'Intentar de nuevo / Try Again';
+        document.getElementById('mainBtn').textContent = 'Try Again';
         var retryPlan = ${planIdFromQuery ? `'${planIdFromQuery}'` : 'null'};
         document.getElementById('mainBtn').href = 'https://pnptv.app/subscribe' + (retryPlan ? '?plan=' + encodeURIComponent(retryPlan) : '');
       }
@@ -538,7 +215,6 @@ const handlePaymentResponse = async (req, res) => {
       }
 
       function poll() {
-        // C4: When pid is absent we always show a neutral message — never a fake success state.
         if (!pid) {
           showError('Could not track your payment. If you completed the payment, your subscription will activate automatically. Please check your Telegram for confirmation.');
           return;
@@ -550,10 +226,8 @@ const handlePaymentResponse = async (req, res) => {
             if (data.status === 'completed') {
               showConfirmation(data);
             } else if (data.status === 'failed' || data.status === 'refunded') {
-              showError(data.message || 'Your payment was not successful. Please try again.', data.epaycoError);
+              showError(data.message || 'Your payment was not successful. Please try again.');
             } else if (attempts >= maxAttempts) {
-              // C4: On timeout we show the neutral processing message — we cannot claim success
-              // without a confirmed status response from the server.
               showProcessing();
             } else {
               setTimeout(poll, pollInterval);
@@ -669,7 +343,6 @@ const handleLiveKitWebhook = async (req, res) => {
 };
 
 module.exports = {
-  handleEpaycoWebhook,
   handleDaimoWebhook,
   handlePaymentResponse,
   handleLiveKitWebhook,

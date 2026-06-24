@@ -167,7 +167,7 @@ const schemas = {
     amount: Joi.number().positive().max(1000000).required(),
     currency: Joi.string().valid('USD', 'USDC', 'COP').required(),
     planId: Joi.string().required(),
-    provider: Joi.string().valid('epayco', 'daimo').required(),
+    provider: Joi.string().valid('btcpay', 'dash', 'nowpayments').required(),
   }),
 
   // Live stream schema

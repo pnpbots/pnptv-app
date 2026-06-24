@@ -1,8 +1,6 @@
 const geoip = require('geoip-lite');
-const { getEpaycoClient } = require('../../../config/epayco');
 const SubscriberModel = require('../../../models/subscriberModel');
 const PlanModel = require('../../../models/planModel');
-const CurrencyConverter = require('../../../utils/currencyConverter');
 const logger = require('../../../utils/logger');
 
 /**
@@ -29,22 +27,9 @@ class SubscriptionController {
       // Colombia gate lifted 2026-05-24 — all users see the full catalog
       const plans = allPlans.filter((p) => p.tier !== 'pnp-col');
 
-      // Add currency conversion for each plan
-      const plansWithPrices = await Promise.all(
-        plans.map(async (plan) => {
-          const prices = await CurrencyConverter.getDisplayAmounts(plan.price, plan.currency);
-          return {
-            ...plan,
-            priceUSD: prices.usd,
-            priceCOP: prices.cop,
-            exchangeRate: prices.rate,
-          };
-        }),
-      );
-
       res.json({
         success: true,
-        plans: plansWithPrices,
+        plans,
         country,
         isColombia,
       });
@@ -53,67 +38,6 @@ class SubscriptionController {
       res.status(500).json({
         success: false,
         error: 'Failed to get subscription plans',
-      });
-    }
-  }
-
-  /**
-   * Create or get ePayco plan
-   * POST /api/subscription/create-plan
-   */
-  static async createEpaycoPlan(req, res) {
-    try {
-      const { planId } = req.body;
-
-      if (!planId) {
-        return res.status(400).json({
-          success: false,
-          error: 'planId is required',
-        });
-      }
-
-      // Get plan details from database
-      const plan = await PlanModel.getById(planId);
-      if (!plan) {
-        return res.status(404).json({
-          success: false,
-          error: 'Plan not found',
-        });
-      }
-
-      // Convert price to COP if in USD
-      let amountCOP = plan.price;
-      if (plan.currency === 'USD') {
-        amountCOP = await CurrencyConverter.usdToCop(plan.price);
-      }
-
-      const epayco = getEpaycoClient();
-
-      // Create plan in ePayco
-      const planInfo = {
-        id_plan: `pnptv_${planId}`,
-        name: plan.name,
-        description: plan.description || `PNPtv ${plan.name} Plan`,
-        amount: amountCOP,
-        currency: 'cop',
-        interval: 'month',
-        interval_count: 1,
-        trial_days: plan.trialDays || 0,
-      };
-
-      const epaycoResponse = await epayco.plans.create(planInfo);
-
-      logger.info('ePayco plan created', { planId, epaycoPlanId: planInfo.id_plan });
-
-      res.json({
-        success: true,
-        plan: epaycoResponse,
-      });
-    } catch (error) {
-      logger.error('Error creating ePayco plan:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to create plan',
       });
     }
   }

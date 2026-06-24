@@ -34,15 +34,14 @@ const schemas = {
 
   /**
    * Payment provider validation
-   * Daimo retired 2026-04-21 — kept out of valid() so any stray daimo-tagged
-   * request fails at the validation boundary (not later via runtime no-op).
-   * btcpay/dash are accepted as they remain active payment rails.
+   * Active rails: btcpay/dash (BTCPay), nowpayments (crypto).
+   * ePayco retired 2026-06-24; daimo retired 2026-04-21.
    */
   provider: Joi.string()
-    .valid('epayco', 'btcpay', 'dash')
+    .valid('btcpay', 'dash', 'nowpayments')
     .required()
     .messages({
-      'any.only': 'Payment provider must be one of: epayco, btcpay, dash',
+      'any.only': 'Payment provider must be one of: btcpay, dash, nowpayments',
       'any.required': 'Payment provider is required',
     }),
 
@@ -94,8 +93,8 @@ const schemas = {
     userId: Joi.string().pattern(/^\d+$/).required(),
     planId: Joi.string().pattern(/^[a-z0-9_-]+$/).required(),
     amount: Joi.number().positive().precision(2).required(),
-    provider: Joi.string().valid('epayco', 'btcpay', 'dash').required(),
-    currency: Joi.string().valid('USD', 'COP', 'USDC').default('USD'),
+    provider: Joi.string().valid('btcpay', 'dash', 'nowpayments').required(),
+    currency: Joi.string().valid('USD', 'USDC').default('USD'),
     metadata: Joi.object().optional(),
   }),
 
@@ -133,31 +132,12 @@ const schemas = {
   }).unknown(true),
 
   /**
-   * ePayco webhook payload validation
-   */
-  epaycoWebhook: Joi.object({
-    x_cust_id_cliente: Joi.string().optional(),
-    x_ref_payco: Joi.string().required(),
-    x_transaction_id: Joi.string().required(),
-    x_amount: Joi.alternatives().try(Joi.string(), Joi.number().positive()).required(),
-    x_currency_code: Joi.string().trim().length(3).required(),
-    x_transaction_state: Joi.string()
-      .valid('Aceptada', 'Aprobada', 'Rechazada', 'Pendiente', 'Fallida', 'Abandonada', 'Cancelada', 'Reversada')
-      .optional(),
-    x_cod_transaction_state: Joi.alternatives().try(
-      Joi.string().valid('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'),
-      Joi.number().valid(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
-    ).optional(),
-    x_signature: Joi.string().optional(), // present in body-hash mode, absent in header-HMAC mode
-  }).or('x_transaction_state', 'x_cod_transaction_state').unknown(true),
-
-  /**
    * Payment query filters validation
    */
   paymentQuery: Joi.object({
     userId: Joi.string().pattern(/^\d+$/).optional(),
     status: Joi.string().valid('pending', 'completed', 'failed', 'refunded', 'cancelled').optional(),
-    provider: Joi.string().valid('epayco', 'btcpay', 'dash').optional(),
+    provider: Joi.string().valid('btcpay', 'dash', 'nowpayments').optional(),
     startDate: Joi.date().iso().optional(),
     endDate: Joi.date().iso().min(Joi.ref('startDate')).optional(),
     minAmount: Joi.number().positive().optional(),
