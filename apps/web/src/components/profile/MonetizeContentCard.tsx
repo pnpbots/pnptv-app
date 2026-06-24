@@ -118,11 +118,11 @@ export default function MonetizeContentCard({ creatorStatus, interestExpressed =
     <>
       <div
         className="glass-card-sm p-4 mt-4"
-        style={{ borderColor: isEligible ? `rgba(${selectedTierConfig.rgb},0.3)` : "rgba(212,0,122,0.15)" }}
+        style={{ borderColor: `rgba(${selectedTierConfig.rgb},0.3)` }}
       >
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: isEligible ? selectedTierConfig.color : "#D4007A" }}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: selectedTierConfig.color }}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <p className="text-sm font-semibold text-white">{p.monetizeYourProfile}</p>
@@ -134,47 +134,45 @@ export default function MonetizeContentCard({ creatorStatus, interestExpressed =
           )}
         </div>
 
-        {isEligible ? (
-          <>
-            <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-              {p.creatorMonetizeDesc}
-            </p>
+        <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+          {p.creatorMonetizeDesc}
+        </p>
 
-            {/* Tier selector */}
-            <div className="grid grid-cols-3 gap-2 mb-3">
-              {CREATOR_TIERS.map((tier) => {
-                const isSelected = selectedTier === tier.id;
-                return (
-                  <button
-                    key={tier.id}
-                    onClick={() => setSelectedTier(tier.id)}
-                    className="relative rounded-xl p-3 text-center transition-all"
-                    style={{
-                      background: isSelected ? `rgba(${TIER_CONFIG[tier.id].rgb},0.15)` : "rgba(255,255,255,0.03)",
-                      border: isSelected ? `2px solid rgba(${TIER_CONFIG[tier.id].rgb},0.6)` : "2px solid rgba(255,255,255,0.08)",
-                      opacity: isSelected ? 1 : 0.7,
-                    }}
-                  >
-                    <p className="text-lg mb-0.5">{tier.emoji}</p>
-                    <p className={`text-xs font-bold ${isSelected ? "text-white" : "text-white/70"}`}>{tier.label}</p>
-                    <p className="text-sm font-bold mt-0.5" style={{ color: isSelected ? tier.color : TIER_CONFIG[tier.id].color }}>
-                      ${tier.price}<span className="text-xs font-normal">/mo</span>
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
+        {/* Tier selector */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          {CREATOR_TIERS.map((tier) => {
+            const isSelected = selectedTier === tier.id;
+            return (
+              <button
+                key={tier.id}
+                onClick={() => setSelectedTier(tier.id)}
+                className="relative rounded-xl p-3 text-center transition-all"
+                style={{
+                  background: isSelected ? `rgba(${TIER_CONFIG[tier.id].rgb},0.15)` : "rgba(255,255,255,0.03)",
+                  border: isSelected ? `2px solid rgba(${TIER_CONFIG[tier.id].rgb},0.6)` : "2px solid rgba(255,255,255,0.08)",
+                  opacity: isSelected ? 1 : 0.7,
+                }}
+              >
+                <p className="text-lg mb-0.5">{tier.emoji}</p>
+                <p className={`text-xs font-bold ${isSelected ? "text-white" : "text-white/70"}`}>{tier.label}</p>
+                <p className="text-sm font-bold mt-0.5" style={{ color: isSelected ? tier.color : TIER_CONFIG[tier.id].color }}>
+                  ${tier.price}<span className="text-xs font-normal">/mo</span>
+                </p>
+              </button>
+            );
+          })}
+        </div>
 
-            <button
-              onClick={() => setShowWizard(true)}
-              className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all"
-              style={{ background: selectedTierConfig.gradient }}
-            >
-              {selectedTierConfig.emoji} {p.startEnrollment}
-            </button>
-          </>
-        ) : (
-          <>
+        <button
+          onClick={() => setShowWizard(true)}
+          className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all"
+          style={{ background: selectedTierConfig.gradient }}
+        >
+          {selectedTierConfig.emoji} {p.startEnrollment}
+        </button>
+
+        {!isEligible && (
+          <div className="mt-4">
             <p className="text-xs mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
               {p.meetRequirementsToUnlock}
             </p>
@@ -235,14 +233,10 @@ export default function MonetizeContentCard({ creatorStatus, interestExpressed =
               })}
             </div>
 
-            <button
-              disabled
-              className="w-full mt-3 py-2.5 rounded-lg text-sm font-semibold text-white/40 cursor-not-allowed"
-              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
-            >
-              {p.completeRequirementsToEnroll}
-            </button>
-          </>
+            <p className="text-xs mt-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)", fontStyle: "italic" }}>
+              {p.eligibilityInfoNote}
+            </p>
+          </div>
         )}
       </div>
 
