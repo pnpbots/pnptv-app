@@ -135,7 +135,7 @@ async function loadPushFollowers(creatorId) {
  */
 async function sendTelegramDMs(bot, followers, creatorName, channelRef, customMessage) {
   const appUrl = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
-  const watchPath = channelRef ? `/stream?channel=${encodeURIComponent(channelRef)}` : '/live';
+  const watchPath = channelRef ? `/live/${encodeURIComponent(channelRef)}` : '/live';
   const watchUrl  = `${appUrl}${watchPath}`;
 
   // Escape for MarkdownV2
@@ -194,7 +194,7 @@ async function sendPushNotifications(followers, creatorName, channelRef) {
   }
 
   const appUrl = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
-  const watchPath = channelRef ? `/stream?channel=${encodeURIComponent(channelRef)}` : '/live';
+  const watchPath = channelRef ? `/live/${encodeURIComponent(channelRef)}` : '/live';
   const watchUrl  = `${appUrl}${watchPath}`;
 
   let sent = 0;

@@ -849,6 +849,7 @@ class PaymentRecoveryService {
            AND (
              (status IN ('pending', 'confirming', 'confirmed', 'partially_paid') AND created_at > NOW() - INTERVAL '24 hours')
              OR (status = 'expired' AND notes LIKE '%underpaid%' AND created_at > NOW() - INTERVAL '7 days')
+             OR (status = 'expired' AND notes LIKE '%auto-expired-24h%' AND created_at > NOW() - INTERVAL '7 days')
            )
          ORDER BY created_at ASC LIMIT 50`
       );
@@ -919,12 +920,68 @@ class PaymentRecoveryService {
             } catch (lookupErr) {
               const httpStatus = lookupErr.response?.status;
               if (httpStatus === 400 || httpStatus === 404) {
-                // Invoice unknown/deleted on NowPayments side — expire locally so it stops retrying
-                await query(
-                  `UPDATE dash_subscription_orders SET status = 'expired', notes = COALESCE(notes || ' ', '') || '[reconciler_np_${httpStatus}]', completed_at = NOW()
-                   WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','expired')`,
-                  [row.order_id]
-                ).catch(() => {});
+                // Invoice unknown/expired on NowPayments side.
+                // Before expiring, check if the order already has proof of payment
+                // stored in metadata (actually_paid >= 98% of price_amount).
+                // This handles orders where NP received payment but the invoice record
+                // rotated out of the API before the reconciler ran.
+                const rowMeta = row.metadata && typeof row.metadata === 'object'
+                  ? row.metadata
+                  : (typeof row.metadata === 'string'
+                      ? (() => { try { return JSON.parse(row.metadata); } catch { return null; } })()
+                      : null);
+                const actuallyPaid = parseFloat(rowMeta?.actually_paid || 0);
+                const priceAmount  = parseFloat(rowMeta?.price_amount || rowMeta?.usd_amount || row.usd_amount || 0);
+                if (actuallyPaid > 0 && priceAmount > 0 && actuallyPaid >= priceAmount * 0.98) {
+                  // Payment data on file confirms funds were received — settle the order
+                  logger.info('NOWPayments reconciler: NP API 400 but stored payment data confirms paid — settling', {
+                    orderId: row.order_id, actuallyPaid, priceAmount, httpStatus,
+                  });
+                  try {
+                    const lockRes2 = await query(
+                      `UPDATE dash_subscription_orders SET status = 'processing'
+                       WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','processing')
+                       RETURNING id, user_id, plan_id, usd_amount, creator_id`,
+                      [row.order_id]
+                    );
+                    if (lockRes2.rows.length > 0) {
+                      const ord2 = lockRes2.rows[0];
+                      const isDonation = ord2.plan_id?.startsWith('donation');
+                      if (!isDonation) {
+                        const PaymentServiceInline = require('./paymentService');
+                        const gr = await PaymentServiceInline.grantEntitlementsForPlan(
+                          ord2.user_id, ord2.plan_id, 'nowpayments',
+                          ord2.creator_id ? { creatorId: String(ord2.creator_id) } : null,
+                          row.order_id
+                        );
+                        if (!gr || gr.granted === 0) throw new Error('grant_zero_on_np400_settle');
+                      }
+                      await query(
+                        `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(),
+                         notes = $2 WHERE btcpay_invoice_id = $1`,
+                        [row.order_id, `nowpayments:reconciler:np_${httpStatus}_paid_settled`]
+                      ).catch(() => {});
+                      results.settled++;
+                    }
+                  } catch (settleErr) {
+                    logger.error('NOWPayments reconciler: NP 400 paid-settle failed', { orderId: row.order_id, error: settleErr.message });
+                    await query(
+                      `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+                      [row.order_id, `nowpayments:reconciler_np_${httpStatus}_settle_failed:${settleErr.message}`.slice(0, 500)]
+                    ).catch(() => {});
+                    results.errors++;
+                  }
+                } else {
+                  // No payment data — invoice was never paid or data is unavailable; expire cleanly
+                  logger.info('NOWPayments reconciler: NP API 400/404 — no payment data, expiring order', {
+                    orderId: row.order_id, httpStatus, planId: row.plan_id,
+                  });
+                  await query(
+                    `UPDATE dash_subscription_orders SET status = 'expired', notes = COALESCE(notes || ' ', '') || '[reconciler_np_${httpStatus}]', completed_at = NOW()
+                     WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','expired')`,
+                    [row.order_id]
+                  ).catch(() => {});
+                }
                 results.stillPending++;
                 continue;
               }
@@ -999,12 +1056,15 @@ class PaymentRecoveryService {
 
             try {
               const PaymentService = require('./paymentService');
+              // Donation plans (donation-10, donation-25, etc.) have no plan_add_ons
+              // and correctly return zero grants — treat as a successful no-op.
+              const isDonationPlan = order.plan_id?.startsWith('donation');
               const grantResult = await PaymentService.grantEntitlementsForPlan(
                 order.user_id, order.plan_id, 'nowpayments',
                 order.creator_id ? { creatorId: String(order.creator_id) } : null,
                 row.order_id
               );
-              if (!grantResult || grantResult.granted === 0) throw new Error('grant_zero');
+              if (!isDonationPlan && (!grantResult || grantResult.granted === 0)) throw new Error('grant_zero');
 
               await query(
                 `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(),

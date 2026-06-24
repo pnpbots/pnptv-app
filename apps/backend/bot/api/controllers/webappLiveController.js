@@ -1049,6 +1049,11 @@ const getSlotTicketStatus = async (req, res) => {
   if (!id || typeof id !== 'string') {
     return res.status(400).json({ success: false, error: 'Invalid slot id' });
   }
+  // live_streams.id is UUID — channel refs (e.g. "pnptv-frank") are not slots
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!UUID_RE.test(id)) {
+    return res.status(404).json({ success: false, error: 'Slot not found' });
+  }
 
   const userId = String(req.session.user.id);
 

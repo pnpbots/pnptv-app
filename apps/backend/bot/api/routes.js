@@ -10532,6 +10532,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
 
       try {
         const PaymentServiceRenewal = require('../../services/paymentService');
+        const isRenewalDonation = existing.plan_id?.startsWith('donation');
         const renewalGrantResult = await PaymentServiceRenewal.grantEntitlementsForPlan(
           existing.user_id,
           existing.plan_id,
@@ -10539,7 +10540,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
           existing.creator_id ? { creatorId: String(existing.creator_id) } : null,
           renewalOrderId
         );
-        if (!renewalGrantResult || renewalGrantResult.granted === 0) {
+        if (!isRenewalDonation && (!renewalGrantResult || renewalGrantResult.granted === 0)) {
           await dbQuery(
             `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
             [renewalOrderId, `renewal:grant_zero:${existing.plan_id}`]
@@ -10658,6 +10659,9 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
   let creatorSubExpiresAt = null;
   try {
     const PaymentServiceGf = require('../../services/paymentService');
+    // Donation plans (donation-10, donation-25, etc.) have no plan_add_ons and
+    // intentionally return zero grants — treat as a successful no-op, not an error.
+    const isDonationPlan = order.plan_id?.startsWith('donation');
     const grantResult = await PaymentServiceGf.grantEntitlementsForPlan(
       order.user_id,
       order.plan_id,
@@ -10666,8 +10670,8 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       order_id
     );
 
-    // NP-H-03: zero-grant guard — roll back so NOWPayments retries
-    if (!grantResult || grantResult.granted === 0) {
+    // NP-H-03: zero-grant guard — roll back so NOWPayments retries (skip for donations)
+    if (!isDonationPlan && (!grantResult || grantResult.granted === 0)) {
       await dbQuery(
         `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
         [order_id, `nowpayments:grant_zero:${order.plan_id}`.slice(0, 500)]

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
@@ -7,27 +8,17 @@ export default function StudioLayout() {
   const t = useI18n();
   const navigate = useNavigate();
 
-  if (isLoading) {
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      const returnTo = window.location.href;
+      window.location.replace(`https://pnptv.app/login?returnTo=${encodeURIComponent(returnTo)}`);
+    }
+  }, [isLoading, isAuthenticated]);
+
+  if (isLoading || (!isAuthenticated)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-pnp-background">
         <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    const returnTo = typeof window !== "undefined" ? window.location.href : "https://studio.pnptv.app/";
-    const loginHref = `https://pnptv.app/login?returnTo=${encodeURIComponent(returnTo)}`;
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-pnp-background px-4 text-center">
-        <h1 className="text-xl font-bold text-white mb-2">PNPtv! Studio</h1>
-        <p className="text-sm text-pnp-textSecondary mb-6">{t.notAuthenticated}</p>
-        <a
-          href={loginHref}
-          className="px-6 py-3 rounded-xl text-sm font-bold text-white btn-gradient"
-        >
-          {t.goToLogin}
-        </a>
       </div>
     );
   }
