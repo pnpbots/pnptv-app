@@ -23,7 +23,7 @@ import React, {
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { checkAuthStatus, getXStatus, sharePostToX, getOwnChannels, getProfile, searchCreators, type SocialPostItem, type CreatorChannel, type MentionUser } from "@/lib/api";
+import { getCreatorEligibility, getXStatus, sharePostToX, getOwnChannels, getProfile, searchCreators, type SocialPostItem, type CreatorChannel, type MentionUser } from "@/lib/api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -299,23 +299,12 @@ export function PostComposer({
   // ── Creator status + X write-scope check ──────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated) return;
-    checkAuthStatus()
-      .then((status) => {
-        if (status.authenticated && status.user) {
-          // Locked creators lose access to monetization (exclusive) content
-          // during onboarding. Admin/superadmin bypass the lock.
-          const isLockedCreator =
-            status.user.creator_status === "active" && status.user.creator_locked === true;
-          setIsActiveCreator(
-            (!isLockedCreator && status.user.creator_status === "active") ||
-              status.user.role === "model" ||
-              status.user.role === "admin" ||
-              status.user.role === "superadmin"
-          );
-        }
+    getCreatorEligibility()
+      .then((eligibility) => {
+        setIsActiveCreator(eligibility.canPostExclusive);
       })
       .catch(() => {
-        // Non-critical
+        // Non-critical — exclusive toggle stays hidden
       });
     getXStatus()
       .then((res) => {

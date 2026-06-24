@@ -81,6 +81,11 @@ class SocialPostService {
          AND sp.channel_id IS NULL
          ${cursorClause}
          AND sp.user_id != ALL($${blockedParamIdx}::text[])
+         AND (
+           u.role NOT IN ('model', 'creator')
+           OR (u.creator_status = 'active' AND u.creator_locked = FALSE)
+           OR u.role IN ('admin', 'superadmin')
+         )
        ORDER BY sp.id DESC
        LIMIT $2`,
       params

@@ -6771,6 +6771,21 @@ export function broadcastLiveNow(opts?: { message?: string }): Promise<{ success
   return request('/api/webapp/live/broadcast-live-now', { method: 'POST', body: opts ?? {} });
 }
 
+export interface CreatorEligibility {
+  success: boolean;
+  canGoLive: boolean;
+  canPostExclusive: boolean;
+  creatorStatus: string;
+  isLocked: boolean;
+  is2257Compliant: boolean;
+  hasLiveChannel: boolean;
+  issues: string[];
+}
+
+export function getCreatorEligibilityStatus(): Promise<CreatorEligibility> {
+  return request('/api/webapp/me/creator-eligibility');
+}
+
 // ============================================================================
 // Creator Album / Media
 // ============================================================================

@@ -1,7 +1,8 @@
-import React, { useState, lazy } from "react";
+import React, { useState, useEffect, lazy } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStreamer } from "@/hooks/useStreamer";
 import type { FilterSettingsState } from "@/hooks/useStreamer";
+import { getCreatorEligibility, type CreatorEligibility } from "@/lib/api";
 import { StudioCanvas } from "@/components/studio/StudioCanvas";
 import { StudioToolbar } from "@/components/studio/StudioToolbar";
 import { StudioStatusBar } from "@/components/studio/StudioStatusBar";
@@ -36,6 +37,17 @@ const VideoFilters = lazy(
 
 export default function BrowserStream() {
   const navigate = useNavigate();
+
+  // ── Eligibility gate ──────────────────────────────────────────────────────
+  const [eligibility, setEligibility] = useState<CreatorEligibility | null>(null);
+  const [eligibilityLoading, setEligibilityLoading] = useState(true);
+
+  useEffect(() => {
+    getCreatorEligibility()
+      .then(setEligibility)
+      .catch(() => setEligibility(null))
+      .finally(() => setEligibilityLoading(false));
+  }, []);
 
   // ── activeTab lives here — purely a UI concern ────────────────────────────
   const [activeTab, setActiveTab] = useState<ActiveTab>("scenes");
@@ -306,6 +318,52 @@ export default function BrowserStream() {
       default:
         return null;
     }
+  }
+
+  // ── Eligibility locked screen ─────────────────────────────────────────────
+  if (!eligibilityLoading && eligibility && !eligibility.canGoLive) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-pnp-background p-6">
+        <div className="max-w-sm w-full space-y-5 text-center">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto"
+            style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(123,97,255,0.2))", border: "1px solid rgba(212,0,122,0.3)" }}>
+            <svg className="w-8 h-8" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-white">Studio Locked</h1>
+            <p className="text-sm mt-1" style={{ color: "var(--pnp-text-secondary)" }}>
+              Complete your creator setup to start streaming.
+            </p>
+          </div>
+          {eligibility.issues.length > 0 && (
+            <div className="text-left rounded-xl p-4 space-y-2"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              {eligibility.issues.map((issue, i) => (
+                <p key={i} className="text-xs flex items-start gap-2" style={{ color: "var(--pnp-text-secondary)" }}>
+                  <span style={{ color: "#FFD60A" }} className="flex-shrink-0 mt-0.5">•</span>
+                  {issue}
+                </p>
+              ))}
+            </div>
+          )}
+          <a
+            href="https://pnptv.app/settings"
+            className="block px-6 py-3 rounded-xl text-sm font-bold text-white btn-gradient"
+          >
+            Go to Settings
+          </a>
+          <a
+            href="https://pnptv.app/creators/live"
+            className="block text-xs"
+            style={{ color: "var(--pnp-text-secondary)" }}
+          >
+            ← Back to Creator Dashboard
+          </a>
+        </div>
+      </div>
+    );
   }
 
   // ── Full render ───────────────────────────────────────────────────────────

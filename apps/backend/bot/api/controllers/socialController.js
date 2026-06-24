@@ -259,11 +259,18 @@ const createPost = async (req, res) => {
       }
     }
 
-    // Validate creator status for exclusive posts
+    // Validate creator status and onboarding lock for exclusive posts
     if (isExclusive) {
-      const creatorCheck = await dbQuery('SELECT creator_status FROM users WHERE id = $1', [user.id]);
+      const creatorCheck = await dbQuery('SELECT creator_status, creator_locked FROM users WHERE id = $1', [user.id]);
       if (creatorCheck.rows[0]?.creator_status !== 'active') {
         return res.status(403).json({ error: 'Only active creators can post exclusive content' });
+      }
+      if (creatorCheck.rows[0]?.creator_locked) {
+        return res.status(403).json({
+          success: false,
+          error: 'Complete your creator onboarding to post exclusive content.',
+          code: 'creator_locked',
+        });
       }
     }
 

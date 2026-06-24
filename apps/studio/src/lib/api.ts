@@ -151,6 +151,21 @@ export function getMyChannel(): Promise<{
   return request("/api/webapp/live/my-channel");
 }
 
+export interface CreatorEligibility {
+  success: boolean;
+  canGoLive: boolean;
+  canPostExclusive: boolean;
+  creatorStatus: string;
+  isLocked: boolean;
+  is2257Compliant: boolean;
+  hasLiveChannel: boolean;
+  issues: string[];
+}
+
+export function getCreatorEligibility(): Promise<CreatorEligibility> {
+  return request("/api/webapp/me/creator-eligibility");
+}
+
 export function provisionChannel(): Promise<{
   success: boolean;
   alreadyProvisioned?: boolean;

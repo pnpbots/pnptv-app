@@ -2567,6 +2567,21 @@ function initSocketIO(io) {
           }
         }
 
+        // Reject if creator is in onboarding lock
+        if (!isAdmin) {
+          const { rows: lockRows } = await query(
+            'SELECT creator_locked FROM users WHERE id = $1',
+            [user.id]
+          );
+          if (lockRows[0]?.creator_locked) {
+            socket.emit('stream:error', {
+              code: 'creator_locked',
+              message: 'Complete your creator onboarding before going live.',
+            });
+            return;
+          }
+        }
+
         if (!assignedChannel) {
           socket.emit('stream:error', { message: 'No streaming channel assigned to your account.' });
           return;

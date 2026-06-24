@@ -2349,6 +2349,83 @@ const getStreamHealth = async (req, res) => {
   return res.json(body);
 };
 
+/**
+ * GET /api/webapp/me/creator-eligibility
+ * Returns a structured eligibility report for the authenticated user,
+ * indicating whether they can go live or post exclusive content and why not if blocked.
+ * Admins and superadmins always receive full eligibility.
+ */
+const getCreatorEligibility = async (req, res) => {
+  const pool = getPool();
+  const userId = req.session?.userId;
+  if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT role, creator_status, creator_locked, identity_verified,
+              identity_verification_required_by, live_channel
+       FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    if (!rows.length) return res.status(404).json({ success: false, error: 'User not found' });
+
+    const user = rows[0];
+    const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+
+    if (isAdmin) {
+      return res.json({
+        success: true,
+        canGoLive: true,
+        canPostExclusive: true,
+        creatorStatus: user.creator_status,
+        isLocked: false,
+        is2257Compliant: true,
+        hasLiveChannel: !!user.live_channel,
+        issues: [],
+      });
+    }
+
+    const creatorStatus = user.creator_status || 'none';
+    const isLocked = !!user.creator_locked;
+    const is2257Compliant = IdentityVerificationService.is2257Compliant(user);
+    const hasLiveChannel = !!user.live_channel;
+
+    const issues = [];
+
+    if (creatorStatus === 'suspended') {
+      issues.push('Your creator account has been suspended. Contact support.');
+    } else if (!['active'].includes(creatorStatus)) {
+      issues.push('Your creator application is under review. You\'ll be notified when approved.');
+    }
+
+    if (isLocked) {
+      issues.push('Complete your creator onboarding setup to unlock streaming and exclusive content.');
+    }
+
+    if (!is2257Compliant) {
+      issues.push('Identity verification (18 U.S.C. § 2257) required. Visit your settings to complete it.');
+    }
+
+    const canGoLive = creatorStatus === 'active' && !isLocked && is2257Compliant;
+    const canPostExclusive = creatorStatus === 'active' && !isLocked && is2257Compliant;
+
+    return res.json({
+      success: true,
+      canGoLive,
+      canPostExclusive,
+      creatorStatus,
+      isLocked,
+      is2257Compliant,
+      hasLiveChannel,
+      issues,
+    });
+  } catch (err) {
+    logger.error(`getCreatorEligibility error: ${err.message}`);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+};
+
 module.exports = {
   listStreams,
   getRtmpKey,
@@ -2384,4 +2461,5 @@ module.exports = {
   getMixerPresets,
   saveMixerPreset,
   getStreamHealth,
+  getCreatorEligibility,
 };

@@ -4213,6 +4213,7 @@ app.post('/api/webapp/live/stream-rules', requireSessionAuth, asyncHandler(liveR
 const webappLiveController = require('./controllers/webappLiveController');
 app.get('/api/webapp/live/streams', requireSessionAuth, requireMemberTier, asyncHandler(webappLiveController.listStreams));
 app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
+app.get('/api/webapp/me/creator-eligibility', requireSessionAuth, asyncHandler(webappLiveController.getCreatorEligibility));
 // Self-serve channel provisioning: creator gets a Restreamer channel on first "Go Live"
 app.post('/api/webapp/live/provision-channel', requireSessionAuth, asyncHandler(webappLiveController.provisionChannel));
 // Raid: creator sends all viewers to another live stream
@@ -6650,8 +6651,90 @@ app.post('/api/webapp/referral/redeem', asyncHandler(async (req, res) => {
   const redeemCount = await redisClient.incr(redeemKey);
   if (redeemCount === 1) await redisClient.expire(redeemKey, 3600);
   if (redeemCount > 3) return res.status(429).json({ error: 'Too many attempts. Try again later.' });
-  const result = await referralService.redeemReferral(code, user.id);
+  const refereeIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+  const result = await referralService.redeemReferral(code, user.id, refereeIp);
   return res.json(result);
+}));
+
+// Admin: referrals dashboard
+app.get('/api/webapp/admin/referrals', requireSessionAuth, adminGuard, asyncHandler(async (req, res) => {
+  const page   = Math.max(1, parseInt(req.query.page  || '1', 10));
+  const limit  = Math.min(200, Math.max(1, parseInt(req.query.limit || '50', 10)));
+  const offset = (page - 1) * limit;
+  const status = req.query.status || 'all';
+  const search = (req.query.search || '').trim();
+
+  // Aggregate stats
+  const { rows: statsRows } = await query(
+    `SELECT
+       COUNT(*)                                              AS total,
+       COUNT(*) FILTER (WHERE status = 'completed')         AS completed,
+       COUNT(*) FILTER (WHERE status = 'pending')           AS pending,
+       COALESCE(SUM(reward_tokens) FILTER (WHERE status = 'completed'), 0) AS total_tokens,
+       COUNT(DISTINCT referrer_id)                          AS unique_referrers
+     FROM referrals`
+  );
+  const stats = {
+    total:           parseInt(statsRows[0].total, 10),
+    completed:       parseInt(statsRows[0].completed, 10),
+    pending:         parseInt(statsRows[0].pending, 10),
+    totalTokensPaidOut: parseInt(statsRows[0].total_tokens, 10),
+    uniqueReferrers: parseInt(statsRows[0].unique_referrers, 10),
+  };
+
+  // Build dynamic WHERE clause
+  const conditions = [];
+  const params = [];
+  if (status !== 'all') {
+    params.push(status);
+    conditions.push(`r.status = $${params.length}`);
+  }
+  if (search) {
+    params.push(`%${search}%`);
+    const idx = params.length;
+    conditions.push(`(ru.username ILIKE $${idx} OR ee.username ILIKE $${idx})`);
+  }
+  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  // Count for pagination
+  const countSql = `
+    SELECT COUNT(*) AS cnt
+    FROM referrals r
+    LEFT JOIN users ru ON ru.id = r.referrer_id
+    LEFT JOIN users ee ON ee.id = r.referee_id
+    ${whereClause}
+  `;
+  const { rows: countRows } = await query(countSql, params);
+  const totalRows = parseInt(countRows[0].cnt, 10);
+
+  // Paginated rows
+  const rowsSql = `
+    SELECT
+      ru.username   AS referrer_username,
+      ee.username   AS referee_username,
+      r.code,
+      r.status,
+      r.reward_tokens,
+      r.created_at,
+      r.completed_at,
+      r.referee_ip
+    FROM referrals r
+    LEFT JOIN users ru ON ru.id = r.referrer_id
+    LEFT JOIN users ee ON ee.id = r.referee_id
+    ${whereClause}
+    ORDER BY r.created_at DESC
+    LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+  `;
+  const { rows } = await query(rowsSql, [...params, limit, offset]);
+
+  return res.json({
+    success: true,
+    stats,
+    rows,
+    total: totalRows,
+    page,
+    pages: Math.ceil(totalRows / limit),
+  });
 }));
 
 // Admin: trigger Cristina neighbor DM campaign
