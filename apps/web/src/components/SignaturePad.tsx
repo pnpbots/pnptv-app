@@ -10,6 +10,7 @@ export function SignaturePad({ onSave, width = 320, height = 120 }: SignaturePad
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawing = useRef(false);
   const lastPos = useRef<{ x: number; y: number } | null>(null);
+  const hasSigRef = useRef(false);
   const [hasSig, setHasSig] = useState(false);
 
   const getPos = (e: React.MouseEvent | React.TouchEvent, canvas: HTMLCanvasElement) => {
@@ -44,21 +45,23 @@ export function SignaturePad({ onSave, width = 320, height = 120 }: SignaturePad
     ctx.lineCap = "round";
     ctx.stroke();
     lastPos.current = pos;
+    hasSigRef.current = true;
     setHasSig(true);
   }, []);
 
   const endDraw = useCallback(() => {
     isDrawing.current = false;
     lastPos.current = null;
-    if (hasSig && canvasRef.current) {
+    if (hasSigRef.current && canvasRef.current) {
       onSave(canvasRef.current.toDataURL("image/png"));
     }
-  }, [hasSig, onSave]);
+  }, [onSave]);
 
   const clear = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext("2d"); if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    hasSigRef.current = false;
     setHasSig(false);
     onSave("");
   }, [onSave]);
