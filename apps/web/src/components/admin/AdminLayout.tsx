@@ -24,6 +24,7 @@ const CREATOR_RESTRICTED_PATHS = new Set([
   "/admin/hangout-telegram-health",
   "/admin/compliance-2257",
   "/admin/invite-links",
+  "/admin/referrals",
 ]);
 
 // Nav item definitions — internal items use { to, labelKey }; external items use { externalUrl, label }
@@ -60,6 +61,7 @@ const allNavItems: NavItem[] = [
   { to: "/admin/hangout-telegram-health", label: "Hangout Telegram", icon: "M8 10h.01M12 10h.01M8 14h8m5-2c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z", creatorAllowed: false },
   { to: "/admin/prime", label: "Prime Channel", icon: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z", creatorAllowed: false },
   { to: "/admin/invite-links", label: "Socio Colombia", icon: "M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z", creatorAllowed: false },
+  { to: "/admin/referrals", label: "Referrals", icon: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1", creatorAllowed: false },
   // Direct CMS (Directus) shortcuts — open in a new tab
   { externalUrl: "https://cms.pnptv.app/admin/content/social_posts", label: "CMS: X Posts", icon: "M6 18L18 6M6 6l12 12", creatorAllowed: false },
 ];

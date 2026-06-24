@@ -81,7 +81,7 @@ async function getReferralStats(userId) {
  * @param {string} refereeId
  * @returns {Promise<object>}
  */
-async function redeemReferral(code, refereeId) {
+async function redeemReferral(code, refereeId, refereeIp = null) {
   const upperCode = String(code || '').toUpperCase();
   const { rows: refRows } = await query(
     'SELECT id FROM users WHERE ref_code=$1',
@@ -99,6 +99,19 @@ async function redeemReferral(code, refereeId) {
     throw err;
   }
 
+  // IP-based duplicate detection — one redemption per network per 30 days.
+  if (refereeIp) {
+    const { rows: ipRows } = await query(
+      `SELECT id FROM referrals WHERE referee_ip = $1 AND created_at > NOW() - INTERVAL '30 days' LIMIT 1`,
+      [refereeIp]
+    );
+    if (ipRows.length > 0) {
+      const err = new Error('Referral already claimed from this network');
+      err.status = 429;
+      throw err;
+    }
+  }
+
   // Check if this is the referee's first-ever referral redemption (any code).
   // Used to gate the one-time 24h PRIME trial — prevents stacking multiple codes.
   const { rows: existingReferrals } = await query(
@@ -109,11 +122,11 @@ async function redeemReferral(code, refereeId) {
 
   // Idempotent attribution. Reward stays at 0 until the referee buys a plan.
   const { rows: inserted } = await query(
-    `INSERT INTO referrals (code, referrer_id, referee_id, status, reward_tokens, reward_days)
-     VALUES ($1, $2, $3, 'pending', 0, 0)
+    `INSERT INTO referrals (code, referrer_id, referee_id, status, reward_tokens, reward_days, referee_ip)
+     VALUES ($1, $2, $3, 'pending', 0, 0, $4)
      ON CONFLICT (code, referee_id) DO NOTHING
      RETURNING id`,
-    [upperCode, referrerId, String(refereeId)]
+    [upperCode, referrerId, String(refereeId), refereeIp || null]
   );
 
   if (!inserted.length) {
