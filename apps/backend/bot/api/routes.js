@@ -4221,7 +4221,8 @@ app.post('/api/webapp/live/raid', requireSessionAuth, asyncHandler(webappLiveCon
 app.get('/api/webapp/live/host', requireSessionAuth, asyncHandler(webappLiveController.getHostedChannel));
 app.post('/api/webapp/live/host', requireSessionAuth, asyncHandler(webappLiveController.setHostedChannel));
 // Stream schedule: upcoming broadcasts for the next 7 days (Redis-cached 5 min)
-app.get('/api/webapp/live/schedule', requireSessionAuth, asyncHandler(webappLiveController.getSchedule));
+app.get('/api/webapp/live/schedule',    requireSessionAuth, asyncHandler(webappLiveController.getSchedule));
+app.get('/api/webapp/live/time-slots',  requireSessionAuth, asyncHandler(webappLiveController.getSchedule));
 // Stream schedule notifications: subscribe/unsubscribe/check for a slot
 app.post('/api/webapp/live/schedule/notify', requireSessionAuth, asyncHandler(webappLiveController.subscribeScheduleNotify));
 app.delete('/api/webapp/live/schedule/notify', requireSessionAuth, asyncHandler(webappLiveController.unsubscribeScheduleNotify));
