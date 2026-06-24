@@ -2424,20 +2424,25 @@ const uploadAvatar = async (req, res) => {
       return res.status(400).json({ error: 'Only image files (jpg, png, webp, gif) are allowed' });
     }
 
-    const filename = `${user.id}-${Date.now()}.webp`;
+    const isGif = detectedMime === 'image/gif';
+    const filename = `${user.id}-${Date.now()}.${isGif ? 'gif' : 'webp'}`;
     const uploadDir = path.join(__dirname, '../../../../../public/uploads/avatars');
     const filePath = path.join(uploadDir, filename);
     const relativeUrl = `/uploads/avatars/${filename}`;
 
     await fs.mkdir(uploadDir, { recursive: true });
 
-    // Step 1: Process image with sharp and write to disk
-    await sharp(buffer, { failOn: 'none' })
-      .rotate()
-      .withMetadata(false)
-      .resize(256, 256, { fit: 'cover', position: 'center' })
-      .webp({ quality: 75, progressive: true })
-      .toFile(filePath);
+    // Step 1: Process image and write to disk (GIFs saved as-is to preserve animation)
+    if (isGif) {
+      await fs.writeFile(filePath, buffer);
+    } else {
+      await sharp(buffer, { failOn: 'none' })
+        .rotate()
+        .withMetadata(false)
+        .resize(256, 256, { fit: 'cover', position: 'center' })
+        .webp({ quality: 75, progressive: true })
+        .toFile(filePath);
+    }
 
     // Step 2: UPDATE database FIRST (atomic PostgreSQL row-level lock).
     // This is the race-condition fix: whichever concurrent upload commits last

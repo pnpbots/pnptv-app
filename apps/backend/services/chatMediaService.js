@@ -83,6 +83,27 @@ async function processImage(buffer, userId) {
   await ensureUploadDir();
 
   const ts = Date.now();
+
+  // GIF bypass: save as-is to preserve animation; thumbnail = first frame as WebP
+  const initialMeta = await sharp(buffer, { failOn: 'none' }).metadata();
+  if (initialMeta.format === 'gif') {
+    const gifFilename = `img-${userId}-${ts}.gif`;
+    const thumbFilename = `img-${userId}-${ts}-thumb.webp`;
+    const gifPath = path.join(UPLOAD_BASE, gifFilename);
+    const thumbPath = path.join(UPLOAD_BASE, thumbFilename);
+    await fs.writeFile(gifPath, buffer);
+    await sharp(buffer, { failOn: 'none' })
+      .resize(IMAGE_THUMB_DIMENSION, IMAGE_THUMB_DIMENSION, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: THUMB_QUALITY })
+      .toFile(thumbPath);
+    return {
+      mediaUrl: `/uploads/chat/${gifFilename}`,
+      thumbUrl: `/uploads/chat/${thumbFilename}`,
+      width: initialMeta.width || 0,
+      height: initialMeta.height || 0,
+    };
+  }
+
   const mainFilename = `img-${userId}-${ts}.webp`;
   const thumbFilename = `img-${userId}-${ts}-thumb.webp`;
   const mainPath = path.join(UPLOAD_BASE, mainFilename);
@@ -290,11 +311,10 @@ async function processChatMedia(file, userId) {
 
   try {
     if (mediaType === 'image') {
-      // sharp auto-converts HEIC/HEIF/JPEG/PNG/GIF to WebP, so no special-case needed
       const { mediaUrl, thumbUrl, width, height } = await processImage(file.buffer, userId);
       return {
         mediaType: 'image',
-        mediaMime: 'image/webp', // always WebP after processing
+        mediaMime: detectedMime === 'image/gif' ? 'image/gif' : 'image/webp',
         mediaUrl,
         thumbUrl,
         width,
@@ -374,6 +394,27 @@ async function processMedia(file, userId, options = {}) {
   try {
     if (mediaType === 'image') {
       const ts = Date.now();
+
+      // GIF bypass: save as-is to preserve animation; thumbnail from first frame
+      if (detectedMime === 'image/gif') {
+        const gifFilename = `img-${userId}-${ts}.gif`;
+        const thumbFilename = `img-${userId}-${ts}-thumb.webp`;
+        const gifMeta = await sharp(file.buffer, { failOn: 'none' }).metadata();
+        await fs.writeFile(path.join(uploadDir, gifFilename), file.buffer);
+        await sharp(file.buffer, { failOn: 'none' })
+          .resize(IMAGE_THUMB_DIMENSION, IMAGE_THUMB_DIMENSION, { fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: THUMB_QUALITY })
+          .toFile(path.join(uploadDir, thumbFilename));
+        return {
+          mediaType: 'image',
+          mediaMime: 'image/gif',
+          mediaUrl: `/uploads/${subdir}/${gifFilename}`,
+          thumbUrl: `/uploads/${subdir}/${thumbFilename}`,
+          width: gifMeta.width || null,
+          height: gifMeta.height || null,
+        };
+      }
+
       const mainFilename = `img-${userId}-${ts}.webp`;
       const thumbFilename = `img-${userId}-${ts}-thumb.webp`;
 

@@ -71,6 +71,30 @@ function publicUrl(hangoutId, filename) {
 async function processImage(buffer, hangoutId, userId) {
   const dir = await ensureDir(hangoutId);
   const ts = Date.now();
+
+  // GIF bypass: save as-is to preserve animation; thumbnail from first frame
+  const initialMeta = await sharp(buffer, { failOn: 'none' }).metadata();
+  if (initialMeta.format === 'gif') {
+    const gifFilename = `img-${userId}-${ts}.gif`;
+    const thumbFilename = `img-${userId}-${ts}-thumb.webp`;
+    await fs.writeFile(path.join(dir, gifFilename), buffer);
+    await sharp(buffer, { failOn: 'none' })
+      .resize(IMAGE_THUMB_DIMENSION, IMAGE_THUMB_DIMENSION, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: THUMB_QUALITY })
+      .toFile(path.join(dir, thumbFilename));
+    return {
+      mediaUrl: publicUrl(hangoutId, gifFilename),
+      thumbUrl: publicUrl(hangoutId, thumbFilename),
+      width: initialMeta.width || null,
+      height: initialMeta.height || null,
+      metadata: {
+        originalWidth: initialMeta.width || null,
+        originalHeight: initialMeta.height || null,
+        format: 'gif',
+      },
+    };
+  }
+
   const mainFilename = `img-${userId}-${ts}.webp`;
   const thumbFilename = `img-${userId}-${ts}-thumb.webp`;
   const mainPath = path.join(dir, mainFilename);

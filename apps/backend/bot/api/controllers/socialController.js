@@ -713,16 +713,23 @@ const createPostWithMedia = async (req, res) => {
       }
 
       if (mediaType === 'image') {
-        const filename = `img-${user.id}-${Date.now()}.webp`;
-        const filePath = path.join(uploadDir, filename);
-        // Images are small enough for memory — read from buffer or disk
         const imgBuffer = hasBuffer ? req.file.buffer : await fs.readFile(tempPath);
-        await sharp(imgBuffer, { failOn: 'none' })
-          .rotate()
-          .withMetadata(false)
-          .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
-          .webp({ quality: 70, progressive: true })
-          .toFile(filePath);
+        let filename, filePath;
+        if (detectedMime === 'image/gif') {
+          // GIF: save as-is to preserve animation
+          filename = `img-${user.id}-${Date.now()}.gif`;
+          filePath = path.join(uploadDir, filename);
+          await fs.writeFile(filePath, imgBuffer);
+        } else {
+          filename = `img-${user.id}-${Date.now()}.webp`;
+          filePath = path.join(uploadDir, filename);
+          await sharp(imgBuffer, { failOn: 'none' })
+            .rotate()
+            .withMetadata(false)
+            .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+            .webp({ quality: 70, progressive: true })
+            .toFile(filePath);
+        }
         if (tempPath) await fs.unlink(tempPath).catch(() => {});
         finalFilePath = filePath;
         mediaUrl = `/uploads/posts/${filename}`;
@@ -1026,15 +1033,23 @@ const createPostWithMultiMedia = async (req, res) => {
       }
 
       if (mediaType === 'image') {
-        const filename = `img-${user.id}-${timestamp}-${i}.webp`;
-        const destPath = path.join(uploadDir, filename);
         const imgBuffer = hasBuffer ? file.buffer : await fs.readFile(fileTempPath);
-        await sharp(imgBuffer, { failOn: 'none' })
-          .rotate()
-          .withMetadata(false)
-          .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
-          .webp({ quality: 70, progressive: true })
-          .toFile(destPath);
+        let filename, destPath;
+        if (detectedMime === 'image/gif') {
+          // GIF: save as-is to preserve animation
+          filename = `img-${user.id}-${timestamp}-${i}.gif`;
+          destPath = path.join(uploadDir, filename);
+          await fs.writeFile(destPath, imgBuffer);
+        } else {
+          filename = `img-${user.id}-${timestamp}-${i}.webp`;
+          destPath = path.join(uploadDir, filename);
+          await sharp(imgBuffer, { failOn: 'none' })
+            .rotate()
+            .withMetadata(false)
+            .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+            .webp({ quality: 70, progressive: true })
+            .toFile(destPath);
+        }
         if (fileTempPath) await fs.unlink(fileTempPath).catch(() => {});
         writtenFilePaths.push(destPath);
         mediaItems.push({ url: `/uploads/posts/${filename}`, type: 'image' });
