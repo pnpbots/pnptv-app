@@ -18,7 +18,7 @@ import {
 } from "@/lib/api";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 
-const STUDIO_URL = "https://studio.pnptv.app/";
+const STUDIO_URL = `/login?returnTo=${encodeURIComponent("https://studio.pnptv.app/")}`;
 
 export default function CreatorLive() {
   const { user } = useAuth();

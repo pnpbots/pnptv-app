@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { LanguageSelector } from "@/components/LanguageSelector";
-import { magicLinkStart, passkeyBegin, passkeyFinish } from "@/lib/api";
+import { magicLinkStart, passkeyBegin, passkeyFinish, checkAuthStatus } from "@/lib/api";
 import { sanitizeReturnTo } from "@/lib/auth";
 
 // ── WebAuthn helpers ──────────────────────────────────────────────────────────
@@ -299,6 +299,17 @@ export function LandingPage() {
   const performerCountry = params.get("country") || null;
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // Auto-redirect already-authenticated users so they don't have to log in again.
+  // Runs once on mount; skipped if there is no returnTo (user landed on /login directly).
+  useEffect(() => {
+    const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+    const safe = sanitizeReturnTo(returnTo);
+    if (!safe) return;
+    checkAuthStatus().then((status) => {
+      if (status.authenticated) window.location.href = safe;
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     document.body.style.overflow = activeSheet ? "hidden" : "";
