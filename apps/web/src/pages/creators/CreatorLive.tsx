@@ -18,7 +18,7 @@ import {
 } from "@/lib/api";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 
-const STUDIO_LOGIN_URL = `/login?returnTo=${encodeURIComponent("https://studio.pnptv.app/")}`;
+const STUDIO_URL = "https://studio.pnptv.app/";
 
 export default function CreatorLive() {
   const { user } = useAuth();
@@ -341,7 +341,7 @@ export default function CreatorLive() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Option 1 — Stream from this app (recommended) */}
             <a
-              href={STUDIO_LOGIN_URL}
+              href={STUDIO_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="relative block rounded-xl p-4 transition-all hover:scale-[1.02]"

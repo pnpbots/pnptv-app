@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { magicLinkStart, passkeyBegin, passkeyFinish } from "@/lib/api";
+import { sanitizeReturnTo } from "@/lib/auth";
 
 // ── WebAuthn helpers ──────────────────────────────────────────────────────────
 // Authentik's flow executor returns binary fields as base64url strings; the
@@ -388,7 +389,7 @@ export function LandingPage() {
       }
 
       const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      window.location.href = returnTo && /^\/[a-z0-9/_-]*/i.test(returnTo) ? returnTo : "/";
+      window.location.href = sanitizeReturnTo(returnTo) ?? "/";
     } catch {
       openMagicForm("Couldn't sign in with passkey. Sign in with email instead.");
     } finally {
@@ -542,7 +543,7 @@ export function LandingPage() {
               }
             } catch { /* ignore quota */ }
             const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-            window.location.href = returnTo && /^\/[a-z0-9/_-]*/i.test(returnTo) ? returnTo : "/";
+            window.location.href = sanitizeReturnTo(returnTo) ?? "/";
           }
         } catch { /* keep polling */ }
       }, 3000);
