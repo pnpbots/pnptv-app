@@ -4392,23 +4392,26 @@ class PaymentService {
         }
 
         // Referral reward — grant PNP Live tokens to the referrer ONCE, when
-        // the referee makes their first paid plan purchase. Failure must not
-        // block the payment, so swallow all errors.
-        try {
-          const referralService = require('./referralService');
-          const reward = await referralService.grantReferralReward(userId, planId);
-          if (reward.credited) {
-            logger.info('Referral reward granted on plan purchase', {
-              referrerId: reward.referrerId,
-              refereeId: userId,
-              planId: reward.planId,
-              tokens: reward.tokens,
+        // the referee makes their first PAID plan purchase. Only fires for
+        // payment sources; admin/manual grants must not trigger token rewards.
+        const PAID_SOURCES = ['payment', 'epayco', 'dash', 'nowpayments', 'btcpay', 'stripe', 'webhook', 'daimo'];
+        if (PAID_SOURCES.includes(source)) {
+          try {
+            const referralService = require('./referralService');
+            const reward = await referralService.grantReferralReward(userId, planId);
+            if (reward.credited) {
+              logger.info('Referral reward granted on plan purchase', {
+                referrerId: reward.referrerId,
+                refereeId: userId,
+                planId: reward.planId,
+                tokens: reward.tokens,
+              });
+            }
+          } catch (referralErr) {
+            logger.warn('Referral reward grant failed (non-critical)', {
+              userId, planId, error: referralErr.message,
             });
           }
-        } catch (referralErr) {
-          logger.warn('Referral reward grant failed (non-critical)', {
-            userId, planId, error: referralErr.message,
-          });
         }
       }
     } catch (err) {

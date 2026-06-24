@@ -248,6 +248,49 @@ async function grantReferralReward(refereeId, planId) {
     tokens,
   });
 
+  // Notify the referrer — non-fatal.
+  try {
+    const { rows: people } = await query(
+      `SELECT u.telegram, u.language,
+              r.username AS referee_username
+       FROM users u
+       LEFT JOIN users r ON r.id = $2
+       WHERE u.id = $1`,
+      [referralRow.referrer_id, String(refereeId)]
+    );
+    const referrer = people[0];
+    if (referrer) {
+      const isEn = typeof referrer.language === 'string' && referrer.language.toLowerCase().startsWith('en');
+      const refName = referrer.referee_username ? `@${referrer.referee_username}` : (isEn ? 'Someone' : 'Alguien');
+      const tokenWord = tokens === 1 ? (isEn ? 'token' : 'token') : (isEn ? 'tokens' : 'tokens');
+      const msg = isEn
+        ? `🎁 ${refName} subscribed via your referral link — you just earned ${tokens} PNP Live ${tokenWord}! Check your balance at pnptv.app/referrals`
+        : `🎁 ${refName} se suscribió con tu enlace de referido — ¡acabas de ganar ${tokens} token${tokens > 1 ? 's' : ''} PNP Live! Revisa tu saldo en pnptv.app/referrals`;
+
+      // In-app bell
+      await query(
+        `INSERT INTO notifications (type, category, priority, actor_id, target_user_id, entity_type, entity_id, message, metadata)
+         VALUES ('announcement', 'system', 'high', NULL, $1, 'referral', $2, $3, $4::jsonb)
+         ON CONFLICT DO NOTHING`,
+        [
+          referralRow.referrer_id,
+          `referral_reward_${referralRow.id}`,
+          msg,
+          JSON.stringify({ url: 'https://pnptv.app/referrals', tokens }),
+        ]
+      ).catch(() => {});
+
+      // Telegram DM
+      if (referrer.telegram) {
+        const { Telegram } = require('telegraf');
+        const tg = new Telegram(process.env.BOT_TOKEN);
+        await tg.sendMessage(referrer.telegram, msg, { disable_web_page_preview: true }).catch(() => {});
+      }
+    }
+  } catch (notifyErr) {
+    logger.warn('grantReferralReward: notification failed (non-fatal)', { error: notifyErr.message });
+  }
+
   return { credited: true, referrerId: referralRow.referrer_id, tokens, planId };
 }
 
