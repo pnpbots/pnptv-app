@@ -170,6 +170,7 @@ export default function CreatorEnrollmentWizard({
   // Step 2 state (terms)
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [commitmentAccepted, setCommitmentAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
 
   // Step 3 state (payment)
   // Dash via BTCPay is the canonical crypto payout path post-Daimo retirement
@@ -231,7 +232,7 @@ export default function CreatorEnrollmentWizard({
   };
 
   const canProceedStep1 = guidelinesRead;
-  const canProceedStep2 = termsAccepted && commitmentAccepted;
+  const canProceedStep2 = termsAccepted && commitmentAccepted && privacyAccepted;
   const canProceedStep3 = paymentAddress.trim().length >= 3;
   const canProceedStep4 = !!idFile && idLegalName.trim().length > 1 && idDob.length > 0 && idType.length > 0;
   const canProceedStep5 = !!signatureData;
@@ -380,6 +381,26 @@ export default function CreatorEnrollmentWizard({
                 </div>
                 <span className="text-xs" style={{ color: commitmentAccepted ? "#fff" : "#8E8E93" }}>
                   {pr.understandCommitment} <strong>{pr.contentRequirementsLabel}</strong>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <div
+                  className="mt-0.5 w-5 h-5 rounded flex items-center justify-center flex-shrink-0 transition-colors"
+                  style={{ background: privacyAccepted ? t.gradient : "rgba(255,255,255,0.08)", border: `1px solid rgba(${t.rgb},0.4)` }}
+                  onClick={() => setPrivacyAccepted((v) => !v)}
+                >
+                  {privacyAccepted && (
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                <span className="text-xs" style={{ color: privacyAccepted ? "#fff" : "#8E8E93" }}>
+                  {pr.agreeToPrivacyPolicy}{" "}
+                  <a href="https://pnptv.app/privacy" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: t.color }}>
+                    {pr.privacyPolicyLabel}
+                  </a>
                 </span>
               </label>
             </>
