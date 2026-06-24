@@ -1438,6 +1438,63 @@ class CreatorService {
     return { success: true };
   }
 
+  static async checkAndUpgradeTier(userId) {
+    const { rows } = await query(
+      `SELECT creator_type, creator_subscriber_count FROM users WHERE id = $1 AND creator_status = 'active'`,
+      [userId]
+    );
+    const user = rows[0];
+    if (!user) return { upgraded: false, from: null, to: null };
+
+    const tierOrder = ['ice', 'crystal', 'diamond'];
+    const thresholds = { ice: 10, crystal: 25 };
+    const prices = { ice: 5.00, crystal: 10.00, diamond: 15.00 };
+
+    const currentTier = user.creator_type;
+    const subscriberCount = user.creator_subscriber_count || 0;
+
+    if (currentTier === 'diamond') return { upgraded: false, from: 'diamond', to: 'diamond' };
+
+    const currentIndex = tierOrder.indexOf(currentTier);
+    if (currentIndex === -1) return { upgraded: false, from: currentTier, to: null };
+
+    const nextTier = tierOrder[currentIndex + 1];
+    if (!nextTier) return { upgraded: false, from: currentTier, to: null };
+
+    const threshold = thresholds[currentTier];
+    if (subscriberCount < threshold) return { upgraded: false, from: currentTier, to: nextTier };
+
+    const newPrice = prices[nextTier];
+
+    await query(
+      `UPDATE users SET creator_type = $2, creator_price_usd = $3, updated_at = NOW() WHERE id = $1`,
+      [userId, nextTier, newPrice]
+    );
+
+    await query(
+      `UPDATE creator_enrollments SET tier = $2, updated_at = NOW()
+       WHERE user_id = $1 AND status = 'approved'`,
+      [userId, nextTier]
+    );
+
+    try {
+      NotificationEmitter.emit({
+        type: 'creator_tier_upgraded',
+        category: 'commerce',
+        priority: 'high',
+        actorId: userId,
+        targetUserId: userId,
+        entityType: 'creator_tier',
+        entityId: userId,
+        message: `Congratulations! Your creator profile has been upgraded to ${nextTier} tier 🎉 Your new subscription price is $${newPrice}/mo for new subscribers.`,
+      });
+    } catch (_) {}
+
+    logger.info('Creator tier upgraded', { userId, from: currentTier, to: nextTier, subscriberCount });
+
+    return { upgraded: true, from: currentTier, to: nextTier };
+  }
+
   static async rejectEnrollment(enrollmentId, adminId, notes) {
     const { rows } = await query('SELECT * FROM creator_enrollments WHERE id = $1', [enrollmentId]);
     const enrollment = rows[0];
