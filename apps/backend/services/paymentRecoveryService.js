@@ -845,9 +845,11 @@ class PaymentRecoveryService {
         `SELECT id, btcpay_invoice_id as order_id, user_id, plan_id, status, notes, created_at, creator_id, usd_amount, metadata
          FROM dash_subscription_orders
          WHERE (btcpay_invoice_id LIKE 'pnptv-nowp-%' OR btcpay_invoice_id LIKE 'call-%')
-           AND status IN ('pending', 'confirming', 'confirmed', 'partially_paid')
            AND created_at < NOW() - INTERVAL '15 minutes'
-           AND created_at > NOW() - INTERVAL '24 hours'
+           AND (
+             (status IN ('pending', 'confirming', 'confirmed', 'partially_paid') AND created_at > NOW() - INTERVAL '24 hours')
+             OR (status = 'expired' AND notes LIKE '%underpaid%' AND created_at > NOW() - INTERVAL '7 days')
+           )
          ORDER BY created_at ASC LIMIT 50`
       );
 

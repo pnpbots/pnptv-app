@@ -10589,23 +10589,28 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
 
   const order = lockRes.rows[0];
 
-  // NP-M-01: amount validation — reject underpayments > 1%
+  // NP-M-01: amount validation — reject underpayments > 2%
   // For cross-currency payments (e.g. BTC paying a USD invoice) compare actually_paid
-  // against pay_amount (both in pay_currency). Comparing BTC to USD directly was causing
-  // false underpayment detection and blocking legitimate finished payments.
+  // against pay_amount (both in pay_currency). If pay_amount is missing from the IPN body
+  // (observed with some BTC finished IPNs), skip the check entirely — the API verification
+  // above already confirmed the payment exists, and the reconciler will catch any real shortfall.
   if (actually_paid != null) {
     const paid = parseFloat(actually_paid);
     const isCrossCurrency = pay_currency && (price_currency || 'usd').toLowerCase() !== pay_currency.toLowerCase();
-    const referenceAmount = (isCrossCurrency && pay_amount != null)
-      ? parseFloat(pay_amount)
-      : (price_amount != null ? parseFloat(price_amount) : null);
-    if (referenceAmount != null && Number.isFinite(paid) && Number.isFinite(referenceAmount) && referenceAmount > 0 && paid < referenceAmount * 0.98) {
-      logger.warn('[NOWPayments] IPN: underpayment detected', { order_id, actually_paid, pay_amount, price_amount, pay_currency, isCrossCurrency });
-      await dbQuery(
-        `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
-        [order_id, `nowpayments:${payment_id}:underpaid:${actually_paid}/${referenceAmount}`]
-      );
-      return res.json({ received: true });
+    // Only run underpayment check when we can compare amounts in the same currency.
+    // Cross-currency with missing pay_amount would compare crypto vs fiat — skip to avoid false positives.
+    if (!isCrossCurrency || pay_amount != null) {
+      const referenceAmount = (isCrossCurrency && pay_amount != null)
+        ? parseFloat(pay_amount)
+        : (price_amount != null ? parseFloat(price_amount) : null);
+      if (referenceAmount != null && Number.isFinite(paid) && Number.isFinite(referenceAmount) && referenceAmount > 0 && paid < referenceAmount * 0.98) {
+        logger.warn('[NOWPayments] IPN: underpayment detected', { order_id, actually_paid, pay_amount, price_amount, pay_currency, isCrossCurrency });
+        await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'partially_paid', notes = $2 WHERE btcpay_invoice_id = $1`,
+          [order_id, `nowpayments:${payment_id}:underpaid:${actually_paid}/${referenceAmount}`]
+        );
+        return res.json({ received: true });
+      }
     }
   }
 
