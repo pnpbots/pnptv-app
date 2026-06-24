@@ -234,7 +234,7 @@ export default function CreatorEnrollmentWizard({
   const canProceedStep1 = guidelinesRead;
   const canProceedStep2 = termsAccepted && commitmentAccepted && privacyAccepted;
   const canProceedStep3 = paymentAddress.trim().length >= 3;
-  const canProceedStep4 = !!idFile && idLegalName.trim().length > 1 && idDob.length > 0 && idType.length > 0;
+  const canProceedStep4 = !!idFile && idLegalName.trim().length >= 1 && idDob.length > 0 && idType.length > 0;
   const canProceedStep5 = !!signatureData;
 
   return (
