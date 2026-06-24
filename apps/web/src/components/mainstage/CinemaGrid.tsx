@@ -8,6 +8,7 @@ import { Track, VideoQuality } from "livekit-client";
 import type { RemoteTrackPublication } from "livekit-client";
 import Hls from "hls.js";
 import { useI18n } from "@/lib/i18n";
+import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
 
 /**
  * Identity of the media-bot participant that publishes URL-backed media
@@ -75,14 +76,10 @@ function IconVolumeUp({ size = 16 }: { size?: number }) {
 
 function UrlMediaPlayer({ src, kind, playing, volume, startedAt }: UrlMediaPlayerProps) {
   const t = useI18n().live;
+  const { userMusicPlaying: userOptedIn, userMusicMuted: muted, setUserMusicPlaying: setUserOptedIn, setUserMusicMuted: setMuted } = useMainStageRoom();
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const hlsRef = useRef<Hls | null>(null);
-
-  // muted: audio output muted (user-controlled)
-  const [muted, setMuted] = useState(true);
-  // userOptedIn: user explicitly pressed Play — nothing plays until this is true
-  const [userOptedIn, setUserOptedIn] = useState(false);
   const [canPlay, setCanPlay] = useState(false);
 
   const isHls = /\.m3u8(\?|$)/i.test(src);

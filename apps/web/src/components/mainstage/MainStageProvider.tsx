@@ -109,6 +109,13 @@ export interface MainStageProviderValue {
 
   /** True when the persistent mini player is currently visible (off /main-stage with live content) */
   showMiniPlayer: boolean;
+
+  /** User's local play intent for Main Stage media — false by default, nothing auto-plays */
+  userMusicPlaying: boolean;
+  /** User's local mute preference for Main Stage media — true by default */
+  userMusicMuted: boolean;
+  setUserMusicPlaying: (v: boolean) => void;
+  setUserMusicMuted: (v: boolean) => void;
 }
 
 // ─── Mini Stage Player helpers ─────────────────────────────────────────────
@@ -238,6 +245,8 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   const [sessionLimitSeconds, setSessionLimitSeconds] = useState<number | null>(null);
   const [cooldownSeconds, setCooldownSeconds] = useState<number | null>(null);
   const [participantTier, setParticipantTier] = useState<'newcomer' | 'member' | 'prime' | 'admin' | null>(null);
+  const [userMusicPlaying, setUserMusicPlaying] = useState(false);
+  const [userMusicMuted, setUserMusicMuted] = useState(true);
   const roleRef = useRef<MainStageRole>(null);
   const roomNameRef = useRef("main-stage-prime");
   const userIdRef = useRef<string | null>(null);
@@ -866,6 +875,10 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       clearCooldown,
       participantTier,
       showMiniPlayer,
+      userMusicPlaying,
+      userMusicMuted,
+      setUserMusicPlaying,
+      setUserMusicMuted,
     }),
     [
       role,
@@ -886,6 +899,8 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       clearCooldown,
       participantTier,
       showMiniPlayer,
+      userMusicPlaying,
+      userMusicMuted,
     ]
   );
 
