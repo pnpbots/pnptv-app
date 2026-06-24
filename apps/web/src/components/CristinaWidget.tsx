@@ -354,10 +354,8 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   const { isPlaying: musicIsPlaying } = useMusicPlayer();
   const location = useLocation();
   const navigate = useNavigate();
-  const { state: msState, userMusicPlaying, userMusicMuted, setUserMusicPlaying, setUserMusicMuted } = useMainStageRoom();
+  useMainStageRoom(); // keep subscription alive — context consumed elsewhere
   const isOnMainStage = location.pathname === "/main-stage";
-  const msMedia = msState?.media;
-  const hasMsMedia = isOnMainStage && !!msMedia && msMedia.kind !== "off" && !!msMedia.src;
   const [isOpen, setIsOpen] = useState(mode === "page");
 
   // Self-Care satellite FAB — sits below Cristina, expands into a 3-button
@@ -403,12 +401,10 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   }, [selfCareFanOpen]);
   const [activeTab, setActiveTab] = useState<CristinaTab>("ai");
 
-  // When on Main Stage with active media, default to VJ tab and open the widget
+  // On Main Stage, default to the VJ/Radio tab so the player is front and centre
   useEffect(() => {
-    if (hasMsMedia) {
-      setActiveTab("vj");
-    }
-  }, [hasMsMedia]);
+    if (isOnMainStage) setActiveTab("vj");
+  }, [isOnMainStage]);
 
   // FAB auto-cycles through tab colors when closed
   const FAB_COLORS = [
@@ -897,24 +893,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
             className="absolute -inset-1 rounded-full"
             style={{ background: fabGradient, opacity: 0.25, filter: "blur(8px)" }}
           />
-          {hasMsMedia ? (
-            /* Main Stage player mode — vinyl icon replaces mermaid */
-            <span className="w-full h-full flex items-center justify-center relative">
-              <svg viewBox="0 0 24 24" className="w-6 h-6 text-white" fill="currentColor"
-                style={{ animation: userMusicPlaying ? "spin 3s linear infinite" : "none" }}>
-                <path d="M12 3a9 9 0 100 18A9 9 0 0012 3zm0 4a2 2 0 110 4 2 2 0 010-4zm0 10a5 5 0 01-4.9-4h9.8A5 5 0 0112 17z"/>
-              </svg>
-              {!userMusicPlaying && (
-                <span className="absolute inset-0 flex items-center justify-center">
-                  <svg viewBox="0 0 24 24" className="w-4 h-4 text-white/90" fill="currentColor">
-                    <path d="M8 5v14l11-7z"/>
-                  </svg>
-                </span>
-              )}
-            </span>
-          ) : (
-            <span role="img" aria-label="Cristina AI" className="w-full h-full flex items-center justify-center text-lg relative">🧜‍♀️</span>
-          )}
+          <span role="img" aria-label="Cristina AI" className="w-full h-full flex items-center justify-center text-lg relative">🧜‍♀️</span>
           {/* Unread reply notification dot */}
           {hasUnreadReply && (
             <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5">
@@ -923,7 +902,7 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
             </span>
           )}
           {/* Music playing indicator */}
-          {(musicIsPlaying || (hasMsMedia && userMusicPlaying)) && !hasUnreadReply && (
+          {musicIsPlaying && !hasUnreadReply && (
             <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-500 ring-2 ring-[rgba(20,20,30,0.98)] animate-pulse" />
           )}
         </button>
@@ -1058,13 +1037,11 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           className={`flex-1 py-2 text-[11px] font-semibold text-center transition-colors ${activeTab === "vj" ? "text-purple-400" : "text-gray-500 hover:text-gray-300"}`}
           style={activeTab === "vj" ? { borderBottom: "2px solid #8B5CF6" } : { borderBottom: "2px solid transparent" }}
         >
-          {hasMsMedia
-            ? (userMusicPlaying ? <><EqualizerBars color="#D4007A" size="sm" /> Main Stage</> : "▶ Main Stage")
-            : musicIsPlaying ? <><EqualizerBars color="#8B5CF6" size="sm" /> Radio</> : "🛫 Radio"}
+          {musicIsPlaying ? <><EqualizerBars color="#8B5CF6" size="sm" /> Radio</> : "🛫 Radio"}
         </button>
       </div>
 
-      {/* ── VJ Tab — Main Stage player OR Radio ──────────────────────── */}
+      {/* ── VJ Tab (Radio Panel) ──────────────────────────────────────── */}
       <div id="tabpanel-vj" role="tabpanel" aria-labelledby="tab-vj" style={{ display: activeTab === "vj" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
         {/* Return to support strip */}
         <div className="bg-pnp-bg/90 border-b border-white/5 py-1.5 px-3 flex items-center justify-between">
@@ -1075,105 +1052,11 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
             <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <path d="m15 18-6-6 6-6"/>
             </svg>
-            {hasMsMedia ? "Return to Chat" : "Return to Support"}
+            Return to Support
           </button>
-          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-tighter">
-            {hasMsMedia ? "Main Stage Player" : "VJ Player Mode"}
-          </span>
+          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-tighter">VJ Player Mode</span>
         </div>
-
-        {hasMsMedia ? (
-          /* ── Main Stage inline player ── */
-          <div className="flex flex-col items-center justify-center flex-1 gap-6 p-6">
-            {/* Vinyl disc / video icon */}
-            <div
-              className="relative w-24 h-24 rounded-full flex items-center justify-center flex-shrink-0"
-              style={{
-                background: msMedia?.kind === "music"
-                  ? "radial-gradient(circle at 30% 30%, rgba(212,0,122,0.5), rgba(123,97,255,0.3) 60%, rgba(0,0,0,0.7) 100%)"
-                  : "radial-gradient(circle at 30% 30%, rgba(94,209,196,0.4), rgba(0,212,232,0.2) 60%, rgba(0,0,0,0.7) 100%)",
-                boxShadow: userMusicPlaying
-                  ? "0 0 40px rgba(212,0,122,0.5), 0 12px 40px rgba(0,0,0,0.5)"
-                  : "0 8px 30px rgba(0,0,0,0.5)",
-                animation: (msMedia?.kind === "music" && userMusicPlaying) ? "spin 8s linear infinite" : "none",
-              }}
-            >
-              <div className="absolute inset-0 rounded-full" style={{ border: "1px solid rgba(255,255,255,0.12)" }} />
-              {msMedia?.kind === "music" ? (
-                <svg className="w-10 h-10 text-white/90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
-                </svg>
-              ) : (
-                <svg className="w-10 h-10 text-white/90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-3.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-1.5A1.125 1.125 0 0118 18.375M20.625 4.5H3.375m17.25 0c.621 0 1.125.504 1.125 1.125M20.625 4.5h-1.5C18.504 4.5 18 5.004 18 5.625m3.75 0v1.5c0 .621-.504 1.125 1.125 1.125" />
-                </svg>
-              )}
-            </div>
-
-            {/* Track / status */}
-            <div className="text-center w-full">
-              <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "#D4007A" }}>
-                {msMedia?.kind === "music" ? "Music" : "Video"} · Main Stage
-              </p>
-              <p className="text-white/80 text-xs font-semibold truncate px-2">
-                {msMedia?.title || (msMedia?.src ? decodeURIComponent(msMedia.src.split("/").pop() || msMedia.src) : "—")}
-              </p>
-              <p className="text-white/30 text-[10px] mt-1">
-                {userMusicPlaying ? (msMedia?.kind === "music" ? "Playing · " : "Video · ") : "Paused · "}
-                {userMusicMuted ? "Muted" : "Sound on"}
-              </p>
-            </div>
-
-            {/* Controls */}
-            <div className="flex items-center gap-4">
-              {/* Mute toggle */}
-              <button
-                type="button"
-                onClick={() => setUserMusicMuted(!userMusicMuted)}
-                disabled={!userMusicPlaying}
-                aria-label={userMusicMuted ? "Unmute" : "Mute"}
-                className="w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
-                style={{
-                  background: userMusicMuted ? "rgba(255,255,255,0.06)" : "rgba(94,209,196,0.15)",
-                  border: userMusicMuted ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(94,209,196,0.4)",
-                  color: userMusicMuted ? "rgba(255,255,255,0.4)" : "#5ED1C4",
-                }}
-              >
-                {userMusicMuted ? (
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2a4.5 4.5 0 00-2.5-4v8a4.5 4.5 0 002.5-4z"/></svg>
-                )}
-              </button>
-
-              {/* Play / Pause */}
-              <button
-                type="button"
-                onClick={() => setUserMusicPlaying(!userMusicPlaying)}
-                aria-label={userMusicPlaying ? "Pause" : "Play"}
-                className="w-16 h-16 rounded-full flex items-center justify-center text-white transition-all active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-500"
-                style={{
-                  background: userMusicPlaying
-                    ? "rgba(255,255,255,0.08)"
-                    : "linear-gradient(135deg,#D4007A,#7B61FF)",
-                  border: userMusicPlaying ? "1px solid rgba(255,255,255,0.18)" : "none",
-                  boxShadow: userMusicPlaying ? "none" : "0 6px 24px rgba(212,0,122,0.45)",
-                }}
-              >
-                {userMusicPlaying ? (
-                  <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
-                )}
-              </button>
-
-              {/* Spacer to balance */}
-              <div className="w-10" />
-            </div>
-          </div>
-        ) : (
-          <RadioPanel onClose={() => setIsOpen(false)} />
-        )}
+        <RadioPanel onClose={() => setIsOpen(false)} />
       </div>
 
       {/* ── AI Chat Tab ───────────────────────────────────────────────── */}
