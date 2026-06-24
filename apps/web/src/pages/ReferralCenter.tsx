@@ -73,7 +73,7 @@ export default function ReferralCenter() {
 
   useEffect(() => { load(); }, [load]);
 
-  const referralUrl = stats ? `https://pnptv.app/join?ref=${stats.code}` : "";
+  const referralUrl = stats?.link ?? "";
 
   return (
     <div

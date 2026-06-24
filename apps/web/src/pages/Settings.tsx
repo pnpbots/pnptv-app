@@ -21,7 +21,7 @@ const HASH_REDIRECTS: Record<string, string> = {
   // Aliases from the old section titles
   "#data-privacy":  "/settings/privacy",
   "#wallet":        "/settings/payments",
-  "#referral":      "/settings/account",
+  "#referral":      "/referrals",
 };
 
 // ── Category row data ─────────────────────────────────────────────────────────
@@ -115,6 +115,34 @@ function SettingsIndex() {
             <p className="text-sm font-bold text-white">{p.selfCarePromoTitle}</p>
             <p className="text-xs leading-relaxed" style={{ color: "rgba(255,255,255,0.65)" }}>
               {p.selfCarePromoBody}
+            </p>
+          </div>
+          <span className="text-white/30 text-lg leading-none flex-shrink-0" aria-hidden>›</span>
+        </div>
+      </button>
+
+      {/* ── Referral Center shortcut ── */}
+      <button
+        type="button"
+        onClick={() => navigate("/referrals")}
+        className="w-full text-left rounded-2xl p-4 mb-2 transition-all hover:scale-[1.005] active:scale-[0.99]"
+        style={{
+          background: "linear-gradient(135deg, rgba(212,0,122,0.10), rgba(155,0,176,0.06))",
+          border: "1px solid rgba(212,0,122,0.22)",
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl"
+            style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.30)" }}
+            aria-hidden
+          >
+            🔗
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-white">{p.referralProgram}</p>
+            <p className="text-xs leading-relaxed" style={{ color: "rgba(255,255,255,0.55)" }}>
+              {p.referralInviteDesc} {p.referralFreePrime}
             </p>
           </div>
           <span className="text-white/30 text-lg leading-none flex-shrink-0" aria-hidden>›</span>

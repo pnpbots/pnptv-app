@@ -555,7 +555,7 @@ export default function AccountSettings() {
                 {referralCopied ? p.copied : p.copy}
               </button>
             </div>
-            <div className="flex gap-4">
+            <div className="flex gap-4 mb-3">
               <div className="text-center">
                 <div className="text-xl font-bold text-white">{referralStats.total}</div>
                 <div className="text-[10px]" style={{ color: "var(--pnp-text-secondary)" }}>{p.invited}</div>
@@ -569,6 +569,21 @@ export default function AccountSettings() {
                 <div className="text-[10px]" style={{ color: "var(--pnp-text-secondary)" }}>{p.tokensEarned ?? p.daysEarned}</div>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => navigate("/referrals")}
+              className="w-full py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
+              style={{
+                background: "rgba(212,0,122,0.10)",
+                border: "1px solid rgba(212,0,122,0.25)",
+                color: "#D4007A",
+              }}
+            >
+              {uiLang?.toLowerCase().startsWith("en") ? "View Referral Center" : "Ver Centro de Referidos"}
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </button>
           </>
         ) : (
           <p className="text-xs" style={{ color: "var(--pnp-text-secondary)" }}>{p.referralLoadError}</p>
