@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useI18n } from "@/lib/i18n";
 import { getNotificationDeepLink } from "@/lib/notificationDeepLink";
+import { getNotifications as fetchNotificationsApi } from "@/lib/api";
 import type { Notification } from "@/lib/api";
 
 type Category = "all" | "social" | "messaging" | "hangouts" | "other";
@@ -54,11 +55,64 @@ interface Props {
   isMobile?: boolean;
 }
 
+// Categories that map 1:1 to a backend category value
+const SERVER_FILTERED_CATEGORIES = new Set(["social", "messaging", "hangouts"]);
+
 export function NotificationDropdown({ onClose, isMobile = false }: Props) {
-  const { notifications, markAllRead, markRead, isLoading, error, fetchMore, hasMore } = useNotifications();
+  const {
+    notifications, markAllRead, markRead, isLoading, error, fetchMore, hasMore,
+    categoryUnreadCounts, unreadCount,
+  } = useNotifications();
   const t = useI18n();
   const [activeCategory, setActiveCategory] = useState<Category>("all");
   const navigate = useNavigate();
+
+  // State for server-filtered category views (social / messaging / hangouts)
+  const [catNotifs, setCatNotifs] = useState<Notification[]>([]);
+  const [catLoading, setCatLoading] = useState(false);
+  const [catError, setCatError] = useState(false);
+  const [catHasMore, setCatHasMore] = useState(false);
+  const [catOffset, setCatOffset] = useState(0);
+  const fetchAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!SERVER_FILTERED_CATEGORIES.has(activeCategory)) return;
+
+    // Cancel any in-flight request
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
+
+    setCatNotifs([]);
+    setCatOffset(0);
+    setCatHasMore(false);
+    setCatError(false);
+    setCatLoading(true);
+
+    fetchNotificationsApi(30, 0, activeCategory)
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setCatNotifs(res.notifications);
+        setCatHasMore(res.hasMore ?? false);
+        setCatOffset(res.notifications.length);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setCatError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCatLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [activeCategory]);
+
+  const fetchMoreCat = async () => {
+    const res = await fetchNotificationsApi(30, catOffset, activeCategory);
+    setCatNotifs((prev) => [...prev, ...res.notifications]);
+    setCatHasMore(res.hasMore ?? false);
+    setCatOffset((prev) => prev + res.notifications.length);
+  };
 
   const CATEGORIES: { key: Category; label: string }[] = [
     { key: "all", label: t.notifications.all },
@@ -68,27 +122,42 @@ export function NotificationDropdown({ onClose, isMobile = false }: Props) {
     { key: "other", label: t.notifications.other },
   ];
 
-  const unreadByCategory = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const n of notifications) {
-      if (n.isRead) continue;
-      const cat = ["social", "messaging", "hangouts"].includes(n.category ?? "") ? n.category! : "other";
-      counts.all = (counts.all ?? 0) + 1;
-      counts[cat] = (counts[cat] ?? 0) + 1;
-    }
-    return counts;
-  }, [notifications]);
+  // Badge counts from server (accurate across all notifications, not just loaded 30)
+  const unreadByCategory: Record<string, number> = {
+    all: unreadCount,
+    social: categoryUnreadCounts.social ?? 0,
+    messaging: categoryUnreadCounts.messaging ?? 0,
+    hangouts: categoryUnreadCounts.hangouts ?? 0,
+    other: (categoryUnreadCounts.commerce ?? 0) + (categoryUnreadCounts.system ?? 0) + (categoryUnreadCounts.announcements ?? 0),
+  };
 
-  const filtered = notifications.filter((n) => {
-    if (activeCategory === "all") return true;
-    if (activeCategory === "other") return !["social", "messaging", "hangouts"].includes(n.category ?? "");
-    return n.category === activeCategory;
-  });
+  // For "other", client-filter the loaded "all" notifications
+  const otherNotifs = notifications.filter(
+    (n) => !["social", "messaging", "hangouts"].includes(n.category ?? "")
+  );
+
+  // Resolve which list / loading / hasMore to use for the current view
+  const isServerCat = SERVER_FILTERED_CATEGORIES.has(activeCategory);
+  const displayNotifs = activeCategory === "all"
+    ? notifications
+    : isServerCat
+      ? catNotifs
+      : otherNotifs;
+  const displayLoading = activeCategory === "all" ? isLoading : (isServerCat ? catLoading : false);
+  const displayError = activeCategory === "all" ? error : (isServerCat && catError ? "Failed to load" : null);
+  const displayHasMore = activeCategory === "all" ? hasMore : (isServerCat ? catHasMore : false);
+  const handleFetchMore = activeCategory === "all" ? fetchMore : fetchMoreCat;
 
   const hasUnread = notifications.some((n) => !n.isRead);
 
   const handleTap = (notif: Notification) => {
-    if (!notif.isRead) markRead([Number(notif.id)]);
+    if (!notif.isRead) {
+      markRead([Number(notif.id)]);
+      // Also optimistically mark read in the category view
+      if (isServerCat) {
+        setCatNotifs((prev) => prev.map((n) => n.id === notif.id ? { ...n, isRead: true } : n));
+      }
+    }
     onClose();
     navigate(getNotificationDeepLink(notif));
   };
@@ -156,10 +225,13 @@ export function NotificationDropdown({ onClose, isMobile = false }: Props) {
       </div>
 
       {/* Mark all read */}
-      {hasUnread && !isLoading && !error && (
+      {hasUnread && !displayLoading && !displayError && (
         <div className="px-4 py-2 border-b border-pnp-border/50 shrink-0">
           <button
-            onClick={async () => { await markAllRead(); }}
+            onClick={async () => {
+              await markAllRead();
+              setCatNotifs((prev) => prev.map((n) => ({ ...n, isRead: true })));
+            }}
             className={`w-full text-center text-xs text-pnp-accent hover:underline rounded py-0.5 ${focusRing}`}
           >
             {t.notifications.markAllRead}
@@ -168,7 +240,7 @@ export function NotificationDropdown({ onClose, isMobile = false }: Props) {
       )}
 
       {/* Loading state */}
-      {isLoading && (
+      {displayLoading && (
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="flex items-start gap-3 px-1 py-1 animate-pulse">
@@ -183,7 +255,7 @@ export function NotificationDropdown({ onClose, isMobile = false }: Props) {
       )}
 
       {/* Error state */}
-      {!isLoading && error && (
+      {!displayLoading && displayError && (
         <div className="flex-1 flex flex-col items-center justify-center py-10 px-4 gap-3 text-center">
           <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-pnp-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
@@ -199,15 +271,15 @@ export function NotificationDropdown({ onClose, isMobile = false }: Props) {
       )}
 
       {/* Notification list */}
-      {!isLoading && !error && (
+      {!displayLoading && !displayError && (
         <div className="flex-1 overflow-y-auto no-scrollbar">
-          {filtered.length === 0 ? (
+          {displayNotifs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-pnp-textSecondary text-sm">
               {activeCategory === "all" ? t.notifications.noNotifications : t.notifications.noNotificationsInCategory}
             </div>
           ) : (
             <>
-              {filtered.map((notif) => (
+              {displayNotifs.map((notif) => (
                 <button
                   key={notif.id}
                   onClick={() => handleTap(notif)}
@@ -245,10 +317,10 @@ export function NotificationDropdown({ onClose, isMobile = false }: Props) {
                 </button>
               ))}
 
-              {hasMore && (
+              {displayHasMore && (
                 <div className="p-3 flex justify-center">
                   <button
-                    onClick={fetchMore}
+                    onClick={handleFetchMore}
                     className={`text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors px-3 py-2 rounded-lg hover:bg-white/5 active:bg-white/10 ${focusRing}`}
                   >
                     {t.notifications.loadMore}

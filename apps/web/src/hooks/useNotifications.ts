@@ -57,6 +57,7 @@ interface ToastData {
 interface NotificationsState {
   notifications: Notification[];
   unreadCount: number;
+  categoryUnreadCounts: Record<string, number>;
   latestToast: ToastData | null;
   isConnected: boolean;
   isLoading: boolean;
@@ -74,6 +75,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const { isAuthenticated, user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [categoryUnreadCounts, setCategoryUnreadCounts] = useState<Record<string, number>>({});
   const [latestToast, setLatestToast] = useState<ToastData | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -96,6 +98,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         ]);
         setNotifications(notifRes.notifications);
         setUnreadCount(countRes.counts.total);
+        setCategoryUnreadCounts(countRes.counts as Record<string, number>);
         setOffset(notifRes.notifications.length);
         setHasMore(notifRes.notifications.length >= 30);
       } catch (err) {
@@ -211,6 +214,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       await markNotificationsAsRead("all");
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
       setUnreadCount(0);
+      setCategoryUnreadCounts({});
     } catch {
       // ignore
     }
@@ -238,6 +242,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         try {
           const countRes = await fetchCounts();
           setUnreadCount(countRes.counts.total);
+          setCategoryUnreadCounts(countRes.counts as Record<string, number>);
         } catch {
           // Non-fatal: leave the count as-is if the refetch fails
         }
@@ -265,6 +270,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const value: NotificationsState = {
     notifications,
     unreadCount,
+    categoryUnreadCounts,
     latestToast,
     isConnected,
     isLoading,

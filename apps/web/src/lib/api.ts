@@ -2605,7 +2605,8 @@ export interface NotificationCounts {
 
 export function getNotifications(
   limit?: number,
-  offset?: number
+  offset?: number,
+  category?: string
 ): Promise<{
   success: boolean;
   notifications: Notification[];
@@ -2617,6 +2618,7 @@ export function getNotifications(
   const params = new URLSearchParams();
   if (limit) params.append("limit", limit.toString());
   if (offset != null && offset > 0) params.append("offset", offset.toString());
+  if (category) params.append("category", category);
   return request(`/api/webapp/notifications?${params.toString()}`);
 }
 
