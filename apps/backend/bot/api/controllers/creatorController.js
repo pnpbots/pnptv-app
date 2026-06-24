@@ -368,7 +368,7 @@ const changeTier = async (req, res) => {
 // POST /api/webapp/creator/enroll
 const submitEnrollment = async (req, res) => {
   try {
-    const { tier, paymentMethod, paymentAddress, paymentNetwork, signatureData } = req.body || {};
+    const { tier, paymentMethod, paymentAddress, paymentNetwork, signatureData, legalName, dateOfBirth, idType } = req.body || {};
     const idDocumentPath = req.file
       ? `/uploads/creator-enrollments/${req.file.filename}`
       : null;
@@ -379,6 +379,24 @@ const submitEnrollment = async (req, res) => {
       idDocumentPath,
       ip
     );
+
+    // Auto-create the 2257 identity record from enrollment data so the user
+    // doesn't hit a second ID-upload form on /creators/apply.
+    if (idDocumentPath && legalName && dateOfBirth && idType) {
+      try {
+        await IdentityVerificationService.submit2257Record(req.user.id, {
+          legalName,
+          dateOfBirth,
+          idType,
+          idDocumentPath,
+          ip,
+        });
+      } catch (idErr) {
+        // Non-fatal — enrollment is saved. Creator can submit 2257 manually on /creators/apply.
+        logger.warn(`submitEnrollment: 2257 auto-create failed for user ${req.user.id}: ${idErr.message}`);
+      }
+    }
+
     return res.json({ success: true, ...result });
   } catch (err) {
     logger.error('submitEnrollment error', err);

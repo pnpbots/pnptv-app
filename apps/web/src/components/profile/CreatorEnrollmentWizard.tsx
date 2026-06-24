@@ -180,9 +180,12 @@ export default function CreatorEnrollmentWizard({
   const [paymentAddress, setPaymentAddress] = useState("");
   const [paymentNetwork, setPaymentNetwork] = useState("dash");
 
-  // Step 4 state (ID + signature)
+  // Step 4 state (ID + 2257 fields + signature)
   const [idFile, setIdFile] = useState<File | null>(null);
   const [idPreview, setIdPreview] = useState<string | null>(null);
+  const [idLegalName, setIdLegalName] = useState("");
+  const [idDob, setIdDob] = useState("");
+  const [idType, setIdType] = useState("");
   const [signatureData, setSignatureData] = useState("");
 
   // Submit state
@@ -200,6 +203,9 @@ export default function CreatorEnrollmentWizard({
 
   const handleSubmit = async () => {
     if (!idFile) { setSubmitError(pr.idDocumentRequired); return; }
+    if (!idLegalName.trim()) { setSubmitError(pr.legalNameRequired); return; }
+    if (!idDob) { setSubmitError(pr.dobRequired); return; }
+    if (!idType) { setSubmitError(pr.idTypeRequired); return; }
     if (!signatureData) { setSubmitError(pr.signatureRequired); return; }
     if (!paymentAddress.trim()) { setSubmitError(pr.paymentAddressRequired); return; }
     setSubmitting(true);
@@ -212,6 +218,9 @@ export default function CreatorEnrollmentWizard({
         paymentNetwork,
         signatureData,
         idDocument: idFile,
+        legalName: idLegalName.trim(),
+        dateOfBirth: idDob,
+        idType,
       });
       onSubmitted();
     } catch (err) {
@@ -224,7 +233,7 @@ export default function CreatorEnrollmentWizard({
   const canProceedStep1 = guidelinesRead;
   const canProceedStep2 = termsAccepted && commitmentAccepted;
   const canProceedStep3 = paymentAddress.trim().length >= 3;
-  const canProceedStep4 = !!idFile;
+  const canProceedStep4 = !!idFile && idLegalName.trim().length > 1 && idDob.length > 0 && idType.length > 0;
   const canProceedStep5 = !!signatureData;
 
   return (
@@ -471,6 +480,55 @@ export default function CreatorEnrollmentWizard({
                 <p style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                   {pr.idVerificationExplanation}
                 </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium block mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                  {pr.idLegalFullName} <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={idLegalName}
+                  onChange={(e) => setIdLegalName(e.target.value)}
+                  placeholder="e.g. John Michael Smith"
+                  className="w-full rounded-lg px-3 py-2.5 text-white outline-none"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
+                  autoComplete="name"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium block mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                    {pr.idDateOfBirth} <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={idDob}
+                    onChange={(e) => setIdDob(e.target.value)}
+                    max={new Date(Date.now() - 18 * 365.25 * 24 * 3600 * 1000).toISOString().split("T")[0]}
+                    className="w-full rounded-lg px-3 py-2.5 text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px", colorScheme: "dark" }}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium block mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                    {pr.idTypeLabel} <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={idType}
+                    onChange={(e) => setIdType(e.target.value)}
+                    className="w-full rounded-lg px-3 py-2.5 text-white outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
+                  >
+                    <option value="" disabled>{pr.idTypePlaceholder}</option>
+                    <option value="passport">Passport</option>
+                    <option value="drivers_license">Driver's License</option>
+                    <option value="national_id">National ID</option>
+                    <option value="state_id">State / Province ID</option>
+                    <option value="other">Other Gov. ID</option>
+                  </select>
+                </div>
               </div>
 
               <div>

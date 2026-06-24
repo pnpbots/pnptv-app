@@ -3828,6 +3828,9 @@ export async function submitCreatorEnrollment(data: {
   paymentNetwork: string;
   signatureData: string;
   idDocument: File;
+  legalName: string;
+  dateOfBirth: string;
+  idType: string;
 }): Promise<{ success: boolean; submitted: boolean; tier: string; status: string }> {
   const formData = new FormData();
   formData.append("tier", data.tier);
@@ -3836,6 +3839,9 @@ export async function submitCreatorEnrollment(data: {
   formData.append("paymentNetwork", data.paymentNetwork);
   formData.append("signatureData", data.signatureData);
   formData.append("idDocument", data.idDocument);
+  formData.append("legalName", data.legalName);
+  formData.append("dateOfBirth", data.dateOfBirth);
+  formData.append("idType", data.idType);
 
   const res = await fetch(`${API_BASE}/api/webapp/creator/enroll`, {
     method: "POST",
