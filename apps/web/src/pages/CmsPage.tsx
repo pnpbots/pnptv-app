@@ -20,10 +20,14 @@ export default function CmsPage() {
   const [accepting, setAccepting] = useState(false);
   const [accepted, setAccepted] = useState(false);
 
-  const showConsentBar = !loading && !!page && isAuthenticated && CONSENT_SLUGS.has(slug);
+  const showConsentBar = !loading && !!page && CONSENT_SLUGS.has(slug);
 
   const handleAccept = async () => {
     if (accepting || accepted) return;
+    if (!isAuthenticated) {
+      navigate(`/login?returnTo=${encodeURIComponent(location.pathname)}`);
+      return;
+    }
     setAccepting(true);
     try {
       await acceptTerms();
