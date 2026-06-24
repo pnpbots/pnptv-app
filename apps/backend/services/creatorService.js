@@ -255,6 +255,25 @@ class CreatorService {
       [app.user_id]
     );
 
+    // C-04: ensure the full-time application path produces a creator_2257_records row.
+    // Apply.tsx collects legal_full_name + date_of_birth + ID docs; the self-service
+    // enrollment flow writes to creator_2257_records directly, but the full-time path
+    // does not. Upsert here so admin approval always leaves a 2257 record behind.
+    if (app.legal_full_name || app.id_front_url) {
+      await query(
+        `INSERT INTO creator_2257_records
+           (user_id, legal_name, date_of_birth, id_document_path, verification_status,
+            submitted_at, verified_at, admin_notes)
+         VALUES ($1, $2, $3, $4, 'admin_approved', NOW(), NOW(), 'Auto-created from approved full-time application')
+         ON CONFLICT (user_id) DO UPDATE SET
+           verification_status = EXCLUDED.verification_status,
+           verified_at         = EXCLUDED.verified_at,
+           admin_notes         = EXCLUDED.admin_notes
+           WHERE creator_2257_records.verification_status NOT IN ('verified', 'admin_approved')`,
+        [app.user_id, app.legal_full_name || null, app.date_of_birth || null, app.id_front_url || null]
+      );
+    }
+
     // Grant lifetime pnp-member so the approved creator immediately has full access
     await this._grantCreatorMembership(app.user_id);
 

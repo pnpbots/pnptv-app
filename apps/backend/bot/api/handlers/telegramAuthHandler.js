@@ -428,19 +428,29 @@ const handleAcceptTerms = async (req, res) => {
       });
     }
     
-    // Update user's terms acceptance in database
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+    const termsVersion = process.env.TERMS_VERSION || '2026-01-01';
+
+    // Update user's terms + privacy acceptance in database with audit trail
     await query(
-      'UPDATE users SET terms_accepted = TRUE WHERE id = $1',
-      [user.id]
+      `UPDATE users SET
+         terms_accepted        = TRUE,
+         privacy_accepted      = TRUE,
+         terms_accepted_at     = NOW(),
+         terms_accepted_ip     = $2,
+         terms_version         = $3
+       WHERE id = $1`,
+      [user.id, ip, termsVersion]
     );
-    
-    // Update session
+
+    // Update session so the consent middleware sees fresh state immediately
     req.session.user.acceptedTerms = true;
+    req.session.user.ageVerified = req.session.user.ageVerified || false;
     await new Promise((resolve, reject) => {
       req.session.save((err) => (err ? reject(err) : resolve()));
     });
 
-    logger.info(`User ${user.id} accepted terms and conditions`);
+    logger.info(`User ${user.id} accepted terms v${termsVersion}`, { ip });
     res.json({ success: true });
     
   } catch (error) {

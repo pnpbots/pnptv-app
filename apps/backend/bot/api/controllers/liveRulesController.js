@@ -76,8 +76,8 @@ const acknowledgeRules = async (req, res) => {
   try {
     const pool = getPool();
     await pool.query(
-      `INSERT INTO live_rules_acknowledgments (user_id, version)
-       VALUES ($1, $2)
+      `INSERT INTO live_rules_acknowledgments (user_id, version, acknowledged_at)
+       VALUES ($1, $2, NOW())
        ON CONFLICT (user_id, version) DO NOTHING`,
       [String(user.id), LIVE_RULES_VERSION]
     );

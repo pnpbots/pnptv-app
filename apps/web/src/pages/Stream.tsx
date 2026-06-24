@@ -577,11 +577,6 @@ function StreamInner() {
       return;
     }
     const channelRef = streamId ? extractChannelRef(streamId) : null;
-    // localStorage fallback key MUST be tied to a real user id. Without one
-    // the key collapses to `live_rules_ack_undefined` which gets shared
-    // across every account that uses this device — a returning user could
-    // bypass the rules gate based on a previous user's acknowledgment.
-    const cacheKey = user?.id ? `live_rules_ack_${user.id}` : null;
     setRulesLoading(true);
     getLiveRulesStatus(channelRef)
       .then((data) => {
@@ -589,18 +584,14 @@ function StreamInner() {
           setRulesAcknowledged(data.acknowledged);
           setCreatorRules(data.creatorRules ?? null);
           setCreatorRulesName(data.creatorName ?? null);
-        } else if (cacheKey) {
-          // On unexpected API error, fail closed; use localStorage cache as fallback
-          const cached = localStorage.getItem(cacheKey);
-          setRulesAcknowledged(cached === 'true');
+        } else {
+          // Unexpected API error — fail closed, show the rules modal
+          setRulesAcknowledged(false);
         }
       })
       .catch(() => {
-        // Network failure — fail closed; use localStorage cache as fallback
-        if (cacheKey) {
-          const cached = localStorage.getItem(cacheKey);
-          setRulesAcknowledged(cached === 'true');
-        }
+        // Network failure — fail closed, show the rules modal
+        setRulesAcknowledged(false);
       })
       .finally(() => {
         setRulesLoading(false);
@@ -610,15 +601,12 @@ function StreamInner() {
   const handleAcknowledgeRules = useCallback(async () => {
     try {
       await acknowledgeLiveRules();
+      setRulesAcknowledged(true);
     } catch {
-      // Persist locally even if the network call fails — the user has seen the rules
-      console.warn("[LiveRules] Failed to persist acknowledgment — session may have expired");
+      // Server call failed — do not mark acknowledged; user must retry
+      console.warn("[LiveRules] Failed to persist acknowledgment — will retry on next load");
     }
-    if (user?.id) {
-      localStorage.setItem(`live_rules_ack_${user.id}`, 'true');
-    }
-    setRulesAcknowledged(true);
-  }, [user?.id]);
+  }, []);
 
   // ── Raid: drive countdown and auto-navigate when a raid event arrives ────────
   useEffect(() => {

@@ -122,10 +122,24 @@ const requireSessionAuth = async (req, res, next) => {
     const banKey = `user:banned:${userId}`;
     const cachedBan = await cache.get(banKey);
     if (cachedBan === 'true') return res.status(403).json({ success: false, error: 'Account suspended.', code: 'BANNED' });
-    const { rows } = await getPool().query('SELECT role FROM users WHERE id = $1', [userId]);
-    if (rows[0]?.role === 'banned') {
+    const { rows } = await getPool().query(
+      'SELECT role, terms_accepted, age_verified FROM users WHERE id = $1',
+      [userId]
+    );
+    const userRow = rows[0];
+    if (userRow?.role === 'banned') {
       await cache.set(banKey, 'true', 120);
       return res.status(403).json({ success: false, error: 'Account suspended.', code: 'BANNED' });
+    }
+    // Consent gate — admins bypass; all other authenticated users must have completed
+    // the VerificationGate (age self-declaration + terms acceptance).
+    if (userRow && userRow.role !== 'admin' && userRow.role !== 'superadmin') {
+      if (!userRow.age_verified) {
+        return res.status(403).json({ success: false, error: 'Age verification required.', code: 'AGE_VERIFICATION_REQUIRED' });
+      }
+      if (!userRow.terms_accepted) {
+        return res.status(403).json({ success: false, error: 'Terms acceptance required.', code: 'CONSENT_REQUIRED' });
+      }
     }
   } catch (err) {
     logger.error('requireSessionAuth ban check failed — failing closed', { userId, error: err.message });
