@@ -132,7 +132,7 @@ const listStreams = async (req, res) => {
     const token = await getRestreamerToken(restreamerUrl);
     const processes = await fetchRestreamerProcesses(restreamerUrl, token);
 
-    const baseStreams = processes
+    let baseStreams = processes
       .map((p) => {
         const rawRefId = p.reference || p.id;
         const refId = sanitizeRefId(rawRefId);
@@ -149,6 +149,29 @@ const listStreams = async (req, res) => {
         };
       })
       .filter(Boolean);
+
+    // Filter out streams owned by creators who have not completed onboarding.
+    // Admins and superadmins see all streams regardless.
+    if (!['admin', 'superadmin'].includes(user.role) && baseStreams.length > 0) {
+      const refIds = baseStreams.map((s) => s.id);
+      const { rows: blockedRows } = await getPool().query(
+        `SELECT live_channel FROM users
+         WHERE live_channel = ANY($1::text[])
+           AND NOT (
+             creator_status = 'active'
+             AND creator_locked = FALSE
+             AND (
+               identity_verified = TRUE
+               OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())
+             )
+           )`,
+        [refIds]
+      );
+      if (blockedRows.length > 0) {
+        const blockedRefs = new Set(blockedRows.map((r) => r.live_channel));
+        baseStreams = baseStreams.filter((s) => !blockedRefs.has(s.id));
+      }
+    }
 
     // Augment streams with metadata and host info from Redis
     const redis = getRedis();

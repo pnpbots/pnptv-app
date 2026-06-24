@@ -635,22 +635,6 @@ app.use(conditionalMiddleware(helmet({
         "'unsafe-inline'",
         "'unsafe-eval'",
         "https://code.jquery.com",
-        "https://cdn.epayco.co",
-        "https://multimedia.epayco.co",
-        "https://checkout.epayco.co",
-        "https://secure.epayco.co",
-        "https://secure.payco.co",
-        "https://api.secure.payco.co",
-        "https://songbird.cardinalcommerce.com",
-        "https://songbirdstag.cardinalcommerce.com",
-        "https://centinelapi.cardinalcommerce.com",
-        "https://centinelapistag.cardinalcommerce.com",
-        "https://3ds.epayco.com",
-        "https://3ds-green.epayco.com",
-        "https://apiflow.epayco.co",
-        "https://apiflow-green.epayco.co",
-        "https://apiflow.epayco.io",
-        "https://eks-ms-3ds-service.epayco.io",
         "https://telegram.org",
       ],
       styleSrc: ["'self'", "'unsafe-inline'", "https:", "https://fonts.googleapis.com"],
@@ -658,22 +642,6 @@ app.use(conditionalMiddleware(helmet({
       imgSrc: ["'self'", "data:", "https://t.me", "https://*.telegram.org", "https:"],
       connectSrc: [
         "'self'",
-        "https://multimedia.epayco.co",
-        "https://songbird.cardinalcommerce.com",
-        "https://songbirdstag.cardinalcommerce.com",
-        "https://centinelapi.cardinalcommerce.com",
-        "https://centinelapistag.cardinalcommerce.com",
-        "https://3ds.epayco.com",
-        "https://3ds-green.epayco.com",
-        "https://apiflow.epayco.co",
-        "https://apiflow-green.epayco.co",
-        "https://apiflow.epayco.io",
-        "https://eks-ms-3ds-service.epayco.io",
-        "https://checkout.epayco.co",
-        "https://secure.epayco.co",
-        "https://secure.payco.co",
-        "https://api.secure.payco.co",
-        "https://cdn.epayco.co",
         "https://fonts.googleapis.com",
         "https://fonts.gstatic.com",
         "https://oauth.telegram.org",
@@ -683,22 +651,12 @@ app.use(conditionalMiddleware(helmet({
       ],
       frameSrc: [
         "'self'",
-        // Wildcards mirror CHECKOUT_CSP — required because ePayco rotates 3DS
-        // sub-hosts between deploys (apiflow-*.epayco.co, eks-ms-3ds-*.epayco.io).
-        // Without wildcards, helmet-served backend pages that host ePayco iframes
-        // silently break post-rotation. Issuer bank ACS pages also live on
-        // unenumerable hosts → see form-action 'https:' below.
-        "https://*.epayco.co",
-        "https://*.epayco.com",
-        "https://*.epayco.io",
-        "https://*.payco.co",
-        "https://*.cardinalcommerce.com",
         "https://oauth.telegram.org",
         "https://telegram.org",
       ],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
-      formAction: ["'self'", "https://checkout.epayco.co", "https://secure.epayco.co", "https://secure.payco.co", "https://api.secure.payco.co", "https://centinelapi.cardinalcommerce.com"],
+      formAction: ["'self'"],
       scriptSrcAttr: ["'unsafe-inline'"],
       upgradeInsecureRequests: [],
     },
@@ -742,32 +700,9 @@ app.use((req, res, next) => {
 // ========== PAYMENT ROUTES (BEFORE static middleware) ==========
 // These must be BEFORE serveStaticWithBlocking to ensure they're processed first
 
-// ╔══════════════════════════════════════════════════════════════════════╗
-// ║  STOP — DO NOT NARROW THE script-src WILDCARDS BELOW                  ║
-// ╠══════════════════════════════════════════════════════════════════════╣
-// ║  CHECKOUT_CSP is load-bearing. The wildcards                          ║
-// ║    https://*.epayco.co  https://*.epayco.com  https://*.epayco.io     ║
-// ║    https://*.payco.co  https://*.cardinalcommerce.com                 ║
-// ║  are required because:                                                ║
-// ║   1. multimedia.epayco.co/general/3DS/validateThreeds.min.js (the     ║
-// ║      script that exposes window.validate3ds) MUST be allowed          ║
-// ║   2. ePayco loads ephemeral 3DS DDC scripts at runtime from           ║
-// ║      subdomains that change between deploys (apiflow-*.epayco.co,     ║
-// ║      eks-ms-3ds-*.epayco.io, etc.)                                    ║
-// ║                                                                      ║
-// ║  Replacing these wildcards with an exact-match list silently          ║
-// ║  breaks ePayco card payments. See feedback_epayco_3ds_do_not_modify   ║
-// ║  in the project memory and commit a37f127 / 4ea6fbf for the           ║
-// ║  regression history.                                                  ║
-// ║                                                                      ║
-// ║  frame-src/connect-src/form-action are intentionally permissive       ║
-// ║  ('self' https:) because 3DS bank challenge iframes load from         ║
-// ║  arbitrary issuer-bank domains (bancolombia.com, davivienda.com,      ║
-// ║  etc.) that we cannot enumerate ahead of time.                        ║
-// ╚══════════════════════════════════════════════════════════════════════╝
 const CHECKOUT_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com https://*.epayco.co https://*.epayco.com https://*.epayco.io https://*.payco.co https://*.cardinalcommerce.com",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com",
   "style-src 'self' 'unsafe-inline' https: https://fonts.googleapis.com",
   "font-src 'self' https: https://fonts.gstatic.com data:",
   "img-src 'self' https: data:",
@@ -2031,11 +1966,7 @@ app.post(
 // The webhook handler is registered via apiApp.post(webhookPath, ...) in bot.js
 
 // Webhook endpoints
-app.post('/api/webhooks/epayco', webhookLimiter, webhookController.handleEpaycoWebhook);
-app.post('/api/webhook/epayco', webhookLimiter, webhookController.handleEpaycoWebhook); // singular alias
-// New route for pnptv-bot ePayco payments via easybots.store domain
-app.post('/checkout/pnp', webhookLimiter, webhookController.handleEpaycoWebhook);
-app.post('/checkout/pnp/confirmation', webhookLimiter, webhookController.handleEpaycoWebhook);
+// ePayco webhook routes removed — ePayco retired
 
 // ── Creator subscription user-facing routes ───────────────────────────────────
 
@@ -2139,13 +2070,6 @@ app.get('/api/pnp-live/booking/:bookingId', authenticateUser, asyncHandler(async
 
   const model = await ModelService.getModelById(booking.model_id);
 
-  // Generate ePayco checkout config for frontend
-  const invoice = `PNP-LIVE-${booking.id}`;
-  const amount = String(booking.price_usd);
-  const currencyCode = 'USD';
-  const webhookDomain = process.env.BOT_WEBHOOK_DOMAIN || 'https://pnptv.app';
-  const epaycoWebhookDomain = process.env.EPAYCO_WEBHOOK_DOMAIN || 'https://pnptv.app';
-
   res.json({
     success: true,
     booking: {
@@ -2159,11 +2083,6 @@ app.get('/api/pnp-live/booking/:bookingId', authenticateUser, asyncHandler(async
       status: booking.status,
       paymentStatus: booking.payment_status,
       paymentMethod: booking.payment_method,
-      epaycoPublicKey: process.env.EPAYCO_PUBLIC_KEY,
-      testMode: process.env.EPAYCO_TEST_MODE === 'true',
-      epaycoSignature: PaymentService.generateEpaycoCheckoutSignature({ invoice, amount, currencyCode }),
-      confirmationUrl: `${epaycoWebhookDomain}/api/webhooks/epayco`,
-      responseUrl: `${webhookDomain}/api/payment-response`,
     }
   });
 }));
@@ -2234,16 +2153,8 @@ app.get('/recurring-checkout/:userId/:planId', pageLimiter, (req, res) => {
   sendCheckoutHtml(res, 'payment-checkout.html');
 });
 
-// NOTE: The /api/recurring/* routes and VisaCybersourceService integration
-// were removed. The service was non-functional in production because its
-// required config (config/payment.config.js) never existed — every call
-// resolved to `undefined/token/card` via an unconfigured axios endpoint.
-// Recurring-subscription tokenization is handled inside the regular ePayco
-// webhook path; frontends use the unified /api/webapp/payments/create flow.
-
 // Subscription API routes
 app.get('/api/subscription/plans', asyncHandler(subscriptionController.getPlans));
-app.post('/api/subscription/create-plan', verifyAdminJWT, asyncHandler(subscriptionController.createEpaycoPlan));
 app.get('/api/subscription/subscriber/:identifier', verifyAdminJWT, asyncHandler(subscriptionController.getSubscriber));
 app.get('/api/subscription/stats', verifyAdminJWT, asyncHandler(subscriptionController.getStatistics));
 
@@ -3873,20 +3784,6 @@ app.post('/api/webapp/reports', requireSessionAuth, socialActionLimiter, asyncHa
 app.get('/api/webapp/admin/payment-health', adminGuard, asyncHandler(async (req, res) => {
   const { query: q } = require('../../config/postgres');
 
-  // ePayco: payments still pending past the abandon threshold (24h cutoff handled
-  // by cleanupAbandonedPayments cron — anything pending >1h is interesting).
-  const epaycoStuck = await q(`
-    SELECT id, user_id, plan_id, amount, currency, reference,
-           created_at,
-           EXTRACT(EPOCH FROM (NOW() - created_at))/3600 AS hours_pending
-    FROM payments
-    WHERE status = 'pending'
-      AND provider = 'epayco'
-      AND created_at < NOW() - INTERVAL '1 hour'
-      AND created_at > NOW() - INTERVAL '30 days'
-    ORDER BY created_at ASC
-    LIMIT 50
-  `);
 
   // Meru: orphan paid links (auto-heal alerts the ops group; this surfaces the
   // pile so the operator can confirm at a glance) plus reserved-pending older
@@ -3942,7 +3839,6 @@ app.get('/api/webapp/admin/payment-health', adminGuard, asyncHandler(async (req,
   // the reconcilers aren't silently broken.
   const settlements = await q(`
     SELECT
-      (SELECT COUNT(*) FROM payments WHERE status='completed' AND provider='epayco' AND completed_at > NOW() - INTERVAL '7 days') AS epayco_completed_7d,
       (SELECT COUNT(*) FROM dash_subscription_orders WHERE status='completed' AND completed_at > NOW() - INTERVAL '7 days') AS dash_completed_7d,
       (SELECT COUNT(*) FROM meru_payment_links WHERE status='used' AND used_at > NOW() - INTERVAL '7 days') AS meru_completed_7d,
       (SELECT COUNT(*) FROM video_fetch_log WHERE fetched_at > NOW() - INTERVAL '7 days') AS video_views_7d,
@@ -3952,7 +3848,6 @@ app.get('/api/webapp/admin/payment-health', adminGuard, asyncHandler(async (req,
   return res.json({
     success: true,
     stuck: {
-      epayco: { count: epaycoStuck.rowCount, items: epaycoStuck.rows },
       meru: { count: meruStuck.rowCount, items: meruStuck.rows },
       dash: { count: dashStuck.rowCount, items: dashStuck.rows },
     },
@@ -5581,7 +5476,7 @@ app.post('/api/webapp/payments/create', requireSessionAuth, paymentCreateLimiter
   const result = await PaymentService.createPayment({
     userId,
     planId,
-    provider: 'epayco',
+    provider: 'nowpayments',
     creatorId: creatorId ? String(creatorId) : undefined,
     extraMetadata: Object.keys(extraMetadata).length ? extraMetadata : undefined,
   });
@@ -7433,7 +7328,7 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
     // Strip trailing slash to prevent double-slash in HLS URLs (e.g. https://live.pnptv.app//memfs/...)
     const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
     const processes = resp.data || [];
-    const rawStreams = processes
+    let rawStreams = processes
       .filter((p) => p.id?.startsWith('restreamer-ui:ingest:'))
       .map((p) => {
         const rawRefId = p.reference || p.id;
@@ -7455,6 +7350,29 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
         };
       })
       .filter(Boolean);
+
+    // Filter out streams owned by creators who have not completed onboarding.
+    const proxyUser = req.session?.user;
+    if (proxyUser && !['admin', 'superadmin'].includes(proxyUser.role) && rawStreams.length > 0) {
+      const refIds = rawStreams.map((s) => s.id);
+      const { rows: blockedRows } = await getPool().query(
+        `SELECT live_channel FROM users
+         WHERE live_channel = ANY($1::text[])
+           AND NOT (
+             creator_status = 'active'
+             AND creator_locked = FALSE
+             AND (
+               identity_verified = TRUE
+               OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())
+             )
+           )`,
+        [refIds]
+      );
+      if (blockedRows.length > 0) {
+        const blockedRefs = new Set(blockedRows.map((r) => r.live_channel));
+        rawStreams = rawStreams.filter((s) => !blockedRefs.has(s.id));
+      }
+    }
 
     // Enrich each live stream with the viewer count and metadata stored in Redis.
     // Polling clients (Socket.IO fallback) can use this to keep the count
@@ -9216,39 +9134,6 @@ app.post('/api/wallet/buy-nowpayments', requireSessionAuth, asyncHandler(async (
   }
 }));
 
-// POST /api/wallet/buy-card — ePayco card checkout for token purchases
-app.post('/api/wallet/buy-card', requireSessionAuth, asyncHandler(async (req, res) => {
-  const user = req.session?.user;
-  const { packageId } = req.body;
-  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
-
-  const userId = String(user.telegramId || user.telegram_id || user.id);
-  const pkg = TokenCheckoutService.PACKAGES.find(p => p.id === packageId);
-  if (!pkg) return res.status(400).json({ success: false, error: 'Invalid package ID', code: 'INVALID_PACKAGE' });
-
-  const { v4: uuidv4 } = require('uuid');
-  const PaymentModel = require('../../models/paymentModel');
-  const payment = await PaymentModel.create({
-    id: uuidv4(),
-    userId,
-    planId: 'token_purchase',
-    provider: 'epayco',
-    sku: 'TOKENS',
-    amount: pkg.usd,
-    currency: 'USD',
-    status: 'pending',
-    metadata: {
-      type: 'token_purchase',
-      tokensAmount: pkg.tokens,
-      usdAmount: pkg.usd,
-      packageId: pkg.id,
-    },
-  });
-
-  const checkoutDomain = process.env.CHECKOUT_DOMAIN || 'https://pnptv.app';
-  const paymentUrl = `${checkoutDomain}/payment/${payment.id}`;
-  return res.json({ success: true, paymentUrl, paymentId: payment.id, tokens: pkg.tokens, usd: pkg.usd });
-}));
 
 // GET /api/token-checkout/:purchaseId — return checkout page data (ePayco widget config)
 app.get('/api/token-checkout/:purchaseId', requireSessionAuth, asyncHandler(async (req, res) => {
@@ -9354,7 +9239,7 @@ app.get('/api/invoice/:paymentId', requireSessionAuth, asyncHandler(async (req, 
     planName,
     amount: parseFloat(r.amount) || 0,
     currency: r.currency || 'USD',
-    provider: r.provider || 'epayco',
+    provider: r.provider || 'nowpayments',
     transactionId: r.reference || r.id,
     purchaseDate: r.completed_at ? new Date(r.completed_at) : new Date(),
   });
@@ -11412,9 +11297,6 @@ const checkoutLimiter = rateLimit({
   message: { success: false, error: 'Too many checkout attempts. Please wait before trying again.' },
 });
 
-app.post('/api/webapp/book-call/checkout',
-  requireSessionAuth, checkoutLimiter,
-  asyncHandler(callBookingController.createCheckout));
 
 // NowPayments (crypto) checkout for call packages — accepts optional payCurrency ('btc', 'btcln', etc.)
 app.post('/api/webapp/book-call/checkout/nowpayments',
