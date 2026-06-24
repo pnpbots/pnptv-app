@@ -7488,6 +7488,11 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
                 creator_type, creator_status, creator_price_usd, live_channel
          FROM users
          WHERE creator_status = 'active'
+           AND creator_locked = FALSE
+           AND (
+             identity_verified = TRUE
+             OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())
+           )
          ORDER BY creator_subscriber_count DESC NULLS LAST
          LIMIT 20`
       ),
@@ -8039,6 +8044,11 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
                 creator_type, creator_status, creator_price_usd
          FROM users
          WHERE creator_status = 'active'
+           AND creator_locked = FALSE
+           AND (
+             identity_verified = TRUE
+             OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())
+           )
          ORDER BY first_name ASC
          LIMIT 100`
       ),
