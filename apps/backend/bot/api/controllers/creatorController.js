@@ -1155,6 +1155,7 @@ const getMyConsents = async (req, res) => {
     const result = await query(`
       SELECT
         u.terms_accepted, u.privacy_accepted,
+        u.privacy_accepted_at, u.privacy_accepted_ip,
         u.age_verified, u.age_verified_at,
         u.wof_photo_consent,
         u.content_disclaimer, u.content_disclaimer_accepted_at,
@@ -1192,6 +1193,26 @@ const getMyConsents = async (req, res) => {
   } catch (err) {
     logger.error('getMyConsents error', err);
     return res.status(500).json({ error: 'Failed to load consents' });
+  }
+};
+
+const acceptPrivacyPolicy = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const ip = req.ip || req.headers['x-forwarded-for'] || null;
+    await query(
+      `UPDATE users
+         SET privacy_accepted    = TRUE,
+             privacy_accepted_at = NOW(),
+             privacy_accepted_ip = $2::text
+       WHERE id = $1`,
+      [userId, ip],
+    );
+    req.session.user = { ...req.session.user, privacy_accepted: true };
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('acceptPrivacyPolicy error', err);
+    return res.status(500).json({ error: 'Failed to record privacy acceptance' });
   }
 };
 
@@ -1479,6 +1500,7 @@ module.exports = {
   removeCollaborator,
   getMySubscribers,
   getMyConsents,
+  acceptPrivacyPolicy,
   getSetupStatus,
   getMyXAccount,
   getMyXCampaigns,

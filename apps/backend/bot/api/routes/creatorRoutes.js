@@ -127,6 +127,7 @@ router.post('/milestones/:id/respond', authGuard, creatorController.respondToMil
 // ── Creator panel: subscribers, consents, X campaigns ────────────────────────
 router.get('/subscribers', authGuard, creatorGuard, creatorController.getMySubscribers);
 router.get('/consents', authGuard, creatorGuard, creatorController.getMyConsents);
+router.post('/privacy/accept', authGuard, creatorController.acceptPrivacyPolicy);
 router.get('/setup/status', authGuard, creatorController.getSetupStatus);
 router.get('/x-account', authGuard, creatorGuard, creatorController.getMyXAccount);
 router.get('/x-campaigns', authGuard, creatorGuard, creatorController.getMyXCampaigns);

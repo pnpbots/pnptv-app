@@ -3926,6 +3926,8 @@ export function getCreatorConsents(): Promise<{
     // Generic platform consents
     terms_accepted: boolean;
     privacy_accepted: boolean;
+    privacy_accepted_at: string | null;
+    privacy_accepted_ip: string | null;
     age_verified: boolean;
     age_verified_at: string | null;
     wof_photo_consent: boolean;
@@ -3956,6 +3958,10 @@ export function getCreatorConsents(): Promise<{
   };
 }> {
   return request("/api/webapp/creator/consents");
+}
+
+export function acceptCreatorPrivacyPolicy(): Promise<{ success: boolean }> {
+  return request("/api/webapp/creator/privacy/accept", { method: "POST" });
 }
 
 // ── Creator Panel: X Account & Campaigns ─────────────────────────────────────
