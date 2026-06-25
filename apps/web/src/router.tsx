@@ -7,6 +7,11 @@ function HangoutToChatRedirect() {
   return <Navigate to={`/chat/${groupId}`} replace />;
 }
 
+function MessagesToDmRedirect() {
+  const { userId } = useParams();
+  return <Navigate to={`/dm/${userId}`} replace />;
+}
+
 function HangoutInviteRedirect() {
   const { code } = useParams();
   const [target, setTarget] = useState<string | null>(null);
@@ -561,6 +566,7 @@ export const router = createBrowserRouter([
         ),
       },
       { path: "creator", element: <Navigate to="/creators" replace /> },
+      { path: "messages/:userId", element: <MessagesToDmRedirect /> },
       { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "hangouts/invite/:code", element: <HangoutInviteRedirect /> },
       { path: "hangouts/:groupId", element: <HangoutToChatRedirect /> },
