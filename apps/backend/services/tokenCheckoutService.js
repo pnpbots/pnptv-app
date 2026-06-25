@@ -549,8 +549,6 @@ class TokenCheckoutService {
           order_id: orderId,
           order_description: `${pkg.tokens} PNP Tokens`,
           ipn_callback_url: `${WEB_APP_URL}/api/webhooks/nowpayments`,
-          is_fixed_rate: true,
-          is_fee_paid_by_user: false,
         },
         { headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' }, timeout: 10000 }
       );

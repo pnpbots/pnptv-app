@@ -10270,8 +10270,6 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
       order_id: orderId,
       order_description: `${planDisplayName} – PNPtv!`,
       ipn_callback_url: `${webappUrl}/api/webhooks/nowpayments`,
-      is_fixed_rate: true,
-      is_fee_paid_by_user: false,
       ...(customerEmail ? { customer_email: customerEmail } : {}),
     }, {
       headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
@@ -10425,8 +10423,6 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
       order_id: orderId,
       order_description: `${planDisplayName} – PNPtv!`,
       ipn_callback_url: ipnCallbackUrl,
-      is_fixed_rate: true,
-      is_fee_paid_by_user: false,
       ...(email ? { customer_email: email } : {}),
     }, {
       headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
