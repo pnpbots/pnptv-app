@@ -1333,7 +1333,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
       )}
 
       {/* Messages */}
-      <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-2 relative" onScroll={handleScroll}>
+      <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-2 relative" style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }} onScroll={handleScroll}>
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-8 h-8 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" />
