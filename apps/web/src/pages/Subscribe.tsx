@@ -37,6 +37,20 @@ function formatPrice(amount: number, currency: string): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
 }
 
+function PriceDisplay({ amount, className = "" }: { amount: number; className?: string }) {
+  const formatted = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
+  const match = formatted.match(/^(\$)(\d+)(\.\d+)?$/);
+  if (!match) return <span className={className}>{formatted}</span>;
+  const [, symbol, integer, decimal] = match;
+  return (
+    <span className={`inline-flex items-start leading-none ${className}`}>
+      <span className="text-sm font-bold self-start mt-[3px] opacity-80">{symbol}</span>
+      <span className="text-2xl font-black tracking-tight">{integer}</span>
+      {decimal && <span className="text-sm font-bold self-start mt-[3px] opacity-80">{decimal}</span>}
+    </span>
+  );
+}
+
 function durationLabel(days: number): string {
   if (days >= 36500) return "Lifetime";
   const years = Math.round(days / 365);
@@ -867,7 +881,7 @@ export default function Subscribe() {
                   </div>
                 </div>
                 <span className="flex flex-col items-end">
-                  <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
+                  <PriceDisplay amount={plan.price} className="text-pnp-textPrimary" />
                 </span>
               </div>
               <span
@@ -1098,7 +1112,7 @@ export default function Subscribe() {
                 </div>
                 <div className="text-right">
                   <div className="flex flex-col items-end">
-                    <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
+                    <PriceDisplay amount={plan.price} className="text-pnp-textPrimary" />
                   </div>
                   {planDays >= 30 && planDays < 36500 && (
                     <div className="text-[10px] text-pnp-textSecondary">
