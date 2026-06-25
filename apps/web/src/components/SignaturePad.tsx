@@ -14,7 +14,6 @@ export function SignaturePad({ onSave, width = 320, height = 120 }: SignaturePad
   const onSaveRef = useRef(onSave);
   const [hasSig, setHasSig] = useState(false);
 
-  // Keep onSaveRef current without re-running the touch-listener effect
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
 
   const getPos = (canvas: HTMLCanvasElement, clientX: number, clientY: number) => {
@@ -46,58 +45,46 @@ export function SignaturePad({ onSave, width = 320, height = 120 }: SignaturePad
     if (hasSigRef.current) onSaveRef.current(canvas.toDataURL("image/png"));
   };
 
-  // ── Touch events: must be non-passive so preventDefault() actually works ─────
+  // ── Pointer Events (covers touch + mouse + stylus uniformly) ──────────────
+  // Uses non-passive native listeners so preventDefault() stops page scroll.
+  // setPointerCapture ensures pointermove fires even if finger drifts outside.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const onTouchStart = (e: TouchEvent) => {
+    const onDown = (e: PointerEvent) => {
       e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
       isDrawing.current = true;
-      const t = e.touches[0];
-      lastPos.current = getPos(canvas, t.clientX, t.clientY);
+      lastPos.current = getPos(canvas, e.clientX, e.clientY);
     };
 
-    const onTouchMove = (e: TouchEvent) => {
+    const onMove = (e: PointerEvent) => {
       e.preventDefault();
       if (!isDrawing.current) return;
-      const t = e.touches[0];
-      const { x, y } = getPos(canvas, t.clientX, t.clientY);
+      const { x, y } = getPos(canvas, e.clientX, e.clientY);
       strokeTo(canvas, x, y);
     };
 
-    const onTouchEnd = (e: TouchEvent) => {
+    const onUp = (e: PointerEvent) => {
       e.preventDefault();
       commitSig(canvas);
     };
 
-    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
-    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
-    canvas.addEventListener("touchend", onTouchEnd, { passive: false });
+    const onCancel = () => commitSig(canvas);
+
+    canvas.addEventListener("pointerdown", onDown, { passive: false });
+    canvas.addEventListener("pointermove", onMove, { passive: false });
+    canvas.addEventListener("pointerup", onUp, { passive: false });
+    canvas.addEventListener("pointercancel", onCancel);
 
     return () => {
-      canvas.removeEventListener("touchstart", onTouchStart);
-      canvas.removeEventListener("touchmove", onTouchMove);
-      canvas.removeEventListener("touchend", onTouchEnd);
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onCancel);
     };
-  }, []); // run once — onSaveRef handles the stable callback
-
-  // ── Mouse events: React synthetic handlers are fine for desktop ───────────────
-  const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    isDrawing.current = true;
-    lastPos.current = getPos(canvas, e.clientX, e.clientY);
-  };
-
-  const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing.current) return;
-    const canvas = canvasRef.current; if (!canvas) return;
-    const { x, y } = getPos(canvas, e.clientX, e.clientY);
-    strokeTo(canvas, x, y);
-  };
-
-  const onMouseUp = () => { const c = canvasRef.current; if (c) commitSig(c); };
-  const onMouseLeave = () => { const c = canvasRef.current; if (c) commitSig(c); };
+  }, []); // run once — refs handle stable callbacks
 
   // ── Initial background fill ────────────────────────────────────────────────
   useEffect(() => {
@@ -124,12 +111,14 @@ export function SignaturePad({ onSave, width = 320, height = 120 }: SignaturePad
         ref={canvasRef}
         width={width}
         height={height}
-        className="w-full rounded-lg cursor-crosshair touch-none"
-        style={{ border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)" }}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onMouseLeave={onMouseLeave}
+        className="w-full rounded-lg cursor-crosshair touch-none select-none"
+        style={{
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(255,255,255,0.04)",
+          touchAction: "none",
+          userSelect: "none",
+          WebkitUserSelect: "none",
+        }}
       />
       <div className="flex items-center justify-between">
         <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
