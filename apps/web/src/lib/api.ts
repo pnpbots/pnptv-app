@@ -1,5 +1,14 @@
 const API_BASE = import.meta.env.VITE_API_URL || (window.location.hostname === "pnptv.app" ? "https://pnptv.app" : "https://pnptv.app");
 
+export const NP_COINS = [
+  { code: "btc",  label: "BTC",  icon: "₿", color: "#f7931a" },
+  { code: "eth",  label: "ETH",  icon: "Ξ", color: "#627eea" },
+  { code: "ltc",  label: "LTC",  icon: "Ł", color: "#bfbbbb" },
+  { code: "xmr",  label: "XMR",  icon: "◎", color: "#ff6600" },
+  { code: "bch",  label: "BCH",  icon: "Ƀ", color: "#8dc351" },
+] as const;
+export type NpCoinCode = (typeof NP_COINS)[number]["code"];
+
 // Creators whose pay buttons are live before the June 1 launch gate lifts
 const LAUNCH_UNLOCKED = new Set(['SantinoFurioso', 'PNPLatinoBoy'].map(u => u.toLowerCase()));
 export const LAUNCH_DATE = new Date('2026-06-01T00:00:00-05:00');
@@ -763,7 +772,7 @@ export function getWalletHistory(): Promise<{ success: boolean; history: TokenPu
   return request("/api/wallet/history");
 }
 
-export function buyTokensWithNowPayments(packageId: string, payCurrency?: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usdAmount: number; error?: string }> {
+export function buyTokensWithNowPayments(packageId: string, payCurrency?: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usdAmount: number; payAddress?: string | null; payAmount?: number | null; network?: string | null; validUntil?: string | null; error?: string }> {
   return request("/api/wallet/buy-nowpayments", { method: "POST", body: { packageId, ...(payCurrency ? { payCurrency } : {}) } });
 }
 

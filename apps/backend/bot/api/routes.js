@@ -10262,6 +10262,7 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
   const customerEmail = email || user.email || null;
 
   let invoiceUrl;
+  let npPayInfo = {};
   try {
     const paymentResp = await axios.post(`${NOWPAYMENTS_URL}/payment`, {
       price_amount: usdAmount,
@@ -10275,9 +10276,10 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
       headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
       timeout: 10000,
     });
-    const { payment_id: npPaymentId, purchase_id: npPurchaseId } = paymentResp.data;
+    const { payment_id: npPaymentId, purchase_id: npPurchaseId, pay_address: npPayAddress, pay_amount: npPayAmount, network: npNetwork, valid_until: npValidUntil } = paymentResp.data;
     if (!npPaymentId || !npPurchaseId) throw new Error('No payment_id/purchase_id in response');
     invoiceUrl = `https://nowpayments.io/payment?iid=${npPurchaseId}&paymentId=${npPaymentId}`;
+    npPayInfo = { payAddress: npPayAddress || null, payAmount: npPayAmount || null, network: npNetwork || null, validUntil: npValidUntil || null };
   } catch (err) {
     logger.error('[NOWPayments] Subscription payment creation failed', { userId, planId, payCurrency: validPayCurrency, error: err.response?.data || err.message });
     return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
@@ -10294,7 +10296,7 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
 
   logger.info('[NOWPayments] Subscription invoice created', { userId, planId, orderId, usdAmount, payCurrency: validPayCurrency });
 
-  return res.json({ success: true, orderId, invoiceUrl, planName: planDisplayName, usdAmount });
+  return res.json({ success: true, orderId, invoiceUrl, planName: planDisplayName, usdAmount, ...npPayInfo });
 }));
 
 // POST /api/webapp/payments/usdc/prepare — create a NowPayments hosted invoice for any plan.
@@ -10415,6 +10417,7 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
   const ipnCallbackUrl = `${webappUrl}/api/webhooks/nowpayments`;
 
   let invoiceUrl;
+  let npPayInfo2 = {};
   try {
     const paymentResp = await axios.post(`${NOWPAYMENTS_URL}/payment`, {
       price_amount: usdAmount,
@@ -10428,9 +10431,10 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
       headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
       timeout: 10000,
     });
-    const { payment_id: npPaymentId, purchase_id: npPurchaseId } = paymentResp.data;
+    const { payment_id: npPaymentId, purchase_id: npPurchaseId, pay_address: npPayAddress, pay_amount: npPayAmount, network: npNetwork, valid_until: npValidUntil } = paymentResp.data;
     if (!npPaymentId || !npPurchaseId) throw new Error('No payment_id/purchase_id in response');
     invoiceUrl = `https://nowpayments.io/payment?iid=${npPurchaseId}&paymentId=${npPaymentId}`;
+    npPayInfo2 = { payAddress: npPayAddress || null, payAmount: npPayAmount || null, network: npNetwork || null, validUntil: npValidUntil || null };
   } catch (err) {
     logger.error('[NOWPayments] Payment creation failed', { userId, planId, orderId, payCurrency: validPayCurrency, error: err.message });
     return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
@@ -10461,6 +10465,7 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
     planName: planDisplayName,
     invoiceUrl,
     ...(discountInfo || {}),
+    ...npPayInfo2,
   });
 }));
 

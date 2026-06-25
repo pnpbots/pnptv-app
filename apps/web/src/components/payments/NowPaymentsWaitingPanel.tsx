@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { NowPaymentsOrder } from "@/hooks/useNowPayments";
 
@@ -11,6 +11,37 @@ interface NowPaymentsWaitingPanelProps {
   isSolana?: boolean;
 }
 
+function useCountdown(validUntil?: string | null) {
+  const [timeLeft, setTimeLeft] = useState("");
+  const [expired, setExpired] = useState(false);
+
+  useEffect(() => {
+    if (!validUntil) return;
+    const tick = () => {
+      const ms = new Date(validUntil).getTime() - Date.now();
+      if (ms <= 0) { setExpired(true); setTimeLeft("0:00"); return; }
+      const m = Math.floor(ms / 60000);
+      const s = Math.floor((ms % 60000) / 1000);
+      setTimeLeft(`${m}:${s.toString().padStart(2, "0")}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [validUntil]);
+
+  return { timeLeft, expired };
+}
+
+function deriveCoinLabel(order: NowPaymentsOrder): string {
+  const raw = order.payCurrency || order.network || "CRYPTO";
+  return raw.toUpperCase()
+    .replace("USDCSOL", "USDC (SOL)")
+    .replace("USDCBSC", "USDC (BSC)")
+    .replace("USDTBSC", "USDT (BSC)")
+    .replace("USDTTRC20", "USDT (TRC-20)")
+    .replace("BTCLN", "BTC (Lightning)");
+}
+
 export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = ({
   order,
   isSuccess,
@@ -20,12 +51,20 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
   isSolana = false,
 }) => {
   const es = lang === "es";
-  const [copied, setCopied] = React.useState(false);
+  const [copiedAddr, setCopiedAddr] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const { timeLeft, expired } = useCountdown(order.validUntil);
 
-  const handleCopy = () => {
+  const handleCopyAddr = () => {
+    navigator.clipboard.writeText(order.payAddress!).catch(() => {});
+    setCopiedAddr(true);
+    setTimeout(() => setCopiedAddr(false), 2000);
+  };
+
+  const handleCopyUrl = () => {
     navigator.clipboard.writeText(order.invoiceUrl).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2000);
   };
 
   if (isSuccess) {
@@ -52,10 +91,151 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
     ? (es ? "Pago parcial recibido" : "Partial payment received")
     : (es ? "Esperando pago" : "Waiting for payment");
 
+  const coinLabel = deriveCoinLabel(order);
+
+  // ── Inline embedded view when we have the wallet address ─────────────────
+  if (order.payAddress) {
+    return (
+      <div className={`rounded-xl border border-green-500/40 bg-green-500/5 p-4 animate-in fade-in slide-in-from-top-1 duration-250 ${wrapperClassName}`}>
+
+        {/* Status + countdown */}
+        <div className="flex items-center gap-2 mb-3">
+          <div className={`w-2 h-2 rounded-full flex-shrink-0 animate-pulse ${order.partiallyPaid ? "bg-yellow-400" : "bg-green-500"}`} />
+          <span className="text-sm font-medium text-pnp-textPrimary">{statusLabel}</span>
+          {timeLeft && !expired && (
+            <span className="ml-auto text-[10px] text-pnp-textSecondary/60 whitespace-nowrap tabular-nums">
+              {es ? "Expira en" : "Expires in"}{" "}
+              <span className="font-bold text-yellow-400">{timeLeft}</span>
+            </span>
+          )}
+          {expired && (
+            <span className="ml-auto text-[10px] text-red-400 font-semibold whitespace-nowrap">
+              {es ? "Expirado" : "Expired"}
+            </span>
+          )}
+        </div>
+
+        {order.partiallyPaid && (
+          <div className="mb-3 p-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+            <p className="text-xs text-yellow-400 font-medium">
+              {es
+                ? "Pago parcial detectado — envía el monto restante a la misma dirección."
+                : "Partial payment detected — send the remaining amount to the same address."}
+            </p>
+          </div>
+        )}
+
+        {/* Coin badge */}
+        <div className="flex items-center gap-2 mb-3">
+          <span className="px-2.5 py-1 rounded-full bg-green-500/15 border border-green-500/30 text-xs font-bold text-green-300">
+            {coinLabel}
+          </span>
+          {order.network && order.network.toUpperCase() !== (order.payCurrency || "").toUpperCase() && (
+            <span className="text-[10px] text-pnp-textSecondary/60">
+              {es ? "Red:" : "Network:"} {order.network}
+            </span>
+          )}
+        </div>
+
+        {/* Amount */}
+        {order.payAmount != null && (
+          <div className="mb-3 p-3 rounded-lg bg-white/5 border border-white/10">
+            <p className="text-[10px] text-pnp-textSecondary mb-1">
+              {es ? "Envía exactamente:" : "Send exactly:"}
+            </p>
+            <p className="text-xl font-black text-pnp-textPrimary tabular-nums">
+              {Number(order.payAmount).toLocaleString("en-US", { maximumFractionDigits: 8 })}{" "}
+              <span className="text-sm font-semibold text-pnp-textSecondary">{coinLabel}</span>
+            </p>
+            <p className="text-xs text-pnp-textSecondary/70 mt-0.5">${order.usdAmount} USD</p>
+          </div>
+        )}
+
+        {/* Wallet address */}
+        <div className="mb-3">
+          <p className="text-[10px] text-pnp-textSecondary mb-1">
+            {es ? "A esta dirección:" : "To this address:"}
+          </p>
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-white/5 border border-white/10">
+            <span className="flex-1 font-mono text-[10px] text-pnp-textPrimary break-all leading-relaxed select-all">
+              {order.payAddress}
+            </span>
+            <button
+              onClick={handleCopyAddr}
+              className={`flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-colors ${
+                copiedAddr
+                  ? "bg-green-500/20 text-green-400"
+                  : "bg-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary"
+              }`}
+            >
+              {copiedAddr ? (es ? "✓" : "✓") : (es ? "Copiar" : "Copy")}
+            </button>
+          </div>
+        </div>
+
+        {/* QR — desktop only */}
+        <div className="hidden sm:flex flex-col items-center gap-2 mb-4">
+          <div className="bg-white p-2 rounded-xl">
+            <QRCodeSVG value={order.payAddress} size={110} level="M" />
+          </div>
+          <p className="text-[10px] text-pnp-textSecondary">
+            {es ? "O escanea desde otro dispositivo" : "Or scan from another device"}
+          </p>
+        </div>
+
+        {/* Trust Wallet CTA (Solana) */}
+        {isSolana && (
+          <a
+            href={`https://link.trustwallet.com/open_url?coin_id=501&url=${encodeURIComponent(order.invoiceUrl)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-xl font-bold text-sm text-white mb-2 transition-all active:scale-[0.98]"
+            style={{ background: "linear-gradient(90deg, #3375BB, #0A2B6E)" }}
+          >
+            <span>🔵</span>
+            {es ? "Pagar con Trust Wallet" : "Pay with Trust Wallet"}
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+        )}
+
+        {/* Secondary: open in NowPayments + copy link */}
+        <div className="flex gap-2 mb-3">
+          <a
+            href={order.invoiceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 py-2 rounded-lg text-center text-[11px] text-pnp-textSecondary border border-white/10 bg-white/5 hover:text-pnp-textPrimary transition-colors"
+          >
+            {es ? "Abrir en NowPayments →" : "Open in NowPayments →"}
+          </a>
+          <button
+            onClick={handleCopyUrl}
+            title={es ? "Copiar link de pago" : "Copy payment link"}
+            className={`px-3 py-2 rounded-lg text-[11px] border transition-colors ${
+              copiedUrl
+                ? "border-green-500/30 text-green-400 bg-green-500/5"
+                : "border-white/10 text-pnp-textSecondary bg-white/5 hover:text-pnp-textPrimary"
+            }`}
+          >
+            {copiedUrl ? "✓" : "⎘"}
+          </button>
+        </div>
+
+        <button
+          onClick={onCancel}
+          className="w-full text-[10px] text-pnp-textSecondary/50 hover:text-pnp-textSecondary transition-colors py-1"
+        >
+          {es ? "Cancelar y elegir otro plan" : "Cancel — choose a different plan"}
+        </button>
+      </div>
+    );
+  }
+
+  // ── Fallback: no payAddress — "Open Checkout" button ─────────────────────
   return (
     <div className={`rounded-xl border border-green-500/40 bg-green-500/5 p-4 animate-in fade-in slide-in-from-top-1 duration-250 ${wrapperClassName}`}>
-
-      {/* Status header */}
       <div className="flex items-center gap-2 mb-3">
         <div className={`w-2 h-2 rounded-full flex-shrink-0 animate-pulse ${order.partiallyPaid ? "bg-yellow-400" : "bg-green-500"}`} />
         <span className="text-sm font-medium text-pnp-textPrimary">{statusLabel}</span>
@@ -77,12 +257,11 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
 
       {order.invoiceUrl && (
         <>
-          {/* PRIMARY CTA — largest, first thing the eye lands on */}
           <a
             href={order.invoiceUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 w-full py-4 rounded-xl font-bold text-base text-white mb-1.5 transition-all active:scale-[0.98] shadow-lg shadow-green-500/25 hover:shadow-green-500/40 hover:brightness-110"
+            className="flex items-center justify-center gap-2 w-full py-4 rounded-xl font-bold text-base text-white mb-3 transition-all active:scale-[0.98] shadow-lg shadow-green-500/25 hover:brightness-110"
             style={{ background: "linear-gradient(90deg, #26a17b, #00c896)" }}
           >
             <span>🪙</span>
@@ -96,82 +275,13 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
               href={`https://link.trustwallet.com/open_url?coin_id=501&url=${encodeURIComponent(order.invoiceUrl)}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 w-full py-3 rounded-xl font-bold text-sm text-white mb-1.5 transition-all active:scale-[0.98]"
+              className="flex items-center justify-center gap-2 w-full py-3 rounded-xl font-bold text-sm text-white mb-2 transition-all active:scale-[0.98]"
               style={{ background: "linear-gradient(90deg, #3375BB, #0A2B6E)" }}
             >
               <span>🔵</span>
-              {es ? "Abrir en Trust Wallet" : "Open in Trust Wallet"}
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
+              {es ? "Pagar con Trust Wallet" : "Pay with Trust Wallet"}
             </a>
           )}
-          <p className="text-center text-[10px] text-pnp-textSecondary/70 mb-4 leading-relaxed">
-            {es
-              ? "Se abre en una nueva pestaña · Vuelve aquí cuando termines"
-              : "Opens in a new tab · Come back here when done"}
-          </p>
-
-          {/* Wallet compat note */}
-          <p className="text-[10px] text-pnp-textSecondary/60 mb-2">
-            {es ? "✓ Compatible con Trust Wallet y otros wallets WalletConnect" : "✓ Compatible with Trust Wallet and other WalletConnect wallets"}
-          </p>
-
-          {/* Accepted coins */}
-          <div className="flex flex-wrap gap-1.5 mb-4">
-            {["BTC", "ETH", "USDC", "USDT", "SOL", "LTC", "+100"].map((coin) => (
-              <span key={coin} className="px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/30 text-[10px] font-semibold text-green-400">
-                {coin}
-              </span>
-            ))}
-          </div>
-
-          {/* Steps */}
-          <ol className="space-y-2 mb-4">
-            {(es
-              ? [
-                  "Abre el checkout y elige tu moneda favorita.",
-                  "Envía el monto exacto a la dirección mostrada.",
-                  "Tu cuenta se activa automáticamente al confirmar.",
-                ]
-              : [
-                  "Open checkout and pick your preferred coin.",
-                  "Send the exact amount to the address shown.",
-                  "Your account activates automatically on confirmation.",
-                ]
-            ).map((step, i) => (
-              <li key={i} className="flex gap-2.5 text-[11px] text-pnp-textSecondary leading-relaxed">
-                <span className="flex-shrink-0 w-4 h-4 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-[9px] font-black mt-0.5">
-                  {i + 1}
-                </span>
-                {step}
-              </li>
-            ))}
-          </ol>
-
-          {/* QR — only useful on desktop; pointless on the same phone you'd pay from */}
-          <div className="hidden sm:flex flex-col items-center gap-2 mb-4">
-            <div className="bg-white p-2 rounded-xl">
-              <QRCodeSVG value={order.invoiceUrl} size={110} level="M" />
-            </div>
-            <p className="text-[10px] text-pnp-textSecondary">
-              {es ? "O escanea desde otro dispositivo" : "Or scan from another device"}
-            </p>
-          </div>
-
-          {/* Copy link */}
-          <button
-            onClick={handleCopy}
-            className={`w-full py-2 rounded-lg text-[11px] font-medium transition-colors border mb-3 ${
-              copied
-                ? "text-green-400 border-green-500/30 bg-green-500/5"
-                : "text-pnp-textSecondary border-white/10 bg-white/5 hover:text-pnp-textPrimary"
-            }`}
-          >
-            {copied
-              ? (es ? "¡Link copiado!" : "Copied!")
-              : (es ? "Copiar link de pago" : "Copy payment link")}
-          </button>
         </>
       )}
 

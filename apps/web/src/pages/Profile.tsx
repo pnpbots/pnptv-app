@@ -63,7 +63,7 @@ import MonetizeContentCard from "@/components/profile/MonetizeContentCard";
 import { BookCallModal } from "@/components/creators/BookCallModal";
 import type { CreatorCardCreator } from "@/components/creators/CreatorCard";
 import { NearbyBadge, useNearbyToggle } from "@/components/NearbyBadge";
-import { getDistanceToUser } from "@/lib/api";
+import { getDistanceToUser, NP_COINS } from "@/lib/api";
 import { useNowPayments } from "@/hooks/useNowPayments";
 import { NowPaymentsWaitingPanel } from "@/components/payments/NowPaymentsWaitingPanel";
 
@@ -210,6 +210,7 @@ export default function Profile() {
   const [subscribeEmail, setSubscribeEmail] = useState("");
   const [subscribeEmailError, setSubscribeEmailError] = useState<string | null>(null);
   const [subscribeProvider, setSubscribeProvider] = useState<"usdc" | "usdc_sol" | "dash" | "btc">("usdc");
+  const [npCoinPick, setNpCoinPick] = useState<string>("btc");
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
   const [btcAvailable, setBtcAvailable] = useState(false);
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
@@ -696,7 +697,7 @@ export default function Profile() {
       setSubscribeEmailError(null);
 
       if (subscribeProvider === "usdc" || subscribeProvider === "usdc_sol") {
-        const payCurrency = subscribeProvider === "usdc_sol" ? "usdcsol" : undefined;
+        const payCurrency = subscribeProvider === "usdc_sol" ? "usdcsol" : (npCoinPick || "btc");
         const res = await startNowPayments("creator_monthly", trimmed, creatorId, false, payCurrency);
         if (!res?.success) {
           setSubscribeError((res as any)?.error || nowpaymentsError || p.failedToCreatePayment);
@@ -1838,7 +1839,7 @@ export default function Profile() {
                 isSuccess={usdcPaymentSuccess}
                 onCancel={() => { cancelNowPayments(); setSubscribeError(null); }}
                 lang={t.lang}
-                isSolana={true}
+                isSolana={usdcOrder?.payCurrency === "usdcsol" || !usdcOrder?.payCurrency}
               />
             ) : !subscribeAwaitingPayment ? (
               <>
@@ -1896,6 +1897,24 @@ export default function Profile() {
                       </button>
                     )}
                   </div>
+                  {subscribeProvider === "usdc" && (
+                    <div className="mt-2 p-2 rounded-lg bg-white/5 border border-white/10 animate-in fade-in duration-150">
+                      <p className="text-[9px] text-pnp-textSecondary/60 mb-1.5">Choose coin:</p>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {NP_COINS.map((coin) => (
+                          <button
+                            key={coin.code}
+                            type="button"
+                            onClick={() => setNpCoinPick(coin.code)}
+                            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${npCoinPick === coin.code ? "border-green-400/60 bg-green-500/20 text-pnp-textPrimary" : "border-white/15 bg-white/5 text-pnp-textSecondary hover:bg-white/10"}`}
+                          >
+                            <span style={{ color: coin.color }}>{coin.icon}</span>
+                            <span>{coin.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Email input */}

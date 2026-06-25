@@ -14,6 +14,7 @@ import {
   getDashSubscriptionStatus,
   getLabelColor,
   validatePromoCode,
+  NP_COINS,
   type SubscriptionPlan,
 } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -134,6 +135,7 @@ export default function Subscribe() {
   const btcPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // BTCPay Dash state
+  const [cryptoPickerPlanId, setCryptoPickerPlanId] = useState<string | null>(null);
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
   const [dashOrder, setDashOrder] = useState<{ invoiceId: string; checkoutUrl: string; planName: string; usdAmount: number } | null>(null);
   const [dashPolling, setDashPolling] = useState(false);
@@ -932,13 +934,13 @@ export default function Subscribe() {
                 {usdcAvailable !== false && (
                   <button
                     disabled={submitting}
-                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id); }}
-                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                    onClick={(e) => { e.stopPropagation(); setCryptoPickerPlanId(cryptoPickerPlanId === plan.id ? null : plan.id); }}
+                    className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border transition-colors disabled:opacity-50 ${cryptoPickerPlanId === plan.id ? "border-green-400/60 bg-green-500/20" : "border-green-500/40 bg-green-500/10 hover:bg-green-500/20"}`}
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
                       <span>🪙</span>
                       <span>Crypto</span>
-                      {cryptoDiscount && <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
+                      <span className="text-[9px] text-green-400/70">▾</span>
                     </span>
                     <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
@@ -953,7 +955,6 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-sky-300">
                       <span>◎</span>
                       <span>USDC</span>
-                      {cryptoDiscount && <span className="text-[9px] font-black bg-sky-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-sky-300 leading-none">{cryptoDisplayPrice}</span>
                   </button>
@@ -967,7 +968,6 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-orange-300">
                       <span>₿</span>
                       <span>Bitcoin</span>
-                      {cryptoDiscount && <span className="text-[9px] font-black bg-orange-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-orange-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
@@ -981,10 +981,35 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-[#4DB8FF]">
                       <span>Ð</span>
                       <span>Dash</span>
-                      {cryptoDiscount && <span className="text-[9px] font-black text-white px-1 py-0.5 rounded leading-none" style={{ background: "#008DE4" }}>−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>
+                )}
+                {cryptoPickerPlanId === plan.id && (
+                  <div className="w-full mt-1 p-2 rounded-lg bg-white/5 border border-white/10 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
+                    <p className="text-[9px] text-pnp-textSecondary/60 mb-1.5">{t.lang === "es" ? "Elige tu moneda:" : "Choose your coin:"}</p>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {NP_COINS.map((coin) => (
+                        <button
+                          key={coin.code}
+                          disabled={submitting}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCryptoPickerPlanId(null);
+                            handleQuickCheckout(plan.id, coin.code);
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-semibold text-pnp-textPrimary transition-colors disabled:opacity-50"
+                        >
+                          <span style={{ color: coin.color }}>{coin.icon}</span>
+                          <span>{coin.label}</span>
+                        </button>
+                      ))}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setCryptoPickerPlanId(null); }}
+                        className="px-2 py-1.5 rounded-lg border border-white/10 text-[10px] text-pnp-textSecondary/50 hover:text-pnp-textSecondary transition-colors"
+                      >✕</button>
+                    </div>
+                  </div>
                 )}
               </div>
             </button>
@@ -996,7 +1021,7 @@ export default function Subscribe() {
                   onCancel={cancelNowPayments}
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
-                  isSolana={true}
+                  isSolana={usdcOrder?.payCurrency === "usdcsol" || !usdcOrder?.payCurrency}
                 />
               </div>
             )}
@@ -1190,33 +1215,18 @@ export default function Subscribe() {
               {/* Quick-pay buttons */}
               <div className="mt-3 pt-3 border-t border-white/5 flex gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
                 {usdcAvailable !== false && (
-                  RECURRING_PLANS.has(plan.id) ? (
-                    <button
-                      disabled={submitting}
-                      onClick={(e) => { e.stopPropagation(); handleCryptoSubscribe(plan.id); }}
-                      className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
-                    >
-                      <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
-                        <span>🔄</span>
-                        <span>Crypto</span>
-                        {cryptoDiscount && <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
-                      </span>
-                      <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
-                    </button>
-                  ) : (
-                    <button
-                      disabled={submitting}
-                      onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id); }}
-                      className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
-                    >
-                      <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
-                        <span>🪙</span>
-                        <span>Crypto</span>
-                        {cryptoDiscount && <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
-                      </span>
-                      <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
-                    </button>
-                  )
+                  <button
+                    disabled={submitting}
+                    onClick={(e) => { e.stopPropagation(); setCryptoPickerPlanId(cryptoPickerPlanId === plan.id ? null : plan.id); }}
+                    className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border transition-colors disabled:opacity-50 ${cryptoPickerPlanId === plan.id ? "border-green-400/60 bg-green-500/20" : "border-green-500/40 bg-green-500/10 hover:bg-green-500/20"}`}
+                  >
+                    <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
+                      <span>{RECURRING_PLANS.has(plan.id) ? "🔄" : "🪙"}</span>
+                      <span>Crypto</span>
+                      <span className="text-[9px] text-green-400/70">▾</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
+                  </button>
                 )}
                 {usdcAvailable !== false && (
                   <button
@@ -1235,7 +1245,6 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-sky-300">
                       <span>◎</span>
                       <span>USDC</span>
-                      {cryptoDiscount && <span className="text-[9px] font-black bg-sky-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-sky-300 leading-none">{cryptoDisplayPrice}</span>
                   </button>
@@ -1249,7 +1258,6 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-orange-300">
                       <span>₿</span>
                       <span>Bitcoin</span>
-                      {cryptoDiscount && <span className="text-[9px] font-black bg-orange-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-orange-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
@@ -1263,10 +1271,36 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-[#4DB8FF]">
                       <span>Ð</span>
                       <span>Dash</span>
-                      {cryptoDiscount && <span className="text-[9px] font-black text-white px-1 py-0.5 rounded leading-none" style={{ background: "#008DE4" }}>−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>
+                )}
+                {cryptoPickerPlanId === plan.id && (
+                  <div className="w-full mt-1 p-2 rounded-lg bg-white/5 border border-white/10 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
+                    <p className="text-[9px] text-pnp-textSecondary/60 mb-1.5">{t.lang === "es" ? "Elige tu moneda:" : "Choose your coin:"}</p>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {NP_COINS.map((coin) => (
+                        <button
+                          key={coin.code}
+                          disabled={submitting}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCryptoPickerPlanId(null);
+                            if (RECURRING_PLANS.has(plan.id)) handleCryptoSubscribe(plan.id, coin.code);
+                            else handleQuickCheckout(plan.id, coin.code);
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-semibold text-pnp-textPrimary transition-colors disabled:opacity-50"
+                        >
+                          <span style={{ color: coin.color }}>{coin.icon}</span>
+                          <span>{coin.label}</span>
+                        </button>
+                      ))}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setCryptoPickerPlanId(null); }}
+                        className="px-2 py-1.5 rounded-lg border border-white/10 text-[10px] text-pnp-textSecondary/50 hover:text-pnp-textSecondary transition-colors"
+                      >✕</button>
+                    </div>
+                  </div>
                 )}
               </div>
             </button>
@@ -1278,7 +1312,7 @@ export default function Subscribe() {
                   onCancel={cancelNowPayments}
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
-                  isSolana={true}
+                  isSolana={usdcOrder?.payCurrency === "usdcsol" || !usdcOrder?.payCurrency}
                 />
               </div>
             )}

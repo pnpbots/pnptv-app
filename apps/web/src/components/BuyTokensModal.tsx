@@ -12,8 +12,103 @@ import {
   getDashPaymentDetails,
   getDashSubscriptionStatus,
   assertPaymentUrl,
+  NP_COINS,
   type TokenPackage,
 } from "@/lib/api";
+
+function useCountdownBtm(validUntil?: string | null) {
+  const [timeLeft, setTimeLeft] = useState("");
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    if (!validUntil) return;
+    const tick = () => {
+      const ms = new Date(validUntil).getTime() - Date.now();
+      if (ms <= 0) { setExpired(true); setTimeLeft("0:00"); return; }
+      const m = Math.floor(ms / 60000);
+      const s = Math.floor((ms % 60000) / 1000);
+      setTimeLeft(`${m}:${s.toString().padStart(2, "0")}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [validUntil]);
+  return { timeLeft, expired };
+}
+
+interface NpInlinePayPanelProps {
+  payment: { checkoutUrl: string; payCurrency?: string; payAddress?: string | null; payAmount?: number | null; network?: string | null; validUntil?: string | null };
+  npPolling: boolean;
+  onCancel: () => void;
+}
+
+function NpInlinePayPanel({ payment, npPolling, onCancel }: NpInlinePayPanelProps) {
+  const [copied, setCopied] = useState(false);
+  const { timeLeft, expired } = useCountdownBtm(payment.validUntil);
+  const coinLabel = (payment.payCurrency || payment.network || "CRYPTO").toUpperCase()
+    .replace("USDCSOL", "USDC (SOL)").replace("BTCLN", "BTC (Lightning)");
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(payment.payAddress!).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="rounded-xl border border-green-500/40 bg-green-500/5 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+        <span className="text-sm font-medium text-pnp-textPrimary">Waiting for payment</span>
+        {timeLeft && !expired && (
+          <span className="ml-auto text-[10px] text-pnp-textSecondary/60 tabular-nums">
+            Expires in <span className="font-bold text-yellow-400">{timeLeft}</span>
+          </span>
+        )}
+        {expired && <span className="ml-auto text-[10px] text-red-400 font-semibold">Expired</span>}
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="px-2.5 py-1 rounded-full bg-green-500/15 border border-green-500/30 text-xs font-bold text-green-300">{coinLabel}</span>
+        {npPolling && <span className="text-[10px] text-pnp-textSecondary/60 flex items-center gap-1"><svg className="animate-spin h-2.5 w-2.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Checking...</span>}
+      </div>
+      {payment.payAmount != null && (
+        <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+          <p className="text-[10px] text-pnp-textSecondary mb-1">Send exactly:</p>
+          <p className="text-xl font-black text-pnp-textPrimary tabular-nums">
+            {Number(payment.payAmount).toLocaleString("en-US", { maximumFractionDigits: 8 })} <span className="text-sm font-semibold text-pnp-textSecondary">{coinLabel}</span>
+          </p>
+        </div>
+      )}
+      <div>
+        <p className="text-[10px] text-pnp-textSecondary mb-1">To this address:</p>
+        <div className="flex items-start gap-2 p-2.5 rounded-lg bg-white/5 border border-white/10">
+          <span className="flex-1 font-mono text-[10px] text-pnp-textPrimary break-all leading-relaxed select-all">{payment.payAddress}</span>
+          <button
+            onClick={handleCopy}
+            className={`flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-colors ${copied ? "bg-green-500/20 text-green-400" : "bg-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary"}`}
+          >{copied ? "✓" : "Copy"}</button>
+        </div>
+      </div>
+      <div className="hidden sm:flex flex-col items-center gap-1">
+        <div className="bg-white p-1.5 rounded-lg"><QRCodeSVG value={payment.payAddress!} size={90} level="M" /></div>
+        <p className="text-[10px] text-pnp-textSecondary">Scan from another device</p>
+      </div>
+      {payment.payCurrency === 'usdcsol' && (
+        <a
+          href={`https://link.trustwallet.com/open_url?coin_id=501&url=${encodeURIComponent(payment.checkoutUrl)}`}
+          target="_blank" rel="noopener noreferrer"
+          className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl font-bold text-sm text-white transition-all active:scale-[0.98]"
+          style={{ background: "linear-gradient(90deg, #3375BB, #0A2B6E)" }}
+        >🔵 Pay with Trust Wallet</a>
+      )}
+      <div className="flex gap-2">
+        <a href={payment.checkoutUrl} target="_blank" rel="noopener noreferrer"
+          className="flex-1 text-center py-2 rounded-lg text-[11px] text-pnp-textSecondary border border-white/10 bg-white/5 hover:text-pnp-textPrimary transition-colors">
+          Open in NowPayments →
+        </a>
+        <button onClick={onCancel} className="flex-1 py-2 rounded-lg text-[11px] text-pnp-textSecondary border border-white/10 bg-white/5 hover:text-pnp-textPrimary transition-colors">Cancel</button>
+      </div>
+    </div>
+  );
+}
 
 interface BuyTokensModalProps {
   isOpen: boolean;
@@ -58,7 +153,9 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
   // NowPayments (multi-coin + USDC Solana) popup + balance-delta poll state
   const npPopupRef = useRef<Window | null>(null);
   const npPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [npPayment, setNpPayment] = useState<{ invoiceId: string; checkoutUrl: string; payCurrency?: string } | null>(null);
+  const [npCoinPick, setNpCoinPick] = useState<string>("btc");
+  const [npPickerOpen, setNpPickerOpen] = useState(false);
+  const [npPayment, setNpPayment] = useState<{ invoiceId: string; checkoutUrl: string; payCurrency?: string; payAddress?: string | null; payAmount?: number | null; network?: string | null; validUntil?: string | null } | null>(null);
   const [npSuccess, setNpSuccess] = useState(false);
   const [npPolling, setNpPolling] = useState(false);
 
@@ -261,22 +358,20 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         return;
       }
       const safeUrl = assertPaymentUrl(result.checkoutUrl);
-      setNpPayment({ invoiceId: result.invoiceId, checkoutUrl: safeUrl, payCurrency });
+      setNpPayment({
+        invoiceId: result.invoiceId,
+        checkoutUrl: safeUrl,
+        payCurrency,
+        payAddress: result.payAddress || null,
+        payAmount: result.payAmount || null,
+        network: result.network || null,
+        validUntil: result.validUntil || null,
+      });
       setNpPolling(true);
       setNpSuccess(false);
 
       // Capture starting balance — we'll fire onSuccess once balance increases.
       const startingBalance = await getWalletBalance().then((r) => r.balance).catch(() => 0);
-
-      // Open centered popup (cannot redirect — breaks iOS + 3rd-party cookies).
-      const pw = 560, ph = 780;
-      const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
-      const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
-      npPopupRef.current = window.open(
-        safeUrl,
-        'nowpayments_tokens_checkout',
-        `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
-      );
 
       // Poll wallet balance every 6s; the NowPayments IPN webhook credits tokens
       // server-side, so balance increase is the success signal. 30-min cap.
@@ -358,22 +453,51 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               Select how you want to pay for your tokens.
             </p>
 
-            {/* Crypto — NowPayments multi-coin */}
-            <button
-              onClick={() => setBuyMethod('np')}
-              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-green-500/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
-            >
-              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(34,197,94,0.15)" }}>
-                <span className="text-lg leading-none">🪙</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-pnp-textPrimary">Crypto</p>
-                <p className="text-xs text-pnp-textSecondary truncate">BTC, ETH, USDC + 100 coins</p>
-              </div>
-              <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
+            {/* Crypto — NowPayments multi-coin with inline coin picker */}
+            <div className={`rounded-xl border transition-colors ${npPickerOpen ? "border-green-500/40 bg-green-500/5" : "border-pnp-border bg-pnp-surface"}`}>
+              <button
+                onClick={() => setNpPickerOpen(!npPickerOpen)}
+                className="w-full flex items-center gap-4 p-4 active:scale-[0.99] transition-all text-left min-h-[64px]"
+              >
+                <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(34,197,94,0.15)" }}>
+                  <span className="text-lg leading-none">🪙</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-pnp-textPrimary">Crypto</p>
+                  <p className="text-xs text-pnp-textSecondary truncate">
+                    {npPickerOpen && npCoinPick ? `Selected: ${NP_COINS.find(c => c.code === npCoinPick)?.label || npCoinPick.toUpperCase()}` : "BTC, ETH, LTC, XMR + more"}
+                  </p>
+                </div>
+                <svg className={`w-4 h-4 flex-shrink-0 text-pnp-textSecondary transition-transform ${npPickerOpen ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              {npPickerOpen && (
+                <div className="px-4 pb-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <p className="text-[10px] text-pnp-textSecondary/60 mb-2">Choose your coin:</p>
+                  <div className="flex gap-1.5 flex-wrap mb-3">
+                    {NP_COINS.map((coin) => (
+                      <button
+                        key={coin.code}
+                        type="button"
+                        onClick={() => setNpCoinPick(coin.code)}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${npCoinPick === coin.code ? "border-green-400/60 bg-green-500/20 text-pnp-textPrimary" : "border-white/15 bg-white/5 text-pnp-textSecondary hover:bg-white/10"}`}
+                      >
+                        <span style={{ color: coin.color }}>{coin.icon}</span>
+                        <span>{coin.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => { setNpPickerOpen(false); setBuyMethod('np'); }}
+                    className="w-full py-2.5 rounded-xl font-bold text-sm text-white transition-all active:scale-[0.98]"
+                    style={{ background: "linear-gradient(90deg, #26a17b, #00c896)" }}
+                  >
+                    Continue with {NP_COINS.find(c => c.code === npCoinPick)?.label || npCoinPick.toUpperCase()} →
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* USDC Solana */}
             <button
@@ -625,13 +749,6 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         {/* NowPayments (Crypto / USDC Solana) waiting panel */}
         {npPayment && (
           <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: npPayment.payCurrency === 'usdcsol' ? "#2775CA" : "#34d399" }} />
-              <span className="text-sm font-medium text-pnp-textPrimary">
-                {npPayment.payCurrency === 'usdcsol' ? 'Waiting for USDC payment...' : 'Waiting for crypto payment...'}
-              </span>
-            </div>
-
             {npSuccess ? (
               <div className="flex flex-col items-center gap-3 py-6">
                 <div className="w-14 h-14 rounded-full bg-green-500/20 flex items-center justify-center">
@@ -642,11 +759,22 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 <p className="text-base font-semibold text-green-400">Tokens added!</p>
                 <p className="text-xs text-pnp-textSecondary">Your balance has been updated.</p>
               </div>
+            ) : npPayment.payAddress ? (
+              <NpInlinePayPanel
+                payment={npPayment}
+                npPolling={npPolling}
+                onCancel={() => {
+                  if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
+                  setNpPayment(null);
+                  setNpPolling(false);
+                }}
+              />
             ) : (
               <div className="flex flex-col items-center gap-4 py-4">
-                <p className="text-sm text-pnp-textSecondary text-center">
-                  Complete your payment in the NowPayments checkout window. This page will update automatically once tokens arrive.
-                </p>
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#34d399" }} />
+                  <span className="text-sm font-medium text-pnp-textPrimary">Waiting for crypto payment...</span>
+                </div>
                 {npPolling && (
                   <div className="flex items-center gap-2 text-xs text-pnp-textSecondary">
                     <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
@@ -662,19 +790,13 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex-1 text-center py-2.5 rounded-xl text-sm font-semibold transition-colors"
-                    style={
-                      npPayment.payCurrency === 'usdcsol'
-                        ? { background: "rgba(39,117,202,0.15)", color: "#7FB8FF", border: "1px solid rgba(39,117,202,0.3)" }
-                        : { background: "rgba(34,197,94,0.15)", color: "#34d399", border: "1px solid rgba(34,197,94,0.3)" }
-                    }
+                    style={{ background: "rgba(34,197,94,0.15)", color: "#34d399", border: "1px solid rgba(34,197,94,0.3)" }}
                   >
                     Open Checkout
                   </a>
                   <button
                     onClick={() => {
                       if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
-                      npPopupRef.current?.close();
-                      npPopupRef.current = null;
                       setNpPayment(null);
                       setNpPolling(false);
                     }}
@@ -719,7 +841,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                       key={pkg.id}
                       onClick={() => {
                         if (buyMethod === 'btc') return handleBuyTokensBtc(pkg);
-                        if (buyMethod === 'np') return handleBuyTokensNowPayments(pkg);
+                        if (buyMethod === 'np') return handleBuyTokensNowPayments(pkg, npCoinPick || 'btc');
                         if (buyMethod === 'np_usdc') return handleBuyTokensNowPayments(pkg, 'usdcsol');
                         return handleBuyTokens(pkg);
                       }}

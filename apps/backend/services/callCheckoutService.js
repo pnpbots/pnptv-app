@@ -670,6 +670,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
     : `${WEB_APP_URL}/subscribe?nowpayments=success`;
 
   let invoiceUrl;
+  let npPayInfo = {};
   try {
     const ALLOWED_CALL_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdtbsc', 'usdcbsc', 'usdcsol']);
     const validCallPayCurrency = (payCurrency && ALLOWED_CALL_PAY_CURRENCIES.has(String(payCurrency).toLowerCase()))
@@ -687,9 +688,10 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
       },
       { headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' } }
     );
-    const { payment_id: npPaymentId, purchase_id: npPurchaseId } = paymentResp.data;
+    const { payment_id: npPaymentId, purchase_id: npPurchaseId, pay_address: npPayAddress, pay_amount: npPayAmount, network: npNetwork, valid_until: npValidUntil } = paymentResp.data;
     if (!npPaymentId || !npPurchaseId) throw new Error('NowPayments returned no payment_id/purchase_id');
     invoiceUrl = `https://nowpayments.io/payment?iid=${npPurchaseId}&paymentId=${npPaymentId}`;
+    npPayInfo = { payAddress: npPayAddress || null, payAmount: npPayAmount || null, network: npNetwork || null, validUntil: npValidUntil || null };
   } catch (invoiceErr) {
     if (booking?.id) {
       await query(`UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`, [booking.id]).catch(() => {});
@@ -743,6 +745,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
     amountUsd,
     expiresAt,
     orderId,
+    ...npPayInfo,
   };
 }
 

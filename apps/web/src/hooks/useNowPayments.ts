@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { 
   getUsdcSubscriptionStatus, 
   prepareUsdcSubscription 
@@ -13,6 +13,11 @@ export interface NowPaymentsOrder {
   createdAt: number;
   partiallyPaid?: boolean;
   confirming?: boolean;
+  payAddress?: string | null;
+  payAmount?: number | null;
+  network?: string | null;
+  validUntil?: string | null;
+  payCurrency?: string | null;
 }
 
 interface UseNowPaymentsOptions {
@@ -34,7 +39,6 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
   const [isPolling, setIsPolling] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const paymentPopupRef = useRef<Window | null>(null);
 
   // Resume from storage on mount
   useEffect(() => {
@@ -78,8 +82,6 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
         if (data.completed) {
           setIsPolling(false);
           setIsSuccess(true);
-          paymentPopupRef.current?.close();
-          paymentPopupRef.current = null;
           sessionStorage.removeItem(storageKey);
           onSuccess?.();
           return;
@@ -158,31 +160,19 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
           usdAmount: result.usdAmount,
           invoiceUrl: result.invoiceUrl,
           createdAt: Date.now(),
+          payAddress: result.payAddress || null,
+          payAmount: result.payAmount || null,
+          network: result.network || null,
+          validUntil: result.validUntil || null,
+          payCurrency: result.payCurrency || null,
         };
-        
+
         setOrder(newOrder);
         setIsPolling(true);
         sessionStorage.setItem(storageKey, JSON.stringify(newOrder));
 
         if (isTelegramContext()) {
           window.Telegram!.WebApp.openLink(result.invoiceUrl);
-        } else {
-          const w = window.screen.width, h = window.screen.height;
-          const pw = Math.min(500, w), ph = Math.min(720, h);
-          const left = Math.round((w - pw) / 2);
-          const top = Math.round((h - ph) / 2);
-          
-          paymentPopupRef.current = window.open(
-            result.invoiceUrl, 
-            "nowpayments_checkout", 
-            `width=${pw},height=${ph},left=${left},top=${top},resizable=yes,scrollbars=yes`
-          );
-          
-          // Fallback if popup blocked
-          if (!paymentPopupRef.current || paymentPopupRef.current.closed || typeof paymentPopupRef.current.closed === 'undefined') {
-            // Popup blocked, we can't do much but the UI will show the link anyway
-            console.warn("Popup blocked");
-          }
         }
         return { success: true, order: newOrder };
       } else {
