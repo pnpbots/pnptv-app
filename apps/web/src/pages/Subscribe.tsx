@@ -819,11 +819,11 @@ export default function Subscribe() {
         {memberPlans.map((plan) => {
           const isSelected = selectedPlan === plan.id;
           const features = getPlanFeatures(plan, true);
-          const displayPrice = formatPrice(plan.priceUSD, "USD");
+          const displayPrice = formatPrice(plan.price, "USD");
           const planLabel = getPlanLabel(plan, true);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
-          const cryptoDiscount = plan.priceUSD > 50;
-          const cryptoPriceUSD = cryptoDiscount ? Math.round(plan.priceUSD * 0.80 * 100) / 100 : plan.priceUSD;
+          const cryptoDiscount = plan.price > 50;
+          const cryptoPriceUSD = cryptoDiscount ? Math.round(plan.price * 0.80 * 100) / 100 : plan.price;
           const cryptoDisplayPrice = formatPrice(cryptoPriceUSD, "USD");
 
           const planDays = plan.duration_days || plan.duration || 30;
@@ -1042,12 +1042,12 @@ export default function Subscribe() {
           const isSelected = selectedPlan === plan.id;
           const isRecommended = plan.id === RECOMMENDED_PLAN || plan.sku === RECOMMENDED_PLAN;
           const features = getPlanFeatures(plan, false);
-          const displayPrice = formatPrice(plan.priceUSD, "USD");
+          const displayPrice = formatPrice(plan.price, "USD");
           const planLabel = getPlanLabel(plan, false);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
           const planDays = plan.duration_days || plan.duration || 30;
-          const cryptoDiscount = plan.priceUSD > 50;
-          const cryptoPriceUSD = cryptoDiscount ? Math.round(plan.priceUSD * 0.80 * 100) / 100 : plan.priceUSD;
+          const cryptoDiscount = plan.price > 50;
+          const cryptoPriceUSD = cryptoDiscount ? Math.round(plan.price * 0.80 * 100) / 100 : plan.price;
           const cryptoDisplayPrice = formatPrice(cryptoPriceUSD, "USD");
 
           const isBtcPanelActive = !!(btcOrder && selectedPlan === plan.id);
@@ -1102,7 +1102,7 @@ export default function Subscribe() {
                   </div>
                   {planDays >= 30 && planDays < 36500 && (
                     <div className="text-[10px] text-pnp-textSecondary">
-                      {formatPrice(plan.priceUSD / Math.max(1, Math.round(planDays / 30)), "USD")}{s.perMonth}
+                      {formatPrice(plan.price / Math.max(1, Math.round(planDays / 30)), "USD")}{s.perMonth}
                     </div>
                   )}
                 </div>
