@@ -1722,10 +1722,11 @@ const webhookLimiter = rateLimit({
   skipSuccessfulRequests: false,
 });
 
-// Rate limiting for authentication endpoints (prevent brute force attacks)
+// Rate limiting for authentication endpoints (prevent brute force attacks).
+// Cap raised to accommodate carrier-NAT IPs that share one bucket across many users.
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 30, // 30 failed auth attempts per 15 min (only failures count)
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 200, // 200 failed auth attempts per 10 min (only failures count)
   message: 'Too many authentication attempts, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
