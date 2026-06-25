@@ -1054,13 +1054,16 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
       return;
     }
 
-    // Use processed stream (scene→filters→audio) when available, else raw camera
-    const finalStream = getFinalStream() || streamRef.current;
+    // Use processed stream (scene→filters→audio) when available, else raw camera.
+    // Stale refs from a previous session may hold streams with ended tracks — fall
+    // back to the raw camera if no live video tracks are found.
+    let finalStream = getFinalStream();
+    if (!finalStream || !finalStream.getVideoTracks().some((t) => t.readyState === "live")) {
+      finalStream = streamRef.current;
+    }
 
-    // Guard against starting a recorder with no video tracks — happens when
-    // camera failed to initialize silently or scene compositor hasn't produced
-    // a frame yet. Recording on a 0-track stream produces silent black data.
-    if (!finalStream || finalStream.getVideoTracks().length === 0) {
+    // Guard against starting a recorder with no live video tracks.
+    if (!finalStream || !finalStream.getVideoTracks().some((t) => t.readyState === "live")) {
       setStreamError("No video source available. Check camera permissions and try again.");
       return;
     }
@@ -1172,6 +1175,11 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     clearAllTimers();
     dispatch({ type: "RESET_STREAM" });
     setDurationSec(0);
+    // Clear processed stream refs so the next goLive() doesn't reuse stale/ended
+    // tracks from the previous session (causes 0-chunk recorder with no data sent).
+    filteredStreamRef.current = null;
+    sceneStreamRef.current = null;
+    mixedAudioNodeRef.current = null;
   }, [socket, stopRecorderAsync, clearAllTimers]);
 
   // ── Screen Share ──────────────────────────────────────────────────────────
