@@ -268,93 +268,6 @@ export default function BrowserStream() {
   }
 
 
-  // ── Active tab content for mobile ─────────────────────────────────────────
-  function MobileTabContent() {
-    switch (activeTab) {
-      case "scenes":
-        return (
-          <TabPanel label="Scene Manager">
-            <SceneManager
-              videoDevices={availableCameras}
-              onCanvasStream={handleSceneStream}
-              micStream={micStream}
-              isLive={isLive}
-              compact={true}
-              sharedCameraStream={rawStreamRef.current}
-            />
-          </TabPanel>
-        );
-      case "audio":
-        return (
-          <TabPanel label="Audio Mixer">
-            <AudioMixer
-              micStream={micStream}
-              onMixedOutput={handleMixedAudioOutput}
-              isLive={isLive}
-              compact={true}
-            />
-          </TabPanel>
-        );
-      case "filters":
-        return (
-          <TabPanel label="Video Filters">
-            <VideoFilters
-              inputStream={sceneStreamRef.current}
-              onFilteredOutput={handleFilteredOutput}
-              isLive={isLive}
-              width={selectedPreset.width}
-              height={selectedPreset.height}
-              fps={fps}
-              compact={true}
-              initialSettings={filterSettings}
-              onSettingsChange={(s: FilterSettingsState) => setFilterSettings(s)}
-            />
-          </TabPanel>
-        );
-      case "settings":
-        return (
-          <StudioSettingsPanel
-            selectedPreset={selectedPreset}
-            onPresetChange={(p) => dispatch({ type: "SET_PRESET", payload: p })}
-            fps={fps}
-            onFpsChange={(f) => dispatch({ type: "SET_FPS", payload: f as 24 | 30 | 60 })}
-            isLive={isLive}
-            autoReconnect={autoReconnect}
-            onToggleAutoReconnect={() => dispatch({ type: "TOGGLE_AUTO_RECONNECT" })}
-            lowLatency={lowLatency}
-            onToggleLowLatency={() => dispatch({ type: "TOGGLE_LOW_LATENCY" })}
-            hardwareAccel={hardwareAccel}
-            onToggleHardwareAccel={() => dispatch({ type: "TOGGLE_HW_ACCEL" })}
-            localRecordEnabled={localRecordEnabled}
-            onToggleLocalRecord={() => setLocalRecordEnabled((v) => !v)}
-            recordingBlob={recordingBlob}
-            onDownloadRecording={downloadRecording}
-            channel={channel}
-            streamProfile={streamProfile}
-            onStreamProfileChange={setStreamProfile}
-            autoMessages={autoMessages}
-            autoActive={autoActive}
-            onSaveProfile={saveProfile}
-            onToggleAutoMessages={toggleAutoMessages}
-            profileSaving={profileSaving}
-            profileError={profileError}
-          />
-        );
-      case "chat":
-        return (
-          <div className="p-3 flex-1 min-h-0">
-            <StudioChatPanel
-              streamId={streamId}
-              isLive={isLive}
-              className="h-full min-h-[400px]"
-            />
-          </div>
-        );
-      default:
-        return null;
-    }
-  }
-
   // ── Eligibility fetch failure — fail closed so a bad network doesn't grant access ──
   if (!eligibilityLoading && eligibilityError) {
     return (
@@ -552,7 +465,80 @@ export default function BrowserStream() {
           id={`tabpanel-${activeTab}`}
           aria-labelledby={`tab-${activeTab}`}
         >
-          <MobileTabContent />
+          {activeTab === "scenes" && (
+            <TabPanel label="Scene Manager">
+              <SceneManager
+                videoDevices={availableCameras}
+                onCanvasStream={handleSceneStream}
+                micStream={micStream}
+                isLive={isLive}
+                compact={true}
+                sharedCameraStream={rawStreamRef.current}
+              />
+            </TabPanel>
+          )}
+          {activeTab === "audio" && (
+            <TabPanel label="Audio Mixer">
+              <AudioMixer
+                micStream={micStream}
+                onMixedOutput={handleMixedAudioOutput}
+                isLive={isLive}
+                compact={true}
+              />
+            </TabPanel>
+          )}
+          {activeTab === "filters" && (
+            <TabPanel label="Video Filters">
+              <VideoFilters
+                inputStream={sceneStreamRef.current}
+                onFilteredOutput={handleFilteredOutput}
+                isLive={isLive}
+                width={selectedPreset.width}
+                height={selectedPreset.height}
+                fps={fps}
+                compact={true}
+                initialSettings={filterSettings}
+                onSettingsChange={(s: FilterSettingsState) => setFilterSettings(s)}
+              />
+            </TabPanel>
+          )}
+          {activeTab === "settings" && (
+            <StudioSettingsPanel
+              selectedPreset={selectedPreset}
+              onPresetChange={(p) => dispatch({ type: "SET_PRESET", payload: p })}
+              fps={fps}
+              onFpsChange={(f) => dispatch({ type: "SET_FPS", payload: f as 24 | 30 | 60 })}
+              isLive={isLive}
+              autoReconnect={autoReconnect}
+              onToggleAutoReconnect={() => dispatch({ type: "TOGGLE_AUTO_RECONNECT" })}
+              lowLatency={lowLatency}
+              onToggleLowLatency={() => dispatch({ type: "TOGGLE_LOW_LATENCY" })}
+              hardwareAccel={hardwareAccel}
+              onToggleHardwareAccel={() => dispatch({ type: "TOGGLE_HW_ACCEL" })}
+              localRecordEnabled={localRecordEnabled}
+              onToggleLocalRecord={() => setLocalRecordEnabled((v) => !v)}
+              recordingBlob={recordingBlob}
+              onDownloadRecording={downloadRecording}
+              channel={channel}
+              streamProfile={streamProfile}
+              onStreamProfileChange={setStreamProfile}
+              autoMessages={autoMessages}
+              autoActive={autoActive}
+              onSaveProfile={saveProfile}
+              onToggleAutoMessages={toggleAutoMessages}
+              profileSaving={profileSaving}
+              profileError={profileError}
+            />
+          )}
+          {activeTab === "chat" && (
+            <div className="p-3 flex-1 min-h-0">
+              <StudioChatPanel
+                streamId={streamId}
+                isLive={isLive}
+                className="h-full min-h-[400px]"
+              />
+            </div>
+          )}
         </div>
       </div>}
 
