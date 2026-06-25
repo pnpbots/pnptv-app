@@ -323,7 +323,11 @@ const createDmVideoCallInvite = async (req, res) => {
 
     const callerId = String(user.id);
     const calleeId = String(partnerId);
-    const roomName = `dm-${Math.min(Number(callerId), Number(calleeId))}-${Math.max(Number(callerId), Number(calleeId))}`;
+    // String sort produces a stable, deterministic room name regardless of which
+    // user initiated the call. Don't use Number() — UUIDs cast to NaN, producing
+    // "dm-NaN-NaN" and silently collapsing all UUID-vs-UUID calls into one room.
+    const [a, b] = [callerId, calleeId].sort();
+    const roomName = `dm-${a}-${b}`;
 
     // Abort if there is already an active call between these two users
     const { rows: activeRows } = await query(

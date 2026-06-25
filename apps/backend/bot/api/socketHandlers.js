@@ -2529,6 +2529,32 @@ function initSocketIO(io) {
         return;
       }
 
+      // Cross-socket exclusivity: prevent a second tab/connection from spawning
+      // a parallel FFmpeg pushing to the same RTMP target. The per-socket guard
+      // above only protects within one connection. TTL is refreshed on every
+      // stream:metrics tick (~5s) so it survives long streams, and released on
+      // stream:stop / disconnect / ffmpeg close.
+      const liveLockKey = `live:streaming:${user.id}`;
+      try {
+        const redis = getRedis();
+        if (redis) {
+          const acquired = await redis.set(liveLockKey, socket.id, 'NX', 'EX', 600);
+          if (!acquired) {
+            socket.emit('stream:error', {
+              code: 'already_live',
+              message: 'You are already streaming from another window. Stop that stream first.',
+            });
+            return;
+          }
+          socket.data.liveLockKey = liveLockKey;
+        }
+      } catch (lockErr) {
+        // If Redis is down we fail safe (reject) — channel hijack is more dangerous than a missed stream.
+        logger.error('stream:start: live lock check failed', { userId: user.id, error: lockErr.message });
+        socket.emit('stream:error', { message: 'Streaming temporarily unavailable. Try again in a moment.' });
+        return;
+      }
+
       // Validate and clamp quality parameters
       const safeVideoBitrate = (typeof videoBitrate === 'number' && isFinite(videoBitrate))
         ? Math.min(Math.max(videoBitrate, 100_000), 6_000_000)
@@ -2677,6 +2703,12 @@ function initSocketIO(io) {
           if (socket.data.ffmpegProcess === ffmpeg) {
             socket.data.ffmpegProcess = null;
             socket.data.streamChannelRef = null;
+            // Release the cross-socket live lock so the user can immediately retry
+            if (socket.data.liveLockKey) {
+              const redis = getRedis();
+              if (redis) redis.del(socket.data.liveLockKey).catch(() => {});
+              socket.data.liveLockKey = null;
+            }
             socket.emit('stream:stopped', { channelRef, reason: code !== 0 ? 'ffmpeg_error' : 'completed' });
             io.to(`live:${channelRef}`).emit('live:ended', { channelRef });
 
@@ -2703,12 +2735,17 @@ function initSocketIO(io) {
           logger.error(`FFmpeg spawn error for channel '${channelRef}'`, err);
           socket.data.ffmpegProcess = null;
           socket.data.streamChannelRef = null;
+          if (socket.data.liveLockKey) {
+            const redis = getRedis();
+            if (redis) redis.del(socket.data.liveLockKey).catch(() => {});
+            socket.data.liveLockKey = null;
+          }
           socket.emit('stream:error', { message: 'Streaming process failed to start. Is FFmpeg installed?' });
         });
 
         socket.data.streamDataChunks = 0;
         socket.data.streamDataBytes = 0;
-        logger.info(`Browser stream started: user ${user.id} → channel '${channelRef}' → ${rtmpTarget}`);
+        logger.info(`Browser stream started: user ${user.id} → channel '${channelRef}' → rtmp://restreamer:1935/live/${streamKey} [token redacted]`);
 
         // Store stream metadata in Redis (TTL 12h — auto-expires if stream ends uncleanly)
         try {
@@ -2927,6 +2964,11 @@ function initSocketIO(io) {
       } finally {
         socket.data.ffmpegProcess = null;
         socket.data.streamChannelRef = null;
+        if (socket.data.liveLockKey) {
+          const redis = getRedis();
+          if (redis) redis.del(socket.data.liveLockKey).catch(() => {});
+          socket.data.liveLockKey = null;
+        }
         logger.info(`Browser stream stopped: user ${user.id}, channel '${channelRef}'`);
         socket.emit('stream:stopped', { channelRef, reason: 'user_stopped' });
 
@@ -2993,6 +3035,11 @@ function initSocketIO(io) {
         }
         socket.data.ffmpegProcess = null;
         socket.data.streamChannelRef = null;
+        if (socket.data.liveLockKey) {
+          const redis = getRedis();
+          if (redis) redis.del(socket.data.liveLockKey).catch(() => {});
+          socket.data.liveLockKey = null;
+        }
 
         // Telegram DM: notify creator their stream went offline unexpectedly.
         // Dedup via Redis NX key set by stream:stop (TTL 60s) — don't fire if they stopped intentionally.

@@ -669,6 +669,7 @@ app.use(conditionalMiddleware(cors({
     'https://app.pnptv.app',
     'https://pnptv.app',
     'https://www.pnptv.app',
+    'https://studio.pnptv.app',
     'https://t.me',
     ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'] : [])
   ],
@@ -4573,21 +4574,22 @@ const autoStreamLimiter = rateLimit({
 app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), autoStreamLimiter, asyncHandler(streamAutoController.startAutoMessages));
 app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), autoStreamLimiter, asyncHandler(streamAutoController.stopAutoMessages));
 
-// Connection quality test — measures round-trip latency and upload throughput
-app.post('/api/webapp/live/connection-test', requireSessionAuth, connectionTestLimiter, express.json({ limit: '50kb' }), asyncHandler(async (req, res) => {
-  const start = Date.now();
-  const payloadSize = req.body?.payload?.length || 0;
-  const latencyMs = Date.now() - start;
-  const payloadBytes = payloadSize * 0.75; // base64 to bytes
-  const uploadKbps = payloadBytes > 0 ? Math.round((payloadBytes * 8) / (latencyMs || 1)) : 0;
-  const quality = uploadKbps >= 5000 ? 'excellent' : uploadKbps >= 2500 ? 'good' : uploadKbps >= 1000 ? 'fair' : 'poor';
-  res.json({ success: true, uploadKbps, latencyMs, quality });
-}));
+// Connection quality test — server echoes received byte count so the studio
+// can compute throughput from its own round-trip timing (performance.now()).
+// The frontend POSTs a ~200KB application/octet-stream Blob.
+app.post('/api/webapp/live/connection-test', requireSessionAuth, connectionTestLimiter,
+  express.raw({ type: ['application/octet-stream', 'application/json'], limit: '512kb' }),
+  asyncHandler(async (req, res) => {
+    const receivedBytes = Buffer.isBuffer(req.body) ? req.body.length : 0;
+    res.json({ success: true, receivedBytes });
+  })
+);
 
 // Stream history — returns past streams and aggregate stats for the authenticated creator
 app.get('/api/webapp/live/stream-history', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
   const LiveStreamModel = require('../../models/liveStreamModel');
-  const userId = req.session.userId || req.session.user?.id;
+  const userId = req.session.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Session expired' });
   const streams = await LiveStreamModel.getByHostId(String(userId), 20);
 
   const totalStreams = streams.length;

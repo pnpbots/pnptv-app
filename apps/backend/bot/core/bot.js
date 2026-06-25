@@ -206,11 +206,14 @@ const startApiServer = (modeLabel) => {
   const io = new SocketIOServer(server, {
     cors: {
       // H5: Filter out wildcard '*' entries — WEBAPP_ORIGIN must never accept all origins.
+      // Default fallback includes studio.pnptv.app so MediaRecorder→FFmpeg streaming
+      // works even when WEBAPP_ORIGIN is unset in the environment.
       origin: (() => {
+        const defaults = ['https://app.pnptv.app', 'https://pnptv.app', 'https://studio.pnptv.app'];
         const raw = process.env.WEBAPP_ORIGIN;
-        if (!raw) return ['https://app.pnptv.app', 'https://pnptv.app'];
+        if (!raw) return defaults;
         const allowed = raw.split(',').map(o => o.trim()).filter(o => o && o !== '*');
-        return allowed.length > 0 ? allowed : ['https://app.pnptv.app', 'https://pnptv.app'];
+        return allowed.length > 0 ? allowed : defaults;
       })(),
       credentials: true,
     },

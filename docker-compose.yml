@@ -587,6 +587,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
+      # Force IPv4 first — host has broken IPv6 routing (egress is v4-only).
+      # Without this, Telegram, Stripe, and other external APIs ETIMEDOUT
+      # because Node20 picks the v6 record first.
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
       POSTGRES_HOST: pg-pnptv
       REDIS_HOST: redis-pnptv
       PG_AUTH_HOST: pg-authentik
