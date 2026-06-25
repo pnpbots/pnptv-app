@@ -46,12 +46,20 @@ const MANIFEST_POLL_INTERVAL_MS = 1_000;
 // ---------------------------------------------------------------------------
 
 /**
- * GET the Restreamer HLS manifest and return true only when it represents a
- * LIVE stream. A 200 response is not enough — Restreamer leaves the previous
- * session's playlist in memfs with #EXT-X-ENDLIST after the stream ends.
- * Starting a recording against an ENDLIST playlist makes FFmpeg consume the
- * stale segments, hit EOF, and exit cleanly in ~150 ms — producing a 1-segment
- * "completed" recording instead of the actual broadcast.
+ * GET the Restreamer HLS manifest and return true when it represents a LIVE
+ * (or recently live) stream.
+ *
+ * Restreamer serves two shapes:
+ *   - Master playlist (#EXT-X-STREAM-INF) — what external clients receive on
+ *     first hit; contains a session-bound child URL.
+ *   - Media playlist (.ts segments, EXT-X-MEDIA-SEQUENCE) — what FFmpeg sees
+ *     after following the session redirect.
+ *
+ * A 200 response on either is sufficient to signal "stream is live" because
+ * Restreamer 404s the URL when the memfs entry has expired (idle channel).
+ * The one trap is the media playlist's #EXT-X-ENDLIST marker, which Restreamer
+ * leaves in place for up to 30 s after a stream ends. We must NOT start a
+ * recording in that window — the underlying RTMP source is gone too.
  */
 function _checkManifestOnce(url) {
   return new Promise((resolve) => {
@@ -61,9 +69,13 @@ function _checkManifestOnce(url) {
       res.setEncoding('utf8');
       res.on('data', (chunk) => { body += chunk; if (body.length > 32 * 1024) { res.destroy(); } });
       res.on('end', () => {
-        const hasSegments = /\.ts\b/.test(body);
-        const isStale = body.includes('#EXT-X-ENDLIST');
-        resolve(hasSegments && !isStale);
+        // Reject the post-stream stale variant playlist.
+        if (body.includes('#EXT-X-ENDLIST')) { resolve(false); return; }
+        // Accept master (STREAM-INF) or media (.ts segments) — both indicate
+        // Restreamer's memfs has a current stream entry for this channel.
+        const isMaster = body.includes('#EXT-X-STREAM-INF');
+        const isMedia = /\.ts\b/.test(body);
+        resolve(isMaster || isMedia);
       });
       res.on('error', () => resolve(false));
     });
