@@ -1533,7 +1533,7 @@ export interface GroupMessage {
   media_height: number | null;
   media_duration?: number | null;
   reply_to_id?: number | null;
-  reply_to?: { name: string; content: string } | null;
+  reply_to?: { name: string; content: string; mediaType?: string | null; mediaThumbUrl?: string | null; mediaUrl?: string | null } | null;
   created_at: string;
   edited_at?: string | null;
   edit_count?: number;

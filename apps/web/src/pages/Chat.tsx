@@ -123,6 +123,13 @@ const UX_STYLES = `
 .reply-line-gradient {
   background: linear-gradient(to bottom, #D4007A, #E69138);
 }
+@keyframes slideUpSheet {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.context-sheet-enter {
+  animation: slideUpSheet 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
 `;
 
 // ─── HangoutChatPanel (PostgreSQL + Socket.IO) ──────────────────────────────
@@ -769,8 +776,7 @@ function HangoutChatPanel({
                           )}
                           {msg.reply_to && (
                             <div
-                              className="mb-1.5 pl-2.5 py-0.5 border-l-[3px] border-white/20 relative cursor-pointer hover:bg-white/5 transition-all group/reply"
-                              style={{ borderLeftColor: "transparent" }}
+                              className="mb-1.5 pl-2.5 py-0.5 border-l-[3px] border-transparent relative cursor-pointer hover:bg-white/5 transition-all group/reply rounded-r-md overflow-hidden flex gap-1.5 items-center"
                               onClick={() => {
                                 const target = document.getElementById(`msg-${msg.reply_to_id}`);
                                 if (target) {
@@ -781,8 +787,23 @@ function HangoutChatPanel({
                               }}
                             >
                               <div className="absolute inset-y-0 left-0 w-[3px] rounded-full reply-line-gradient" />
-                              <p className="font-bold text-[11px] leading-tight text-pnp-accent/90 group-hover/reply:text-pnp-accent">{msg.reply_to.name}</p>
-                              <p className="text-[10px] leading-snug text-white/50 line-clamp-1 group-hover/reply:text-white/70">{msg.reply_to.content?.slice(0, 80)}</p>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold text-[11px] leading-tight text-pnp-accent/90 group-hover/reply:text-pnp-accent">{msg.reply_to.name}</p>
+                                <p className="text-[10px] leading-snug text-white/50 line-clamp-1 group-hover/reply:text-white/70">{msg.reply_to.content?.slice(0, 80)}</p>
+                              </div>
+                              {(msg.reply_to.mediaThumbUrl || (msg.reply_to.mediaType === "image" && msg.reply_to.mediaUrl)) && (
+                                <img
+                                  src={msg.reply_to.mediaThumbUrl || msg.reply_to.mediaUrl!}
+                                  alt=""
+                                  className="w-8 h-8 rounded object-cover flex-shrink-0 opacity-80"
+                                />
+                              )}
+                              {msg.reply_to.mediaType === "video" && !msg.reply_to.mediaThumbUrl && !msg.reply_to.mediaUrl && (
+                                <span className="w-8 h-8 rounded bg-white/10 flex-shrink-0 flex items-center justify-center text-[10px]">🎥</span>
+                              )}
+                              {msg.reply_to.mediaType === "audio" && (
+                                <span className="w-8 h-8 rounded bg-white/10 flex-shrink-0 flex items-center justify-center text-[10px]">🎤</span>
+                              )}
                             </div>
                           )}
                           {msg.message_type === "post_card" && msg.meta?.kind === "forward" ? (() => {
@@ -994,106 +1015,106 @@ function HangoutChatPanel({
         </button>
       )}
 
-      {/* Context menu */}
-      {contextMenu && (
-        <>
-          <div className="fixed inset-0 z-50" onClick={() => setContextMenu(null)} />
-          <div
-            className="fixed z-50 rounded-xl overflow-hidden shadow-xl py-1 min-w-[160px] animate-fade-in-up"
-            style={{
-              background: "var(--pnp-surface-hover)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 280)),
-              top: Math.max(60, Math.min(contextMenu.y, window.innerHeight - 360)),
-            }}
-          >
-            {/* Quick reactions in context menu */}
-            <div className="flex items-center gap-0.5 px-2 py-2 border-b border-white/5 overflow-x-auto scrollbar-hide">
-              {QUICK_REACTIONS.map((emoji) => (
-                <button
-                  key={emoji}
-                  onClick={() => { handleReactionWithAnimation(contextMenu.msg.id, emoji); setContextMenu(null); }}
-                  aria-label={`React with ${emoji}`}
-                  className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-base"
-                >
-                  {emoji}
-                </button>
-              ))}
-              <button
-                onClick={(e) => { e.stopPropagation(); openEmojiPicker(contextMenu.msg.id, e.clientX, e.clientY); }}
-                aria-label="More emojis"
-                className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-sm text-pnp-textSecondary font-bold"
-              >+</button>
-            </div>
-            {contextMenu.msg.media_url && (
-              <button
-                onClick={() => handleShareToFeed(contextMenu.msg)}
-                className="w-full px-4 py-2.5 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
-              >
-                <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      {/* Context menu — bottom sheet on mobile, floating popup on desktop */}
+      {contextMenu && (() => {
+        const useMobileSheet = window.innerWidth < 640;
+        const cmsg = contextMenu.msg;
+        const isMine = String(cmsg.user_id) === String(myId);
+        const canMod = isOwnerOrMod && !isMine;
+        const menuItems = (py: string) => (
+          <>
+            {cmsg.media_url && (
+              <button onClick={() => handleShareToFeed(cmsg)} className={`w-full px-5 ${py} text-[15px] text-left text-white active:bg-white/10 hover:bg-white/10 transition-colors flex items-center gap-3`}>
+                <svg className="w-5 h-5 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
                 </svg>
                 Share to Feed
               </button>
             )}
-            <button
-              onClick={() => startReply(contextMenu.msg)}
-              className="w-full px-4 py-2.5 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
-            >
-              <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <button onClick={() => startReply(cmsg)} className={`w-full px-5 ${py} text-[15px] text-left text-white active:bg-white/10 hover:bg-white/10 transition-colors flex items-center gap-3`}>
+              <svg className="w-5 h-5 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
               </svg>
               Reply
             </button>
-            <button
-              onClick={() => { const msg = contextMenu.msg; setContextMenu(null); setForwardingMsg(msg); }}
-              className="w-full px-4 py-2.5 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
-            >
-              <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 14l5.293-5.293a1 1 0 011.414 0L12 11m0 0l5-5m-5 5v9" transform="rotate(90 12 12)" />
+            <button onClick={() => { setContextMenu(null); setForwardingMsg(cmsg); }} className={`w-full px-5 ${py} text-[15px] text-left text-white active:bg-white/10 hover:bg-white/10 transition-colors flex items-center gap-3`}>
+              <svg className="w-5 h-5 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17l5-5-5-5M4 18v-2a4 4 0 014-4h12" />
               </svg>
               Forward
             </button>
-            {String(contextMenu.msg.user_id) === String(myId) && (
+            {isMine && (
               <>
-                <button
-                  onClick={() => startEdit(contextMenu.msg)}
-                  className="w-full px-4 py-2.5 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
-                >
-                  <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <button onClick={() => startEdit(cmsg)} className={`w-full px-5 ${py} text-[15px] text-left text-white active:bg-white/10 hover:bg-white/10 transition-colors flex items-center gap-3`}>
+                  <svg className="w-5 h-5 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
                   </svg>
                   Edit
                 </button>
-                <div className="border-t border-white/5" />
-                <button
-                  onClick={() => handleDeleteMsg(contextMenu.msg)}
-                  className="w-full px-4 py-2.5 text-sm text-left text-red-400 hover:bg-white/10 transition-colors flex items-center gap-3"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="border-t border-white/8" />
+                <button onClick={() => handleDeleteMsg(cmsg)} className={`w-full px-5 ${py} text-[15px] text-left text-red-400 active:bg-white/10 hover:bg-white/10 transition-colors flex items-center gap-3`}>
+                  <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
                   Delete
                 </button>
               </>
             )}
-            {isOwnerOrMod && String(contextMenu.msg.user_id) !== String(myId) && (
+            {canMod && (
               <>
-                <div className="border-t border-white/5" />
-                <button
-                  onClick={() => handleDeleteMsg(contextMenu.msg)}
-                  className="w-full px-4 py-2.5 text-sm text-left text-red-400 hover:bg-white/10 transition-colors flex items-center gap-3"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="border-t border-white/8" />
+                <button onClick={() => handleDeleteMsg(cmsg)} className={`w-full px-5 ${py} text-[15px] text-left text-red-400 active:bg-white/10 hover:bg-white/10 transition-colors flex items-center gap-3`}>
+                  <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
-                  Delete
+                  Delete (mod)
                 </button>
               </>
             )}
+          </>
+        );
+        const reactionRow = (size: string) => (
+          <div className={`flex items-center gap-0.5 px-2 py-2 border-b border-white/8 overflow-x-auto scrollbar-hide`}>
+            {QUICK_REACTIONS.map((emoji) => (
+              <button key={emoji} onClick={() => { handleReactionWithAnimation(cmsg.id, emoji); setContextMenu(null); }} aria-label={`React ${emoji}`}
+                className={`flex-shrink-0 ${size} flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-xl`}>{emoji}</button>
+            ))}
+            <button onClick={(e) => { e.stopPropagation(); openEmojiPicker(cmsg.id, e.clientX, e.clientY); }} aria-label="More emojis"
+              className={`flex-shrink-0 ${size} flex items-center justify-center rounded-full hover:bg-white/10 active:scale-90 transition-all text-sm text-pnp-textSecondary font-bold`}>+</button>
           </div>
-        </>
-      )}
+        );
+        if (useMobileSheet) {
+          return (
+            <>
+              <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setContextMenu(null)} />
+              <div className="fixed bottom-0 inset-x-0 z-50 context-sheet-enter" style={{ background: "var(--pnp-surface)", borderTopLeftRadius: 20, borderTopRightRadius: 20, border: "1px solid rgba(255,255,255,0.1)", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+                <div className="flex justify-center pt-2.5 pb-1">
+                  <div className="w-10 h-1 rounded-full bg-white/20" />
+                </div>
+                {cmsg.content && (
+                  <p className="px-5 pb-2 text-[12px] text-white/40 line-clamp-2 leading-snug">{cmsg.content.slice(0, 100)}</p>
+                )}
+                {reactionRow("w-10 h-10")}
+                {menuItems("py-4")}
+                <div className="border-t border-white/8" />
+                <button onClick={() => setContextMenu(null)} className="w-full px-5 py-4 text-[15px] font-semibold text-white/60 active:bg-white/10 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </>
+          );
+        }
+        return (
+          <>
+            <div className="fixed inset-0 z-50" onClick={() => setContextMenu(null)} />
+            <div className="fixed z-50 rounded-xl overflow-hidden shadow-xl py-1 min-w-[180px] animate-fade-in-up"
+              style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)", left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 200)), top: Math.max(60, Math.min(contextMenu.y, window.innerHeight - 380)) }}>
+              {reactionRow("w-8 h-8")}
+              {menuItems("py-2.5")}
+            </div>
+          </>
+        );
+      })()}
 
       {/* Full emoji picker */}
       {emojiPickerMsgId !== null && (
@@ -1208,12 +1229,20 @@ function HangoutChatPanel({
 
       {/* Reply bar */}
       {replyTo && !editingMsg && (
-        <div className="px-3 py-2.5 border-t border-pnp-border flex items-center gap-3 flex-shrink-0 bg-white/[0.03] backdrop-blur-xl animate-fade-in-up">
-          <div className="w-[3px] h-8 rounded-full flex-shrink-0 reply-line-gradient" />
+        <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-2.5 flex-shrink-0 bg-white/[0.03] backdrop-blur-xl animate-fade-in-up">
+          <div className="w-[3px] h-9 rounded-full flex-shrink-0 reply-line-gradient" />
           <div className="flex-1 min-w-0">
             <p className="text-[11px] font-bold text-pnp-accent uppercase tracking-tight">{replyTo.first_name || replyTo.username || "User"}</p>
-            <p className="text-xs text-white/50 truncate leading-relaxed">{replyTo.content?.slice(0, 80) || (replyTo.media_type ? (replyTo.media_type === 'image' ? "📷 Photo" : "🎥 Video") : "Media")}</p>
+            <p className="text-xs text-white/50 truncate leading-relaxed">
+              {replyTo.content?.slice(0, 80) || (replyTo.media_type === "image" ? "📷 Photo" : replyTo.media_type === "video" ? "🎥 Video" : replyTo.media_type === "audio" ? "🎤 Voice" : "Media")}
+            </p>
           </div>
+          {replyTo.media_thumb_url && (
+            <img src={replyTo.media_thumb_url} alt="" className="w-9 h-9 rounded-md object-cover flex-shrink-0 opacity-80" />
+          )}
+          {!replyTo.media_thumb_url && replyTo.media_type === "image" && replyTo.media_url && (
+            <img src={replyTo.media_url} alt="" className="w-9 h-9 rounded-md object-cover flex-shrink-0 opacity-80" />
+          )}
           <button onClick={() => setReplyTo(null)} className="w-8 h-8 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-white hover:bg-white/10 transition-all active:scale-90 flex-shrink-0" aria-label="Cancel reply">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>

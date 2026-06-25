@@ -981,6 +981,7 @@ const getMessages = async (req, res) => {
               cm.media_metadata, cm.reply_to_id,
               r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content,
               r.media_type AS reply_media_type, r.message_type AS reply_message_type, r.meta AS reply_meta,
+              r.media_thumb_url AS reply_media_thumb_url, r.media_url AS reply_media_url,
               cm.created_at, cm.edited_at, cm.edit_count, cm.is_pinned,
               rxn.reactions
        FROM chat_messages cm
@@ -1018,10 +1019,14 @@ const getMessages = async (req, res) => {
             message_type: msg.reply_message_type,
             meta: msg.reply_meta,
           }),
+          mediaType: msg.reply_media_type || null,
+          mediaThumbUrl: msg.reply_media_thumb_url || null,
+          mediaUrl: msg.reply_media_url || null,
         };
       }
       delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
       delete msg.reply_media_type; delete msg.reply_message_type; delete msg.reply_meta;
+      delete msg.reply_media_thumb_url; delete msg.reply_media_url;
 
       if (Array.isArray(msg.reactions)) {
         msg.reactions = msg.reactions.map((r) => ({
@@ -1143,13 +1148,16 @@ const sendMessage = async (req, res) => {
     // Attach reply_to preview if replying
     if (parsedReplyToId) {
       const { rows: replyRows } = await query(
-        'SELECT first_name, username, content, media_type, message_type, meta FROM chat_messages WHERE id = $1 AND room = $2',
+        'SELECT first_name, username, content, media_type, message_type, meta, media_thumb_url, media_url FROM chat_messages WHERE id = $1 AND room = $2',
         [parsedReplyToId, room]
       );
       if (replyRows[0]) {
         msg.reply_to = {
           name: replyRows[0].first_name || replyRows[0].username || 'User',
           content: buildReplyPreviewText(replyRows[0]),
+          mediaType: replyRows[0].media_type || null,
+          mediaThumbUrl: replyRows[0].media_thumb_url || null,
+          mediaUrl: replyRows[0].media_url || null,
         };
       }
     }
@@ -2117,6 +2125,7 @@ const searchMessages = async (req, res) => {
               cm.media_metadata, cm.reply_to_id,
               r.first_name AS reply_name, r.username AS reply_username, r.content AS reply_content,
               r.media_type AS reply_media_type, r.message_type AS reply_message_type, r.meta AS reply_meta,
+              r.media_thumb_url AS reply_media_thumb_url, r.media_url AS reply_media_url,
               cm.created_at, cm.edited_at, cm.edit_count, cm.is_pinned
        FROM chat_messages cm
        LEFT JOIN users u ON u.id = cm.user_id
@@ -2139,10 +2148,14 @@ const searchMessages = async (req, res) => {
             message_type: msg.reply_message_type,
             meta: msg.reply_meta,
           }),
+          mediaType: msg.reply_media_type || null,
+          mediaThumbUrl: msg.reply_media_thumb_url || null,
+          mediaUrl: msg.reply_media_url || null,
         };
       }
       delete msg.reply_name; delete msg.reply_username; delete msg.reply_content;
       delete msg.reply_media_type; delete msg.reply_message_type; delete msg.reply_meta;
+      delete msg.reply_media_thumb_url; delete msg.reply_media_url;
       msg.reactions = [];
     }
 
