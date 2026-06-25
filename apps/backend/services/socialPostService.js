@@ -86,7 +86,10 @@ class SocialPostService {
            OR (u.creator_status = 'active' AND u.creator_locked = FALSE)
            OR u.role IN ('admin', 'superadmin')
          )
-       ORDER BY sp.id DESC
+       ORDER BY
+         CASE WHEN sp.pinned_at IS NOT NULL AND sp.is_deleted = false THEN 0 ELSE 1 END,
+         sp.pinned_at DESC NULLS LAST,
+         sp.id DESC
        LIMIT $2`,
       params
     );
