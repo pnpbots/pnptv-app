@@ -734,23 +734,6 @@ export default function Subscribe() {
       {/* Current tier status banner */}
       {renderTierBanner()}
 
-      {/* Crypto 20% discount callout */}
-      {usdcAvailable !== false && (
-        <div className="mb-4 rounded-xl px-4 py-3 border border-green-500/40 bg-green-500/8 flex items-center gap-3">
-          <span className="text-2xl leading-none">🪙</span>
-          <div className="min-w-0">
-            <p className="text-sm font-bold text-green-400">
-              {t.lang === "es" ? "Ahorra 20% pagando con cripto" : "Save 20% when you pay with crypto"}
-            </p>
-            <p className="text-xs text-pnp-textSecondary">
-              {t.lang === "es"
-                ? "BTC, ETH, USDC y +100 monedas. El descuento se aplica automáticamente."
-                : "BTC, ETH, USDC + 100 coins. Discount applied automatically."}
-            </p>
-          </div>
-          <span className="ml-auto shrink-0 text-xl font-black text-green-400 leading-none">−20%</span>
-        </div>
-      )}
 
       {/* Promo code banner — applied state */}
       {appliedPromo && (
@@ -931,6 +914,16 @@ export default function Subscribe() {
 
               {/* Quick-pay buttons */}
               <div className="mt-3 pt-3 border-t border-white/5 flex gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                {cryptoDiscount && usdcAvailable !== false && (
+                  <div className="w-full flex items-center justify-between rounded-lg bg-green-500/8 border border-green-500/20 px-2.5 py-1.5">
+                    <span className="text-[11px] font-bold text-green-400">🪙 {t.lang === "es" ? "Paga con cripto" : "Pay with crypto"}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-pnp-textSecondary/60 line-through">{displayPrice}</span>
+                      <span className="text-[12px] font-black text-green-300">{cryptoDisplayPrice}</span>
+                      <span className="bg-green-500/20 text-green-400 border border-green-500/30 rounded-full px-1.5 py-0.5 text-[9px] font-black leading-none">−20%</span>
+                    </span>
+                  </div>
+                )}
                 {usdcAvailable !== false && (
                   <button
                     disabled={submitting}
@@ -1214,6 +1207,16 @@ export default function Subscribe() {
 
               {/* Quick-pay buttons */}
               <div className="mt-3 pt-3 border-t border-white/5 flex gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                {cryptoDiscount && usdcAvailable !== false && (
+                  <div className="w-full flex items-center justify-between rounded-lg bg-green-500/8 border border-green-500/20 px-2.5 py-1.5">
+                    <span className="text-[11px] font-bold text-green-400">🪙 {t.lang === "es" ? "Paga con cripto" : "Pay with crypto"}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-pnp-textSecondary/60 line-through">{displayPrice}</span>
+                      <span className="text-[12px] font-black text-green-300">{cryptoDisplayPrice}</span>
+                      <span className="bg-green-500/20 text-green-400 border border-green-500/30 rounded-full px-1.5 py-0.5 text-[9px] font-black leading-none">−20%</span>
+                    </span>
+                  </div>
+                )}
                 {usdcAvailable !== false && (
                   <button
                     disabled={submitting}
