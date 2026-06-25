@@ -56,7 +56,7 @@ const redeemLimiter = rateLimit({
 
 /**
  * GET /api/invite/:code
- * Returns validity info for a given invite code — no auth needed.
+ * Returns validity info. Increments click_count on every valid hit (landing page loads).
  */
 router.get('/invite/:code', checkLimiter, asyncHandler(async (req, res) => {
   const code = String(req.params.code || '').toUpperCase().trim();
@@ -73,6 +73,9 @@ router.get('/invite/:code', checkLimiter, asyncHandler(async (req, res) => {
     return res.status(410).json({ valid: false, reason: 'exhausted' });
   }
 
+  // Fire-and-forget click tracking
+  inviteLinkService.trackClick(code);
+
   return res.json({
     valid: true,
     note: link.note || null,
@@ -81,6 +84,7 @@ router.get('/invite/:code', checkLimiter, asyncHandler(async (req, res) => {
     useCount: link.use_count,
     sku: link.sku,
     isLifetime: link.is_lifetime,
+    primeHours: link.prime_hours || 0,
   });
 }));
 
@@ -88,7 +92,6 @@ router.get('/invite/:code', checkLimiter, asyncHandler(async (req, res) => {
 
 /**
  * POST /api/invite/:code/redeem
- * Requires session auth. Redeems the link for req.session.user.
  */
 router.post('/invite/:code/redeem', redeemLimiter, asyncHandler(async (req, res) => {
   const sessionUser = req.session?.user;
@@ -107,28 +110,38 @@ router.post('/invite/:code/redeem', redeemLimiter, asyncHandler(async (req, res)
 
 /**
  * GET /api/admin/invite-links
- * List all invite links.
  */
 router.get('/admin/invite-links', requireAdminAccess, asyncHandler(async (_req, res) => {
   const links = await inviteLinkService.listLinks();
-  return res.json({ success: true, links });
+
+  // Aggregate stats
+  const totalClicks  = links.reduce((s, l) => s + (l.click_count || 0), 0);
+  const totalSignups = links.reduce((s, l) => s + (l.use_count   || 0), 0);
+  const stats = {
+    totalLinks:  links.length,
+    totalClicks,
+    totalSignups,
+    avgConversion: totalClicks > 0 ? Math.round((totalSignups / totalClicks) * 100) : 0,
+  };
+
+  return res.json({ success: true, links, stats });
 }));
 
 /**
  * POST /api/admin/invite-links
- * Create a new invite link.
- * Body: { note?, maxUses?, expiresAt? }
+ * Body: { note?, maxUses?, expiresAt?, isLifetime?, primeHours? }
  */
 router.post('/admin/invite-links', requireAdminAccess, asyncHandler(async (req, res) => {
-  const { note, maxUses, expiresAt, isLifetime } = req.body;
+  const { note, maxUses, expiresAt, isLifetime, primeHours } = req.body;
   const createdBy = req.user?.id || req.session?.user?.id;
 
   const link = await inviteLinkService.createLink({
     createdBy,
-    note: note || null,
-    maxUses: maxUses ? parseInt(maxUses, 10) : null,
-    expiresAt: expiresAt || null,
+    note:       note || null,
+    maxUses:    maxUses    ? parseInt(maxUses, 10)    : null,
+    expiresAt:  expiresAt  || null,
     isLifetime: isLifetime !== false,
+    primeHours: primeHours ? parseInt(primeHours, 10) : 0,
   });
 
   return res.status(201).json({

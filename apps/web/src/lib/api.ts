@@ -6161,6 +6161,19 @@ export function createCallCheckoutBtc(
   return request("/api/webapp/book-call/checkout/btc", { method: "POST", body });
 }
 
+export function createCallCheckoutDash(
+  packageId: number,
+  startTimeUtc?: string,
+  endTimeUtc?: string,
+  clientNotes?: string
+): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; paymentId: string; amountUsd: number; bookingId?: string; orderId?: string }> {
+  const body: Record<string, unknown> = { packageId };
+  if (startTimeUtc) body.startTimeUtc = startTimeUtc;
+  if (endTimeUtc) body.endTimeUtc = endTimeUtc;
+  if (clientNotes) body.clientNotes = clientNotes;
+  return request("/api/webapp/book-call/checkout/dash", { method: "POST", body });
+}
+
 export function getBtcAvailable(): Promise<{ available: boolean; configured: boolean }> {
   return request("/api/webapp/payments/btc/available");
 }
@@ -6634,10 +6647,19 @@ export interface InviteLink {
   note: string | null;
   sku: string;
   is_lifetime: boolean;
+  prime_hours: number;
   max_uses: number | null;
   use_count: number;
+  click_count: number;
   expires_at: string | null;
   created_at: string;
+}
+
+export interface InviteLinkStats {
+  totalLinks: number;
+  totalClicks: number;
+  totalSignups: number;
+  avgConversion: number;
 }
 
 export interface InviteLinkCheck {
@@ -6649,17 +6671,18 @@ export interface InviteLinkCheck {
   useCount?: number;
   sku?: string;
   isLifetime?: boolean;
+  primeHours?: number;
 }
 
 export function checkInviteLink(code: string): Promise<InviteLinkCheck> {
   return request(`/api/invite/${encodeURIComponent(code)}`);
 }
 
-export function redeemInviteLink(code: string): Promise<{ success: boolean; alreadyRedeemed: boolean; alreadyHadEntitlement: boolean; error?: string }> {
+export function redeemInviteLink(code: string): Promise<{ success: boolean; alreadyRedeemed: boolean; alreadyHadEntitlement: boolean; primeGranted: boolean; error?: string }> {
   return request(`/api/invite/${encodeURIComponent(code)}/redeem`, { method: "POST" });
 }
 
-export function listAdminInviteLinks(): Promise<{ success: boolean; links: InviteLink[] }> {
+export function listAdminInviteLinks(): Promise<{ success: boolean; links: InviteLink[]; stats: InviteLinkStats }> {
   return request("/api/admin/invite-links");
 }
 
@@ -6668,6 +6691,7 @@ export function createAdminInviteLink(data: {
   maxUses?: number | null;
   expiresAt?: string | null;
   isLifetime?: boolean;
+  primeHours?: number;
 }): Promise<{ success: boolean; code: string; url: string; link: InviteLink }> {
   return request("/api/admin/invite-links", { method: "POST", body: data });
 }

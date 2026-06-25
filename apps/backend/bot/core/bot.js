@@ -526,6 +526,23 @@ const startBot = async () => {
         return;
       }
 
+      // Handle invite deep links (/start invite_CODE)
+      if (startPayload.startsWith('invite_')) {
+        const code = startPayload.replace('invite_', '').toUpperCase();
+        const inviteUrl = `https://pnptv.app/invite/${code}`;
+        await ctx.reply(
+          '🎉 ¡Tienes un enlace de invitación especial!\n\n' +
+          '🎉 You have a special invite link!\n\n' +
+          '👇 Tap below to activate it on the web:',
+          {
+            reply_markup: {
+              inline_keyboard: [[{ text: '🚀 Activate Invite on PNPtv!', url: inviteUrl }]],
+            },
+          }
+        );
+        return;
+      }
+
       await ctx.reply(
         '🌐 PNPtv! has moved to the web!\n\n' +
         'Visit our app for the full experience:\n' +

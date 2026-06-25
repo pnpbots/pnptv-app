@@ -6,10 +6,6 @@ const logger = require('../utils/logger');
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // unambiguous chars
 
-/**
- * Generate an 8-character random alphanumeric code (uppercase, no I/O/0/1).
- * @returns {string}
- */
 function generateCode() {
   const bytes = crypto.randomBytes(8);
   return Array.from(bytes)
@@ -19,23 +15,24 @@ function generateCode() {
 
 /**
  * Create a new invite link.
- *
  * @param {object} opts
- * @param {string} opts.createdBy  - admin user ID
- * @param {string} [opts.note]
- * @param {number} [opts.maxUses]  - null = unlimited
- * @param {string} [opts.expiresAt] - ISO string or null
- * @returns {Promise<object>}      - full invite_links row
+ * @param {string}  opts.createdBy
+ * @param {string}  [opts.note]
+ * @param {number}  [opts.maxUses]
+ * @param {string}  [opts.expiresAt]
+ * @param {boolean} [opts.isLifetime=true]
+ * @param {number}  [opts.primeHours=0]  — hours of PRIME to grant on redemption (0 = none)
+ * @returns {Promise<object>}
  */
-async function createLink({ createdBy, note = null, maxUses = null, expiresAt = null, isLifetime = true } = {}) {
+async function createLink({ createdBy, note = null, maxUses = null, expiresAt = null, isLifetime = true, primeHours = 0 } = {}) {
   if (!createdBy) throw new Error('createdBy is required');
 
   const code = generateCode();
   const { rows } = await query(
-    `INSERT INTO invite_links (code, created_by, note, max_uses, expires_at, is_lifetime)
-     VALUES ($1, $2, $3, $4, $5::timestamptz, $6)
+    `INSERT INTO invite_links (code, created_by, note, max_uses, expires_at, is_lifetime, prime_hours)
+     VALUES ($1, $2, $3, $4, $5::timestamptz, $6, $7)
      RETURNING *`,
-    [code, String(createdBy), note, maxUses ?? null, expiresAt ?? null, isLifetime],
+    [code, String(createdBy), note, maxUses ?? null, expiresAt ?? null, isLifetime, Math.max(0, Math.floor(Number(primeHours) || 0))],
   );
   return rows[0];
 }
@@ -67,21 +64,38 @@ async function getLink(code) {
 }
 
 /**
+ * Increment click_count for a link (fire-and-forget safe).
+ * Called when a user lands on the /invite/:code page.
+ * @param {string} code
+ */
+async function trackClick(code) {
+  if (!code) return;
+  try {
+    await query(
+      `UPDATE invite_links SET click_count = click_count + 1 WHERE code = $1`,
+      [String(code).toUpperCase()],
+    );
+  } catch (err) {
+    logger.warn('trackClick failed (non-critical)', { code, error: err.message });
+  }
+}
+
+/**
  * Redeem an invite link for a user.
  *
  * Transactional:
  *   1. Lock the invite_links row.
  *   2. Validate existence, expiry, max_uses.
  *   3. Check the user hasn't already redeemed this code.
- *   4. Grant lifetime pnp-member entitlement (upsert — safe to call even if user already has it).
- *   5. Set colombia_badge = true on users.
- *   6. Increment use_count.
- *   7. Insert into invite_link_uses.
+ *   4. Grant lifetime pnp-member entitlement (if is_lifetime).
+ *   5. Grant timed PRIME entitlement (if prime_hours > 0).
+ *   6. Set colombia_badge = true on users.
+ *   7. Increment use_count.
+ *   8. Insert into invite_link_uses.
  *
  * @param {string} code
- * @param {string} userId   - users.id
- * @returns {Promise<{ success: true, alreadyHadEntitlement: boolean, alreadyRedeemed: boolean }>}
- * @throws {Error} with a user-facing .message on validation failure
+ * @param {string} userId
+ * @returns {Promise<{ success: true, alreadyHadEntitlement: boolean, alreadyRedeemed: boolean, primeGranted: boolean }>}
  */
 async function redeemLink(code, userId) {
   if (!code || !userId) throw new Error('code and userId are required');
@@ -89,8 +103,6 @@ async function redeemLink(code, userId) {
   const normalCode = String(code).toUpperCase();
   const uid = String(userId);
 
-  // Open a transaction via multiple statements within a single client session.
-  // query() does not expose a client, so we get one from the pool directly.
   const { getPool } = require('../config/postgres');
   const client = await getPool().connect();
   try {
@@ -128,39 +140,52 @@ async function redeemLink(code, userId) {
       `SELECT 1 FROM invite_link_uses WHERE code = $1 AND user_id = $2`,
       [normalCode, uid],
     );
-    const alreadyRedeemed = useRes.rows.length > 0;
-    if (alreadyRedeemed) {
+    if (useRes.rows.length > 0) {
       await client.query('ROLLBACK');
-      return { success: true, alreadyRedeemed: true, alreadyHadEntitlement: true };
+      return { success: true, alreadyRedeemed: true, alreadyHadEntitlement: true, primeGranted: false };
     }
 
-    // 4. Upsert pnp-member entitlement (lifetime)
-    //    ON CONFLICT on the unique index (user_id, add_on_id, creator_id NULLS NOT DISTINCT).
-    //    The trigger blocks update on existing lifetime rows, so we must not overwrite them —
-    //    we skip the update when the row is already lifetime (DO NOTHING).
-    const entRes = await client.query(
-      `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
-       VALUES ($1, 'pnp-member', true, NULL, false)
-       ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
-       DO NOTHING
-       RETURNING id`,
-      [uid],
-    );
-    const alreadyHadEntitlement = entRes.rows.length === 0;
+    // 4. Upsert pnp-member entitlement (lifetime) — only if is_lifetime
+    let alreadyHadEntitlement = false;
+    if (link.is_lifetime) {
+      const entRes = await client.query(
+        `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
+         VALUES ($1, 'pnp-member', true, NULL, false)
+         ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
+         DO NOTHING
+         RETURNING id`,
+        [uid],
+      );
+      alreadyHadEntitlement = entRes.rows.length === 0;
+    }
 
-    // 5. Set colombia_badge
+    // 5. Grant timed PRIME if prime_hours > 0
+    let primeGranted = false;
+    const primeHours = Number(link.prime_hours) || 0;
+    if (primeHours > 0) {
+      await client.query(
+        `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
+         VALUES ($1, 'prime', false, NOW() + ($2 || ' hours')::interval, false)
+         ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
+         DO UPDATE SET expires_at = GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)`,
+        [uid, String(primeHours)],
+      );
+      primeGranted = true;
+    }
+
+    // 6. Set colombia_badge
     await client.query(
       `UPDATE users SET colombia_badge = true WHERE id = $1`,
       [uid],
     );
 
-    // 6. Increment use_count
+    // 7. Increment use_count
     await client.query(
       `UPDATE invite_links SET use_count = use_count + 1 WHERE code = $1`,
       [normalCode],
     );
 
-    // 7. Record redemption
+    // 8. Record redemption
     await client.query(
       `INSERT INTO invite_link_uses (code, user_id) VALUES ($1, $2)`,
       [normalCode, uid],
@@ -177,8 +202,8 @@ async function redeemLink(code, userId) {
       }
     }
 
-    logger.info('Invite link redeemed', { code: normalCode, userId: uid, alreadyHadEntitlement });
-    return { success: true, alreadyRedeemed: false, alreadyHadEntitlement };
+    logger.info('Invite link redeemed', { code: normalCode, userId: uid, alreadyHadEntitlement, primeGranted });
+    return { success: true, alreadyRedeemed: false, alreadyHadEntitlement, primeGranted };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* best-effort */ }
     throw err;
@@ -187,4 +212,4 @@ async function redeemLink(code, userId) {
   }
 }
 
-module.exports = { generateCode, createLink, listLinks, getLink, redeemLink };
+module.exports = { generateCode, createLink, listLinks, getLink, trackClick, redeemLink };
