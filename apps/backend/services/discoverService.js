@@ -125,7 +125,7 @@ function queryMembers(hasTags, tags, hasText, likePattern, limit, offset) {
 }
 
 function queryCreators(hasTags, tags, hasText, likePattern, limit, offset) {
-  const conditions = ['cp.is_active = TRUE'];
+  const conditions = ["u.role IN ('creator', 'model') AND u.is_deleted = FALSE"];
   const params = [];
   let idx = 1;
 
@@ -135,30 +135,32 @@ function queryCreators(hasTags, tags, hasText, likePattern, limit, offset) {
   }
 
   if (hasText) {
-    params.push(likePattern, likePattern);
+    params.push(likePattern, likePattern, likePattern);
     conditions.push(
-      `(cp.display_name ILIKE $${idx} OR cp.username ILIKE $${idx + 1})`
+      `(u.username ILIKE $${idx} OR u.first_name ILIKE $${idx + 1} OR u.last_name ILIKE $${idx + 2})`
     );
-    idx += 2;
+    idx += 3;
   }
 
   params.push(limit, offset);
 
   return query(
-    `SELECT DISTINCT ON (cp.id)
-            cp.id, cp.user_id, cp.display_name, cp.username,
-            cp.photo_url, cp.category, cp.verified
-       FROM creator_profiles cp
-       LEFT JOIN creator_channels cc ON cc.creator_id = cp.id
+    `SELECT DISTINCT ON (u.id)
+            u.id, u.id AS user_id,
+            COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.username) AS display_name,
+            u.username, u.photo_file_id AS photo_url,
+            NULL AS category, FALSE AS verified
+       FROM users u
+       LEFT JOIN creator_channels cc ON cc.creator_id = u.id::text
       WHERE ${conditions.join(' AND ')}
-      ORDER BY cp.id, cp.display_name
+      ORDER BY u.id, u.username
       LIMIT $${idx} OFFSET $${idx + 1}`,
     params
   );
 }
 
 function queryChannels(hasTags, tags, hasText, likePattern, limit, offset) {
-  const conditions = ['cc.is_deleted = FALSE'];
+  const conditions = ['cc.is_active = TRUE'];
   const params = [];
   let idx = 1;
 
@@ -189,7 +191,7 @@ function queryChannels(hasTags, tags, hasText, likePattern, limit, offset) {
 }
 
 function queryVideos(hasTags, tags, hasText, likePattern, limit, offset) {
-  const conditions = ["cv.is_deleted = FALSE AND cv.status = 'ready'"];
+  const conditions = ["cv.status = 'ready'"];
   const params = [];
   let idx = 1;
 
@@ -218,7 +220,7 @@ function queryVideos(hasTags, tags, hasText, likePattern, limit, offset) {
 }
 
 function queryHangouts(hasTags, tags, hasText, likePattern, limit, offset) {
-  const conditions = ['hg.is_deleted = FALSE AND hg.is_public = TRUE'];
+  const conditions = ['hg.is_public = TRUE AND hg.is_main = FALSE AND hg.is_wall_of_fame = FALSE'];
   const params = [];
   let idx = 1;
 
