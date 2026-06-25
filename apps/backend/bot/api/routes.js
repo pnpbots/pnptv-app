@@ -7489,6 +7489,7 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
          FROM users
          WHERE creator_status = 'active'
            AND creator_locked = FALSE
+           AND is_deleted = FALSE
            AND (
              identity_verified = TRUE
              OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())
@@ -7506,7 +7507,24 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
       : [];
 
     const photoMap = await fetchPerformerPhotos(directusPerformers);
-    const mapped = directusPerformers.map(p => mapDirectusPerformer(p, photoMap));
+    let mapped = directusPerformers.map(p => mapDirectusPerformer(p, photoMap));
+
+    // Post-filter: exclude Directus performers whose pnptv_id maps to a deleted DB user
+    try {
+      const directusLinkedIds = mapped.filter(p => p.userId).map(p => String(p.userId));
+      if (directusLinkedIds.length > 0) {
+        const { rows: deletedRows } = await getPool().query(
+          `SELECT id::text FROM users WHERE id = ANY($1::text[]) AND is_deleted = TRUE`,
+          [directusLinkedIds]
+        );
+        if (deletedRows.length > 0) {
+          const deletedIds = new Set(deletedRows.map(r => r.id));
+          mapped = mapped.filter(p => !p.userId || !deletedIds.has(String(p.userId)));
+        }
+      }
+    } catch (filterErr) {
+      logger.warn(`featured: deleted-user filter failed (non-fatal): ${filterErr.message}`);
+    }
 
     const coveredUserIds = new Set(
       directusPerformers.filter(p => p.pnptv_id).map(p => String(p.pnptv_id))
@@ -8045,6 +8063,7 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
          FROM users
          WHERE creator_status = 'active'
            AND creator_locked = FALSE
+           AND is_deleted = FALSE
            AND (
              identity_verified = TRUE
              OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())

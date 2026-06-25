@@ -158,7 +158,8 @@ const listStreams = async (req, res) => {
         `SELECT live_channel FROM users
          WHERE live_channel = ANY($1::text[])
            AND NOT (
-             creator_status = 'active'
+             is_deleted = FALSE
+             AND creator_status = 'active'
              AND creator_locked = FALSE
              AND (
                identity_verified = TRUE
@@ -695,6 +696,7 @@ const getSchedule = async (req, res) => {
        WHERE ls.status = 'scheduled'
          AND COALESCE(ls.scheduled_at, ls.scheduled_for) >= $1
          AND COALESCE(ls.scheduled_at, ls.scheduled_for) <= $2
+         AND (u.id IS NULL OR u.is_deleted = FALSE)
        ORDER BY COALESCE(ls.scheduled_at, ls.scheduled_for) ASC
        LIMIT 50`,
       [now.toISOString(), sevenDaysOut.toISOString()]
