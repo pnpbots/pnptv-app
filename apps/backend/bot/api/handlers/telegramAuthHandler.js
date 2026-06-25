@@ -117,7 +117,7 @@ const handleTelegramAuth = async (req, res) => {
     // Check if user exists in our database
     let userQuery = await query(
       `SELECT id, pnptv_id, telegram, username, email, subscription_status, tier, terms_accepted,
-              first_name, language, photo_file_id,
+              first_name, language, photo_file_id, live_channel,
               COALESCE(age_verified, false) as age_verified,
               COALESCE(onboarding_complete, false) as onboarding_complete,
               COALESCE(role, 'user') as role
@@ -306,6 +306,7 @@ const handleTelegramAuth = async (req, res) => {
       onboardingComplete: user.onboarding_complete,
       role,
       last_login_method: 'mini_app',
+      liveChannel: user.live_channel || null,
     };
 
     logger.info(`User ${user.id} authenticated successfully, terms accepted: ${user.terms_accepted}`);
@@ -400,6 +401,7 @@ const handleTelegramAuth = async (req, res) => {
         tier: user.tier || 'free',
         role,
         photo_url: photoUrl,
+        live_channel: user.live_channel || null,
       },
       termsAccepted: user.terms_accepted
     });
@@ -477,7 +479,7 @@ const checkAuthStatus = async (req, res) => {
     // Refresh tier, role, and subscription from DB (prevents stale session data)
     try {
       const { rows } = await query(
-        'SELECT pnptv_id, tier, role, subscription_status, photo_file_id, creator_status, creator_type, creator_locked, age_verified, terms_accepted, date_of_birth, content_disclaimer, onboarding_complete FROM users WHERE id = $1',
+        'SELECT pnptv_id, tier, role, subscription_status, photo_file_id, creator_status, creator_type, creator_locked, age_verified, terms_accepted, date_of_birth, content_disclaimer, onboarding_complete, live_channel FROM users WHERE id = $1',
         [user.id]
       );
       if (rows.length > 0) {
@@ -496,6 +498,7 @@ const checkAuthStatus = async (req, res) => {
         user.date_of_birth = fresh.date_of_birth || null;
         user.contentDisclaimer = fresh.content_disclaimer || false;
         user.onboardingComplete = fresh.onboarding_complete === true;
+        user.liveChannel = fresh.live_channel || null;
         const isValidPhoto = (p) => p && typeof p === 'string' && (p.startsWith('/') || p.startsWith('http'));
         if (isValidPhoto(fresh.photo_file_id)) {
           user.photoUrl = fresh.photo_file_id;
@@ -540,6 +543,8 @@ const checkAuthStatus = async (req, res) => {
         last_login_method: user.last_login_method || null,
         // Email (from OIDC or direct registration)
         email: user.email || null,
+        // Stream ownership
+        live_channel: user.liveChannel || null,
       }
     });
 

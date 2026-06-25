@@ -33,6 +33,7 @@ interface PnptvUser {
   onboardingComplete?: boolean;
   /** Entitlement-derived display label: 'PRIME' | 'BASIC' | 'FREE' */
   label?: string;
+  liveChannel?: string | null;
 }
 
 interface AuthState {
@@ -76,6 +77,7 @@ function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUse
     city: u.city ?? null,
     country: u.country ?? null,
     onboardingComplete: u.onboarding_complete ?? false,
+    liveChannel: u.live_channel ?? null,
   };
 }
 

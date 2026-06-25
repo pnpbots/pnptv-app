@@ -656,8 +656,13 @@ function StreamInner() {
     dismissRaid();
   }, [raidCountdown, raidEvent, navigate, dismissRaid]);
 
-  // Whether the current user is a creator/admin (controls raid + host UI visibility)
-  const isStreamOwner = !!(user && ['model', 'creator', 'admin', 'superadmin'].includes(user.role));
+  // Whether the current user owns this specific stream (not just any creator)
+  const channelRef = streamId ? extractChannelRef(streamId) : null;
+  const isStreamOwner = !!(user && (
+    user.role === 'admin' ||
+    user.role === 'superadmin' ||
+    (user.liveChannel && channelRef && user.liveChannel === channelRef)
+  ));
 
   // ── Ticket status fetch — runs after stream resolves, for authenticated users ──
   useEffect(() => {
