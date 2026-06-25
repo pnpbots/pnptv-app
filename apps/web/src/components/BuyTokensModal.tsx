@@ -58,7 +58,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
   const [btcPolling, setBtcPolling] = useState(false);
   const [btcAvailable, setBtcAvailable] = useState(false);
 
-  // NowPayments (multi-coin + USDC Solana) balance-delta poll state
+  // NowPayments (multi-coin + USDT BSC) balance-delta poll state
   const npPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [npCoinPick, setNpCoinPick] = useState<string>("btc");
   const [npPickerOpen, setNpPickerOpen] = useState(false);
@@ -404,18 +404,18 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               )}
             </div>
 
-            {/* USDC Solana */}
+            {/* USDT BSC */}
             <button
               onClick={() => setBuyMethod('np_usdc')}
-              title="USD Coin on Solana — instant + sub-cent fees"
-              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-sky-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
+              title="Tether (USDT) on BNB Smart Chain — works with MetaMask, Trust Wallet, Binance"
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-emerald-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
             >
-              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(39,117,202,0.15)" }}>
-                <span className="text-lg leading-none" style={{ color: "#2775CA" }}>◎</span>
+              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(38,161,123,0.15)" }}>
+                <span className="text-lg leading-none font-bold" style={{ color: "#26a17b" }}>₮</span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-pnp-textPrimary">USDC (Solana)</p>
-                <p className="text-xs text-pnp-textSecondary truncate">USD Coin on Solana — sub-cent fees</p>
+                <p className="text-sm font-semibold text-pnp-textPrimary">USDT (BNB Chain)</p>
+                <p className="text-xs text-pnp-textSecondary truncate">Tether on BSC — MetaMask, Trust Wallet, Binance</p>
               </div>
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -651,7 +651,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           </div>
         )}
 
-        {/* NowPayments (Crypto / USDC Solana) waiting panel */}
+        {/* NowPayments (Crypto / USDT BSC) waiting panel */}
         {npPayment && (
           <NowPaymentsWaitingPanel
             order={{
@@ -671,7 +671,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
             }}
             lang="en"
-            isSolana={npPayment.payCurrency === 'usdcsol'}
+            payCurrency={npPayment.payCurrency}
           />
         )}
 
@@ -685,7 +685,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 : buyMethod === 'np'
                 ? 'Pay with BTC, ETH, USDC, or 100+ other coins via NowPayments. A popup will open for checkout.'
                 : buyMethod === 'np_usdc'
-                ? 'Pay with USD Coin (USDC) on Solana — instant and nearly free fees. A popup will open for checkout.'
+                ? 'Pay with Tether (USDT) on BNB Chain — works with MetaMask, Trust Wallet & Binance. A popup will open for checkout.'
                 : 'Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed.'}
             </p>
 
@@ -699,14 +699,14 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {tokenPackages.map((pkg) => {
                   const cryptoMethod = buyMethod === 'btc' || buyMethod === 'np' || buyMethod === 'np_usdc';
-                  const priceColor = buyMethod === 'btc' ? '#F7931A' : buyMethod === 'np_usdc' ? '#7FB8FF' : buyMethod === 'np' ? '#34d399' : '#008CE7';
+                  const priceColor = buyMethod === 'btc' ? '#F7931A' : buyMethod === 'np_usdc' ? '#26a17b' : buyMethod === 'np' ? '#34d399' : '#008CE7';
                   return (
                     <button
                       key={pkg.id}
                       onClick={() => {
                         if (buyMethod === 'btc') return handleBuyTokensBtc(pkg);
                         if (buyMethod === 'np') return handleBuyTokensNowPayments(pkg, npCoinPick || 'btc');
-                        if (buyMethod === 'np_usdc') return handleBuyTokensNowPayments(pkg, 'usdcsol');
+                        if (buyMethod === 'np_usdc') return handleBuyTokensNowPayments(pkg, 'usdtbsc');
                         return handleBuyTokens(pkg);
                       }}
                       disabled={buyingPackage === pkg.id}

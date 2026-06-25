@@ -7,7 +7,7 @@ interface NowPaymentsWaitingPanelProps {
   onCancel: () => void;
   lang: string;
   wrapperClassName?: string;
-  isSolana?: boolean;
+  payCurrency?: string | null;
 }
 
 export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = ({
@@ -16,9 +16,11 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
   onCancel,
   lang,
   wrapperClassName = "",
-  isSolana = false,
+  payCurrency = null,
 }) => {
   const es = lang === "es";
+  const isBsc = payCurrency === "usdtbsc" || payCurrency === "usdcbsc";
+  const isSolana = payCurrency === "usdcsol";
 
   if (isSuccess) {
     return (
@@ -34,7 +36,9 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
     );
   }
 
-  const trustWalletUrl = `https://link.trustwallet.com/open_url?coin_id=501&url=${encodeURIComponent(order.invoiceUrl)}`;
+  const metaMaskUrl = `https://metamask.app.link/dapp/${order.invoiceUrl.replace(/^https?:\/\//, '')}`;
+  const trustWalletBscUrl = `https://link.trustwallet.com/open_url?coin_id=20000714&url=${encodeURIComponent(order.invoiceUrl)}`;
+  const trustWalletSolUrl = `https://link.trustwallet.com/open_url?coin_id=501&url=${encodeURIComponent(order.invoiceUrl)}`;
 
   return (
     <div className={`rounded-xl border border-green-500/40 bg-green-500/5 p-3 animate-in fade-in slide-in-from-top-1 duration-250 ${wrapperClassName}`}>
@@ -50,10 +54,48 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
         </span>
       </div>
 
-      {/* Trust Wallet CTA — shown when paying with Solana/USDC */}
+      {/* BSC wallet shortcuts — MetaMask, Trust Wallet, other */}
+      {isBsc && (
+        <>
+          <p className="text-[10px] text-pnp-textSecondary/70 mb-2">
+            {es ? "Abre directamente en tu billetera:" : "Open directly in your wallet:"}
+          </p>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <a
+              href={metaMaskUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border border-orange-500/30 bg-orange-500/8 hover:bg-orange-500/15 transition-colors active:scale-[0.97]"
+            >
+              <span className="text-xl leading-none">🦊</span>
+              <span className="text-[10px] font-bold text-orange-300">MetaMask</span>
+            </a>
+            <a
+              href={trustWalletBscUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border border-sky-500/30 bg-sky-500/8 hover:bg-sky-500/15 transition-colors active:scale-[0.97]"
+            >
+              <span className="text-xl leading-none">🔵</span>
+              <span className="text-[10px] font-bold text-sky-300">Trust Wallet</span>
+            </a>
+            <a
+              href={order.invoiceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border border-yellow-500/30 bg-yellow-500/8 hover:bg-yellow-500/15 transition-colors active:scale-[0.97]"
+            >
+              <span className="text-xl leading-none">🌐</span>
+              <span className="text-[10px] font-bold text-yellow-300">{es ? "Otra billetera" : "Other wallet"}</span>
+            </a>
+          </div>
+        </>
+      )}
+
+      {/* Solana / Trust Wallet CTA */}
       {isSolana && (
         <a
-          href={trustWalletUrl}
+          href={trustWalletSolUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-center gap-2 w-full py-3 rounded-xl font-bold text-sm text-white mb-3 transition-all active:scale-[0.98]"

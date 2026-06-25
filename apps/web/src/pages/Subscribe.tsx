@@ -941,15 +941,15 @@ export default function Subscribe() {
                 {usdcAvailable !== false && (
                   <button
                     disabled={submitting}
-                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdcsol"); }}
-                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-sky-400/40 bg-sky-400/10 hover:bg-sky-400/20 disabled:opacity-50 transition-colors"
-                    title="USD Coin on Solana — instant + sub-cent fees"
+                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdtbsc"); }}
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
+                    title="Tether (USDT) on BNB Smart Chain — works with MetaMask, Trust Wallet, Binance"
                   >
-                    <span className="flex items-center gap-1 text-xs font-semibold text-sky-300">
-                      <span>◎</span>
-                      <span>USDC</span>
+                    <span className="flex items-center gap-1 text-xs font-semibold text-emerald-300">
+                      <span>₮</span>
+                      <span>USDT</span>
                     </span>
-                    <span className="text-[11px] font-bold text-sky-300 leading-none">{cryptoDisplayPrice}</span>
+                    <span className="text-[11px] font-bold text-emerald-300 leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
                 {btcAvailable && (
@@ -1014,7 +1014,7 @@ export default function Subscribe() {
                   onCancel={cancelNowPayments}
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
-                  isSolana={usdcOrder?.payCurrency === "usdcsol"}
+                  payCurrency={usdcOrder?.payCurrency}
                 />
               </div>
             )}
@@ -1237,19 +1237,19 @@ export default function Subscribe() {
                     onClick={(e) => {
                       e.stopPropagation();
                       if (RECURRING_PLANS.has(plan.id)) {
-                        handleCryptoSubscribe(plan.id, "usdcsol");
+                        handleCryptoSubscribe(plan.id, "usdtbsc");
                       } else {
-                        handleQuickCheckout(plan.id, "usdcsol");
+                        handleQuickCheckout(plan.id, "usdtbsc");
                       }
                     }}
-                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-sky-400/40 bg-sky-400/10 hover:bg-sky-400/20 disabled:opacity-50 transition-colors"
-                    title="USD Coin on Solana — instant + sub-cent fees"
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
+                    title="Tether (USDT) on BNB Smart Chain — works with MetaMask, Trust Wallet, Binance"
                   >
-                    <span className="flex items-center gap-1 text-xs font-semibold text-sky-300">
-                      <span>◎</span>
-                      <span>USDC</span>
+                    <span className="flex items-center gap-1 text-xs font-semibold text-emerald-300">
+                      <span>₮</span>
+                      <span>USDT</span>
                     </span>
-                    <span className="text-[11px] font-bold text-sky-300 leading-none">{cryptoDisplayPrice}</span>
+                    <span className="text-[11px] font-bold text-emerald-300 leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
                 {btcAvailable && (
@@ -1315,7 +1315,7 @@ export default function Subscribe() {
                   onCancel={cancelNowPayments}
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
-                  isSolana={usdcOrder?.payCurrency === "usdcsol"}
+                  payCurrency={usdcOrder?.payCurrency}
                 />
               </div>
             )}
@@ -1410,8 +1410,8 @@ export default function Subscribe() {
           </p>
           <p className="text-xs text-pnp-textSecondary mb-3">
             {t.lang === "es"
-              ? "BTC, ETH, USDC y +100 monedas. Descuento del 20% aplicado automáticamente."
-              : "BTC, ETH, USDC + 100 coins. 20% discount applied automatically."}
+              ? "BTC, ETH, USDT y +100 monedas. Descuento del 20% aplicado automáticamente."
+              : "BTC, ETH, USDT + 100 coins. 20% discount applied automatically."}
           </p>
           <button
             disabled={submitting}

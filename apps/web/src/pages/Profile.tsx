@@ -697,7 +697,7 @@ export default function Profile() {
       setSubscribeEmailError(null);
 
       if (subscribeProvider === "usdc" || subscribeProvider === "usdc_sol") {
-        const payCurrency = subscribeProvider === "usdc_sol" ? "usdcsol" : (npCoinPick || "btc");
+        const payCurrency = subscribeProvider === "usdc_sol" ? "usdtbsc" : (npCoinPick || "btc");
         const res = await startNowPayments("creator_monthly", trimmed, creatorId, false, payCurrency);
         if (!res?.success) {
           setSubscribeError((res as any)?.error || nowpaymentsError || p.failedToCreatePayment);
@@ -1839,7 +1839,7 @@ export default function Profile() {
                 isSuccess={usdcPaymentSuccess}
                 onCancel={() => { cancelNowPayments(); setSubscribeError(null); }}
                 lang={t.lang}
-                isSolana={usdcOrder?.payCurrency === "usdcsol"}
+                payCurrency={usdcOrder?.payCurrency}
               />
             ) : !subscribeAwaitingPayment ? (
               <>
@@ -1863,13 +1863,13 @@ export default function Profile() {
                       <button
                         type="button"
                         onClick={() => setSubscribeProvider("usdc_sol")}
-                        title="USD Coin on Solana — instant + sub-cent fees"
+                        title="Tether (USDT) on BNB Smart Chain — works with MetaMask, Trust Wallet, Binance"
                         className="py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
                         style={subscribeProvider === "usdc_sol"
-                          ? { background: "rgba(39,117,202,0.20)", color: "#7FB8FF", borderColor: "rgba(127,184,255,0.5)" }
-                          : { background: "rgba(39,117,202,0.06)", color: "#7FB8FF", borderColor: "rgba(127,184,255,0.2)" }}
+                          ? { background: "rgba(38,161,123,0.20)", color: "#26a17b", borderColor: "rgba(38,161,123,0.5)" }
+                          : { background: "rgba(38,161,123,0.06)", color: "#26a17b", borderColor: "rgba(38,161,123,0.2)" }}
                       >
-                        ◎ USDC Solana
+                        ₮ USDT (BSC)
                       </button>
                     )}
                     {dashAvailable !== false && (
