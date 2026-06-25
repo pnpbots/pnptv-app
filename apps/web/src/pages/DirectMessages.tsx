@@ -1085,7 +1085,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
           the chat. The flex-column layout already keeps it from shrinking;
           sticky+top-0+z-10 is belt-and-suspenders for mobile edge cases. */}
       <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-2.5 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
-        <button onClick={() => onBack ? onBack() : navigate("/dm")} className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0" aria-label="Back">
+        <button onClick={() => onBack ? onBack() : navigate("/dm")} className={`w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0${panelMode ? " hidden" : ""}`} aria-label="Back">
           <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
@@ -1716,7 +1716,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
 
       {/* Recording bar — replaces input bar while recording */}
       {isRecording ? (
-        <div className="flex items-center gap-2 px-3 py-2.5 border-t border-pnp-border flex-shrink-0 bg-pnp-background pb-safe">
+        <div className={`flex items-center gap-2 px-3 py-2.5 border-t border-pnp-border flex-shrink-0 bg-pnp-background${panelMode ? "" : " pb-safe"}`}>
           <button
             type="button"
             onClick={cancelRecording}
@@ -1744,7 +1744,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
         </div>
       ) : (
       /* Input bar */
-      <div className="flex items-end gap-2 px-3 py-2 border-t border-pnp-border flex-shrink-0 bg-pnp-background pb-safe">
+      <div className={`flex items-end gap-2 px-3 py-2 border-t border-pnp-border flex-shrink-0 bg-pnp-background${panelMode ? "" : " pb-safe"}`}>
         <input ref={mediaInputRef} type="file" accept="image/*,video/*,audio/*" className="hidden" onChange={handleMediaSelect} />
         <input ref={cameraInputRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handleMediaSelect} />
         <button type="button" onClick={() => mediaInputRef.current?.click()} className="p-2.5 rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0" aria-label="Attach media">
@@ -1757,6 +1757,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
           value={messageInput}
           onChange={(e) => { setMessageInput(e.target.value); emitTyping(); }}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
+          onFocus={panelMode ? () => { setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 300); } : undefined}
           placeholder="Type a message..."
           className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary rounded-2xl px-4 py-2 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/50 max-h-32 leading-6"
           rows={1}
@@ -2404,13 +2405,14 @@ function ThreadListView({ myDbId, onThreadSelect, panelMode }: { myDbId: string;
 
   return (
     <div className="relative">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-6 pb-2 mb-2">
-        <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.messagesTitle}</h1>
-          <p className="text-sm mt-1 text-pnp-textSecondary">{t.messagesSubtitle}</p>
+      {!panelMode && (
+        <div className="flex items-center justify-between px-4 pt-6 pb-2 mb-2">
+          <div>
+            <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.messagesTitle}</h1>
+            <p className="text-sm mt-1 text-pnp-textSecondary">{t.messagesSubtitle}</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Search bar — always visible */}
       <div className="px-4 pt-1 pb-2">

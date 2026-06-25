@@ -836,6 +836,28 @@ export function Layout() {
     return () => document.removeEventListener("keydown", onKey);
   }, [isDmPanelOpen]);
 
+  useEffect(() => {
+    if (!isDmPanelOpen || !isMobile) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onVVChange = () => {
+      const panel = dmPanelRef.current;
+      if (!panel) return;
+      const keyboardH = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      panel.style.bottom = `${keyboardH}px`;
+      panel.style.maxHeight = `${vv.height * 0.96}px`;
+    };
+    vv.addEventListener("resize", onVVChange);
+    vv.addEventListener("scroll", onVVChange);
+    onVVChange();
+    return () => {
+      vv.removeEventListener("resize", onVVChange);
+      vv.removeEventListener("scroll", onVVChange);
+      const panel = dmPanelRef.current;
+      if (panel) { panel.style.bottom = ""; panel.style.maxHeight = ""; }
+    };
+  }, [isDmPanelOpen, isMobile]);
+
   // Fetch profile data when mobile menu opens
   useEffect(() => {
     if (!mobileMenuOpen || profileData) return;
@@ -1673,7 +1695,7 @@ export function Layout() {
           <div
             ref={dmPanelRef}
             className={isMobile
-              ? "fixed bottom-0 left-0 right-0 z-50 animate-slide-up w-full max-h-[82svh] flex flex-col rounded-t-2xl bg-pnp-background border-t border-pnp-border shadow-2xl overflow-hidden"
+              ? "fixed bottom-0 left-0 right-0 z-50 animate-slide-up w-full max-h-[92dvh] flex flex-col rounded-t-2xl bg-pnp-background border-t border-pnp-border shadow-2xl overflow-hidden"
               : "flex flex-col rounded-xl bg-pnp-background border border-pnp-border shadow-xl overflow-hidden"
             }
             style={!isMobile ? { position: "fixed", top: dmPanelPos.top, right: dmPanelPos.right, zIndex: 50, width: "480px", maxHeight: "82svh" } : undefined}
