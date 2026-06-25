@@ -632,9 +632,10 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           </span>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
             <span style={{ fontSize: 20, color: "#636366", textDecoration: "line-through", fontWeight: 600, marginBottom: 4 }}>{s.oldPrice}</span>
-            <div style={{ fontSize: "clamp(56px, 15vw, 72px)", fontWeight: 900, lineHeight: 1, color: "#26a17b", textShadow: "0 0 30px rgba(38,161,123,0.4)", display: "flex", alignItems: "flex-start" }}>
-              <span style={{ fontSize: "0.36em", marginTop: "0.55em", opacity: 0.8 }}>$</span>
-              <span>100</span>
+            <div style={{ fontWeight: 900, lineHeight: 1, color: "#26a17b", textShadow: "0 0 30px rgba(38,161,123,0.4)", display: "inline-flex", alignItems: "flex-start" }}>
+              <span style={{ fontSize: "clamp(22px, 5vw, 28px)", fontWeight: 700, marginTop: "0.35em", opacity: 0.8 }}>$</span>
+              <span style={{ fontSize: "clamp(56px, 15vw, 72px)", letterSpacing: "-0.02em" }}>100</span>
+              <span style={{ fontSize: "clamp(22px, 5vw, 28px)", fontWeight: 700, marginTop: "0.35em", opacity: 0.8 }}>.00</span>
             </div>
             <span style={{ fontSize: 13, color: "#26a17b", fontWeight: 600, marginTop: 4 }}>💳 {es ? "Tarjeta o cripto" : "Card or crypto"}</span>
           </div>
