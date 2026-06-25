@@ -833,8 +833,9 @@ export default function Subscribe() {
           const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
           const planLabel = getPlanLabel(plan, true);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
-          const cryptoPriceUSD = Math.round(plan.priceUSD * 0.80 * 100) / 100;
-          const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
+          const cryptoDiscount = plan.priceUSD > 50;
+          const cryptoPriceUSD = cryptoDiscount ? Math.round(plan.priceUSD * 0.80 * 100) / 100 : plan.priceUSD;
+          const cryptoPriceCOP = cryptoDiscount ? Math.round(plan.priceCOP * 0.80) : plan.priceCOP;
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
           const planDays = plan.duration_days || plan.duration || 30;
@@ -936,7 +937,7 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
                       <span>🪙</span>
                       <span>Crypto</span>
-                      <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>
+                      {cryptoDiscount && <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
@@ -950,7 +951,7 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-orange-300">
                       <span>₿</span>
                       <span>Bitcoin</span>
-                      <span className="text-[9px] font-black bg-orange-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>
+                      {cryptoDiscount && <span className="text-[9px] font-black bg-orange-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-orange-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
@@ -964,7 +965,7 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-[#4DB8FF]">
                       <span>Ð</span>
                       <span>Dash</span>
-                      <span className="text-[9px] font-black text-white px-1 py-0.5 rounded leading-none" style={{ background: "#008DE4" }}>−20%</span>
+                      {cryptoDiscount && <span className="text-[9px] font-black text-white px-1 py-0.5 rounded leading-none" style={{ background: "#008DE4" }}>−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>
@@ -1058,8 +1059,9 @@ export default function Subscribe() {
           const planLabel = getPlanLabel(plan, false);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
           const planDays = plan.duration_days || plan.duration || 30;
-          const cryptoPriceUSD = Math.round(plan.priceUSD * 0.80 * 100) / 100;
-          const cryptoPriceCOP = Math.round(plan.priceCOP * 0.80);
+          const cryptoDiscount = plan.priceUSD > 50;
+          const cryptoPriceUSD = cryptoDiscount ? Math.round(plan.priceUSD * 0.80 * 100) / 100 : plan.priceUSD;
+          const cryptoPriceCOP = cryptoDiscount ? Math.round(plan.priceCOP * 0.80) : plan.priceCOP;
           const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
 
           const isBtcPanelActive = !!(btcOrder && selectedPlan === plan.id);
@@ -1182,7 +1184,7 @@ export default function Subscribe() {
                       <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
                         <span>🔄</span>
                         <span>Crypto</span>
-                        <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>
+                        {cryptoDiscount && <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                       </span>
                       <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
                     </button>
@@ -1195,7 +1197,7 @@ export default function Subscribe() {
                       <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
                         <span>🪙</span>
                         <span>Crypto</span>
-                        <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>
+                        {cryptoDiscount && <span className="text-[9px] font-black bg-green-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                       </span>
                       <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
                     </button>
@@ -1210,7 +1212,7 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-orange-300">
                       <span>₿</span>
                       <span>Bitcoin</span>
-                      <span className="text-[9px] font-black bg-orange-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>
+                      {cryptoDiscount && <span className="text-[9px] font-black bg-orange-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-orange-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
@@ -1224,7 +1226,7 @@ export default function Subscribe() {
                     <span className="flex items-center gap-1 text-xs font-semibold text-[#4DB8FF]">
                       <span>Ð</span>
                       <span>Dash</span>
-                      <span className="text-[9px] font-black text-white px-1 py-0.5 rounded leading-none" style={{ background: "#008DE4" }}>−20%</span>
+                      {cryptoDiscount && <span className="text-[9px] font-black text-white px-1 py-0.5 rounded leading-none" style={{ background: "#008DE4" }}>−20%</span>}
                     </span>
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>

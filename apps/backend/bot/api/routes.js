@@ -9342,9 +9342,11 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
     // crypto payment_method = fixed promo price, no stacking discount
     if (plan.payment_method === 'crypto') {
       usdAmount = basePrice;
-    } else {
+    } else if (basePrice > 50) {
       usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
       discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    } else {
+      usdAmount = basePrice;
     }
     planDisplayName = plan.display_name || plan.name;
   }
@@ -9576,9 +9578,11 @@ app.post('/api/webapp/payments/lightning/create', requireSessionAuth, paymentCre
     // crypto payment_method = fixed promo price, no stacking discount
     if (plan.payment_method === 'crypto') {
       usdAmount = basePrice;
-    } else {
+    } else if (basePrice > 50) {
       usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
       discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    } else {
+      usdAmount = basePrice;
     }
     planDisplayName = plan.display_name || plan.name;
   }
@@ -9789,7 +9793,7 @@ app.post('/api/webapp/payments/btc/create', requireSessionAuth, btcSubscribeLimi
     const plan = planRes.rows[0];
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
     const basePrice = parseFloat(plan.price);
-    usdAmount = plan.payment_method === 'crypto' ? basePrice : Math.round(basePrice * 0.80 * 100) / 100;
+    usdAmount = (plan.payment_method === 'crypto' || basePrice <= 50) ? basePrice : Math.round(basePrice * 0.80 * 100) / 100;
     planDisplayName = plan.display_name || plan.name;
   }
 
@@ -10017,9 +10021,9 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
   const plan = planRes.rows[0];
   if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
 
-  // Apply 20% crypto discount for non-crypto-fixed plans
+  // Apply 20% crypto discount for non-crypto-fixed plans over $50
   const basePrice = parseFloat(plan.price);
-  const usdAmount = plan.payment_method === 'crypto'
+  const usdAmount = (plan.payment_method === 'crypto' || basePrice <= 50)
     ? basePrice
     : Math.round(basePrice * 0.80 * 100) / 100;
   const planDisplayName = plan.display_name || plan.name;
@@ -10186,9 +10190,11 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
     // crypto payment_method = fixed promo price, no stacking discount
     if (plan.payment_method === 'crypto') {
       usdAmount = basePrice;
-    } else {
+    } else if (basePrice > 50) {
       usdAmount = Math.round(basePrice * 0.80 * 100) / 100;
       discountInfo = { originalAmount: basePrice, discountPct: 20 };
+    } else {
+      usdAmount = basePrice;
     }
     planDisplayName = plan.display_name || plan.name;
   }
