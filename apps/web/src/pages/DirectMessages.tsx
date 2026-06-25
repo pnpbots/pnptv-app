@@ -1079,12 +1079,12 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
   };
 
   return (
-    <div className={panelMode ? "flex flex-col flex-1 min-h-0" : "flex flex-col"} style={panelMode ? undefined : { height: "calc(100dvh - 3.5rem - 4rem)" }}>
+    <div className={panelMode ? "absolute inset-0 flex flex-col overflow-hidden" : "flex flex-col"} style={panelMode ? undefined : { height: "calc(100dvh - 3.5rem - 4rem)" }}>
       {/* Header — sticky-pinned so the video-call button is always reachable
           even when iOS PWA chrome shifts or the on-screen keyboard reflows
           the chat. The flex-column layout already keeps it from shrinking;
           sticky+top-0+z-10 is belt-and-suspenders for mobile edge cases. */}
-      <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-2.5 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm">
+      <div className={`${panelMode ? "" : "sticky top-0 "}z-10 flex items-center gap-2 px-3 py-2.5 border-b border-pnp-border flex-shrink-0 bg-pnp-background/95 backdrop-blur-sm`}>
         <button onClick={() => onBack ? onBack() : navigate("/dm")} className={`w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all flex-shrink-0${panelMode ? " hidden" : ""}`} aria-label="Back">
           <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />

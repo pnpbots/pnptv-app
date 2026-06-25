@@ -1721,7 +1721,7 @@ export function Layout() {
                 </svg>
               </button>
             </div>
-            <div className="flex flex-col flex-1 min-h-0">
+            <div className="flex-1 min-h-0 relative">
               {dmPartnerId ? (
                 <DmChatView
                   userId={dmPartnerId}
