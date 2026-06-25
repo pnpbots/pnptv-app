@@ -275,8 +275,8 @@ export default function CreatorEnrollmentWizard({
           </div>
         </div>
 
-        {/* Body — scrollable */}
-        <div className="overflow-y-auto flex-1 px-5 pb-4 space-y-4">
+        {/* Body — scrollable (touch-action:none on step 5 prevents Android Chrome scroll container from swallowing canvas pointer events) */}
+        <div className="overflow-y-auto flex-1 px-5 pb-4 space-y-4" style={step === 5 ? { touchAction: "none" } : undefined}>
 
           {/* Step 1: Creator Guidelines (mandatory read) */}
           {step === 1 && (
