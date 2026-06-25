@@ -4,6 +4,7 @@ const PlatformBanService = require('../../../services/platformBanService');
 const AuthentikService = require('../../../services/authentikService');
 const { isAdminUser } = require('../../utils/helpers');
 const { enforceDefaultFollows } = require('../../../services/followService');
+const EntitlementAccessService = require('../../../services/entitlementAccessService');
 const crypto = require('crypto');
 
 /**
@@ -506,6 +507,28 @@ const checkAuthStatus = async (req, res) => {
       }
     } catch (dbErr) {
       logger.warn('checkAuthStatus: DB refresh failed, using session values', dbErr.message);
+    }
+
+    // Derive tier live from user_entitlements (Redis-cached, 2-min TTL) and use it
+    // as the authoritative value — this guarantees the correct tier regardless of
+    // whether users.tier has drifted (stale after expiry, missed grant, failed cleanup).
+    // Banned/creator tiers are managed separately and never overridden here.
+    try {
+      const protectedTiers = ['banned', 'creator'];
+      if (!protectedTiers.includes(user.tier)) {
+        const label = await EntitlementAccessService.getUserLabel(user.id);
+        const liveTier = EntitlementAccessService.labelToDisplayTier(label);
+        if (liveTier !== user.tier) {
+          // Silently self-heal the DB in the background — don't block the response.
+          EntitlementAccessService.recomputeUserTier(user.id).catch(() => {});
+          logger.info('checkAuthStatus: tier drift corrected', {
+            userId: user.id, dbTier: user.tier, liveTier,
+          });
+        }
+        user.tier = liveTier;
+      }
+    } catch (entErr) {
+      logger.warn('checkAuthStatus: live tier check failed, using DB value', { error: entErr.message });
     }
 
     // Build auth_methods from session data
