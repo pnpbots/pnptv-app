@@ -725,6 +725,12 @@ class PaymentService {
       }
 
       const txClient = await getClient();
+      // If the plan already explicitly grants pnp-member, skip the auto-grant
+      // safety guard that fires when prime is processed — otherwise pnp-member
+      // gets extended twice per payment (once from its own add-on row, once from
+      // the guard), making it expire plan_duration_days longer than prime.
+      const planGrantsMember = addOnsResult.rows.some(r => r.add_on_id === 'pnp-member');
+
       try {
         await txClient.query('BEGIN');
 
@@ -798,7 +804,9 @@ class PaymentService {
 
           // Auto-grant pnp-member inside the transaction when prime is being granted,
           // so a crash after COMMIT cannot leave the user with PRIME but no pnp-member.
-          if (row.add_on_id === 'prime') {
+          // Skip if pnp-member is already an explicit add-on on this plan — it was
+          // already handled above and a second extension would over-grant by durationDays.
+          if (row.add_on_id === 'prime' && !planGrantsMember) {
             const memberIsLifetime = isLifetime;
             const memberDays = parseInt(durationDays, 10);
             if (memberIsLifetime) {
