@@ -8,7 +8,6 @@ const backendPath = path.join(basePath, '..');
 
 const { initializeRedis } = require(path.join(backendPath, 'config/redis'));
 const { initializePostgres } = require(path.join(backendPath, 'config/postgres'));
-const { refreshEpaycoCopRate } = require(path.join(backendPath, 'services/paymentService'));
 const UserService = require(path.join(backendPath, 'services/userService'));
 const MembershipCleanupService = require(path.join(backendPath, 'services/membershipCleanupService'));
 const TutorialReminderService = require(path.join(backendPath, 'services/tutorialReminderService'));
@@ -306,35 +305,6 @@ const startCronJobs = async (bot = null) => {
         }
       } catch (error) {
         logger.error('Error in BTCPay webhook probe cron:', error);
-      }
-    });
-
-    // ── ePayco USD→COP FX rate refresh — daily at 06:00 UTC ─────────────────
-    // PNPtv displays prices in USD to international users but settles via ePayco's
-    // Colombian acquiring network in COP. A stale rate means every transaction
-    // is systematically mis-priced. The cron keeps the Redis key fresh; the
-    // self-heal path in getEpaycoCopRate() covers missed-cron windows.
-    cron.schedule('0 6 * * *', async () => {
-      try {
-        const rate = await refreshEpaycoCopRate();
-        logger.info('[ePayco FX] Daily rate refresh completed', { rate });
-      } catch (err) {
-        logger.error('[ePayco FX] Daily rate refresh FAILED — next request will self-heal or fail closed', {
-          error: err.message,
-        });
-      }
-    }, { timezone: 'UTC' });
-
-    // Boot-time FX fetch — runs once when cron jobs start.
-    // Ensures the rate is available immediately on first deploy without waiting for 06:00 UTC.
-    setImmediate(async () => {
-      try {
-        const rate = await refreshEpaycoCopRate();
-        logger.info('[ePayco FX] Boot-time rate fetch completed', { rate });
-      } catch (err) {
-        logger.error('[ePayco FX] Boot-time rate fetch failed (next request will self-heal or fail closed)', {
-          error: err.message,
-        });
       }
     });
 
@@ -663,6 +633,47 @@ const startCronJobs = async (bot = null) => {
         await StreamRecordingService.expireOldRecordings(7);
       } catch (error) {
         logger.error('Error in VOD recording retention cron:', error);
+      }
+    });
+
+    // Live-stream dead-man sweep — every 5 minutes
+    // Marks `live_streams` rows as 'ended' when the bot crashed mid-stream and
+    // both the disconnect handler and recording finalizer were skipped. A row
+    // is stuck if status='live', ended_at IS NULL, started_at > 15min ago, AND
+    // Redis has no `live:streaming:<host_id>` lock confirming the session.
+    cron.schedule(process.env.LIVE_STREAM_SWEEP_CRON || '*/5 * * * *', async () => {
+      try {
+        const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
+        const { getRedis } = require(path.join(backendPath, 'config/redis'));
+        const redis = getRedis();
+        const { rows } = await pgQuery(
+          `SELECT id, host_id FROM live_streams
+            WHERE status = 'live'
+              AND ended_at IS NULL
+              AND started_at < NOW() - INTERVAL '15 minutes'
+            LIMIT 50`
+        );
+        let swept = 0;
+        for (const row of rows) {
+          if (redis) {
+            const locked = await redis.exists(`live:streaming:${row.host_id}`).catch(() => 0);
+            if (locked) continue; // session is actually alive
+          }
+          await pgQuery(
+            `UPDATE live_streams
+                SET status = 'ended',
+                    ended_at = NOW(),
+                    updated_at = NOW()
+              WHERE id = $1 AND ended_at IS NULL`,
+            [row.id]
+          );
+          swept++;
+        }
+        if (swept > 0) {
+          logger.warn(`[liveStreamSweep] marked ${swept} stuck row(s) as ended`);
+        }
+      } catch (error) {
+        logger.error('Error in live-stream sweep cron:', { error: error.message });
       }
     });
 
