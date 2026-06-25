@@ -441,8 +441,14 @@ export default function CreatorEnrollmentWizard({
                     <button
                       key={m.id}
                       onClick={() => {
+                        if (m.id === paymentMethod) return;
+                        // Only wipe the address when switching FROM a format that
+                        // can't possibly match the new one (crypto ↔ meru). Within
+                        // the crypto family the user might be correcting a typo.
+                        const switchingFamily =
+                          (paymentMethod === "meru") !== (m.id === "meru");
+                        if (switchingFamily) setPaymentAddress("");
                         setPaymentMethod(m.id);
-                        setPaymentAddress("");
                         if (m.id === "dash") setPaymentNetwork("dash");
                         else if (m.id === "usdt") setPaymentNetwork("tron");
                         else if (m.id === "usdc") setPaymentNetwork("base");
@@ -498,6 +504,16 @@ export default function CreatorEnrollmentWizard({
                   style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", fontSize: "16px" }}
                   autoComplete="off"
                 />
+                <div className="flex justify-between items-center mt-1.5 text-[10px]" style={{ color: canProceedStep3 ? "#5ED1C4" : "var(--pnp-text-secondary, #8E8E93)" }}>
+                  <span>
+                    {canProceedStep3
+                      ? (i18n.language === 'es' ? "✓ Listo para continuar" : "✓ Ready to continue")
+                      : (i18n.language === 'es'
+                          ? `Mínimo ${paymentMinLength} caracteres`
+                          : `Minimum ${paymentMinLength} characters required`)}
+                  </span>
+                  <span>{paymentAddress.trim().length}/{paymentMinLength}</span>
+                </div>
               </div>
             </>
           )}

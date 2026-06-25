@@ -1400,6 +1400,39 @@ class CreatorService {
       [enrollment.user_id]
     );
 
+    // Copy payout target from the enrollment into the canonical user columns so
+    // the creator-setup checklist sees the "Payout Method" item as done. The
+    // wizard only writes to creator_enrollments; without this copy the checker
+    // (creatorController.getSetupStatus) reports payout as unconfigured.
+    if (enrollment.payment_address) {
+      const addr = enrollment.payment_address.trim();
+      const method = enrollment.payment_method;
+      if (method === 'dash') {
+        await query(
+          `UPDATE users SET creator_dash_address = COALESCE(NULLIF(creator_dash_address, ''), $2),
+                            payout_method = 'crypto'
+             WHERE id = $1`,
+          [enrollment.user_id, addr]
+        );
+      } else if (method === 'meru') {
+        await query(
+          `UPDATE users SET meru_account = COALESCE(NULLIF(meru_account, ''), $2),
+                            fiat_payout_method = COALESCE(fiat_payout_method, 'meru'),
+                            fiat_payout_account = COALESCE(NULLIF(fiat_payout_account, ''), $2),
+                            payout_method = 'fiat'
+             WHERE id = $1`,
+          [enrollment.user_id, addr]
+        );
+      } else if (method === 'usdc' || method === 'usdt') {
+        await query(
+          `UPDATE users SET creator_wallet_address = COALESCE(NULLIF(creator_wallet_address, ''), $2),
+                            payout_method = 'crypto'
+             WHERE id = $1`,
+          [enrollment.user_id, addr]
+        );
+      }
+    }
+
     // Generate subscription code, live channel slug, and set DM policy
     try {
       await this.finaliseCreatorActivation(enrollment.user_id, enrollment.tier);

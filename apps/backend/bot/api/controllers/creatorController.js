@@ -1237,9 +1237,15 @@ const getSetupStatus = async (req, res) => {
       SELECT
         u.identity_verified,
         u.fiat_payout_method,
+        u.meru_account,
+        u.creator_wallet_address,
         (u.creator_dash_address IS NOT NULL AND u.creator_dash_address <> '') AS wallet_set,
         r.verification_status                                                  AS identity_record_status,
-        COALESCE(ma.terms_agreed, FALSE)                                       AS creator_terms,
+        (
+          COALESCE(ma.terms_agreed, FALSE)
+          OR ce.terms_accepted_at IS NOT NULL
+        )                                                                       AS creator_terms,
+        ce.payment_address                                                      AS enrollment_payment_address,
         (COALESCE(ma.stage_name, u.first_name, '') <> '')                       AS has_stage_name,
         (COALESCE(ma.bio, u.bio, '') <> '')                                    AS has_bio,
         COALESCE(ma.call_scheduled, FALSE)                                     AS onboarding_call,
@@ -1257,6 +1263,8 @@ const getSetupStatus = async (req, res) => {
         ORDER BY created_at DESC
         LIMIT 1
       ) ma ON TRUE
+      LEFT JOIN creator_enrollments ce
+        ON ce.user_id = u.id::text AND ce.status = 'approved'
       WHERE u.id = $1
     `, [userId]);
 
@@ -1264,7 +1272,13 @@ const getSetupStatus = async (req, res) => {
     const d = rows[0];
 
     const identityDone = d.identity_verified === true;
-    const payoutDone   = !!(d.fiat_payout_method || d.wallet_set);
+    const payoutDone   = !!(
+      d.fiat_payout_method ||
+      d.wallet_set ||
+      d.meru_account ||
+      d.creator_wallet_address ||
+      d.enrollment_payment_address
+    );
     const profileDone  = !!(d.has_stage_name && d.has_bio);
 
     const items = [
