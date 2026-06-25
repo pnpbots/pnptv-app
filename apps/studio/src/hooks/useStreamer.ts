@@ -232,6 +232,9 @@ export interface UseStreamerReturn {
   channel: { ref: string; streamKey: string; rtmpUrl: string } | null;
   channelLoading: boolean;
   channelError: string | null;
+  setChannelError: React.Dispatch<React.SetStateAction<string | null>>;
+  retryChannel: () => Promise<void>;
+  retryCamera: () => Promise<void>;
   socket: Socket | null;
 
   // Reducer state + dispatch
@@ -353,37 +356,38 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     }
   }, [socketProp]);
 
-  useEffect(() => {
+  // Channel resolution — pulled into a named function so the error banner's
+  // Retry button can re-trigger it without unmounting the studio.
+  const loadChannel = useCallback(async () => {
     if (channelProp) return;
-    let cancelled = false;
     setChannelLoading(true);
-    (async () => {
-      try {
-        const res = await getMyChannel();
-        if (!cancelled && res.success && res.channel) {
-          setOwnChannel(res.channel);
-          return;
-        }
-        // No channel yet — self-provision (same path as Creator Studio).
-        const prov = await provisionChannel();
-        if (cancelled) return;
-        if (prov.success && prov.rtmpUrl && prov.streamKey && prov.channelRef) {
-          setOwnChannel({
-            ref: prov.channelRef,
-            streamKey: prov.streamKey,
-            rtmpUrl: prov.rtmpUrl,
-          });
-        } else {
-          setChannelError(prov.error || "Could not set up your streaming channel.");
-        }
-      } catch {
-        if (!cancelled) setChannelError("Failed to load channel info.");
-      } finally {
-        if (!cancelled) setChannelLoading(false);
+    setChannelError(null);
+    try {
+      const res = await getMyChannel();
+      if (res.success && res.channel) {
+        setOwnChannel(res.channel);
+        return;
       }
-    })();
-    return () => { cancelled = true; };
+      const prov = await provisionChannel();
+      if (prov.success && prov.rtmpUrl && prov.streamKey && prov.channelRef) {
+        setOwnChannel({
+          ref: prov.channelRef,
+          streamKey: prov.streamKey,
+          rtmpUrl: prov.rtmpUrl,
+        });
+      } else {
+        setChannelError(prov.error || "Could not set up your streaming channel.");
+      }
+    } catch {
+      setChannelError("Failed to load channel info.");
+    } finally {
+      setChannelLoading(false);
+    }
   }, [channelProp]);
+
+  useEffect(() => {
+    void loadChannel();
+  }, [loadChannel]);
 
   // ── Reducer ──────────────────────────────────────────────────────────────
   const [state, dispatch] = useReducer(dashboardReducer, {
@@ -772,13 +776,20 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     }
   }, []);
 
-  // ── Start preview on mount ────────────────────────────────────────────────
-  useEffect(() => {
+  // ── Camera acquisition (extracted so the Retry button can re-call it) ─────
+  const acquireCamera = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setStreamError(
         "Your browser doesn't support camera access. Use a recent version of Chrome, Firefox, or Edge."
       );
       return;
+    }
+
+    // Release any previous tracks before requesting fresh ones — otherwise
+    // a manual retry may collide with the still-open device.
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     }
 
     const preset = state.selectedPreset;
@@ -797,61 +808,68 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
         audio: { echoCancellation: true, noiseSuppression: true },
       });
 
-    tryGetUserMedia(true)
-      .catch((err: unknown) => {
-        // Only fall back to relaxed constraints for OverconstrainedError —
-        // permission/not-found/in-use errors won't be fixed by relaxing.
+    try {
+      let stream: MediaStream;
+      try {
+        stream = await tryGetUserMedia(true);
+      } catch (err: unknown) {
         if (err instanceof Error && err.name === "OverconstrainedError") {
-          return tryGetUserMedia(false);
+          stream = await tryGetUserMedia(false);
+        } else {
+          throw err;
         }
-        throw err;
-      })
-      .then((stream) => {
-        streamRef.current = stream;
-        // Listen for mid-session track termination (camera revoked, device unplugged,
-        // OS muted the device). Browsers don't fire 'ended' for permission revocation
-        // in all cases — but when they do, we surface it so the creator isn't left
-        // broadcasting a black frame.
-        const videoTrack = stream.getVideoTracks()[0];
-        if (videoTrack) {
-          videoTrack.addEventListener("ended", () => {
-            setStreamError(
-              "Camera disconnected. Check your camera and reload to resume."
-            );
-          });
-        }
-        // Race-tolerant attach: PreStreamSetup may mount its <video> element
-        // after the getUserMedia promise resolves. Retry every 100ms for up to
-        // 5s until videoRef.current is available, then call .play() explicitly
-        // since some mobile browsers don't respect autoplay reliably.
-        let attempts = 0;
-        const attach = () => {
-          const el = videoRef.current;
-          if (el) {
-            try { el.srcObject = stream; } catch { /* noop */ }
-            el.play().catch(() => { /* autoplay policy — user gesture will trigger play */ });
-            return;
-          }
-          if (attempts++ < 50) setTimeout(attach, 100);
-        };
-        attach();
-        enumerateCameras();
-      })
-      .catch((err: unknown) => {
-        const name = err instanceof Error ? err.name : "";
-        const msg =
-          name === "NotAllowedError"
-            ? "Camera permission denied. Please allow camera access in your browser settings and reload."
-            : name === "NotFoundError"
-            ? "No camera found. Make sure your camera is connected and not in use by another app."
-            : name === "NotReadableError"
-            ? "Camera is in use by another app. Close other apps using the camera and reload."
-            : name === "OverconstrainedError"
-            ? "Camera doesn't support the requested resolution. Try a lower preset in Settings."
-            : "Could not access camera. Try closing other apps that may be using it and reload.";
-        setStreamError(msg);
-      });
+      }
 
+      streamRef.current = stream;
+      setStreamError(null);
+
+      // Listen for mid-session track termination (camera revoked, device unplugged,
+      // OS muted the device). Browsers don't fire 'ended' for permission revocation
+      // in all cases — but when they do, we surface it so the creator isn't left
+      // broadcasting a black frame.
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.addEventListener("ended", () => {
+          setStreamError(
+            "Camera disconnected. Check your camera and try again."
+          );
+        });
+      }
+      // Race-tolerant attach: PreStreamSetup may mount its <video> element
+      // after the getUserMedia promise resolves. Retry every 100ms for up to
+      // 5s until videoRef.current is available, then call .play() explicitly
+      // since some mobile browsers don't respect autoplay reliably.
+      let attempts = 0;
+      const attach = () => {
+        const el = videoRef.current;
+        if (el) {
+          try { el.srcObject = stream; } catch { /* noop */ }
+          el.play().catch(() => { /* autoplay policy — user gesture will trigger play */ });
+          return;
+        }
+        if (attempts++ < 50) setTimeout(attach, 100);
+      };
+      attach();
+      void enumerateCameras();
+    } catch (err: unknown) {
+      const name = err instanceof Error ? err.name : "";
+      const msg =
+        name === "NotAllowedError"
+          ? "Camera permission denied. Allow camera access in your browser settings, then tap Retry."
+          : name === "NotFoundError"
+          ? "No camera found. Make sure your camera is connected and not in use by another app."
+          : name === "NotReadableError"
+          ? "Camera is in use by another app. Close other apps using the camera, then tap Retry."
+          : name === "OverconstrainedError"
+          ? "Camera doesn't support the requested resolution. Try a lower preset in Settings."
+          : "Could not access camera. Close other apps that may be using it, then tap Retry.";
+      setStreamError(msg);
+    }
+  }, [state.selectedPreset, enumerateCameras]);
+
+  // ── Start preview on mount ────────────────────────────────────────────────
+  useEffect(() => {
+    void acquireCamera();
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
@@ -1381,6 +1399,9 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     channel,
     channelLoading,
     channelError,
+    setChannelError,
+    retryChannel: loadChannel,
+    retryCamera: acquireCamera,
     socket,
 
     // Reducer state + dispatch

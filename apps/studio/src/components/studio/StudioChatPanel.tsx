@@ -170,16 +170,46 @@ export function StudioChatPanel({
   const [inputValue, setInputValue] = useState("");
   const [lastTipId, setLastTipId] = useState<number | null>(null);
   const [visibleTip, setVisibleTip] = useState<LiveTip | null>(null);
+  const [showNewMessagesPill, setShowNewMessagesPill] = useState(false);
   const messageListRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const tipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isAtBottomRef = useRef(true);
 
-  // Auto-scroll to bottom whenever new messages arrive
+  // Auto-scroll only when the user is already near the bottom — otherwise
+  // they're reading earlier messages and we shouldn't yank the scroll position.
+  // When suppressed, show a "↓ new messages" pill they can tap.
   useEffect(() => {
     const el = messageListRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    if (isAtBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+      setShowNewMessagesPill(false);
+    } else if (messages.length > 0) {
+      setShowNewMessagesPill(true);
+    }
   }, [messages]);
+
+  // Track scroll position so we know whether to auto-scroll the next batch.
+  useEffect(() => {
+    const el = messageListRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+      isAtBottomRef.current = nearBottom;
+      if (nearBottom) setShowNewMessagesPill(false);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const scrollToBottom = () => {
+    const el = messageListRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    isAtBottomRef.current = true;
+    setShowNewMessagesPill(false);
+  };
 
   // Animate new tips — show banner for 5 seconds
   useEffect(() => {
@@ -282,6 +312,7 @@ export function StudioChatPanel({
           )}
 
           {/* ── Message list ──────────────────────────────────────────── */}
+          <div className="relative flex-1 min-h-0 flex flex-col">
           <div
             ref={messageListRef}
             className="flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-0"
@@ -315,6 +346,18 @@ export function StudioChatPanel({
                 </div>
               ))
             )}
+          </div>
+          {showNewMessagesPill && (
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-[11px] font-semibold text-white shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+              style={{ background: "linear-gradient(135deg,#D4007A,#E69138)" }}
+              aria-label="Scroll to newest messages"
+            >
+              ↓ New messages
+            </button>
+          )}
           </div>
 
           {/* ── Message input ─────────────────────────────────────────── */}

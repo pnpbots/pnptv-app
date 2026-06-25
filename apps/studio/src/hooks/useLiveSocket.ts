@@ -95,6 +95,14 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     const onReconnectAttempt = () => {
       setReconnecting(true);
     };
+    const onReconnectFailed = () => {
+      // Socket.IO's bundled retry budget is exhausted. Without this the
+      // hook's `reconnecting` flag stayed true forever, leaving the studio
+      // stuck on "Reconnecting…" until a full page reload.
+      setReconnecting(false);
+      setIsConnected(false);
+      setSocketError("Connection lost. Reload to reconnect.");
+    };
     const onError = () => {
       setIsConnected(false);
     };
@@ -111,6 +119,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("reconnect_attempt", onReconnectAttempt);
+    socket.io?.on?.("reconnect_failed", onReconnectFailed);
     socket.on("connect_error", onError);
     socket.on("wallet:updated", onWalletUpdated);
     socket.on("live:error", onLiveError);
@@ -120,6 +129,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("reconnect_attempt", onReconnectAttempt);
+      socket.io?.off?.("reconnect_failed", onReconnectFailed);
       socket.off("connect_error", onError);
       socket.off("wallet:updated", onWalletUpdated);
       socket.off("live:error", onLiveError);

@@ -88,6 +88,8 @@ export interface PreStreamSetupProps {
   channel: { ref: string } | null;
   /** Camera or recorder error to display above the preview — visible above the fold on mobile. */
   streamError?: string | null;
+  /** Re-run getUserMedia in place — preferred over a full page reload. */
+  onRetryCamera?: () => void | Promise<void>;
 }
 
 // ─── Countdown overlay ────────────────────────────────────────────────────────
@@ -202,6 +204,7 @@ export function PreStreamSetup({
   isConnecting,
   channel,
   streamError = null,
+  onRetryCamera,
 }: PreStreamSetupProps) {
   const t = useI18n();
 
@@ -345,7 +348,10 @@ export function PreStreamSetup({
                   <p className="opacity-80 leading-snug break-words">{streamError}</p>
                   <button
                     type="button"
-                    onClick={() => window.location.reload()}
+                    onClick={() => {
+                      if (onRetryCamera) void onRetryCamera();
+                      else window.location.reload();
+                    }}
                     className="mt-1.5 text-[11px] font-semibold underline hover:no-underline"
                   >
                     Retry
@@ -635,7 +641,7 @@ export function PreStreamSetup({
           <button
             type="button"
             onClick={handleGoLive}
-            disabled={isConnecting || !channel}
+            disabled={isConnecting || !channel || !!streamError}
             className="
               w-full flex items-center justify-center gap-2
               py-3.5 rounded-2xl
@@ -646,7 +652,7 @@ export function PreStreamSetup({
               focus-visible:ring-offset-[#0E0E0E]
             "
             style={
-              isConnecting || !channel
+              isConnecting || !channel || streamError
                 ? { background: "rgba(255,255,255,0.08)" }
                 : { background: "linear-gradient(135deg, #D4007A, #E69138)" }
             }

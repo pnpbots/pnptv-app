@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy } from "react";
+import React, { useState, useEffect, useRef, lazy } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStreamer } from "@/hooks/useStreamer";
 import type { FilterSettingsState } from "@/hooks/useStreamer";
@@ -33,6 +33,72 @@ const VideoFilters = lazy(
   () => import("@/components/streaming/VideoFilters")
 );
 
+// ─── Top-bar Go Live / Stop button ────────────────────────────────────────────
+// Hoisted out of BrowserStream so React doesn't unmount/remount it every
+// render (BrowserStream re-renders every second via durationSec).
+function GoLiveButton({
+  isLive,
+  isConnecting,
+  onClick,
+}: {
+  isLive: boolean;
+  isConnecting: boolean;
+  onClick: () => void;
+}) {
+  if (isLive) {
+    return (
+      <button
+        onClick={onClick}
+        className="
+          flex items-center gap-1.5 px-3 py-2 rounded-xl
+          text-xs font-bold text-white
+          transition-all duration-150 active:scale-[0.97]
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500
+        "
+        style={{ background: "linear-gradient(135deg, #b91c1c, #dc2626)" }}
+        aria-label="Stop stream"
+      >
+        <StopCircle className="w-3.5 h-3.5" aria-hidden="true" />
+        Stop
+      </button>
+    );
+  }
+  if (isConnecting) {
+    return (
+      <button
+        disabled
+        className="
+          flex items-center gap-1.5 px-3 py-2 rounded-xl
+          text-xs font-bold text-white opacity-70 cursor-wait
+        "
+        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+      >
+        <span
+          className="w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin"
+          aria-hidden="true"
+        />
+        Connecting…
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={onClick}
+      className="
+        flex items-center gap-1.5 px-3 py-2 rounded-xl
+        text-xs font-bold text-white
+        transition-all duration-150 active:scale-[0.97]
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
+      "
+      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+      aria-label="Go live"
+    >
+      <Radio className="w-3.5 h-3.5" aria-hidden="true" />
+      Go Live
+    </button>
+  );
+}
+
 // ─── BrowserStream ────────────────────────────────────────────────────────────
 
 export default function BrowserStream() {
@@ -53,6 +119,20 @@ export default function BrowserStream() {
       .finally(() => setEligibilityLoading(false));
   }, []);
 
+  // ── Warn before closing the tab while live ───────────────────────────────
+  // Most browsers no longer respect custom messages, but setting returnValue
+  // still triggers the native "leave this site?" prompt.
+  const isLiveForUnload = useRef(false);
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!isLiveForUnload.current) return;
+      e.preventDefault();
+      e.returnValue = "You are currently broadcasting. End the stream before closing this tab.";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
+
   // ── activeTab lives here — purely a UI concern ────────────────────────────
   const [activeTab, setActiveTab] = useState<ActiveTab>("scenes");
 
@@ -64,6 +144,9 @@ export default function BrowserStream() {
     channel,
     channelLoading,
     channelError,
+    setChannelError,
+    retryChannel,
+    retryCamera,
 
     // Reducer state
     state,
@@ -161,6 +244,9 @@ export default function BrowserStream() {
     fps,
   } = state;
 
+  // Keep the beforeunload ref in sync with the live flag.
+  useEffect(() => { isLiveForUnload.current = isLive; }, [isLive]);
+
   // The raw camera stream for mic input — SceneManager and AudioMixer need the
   // audio tracks from the raw device stream. sceneStreamRef holds the composed
   // canvas output (no mic); the raw mic lives in the browser's getUserMedia
@@ -181,63 +267,6 @@ export default function BrowserStream() {
     setShowStopConfirm(false);
   }
 
-  // ── Top bar Go Live / Stop button ─────────────────────────────────────────
-  function GoLiveButton() {
-    if (isLive) {
-      return (
-        <button
-          onClick={handleGoLiveClick}
-          className="
-            flex items-center gap-1.5 px-3 py-2 rounded-xl
-            text-xs font-bold text-white
-            transition-all duration-150 active:scale-[0.97]
-            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500
-          "
-          style={{ background: "linear-gradient(135deg, #b91c1c, #dc2626)" }}
-          aria-label="Stop stream"
-        >
-          <StopCircle className="w-3.5 h-3.5" aria-hidden="true" />
-          Stop
-        </button>
-      );
-    }
-
-    if (isConnecting) {
-      return (
-        <button
-          disabled
-          className="
-            flex items-center gap-1.5 px-3 py-2 rounded-xl
-            text-xs font-bold text-white opacity-70 cursor-wait
-          "
-          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-        >
-          <span
-            className="w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin"
-            aria-hidden="true"
-          />
-          Connecting…
-        </button>
-      );
-    }
-
-    return (
-      <button
-        onClick={handleGoLiveClick}
-        className="
-          flex items-center gap-1.5 px-3 py-2 rounded-xl
-          text-xs font-bold text-white
-          transition-all duration-150 active:scale-[0.97]
-          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent
-        "
-        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-        aria-label="Go live"
-      >
-        <Radio className="w-3.5 h-3.5" aria-hidden="true" />
-        Go Live
-      </button>
-    );
-  }
 
   // ── Active tab content for mobile ─────────────────────────────────────────
   function MobileTabContent() {
@@ -445,7 +474,7 @@ export default function BrowserStream() {
         </div>
 
         {/* Go Live / Stop button */}
-        <GoLiveButton />
+        <GoLiveButton isLive={isLive} isConnecting={isConnecting} onClick={handleGoLiveClick} />
       </header>
 
       {/* ── PRE-STREAM SETUP (shown when not live and not connecting) ───────── */}
@@ -464,6 +493,7 @@ export default function BrowserStream() {
           isConnecting={isConnecting}
           channel={channel}
           streamError={streamError}
+          onRetryCamera={retryCamera}
         />
       )}
 
@@ -703,9 +733,24 @@ export default function BrowserStream() {
           <p className="text-xs text-pnp-error flex-1 min-w-0 truncate">
             {streamError ?? channelError}
           </p>
+          {channelError && !streamError && (
+            <button
+              onClick={() => { void retryChannel(); }}
+              className="
+                text-pnp-textPrimary hover:text-white
+                text-xs font-semibold flex-shrink-0
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent rounded px-2 py-0.5
+              "
+              style={{ background: "rgba(255,255,255,0.06)" }}
+              aria-label="Retry channel setup"
+            >
+              Retry
+            </button>
+          )}
           <button
             onClick={() => {
               if (streamError) setStreamError(null);
+              if (channelError) setChannelError(null);
             }}
             className="
               text-pnp-textSecondary hover:text-pnp-textPrimary

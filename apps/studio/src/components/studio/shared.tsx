@@ -255,16 +255,30 @@ export function BitrateSparkline({ samples }: { samples: number[] }) {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || samples.length < 2) return;
+    if (!canvas) return;
+
+    // Size the backing buffer to the actual CSS box * DPR so the sparkline
+    // stays crisp on Retina / wide sidebars. Otherwise the canvas is locked
+    // to its `width` attribute (200) and rescaled by CSS, blurring the line.
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 200;
+    const cssHeight = canvas.clientHeight || 48;
+    const pxWidth = Math.round(cssWidth * dpr);
+    const pxHeight = Math.round(cssHeight * dpr);
+    if (canvas.width !== pxWidth) canvas.width = pxWidth;
+    if (canvas.height !== pxHeight) canvas.height = pxHeight;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const { width, height } = canvas;
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, pxWidth, pxHeight);
+    if (samples.length < 2) return;
+
+    // Draw in CSS pixel coordinates; the transform handles DPR scaling.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const max = Math.max(...samples, 1);
-    const step = width / (samples.length - 1);
+    const step = cssWidth / (samples.length - 1);
 
     ctx.beginPath();
     ctx.strokeStyle = "#D4007A";
@@ -273,17 +287,17 @@ export function BitrateSparkline({ samples }: { samples: number[] }) {
 
     samples.forEach((v, i) => {
       const x = i * step;
-      const y = height - (v / max) * height;
+      const y = cssHeight - (v / max) * cssHeight;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
     ctx.stroke();
 
     // Fill gradient under line
-    ctx.lineTo((samples.length - 1) * step, height);
-    ctx.lineTo(0, height);
+    ctx.lineTo((samples.length - 1) * step, cssHeight);
+    ctx.lineTo(0, cssHeight);
     ctx.closePath();
-    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    const grad = ctx.createLinearGradient(0, 0, 0, cssHeight);
     grad.addColorStop(0, "rgba(212,0,122,0.25)");
     grad.addColorStop(1, "rgba(212,0,122,0)");
     ctx.fillStyle = grad;
@@ -293,8 +307,6 @@ export function BitrateSparkline({ samples }: { samples: number[] }) {
   return (
     <canvas
       ref={canvasRef}
-      width={200}
-      height={48}
       className="w-full h-12 rounded"
       aria-hidden="true"
     />
@@ -374,8 +386,43 @@ export interface ConfirmStopDialogProps {
 }
 
 export function ConfirmStopDialog({ onConfirm, onCancel }: ConfirmStopDialogProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Focus trap: keep Tab/Shift-Tab + Escape inside the dialog so keyboard users
+  // can't accidentally interact with the live stream controls behind the overlay.
+  useEffect(() => {
+    cancelBtnRef.current?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const root = dialogRef.current;
+      if (!root) return;
+      const focusable = root.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
+
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
       role="dialog"
@@ -401,6 +448,7 @@ export function ConfirmStopDialog({ onConfirm, onCancel }: ConfirmStopDialogProp
         </div>
         <div className="flex gap-3 pt-1">
           <button
+            ref={cancelBtnRef}
             onClick={onCancel}
             className="
               flex-1 py-2.5 rounded-xl text-sm font-semibold
