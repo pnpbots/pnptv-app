@@ -9336,7 +9336,7 @@ app.post('/api/wallet/buy-nowpayments', requireSessionAuth, asyncHandler(async (
   const { packageId, payCurrency: rawPayCurrency } = req.body;
   if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
 
-  const ALLOWED_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdttrc20', 'usdtbsc', 'usdcbsc', 'usdcsol']);
+  const ALLOWED_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdcbsc', 'usdcsol']);
   const payCurrency = (rawPayCurrency && ALLOWED_PAY_CURRENCIES.has(String(rawPayCurrency).toLowerCase()))
     ? String(rawPayCurrency).toLowerCase() : null;
 
@@ -10202,7 +10202,7 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
   const { planId, email: rawEmail, returnUrl: rawReturnUrl, payCurrency: rawPayCurrency } = req.body;
   if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
 
-  const ALLOWED_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdttrc20', 'usdtbsc', 'usdcbsc', 'usdcsol']);
+  const ALLOWED_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdcbsc', 'usdcsol']);
   const validPayCurrency = (rawPayCurrency && ALLOWED_PAY_CURRENCIES.has(String(rawPayCurrency).toLowerCase()))
     ? String(rawPayCurrency).toLowerCase() : null;
 
@@ -10264,7 +10264,7 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
   let invoiceUrl;
   let npPayInfo = {};
   try {
-    const paymentResp = await axios.post(`${NOWPAYMENTS_URL}/payment`, {
+    const paymentResp = await axios.post(`${NOWPAYMENTS_URL}/invoice`, {
       price_amount: usdAmount,
       price_currency: 'usd',
       pay_currency: validPayCurrency || 'usdcsol',
@@ -10276,10 +10276,10 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
       headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
       timeout: 10000,
     });
-    const { payment_id: npPaymentId, purchase_id: npPurchaseId, pay_address: npPayAddress, pay_amount: npPayAmount, network: npNetwork, valid_until: npValidUntil } = paymentResp.data;
-    if (!npPaymentId || !npPurchaseId) throw new Error('No payment_id/purchase_id in response');
-    invoiceUrl = `https://nowpayments.io/payment?iid=${npPurchaseId}&paymentId=${npPaymentId}`;
-    npPayInfo = { payAddress: npPayAddress || null, payAmount: npPayAmount || null, network: npNetwork || null, validUntil: npValidUntil || null };
+    const { id: nowpaymentsInvoiceId } = paymentResp.data;
+    if (!nowpaymentsInvoiceId) throw new Error('No invoice id in response');
+    invoiceUrl = `https://nowpayments.io/payment?iid=${nowpaymentsInvoiceId}`;
+    npPayInfo = { nowpaymentsInvoiceId: String(nowpaymentsInvoiceId), payCurrency: validPayCurrency || 'usdcsol' };
   } catch (err) {
     logger.error('[NOWPayments] Subscription payment creation failed', { userId, planId, payCurrency: validPayCurrency, error: err.response?.data || err.message });
     return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
@@ -10314,7 +10314,7 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
     return res.status(400).json({ success: false, error: 'Invalid email address' });
   }
 
-  const ALLOWED_PAY_CURRENCIES_PREPARE = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdttrc20', 'usdtbsc', 'usdcbsc', 'usdcsol']);
+  const ALLOWED_PAY_CURRENCIES_PREPARE = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdcbsc', 'usdcsol']);
   const validPayCurrency = (rawPayCurrency && ALLOWED_PAY_CURRENCIES_PREPARE.has(String(rawPayCurrency).toLowerCase()))
     ? String(rawPayCurrency).toLowerCase() : null;
 
@@ -10419,7 +10419,7 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
   let invoiceUrl;
   let npPayInfo2 = {};
   try {
-    const paymentResp = await axios.post(`${NOWPAYMENTS_URL}/payment`, {
+    const paymentResp = await axios.post(`${NOWPAYMENTS_URL}/invoice`, {
       price_amount: usdAmount,
       price_currency: 'usd',
       pay_currency: validPayCurrency || 'usdcsol',
@@ -10431,10 +10431,10 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
       headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
       timeout: 10000,
     });
-    const { payment_id: npPaymentId, purchase_id: npPurchaseId, pay_address: npPayAddress, pay_amount: npPayAmount, network: npNetwork, valid_until: npValidUntil } = paymentResp.data;
-    if (!npPaymentId || !npPurchaseId) throw new Error('No payment_id/purchase_id in response');
-    invoiceUrl = `https://nowpayments.io/payment?iid=${npPurchaseId}&paymentId=${npPaymentId}`;
-    npPayInfo2 = { payAddress: npPayAddress || null, payAmount: npPayAmount || null, network: npNetwork || null, validUntil: npValidUntil || null };
+    const { id: nowpaymentsInvoiceId } = paymentResp.data;
+    if (!nowpaymentsInvoiceId) throw new Error('No invoice id in response');
+    invoiceUrl = `https://nowpayments.io/payment?iid=${nowpaymentsInvoiceId}`;
+    npPayInfo2 = { nowpaymentsInvoiceId: String(nowpaymentsInvoiceId), payCurrency: validPayCurrency || 'usdcsol' };
   } catch (err) {
     logger.error('[NOWPayments] Payment creation failed', { userId, planId, orderId, payCurrency: validPayCurrency, error: err.message });
     return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });

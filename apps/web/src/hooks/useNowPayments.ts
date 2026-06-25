@@ -11,12 +11,7 @@ export interface NowPaymentsOrder {
   usdAmount: number;
   invoiceUrl: string;
   createdAt: number;
-  partiallyPaid?: boolean;
-  confirming?: boolean;
-  payAddress?: string | null;
-  payAmount?: number | null;
-  network?: string | null;
-  validUntil?: string | null;
+  nowpaymentsInvoiceId: string;
   payCurrency?: string | null;
 }
 
@@ -96,26 +91,8 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
           return;
         }
 
-        let updated = false;
-        const newOrder = { ...order };
-
-        if (data.partiallyPaid && !order.partiallyPaid) {
-          newOrder.partiallyPaid = true;
-          updated = true;
-        }
-
-        if (data.confirming && !order.confirming) {
-          newOrder.confirming = true;
-          updated = true;
-        }
-
-        if (updated) {
-          setOrder(newOrder);
-          sessionStorage.setItem(storageKey, JSON.stringify(newOrder));
-        }
-
         if (!cancelled) {
-          timerId = setTimeout(poll, data.confirming ? 5000 : 8000);
+          timerId = setTimeout(poll, 8000);
         }
       } catch (err: any) {
         if (err.status === 401) {
@@ -160,10 +137,7 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
           usdAmount: result.usdAmount,
           invoiceUrl: result.invoiceUrl,
           createdAt: Date.now(),
-          payAddress: result.payAddress || null,
-          payAmount: result.payAmount || null,
-          network: result.network || null,
-          validUntil: result.validUntil || null,
+          nowpaymentsInvoiceId: result.nowpaymentsInvoiceId || "",
           payCurrency: result.payCurrency || null,
         };
 

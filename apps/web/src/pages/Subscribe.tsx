@@ -1021,7 +1021,7 @@ export default function Subscribe() {
                   onCancel={cancelNowPayments}
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
-                  isSolana={usdcOrder?.payCurrency === "usdcsol" || !usdcOrder?.payCurrency}
+                  isSolana={usdcOrder?.payCurrency === "usdcsol"}
                 />
               </div>
             )}
@@ -1312,7 +1312,7 @@ export default function Subscribe() {
                   onCancel={cancelNowPayments}
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
-                  isSolana={usdcOrder?.payCurrency === "usdcsol" || !usdcOrder?.payCurrency}
+                  isSolana={usdcOrder?.payCurrency === "usdcsol"}
                 />
               </div>
             )}

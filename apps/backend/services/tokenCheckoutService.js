@@ -542,7 +542,7 @@ class TokenCheckoutService {
     let npPayInfo = {};
     try {
       const paymentResp = await axios.post(
-        `${NOWPAYMENTS_URL}/payment`,
+        `${NOWPAYMENTS_URL}/invoice`,
         {
           price_amount: usdAmount,
           price_currency: 'usd',
@@ -553,10 +553,10 @@ class TokenCheckoutService {
         },
         { headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' }, timeout: 10000 }
       );
-      const { payment_id: npPaymentId, purchase_id: npPurchaseId, pay_address: npPayAddress, pay_amount: npPayAmount, network: npNetwork, valid_until: npValidUntil } = paymentResp.data;
-      if (!npPaymentId || !npPurchaseId) throw new Error('No payment_id/purchase_id in response');
-      invoiceUrl = `https://nowpayments.io/payment?iid=${npPurchaseId}&paymentId=${npPaymentId}`;
-      npPayInfo = { payAddress: npPayAddress || null, payAmount: npPayAmount || null, network: npNetwork || null, validUntil: npValidUntil || null };
+      const { id: nowpaymentsInvoiceId } = paymentResp.data;
+      if (!nowpaymentsInvoiceId) throw new Error('No invoice id in response');
+      invoiceUrl = `https://nowpayments.io/payment?iid=${nowpaymentsInvoiceId}`;
+      npPayInfo = { nowpaymentsInvoiceId: String(nowpaymentsInvoiceId), payCurrency: payCurrency || 'usdcsol' };
     } catch (invoiceErr) {
       logger.error('TokenCheckoutService.createNowPaymentsCheckout: NowPayments error', {
         userId, packageId, payCurrency, error: invoiceErr.response?.data || invoiceErr.message,

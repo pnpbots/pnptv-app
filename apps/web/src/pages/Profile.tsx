@@ -1839,7 +1839,7 @@ export default function Profile() {
                 isSuccess={usdcPaymentSuccess}
                 onCancel={() => { cancelNowPayments(); setSubscribeError(null); }}
                 lang={t.lang}
-                isSolana={usdcOrder?.payCurrency === "usdcsol" || !usdcOrder?.payCurrency}
+                isSolana={usdcOrder?.payCurrency === "usdcsol"}
               />
             ) : !subscribeAwaitingPayment ? (
               <>

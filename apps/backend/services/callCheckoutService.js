@@ -672,12 +672,12 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
   let invoiceUrl;
   let npPayInfo = {};
   try {
-    const ALLOWED_CALL_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdtbsc', 'usdcbsc', 'usdcsol']);
+    const ALLOWED_CALL_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdtbsc', 'usdcbsc', 'usdcsol']);
     const validCallPayCurrency = (payCurrency && ALLOWED_CALL_PAY_CURRENCIES.has(String(payCurrency).toLowerCase()))
       ? String(payCurrency).toLowerCase() : null;
 
     const paymentResp = await axios.post(
-      `${NOWPAYMENTS_URL}/payment`,
+      `${NOWPAYMENTS_URL}/invoice`,
       {
         price_amount: amountUsd,
         price_currency: 'usd',
@@ -688,10 +688,10 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
       },
       { headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' } }
     );
-    const { payment_id: npPaymentId, purchase_id: npPurchaseId, pay_address: npPayAddress, pay_amount: npPayAmount, network: npNetwork, valid_until: npValidUntil } = paymentResp.data;
-    if (!npPaymentId || !npPurchaseId) throw new Error('NowPayments returned no payment_id/purchase_id');
-    invoiceUrl = `https://nowpayments.io/payment?iid=${npPurchaseId}&paymentId=${npPaymentId}`;
-    npPayInfo = { payAddress: npPayAddress || null, payAmount: npPayAmount || null, network: npNetwork || null, validUntil: npValidUntil || null };
+    const { id: nowpaymentsInvoiceId } = paymentResp.data;
+    if (!nowpaymentsInvoiceId) throw new Error('NowPayments returned no invoice id');
+    invoiceUrl = `https://nowpayments.io/payment?iid=${nowpaymentsInvoiceId}`;
+    npPayInfo = { nowpaymentsInvoiceId: String(nowpaymentsInvoiceId), payCurrency: validCallPayCurrency || 'usdcsol' };
   } catch (invoiceErr) {
     if (booking?.id) {
       await query(`UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`, [booking.id]).catch(() => {});
