@@ -53,8 +53,6 @@ interface UseLiveSocketResult {
   raidEvent: LiveRaidEvent | null;
   /** Dismiss the active raid overlay (viewer clicked Cancel). */
   dismissRaid: () => void;
-  /** Emit a live:raid:initiate event as the stream owner. */
-  emitRaid: (streamId: string, targetChannelRef: string) => void;
   /** Current tip goal state — updated via live:goal_update socket event. */
   tipGoal: TipGoal | null;
   /** Latest tip alert — auto-clears after 4 seconds. */
@@ -75,13 +73,16 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
   const [tipGoal, setTipGoal] = useState<TipGoal | null>(null);
   const [tipAlert, setTipAlert] = useState<LiveTipAlert | null>(null);
   const [chatBanned, setChatBanned] = useState(false);
+  const [socketBalanceReceived, setSocketBalanceReceived] = useState(false);
   const tipAlertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const raidDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Tracks the currently joined streamId so we can emit live:leave on change/unmount
   const joinedStreamRef = useRef<string | null>(null);
   // SOCK-H6: prevent double live:join emissions when the effect re-runs
   const hasJoinedRef = useRef(false);
-  // FE-M1: once the socket delivers a balance, prefer it over HTTP-fetched values
+  // FE-M1: once the socket delivers a balance, prefer it over HTTP-fetched values.
+  // Used as an internal guard inside socket callbacks (avoids stale closure over state).
   const socketBalanceReceivedRef = useRef(false);
 
   // ── Always-on: personal event bus (wallet updates, connection state) ─────────
@@ -96,6 +97,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       // FE-M1: mark that the authoritative socket value has arrived;
       // callers that set balance via HTTP should check this flag first.
       socketBalanceReceivedRef.current = true;
+      setSocketBalanceReceived(true);
       setWalletBalance(data.balance);
     };
     const onConnect = () => {
@@ -152,6 +154,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     return () => {
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
       if (tipAlertTimerRef.current) clearTimeout(tipAlertTimerRef.current);
+      if (raidDismissTimerRef.current) clearTimeout(raidDismissTimerRef.current);
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("reconnect_attempt", onReconnectAttempt);
@@ -235,7 +238,11 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     const onRaid = (data: LiveRaidEvent) => {
       setRaidEvent(data);
       // Auto-dismiss after 30s if the viewer hasn't acted
-      setTimeout(() => setRaidEvent((cur) => (cur === data ? null : cur)), 30_000);
+      if (raidDismissTimerRef.current) clearTimeout(raidDismissTimerRef.current);
+      raidDismissTimerRef.current = setTimeout(() => {
+        setRaidEvent((cur) => (cur === data ? null : cur));
+        raidDismissTimerRef.current = null;
+      }, 30_000);
     };
 
     socket.on("connect", onConnectForStream);
@@ -257,6 +264,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       }
       // SOCK-H6: reset join guard on cleanup so re-mounting can join cleanly
       hasJoinedRef.current = false;
+      if (raidDismissTimerRef.current) clearTimeout(raidDismissTimerRef.current);
       socket.off("connect", onConnectForStream);
       socket.off("live:history", onHistory);
       socket.off("live:message", onMessage);
@@ -299,12 +307,11 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     sendMessage,
     latestTip,
     walletBalance,
-    socketBalanceReceived: socketBalanceReceivedRef.current,
+    socketBalanceReceived,
     setWalletBalance,
     socketError,
     raidEvent,
     dismissRaid,
-    emitRaid,
     tipGoal,
     tipAlert,
     chatBanned,

@@ -11537,6 +11537,11 @@ app.post('/api/webapp/book-call/checkout/btc',
   requireSessionAuth, checkoutLimiter,
   asyncHandler(callBookingController.createCheckoutBtc));
 
+// BTCPay Dash checkout for call packages
+app.post('/api/webapp/book-call/checkout/dash',
+  requireSessionAuth, checkoutLimiter,
+  asyncHandler(callBookingController.createCheckoutDash));
+
 // Member: upcoming confirmed bookings — must be before /:bookingId catch-all
 app.get('/api/webapp/bookings/upcoming',
   requireSessionAuth,

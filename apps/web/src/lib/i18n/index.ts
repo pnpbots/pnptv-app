@@ -35,6 +35,7 @@ import { notifications, type NotificationsStrings } from "./notifications";
 import { admin, type AdminStrings } from "./admin";
 import { wellness, type WellnessStrings } from "./wellness";
 import { home, type HomeStrings } from "./home";
+import { onboarding, type OnboardingStrings } from "./onboarding";
 
 export type Lang = "en" | "es" | "pt" | "zh" | "zhTW" | "fr" | "de" | "th" | "it" | "tr" | "ru" | "nl" | "vi" | "ja" | "id" | "ar";
 
@@ -77,6 +78,7 @@ export interface I18n {
   admin: Widen<AdminStrings>;
   wellness: Widen<WellnessStrings>;
   home: Widen<HomeStrings>;
+  onboarding: Widen<OnboardingStrings>;
 }
 
 /** Safely index an i18n module, falling back to "en" for unsupported languages. */
@@ -117,6 +119,7 @@ function resolve(lang: Lang): I18n {
     admin: pick(admin, lang),
     wellness: pick(wellness, lang),
     home: pick(home, lang),
+    onboarding: pick(onboarding, lang),
   } as I18n;
 }
 

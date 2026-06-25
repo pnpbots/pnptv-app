@@ -385,4 +385,122 @@ export const tutorialContent: Record<string, TutorialSection> = {
       },
     ],
   },
+
+  channels: {
+    slides: [
+      {
+        titleEn: "Creator Channels",
+        titleEs: "Canales de Creadores",
+        descEn: "Channels are creator-owned video collections — exclusive content curated by your favorite performers. Each creator controls their own channel with original uploads just for subscribers.",
+        descEs: "Los canales son colecciones de videos de creadores — contenido exclusivo curado por tus performers favoritos. Cada creador controla su propio canal con subidas originales solo para suscriptores.",
+        illustration: "primeContent",
+      },
+      {
+        titleEn: "Browse & Discover",
+        titleEs: "Explora y Descubre",
+        descEn: "Switch between Channels, Videos, and Discover tabs to find new creators. Use the search bar to filter by name or tag, or browse the creator strip at the bottom.",
+        descEs: "Cambia entre las pestanas Canales, Videos y Descubrir para encontrar nuevos creadores. Usa la barra de busqueda para filtrar por nombre o etiqueta, o explora la tira de creadores abajo.",
+        illustration: "browse",
+      },
+      {
+        titleEn: "Free vs. Locked Content",
+        titleEs: "Contenido Libre vs. Bloqueado",
+        descEn: "Some channels are free to browse. Others require a creator subscription or PRIME. Locked videos show a preview thumbnail — subscribe to the creator to unlock full access.",
+        descEs: "Algunos canales son gratis. Otros requieren una suscripcion al creador o PRIME. Los videos bloqueados muestran una miniatura — suscribete al creador para desbloquear el acceso completo.",
+        illustration: "subscribePlans",
+      },
+      {
+        titleEn: "Subscribe to a Creator",
+        titleEs: "Suscribete a un Creador",
+        descEn: "Tap any creator channel card and look for the Subscribe button. Subscriptions unlock all their exclusive content and support the creator directly.",
+        descEs: "Toca cualquier tarjeta de canal de creador y busca el boton Suscribirse. Las suscripciones desbloquean todo su contenido exclusivo y apoyan al creador directamente.",
+        illustration: "instantAccess",
+      },
+    ],
+  },
+
+  stream: {
+    slides: [
+      {
+        titleEn: "Watching a Live Stream",
+        titleEs: "Ver una Transmision en Vivo",
+        descEn: "You are watching live — no rewind, no pause. The player starts automatically. If the stream has not started yet, the page will update as soon as it goes live.",
+        descEs: "Estas viendo en vivo — sin rebobinar, sin pausar. El reproductor arranca automaticamente. Si la transmision aun no empezo, la pagina se actualizara en cuanto comience.",
+        illustration: "liveStream",
+      },
+      {
+        titleEn: "Chat & Etiquette",
+        titleEs: "Chat y Etiqueta",
+        descEn: "Use the chat panel to interact with the performer and other viewers. Keep it respectful — harassment or spam will get you removed. Support requests or complaints must go to Cristina AI, not the chat.",
+        descEs: "Usa el panel de chat para interactuar con el performer y otros viewers. Mantente respetuoso — el acoso o spam te sacara de la sala. Las solicitudes de soporte o quejas deben ir a Cristina AI, no al chat.",
+        illustration: "engage",
+      },
+      {
+        titleEn: "Tip with Tokens",
+        titleEs: "Propinas con Tokens",
+        descEn: "Tap the tip button to send tokens to the performer. Choose a preset amount or enter a custom one. Tips are instant and appear in the stream as a shout-out. You can top up tokens anytime from the tip panel.",
+        descEs: "Toca el boton de propina para enviar tokens al performer. Elige un monto predefinido o ingresa uno personalizado. Las propinas son instantaneas y aparecen en la transmision como un saludo. Puedes recargar tokens desde el panel de propinas.",
+        illustration: "tips",
+      },
+      {
+        titleEn: "Live Rules",
+        titleEs: "Reglas del Vivo",
+        descEn: "Some streams require you to acknowledge the creator's rules before entering. Read them carefully — they cover what is allowed in chat and during the session.",
+        descEs: "Algunas transmisiones requieren que aceptes las reglas del creador antes de entrar. Lelas con atencion — cubren lo que esta permitido en el chat y durante la sesion.",
+        illustration: "navigate",
+      },
+    ],
+  },
+
+  settings: {
+    slides: [
+      {
+        titleEn: "Your Settings Hub",
+        titleEs: "Tu Centro de Ajustes",
+        descEn: "Everything that controls your account lives here: notifications, privacy, language, billing, and security. Tap any category to dive in — changes save instantly.",
+        descEs: "Todo lo que controla tu cuenta vive aqui: notificaciones, privacidad, idioma, facturacion y seguridad. Toca cualquier categoria para acceder — los cambios se guardan al instante.",
+        illustration: "profileCustomize",
+      },
+      {
+        titleEn: "Privacy & Language",
+        titleEs: "Privacidad e Idioma",
+        descEn: "Under Privacy you control who sees your profile and location. Under Preferences you switch the app language between English and Spanish — and enable Wellness Mode when you need a break.",
+        descEs: "En Privacidad controlas quien ve tu perfil y ubicacion. En Preferencias cambias el idioma de la app entre ingles y espanol — y activas Modo Bienestar cuando necesitas un descanso.",
+        illustration: "privacy",
+      },
+      {
+        titleEn: "Account & Billing",
+        titleEs: "Cuenta y Facturacion",
+        descEn: "Account lets you update your email, password, and linked identity providers. Payments shows your subscription status, active plan, and transaction history.",
+        descEs: "Cuenta te permite actualizar tu email, contrasena y proveedores de identidad vinculados. Pagos muestra tu estado de suscripcion, plan activo e historial de transacciones.",
+        illustration: "subscribePlans",
+      },
+    ],
+  },
+
+  creatorProfile: {
+    slides: [
+      {
+        titleEn: "Creator Profile",
+        titleEs: "Perfil de Creador",
+        descEn: "This is a creator's public profile. Browse their posts, exclusive content, and channel videos all in one place. Tap Follow to see their updates in your feed.",
+        descEs: "Este es el perfil publico de un creador. Explora sus publicaciones, contenido exclusivo y videos de canal en un solo lugar. Toca Seguir para ver sus novedades en tu feed.",
+        illustration: "socialPost",
+      },
+      {
+        titleEn: "Tip & Subscribe",
+        titleEs: "Propina y Suscripcion",
+        descEn: "Tap the Tip button to send tokens directly to this creator. To unlock their exclusive content, look for the Subscribe button — it opens the creator's channel subscription.",
+        descEs: "Toca el boton Propina para enviar tokens directamente a este creador. Para desbloquear su contenido exclusivo, busca el boton Suscribirse — abre la suscripcion al canal del creador.",
+        illustration: "tips",
+      },
+      {
+        titleEn: "Channels & Exclusive Content",
+        titleEs: "Canales y Contenido Exclusivo",
+        descEn: "The Channels tab shows all videos this creator has published. The Exclusive tab (when available) shows subscriber-only posts. Subscribe to this creator to see everything they have made.",
+        descEs: "La pestana Canales muestra todos los videos que este creador ha publicado. La pestana Exclusivo (cuando esta disponible) muestra publicaciones solo para suscriptores. Suscribete a este creador para ver todo lo que ha hecho.",
+        illustration: "primeContent",
+      },
+    ],
+  },
 };

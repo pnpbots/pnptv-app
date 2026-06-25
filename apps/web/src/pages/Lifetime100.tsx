@@ -1,9 +1,14 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { useSearchParams, useNavigate, Link } from "react-router-dom";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useSearchParams, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  createPayment,
   getUsdcAvailable,
+  getDashAvailable,
+  getBtcAvailable,
+  createDashSubscription,
+  createBtcSubscription,
+  getDashSubscriptionStatus,
+  getBtcSubscriptionStatus,
   ApiError,
 } from "@/lib/api";
 
@@ -471,7 +476,7 @@ function SheetModal({ sheet, onClose }: { sheet: { title: string; emoji: string;
 
 // ── Payment types ──────────────────────────────────────────────────────────────
 
-type PayMethod = "usdc";
+type PayMethod = "usdc" | "dash" | "btc";
 
 // ── Hero view ──────────────────────────────────────────────────────────────────
 
@@ -504,11 +509,41 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
     },
   });
 
+  // Dash state
+  const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
+  const [dashOrder, setDashOrder] = useState<{ invoiceId: string; checkoutUrl: string } | null>(null);
+  const [dashPolling, setDashPolling] = useState(false);
+  const [dashSuccess, setDashSuccess] = useState(false);
+  const dashPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dashPopupRef = useRef<Window | null>(null);
+
+  // BTC state
+  const [btcAvailable, setBtcAvailable] = useState<boolean | null>(null);
+  const [btcOrder, setBtcOrder] = useState<{ invoiceId: string; checkoutUrl: string } | null>(null);
+  const [btcPolling, setBtcPolling] = useState(false);
+  const [btcSuccess, setBtcSuccess] = useState(false);
+  const btcPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const btcPopupRef = useRef<Window | null>(null);
+
   // Init: check availability
   useEffect(() => {
     getUsdcAvailable()
       .then((r) => setUsdcAvailable(r.available === true && r.configured === true))
       .catch(() => setUsdcAvailable(false));
+    getDashAvailable()
+      .then((r) => setDashAvailable(r.available === true))
+      .catch(() => setDashAvailable(false));
+    getBtcAvailable()
+      .then((r) => setBtcAvailable(r.available === true))
+      .catch(() => setBtcAvailable(false));
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+      if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
+    };
   }, []);
 
   // Handle return from hosted checkout (popup redirect or direct link fallback)
@@ -552,13 +587,119 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
     handlePay("usdcsol");
   };
 
+  const handleDashPay = useCallback(async () => {
+    if (!user) { window.location.href = `/login?returnTo=${encodeURIComponent("/lifetime100")}`; return; }
+    if (submitting) return;
+    setSubmitting(true); setPayError(null);
+    try {
+      const result = await createDashSubscription(PLAN_ID);
+      if (!result.success || !result.checkoutUrl) {
+        setPayError(result.error || (es ? "No se pudo crear el pago Dash." : "Failed to create Dash payment."));
+        return;
+      }
+      setDashOrder({ invoiceId: result.invoiceId, checkoutUrl: result.checkoutUrl });
+      const pw = 560, ph = 780;
+      const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+      const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+      dashPopupRef.current = window.open(result.checkoutUrl, "dash_lt100_checkout", `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`);
+      setDashPolling(true);
+      const pollStart = Date.now();
+      const POLL_INTERVAL_MS = 6_000;
+      const POLL_TIMEOUT_MS = 30 * 60 * 1000;
+      if (dashPollRef.current) clearInterval(dashPollRef.current);
+      dashPollRef.current = setInterval(async () => {
+        if (Date.now() - pollStart >= POLL_TIMEOUT_MS) {
+          if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+          setDashPolling(false);
+          return;
+        }
+        try {
+          const status = await getDashSubscriptionStatus(result.invoiceId);
+          if (status.completed) {
+            if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+            dashPopupRef.current?.close();
+            dashPopupRef.current = null;
+            setDashPolling(false);
+            setDashSuccess(true);
+            await refreshUser();
+            setPaymentSuccess(true);
+          } else if (status.failed) {
+            if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+            setDashPolling(false);
+            setPayError(es ? "Pago Dash fallido." : "Dash payment failed.");
+          }
+        } catch {
+          // Network hiccup — keep polling
+        }
+      }, POLL_INTERVAL_MS);
+    } catch (err: unknown) {
+      setPayError(err instanceof ApiError ? err.message : (err instanceof Error ? err.message : (es ? "Error inesperado." : "Unexpected error.")));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [user, submitting, es, refreshUser]);
+
+  const handleBtcPay = useCallback(async () => {
+    if (!user) { window.location.href = `/login?returnTo=${encodeURIComponent("/lifetime100")}`; return; }
+    if (submitting) return;
+    setSubmitting(true); setPayError(null);
+    try {
+      const result = await createBtcSubscription(PLAN_ID);
+      if (!result.success || !result.checkoutUrl) {
+        setPayError(result.error || (es ? "No se pudo crear el pago BTC." : "Failed to create BTC payment."));
+        return;
+      }
+      setBtcOrder({ invoiceId: result.invoiceId, checkoutUrl: result.checkoutUrl });
+      const pw = 560, ph = 780;
+      const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+      const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+      btcPopupRef.current = window.open(result.checkoutUrl, "btc_lt100_checkout", `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`);
+      setBtcPolling(true);
+      const pollStart = Date.now();
+      const POLL_INTERVAL_MS = 10_000;
+      const POLL_TIMEOUT_MS = 30 * 60 * 1000;
+      if (btcPollRef.current) clearInterval(btcPollRef.current);
+      btcPollRef.current = setInterval(async () => {
+        if (Date.now() - pollStart >= POLL_TIMEOUT_MS) {
+          if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
+          setBtcPolling(false);
+          return;
+        }
+        try {
+          const status = await getBtcSubscriptionStatus(result.invoiceId);
+          if (status.completed) {
+            if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
+            btcPopupRef.current?.close();
+            btcPopupRef.current = null;
+            setBtcPolling(false);
+            setBtcSuccess(true);
+            await refreshUser();
+            setPaymentSuccess(true);
+          } else if (status.failed) {
+            if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
+            setBtcPolling(false);
+            setPayError(es ? "Pago BTC fallido." : "Bitcoin payment failed.");
+          }
+        } catch {
+          // Network hiccup — keep polling
+        }
+      }, POLL_INTERVAL_MS);
+    } catch (err: unknown) {
+      setPayError(err instanceof ApiError ? err.message : (err instanceof Error ? err.message : (es ? "Error inesperado." : "Unexpected error.")));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [user, submitting, es, refreshUser]);
+
   const usdcUnavailable = usdcAvailable === false;
-  const ctaDisabled = submitting || (payMethod === "usdc" && usdcUnavailable) || (payMethod === "usdc" && usdcPolling && !usdcPaymentSuccess);
+  const ctaDisabled = submitting || (payMethod === "usdc" && usdcUnavailable) || (payMethod === "usdc" && usdcPolling && !usdcPaymentSuccess) || (payMethod === "dash" && dashPolling) || (payMethod === "btc" && btcPolling);
 
   const ctaLabel = (() => {
     if (submitting) return es ? "Procesando…" : "Processing…";
-    if (usdcPolling && !usdcPaymentSuccess) return usdcOrder?.confirming ? (es ? "Confirmando pago…" : "Confirming payment…") : (es ? "Esperando pago…" : "Waiting for payment…");
-    if (usdcUnavailable) return es ? "Crypto no disponible" : "Crypto unavailable";
+    if (payMethod === "usdc") {
+      if (usdcPolling && !usdcPaymentSuccess) return usdcOrder?.confirming ? (es ? "Confirmando pago…" : "Confirming payment…") : (es ? "Esperando pago…" : "Waiting for payment…");
+      if (usdcUnavailable) return es ? "Crypto no disponible" : "Crypto unavailable";
+    }
     if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
     return es ? "Pagar con Crypto — $100" : "Pay with Crypto — $100";
   })();
@@ -658,12 +799,71 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
 
         {/* USDC waiting panel */}
         {usdcOrder && (
-          <NowPaymentsWaitingPanel 
-            order={usdcOrder} 
-            isSuccess={usdcPaymentSuccess} 
-            onCancel={cancelNowPayments} 
-            lang={lang} 
+          <NowPaymentsWaitingPanel
+            order={usdcOrder}
+            isSuccess={usdcPaymentSuccess}
+            onCancel={cancelNowPayments}
+            lang={lang}
+            isSolana={true}
           />
+        )}
+
+        {/* Dash waiting panel */}
+        {dashOrder && !dashSuccess && (
+          <div style={{ marginBottom: 16, padding: "16px", borderRadius: 16, border: "1px solid rgba(18,152,219,0.40)", background: "rgba(18,152,219,0.07)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#1298DB", animation: "lt100-pulse 1.5s infinite" }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#1298DB" }}>
+                {es ? "Ð Esperando pago Dash…" : "Ð Waiting for Dash payment…"}
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                const pw = 560, ph = 780;
+                const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+                const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+                const popup = window.open(dashOrder.checkoutUrl, "dash_lt100_checkout", `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`);
+                if (!popup || popup.closed) window.open(dashOrder.checkoutUrl, "_blank");
+              }}
+              style={{ width: "100%", padding: "12px", borderRadius: 12, border: "none", background: "linear-gradient(90deg, #1298DB, #008CE7)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+            >
+              {es ? "Abrir Checkout Dash" : "Open Dash Checkout"}
+            </button>
+          </div>
+        )}
+        {dashSuccess && (
+          <p style={{ textAlign: "center", color: "#1298DB", fontWeight: 700, marginBottom: 16 }}>
+            ✓ {es ? "¡Pago Dash confirmado!" : "Dash payment confirmed!"}
+          </p>
+        )}
+
+        {/* BTC waiting panel */}
+        {btcOrder && !btcSuccess && (
+          <div style={{ marginBottom: 16, padding: "16px", borderRadius: 16, border: "1px solid rgba(247,147,26,0.40)", background: "rgba(247,147,26,0.07)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#F7931A", animation: "lt100-pulse 1.5s infinite" }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#F7931A" }}>
+                {es ? "₿ Esperando pago Bitcoin…" : "₿ Waiting for Bitcoin payment…"}
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                const pw = 560, ph = 780;
+                const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+                const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+                const popup = window.open(btcOrder.checkoutUrl, "btc_lt100_checkout", `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`);
+                if (!popup || popup.closed) window.open(btcOrder.checkoutUrl, "_blank");
+              }}
+              style={{ width: "100%", padding: "12px", borderRadius: 12, border: "none", background: "linear-gradient(90deg, #F7931A, #E67E00)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+            >
+              {es ? "Abrir Checkout Bitcoin" : "Open Bitcoin Checkout"}
+            </button>
+          </div>
+        )}
+        {btcSuccess && (
+          <p style={{ textAlign: "center", color: "#F7931A", fontWeight: 700, marginBottom: 16 }}>
+            ✓ {es ? "¡Pago Bitcoin confirmado!" : "Bitcoin payment confirmed!"}
+          </p>
         )}
 
         {/* Info boxes */}
@@ -732,15 +932,40 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
           </p>
           <div style={{ display: "flex", gap: 6 }}>
             <button
-              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, padding: "8px 4px", borderRadius: 12, border: "1.5px solid rgba(38,161,123,0.75)", background: "rgba(38,161,123,0.13)", color: usdcUnavailable ? "#636366" : "#26a17b", cursor: usdcUnavailable ? "not-allowed" : "default", opacity: usdcUnavailable ? 0.45 : 1, boxShadow: "0 0 16px rgba(38,161,123,0.22)" }}
+              onClick={() => setPayMethod("usdc")}
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, padding: "8px 4px", borderRadius: 12, border: payMethod === "usdc" ? "1.5px solid rgba(38,161,123,0.75)" : "1px solid rgba(255,255,255,0.10)", background: payMethod === "usdc" ? "rgba(38,161,123,0.13)" : "rgba(255,255,255,0.04)", color: usdcUnavailable ? "#636366" : (payMethod === "usdc" ? "#26a17b" : "#8E8E93"), cursor: usdcUnavailable ? "not-allowed" : "pointer", opacity: usdcUnavailable ? 0.45 : 1, boxShadow: payMethod === "usdc" ? "0 0 16px rgba(38,161,123,0.22)" : "none" }}
             >
               <span style={{ fontSize: 18, lineHeight: 1, marginBottom: 2 }}>🪙</span>
               <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>{es ? "Cripto" : "Crypto"}</span>
               <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.65, lineHeight: 1.3, textAlign: "center" }}>BTC · ETH · USDC +100</span>
             </button>
+            {dashAvailable !== false && (
+              <button
+                onClick={() => setPayMethod("dash")}
+                style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, padding: "8px 4px", borderRadius: 12, border: payMethod === "dash" ? "1.5px solid #1298DB" : "1px solid rgba(255,255,255,0.10)", background: payMethod === "dash" ? "rgba(18,152,219,0.13)" : "rgba(255,255,255,0.04)", color: payMethod === "dash" ? "#1298DB" : "#8E8E93", cursor: "pointer", boxShadow: payMethod === "dash" ? "0 0 16px rgba(18,152,219,0.22)" : "none" }}
+              >
+                <span style={{ fontSize: 18, lineHeight: 1, marginBottom: 2 }}>Ð</span>
+                <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>Dash</span>
+                <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.65, lineHeight: 1.3, textAlign: "center" }}>BTCPay · Ð Dash</span>
+              </button>
+            )}
+            {btcAvailable !== false && (
+              <button
+                onClick={() => setPayMethod("btc")}
+                style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, padding: "8px 4px", borderRadius: 12, border: payMethod === "btc" ? "1.5px solid #F7931A" : "1px solid rgba(255,255,255,0.10)", background: payMethod === "btc" ? "rgba(247,147,26,0.13)" : "rgba(255,255,255,0.04)", color: payMethod === "btc" ? "#F7931A" : "#8E8E93", cursor: "pointer", boxShadow: payMethod === "btc" ? "0 0 16px rgba(247,147,26,0.22)" : "none" }}
+              >
+                <span style={{ fontSize: 18, lineHeight: 1, marginBottom: 2 }}>₿</span>
+                <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>BTC</span>
+                <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.65, lineHeight: 1.3, textAlign: "center" }}>Lightning · BTC</span>
+              </button>
+            )}
           </div>
           <p style={{ margin: "6px 0 0", fontSize: 10, color: "rgba(207,207,212,0.45)", textAlign: "center", lineHeight: 1.4, minHeight: 14 }}>
-            {es ? "BTC, ETH, USDC y +100 criptos vía NowPayments." : "BTC, ETH, USDC and 100+ coins via NowPayments."}
+            {payMethod === "dash"
+              ? (es ? "Dash privado vía BTCPay." : "Private Dash via BTCPay.")
+              : payMethod === "btc"
+              ? (es ? "Bitcoin / Lightning vía BTCPay." : "Bitcoin / Lightning via BTCPay.")
+              : (es ? "BTC, ETH, USDC y +100 criptos vía NowPayments." : "BTC, ETH, USDC and 100+ coins via NowPayments.")}
           </p>
           <p style={{ margin: "8px 0 0", textAlign: "center" }}>
             <a href="/crypto-guide" style={{ fontSize: 10, color: "rgba(207,207,212,0.50)", textDecoration: "underline", textDecorationStyle: "dotted" }}>
@@ -751,33 +976,53 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
 
         {/* CTA */}
         <div style={{ padding: "0 20px" }}>
-          <button
-            onClick={handleCtaClick}
-            disabled={ctaDisabled}
-            aria-disabled={ctaDisabled}
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", maxWidth: 500, margin: "0 auto", padding: "18px 24px", borderRadius: 16, border: "none", background: ctaDisabled ? "rgba(255,255,255,0.08)" : "linear-gradient(90deg, #26a17b, #008DE4)", color: ctaDisabled ? "#8E8E93" : "#ffffff", fontSize: 15, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", cursor: ctaDisabled ? "not-allowed" : "pointer", minHeight: 56, boxShadow: ctaDisabled ? "none" : "0 8px 32px rgba(38,161,123,0.35)", transition: "opacity 0.15s, transform 0.1s" }}
-            onMouseDown={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
-            onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
-            onTouchStart={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
-            onTouchEnd={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
-          >
-            {submitting && <Spinner size={16} />}
-            {ctaLabel}
-          </button>
-          <button
-            onClick={handleUsdcClick}
-            disabled={ctaDisabled}
-            aria-disabled={ctaDisabled}
-            title="USD Coin on Solana — instant + sub-cent fees"
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", maxWidth: 500, margin: "10px auto 0", padding: "14px 24px", borderRadius: 14, border: "1px solid rgba(39,117,202,0.45)", background: ctaDisabled ? "rgba(255,255,255,0.04)" : "rgba(39,117,202,0.10)", color: ctaDisabled ? "#8E8E93" : "#7FB8FF", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", cursor: ctaDisabled ? "not-allowed" : "pointer", minHeight: 48, transition: "opacity 0.15s, transform 0.1s" }}
-            onMouseDown={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
-            onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
-            onTouchStart={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
-            onTouchEnd={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
-          >
-            <span style={{ fontSize: 16 }}>◎</span>
-            {es ? "Pagar con USDC (Solana) — $100" : "Pay with USDC (Solana) — $100"}
-          </button>
+          {payMethod === "usdc" && (
+            <button
+              onClick={handleCtaClick}
+              disabled={ctaDisabled}
+              aria-disabled={ctaDisabled}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", maxWidth: 500, margin: "0 auto", padding: "18px 24px", borderRadius: 16, border: "none", background: ctaDisabled ? "rgba(255,255,255,0.08)" : "linear-gradient(90deg, #26a17b, #008DE4)", color: ctaDisabled ? "#8E8E93" : "#ffffff", fontSize: 15, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", cursor: ctaDisabled ? "not-allowed" : "pointer", minHeight: 56, boxShadow: ctaDisabled ? "none" : "0 8px 32px rgba(38,161,123,0.35)", transition: "opacity 0.15s, transform 0.1s" }}
+              onMouseDown={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
+              onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
+              onTouchStart={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
+              onTouchEnd={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
+            >
+              {submitting && <Spinner size={16} />}
+              {ctaLabel}
+            </button>
+          )}
+          {payMethod === "dash" && (
+            <button
+              onClick={handleDashPay}
+              disabled={ctaDisabled}
+              aria-disabled={ctaDisabled}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", maxWidth: 500, margin: "0 auto", padding: "18px 24px", borderRadius: 16, border: "none", background: ctaDisabled ? "rgba(255,255,255,0.08)" : "linear-gradient(90deg, #1298DB, #008CE7)", color: ctaDisabled ? "#8E8E93" : "#ffffff", fontSize: 15, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", cursor: ctaDisabled ? "not-allowed" : "pointer", minHeight: 56, boxShadow: ctaDisabled ? "none" : "0 8px 32px rgba(18,152,219,0.35)", transition: "opacity 0.15s, transform 0.1s" }}
+              onMouseDown={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
+              onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
+              onTouchStart={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
+              onTouchEnd={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
+            >
+              {submitting && <Spinner size={16} />}
+              <span style={{ fontSize: 18 }}>Ð</span>
+              {dashPolling ? (es ? "Esperando Dash…" : "Waiting for Dash…") : (es ? "Pagar con Dash — $100" : "Pay with Dash — $100")}
+            </button>
+          )}
+          {payMethod === "btc" && (
+            <button
+              onClick={handleBtcPay}
+              disabled={ctaDisabled}
+              aria-disabled={ctaDisabled}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", maxWidth: 500, margin: "0 auto", padding: "18px 24px", borderRadius: 16, border: "none", background: ctaDisabled ? "rgba(255,255,255,0.08)" : "linear-gradient(90deg, #F7931A, #E67E00)", color: ctaDisabled ? "#8E8E93" : "#ffffff", fontSize: 15, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", cursor: ctaDisabled ? "not-allowed" : "pointer", minHeight: 56, boxShadow: ctaDisabled ? "none" : "0 8px 32px rgba(247,147,26,0.35)", transition: "opacity 0.15s, transform 0.1s" }}
+              onMouseDown={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
+              onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
+              onTouchStart={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
+              onTouchEnd={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
+            >
+              {submitting && <Spinner size={16} />}
+              <span style={{ fontSize: 18 }}>₿</span>
+              {btcPolling ? (es ? "Esperando BTC…" : "Waiting for BTC…") : (es ? "Pagar con Bitcoin — $100" : "Pay with Bitcoin — $100")}
+            </button>
+          )}
         </div>
       </div>
       <style>{`@keyframes lt100-pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>

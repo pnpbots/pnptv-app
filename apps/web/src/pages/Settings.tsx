@@ -3,6 +3,8 @@ import { Helmet } from "react-helmet-async";
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 
 // ── Legacy exports (used by SelfCareCenter and other pages) ──────────────────
 // Keep these exports so existing imports don't break.
@@ -77,6 +79,7 @@ function SettingsIndex() {
   const location = useLocation();
   const t = useI18n();
   const p = t.profile;
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("settings");
 
   // Handle legacy hash deep-links: /settings#privacy → /settings/privacy
   useEffect(() => {
@@ -193,6 +196,7 @@ function SettingsIndex() {
           ))}
         </ul>
       </nav>
+      {showTutorial && <TutorialOverlay section="settings" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
     </div>
   );
 }

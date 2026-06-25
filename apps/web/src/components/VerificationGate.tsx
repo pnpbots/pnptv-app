@@ -31,6 +31,19 @@ export function VerificationGate({ children }: VerificationGateProps) {
     return <Navigate to="/login" replace />;
   }
 
+  // Onboarding not complete: send to wizard.
+  // Excludes /onboarding itself plus public doc pages linked from within the wizard.
+  if (
+    user.onboardingComplete === false &&
+    !window.location.pathname.startsWith("/onboarding") &&
+    !window.location.pathname.startsWith("/terms") &&
+    !window.location.pathname.startsWith("/privacy") &&
+    !window.location.pathname.startsWith("/community-guidelines") &&
+    !window.location.pathname.startsWith("/crypto-guide")
+  ) {
+    return <Navigate to="/onboarding" replace />;
+  }
+
   // Both verified: show content (context OR local confirmed flags)
   if ((user.ageVerified || verifiedAge) && (user.termsAccepted || acceptedTerms)) {
     return <>{children}</>;

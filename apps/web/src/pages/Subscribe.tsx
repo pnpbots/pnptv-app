@@ -996,6 +996,7 @@ export default function Subscribe() {
                   onCancel={cancelNowPayments}
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
+                  isSolana={true}
                 />
               </div>
             )}
@@ -1277,6 +1278,7 @@ export default function Subscribe() {
                   onCancel={cancelNowPayments}
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
+                  isSolana={true}
                 />
               </div>
             )}

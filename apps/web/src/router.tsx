@@ -178,6 +178,7 @@ const CreatorConsents = lazy(() => import("@/components/creators/CreatorLayout")
 const CreatorXCampaignsPage = lazy(() => import("@/components/creators/CreatorLayout").then(m => ({ default: m.CreatorXCampaigns })));
 const CreatorGuidelines = lazy(() => import("@/pages/creators/CreatorGuidelines"));
 const Donate = lazy(() => import("@/pages/Donate"));
+const Onboarding = lazy(() => import("@/pages/Onboarding"));
 
 export const router = createBrowserRouter([
   {
@@ -870,6 +871,16 @@ export const router = createBrowserRouter([
     element: (
       <ModuleLoader>
         <Donate />
+      </ModuleLoader>
+    ),
+  },
+  {
+    // Onboarding wizard — authenticated but no Layout/VerificationGate wrapper
+    // so incomplete users aren't redirected away mid-wizard.
+    path: "/onboarding",
+    element: (
+      <ModuleLoader>
+        <Onboarding />
       </ModuleLoader>
     ),
   },

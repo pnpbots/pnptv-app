@@ -573,7 +573,7 @@ async function _getPerformerId(client, creatorUserId) {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a NowPayments hosted invoice for a call package purchase (20% crypto discount).
+ * Create a NowPayments hosted invoice for a call package purchase.
  * Locks the slot atomically and creates an awaiting_payment booking row before the invoice.
  *
  * @param {object} opts
@@ -606,8 +606,8 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
     throw err;
   }
 
-  // 2. Apply 20% crypto discount
-  const amountUsd = Math.round(parseFloat(pkg.price_usd) * 0.80 * 100) / 100;
+  // 2. Use full package price
+  const amountUsd = parseFloat(pkg.price_usd);
 
   // 3. Create pending payment record
   const payment = await PaymentModel.create({
@@ -671,7 +671,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
 
   let invoiceUrl;
   try {
-    const ALLOWED_CALL_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdtbsc', 'usdcbsc']);
+    const ALLOWED_CALL_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdtbsc', 'usdcbsc', 'usdcsol']);
     const validCallPayCurrency = (payCurrency && ALLOWED_CALL_PAY_CURRENCIES.has(String(payCurrency).toLowerCase()))
       ? String(payCurrency).toLowerCase() : null;
 
@@ -753,7 +753,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
 // ---------------------------------------------------------------------------
 
 /**
- * Create a BTCPay BTC+Lightning invoice for a call package purchase (20% crypto discount).
+ * Create a BTCPay BTC+Lightning invoice for a call package purchase.
  * Mirrors createCallCheckoutNowPayments but routes through BTCPay instead.
  * The same dash_subscription_orders webhook handler processes both.
  *
@@ -779,8 +779,8 @@ async function createCallCheckoutBtc({ userId, packageId, startTimeUtc, endTimeU
     throw err;
   }
 
-  // 2. Apply 20% crypto discount
-  const amountUsd = Math.round(parseFloat(pkg.price_usd) * 0.80 * 100) / 100;
+  // 2. Use full package price
+  const amountUsd = parseFloat(pkg.price_usd);
 
   // 3. Create pending payment record
   const payment = await PaymentModel.create({
@@ -915,6 +915,160 @@ async function createCallCheckoutBtc({ userId, packageId, startTimeUtc, endTimeU
 }
 
 /**
+ * Create a BTCPay Dash invoice for a call package purchase.
+ * Identical flow to createCallCheckoutBtc but uses the Dash BTCPay store.
+ *
+ * @param {object} opts
+ * @param {string} opts.userId        - users.id of the buyer
+ * @param {number} opts.packageId     - call_packages.id
+ * @param {string} [opts.startTimeUtc] - ISO 8601
+ * @param {string} [opts.endTimeUtc]   - ISO 8601
+ * @param {string|null} [opts.clientNotes]
+ * @returns {{ invoiceId, checkoutUrl, paymentId, bookingId, usdAmount, orderId }}
+ */
+async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTimeUtc, clientNotes = null }) {
+  const { createDashInvoice } = require('../config/btcpay');
+
+  // 1. Load package
+  const pkgResult = await query(
+    'SELECT * FROM call_packages WHERE id = $1 AND is_active = true',
+    [packageId]
+  );
+  const pkg = pkgResult.rows[0];
+  if (!pkg) {
+    const err = new Error(`Call package ${packageId} not found or inactive`);
+    err.code = 'PACKAGE_NOT_FOUND';
+    throw err;
+  }
+
+  // 2. Use full package price
+  const amountUsd = parseFloat(pkg.price_usd);
+
+  // 3. Create pending payment record
+  const payment = await PaymentModel.create({
+    userId,
+    planId: null,
+    provider: 'dash',
+    sku: pkg.sku,
+    amount: amountUsd,
+    currency: 'USD',
+    status: 'pending',
+    metadata: {
+      type: 'call_package',
+      packageId: pkg.id,
+      packageSku: pkg.sku,
+      creatorId: pkg.creator_id,
+      startTimeUtc: startTimeUtc || null,
+      endTimeUtc: endTimeUtc || null,
+      provider: 'dash',
+    },
+  });
+
+  // 4. Slot-lock + insert booking row when times are provided
+  const pool = getPool();
+  const client = await pool.connect();
+  let booking;
+  try {
+    await client.query('BEGIN');
+    const performerId = await _getPerformerId(client, pkg.creator_id);
+    if (!performerId) {
+      throw Object.assign(new Error(`Creator ${pkg.creator_id} has no performer profile`), {
+        code: 'PERFORMER_NOT_FOUND', status: 404,
+      });
+    }
+    if (startTimeUtc && endTimeUtc) {
+      booking = await _lockSlotAndInsertBooking(client, {
+        performerId,
+        memberId: userId,
+        startTimeUtc,
+        endTimeUtc,
+        paymentId: payment.id,
+        packageId: pkg.id,
+        durationMinutes: pkg.duration_minutes,
+        priceUsd: pkg.price_usd,
+        clientNotes,
+      });
+    }
+    await client.query('COMMIT');
+  } catch (txErr) {
+    await client.query('ROLLBACK');
+    await query(`UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1`, [payment.id]).catch(() => {});
+    throw txErr;
+  } finally {
+    client.release();
+  }
+
+  // 5. Create BTCPay Dash invoice — outside the booking transaction
+  const orderId = `call-dash-${payment.id}`;
+  const successUrl = booking?.id
+    ? `${WEB_APP_URL}/booking/${booking.id}/confirm?dash=success`
+    : `${WEB_APP_URL}/subscribe?dash=success`;
+
+  let invoice;
+  try {
+    invoice = await createDashInvoice({
+      usdAmount: amountUsd,
+      userId,
+      orderId,
+      description: `${pkg.duration_minutes}-min call with creator`,
+      redirectUrl: successUrl,
+    });
+  } catch (invoiceErr) {
+    if (booking?.id) {
+      await query(`UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`, [booking.id]).catch(() => {});
+    }
+    await query(`UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1`, [payment.id]).catch(() => {});
+    logger.error('[callCheckoutService] BTCPay Dash invoice creation failed', {
+      paymentId: payment.id, bookingId: booking?.id ?? null,
+      error: invoiceErr.message,
+    });
+    const cfgErr = invoiceErr.message?.includes('not configured') || invoiceErr.code === 'BTCPAY_NOT_CONFIGURED';
+    throw Object.assign(
+      new Error(cfgErr ? 'Dash payments are not configured' : 'Could not reach BTCPay. Please try again.'),
+      { code: cfgErr ? 'BTCPAY_NOT_CONFIGURED' : 'BTCPAY_ERROR', status: cfgErr ? 503 : 502 }
+    );
+  }
+
+  // 6. Register in dash_subscription_orders so the webhook handler can route
+  await query(
+    `INSERT INTO dash_subscription_orders
+       (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, creator_id, metadata)
+     VALUES ($1, 'call_package', NULL, $2, $3, 'pending', $4, $5::jsonb)
+     ON CONFLICT (btcpay_invoice_id) DO NOTHING`,
+    [
+      userId, amountUsd, invoice.invoiceId, pkg.creator_id,
+      JSON.stringify({
+        resource: 'call_package',
+        packageId: pkg.id,
+        paymentId: payment.id,
+        bookingId: booking?.id ?? null,
+        startTimeUtc: startTimeUtc || null,
+        endTimeUtc: endTimeUtc || null,
+      }),
+    ]
+  );
+
+  // 7. Stamp orderId + bookingId back onto payment metadata for getBookingPaymentStatus polling
+  await query(
+    `UPDATE payments SET metadata = metadata || $2::jsonb, updated_at = NOW() WHERE id = $1`,
+    [payment.id, JSON.stringify({ btcpay_invoice_id: invoice.invoiceId, booking_id: booking?.id ?? null })]
+  );
+
+  logger.info('[callCheckoutService] Dash call checkout created', {
+    paymentId: payment.id, bookingId: booking?.id ?? null, orderId, packageId: pkg.id, amountUsd,
+  });
+
+  return {
+    invoiceId: invoice.invoiceId,
+    checkoutUrl: invoice.checkoutLink || invoice.checkoutUrl,
+    paymentId: payment.id,
+    bookingId: booking?.id ?? null,
+    usdAmount: amountUsd,
+    orderId,
+  };
+}
+
+/**
  * Expire bookings stuck in 'awaiting_payment' for more than 2 hours.
  * Called by the cron every hour. Frees calendar slots that were locked
  * by an ePayco or BTCPay checkout the user abandoned without paying.
@@ -975,6 +1129,7 @@ module.exports = {
   createCallCheckout,
   createCallCheckoutNowPayments,
   createCallCheckoutBtc,
+  createCallCheckoutDash,
   onCallPaymentSuccess,
   expireAbandonedBookings,
   _lockSlotAndInsertBooking,

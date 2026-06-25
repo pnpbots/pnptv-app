@@ -367,7 +367,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 <span className="text-lg leading-none">🪙</span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-pnp-textPrimary">Crypto <span className="text-xs font-normal text-green-400 ml-1">−20%</span></p>
+                <p className="text-sm font-semibold text-pnp-textPrimary">Crypto</p>
                 <p className="text-xs text-pnp-textSecondary truncate">BTC, ETH, USDC + 100 coins</p>
               </div>
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -385,7 +385,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 <span className="text-lg leading-none" style={{ color: "#2775CA" }}>◎</span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-pnp-textPrimary">USDC (Solana) <span className="text-xs font-normal text-sky-300 ml-1">−20%</span></p>
+                <p className="text-sm font-semibold text-pnp-textPrimary">USDC (Solana)</p>
                 <p className="text-xs text-pnp-textSecondary truncate">USD Coin on Solana — sub-cent fees</p>
               </div>
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -421,7 +421,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 <span className="text-lg leading-none" style={{ color: "#F7931A" }}>₿</span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-pnp-textPrimary">Bitcoin <span className="text-xs font-normal text-orange-400 ml-1">−20%</span></p>
+                <p className="text-sm font-semibold text-pnp-textPrimary">Bitcoin</p>
                 <p className="text-xs text-pnp-textSecondary truncate">BTC on-chain or Lightning Network</p>
               </div>
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -695,11 +695,11 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
             {/* Method explanation */}
             <p className="text-xs text-pnp-textSecondary mb-4 leading-relaxed">
               {buyMethod === 'btc'
-                ? 'Pay with Bitcoin (on-chain or Lightning) via NowPayments. 20% discount applied automatically. A popup will open for checkout.'
+                ? 'Pay with Bitcoin (on-chain or Lightning) via BTCPay Server. A popup will open for checkout.'
                 : buyMethod === 'np'
-                ? 'Pay with BTC, ETH, USDC, or 100+ other coins via NowPayments. 20% discount applied automatically. A popup will open for checkout.'
+                ? 'Pay with BTC, ETH, USDC, or 100+ other coins via NowPayments. A popup will open for checkout.'
                 : buyMethod === 'np_usdc'
-                ? 'Pay with USD Coin (USDC) on Solana — instant and nearly free fees. 20% discount applied automatically. A popup will open for checkout.'
+                ? 'Pay with USD Coin (USDC) on Solana — instant and nearly free fees. A popup will open for checkout.'
                 : 'Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed.'}
             </p>
 
@@ -729,9 +729,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                       <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
                       <p className="text-xs text-pnp-textSecondary">{t.live.tokensLabel}</p>
                       <p className="text-sm font-semibold mt-1" style={{ color: priceColor }}>
-                        {cryptoMethod
-                          ? `$${(Math.round(pkg.usd * 0.80 * 100) / 100).toFixed(2)}`
-                          : `$${pkg.usd}`}
+                        ${pkg.usd}
                       </p>
                       {buyingPackage === pkg.id && (
                         <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.opening}</p>

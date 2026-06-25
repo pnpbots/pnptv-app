@@ -1005,7 +1005,7 @@ async function createCheckoutNowPayments(req, res) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
     }
 
-    const ALLOWED_PAY_CURRENCIES_CALL = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdtbsc', 'usdcbsc']);
+    const ALLOWED_PAY_CURRENCIES_CALL = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdtbsc', 'usdcbsc', 'usdcsol']);
     const payCurrency = (rawPayCurrency && ALLOWED_PAY_CURRENCIES_CALL.has(String(rawPayCurrency).toLowerCase()))
       ? String(rawPayCurrency).toLowerCase() : null;
 
@@ -1136,6 +1136,81 @@ async function createCheckoutBtc(req, res) {
       return res.status(409).json({ success: false, error: 'The requested time slot is no longer available' });
     }
     return res.status(500).json({ success: false, error: 'Failed to create Bitcoin checkout' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/webapp/book-call/checkout/dash
+// ---------------------------------------------------------------------------
+
+async function createCheckoutDash(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+
+    const { packageId, startTimeUtc, endTimeUtc, clientNotes: rawClientNotesDash } = req.body;
+
+    if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
+      return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
+    }
+
+    const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+    let slotTimes = null;
+    if (startTimeUtc || endTimeUtc) {
+      if (!startTimeUtc || typeof startTimeUtc !== 'string' || !ISO_RE.test(startTimeUtc)) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc must be an ISO 8601 timestamp with timezone' });
+      }
+      if (!endTimeUtc || typeof endTimeUtc !== 'string' || !ISO_RE.test(endTimeUtc)) {
+        return res.status(400).json({ success: false, error: 'endTimeUtc must be an ISO 8601 timestamp with timezone' });
+      }
+      const start = new Date(startTimeUtc);
+      const end = new Date(endTimeUtc);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc or endTimeUtc is not a valid date' });
+      }
+      if (start >= end) {
+        return res.status(400).json({ success: false, error: 'endTimeUtc must be after startTimeUtc' });
+      }
+      if (start <= new Date()) {
+        return res.status(400).json({ success: false, error: 'startTimeUtc must be in the future' });
+      }
+      slotTimes = { startTimeUtc, endTimeUtc };
+    }
+
+    const clientNotesDash = rawClientNotesDash && typeof rawClientNotesDash === 'string'
+      ? rawClientNotesDash.trim().slice(0, 1000) || null : null;
+
+    const result = await callCheckoutService.createCallCheckoutDash({
+      userId,
+      packageId: Number(packageId),
+      startTimeUtc: slotTimes?.startTimeUtc ?? null,
+      endTimeUtc: slotTimes?.endTimeUtc ?? null,
+      clientNotes: clientNotesDash,
+    });
+
+    return res.status(201).json({ success: true, ...result });
+  } catch (err) {
+    logger.error('[callBookingController] createCheckoutDash error', { error: err.message, code: err.code });
+
+    if (err.code === 'BTCPAY_NOT_CONFIGURED') {
+      return res.status(503).json({ success: false, error: 'Dash payments are not available right now' });
+    }
+    if (err.code === 'BTCPAY_ERROR') {
+      return res.status(502).json({ success: false, error: 'Could not reach BTCPay. Please try again.' });
+    }
+    if (err.code === 'PACKAGE_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Call package not found or inactive' });
+    }
+    if (err.code === 'PERFORMER_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Creator profile not found' });
+    }
+    if (err.code === 'SLOT_TAKEN') {
+      return res.status(409).json({ success: false, error: 'The requested time slot is no longer available' });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to create Dash checkout' });
   }
 }
 
@@ -1336,4 +1411,5 @@ module.exports = {
   getNextShowDate,
   setNextShowDate,
   getUpcomingBookings,
+  createCheckoutDash,
 };

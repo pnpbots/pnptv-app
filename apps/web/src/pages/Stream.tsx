@@ -3,6 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Card, Skeleton } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { useI18n } from "@/lib/i18n";
 import { LivePlayer } from "@/components/LivePlayer";
@@ -131,7 +133,7 @@ function StreamMembersOnlyWall() {
         <p className="text-sm text-pnp-textSecondary max-w-xs">Live streams require a PNPtv! membership.</p>
       </div>
       <button
-        onClick={() => navigate('/plans')}
+        onClick={() => navigate('/subscribe')}
         className="px-6 py-3 rounded-xl text-sm font-bold text-white"
         style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
       >
@@ -146,7 +148,7 @@ function StreamMembersOnlyWall() {
 
 export default function Stream() {
   const { user } = useAuth();
-  if (!user || user.tier === 'free') {
+  if (!user || user.label === 'FREE' || (!user.label && user.tier === 'free')) {
     return <StreamMembersOnlyWall />;
   }
   return <StreamInner />;
@@ -157,6 +159,7 @@ function StreamInner() {
   const navigate = useNavigate();
   const t = useI18n();
   const { isAuthenticated, login, user } = useAuth();
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("stream");
 
   const [stream, setStream] = useState<LiveStream | null>(null);
   const [loading, setLoading] = useState(true);
@@ -221,7 +224,7 @@ function StreamInner() {
   // ── Leaderboard overlay state ──────────────────────────────────────────────
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [leaderboardTab, setLeaderboardTab] = useState<"today" | "week">("today");
-  const [leaderboardData, setLeaderboardData] = useState<{ today: { username: string; total: number; tip_count: number }[]; week: { username: string; total: number; tip_count: number }[] }>({ today: [], week: [] });
+  const [leaderboardData, setLeaderboardData] = useState<{ today: { username: string; total: number; tipCount: number }[]; week: { username: string; total: number; tipCount: number }[] }>({ today: [], week: [] });
 
   // ── Tip goal state ─────────────────────────────────────────────────────────
   const [tipGoal, setTipGoal] = useState<TipGoal | null>(null);
@@ -277,6 +280,7 @@ function StreamInner() {
     dismissRaid,
     tipGoal: socketTipGoal,
     chatBanned,
+    tipAlert,
   } = useLiveSocket(streamId || null);
 
   // chatSendingRef gates rapid Enter-Enter and click-click to keep both
@@ -378,10 +382,13 @@ function StreamInner() {
 
   // Ref for the polling interval so it can be cancelled on error.
   const streamPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Tracks whether the most recent loadStream call ended with an error.
+  const loadErrorRef = useRef(false);
 
   // Load stream info from Restreamer HLS streams and performer lookup.
   const loadStream = useCallback(() => {
     if (!streamId) return Promise.resolve();
+    loadErrorRef.current = false;
     const channelRef = extractChannelRef(streamId);
 
     return Promise.all([
@@ -465,6 +472,7 @@ function StreamInner() {
           clearInterval(streamPollRef.current);
           streamPollRef.current = null;
         }
+        loadErrorRef.current = true;
         setError(t.live.streamNotFound);
         setStreamError(true);
       })
@@ -473,6 +481,7 @@ function StreamInner() {
           clearInterval(streamPollRef.current);
           streamPollRef.current = null;
         }
+        loadErrorRef.current = true;
         setError(err instanceof Error ? err.message : "Failed to load stream");
         setStreamError(true);
       });
@@ -482,8 +491,8 @@ function StreamInner() {
     setLoading(true);
     loadStream().finally(() => {
       setLoading(false);
-      // Only start polling if we didn't hit an error (poll ref cleared on error)
-      if (!streamPollRef.current) {
+      // Only start polling if we didn't hit an error
+      if (!loadErrorRef.current && !streamPollRef.current) {
         streamPollRef.current = setInterval(loadStream, 30000);
       }
     });
@@ -643,7 +652,7 @@ function StreamInner() {
   // Auto-navigate when countdown reaches 0
   useEffect(() => {
     if (raidCountdown !== 0 || !raidEvent) return;
-    navigate(`/stream/${encodeURIComponent(raidEvent.targetChannelRef)}`);
+    navigate(`/live/${encodeURIComponent(raidEvent.targetChannelRef)}`);
     dismissRaid();
   }, [raidCountdown, raidEvent, navigate, dismissRaid]);
 
@@ -915,30 +924,35 @@ function StreamInner() {
   // ── Tip menu: load when stream resolves ────────────────────────────────────
   useEffect(() => {
     if (!streamId) return;
-    getTipMenu(streamId)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = stream as any;
+    const performerId = s?.performerId || s?.userId || stream?.username || streamId;
+    getTipMenu(String(performerId))
       .then((res) => setTipMenu(res.items || []))
       .catch(() => {});
-  }, [streamId]);
+  }, [streamId, stream?.username]);
 
   // ── Leaderboard: fetch when panel opens or tab changes ─────────────────────
   useEffect(() => {
     const channelRef = streamId ? extractChannelRef(streamId) : null;
     if (!showLeaderboard || !channelRef) return;
     getTipLeaderboard(channelRef, leaderboardTab)
-      .then((res) => setLeaderboardData((prev) => ({ ...prev, [leaderboardTab]: res.entries || [] })))
+      .then((res) => setLeaderboardData((prev) => ({ ...prev, [leaderboardTab]: res.leaderboard || [] })))
       .catch(() => {});
   }, [showLeaderboard, leaderboardTab, streamId]);
 
   // ── VOD replay: fetch recordings when stream is detected offline ────────────
   useEffect(() => {
-    if (!stream || stream.isLive || !streamId) return;
-    getCreatorRecordings(streamId)
+    if (!stream || stream.isLive || !streamId || !isStreamOwner) return;
+    const creatorId = user?.id?.toString() ?? '';
+    if (!creatorId) return;
+    getCreatorRecordings(creatorId)
       .then((res) => {
         const latest = (res.recordings || [])[0];
-        if (latest?.hlsUrl) setReplayUrl(latest.hlsUrl);
+        if (latest?.manifestUrl) setReplayUrl(latest.manifestUrl);
       })
       .catch(() => {});
-  }, [stream?.isLive, streamId]);
+  }, [stream?.isLive, streamId, isStreamOwner, user?.id]);
 
   // Countdown timer for Dash tip invoice (15-minute expiry)
   useEffect(() => {
@@ -1539,6 +1553,12 @@ function StreamInner() {
           </div>
         )}
 
+        {tipAlert && (
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-full bg-pnp-accent text-white text-xs font-bold shadow-lg animate-bounce pointer-events-none">
+            {tipAlert.message || `${tipAlert.username} tipped ${tipAlert.amount}T`}
+          </div>
+        )}
+
         {/* Mobile fullscreen toggle button (improvement #6) */}
         <button
           onClick={handleFullscreen}
@@ -1703,7 +1723,7 @@ function StreamInner() {
             </div>
           </div>
           <button
-            onClick={() => navigate(`/stream/${encodeURIComponent(hostedStream.id)}`)}
+            onClick={() => navigate(`/live/${encodeURIComponent(hostedStream.id)}`)}
             className="flex-shrink-0 px-3 py-1.5 rounded-lg btn-gradient text-white text-[10px] font-semibold active:scale-95"
           >
             Watch
@@ -2131,6 +2151,9 @@ function StreamInner() {
         onClose={() => setShowTopUp(false)}
         onSuccess={(newBalance) => setTokenBalance(newBalance)}
       />
+      {showTutorial && !rulesLoading && rulesAcknowledged && (
+        <TutorialOverlay section="stream" onDismiss={dismissTutorial} onDismissForever={dismissForever} />
+      )}
     </div>
   );
 }

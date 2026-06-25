@@ -97,6 +97,7 @@ export default function Profile() {
   const isOwnProfile = !paramUserId || paramUserId === String(user?.id) || paramUserId === String(user?.dbId);
   const targetUserId = paramUserId || String(user?.dbId || user?.id || "");
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("profile");
+  const { showTutorial: showCreatorTutorial, dismissTutorial: dismissCreatorTutorial, dismissForever: dismissCreatorForever } = useTutorial("creatorProfile");
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<SocialPostItem[]>([]);
@@ -985,6 +986,7 @@ export default function Profile() {
         <meta name="description" content={profile ? `${profile.display_name || profile.username}'s profile on PNPtv.` : "User profile on PNPtv."} />
       </Helmet>
       {isOwnProfile && showTutorial && <TutorialOverlay section="profile" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
+      {!isOwnProfile && showCreatorTutorial && <TutorialOverlay section="creatorProfile" onDismiss={dismissCreatorTutorial} onDismissForever={dismissCreatorForever} />}
       {/* ── Back button for public profiles — sticky so it stays visible while scrolling ── */}
       {paramUserId && (
         <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-2 backdrop-blur-sm" style={{ background: "var(--pnp-background)" }}>
@@ -1836,6 +1838,7 @@ export default function Profile() {
                 isSuccess={usdcPaymentSuccess}
                 onCancel={() => { cancelNowPayments(); setSubscribeError(null); }}
                 lang={t.lang}
+                isSolana={true}
               />
             ) : !subscribeAwaitingPayment ? (
               <>
@@ -1852,7 +1855,7 @@ export default function Profile() {
                           ? { background: "rgba(38,161,123,0.20)", color: "#26a17b", borderColor: "rgba(38,161,123,0.5)" }
                           : { background: "rgba(38,161,123,0.06)", color: "#26a17b", borderColor: "rgba(38,161,123,0.2)" }}
                       >
-                        🪙 Crypto −20%
+                        🪙 Crypto
                       </button>
                     )}
                     {usdcAvailable !== false && (

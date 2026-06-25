@@ -152,7 +152,7 @@ class TokenCheckoutService {
     // The real BTCPay invoice ID will overwrite this once the invoice is created.
     const placeholderKey = idempotencyKey('dash-pending', purchaseUuid);
 
-    const discountedUsd = Math.round(pkg.usd * 0.95 * 100) / 100;
+    const amountUsd = pkg.usd;
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -160,7 +160,7 @@ class TokenCheckoutService {
         purchaseUuid,
         userId,
         tokens: pkg.tokens,
-        usd: discountedUsd,
+        usd: amountUsd,
         invoiceKey: placeholderKey,
         paymentMethod: 'dash',
       });
@@ -179,7 +179,7 @@ class TokenCheckoutService {
     let invoice;
     try {
       invoice = await createDashInvoice({
-        usdAmount: discountedUsd,
+        usdAmount: amountUsd,
         userId,
         orderId: `pnptv-tokens-${userId}-${Date.now()}`,
         description: `${pkg.tokens} Digital Credits`,
@@ -219,14 +219,14 @@ class TokenCheckoutService {
       invoiceId: invoice.invoiceId,
       checkoutUrl: invoice.checkoutUrl,
       tokens: pkg.tokens,
-      usd: discountedUsd,
+      usd: amountUsd,
     };
   }
 
   // ── BTC / Lightning checkout ──────────────────────────────────────────────
 
   /**
-   * Create a BTCPay BTC+Lightning invoice for a token package (20% crypto discount).
+   * Create a BTCPay BTC+Lightning invoice for a token package.
    * Identical flow to createDashCheckout but uses paymentMethods=['BTC-LightningNetwork','BTC'].
    *
    * @param {string} userId
@@ -249,7 +249,7 @@ class TokenCheckoutService {
     const purchaseUuid = uuidv4();
     const placeholderKey = idempotencyKey('btc-pending', purchaseUuid);
 
-    const discountedUsd = Math.round(pkg.usd * 0.80 * 100) / 100;
+    const amountUsd = pkg.usd;
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -257,7 +257,7 @@ class TokenCheckoutService {
         purchaseUuid,
         userId,
         tokens: pkg.tokens,
-        usd: discountedUsd,
+        usd: amountUsd,
         invoiceKey: placeholderKey,
         paymentMethod: 'btc',
       });
@@ -275,7 +275,7 @@ class TokenCheckoutService {
     let invoice;
     try {
       invoice = await createBtcInvoice({
-        amount: discountedUsd,
+        amount: amountUsd,
         currency: 'USD',
         userId,
         orderId: `pnptv-tokens-btc-${userId}-${Date.now()}`,
@@ -314,7 +314,7 @@ class TokenCheckoutService {
       invoiceId: invoice.invoiceId,
       checkoutUrl: invoice.checkoutLink,
       tokens: pkg.tokens,
-      usd: discountedUsd,
+      usd: amountUsd,
     };
   }
 
@@ -533,8 +533,7 @@ class TokenCheckoutService {
       throw Object.assign(new Error('Crypto payments are not configured'), { code: 'NOWPAYMENTS_NOT_CONFIGURED', status: 503 });
     }
 
-    // 20% discount for crypto payments
-    const usdAmount = Math.round(pkg.usd * 0.80 * 100) / 100;
+    const usdAmount = pkg.usd;
     const orderId = `pnptv-tokens-nowp-${userId}-${Date.now()}`;
     const successUrl = `${WEB_APP_URL}/wallet?nowpayments=success&order=${encodeURIComponent(orderId)}`;
     const cancelUrl = `${WEB_APP_URL}/wallet`;

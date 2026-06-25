@@ -498,7 +498,7 @@ export default function BrowserStream() {
       )}
 
       {/* ── MOBILE LAYOUT (hidden at lg:) — only shown when live/connecting ── */}
-      <div className={`flex flex-col flex-1 min-h-0 lg:hidden overflow-hidden${!isLive && !isConnecting ? " hidden" : ""}`}>
+      {(isLive || isConnecting) && <div className="flex flex-col flex-1 min-h-0 lg:hidden overflow-hidden">
         {/* Preview canvas — 16:9 */}
         <StudioCanvas
           videoRef={videoRef}
@@ -554,10 +554,10 @@ export default function BrowserStream() {
         >
           <MobileTabContent />
         </div>
-      </div>
+      </div>}
 
       {/* ── DESKTOP LAYOUT (hidden below lg:) — only shown when live/connecting */}
-      <div className={`hidden${isLive || isConnecting ? " lg:flex" : ""} flex-1 min-h-0 overflow-hidden`}>
+      {(isLive || isConnecting) && <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
 
         {/* Left column — scene + audio */}
         <aside
@@ -712,7 +712,7 @@ export default function BrowserStream() {
             </TabPanel>
           </div>
         </aside>
-      </div>
+      </div>}
 
       {/* ── Error banner (conditionally shown) ──────────────────────────────── */}
       {(streamError || channelError) && (

@@ -25,7 +25,9 @@ import {
   getBookingOptions,
   createCallCheckoutNowPayments,
   createCallCheckoutBtc,
+  createCallCheckoutDash,
   getBtcAvailable,
+  getDashAvailable,
   getBtcSubscriptionStatus,
   getBookingPaymentStatus,
   assertPaymentUrl,
@@ -38,7 +40,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "nowpayments" | "nowpayments_usdc" | "btc";
+type Provider = "nowpayments" | "nowpayments_usdc" | "dash" | "btc";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -179,6 +181,7 @@ export function BookCallModal({
   const [confirmedBookingId, setConfirmedBookingId] = useState<string | number | null>(null);
   const [dashTimedOut, setDashTimedOut] = useState(false);
   const [dashPaymentId, setDashPaymentId] = useState<string | null>(null);
+  const [npInvoiceUrl, setNpInvoiceUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [retryPayload, setRetryPayload] = useState<{
     packageId: number;
@@ -192,9 +195,11 @@ export function BookCallModal({
   const [joinCallLoading, setJoinCallLoading] = useState(false);
   const [joinCallError, setJoinCallError] = useState<string | null>(null);
   const [btcAvailable, setBtcAvailable] = useState(false);
+  const [dashAvailable, setDashAvailable] = useState(false);
 
   useEffect(() => {
     getBtcAvailable().then((r) => setBtcAvailable(r.available === true)).catch(() => {});
+    getDashAvailable().then((r) => setDashAvailable(r.available === true)).catch(() => {});
   }, []);
 
   // Permission preflight state
@@ -249,6 +254,7 @@ export function BookCallModal({
     setConfirmedBookingId(null);
     setDashTimedOut(false);
     setDashPaymentId(null);
+    setNpInvoiceUrl(null);
     setIsProcessing(false);
     setRetryPayload(null);
     setJoinCallLoading(false);
@@ -456,12 +462,13 @@ export function BookCallModal({
         );
         if (npRes.invoiceUrl) {
           const safeUrl = assertPaymentUrl(npRes.invoiceUrl);
+          setNpInvoiceUrl(safeUrl);
           const pw = 600, ph = 700;
           const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
           const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
           paymentPopupRef.current = window.open(
-            safeUrl, "_blank",
-            `noopener,width=${pw},height=${ph},left=${pl},top=${pt}`
+            safeUrl, "nowpayments_call_checkout",
+            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
           );
         }
         setDashPaymentId(npRes.paymentId ?? null);
@@ -588,6 +595,83 @@ export function BookCallModal({
                 setRetryPayload({
                   packageId: activePackage.id,
                   provider: "btc",
+                  email,
+                  quantity: 1,
+                  selectedSlot: selectedSlot?.startUtc ?? null,
+                });
+                setCheckoutLoading(false);
+                setIsProcessing(false);
+                checkoutInFlight.current = false;
+              }
+            } catch {
+              // Network hiccup — keep polling
+            }
+          }, POLL_INTERVAL_MS);
+        }
+        return;
+      }
+
+      // Dash — BTCPay Server Dash store
+      if (provider === "dash") {
+        const dashRes = await createCallCheckoutDash(
+          activePackage.id,
+          selectedSlot?.startUtc ?? undefined,
+          selectedSlot?.endUtc ?? undefined,
+          clientNotes.trim() || undefined
+        );
+        if (dashRes.checkoutUrl) {
+          const safeUrl = assertPaymentUrl(dashRes.checkoutUrl);
+          const pw = 560, ph = 780;
+          const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+          const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+          paymentPopupRef.current = window.open(
+            safeUrl, "dash_call_checkout",
+            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
+          );
+        }
+        const dashInvoiceId = dashRes.invoiceId;
+        setDashPaymentId(dashInvoiceId ?? null);
+
+        const pollId = dashRes.bookingId ?? dashRes.paymentId ?? dashInvoiceId;
+        if (pollId) {
+          if (dashPollRef.current) clearInterval(dashPollRef.current);
+
+          const POLL_INTERVAL_MS = 6_000;
+          const POLL_TIMEOUT_MS = 900_000; // 15 min
+          const pollStart = Date.now();
+
+          dashPollRef.current = setInterval(async () => {
+            if (Date.now() - pollStart >= POLL_TIMEOUT_MS) {
+              if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+              setCheckoutLoading(false);
+              setIsProcessing(false);
+              checkoutInFlight.current = false;
+              setDashTimedOut(true);
+              return;
+            }
+            try {
+              const status = await getBookingPaymentStatus(String(pollId));
+              if (status.status === "paid") {
+                if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+                paymentPopupRef.current?.close();
+                paymentPopupRef.current = null;
+                setConfirmedRoomName(status.roomName ?? null);
+                setConfirmedBookingId((prev) => status.bookingId ?? prev);
+                if (selectedSlot?.startUtc) setConfirmedStartAt(selectedSlot.startUtc);
+                setStep("SUCCESS");
+                setCheckoutLoading(false);
+                setIsProcessing(false);
+                checkoutInFlight.current = false;
+              } else if (status.status === "expired" || status.status === "failed") {
+                if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+                setCheckoutError(
+                  status.status === "expired"
+                    ? "Invoice expired. Please try again."
+                    : "Payment failed. Please try again."
+                );
+                setRetryPayload({
+                  packageId: activePackage.id,
+                  provider: "dash",
                   email,
                   quantity: 1,
                   selectedSlot: selectedSlot?.startUtc ?? null,
@@ -1192,16 +1276,30 @@ export function BookCallModal({
           >
             ◎ USDC
           </button>
-          {btcAvailable && <button
-            type="button"
-            onClick={() => setProvider("btc")}
-            className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
-            style={provider === "btc"
-              ? { background: "rgba(247,147,26,0.16)", border: "1.5px solid #F7931A", color: "#F7931A" }
-              : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
-          >
-            ₿ BTC −20%
-          </button>}
+          {dashAvailable && (
+            <button
+              type="button"
+              onClick={() => setProvider("dash")}
+              className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+              style={provider === "dash"
+                ? { background: "rgba(18,152,219,0.16)", border: "1.5px solid #1298DB", color: "#1298DB" }
+                : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+            >
+              Ð Dash
+            </button>
+          )}
+          {btcAvailable && (
+            <button
+              type="button"
+              onClick={() => setProvider("btc")}
+              className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+              style={provider === "btc"
+                ? { background: "rgba(247,147,26,0.16)", border: "1.5px solid #F7931A", color: "#F7931A" }
+                : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+            >
+              ₿ BTC
+            </button>
+          )}
         </div>
       </div>
 
@@ -1266,7 +1364,7 @@ export function BookCallModal({
       </div>
 
       {/* Crypto: 15-min timeout recovery card */}
-      {(provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "btc") && dashTimedOut && (
+      {(provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "dash" || provider === "btc") && dashTimedOut && (
         <div
           className="rounded-xl px-4 py-4 space-y-3"
           style={{ background: "rgba(255,159,10,0.10)", border: "1px solid rgba(255,159,10,0.25)" }}
@@ -1306,25 +1404,43 @@ export function BookCallModal({
       )}
 
       {/* Crypto: waiting for payment indicator */}
-      {(provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "btc") && checkoutLoading && !dashTimedOut && (
-        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
-          <div className="flex items-center gap-2">
-            <Spinner size={16} />
-            <span className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.waitingForPayment}</span>
+      {(provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "dash" || provider === "btc") && checkoutLoading && !dashTimedOut && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
+            <div className="flex items-center gap-2">
+              <Spinner size={16} />
+              <span className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.waitingForPayment}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
+                setCheckoutLoading(false);
+                setIsProcessing(false);
+                checkoutInFlight.current = false;
+              }}
+              className="text-xs font-semibold px-3 min-h-[32px] rounded-lg transition-opacity hover:opacity-80"
+              style={{ color: "#FF453A", background: "rgba(255,69,58,0.10)", border: "1px solid rgba(255,69,58,0.20)" }}
+            >
+              {t.creator.cancelBtn}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              if (dashPollRef.current) { clearInterval(dashPollRef.current); dashPollRef.current = null; }
-              setCheckoutLoading(false);
-              setIsProcessing(false);
-              checkoutInFlight.current = false;
-            }}
-            className="text-xs font-semibold px-3 min-h-[32px] rounded-lg transition-opacity hover:opacity-80"
-            style={{ color: "#FF453A", background: "rgba(255,69,58,0.10)", border: "1px solid rgba(255,69,58,0.20)" }}
-          >
-            {t.creator.cancelBtn}
-          </button>
+          {npInvoiceUrl && (provider === "nowpayments" || provider === "nowpayments_usdc") && (
+            <button
+              type="button"
+              onClick={() => {
+                const pw = 600, ph = 700;
+                const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+                const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+                const popup = window.open(npInvoiceUrl, "nowpayments_call_checkout", `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`);
+                if (!popup || popup.closed) window.open(npInvoiceUrl, "_blank");
+              }}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
+              style={{ background: "linear-gradient(90deg, #26a17b, #00c896)" }}
+            >
+              🪙 {provider === "nowpayments_usdc" ? "Open USDC Checkout" : "Open Crypto Checkout"}
+            </button>
+          )}
         </div>
       )}
 
@@ -1351,7 +1467,7 @@ export function BookCallModal({
       )}
 
       {/* Submit */}
-      {!((provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "btc") && (checkoutLoading || dashTimedOut)) && (
+      {!((provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "dash" || provider === "btc") && (checkoutLoading || dashTimedOut)) && (
         <button
           type="button"
           disabled={checkoutLoading || !activePackage}
