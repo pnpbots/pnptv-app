@@ -7032,6 +7032,35 @@ app.post('/api/admin/social/sync-content', adminGuard, asyncHandler(contentFeedS
 // Users search
 app.get('/api/webapp/users/search', asyncHandler(usersController.searchUsers));
 
+// Tag taxonomy + discovery endpoints
+const discoverService = require('../../services/discoverService');
+
+app.get('/api/webapp/discover/tags', async (req, res) => {
+  try {
+    const groups = await discoverService.getTagTaxonomy();
+    res.json({ success: true, groups });
+  } catch (err) {
+    console.error('discoverTags:', err);
+    res.json({ success: true, groups: {} });
+  }
+});
+
+app.get('/api/webapp/discover', async (req, res) => {
+  try {
+    const tags = req.query.tags ? String(req.query.tags).split(',').filter(Boolean) : [];
+    const q = String(req.query.q || '').trim().slice(0, 200);
+    const entity = ['all','members','creators','channels','videos','hangouts'].includes(req.query.entity)
+      ? req.query.entity : 'all';
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(24, Math.max(1, parseInt(req.query.limit, 10) || 12));
+    const results = await discoverService.discoverByTags(tags, q, entity, page, limit);
+    res.json({ success: true, ...results });
+  } catch (err) {
+    console.error('discover:', err);
+    res.status(500).json({ success: false });
+  }
+});
+
 // Global search — used by the navbar 🔍 icon. Aggregates users, creators,
 // and posts in a single response so the client doesn't have to fan out.
 // Client expects: { success, users:[…], creators:[…], posts:[…] }.

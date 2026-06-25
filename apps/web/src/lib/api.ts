@@ -7577,3 +7577,30 @@ export function getCreatorRecordings(creatorId: string): Promise<{
 }> {
   return request(`/api/webapp/creators/${encodeURIComponent(creatorId)}/recordings`);
 }
+
+export function getDiscoverTags(): Promise<{ success: boolean; groups: Record<string, { name: string; emoji: string }[]> }> {
+  return request("/api/webapp/discover/tags");
+}
+
+export function discover(params: {
+  tags?: string[];
+  q?: string;
+  entity?: "all" | "members" | "creators" | "channels" | "videos" | "hangouts";
+  page?: number;
+  limit?: number;
+}): Promise<{
+  success: boolean;
+  members?: any[];
+  creators?: any[];
+  channels?: any[];
+  videos?: any[];
+  hangouts?: any[];
+}> {
+  const qp = new URLSearchParams();
+  if (params.tags?.length) qp.set("tags", params.tags.join(","));
+  if (params.q) qp.set("q", params.q);
+  if (params.entity) qp.set("entity", params.entity);
+  if (params.page) qp.set("page", String(params.page));
+  if (params.limit) qp.set("limit", String(params.limit));
+  return request(`/api/webapp/discover?${qp}`);
+}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { createPortal } from "react-dom";
 import { Outlet, NavLink, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { AnnouncementStrip } from "./AnnouncementStrip";
@@ -18,6 +19,7 @@ import { useI18n } from "@/lib/i18n";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import { SelfCamFloater } from "@/components/mainstage/SelfCamFloater";
+import { ThreadListView, DmChatView } from "@/pages/DirectMessages";
 
 const SIDEBAR_DM_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -740,6 +742,14 @@ export function Layout() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ users: any[]; creators: any[]; posts: any[] } | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [isDmPanelOpen, setIsDmPanelOpen] = useState(false);
+  const [dmPartnerId, setDmPartnerId] = useState<string | null>(null);
+  const [dmPanelPos, setDmPanelPos] = useState({ top: 0, right: 0 });
+  const dmButtonRef = useRef<HTMLButtonElement>(null);
+  const dmPanelRef = useRef<HTMLDivElement>(null);
+  const [searchPanelPos, setSearchPanelPos] = useState({ top: 0, right: 0 });
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const searchPanelRef = useRef<HTMLDivElement>(null);
   const { enabled: nearbyEnabled, toggle: toggleNearby } = useNearbyToggle();
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const [profileData, setProfileData] = useState<any>(null);
@@ -808,6 +818,23 @@ export function Layout() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    if (!isDmPanelOpen) return;
+    const onMouse = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!dmButtonRef.current?.contains(t) && !dmPanelRef.current?.contains(t)) setIsDmPanelOpen(false);
+    };
+    document.addEventListener("mousedown", onMouse);
+    return () => document.removeEventListener("mousedown", onMouse);
+  }, [isDmPanelOpen]);
+
+  useEffect(() => {
+    if (!isDmPanelOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setIsDmPanelOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isDmPanelOpen]);
 
   // Fetch profile data when mobile menu opens
   useEffect(() => {
@@ -943,7 +970,14 @@ export function Layout() {
           <div className="flex items-center gap-1">
             {/* Search */}
             <button
-              onClick={() => setSearchOpen(true)}
+              ref={searchButtonRef}
+              onClick={() => {
+                if (!searchOpen && searchButtonRef.current) {
+                  const r = searchButtonRef.current.getBoundingClientRect();
+                  setSearchPanelPos({ top: r.bottom + 8, right: window.innerWidth - r.right });
+                }
+                setSearchOpen(true);
+              }}
               className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
               aria-label="Search"
               title="Search"
@@ -954,7 +988,15 @@ export function Layout() {
             </button>
             {/* DM */}
             <button
-              onClick={() => navigate("/dm")}
+              ref={dmButtonRef}
+              onClick={() => {
+                if (!isDmPanelOpen && dmButtonRef.current) {
+                  const r = dmButtonRef.current.getBoundingClientRect();
+                  setDmPanelPos({ top: r.bottom + 8, right: window.innerWidth - r.right });
+                }
+                setDmPartnerId(null);
+                setIsDmPanelOpen(v => !v);
+              }}
               className="relative p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
               aria-label="Messages"
               title="Direct Messages"
@@ -1466,170 +1508,205 @@ export function Layout() {
         );
       })()}
 
-      {/* ── Global Search Overlay ─────────────────────────────────────────────── */}
-      {searchOpen && (
-        <div className="fixed inset-0 z-50 bg-pnp-background flex flex-col" role="dialog" aria-modal="true" aria-label="Search">
-          {/* Header */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-pnp-border flex-shrink-0">
-            <button
-              onClick={handleSearchClose}
-              className="p-1.5 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors flex-shrink-0"
-              aria-label="Close search"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-              </svg>
-            </button>
-            <div className="flex-1 flex items-center gap-2 bg-pnp-surface rounded-xl px-3 py-2">
+      {/* ── Search Panel ────────────────────────────────────────────────────── */}
+      {searchOpen && createPortal(
+        <>
+          <div
+            className={`fixed inset-0 z-40 ${isMobile ? "bg-black/60" : ""}`}
+            onClick={handleSearchClose}
+            aria-hidden="true"
+          />
+          <div
+            ref={searchPanelRef}
+            className={isMobile
+              ? "fixed bottom-0 left-0 right-0 z-50 animate-slide-up w-full max-h-[82svh] flex flex-col rounded-t-2xl bg-pnp-background border-t border-pnp-border shadow-2xl overflow-hidden"
+              : "flex flex-col rounded-xl bg-pnp-background border border-pnp-border shadow-xl overflow-hidden"
+            }
+            style={!isMobile ? { position: "fixed", top: searchPanelPos.top, right: searchPanelPos.right, zIndex: 50, width: "480px", maxHeight: "82svh" } : undefined}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Search"
+          >
+            {isMobile && <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-pnp-border" /></div>}
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-pnp-border flex-shrink-0">
               <svg className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
               <input
                 autoFocus
                 type="text"
-                placeholder="Search people, creators, posts..."
+                placeholder="People, creators, channels, hangouts…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Escape") handleSearchClose(); }}
                 className="flex-1 bg-transparent text-pnp-textPrimary text-sm outline-none placeholder:text-pnp-textSecondary min-w-0"
               />
-              {searchQuery && (
-                <button
-                  onClick={() => { setSearchQuery(""); setSearchResults(null); }}
-                  className="flex-shrink-0 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-                  aria-label="Clear search"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
+              <button
+                onClick={searchQuery ? () => { setSearchQuery(""); setSearchResults(null); } : handleSearchClose}
+                className="flex-shrink-0 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+                aria-label={searchQuery ? "Clear" : "Close"}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
-          </div>
-
-          {/* Results */}
-          <div className="flex-1 overflow-y-auto">
-            {searchLoading ? (
-              <div className="flex items-center justify-center py-16">
-                <svg className="w-6 h-6 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              </div>
-            ) : searchQuery.trim().length < 2 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center px-6">
-                <svg className="w-10 h-10 text-pnp-textSecondary/30 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-                <p className="text-sm text-pnp-textSecondary">Type at least 2 characters to search</p>
-              </div>
-            ) : !searchResults || (searchResults.users.length === 0 && searchResults.creators.length === 0 && searchResults.posts.length === 0) ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center px-6">
-                <svg className="w-10 h-10 text-pnp-textSecondary/30 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.182 16.318A4.486 4.486 0 0012.016 15a4.486 4.486 0 00-3.198 1.318M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75zm-.375 0h.008v.015h-.008V9.75zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75zm-.375 0h.008v.015h-.008V9.75z" />
-                </svg>
-                <p className="text-sm text-pnp-textSecondary">No results for &ldquo;{searchQuery}&rdquo;</p>
-              </div>
-            ) : (
-              <div className="px-4 py-3 space-y-1">
-                {/* People */}
-                {searchResults.users.length > 0 && (
-                  <div>
-                    <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">People</p>
-                    {searchResults.users.map((u: any) => {
-                      const photo = u.photo_file_id
-                        ? u.photo_file_id.startsWith("/") || u.photo_file_id.startsWith("http")
-                          ? u.photo_file_id
-                          : null
-                        : null;
-                      const initial = (u.first_name || u.username || "?")[0].toUpperCase();
-                      return (
-                        <button
-                          key={u.id}
-                          onClick={() => { handleSearchClose(); navigate(`/profile/${u.id}`); }}
-                          className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left"
-                        >
-                          {photo ? (
-                            <img src={photo} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-                          ) : (
-                            <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
-                              {initial}
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-pnp-textPrimary truncate">
-                              {u.first_name}{u.last_name ? ` ${u.last_name}` : ""}
-                            </p>
-                            {u.username && <p className="text-xs text-pnp-textSecondary truncate">@{u.username}</p>}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Creators */}
-                {searchResults.creators.length > 0 && (
-                  <div>
-                    <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Creators</p>
-                    {searchResults.creators.map((c: any) => {
-                      const photo = c.photo_url
-                        ? c.photo_url.startsWith("/") || c.photo_url.startsWith("http")
-                          ? c.photo_url
-                          : null
-                        : null;
-                      const initial = (c.display_name || c.username || "?")[0].toUpperCase();
-                      return (
-                        <button
-                          key={c.id}
-                          onClick={() => { handleSearchClose(); navigate(`/profile/${c.user_id}`); }}
-                          className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left"
-                        >
-                          {photo ? (
-                            <img src={photo} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-                          ) : (
-                            <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg, #5ED1C4, #D4007A)", color: "#fff" }}>
-                              {initial}
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-pnp-textPrimary truncate">{c.display_name || c.username}</p>
-                            {c.category && <p className="text-xs text-pnp-textSecondary truncate">{c.category}</p>}
-                          </div>
-                          {c.verified && (
-                            <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>
-                              Verified
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Posts */}
-                {searchResults.posts.length > 0 && (
-                  <div>
-                    <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Posts</p>
-                    {searchResults.posts.map((post: any) => (
+            <div className="flex-1 overflow-y-auto">
+              {searchQuery.trim().length < 2 ? (
+                <div className="px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50 mb-3">Browse by interest</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { tag: "leather", emoji: "🥋" }, { tag: "bear", emoji: "🐻" }, { tag: "daddy", emoji: "👨" },
+                      { tag: "clouds", emoji: "☁️" }, { tag: "pig-play", emoji: "🐷" }, { tag: "raw", emoji: "🔥" },
+                      { tag: "bdsm", emoji: "⛓️" }, { tag: "twink", emoji: "🌸" }, { tag: "fisting", emoji: "✊" },
+                      { tag: "watersports", emoji: "💦" }, { tag: "outdoor", emoji: "🌲" }, { tag: "jock", emoji: "💪" },
+                      { tag: "latino", emoji: "🌶️" }, { tag: "group", emoji: "👥" }, { tag: "voyeur", emoji: "👁️" },
+                      { tag: "muscle", emoji: "🏋️" }, { tag: "sober", emoji: "💧" }, { tag: "roleplay", emoji: "🎭" },
+                      { tag: "solo", emoji: "1️⃣" }, { tag: "breeding", emoji: "💦" }, { tag: "bondage", emoji: "🪢" },
+                    ].map(({ tag, emoji }) => (
                       <button
-                        key={post.id}
-                        onClick={() => { handleSearchClose(); navigate(`/social/post/${post.id}`); }}
-                        className="w-full flex items-start gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left"
+                        key={tag}
+                        onClick={() => { navigate(`/channels?discover=${encodeURIComponent(tag)}`); handleSearchClose(); }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-pnp-surface hover:bg-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors border border-pnp-border"
                       >
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-pnp-textSecondary mb-0.5">@{post.author_username}</p>
-                          <p className="text-sm text-pnp-textPrimary line-clamp-2">{post.content}</p>
-                        </div>
+                        <span>{emoji}</span>
+                        <span>{tag}</span>
                       </button>
                     ))}
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              ) : searchLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <svg className="w-5 h-5 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                </div>
+              ) : !searchResults || (searchResults.users.length === 0 && searchResults.creators.length === 0 && searchResults.posts.length === 0) ? (
+                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                  <p className="text-sm text-pnp-textSecondary">No results for &ldquo;{searchQuery}&rdquo;</p>
+                </div>
+              ) : (
+                <div className="px-4 py-3 space-y-1">
+                  {searchResults.users.length > 0 && (
+                    <div>
+                      <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">People</p>
+                      {searchResults.users.map((u: any) => {
+                        const photo = u.photo_file_id && (u.photo_file_id.startsWith("/") || u.photo_file_id.startsWith("http")) ? u.photo_file_id : null;
+                        const initial = (u.first_name || u.username || "?")[0].toUpperCase();
+                        return (
+                          <button key={u.id} onClick={() => { handleSearchClose(); navigate(`/profile/${u.id}`); }} className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                            {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }}>{initial}</div>}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-pnp-textPrimary truncate">{u.first_name}{u.last_name ? ` ${u.last_name}` : ""}</p>
+                              {u.username && <p className="text-xs text-pnp-textSecondary truncate">@{u.username}</p>}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {searchResults.creators.length > 0 && (
+                    <div>
+                      <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Creators</p>
+                      {searchResults.creators.map((c: any) => {
+                        const photo = c.photo_url && (c.photo_url.startsWith("/") || c.photo_url.startsWith("http")) ? c.photo_url : null;
+                        const initial = (c.display_name || c.username || "?")[0].toUpperCase();
+                        return (
+                          <button key={c.id} onClick={() => { handleSearchClose(); navigate(`/profile/${c.user_id}`); }} className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                            {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg,#5ED1C4,#D4007A)", color: "#fff" }}>{initial}</div>}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-pnp-textPrimary truncate">{c.display_name || c.username}</p>
+                              {c.category && <p className="text-xs text-pnp-textSecondary truncate">{c.category}</p>}
+                            </div>
+                            {c.verified && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>Verified</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {searchResults.posts.length > 0 && (
+                    <div>
+                      <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Posts</p>
+                      {searchResults.posts.map((post: any) => (
+                        <button key={post.id} onClick={() => { handleSearchClose(); navigate(`/social/post/${post.id}`); }} className="w-full flex items-start gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-pnp-textSecondary mb-0.5">@{post.author_username}</p>
+                            <p className="text-sm text-pnp-textPrimary line-clamp-2">{post.content}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>,
+        document.body
       )}
+
+      {/* ── DM Panel ────────────────────────────────────────────────────────── */}
+      {isDmPanelOpen && createPortal(
+        <>
+          <div
+            className={`fixed inset-0 z-40 ${isMobile ? "bg-black/60" : ""}`}
+            onClick={() => setIsDmPanelOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            ref={dmPanelRef}
+            className={isMobile
+              ? "fixed bottom-0 left-0 right-0 z-50 animate-slide-up w-full max-h-[82svh] flex flex-col rounded-t-2xl bg-pnp-background border-t border-pnp-border shadow-2xl overflow-hidden"
+              : "flex flex-col rounded-xl bg-pnp-background border border-pnp-border shadow-xl overflow-hidden"
+            }
+            style={!isMobile ? { position: "fixed", top: dmPanelPos.top, right: dmPanelPos.right, zIndex: 50, width: "480px", maxHeight: "82svh" } : undefined}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Messages"
+          >
+            {isMobile && <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-pnp-border" /></div>}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-pnp-border flex-shrink-0">
+              {dmPartnerId ? (
+                <button onClick={() => setDmPartnerId(null)} className="flex items-center gap-2 text-pnp-textPrimary hover:opacity-80 transition-opacity">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                  <span className="text-sm font-semibold">Back</span>
+                </button>
+              ) : (
+                <h2 className="text-sm font-semibold text-pnp-textPrimary">Messages</h2>
+              )}
+              <button onClick={() => setIsDmPanelOpen(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors" aria-label="Close">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden min-h-0">
+              {dmPartnerId ? (
+                <DmChatView
+                  userId={dmPartnerId}
+                  myDbId={user?.dbId ?? user?.id ?? ""}
+                  myUserId={String(user?.id ?? "")}
+                  isAdmin={isAdmin}
+                  onBack={() => setDmPartnerId(null)}
+                  panelMode
+                />
+              ) : (
+                <ThreadListView
+                  myDbId={user?.dbId ?? user?.id ?? ""}
+                  onThreadSelect={(uid) => setDmPartnerId(uid)}
+                  panelMode
+                />
+              )}
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+
 
       {/* Toast notifications */}
       {isAuthenticated && <Toast />}

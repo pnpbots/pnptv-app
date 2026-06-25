@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
@@ -1154,9 +1154,18 @@ export default function Channels() {
 function ChannelsInner() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
 
   // Selected channel for detail view
   const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
+
+  const [discoverTag, setDiscoverTag] = useState<string | null>(searchParams.get("discover"));
+  const [discoverEntity, setDiscoverEntity] = useState<"all"|"members"|"creators"|"channels"|"videos"|"hangouts">("all");
+  const [discoverResults, setDiscoverResults] = useState<{ members?: any[]; creators?: any[]; channels?: any[]; videos?: any[]; hangouts?: any[] } | null>(null);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"channels"|"videos"|"discover">(
+    searchParams.get("discover") ? "discover" : "channels"
+  );
 
   // ── Creator profile state (feeds the pill strip at the bottom of the page) ──
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -1300,6 +1309,17 @@ function ChannelsInner() {
     return () => observer.disconnect();
   }, [channelsHasMore, channelsLoadingMore, channelsPage, fetchCreatorChannels]);
 
+  useEffect(() => {
+    if (activeTab !== "discover" || !discoverTag) { setDiscoverResults(null); return; }
+    setDiscoverLoading(true);
+    const qs = new URLSearchParams({ tags: discoverTag, entity: discoverEntity });
+    fetch(`/api/webapp/discover?${qs}`, { credentials: "include" })
+      .then(r => r.json())
+      .then(data => { if (data.success !== false) setDiscoverResults(data); })
+      .catch(() => {})
+      .finally(() => setDiscoverLoading(false));
+  }, [discoverTag, discoverEntity, activeTab]);
+
   // ── If channel detail is open, render that view ──
   if (selectedChannelId !== null) {
     return (
@@ -1341,8 +1361,219 @@ function ChannelsInner() {
           </div>
         </div>
 
+        {/* ── Tab switcher ── */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => setActiveTab("channels")}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              activeTab === "channels"
+                ? "bg-pnp-accent text-white"
+                : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+            }`}
+          >
+            Channels
+          </button>
+          <button
+            onClick={() => setActiveTab("discover")}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              activeTab === "discover"
+                ? "bg-pnp-accent text-white"
+                : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+            }`}
+          >
+            Discover ✨
+          </button>
+        </div>
+
+        {/* ── DISCOVER VIEW ── */}
+        {activeTab === "discover" && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-pnp-border bg-pnp-surface overflow-hidden">
+              <div className="px-4 py-3 border-b border-pnp-border">
+                <div className="flex flex-wrap gap-2 items-center">
+                  {discoverTag ? (
+                    <span className="flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium bg-pnp-accent text-white">
+                      {discoverTag}
+                      <button onClick={() => { setDiscoverTag(null); setDiscoverResults(null); }} className="ml-1 hover:opacity-80">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </span>
+                  ) : (
+                    <p className="text-sm text-pnp-textSecondary">Select an interest to explore:</p>
+                  )}
+                  {!discoverTag && [
+                    { tag: "leather", e: "🥋" }, { tag: "bear", e: "🐻" }, { tag: "clouds", e: "☁️" },
+                    { tag: "raw", e: "🔥" }, { tag: "bdsm", e: "⛓️" }, { tag: "twink", e: "🌸" },
+                    { tag: "pig-play", e: "🐷" }, { tag: "outdoor", e: "🌲" }, { tag: "daddy", e: "👨" },
+                    { tag: "latino", e: "🌶️" }, { tag: "jock", e: "💪" }, { tag: "muscle", e: "🏋️" },
+                    { tag: "watersports", e: "💦" }, { tag: "voyeur", e: "👁️" }, { tag: "bondage", e: "🪢" },
+                    { tag: "fisting", e: "✊" }, { tag: "solo", e: "1️⃣" }, { tag: "sober", e: "💧" },
+                    { tag: "roleplay", e: "🎭" }, { tag: "breeding", e: "💦" }, { tag: "group", e: "👥" },
+                    { tag: "orgy", e: "🎊" },
+                  ].map(({ tag, e }) => (
+                    <button
+                      key={tag}
+                      onClick={() => setDiscoverTag(tag)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium bg-pnp-surface hover:bg-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors border border-pnp-border"
+                    >
+                      <span>{e}</span><span>{tag}</span>
+                    </button>
+                  ))}
+                </div>
+                {discoverTag && (
+                  <div className="flex gap-2 mt-3 overflow-x-auto pb-1 scrollbar-none">
+                    {(["all","members","creators","channels","videos","hangouts"] as const).map(e => (
+                      <button
+                        key={e}
+                        onClick={() => setDiscoverEntity(e)}
+                        className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 ${
+                          discoverEntity === e ? "bg-pnp-accent text-white" : "bg-pnp-surface text-pnp-textSecondary hover:text-pnp-textPrimary border border-pnp-border"
+                        }`}
+                      >
+                        {e === "all" ? "All" : e.charAt(0).toUpperCase() + e.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {discoverLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <div className="w-6 h-6 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : discoverTag && !discoverResults ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+                  <p className="text-sm text-pnp-textSecondary">No results found for &ldquo;{discoverTag}&rdquo;</p>
+                </div>
+              ) : !discoverTag ? null : (
+                <div className="divide-y divide-pnp-border">
+                  {(discoverEntity === "all" || discoverEntity === "members") && (discoverResults?.members ?? []).length > 0 && (
+                    <div className="px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50 mb-2">Members</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                        {(discoverResults?.members ?? []).map((m: any) => {
+                          const photo = m.photo_file_id && (m.photo_file_id.startsWith("/") || m.photo_file_id.startsWith("http")) ? m.photo_file_id : null;
+                          const name = m.first_name ? `${m.first_name}${m.last_name ? ` ${m.last_name}` : ""}` : m.username || "Member";
+                          return (
+                            <button key={m.id} onClick={() => navigate(`/profile/${m.id}`)} className="flex items-center gap-3 p-3 rounded-xl hover:bg-pnp-surfaceHover transition-colors text-left w-full">
+                              {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#D4007A,#E69138)" }}>{name[0]?.toUpperCase()}</div>}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-pnp-textPrimary truncate">{name}</p>
+                                <div className="flex gap-1 mt-0.5 flex-wrap">
+                                  {(m.tags || m.interests || []).slice(0, 3).map((tg: string) => (
+                                    <span key={tg} className="text-[10px] px-1.5 py-0.5 rounded bg-pnp-surface text-pnp-textSecondary border border-pnp-border">{tg}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {(discoverEntity === "all" || discoverEntity === "creators") && (discoverResults?.creators ?? []).length > 0 && (
+                    <div className="px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50 mb-2">Creators</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                        {(discoverResults?.creators ?? []).map((c: any) => {
+                          const photo = c.photo_url && (c.photo_url.startsWith("/") || c.photo_url.startsWith("http")) ? c.photo_url : null;
+                          const name = c.display_name || c.username || "Creator";
+                          return (
+                            <button key={c.id} onClick={() => navigate(`/profile/${c.user_id}`)} className="flex items-center gap-3 p-3 rounded-xl hover:bg-pnp-surfaceHover transition-colors text-left w-full">
+                              {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#5ED1C4,#D4007A)" }}>{name[0]?.toUpperCase()}</div>}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-pnp-textPrimary truncate">{name}</p>
+                                <div className="flex gap-1 mt-0.5 flex-wrap">
+                                  {(c.tags || c.interests || []).slice(0, 3).map((tg: string) => (
+                                    <span key={tg} className="text-[10px] px-1.5 py-0.5 rounded bg-pnp-surface text-pnp-textSecondary border border-pnp-border">{tg}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {(discoverEntity === "all" || discoverEntity === "channels") && (discoverResults?.channels ?? []).length > 0 && (
+                    <div className="px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50 mb-2">Channels</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                        {(discoverResults?.channels ?? []).map((ch: any) => (
+                          <button key={ch.id} onClick={() => setSelectedChannelId(ch.id)} className="flex items-center gap-3 p-3 rounded-xl hover:bg-pnp-surfaceHover transition-colors text-left w-full">
+                            <div className="w-9 h-9 rounded-lg flex-shrink-0 flex items-center justify-center text-sm font-bold text-white overflow-hidden" style={{ background: `linear-gradient(135deg, hsl(${(ch.id * 47) % 360}, 60%, 20%), hsl(${(ch.id * 47 + 120) % 360}, 60%, 15%))` }}>
+                              {ch.coverImageUrl ? <img src={ch.coverImageUrl} alt="" className="w-full h-full object-cover" /> : (ch.name || "C")[0].toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-pnp-textPrimary truncate">{ch.name}</p>
+                              <div className="flex gap-1 mt-0.5 flex-wrap">
+                                {(ch.tags || []).slice(0, 3).map((tg: string) => (
+                                  <span key={tg} className="text-[10px] px-1.5 py-0.5 rounded bg-pnp-surface text-pnp-textSecondary border border-pnp-border">{tg}</span>
+                                ))}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {(discoverEntity === "all" || discoverEntity === "videos") && (discoverResults?.videos ?? []).length > 0 && (
+                    <div className="px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50 mb-2">Videos</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                        {(discoverResults?.videos ?? []).map((v: any) => (
+                          <button key={v.id} onClick={() => setSelectedChannelId(v.channel_id)} className="flex items-center gap-3 p-3 rounded-xl hover:bg-pnp-surfaceHover transition-colors text-left w-full">
+                            <div className="w-14 h-9 rounded-lg flex-shrink-0 overflow-hidden bg-pnp-surfaceHover">
+                              {v.thumbnail_url ? <img src={v.thumbnail_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><svg className="w-4 h-4 text-pnp-textSecondary" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg></div>}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-pnp-textPrimary truncate">{v.title || "Untitled"}</p>
+                              <div className="flex gap-1 mt-0.5 flex-wrap">
+                                {(v.tags || []).slice(0, 3).map((tg: string) => (
+                                  <span key={tg} className="text-[10px] px-1.5 py-0.5 rounded bg-pnp-surface text-pnp-textSecondary border border-pnp-border">{tg}</span>
+                                ))}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {(discoverEntity === "all" || discoverEntity === "hangouts") && (discoverResults?.hangouts ?? []).length > 0 && (
+                    <div className="px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50 mb-2">Hangouts</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                        {(discoverResults?.hangouts ?? []).map((h: any) => (
+                          <button key={h.id} onClick={() => navigate(`/chat/${h.id}`)} className="flex items-center gap-3 p-3 rounded-xl hover:bg-pnp-surfaceHover transition-colors text-left w-full">
+                            <div className="w-9 h-9 rounded-lg flex-shrink-0 flex items-center justify-center text-sm font-bold text-white" style={{ background: "rgba(212,0,122,0.2)" }}>
+                              {(h.name || "H")[0].toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-pnp-textPrimary truncate">{h.name}</p>
+                              <div className="flex gap-1 mt-0.5 flex-wrap">
+                                {(h.tags || h.interests || []).slice(0, 3).map((tg: string) => (
+                                  <span key={tg} className="text-[10px] px-1.5 py-0.5 rounded bg-pnp-surface text-pnp-textSecondary border border-pnp-border">{tg}</span>
+                                ))}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {discoverResults && Object.values(discoverResults).every(arr => !arr || arr.length === 0) && (
+                    <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+                      <p className="text-sm text-pnp-textSecondary">No results found for &ldquo;{discoverTag}&rdquo;</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── CHANNELS VIEW (primary) ── */}
-        <>
+        {activeTab === "channels" && <>
             {/* Search + Create button row */}
             <div className="flex gap-2">
               <div className="relative flex-1">
@@ -1624,7 +1855,7 @@ function ChannelsInner() {
                 </div>
               </div>
             )}
-        </>
+        </>}
       </div>
     </>
   );
