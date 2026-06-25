@@ -1297,7 +1297,8 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     const url = URL.createObjectURL(recordingBlob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `stream-recording-${Date.now()}.webm`;
+    const ext = recordingBlob.type.startsWith("video/mp4") ? "mp4" : "webm";
+    a.download = `stream-recording-${Date.now()}.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
   }, [recordingBlob]);

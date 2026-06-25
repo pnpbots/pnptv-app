@@ -2765,6 +2765,7 @@ function initSocketIO(io) {
 
         socket.data.streamDataChunks = 0;
         socket.data.streamDataBytes = 0;
+        socket.data.pipeBrokenNotified = false;
         logger.info(`Browser stream started: user ${user.id} → channel '${channelRef}' → rtmp://restreamer:1935/live/${streamKey} [token redacted]`);
 
         // Store stream metadata in Redis (TTL 12h — auto-expires if stream ends uncleanly)
@@ -2919,6 +2920,16 @@ function initSocketIO(io) {
         ffmpeg.stdin.write(buf, (writeErr) => {
           if (writeErr && !ffmpeg.stdin.destroyed) {
             logger.warn(`stream:data write error for channel '${socket.data.streamChannelRef}'`, { error: writeErr.message });
+            // Tell the client so it stops sending chunks into a dead pipe and
+            // surfaces an error instead of holding a green "LIVE" UI forever.
+            // Guard with a flag so we only emit once per broken pipe.
+            if (!socket.data.pipeBrokenNotified) {
+              socket.data.pipeBrokenNotified = true;
+              socket.emit('stream:error', {
+                code: 'pipe_broken',
+                message: 'Stream pipeline broken. Please stop and restart.',
+              });
+            }
           }
         });
       } catch (err) {
@@ -2935,6 +2946,14 @@ function initSocketIO(io) {
       const lastSample = socket.data.lastMetricsSample || 0;
       if (now - lastSample < 3000) return; // rate-limit: 3 s per session
       socket.data.lastMetricsSample = now;
+
+      // Refresh the cross-socket live lock so streams that run longer than the
+      // 600 s TTL aren't hijacked by a second tab. The client sends metrics
+      // every 5 s while live, so this keeps the lock alive for the full session.
+      if (socket.data.liveLockKey) {
+        const redis = getRedis();
+        if (redis) redis.expire(socket.data.liveLockKey, 600).catch(() => {});
+      }
 
       // Basic validation — all fields optional but must be numbers when present
       const safeKbps    = Number.isFinite(Number(kbps))    ? Math.max(0, Math.round(Number(kbps)))    : null;

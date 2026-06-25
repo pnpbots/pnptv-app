@@ -322,7 +322,10 @@ export async function uploadRecording(
   durationSec: number
 ): Promise<{ success: boolean; publicUrl: string }> {
   const form = new FormData();
-  form.append("file", blob, "recording.webm");
+  // iOS Safari's MediaRecorder produces video/mp4; everyone else WebM. Match
+  // the filename to the actual container so the backend doesn't misroute.
+  const ext = blob.type.startsWith("video/mp4") ? "mp4" : "webm";
+  form.append("file", blob, `recording.${ext}`);
   if (sessionId) form.append("sessionId", sessionId);
   form.append("durationSec", String(Math.round(durationSec)));
 

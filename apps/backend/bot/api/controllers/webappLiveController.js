@@ -2400,7 +2400,7 @@ const getCreatorEligibility = async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `SELECT role, creator_status, identity_verified,
+      `SELECT role, creator_status, creator_locked, identity_verified,
               identity_verification_required_by, live_channel, followers_count
        FROM users WHERE id = $1`,
       [userId]
@@ -2425,30 +2425,47 @@ const getCreatorEligibility = async (req, res) => {
       });
     }
 
+    // Mirror the exact gates from socketHandlers.js stream:start so the UI
+    // can't show a green Go Live button that the socket will then reject.
     const creatorStatus = user.creator_status || 'none';
     const is2257Compliant = IdentityVerificationService.is2257Compliant(user);
     const hasLiveChannel = !!user.live_channel;
+    const isLocked = !!user.creator_locked;
     const followersCount = user.followers_count ?? 0;
+
+    // stream:start checks performers table, not users.creator_status — query it
+    // so eligibility reflects the same authority.
+    const { rows: performerRows } = await pool.query(
+      `SELECT 1 FROM performers WHERE user_id = $1 AND status = 'active' LIMIT 1`,
+      [userId]
+    );
+    const hasActivePerformerRow = performerRows.length > 0;
 
     const issues = [];
 
-    if (creatorStatus === 'suspended') {
-      issues.push('Your creator account has been suspended. Contact support.');
-    } else if (!['active'].includes(creatorStatus)) {
-      issues.push('Your creator application is under review. You\'ll be notified when approved.');
+    if (!hasActivePerformerRow) {
+      if (creatorStatus === 'suspended') {
+        issues.push('Your creator account has been suspended. Contact support.');
+      } else {
+        issues.push('Your creator application is under review. You\'ll be notified when approved.');
+      }
     }
-
+    if (isLocked) {
+      issues.push('Complete your creator onboarding before going live.');
+    }
+    if (!hasLiveChannel) {
+      issues.push('Your streaming channel has not been provisioned yet. Try again in a moment.');
+    }
     if (!is2257Compliant) {
       issues.push('Identity verification (18 U.S.C. § 2257) required. Visit your settings to complete it.');
     }
 
-    // Live is always available for active creators — tier does NOT affect go-live
-    const canGoLive = creatorStatus === 'active';
+    const canGoLive = hasActivePerformerRow && !isLocked && hasLiveChannel && is2257Compliant;
 
     // Exclusive content monetization requires Ice tier threshold (10 followers)
-    const canPostExclusive = creatorStatus === 'active' && followersCount >= 10;
+    const canPostExclusive = hasActivePerformerRow && followersCount >= 10;
 
-    if (!canPostExclusive && creatorStatus === 'active') {
+    if (!canPostExclusive && hasActivePerformerRow) {
       issues.push('Reach 10 followers on your free profile to unlock exclusive content monetization.');
     }
 
@@ -2457,7 +2474,7 @@ const getCreatorEligibility = async (req, res) => {
       canGoLive,
       canPostExclusive,
       creatorStatus,
-      isLocked: false,
+      isLocked,
       is2257Compliant,
       hasLiveChannel,
       followersCount,
