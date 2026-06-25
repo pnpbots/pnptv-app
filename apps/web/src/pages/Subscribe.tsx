@@ -946,16 +946,16 @@ export default function Subscribe() {
                 {usdcAvailable !== false && (
                   <button
                     disabled={submitting}
-                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdttrc20"); }}
-                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-teal-400/40 bg-teal-400/10 hover:bg-teal-400/20 disabled:opacity-50 transition-colors"
-                    title="Tether USDT on Tron (TRC-20)"
+                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdcsol"); }}
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-sky-400/40 bg-sky-400/10 hover:bg-sky-400/20 disabled:opacity-50 transition-colors"
+                    title="USD Coin on Solana — instant + sub-cent fees"
                   >
-                    <span className="flex items-center gap-1 text-xs font-semibold text-teal-300">
-                      <span>₮</span>
-                      <span>USDT</span>
-                      {cryptoDiscount && <span className="text-[9px] font-black bg-teal-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
+                    <span className="flex items-center gap-1 text-xs font-semibold text-sky-300">
+                      <span>◎</span>
+                      <span>USDC</span>
+                      {cryptoDiscount && <span className="text-[9px] font-black bg-sky-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                     </span>
-                    <span className="text-[11px] font-bold text-teal-300 leading-none">{cryptoDisplayPrice}</span>
+                    <span className="text-[11px] font-bold text-sky-300 leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
                 {btcAvailable && (
@@ -1223,20 +1223,20 @@ export default function Subscribe() {
                     onClick={(e) => {
                       e.stopPropagation();
                       if (RECURRING_PLANS.has(plan.id)) {
-                        handleCryptoSubscribe(plan.id, "usdttrc20");
+                        handleCryptoSubscribe(plan.id, "usdcsol");
                       } else {
-                        handleQuickCheckout(plan.id, "usdttrc20");
+                        handleQuickCheckout(plan.id, "usdcsol");
                       }
                     }}
-                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-teal-400/40 bg-teal-400/10 hover:bg-teal-400/20 disabled:opacity-50 transition-colors"
-                    title="Tether USDT on Tron (TRC-20)"
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-sky-400/40 bg-sky-400/10 hover:bg-sky-400/20 disabled:opacity-50 transition-colors"
+                    title="USD Coin on Solana — instant + sub-cent fees"
                   >
-                    <span className="flex items-center gap-1 text-xs font-semibold text-teal-300">
-                      <span>₮</span>
-                      <span>USDT</span>
-                      {cryptoDiscount && <span className="text-[9px] font-black bg-teal-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
+                    <span className="flex items-center gap-1 text-xs font-semibold text-sky-300">
+                      <span>◎</span>
+                      <span>USDC</span>
+                      {cryptoDiscount && <span className="text-[9px] font-black bg-sky-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
                     </span>
-                    <span className="text-[11px] font-bold text-teal-300 leading-none">{cryptoDisplayPrice}</span>
+                    <span className="text-[11px] font-bold text-sky-300 leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
                 {btcAvailable && (

@@ -548,8 +548,8 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
     handlePay();
   };
 
-  const handleUsdtClick = () => {
-    handlePay("usdttrc20");
+  const handleUsdcClick = () => {
+    handlePay("usdcsol");
   };
 
   const usdcUnavailable = usdcAvailable === false;
@@ -765,18 +765,18 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
             {ctaLabel}
           </button>
           <button
-            onClick={handleUsdtClick}
+            onClick={handleUsdcClick}
             disabled={ctaDisabled}
             aria-disabled={ctaDisabled}
-            title="Tether USDT on Tron (TRC-20)"
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", maxWidth: 500, margin: "10px auto 0", padding: "14px 24px", borderRadius: 14, border: "1px solid rgba(38,161,123,0.45)", background: ctaDisabled ? "rgba(255,255,255,0.04)" : "rgba(38,161,123,0.10)", color: ctaDisabled ? "#8E8E93" : "#7FE3C1", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", cursor: ctaDisabled ? "not-allowed" : "pointer", minHeight: 48, transition: "opacity 0.15s, transform 0.1s" }}
+            title="USD Coin on Solana — instant + sub-cent fees"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", maxWidth: 500, margin: "10px auto 0", padding: "14px 24px", borderRadius: 14, border: "1px solid rgba(39,117,202,0.45)", background: ctaDisabled ? "rgba(255,255,255,0.04)" : "rgba(39,117,202,0.10)", color: ctaDisabled ? "#8E8E93" : "#7FB8FF", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", cursor: ctaDisabled ? "not-allowed" : "pointer", minHeight: 48, transition: "opacity 0.15s, transform 0.1s" }}
             onMouseDown={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
             onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
             onTouchStart={(e) => { if (!ctaDisabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)"; }}
             onTouchEnd={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
           >
-            <span style={{ fontSize: 16 }}>₮</span>
-            {es ? "Pagar con USDT (TRC-20) — $100" : "Pay with USDT (TRC-20) — $100"}
+            <span style={{ fontSize: 16 }}>◎</span>
+            {es ? "Pagar con USDC (Solana) — $100" : "Pay with USDC (Solana) — $100"}
           </button>
         </div>
       </div>

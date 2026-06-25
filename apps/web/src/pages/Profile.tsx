@@ -208,7 +208,7 @@ export default function Profile() {
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [subscribeEmail, setSubscribeEmail] = useState("");
   const [subscribeEmailError, setSubscribeEmailError] = useState<string | null>(null);
-  const [subscribeProvider, setSubscribeProvider] = useState<"usdc" | "usdt" | "dash" | "btc">("usdc");
+  const [subscribeProvider, setSubscribeProvider] = useState<"usdc" | "usdc_sol" | "dash" | "btc">("usdc");
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
   const [btcAvailable, setBtcAvailable] = useState(false);
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
@@ -694,8 +694,8 @@ export default function Profile() {
       }
       setSubscribeEmailError(null);
 
-      if (subscribeProvider === "usdc" || subscribeProvider === "usdt") {
-        const payCurrency = subscribeProvider === "usdt" ? "usdttrc20" : undefined;
+      if (subscribeProvider === "usdc" || subscribeProvider === "usdc_sol") {
+        const payCurrency = subscribeProvider === "usdc_sol" ? "usdcsol" : undefined;
         const res = await startNowPayments("creator_monthly", trimmed, creatorId, false, payCurrency);
         if (!res?.success) {
           setSubscribeError((res as any)?.error || nowpaymentsError || p.failedToCreatePayment);
@@ -1858,14 +1858,14 @@ export default function Profile() {
                     {usdcAvailable !== false && (
                       <button
                         type="button"
-                        onClick={() => setSubscribeProvider("usdt")}
-                        title="Tether USDT on Tron (TRC-20)"
+                        onClick={() => setSubscribeProvider("usdc_sol")}
+                        title="USD Coin on Solana — instant + sub-cent fees"
                         className="py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
-                        style={subscribeProvider === "usdt"
-                          ? { background: "rgba(38,161,123,0.20)", color: "#7FE3C1", borderColor: "rgba(127,227,193,0.5)" }
-                          : { background: "rgba(38,161,123,0.06)", color: "#7FE3C1", borderColor: "rgba(127,227,193,0.2)" }}
+                        style={subscribeProvider === "usdc_sol"
+                          ? { background: "rgba(39,117,202,0.20)", color: "#7FB8FF", borderColor: "rgba(127,184,255,0.5)" }
+                          : { background: "rgba(39,117,202,0.06)", color: "#7FB8FF", borderColor: "rgba(127,184,255,0.2)" }}
                       >
-                        ₮ USDT TRC-20
+                        ◎ USDC Solana
                       </button>
                     )}
                     {dashAvailable !== false && (

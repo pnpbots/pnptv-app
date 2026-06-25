@@ -24,7 +24,7 @@ interface BuyTokensModalProps {
 
 export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTokensModalProps) {
   const t = useI18n();
-  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'btc' | 'np' | 'np_usdt'>('select');
+  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'btc' | 'np' | 'np_usdc'>('select');
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
@@ -55,7 +55,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
   const [btcPolling, setBtcPolling] = useState(false);
   const [btcAvailable, setBtcAvailable] = useState(false);
 
-  // NowPayments (multi-coin + USDT TRC-20) popup + balance-delta poll state
+  // NowPayments (multi-coin + USDC Solana) popup + balance-delta poll state
   const npPopupRef = useRef<Window | null>(null);
   const npPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [npPayment, setNpPayment] = useState<{ invoiceId: string; checkoutUrl: string; payCurrency?: string } | null>(null);
@@ -375,18 +375,18 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               </svg>
             </button>
 
-            {/* USDT TRC-20 */}
+            {/* USDC Solana */}
             <button
-              onClick={() => setBuyMethod('np_usdt')}
-              title="Tether USDT on Tron (TRC-20)"
-              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-teal-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
+              onClick={() => setBuyMethod('np_usdc')}
+              title="USD Coin on Solana — instant + sub-cent fees"
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-sky-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
             >
-              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(38,161,123,0.15)" }}>
-                <span className="text-lg leading-none" style={{ color: "#26a17b" }}>₮</span>
+              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(39,117,202,0.15)" }}>
+                <span className="text-lg leading-none" style={{ color: "#2775CA" }}>◎</span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-pnp-textPrimary">USDT (TRC-20) <span className="text-xs font-normal text-teal-300 ml-1">−20%</span></p>
-                <p className="text-xs text-pnp-textSecondary truncate">Tether on Tron — lowest fees</p>
+                <p className="text-sm font-semibold text-pnp-textPrimary">USDC (Solana) <span className="text-xs font-normal text-sky-300 ml-1">−20%</span></p>
+                <p className="text-xs text-pnp-textSecondary truncate">USD Coin on Solana — sub-cent fees</p>
               </div>
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -622,13 +622,13 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           </div>
         )}
 
-        {/* NowPayments (Crypto / USDT) waiting panel */}
+        {/* NowPayments (Crypto / USDC Solana) waiting panel */}
         {npPayment && (
           <div className="space-y-4">
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: npPayment.payCurrency === 'usdttrc20' ? "#26a17b" : "#34d399" }} />
+              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: npPayment.payCurrency === 'usdcsol' ? "#2775CA" : "#34d399" }} />
               <span className="text-sm font-medium text-pnp-textPrimary">
-                {npPayment.payCurrency === 'usdttrc20' ? 'Waiting for USDT payment...' : 'Waiting for crypto payment...'}
+                {npPayment.payCurrency === 'usdcsol' ? 'Waiting for USDC payment...' : 'Waiting for crypto payment...'}
               </span>
             </div>
 
@@ -663,8 +663,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     rel="noopener noreferrer"
                     className="flex-1 text-center py-2.5 rounded-xl text-sm font-semibold transition-colors"
                     style={
-                      npPayment.payCurrency === 'usdttrc20'
-                        ? { background: "rgba(38,161,123,0.15)", color: "#7FE3C1", border: "1px solid rgba(38,161,123,0.3)" }
+                      npPayment.payCurrency === 'usdcsol'
+                        ? { background: "rgba(39,117,202,0.15)", color: "#7FB8FF", border: "1px solid rgba(39,117,202,0.3)" }
                         : { background: "rgba(34,197,94,0.15)", color: "#34d399", border: "1px solid rgba(34,197,94,0.3)" }
                     }
                   >
@@ -698,8 +698,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 ? 'Pay with Bitcoin (on-chain or Lightning) via NowPayments. 20% discount applied automatically. A popup will open for checkout.'
                 : buyMethod === 'np'
                 ? 'Pay with BTC, ETH, USDC, or 100+ other coins via NowPayments. 20% discount applied automatically. A popup will open for checkout.'
-                : buyMethod === 'np_usdt'
-                ? 'Pay with Tether (USDT) on the Tron network — lowest fees. 20% discount applied automatically. A popup will open for checkout.'
+                : buyMethod === 'np_usdc'
+                ? 'Pay with USD Coin (USDC) on Solana — instant and nearly free fees. 20% discount applied automatically. A popup will open for checkout.'
                 : 'Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed.'}
             </p>
 
@@ -712,15 +712,15 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
             ) : (
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {tokenPackages.map((pkg) => {
-                  const cryptoMethod = buyMethod === 'btc' || buyMethod === 'np' || buyMethod === 'np_usdt';
-                  const priceColor = buyMethod === 'btc' ? '#F7931A' : buyMethod === 'np_usdt' ? '#7FE3C1' : buyMethod === 'np' ? '#34d399' : '#008CE7';
+                  const cryptoMethod = buyMethod === 'btc' || buyMethod === 'np' || buyMethod === 'np_usdc';
+                  const priceColor = buyMethod === 'btc' ? '#F7931A' : buyMethod === 'np_usdc' ? '#7FB8FF' : buyMethod === 'np' ? '#34d399' : '#008CE7';
                   return (
                     <button
                       key={pkg.id}
                       onClick={() => {
                         if (buyMethod === 'btc') return handleBuyTokensBtc(pkg);
                         if (buyMethod === 'np') return handleBuyTokensNowPayments(pkg);
-                        if (buyMethod === 'np_usdt') return handleBuyTokensNowPayments(pkg, 'usdttrc20');
+                        if (buyMethod === 'np_usdc') return handleBuyTokensNowPayments(pkg, 'usdcsol');
                         return handleBuyTokens(pkg);
                       }}
                       disabled={buyingPackage === pkg.id}

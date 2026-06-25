@@ -38,7 +38,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "nowpayments" | "nowpayments_usdt" | "btc";
+type Provider = "nowpayments" | "nowpayments_usdc" | "btc";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -445,8 +445,8 @@ export function BookCallModal({
     setCheckoutError(null);
     try {
       // NowPayments — open a centered popup (cannot redirect: breaks iOS + 3rd-party cookie policy)
-      if (provider === "nowpayments" || provider === "nowpayments_usdt") {
-        const payCurrency = provider === "nowpayments_usdt" ? "usdttrc20" : undefined;
+      if (provider === "nowpayments" || provider === "nowpayments_usdc") {
+        const payCurrency = provider === "nowpayments_usdc" ? "usdcsol" : undefined;
         const npRes = await createCallCheckoutNowPayments(
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
@@ -1183,14 +1183,14 @@ export function BookCallModal({
           </button>
           <button
             type="button"
-            onClick={() => setProvider("nowpayments_usdt")}
-            title="Tether USDT on Tron (TRC-20)"
+            onClick={() => setProvider("nowpayments_usdc")}
+            title="USD Coin on Solana — instant + sub-cent fees"
             className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
-            style={provider === "nowpayments_usdt"
-              ? { background: "rgba(38,161,123,0.16)", border: "1.5px solid #26a17b", color: "#7FE3C1" }
+            style={provider === "nowpayments_usdc"
+              ? { background: "rgba(39,117,202,0.16)", border: "1.5px solid #2775CA", color: "#7FB8FF" }
               : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
-            ₮ USDT
+            ◎ USDC
           </button>
           {btcAvailable && <button
             type="button"
@@ -1266,7 +1266,7 @@ export function BookCallModal({
       </div>
 
       {/* Crypto: 15-min timeout recovery card */}
-      {(provider === "nowpayments" || provider === "nowpayments_usdt" || provider === "btc") && dashTimedOut && (
+      {(provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "btc") && dashTimedOut && (
         <div
           className="rounded-xl px-4 py-4 space-y-3"
           style={{ background: "rgba(255,159,10,0.10)", border: "1px solid rgba(255,159,10,0.25)" }}
@@ -1306,7 +1306,7 @@ export function BookCallModal({
       )}
 
       {/* Crypto: waiting for payment indicator */}
-      {(provider === "nowpayments" || provider === "nowpayments_usdt" || provider === "btc") && checkoutLoading && !dashTimedOut && (
+      {(provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "btc") && checkoutLoading && !dashTimedOut && (
         <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
           <div className="flex items-center gap-2">
             <Spinner size={16} />
@@ -1351,7 +1351,7 @@ export function BookCallModal({
       )}
 
       {/* Submit */}
-      {!((provider === "nowpayments" || provider === "nowpayments_usdt" || provider === "btc") && (checkoutLoading || dashTimedOut)) && (
+      {!((provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "btc") && (checkoutLoading || dashTimedOut)) && (
         <button
           type="button"
           disabled={checkoutLoading || !activePackage}
