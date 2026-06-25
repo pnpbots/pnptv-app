@@ -1848,9 +1848,12 @@ app.get('/health', healthLimiter, async (req, res) => {
 // Authentication API endpoints
 app.post('/api/telegram-auth', authLimiter, handleTelegramAuth);
 app.post('/api/accept-terms', handleAcceptTerms);
+// /api/auth-status is fired 5-10x per page nav (Layout, route guards, SW handshake),
+// so 120/min trips on normal SPA usage after a few page switches. 600/min (~10/sec)
+// matches the page-data limiter at line 1248 and gives headroom for retry storms.
 const authStatusLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 120,
+  max: 600,
   keyGenerator: (req) => req.ip,
   standardHeaders: true,
   legacyHeaders: false,

@@ -431,6 +431,7 @@ export default function BrowserStream() {
           onStartStream={handleGoLiveClick}
           isConnecting={isConnecting}
           channel={channel}
+          streamError={streamError}
         />
       )}
 

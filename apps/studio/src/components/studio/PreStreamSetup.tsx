@@ -86,6 +86,8 @@ export interface PreStreamSetupProps {
   onStartStream: () => void;
   isConnecting: boolean;
   channel: { ref: string } | null;
+  /** Camera or recorder error to display above the preview — visible above the fold on mobile. */
+  streamError?: string | null;
 }
 
 // ─── Countdown overlay ────────────────────────────────────────────────────────
@@ -199,6 +201,7 @@ export function PreStreamSetup({
   onStartStream,
   isConnecting,
   channel,
+  streamError = null,
 }: PreStreamSetupProps) {
   const t = useI18n();
 
@@ -332,6 +335,37 @@ export function PreStreamSetup({
           {/* ── Camera preview + thumbnail capture ────────────────────── */}
           <div>
             <SectionLabel>{t.thumbnailLabel}</SectionLabel>
+
+            {/* Inline camera error banner — visible above the fold on mobile.
+                Surfaces NotAllowed / NotFound / NotReadable so creators know
+                to grant permission instead of staring at a black preview. */}
+            {streamError && (
+              <div
+                className="mb-3 flex items-start gap-2 px-3 py-2 rounded-lg text-xs"
+                style={{
+                  background: "rgba(255,69,58,0.10)",
+                  border: "1px solid rgba(255,69,58,0.30)",
+                  color: "#FF6B6B",
+                }}
+                role="alert"
+                aria-live="assertive"
+              >
+                <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold mb-0.5">Camera unavailable</p>
+                  <p className="opacity-80 leading-snug break-words">{streamError}</p>
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="mt-1.5 text-[11px] font-semibold underline hover:no-underline"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div
               className="relative rounded-xl overflow-hidden"

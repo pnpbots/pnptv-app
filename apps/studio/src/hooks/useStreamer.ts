@@ -766,9 +766,21 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
       })
       .then((stream) => {
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
+        // Race-tolerant attach: PreStreamSetup may mount its <video> element
+        // after the getUserMedia promise resolves. Retry every 100ms for up to
+        // 5s until videoRef.current is available, then call .play() explicitly
+        // since some mobile browsers don't respect autoplay reliably.
+        let attempts = 0;
+        const attach = () => {
+          const el = videoRef.current;
+          if (el) {
+            try { el.srcObject = stream; } catch { /* noop */ }
+            el.play().catch(() => { /* autoplay policy — user gesture will trigger play */ });
+            return;
+          }
+          if (attempts++ < 50) setTimeout(attach, 100);
+        };
+        attach();
         enumerateCameras();
       })
       .catch((err: unknown) => {
