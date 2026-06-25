@@ -167,7 +167,8 @@ async function redeemLink(code, userId) {
         `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
          VALUES ($1, 'prime', false, NOW() + ($2 || ' hours')::interval, false)
          ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
-         DO UPDATE SET expires_at = GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)`,
+         DO UPDATE SET expires_at = GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
+         WHERE user_entitlements.is_lifetime = FALSE`,
         [uid, String(primeHours)],
       );
       primeGranted = true;
