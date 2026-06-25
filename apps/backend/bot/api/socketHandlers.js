@@ -10,6 +10,7 @@ const LiveStreamModel = require('../../models/liveStreamModel');
 const DmService = require('../../services/dmService');
 const streamAnalyticsService = require('../../services/streamAnalyticsService');
 const streamRecordingService = require('../../services/streamRecordingService');
+const restreamerService = require('../../services/restreamerService');
 const IdentityVerificationService = require('../../services/identityVerificationService');
 
 // ── Lua script: atomic viewer-count decrement clamped to 0 ────────────────────
@@ -2640,6 +2641,19 @@ function initSocketIO(io) {
         const streamKey = channelRef.startsWith('pnptv-')
           ? channelRef.slice('pnptv-'.length)
           : channelRef;
+
+        // Self-heal: ensure the Restreamer ingest process exists for this
+        // channelRef. createProcess is idempotent — it returns the existing
+        // process if one is present. Without this, creators whose provisionChannel
+        // ran before reliable Restreamer process creation push RTMP into a void:
+        // FFmpeg connects, frames are accepted, but no HLS manifest is generated
+        // and viewers see nothing. Non-fatal: failure logs but stream proceeds.
+        try {
+          const performerTitle = (user.first_name || user.username || `Creator ${user.id}`).slice(0, 100);
+          await restreamerService.createProcess({ refId: channelRef, title: performerTitle });
+        } catch (provErr) {
+          logger.warn('stream:start: Restreamer createProcess failed (non-fatal)', { channelRef, error: provErr.message });
+        }
 
         const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN;
         const rtmpTarget = rtmpToken
