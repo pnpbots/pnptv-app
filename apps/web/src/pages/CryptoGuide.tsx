@@ -41,6 +41,13 @@ function ShieldIcon() {
 }
 
 const WALLETS = {
+  metamask: {
+    name: "MetaMask",
+    emoji: "🦊",
+    color: "#F6851B",
+    android: "https://play.google.com/store/apps/details?id=io.metamask",
+    ios: "https://apps.apple.com/app/metamask-blockchain-wallet/id1438144202",
+  },
   trust: {
     name: "Trust Wallet",
     emoji: "👛",
@@ -78,21 +85,28 @@ const S = {
     whichOptions: [
       { coin: "Dash", anchor: "#dash", color: "#008DE4", emoji: "🥷", tag: "Most private", desc: "Fastest confirmation. Built for private everyday payments. Self-hosted checkout via BTCPay — we never see your identity." },
       { coin: "Bitcoin (BTC)", anchor: "#btc", color: "#F7931A", emoji: "₿", tag: "Most recognized", desc: "The original decentralized currency. No government can stop it. Known worldwide. Great if you already have BTC." },
-      { coin: "USDC / USDT", anchor: "#stable", color: "#26a17b", emoji: "💵", tag: "Stable = 1 USD", desc: "Digital dollars. 1 USDC = $1 USD always. Perfect for beginners who want crypto privacy without the price volatility." },
+      { coin: "USDT (BNB Chain)", anchor: "#stable", color: "#26a17b", emoji: "₮", tag: "Stable = 1 USD", desc: "Digital dollar on BNB Chain. 1 USDT = $1 USD always. Works natively with MetaMask, Trust Wallet, and Binance — tap the shortcut button and pay instantly." },
     ],
 
     beginnerTitle: "New to crypto? Start here.",
     beginnerSubtitle: "You've never touched crypto before. That's fine — this section is for you. Three steps and you're ready to pay.",
 
     walletTitle: "Step 1 — Get a wallet",
-    walletBody: "A crypto wallet is an app that holds your coins. Think of it like a digital purse. You need one to receive and send crypto. Here are the two we recommend:",
+    walletBody: "A crypto wallet is an app that holds your coins. Think of it like a digital purse. You need one to receive and send crypto. Here are the three we recommend:",
     wallets: [
       {
-        key: "trust" as const,
-        desc: "The best all-in-one wallet. Supports Bitcoin, USDC, USDT, and hundreds of other coins. Free, open-source, no account needed.",
+        key: "metamask" as const,
+        desc: "The most popular EVM wallet. Supports USDT on BNB Smart Chain natively — the PNPtv checkout opens straight inside MetaMask. Free, no account needed.",
         androidLabel: "Google Play",
         iosLabel: "App Store",
-        tip: "Use Trust Wallet for Bitcoin, USDC, and USDT.",
+        tip: "Use MetaMask for USDT (BNB Chain) — the PNPtv checkout links directly to it.",
+      },
+      {
+        key: "trust" as const,
+        desc: "All-in-one wallet. Supports Bitcoin, USDT, USDC, and hundreds of other coins. Free, open-source, no account needed.",
+        androidLabel: "Google Play",
+        iosLabel: "App Store",
+        tip: "Use Trust Wallet for Bitcoin and USDT.",
       },
       {
         key: "dash" as const,
@@ -102,7 +116,7 @@ const S = {
         tip: "Use Dash Wallet for Dash payments only.",
       },
     ],
-    walletTip: "💡 Not sure which to pick? Download Trust Wallet — it covers Bitcoin, USDC, and USDT all in one app.",
+    walletTip: "💡 Not sure which to pick? Download MetaMask or Trust Wallet — both work with USDT on BNB Chain and open directly from the PNPtv checkout.",
 
     buyTitle: "Step 2 — Buy crypto",
     buyBody: "You get crypto by buying it on an exchange — an app that sells crypto the same way a currency exchange converts dollars to euros.",
@@ -188,32 +202,33 @@ const S = {
       },
     ],
 
-    stableTitle: "USDC / USDT — Stable Digital Dollar",
-    stableWhat: "USDC and USDT are stablecoins — digital dollars. 1 USDC = $1 USD. 1 USDT = $1 USD. Always. They don't go up or down in value like Bitcoin or Dash. You buy exactly the amount you need and spend it. They still give you full crypto privacy — no bank statement, no name attached — but without price volatility. Perfect for beginners.",
-    stableWhy: "Best for: newcomers to crypto who want stability. Buy $30 of USDC, spend $30 on PNPtv. Simple.",
+    stableTitle: "USDT (BNB Chain) — Stable Digital Dollar",
+    stableWhat: "USDT is a stablecoin — a digital dollar. 1 USDT = $1 USD. Always. It doesn't go up or down in value like Bitcoin or Dash. You buy exactly the amount you need and spend it. We use USDT on BNB Smart Chain (BSC) — the same network natively supported by MetaMask, Trust Wallet, and Binance. No bridge, no network confusion. It still gives you full crypto privacy — no bank statement, no name attached — but without price volatility. Perfect for beginners.",
+    stableWhy: "Best for: beginners who want stability. Buy $30 of USDT, spend $30 on PNPtv. Open directly in MetaMask or Trust Wallet with one tap.",
     stableSteps: [
       {
         n: "1",
-        title: "Get USDC or USDT",
-        body: "Buy on Coinbase, Binance, or Kraken. Or instantly with a card via MoonPay. Store in Trust Wallet (Android or iOS).",
+        title: "Get USDT (BNB Chain)",
+        body: "Buy USDT on Binance, Coinbase, or Kraken. Or instantly with a card via MoonPay. Store it in MetaMask or Trust Wallet — both support BNB Smart Chain natively.",
         links: [
+          { label: "MetaMask — Android ↗", href: WALLETS.metamask.android },
+          { label: "MetaMask — iOS ↗", href: WALLETS.metamask.ios },
           { label: "Trust Wallet — Android ↗", href: WALLETS.trust.android },
           { label: "Trust Wallet — iOS ↗", href: WALLETS.trust.ios },
-          { label: "Buy USDC on Coinbase ↗", href: "https://www.coinbase.com/price/usd-coin" },
-          { label: "Buy on MoonPay ↗", href: "https://www.moonpay.com/buy/usdc" },
+          { label: "Buy on Binance ↗", href: "https://www.binance.com/en/buy-sell-crypto" },
+          { label: "Buy on MoonPay ↗", href: "https://www.moonpay.com/buy/usdt" },
         ],
       },
       {
         n: "2",
-        title: "Pick a network",
-        body: "When sending USDC/USDT, you'll choose a network. Cheaper options: Polygon, Base, Solana, or TRON. Ethereum works everywhere but has higher fees. Make sure the network in your wallet matches what NowPayments shows.",
+        title: "BNB Smart Chain is pre-selected",
+        body: "Unlike other crypto options, you don't have to choose a network. We pre-select BNB Smart Chain (BSC) for USDT — the cheapest and fastest option, fully supported by MetaMask, Trust Wallet, and Binance. No network mismatch risk.",
         links: [],
-        warning: "⚠️ Always match the network on your wallet to the network in the NowPayments checkout. Sending on the wrong network can result in lost funds.",
       },
       {
         n: "3",
         title: "Choose your plan on PNPtv",
-        body: "Go to pnptv.app/subscribe or /lifetime100. Select your plan and choose \"USDC\" or \"USDT\" as the payment method.",
+        body: "Go to pnptv.app/subscribe or /lifetime100. Select your plan and choose \"USDT\" as the payment method.",
         links: [
           { label: "Subscribe page ↗", href: "/subscribe" },
           { label: "Lifetime PRIME $100 ↗", href: "/lifetime100" },
@@ -221,8 +236,8 @@ const S = {
       },
       {
         n: "4",
-        title: "Complete the NowPayments checkout",
-        body: "A NowPayments page opens with an address and QR code. In your wallet → Send → paste the address or scan the QR → confirm the exact amount. Your membership activates automatically.",
+        title: "Open in your wallet and pay",
+        body: "Three shortcut buttons appear: 🦊 MetaMask, 🔵 Trust Wallet, and 🌐 Other wallet. Tap your wallet — it opens the payment page directly inside your app. Confirm the USDT amount. Your membership activates automatically.",
         links: [],
       },
     ],
@@ -231,7 +246,7 @@ const S = {
     faq: [
       { q: "I've never used crypto. Is this complicated?", a: "It feels new at first but it's simpler than it looks. The hardest part is buying the crypto — once you have it, sending a payment is just \"open app → send → scan QR → confirm\". Follow the step-by-step guides above and you'll be done in under 10 minutes." },
       { q: "Why Dash and Bitcoin specifically?", a: "Because they are genuinely decentralized. No government, no bank, no corporation controls them. Bitcoin has been running for 15+ years without anyone being able to shut it down. Dash was designed for fast, private everyday payments. USDC/USDT are convenient but issued by companies — technically a company could freeze USDC. Dash and Bitcoin can't be frozen by anyone." },
-      { q: "What's the difference between USDC and USDT?", a: "Both are digital dollars worth exactly $1 each. USDC is issued by Circle (backed by Coinbase) and is considered more transparent. USDT is issued by Tether and is the most widely used stablecoin worldwide. We accept both — pick whichever is easier to buy in your country." },
+      { q: "What's the difference between USDC and USDT?", a: "Both are digital dollars worth exactly $1 each. We use USDT on BNB Smart Chain (BSC) as the quick-pay option — it works natively with MetaMask, Trust Wallet, and Binance, so when you tap the checkout button your wallet opens directly. USDC is also accepted via NowPayments if you prefer it. Both are stable, both give you full crypto privacy." },
       { q: "What if my crypto payment doesn't confirm?", a: "If you sent the payment but your account wasn't activated after 30 minutes, contact us at pnptv.app/contact. Send your transaction ID (a long string of letters/numbers your wallet gives you after sending). We can recover it manually." },
       { q: "Is my identity hidden when I pay with crypto?", a: "Yes. Crypto transactions are pseudonymous — recorded on a public blockchain but not tied to your real name. We don't ask for your name when you pay. We never see who you are beyond your PNPtv account." },
       { q: "Can I pay with other cryptocurrencies (Ethereum, Litecoin, etc.)?", a: "We accept many coins via NowPayments — including ETH, LTC, XMR (Monero), and more. On the checkout page you can select your coin. We highlight Dash, Bitcoin, USDC, and USDT because they're the most practical for our community." },
@@ -245,7 +260,7 @@ const S = {
     ctaLifetime: "Lifetime PRIME $100 →",
     backHome: "← Back to PNPtv",
     needHelp: "Still stuck? Contact support →",
-    stableCoinsNote: "USDC and USDT = 1 USD always. No volatility.",
+    stableCoinsNote: "USDT on BNB Chain = 1 USD always. No volatility.",
     androidLabel: "Android",
     iosLabel: "iPhone / iOS",
   },
@@ -269,21 +284,28 @@ const S = {
     whichOptions: [
       { coin: "Dash", anchor: "#dash", color: "#008DE4", emoji: "🥷", tag: "Más privado", desc: "Confirmación más rápida. Creado para pagos privados del día a día. Checkout propio con BTCPay — nunca vemos tu identidad." },
       { coin: "Bitcoin (BTC)", anchor: "#btc", color: "#F7931A", emoji: "₿", tag: "El más reconocido", desc: "La moneda descentralizada original. Ningún gobierno puede detenerlo. Conocido en todo el mundo. Ideal si ya tienes BTC." },
-      { coin: "USDC / USDT", anchor: "#stable", color: "#26a17b", emoji: "💵", tag: "Estable = 1 USD", desc: "Dólares digitales. 1 USDC = $1 USD siempre. Perfecto para principiantes que quieren privacidad cripto sin la volatilidad de precios." },
+      { coin: "USDT (BNB Chain)", anchor: "#stable", color: "#26a17b", emoji: "₮", tag: "Estable = 1 USD", desc: "Dólar digital en BNB Chain. 1 USDT = $1 USD siempre. Compatible nativamente con MetaMask, Trust Wallet y Binance — toca el botón de acceso directo y paga al instante." },
     ],
 
     beginnerTitle: "¿Nuevo en cripto? Empieza aquí.",
     beginnerSubtitle: "Nunca has tocado cripto. Sin problema — esta sección es para ti. Tres pasos y estás listo para pagar.",
 
     walletTitle: "Paso 1 — Obtén una wallet",
-    walletBody: "Una wallet de cripto es una app que guarda tus monedas. Piénsala como una billetera digital. La necesitas para recibir y enviar cripto.",
+    walletBody: "Una wallet de cripto es una app que guarda tus monedas. Piénsala como una billetera digital. La necesitas para recibir y enviar cripto. Estas son las tres que recomendamos:",
     wallets: [
       {
-        key: "trust" as const,
-        desc: "La mejor wallet todo-en-uno. Soporta Bitcoin, USDC, USDT y cientos de otras monedas. Gratuita, código abierto, sin necesidad de cuenta.",
+        key: "metamask" as const,
+        desc: "La billetera EVM más popular. Soporta USDT en BNB Smart Chain de forma nativa — el checkout de PNPtv abre directamente en MetaMask. Gratuita, sin necesidad de cuenta.",
         androidLabel: "Google Play",
         iosLabel: "App Store",
-        tip: "Usa Trust Wallet para Bitcoin, USDC y USDT.",
+        tip: "Usa MetaMask para USDT (BNB Chain) — el checkout de PNPtv enlaza directamente.",
+      },
+      {
+        key: "trust" as const,
+        desc: "Billetera todo-en-uno. Soporta Bitcoin, USDT, USDC y cientos de otras monedas. Gratuita, código abierto, sin cuenta.",
+        androidLabel: "Google Play",
+        iosLabel: "App Store",
+        tip: "Usa Trust Wallet para Bitcoin y USDT.",
       },
       {
         key: "dash" as const,
@@ -293,7 +315,7 @@ const S = {
         tip: "Usa Dash Wallet solo para pagos con Dash.",
       },
     ],
-    walletTip: "💡 ¿No sabes cuál elegir? Descarga Trust Wallet — cubre Bitcoin, USDC y USDT en una sola app.",
+    walletTip: "💡 ¿No sabes cuál elegir? Descarga MetaMask o Trust Wallet — ambas funcionan con USDT en BNB Chain y abren directamente desde el checkout de PNPtv.",
 
     buyTitle: "Paso 2 — Compra cripto",
     buyBody: "Obtienes cripto comprándolo en un exchange — una app que vende cripto igual que una casa de cambio convierte dólares a euros.",
@@ -379,32 +401,33 @@ const S = {
       },
     ],
 
-    stableTitle: "USDC / USDT — Dólar Digital Estable",
-    stableWhat: "USDC y USDT son stablecoins — dólares digitales. 1 USDC = $1 USD. 1 USDT = $1 USD. Siempre. No suben ni bajan de valor como Bitcoin o Dash. Compras exactamente el monto que necesitas y lo gastas. Igualmente te dan privacidad total de cripto — sin estado de cuenta, sin nombre asociado — pero sin volatilidad de precios. Perfecto para principiantes.",
-    stableWhy: "Ideal para: quienes son nuevos en cripto y quieren estabilidad. Compra $30 de USDC, gasta $30 en PNPtv. Simple.",
+    stableTitle: "USDT (BNB Chain) — Dólar Digital Estable",
+    stableWhat: "USDT es una stablecoin — un dólar digital. 1 USDT = $1 USD. Siempre. No sube ni baja de valor como Bitcoin o Dash. Compras exactamente el monto que necesitas y lo gastas. Usamos USDT en BNB Smart Chain (BSC) — la misma red que soportan MetaMask, Trust Wallet y Binance de forma nativa. Sin bridges, sin confusión de redes. Igualmente te da privacidad total de cripto — sin estado de cuenta, sin nombre asociado — pero sin volatilidad de precios. Perfecto para principiantes.",
+    stableWhy: "Ideal para: principiantes que quieren estabilidad. Compra $30 de USDT, gasta $30 en PNPtv. Abre directamente en MetaMask o Trust Wallet con un toque.",
     stableSteps: [
       {
         n: "1",
-        title: "Obtén USDC o USDT",
-        body: "Compra en Coinbase, Binance o Kraken. O instantáneamente con tarjeta en MoonPay. Guárdalos en Trust Wallet (Android o iOS).",
+        title: "Obtén USDT (BNB Chain)",
+        body: "Compra USDT en Binance, Coinbase o Kraken. O instantáneamente con tarjeta en MoonPay. Guárdalo en MetaMask o Trust Wallet — ambas soportan BNB Smart Chain de forma nativa.",
         links: [
+          { label: "MetaMask — Android ↗", href: WALLETS.metamask.android },
+          { label: "MetaMask — iOS ↗", href: WALLETS.metamask.ios },
           { label: "Trust Wallet — Android ↗", href: WALLETS.trust.android },
           { label: "Trust Wallet — iOS ↗", href: WALLETS.trust.ios },
-          { label: "Comprar USDC en Coinbase ↗", href: "https://www.coinbase.com/price/usd-coin" },
-          { label: "Comprar en MoonPay ↗", href: "https://www.moonpay.com/buy/usdc" },
+          { label: "Comprar en Binance ↗", href: "https://www.binance.com/en/buy-sell-crypto" },
+          { label: "Comprar en MoonPay ↗", href: "https://www.moonpay.com/buy/usdt" },
         ],
       },
       {
         n: "2",
-        title: "Elige una red",
-        body: "Al enviar USDC/USDT, debes elegir una red. Opciones más económicas: Polygon, Base, Solana o TRON. Ethereum funciona en todas partes pero tiene comisiones más altas. Asegúrate que la red de tu wallet coincida con la de NowPayments.",
+        title: "BNB Smart Chain ya está preseleccionado",
+        body: "A diferencia de otras opciones de cripto, no tienes que elegir una red. Preseleccionamos BNB Smart Chain (BSC) para USDT — la opción más barata y rápida, completamente compatible con MetaMask, Trust Wallet y Binance. Sin riesgo de enviar en la red incorrecta.",
         links: [],
-        warning: "⚠️ Siempre haz coincidir la red en tu wallet con la red que muestra NowPayments. Enviar en la red incorrecta puede resultar en pérdida de fondos.",
       },
       {
         n: "3",
         title: "Elige tu plan en PNPtv",
-        body: "Ve a pnptv.app/subscribe o /lifetime100. Elige tu plan y selecciona \"USDC\" o \"USDT\" como método de pago.",
+        body: "Ve a pnptv.app/subscribe o /lifetime100. Elige tu plan y selecciona \"USDT\" como método de pago.",
         links: [
           { label: "Página de suscripción ↗", href: "/subscribe" },
           { label: "Lifetime PRIME $100 ↗", href: "/lifetime100" },
@@ -412,8 +435,8 @@ const S = {
       },
       {
         n: "4",
-        title: "Completa el checkout de NowPayments",
-        body: "Se abre una página de NowPayments con una dirección y código QR. En tu wallet → Enviar → pega la dirección o escanea el QR → confirma el monto exacto. Tu membresía se activa automáticamente.",
+        title: "Abre en tu billetera y paga",
+        body: "Aparecen tres botones de acceso directo: 🦊 MetaMask, 🔵 Trust Wallet y 🌐 Otra billetera. Toca tu billetera — abre la página de pago directamente dentro de tu app. Confirma el monto en USDT. Tu membresía se activa automáticamente.",
         links: [],
       },
     ],
@@ -422,7 +445,7 @@ const S = {
     faq: [
       { q: "Nunca he usado cripto. ¿Es complicado?", a: "Al principio se siente nuevo pero es más simple de lo que parece. La parte más difícil es comprar el cripto — una vez que lo tienes, enviar un pago es solo \"abrir app → enviar → escanear QR → confirmar\". Sigue las guías paso a paso y estarás listo en menos de 10 minutos." },
       { q: "¿Por qué Dash y Bitcoin específicamente?", a: "Porque son genuinamente descentralizados. Ningún gobierno, ningún banco, ninguna empresa los controla. Bitcoin lleva más de 15 años funcionando sin que nadie haya podido apagarlo. Dash fue diseñado para pagos privados y rápidos del día a día. USDC/USDT son convenientes pero los emiten empresas — técnicamente podrían congelarlos. Dash y Bitcoin no pueden ser congelados por nadie." },
-      { q: "¿Cuál es la diferencia entre USDC y USDT?", a: "Ambos son dólares digitales que valen exactamente $1 cada uno. USDC lo emite Circle (respaldado por Coinbase) y se considera más transparente. USDT lo emite Tether y es la stablecoin más usada en el mundo. Aceptamos ambos — elige el que sea más fácil de comprar en tu país." },
+      { q: "¿Cuál es la diferencia entre USDC y USDT?", a: "Ambos son dólares digitales que valen exactamente $1 cada uno. Usamos USDT en BNB Smart Chain (BSC) como opción de pago rápido — funciona nativamente con MetaMask, Trust Wallet y Binance, así que cuando tocas el botón de checkout tu billetera abre directamente. USDC también es aceptado a través de NowPayments si lo prefieres. Ambos son estables y ambos te dan privacidad total." },
       { q: "¿Qué pasa si mi pago en cripto no se confirma?", a: "Si enviaste el pago pero tu cuenta no se activó después de 30 minutos, contáctanos en pnptv.app/contact. Envía tu ID de transacción (una cadena larga de letras/números que tu wallet te da después de enviar). Podemos recuperarlo manualmente." },
       { q: "¿Mi identidad está oculta cuando pago con cripto?", a: "Sí. Las transacciones cripto son seudónimas — se registran en una blockchain pública pero no están vinculadas a tu nombre real. No pedimos tu nombre cuando pagas. Nunca vemos quién eres más allá de tu cuenta en PNPtv." },
       { q: "¿Puedo pagar con otras criptomonedas (Ethereum, Litecoin, etc.)?", a: "Aceptamos muchas monedas a través de NowPayments — incluyendo ETH, LTC, XMR (Monero) y más. En la página de checkout puedes seleccionar tu moneda." },
@@ -436,7 +459,7 @@ const S = {
     ctaLifetime: "Lifetime PRIME $100 →",
     backHome: "← Volver a PNPtv",
     needHelp: "¿Aún con dudas? Contacta soporte →",
-    stableCoinsNote: "USDC y USDT = 1 USD siempre. Sin volatilidad.",
+    stableCoinsNote: "USDT en BNB Chain = 1 USD siempre. Sin volatilidad.",
     androidLabel: "Android",
     iosLabel: "iPhone / iOS",
   },
@@ -473,7 +496,7 @@ function Step({ n, title, body, links, color, warning }: {
 }
 
 function WalletCard({ walletKey, desc, androidLabel, iosLabel, tip }: {
-  walletKey: "trust" | "dash"; desc: string; androidLabel: string; iosLabel: string; tip: string;
+  walletKey: "trust" | "dash" | "metamask"; desc: string; androidLabel: string; iosLabel: string; tip: string;
 }) {
   const w = WALLETS[walletKey];
   return (
