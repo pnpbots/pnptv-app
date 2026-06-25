@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { Modal } from "@pnptv/ui-kit";
 import { useI18n } from "@/lib/i18n";
 import { getFollowersList, getFollowingList, type FollowListUser } from "@/lib/api";
+import { UserAvatar } from "@/components/UserAvatar";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -81,30 +82,31 @@ export default function FollowListModal({
       ) : (
         <div className="space-y-1 py-2">
           {users.map((u) => (
-            <button
+            <div
               key={u.id}
-              onClick={() => { onClose(); onNavigate(u.id); }}
-              className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors text-left"
+              className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
             >
-              {u.photoUrl && (u.photoUrl.startsWith("/") || u.photoUrl.startsWith("http")) ? (
-                <img src={u.photoUrl} alt={`${u.displayName || u.username || "User"}'s avatar`} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-              ) : (
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-                >
-                  {(u.firstName || u.username || "?")[0].toUpperCase()}
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
+              <UserAvatar
+                userId={u.id}
+                photoUrl={u.photoUrl}
+                displayName={u.firstName || u.username}
+                size="md"
+                onClick={() => { onClose(); onNavigate(u.id); }}
+                linkToProfile={false}
+              />
+              <button
+                type="button"
+                onClick={() => { onClose(); onNavigate(u.id); }}
+                className="flex-1 min-w-0 text-left"
+              >
                 <p className="text-sm font-medium text-white truncate">
                   {u.firstName}{u.lastName ? ` ${u.lastName}` : ""}
                 </p>
                 {u.username && (
                   <p className="text-xs truncate" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>@{u.username}</p>
                 )}
-              </div>
-            </button>
+              </button>
+            </div>
           ))}
           {nextCursor && (
             <div className="pt-2 text-center">

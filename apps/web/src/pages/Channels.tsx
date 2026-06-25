@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
+import { useTutorial } from "@/hooks/useTutorial";
+import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import {
   getChannels,
   browseCreatorChannels,
@@ -22,6 +24,7 @@ import {
 } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import { UploadVideoButton } from "@/components/channels/UploadVideoButton";
+import { UserAvatar } from "@/components/UserAvatar";
 
 // ── Tier badge colors ────────────────────────────────────────────────────────
 const TIER_COLORS: Record<string, { bg: string; text: string; label: string }> = {
@@ -1155,6 +1158,7 @@ function ChannelsInner() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
+  const { showTutorial, dismissTutorial, dismissForever } = useTutorial("channels");
 
   // Selected channel for detail view
   const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
@@ -1455,17 +1459,17 @@ function ChannelsInner() {
                           const photo = m.photo_file_id && (m.photo_file_id.startsWith("/") || m.photo_file_id.startsWith("http")) ? m.photo_file_id : null;
                           const name = m.first_name ? `${m.first_name}${m.last_name ? ` ${m.last_name}` : ""}` : m.username || "Member";
                           return (
-                            <button key={m.id} onClick={() => navigate(`/profile/${m.id}`)} className="flex items-center gap-3 p-3 rounded-xl hover:bg-pnp-surfaceHover transition-colors text-left w-full">
-                              {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#D4007A,#E69138)" }}>{name[0]?.toUpperCase()}</div>}
-                              <div className="flex-1 min-w-0">
+                            <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-pnp-surfaceHover transition-colors text-left w-full">
+                              <UserAvatar userId={m.id} photoUrl={photo} displayName={name} size="md" />
+                              <button onClick={() => navigate(`/profile/${m.id}`)} className="flex-1 min-w-0 text-left">
                                 <p className="text-sm font-medium text-pnp-textPrimary truncate">{name}</p>
                                 <div className="flex gap-1 mt-0.5 flex-wrap">
                                   {(m.tags || m.interests || []).slice(0, 3).map((tg: string) => (
                                     <span key={tg} className="text-[10px] px-1.5 py-0.5 rounded bg-pnp-surface text-pnp-textSecondary border border-pnp-border">{tg}</span>
                                   ))}
                                 </div>
-                              </div>
-                            </button>
+                              </button>
+                            </div>
                           );
                         })}
                       </div>
@@ -1479,17 +1483,17 @@ function ChannelsInner() {
                           const photo = c.photo_url && (c.photo_url.startsWith("/") || c.photo_url.startsWith("http")) ? c.photo_url : null;
                           const name = c.display_name || c.username || "Creator";
                           return (
-                            <button key={c.id} onClick={() => navigate(`/profile/${c.user_id}`)} className="flex items-center gap-3 p-3 rounded-xl hover:bg-pnp-surfaceHover transition-colors text-left w-full">
-                              {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-bold text-white" style={{ background: "linear-gradient(135deg,#5ED1C4,#D4007A)" }}>{name[0]?.toUpperCase()}</div>}
-                              <div className="flex-1 min-w-0">
+                            <div key={c.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-pnp-surfaceHover transition-colors text-left w-full">
+                              <UserAvatar userId={c.user_id} photoUrl={photo} displayName={name} size="md" />
+                              <button onClick={() => navigate(`/profile/${c.user_id}`)} className="flex-1 min-w-0 text-left">
                                 <p className="text-sm font-medium text-pnp-textPrimary truncate">{name}</p>
                                 <div className="flex gap-1 mt-0.5 flex-wrap">
                                   {(c.tags || c.interests || []).slice(0, 3).map((tg: string) => (
                                     <span key={tg} className="text-[10px] px-1.5 py-0.5 rounded bg-pnp-surface text-pnp-textSecondary border border-pnp-border">{tg}</span>
                                   ))}
                                 </div>
-                              </div>
-                            </button>
+                              </button>
+                            </div>
                           );
                         })}
                       </div>
@@ -1857,6 +1861,7 @@ function ChannelsInner() {
             )}
         </>}
       </div>
+      {showTutorial && <TutorialOverlay section="channels" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
     </>
   );
 }

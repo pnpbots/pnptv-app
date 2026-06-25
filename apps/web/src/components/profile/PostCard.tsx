@@ -17,6 +17,7 @@ import { SharePostModal } from "@/components/SharePostModal";
 // NearbyBadge removed — PostCard shows city name inline instead
 import { MentionText } from "@/components/MentionText";
 import { MentionInput } from "@/components/MentionInput";
+import { UserAvatar } from "@/components/UserAvatar";
 
 // ── Helpers (duplicated here to keep the component self-contained) ────────────
 
@@ -122,6 +123,7 @@ export default function PostCard({
   // the server returns the real post.id. Prefixed negative-ish range so it
   // never collides with real bigint ids.
   const optimisticIdRef = useRef(-Date.now());
+  const composerRef = useRef<HTMLDivElement>(null);
 
   const canDelete = isOwn || isAdmin;
 
@@ -317,6 +319,9 @@ export default function PostCard({
       return `${prev}${sep}${handle} `;
     });
     setComposerKey((k) => k + 1);
+    setTimeout(() => {
+      composerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 50);
   }, []);
 
   const handleSendReply = useCallback(async () => {
@@ -515,39 +520,16 @@ export default function PostCard({
 
       <div className="flex gap-3">
         {/* Avatar */}
-        <button
-          onClick={() => onAuthorTap?.(post.author_id)}
-          className="flex-shrink-0"
-          aria-label={`View ${
-            post.author_first_name || post.author_username || "user"
-          }'s profile`}
-        >
-          {post.author_id === "cristina-ai" ? (
-            <span className="w-10 h-10 rounded-full flex items-center justify-center text-2xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
-          ) : photoUrl ? (
-            <img
-              src={photoUrl}
-              alt={`${
-                post.author_first_name || post.author_username || "User"
-              }'s avatar`}
-              className="w-10 h-10 rounded-full object-cover"
-            />
-          ) : (
-            <div
-              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
-              style={{
-                background: "linear-gradient(135deg, #D4007A, #E69138)",
-                color: "#fff",
-              }}
-            >
-              {(
-                post.author_first_name ||
-                post.author_username ||
-                "?"
-              )[0].toUpperCase()}
-            </div>
-          )}
-        </button>
+        {post.author_id === "cristina-ai" ? (
+          <span className="w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center text-2xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
+        ) : (
+          <UserAvatar
+            userId={post.author_id}
+            photoUrl={photoUrl}
+            displayName={post.author_first_name || post.author_username}
+            size="md"
+          />
+        )}
 
         {/* Content */}
         <div className="flex-1 min-w-0">
@@ -1098,29 +1080,13 @@ export default function PostCard({
                         key={reply.id}
                         className={`flex gap-2 transition-opacity ${pending ? "opacity-60" : ""}`}
                       >
-                        <button
-                          onClick={() => !pending && onAuthorTap?.(reply.author_id)}
-                          className="flex-shrink-0"
-                          disabled={pending}
-                        >
-                          {resolvePhotoUrl(reply.author_photo) ? (
-                            <img
-                              src={resolvePhotoUrl(reply.author_photo)!}
-                              alt=""
-                              className="w-7 h-7 rounded-full object-cover"
-                            />
-                          ) : (
-                            <div
-                              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
-                              style={{
-                                background: "linear-gradient(135deg, #D4007A, #E69138)",
-                                color: "#fff",
-                              }}
-                            >
-                              {(reply.author_first_name || reply.author_username || "?")[0].toUpperCase()}
-                            </div>
-                          )}
-                        </button>
+                        <UserAvatar
+                          userId={reply.author_id}
+                          photoUrl={resolvePhotoUrl(reply.author_photo)}
+                          displayName={reply.author_first_name || reply.author_username}
+                          size="sm"
+                          linkToProfile={!pending}
+                        />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
                             <span className="text-xs font-semibold text-white truncate">
@@ -1152,10 +1118,10 @@ export default function PostCard({
                                 </svg>
                                 {likeState.count > 0 && <span>{likeState.count}</span>}
                               </button>
-                              {!isOwnReply && reply.author_username && (
+                              {!isOwnReply && (reply.author_username || reply.author_first_name) && (
                                 <button
                                   type="button"
-                                  onClick={() => replyToUser(reply.author_username || null)}
+                                  onClick={() => replyToUser(reply.author_username || reply.author_first_name || null)}
                                   className="inline-flex items-center gap-1 transition-colors hover:text-white/80"
                                   style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
                                   aria-label={ft.replyToAuthor.replace("{name}", reply.author_username)}
@@ -1190,7 +1156,7 @@ export default function PostCard({
 
               {/* Reply composer */}
               {currentUserId && (
-                <>
+                <div ref={composerRef}>
                   <div className="flex gap-2 items-end">
                     <MentionInput
                       key={composerKey}
@@ -1232,7 +1198,7 @@ export default function PostCard({
                       </button>
                     </div>
                   )}
-                </>
+                </div>
               )}
             </div>
           )}

@@ -64,6 +64,7 @@ class SocialPostService {
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
               u.city as author_city, u.country as author_country,
+              u.tier as author_tier,
               u.creator_status as author_creator_status, u.creator_type as author_creator_type,
               u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,
@@ -103,10 +104,50 @@ class SocialPostService {
     }
     // Interleave by author so every user gets seen before prolific posters dominate
     posts = SocialPostService._diversifyFeed(posts);
+    // Boost posts from online + PRIME authors to the top of the page window.
+    // Cursor pagination still works because we only re-order within the bounded
+    // window (sp.id < cursor); the next page resumes at the lowest id we returned.
+    posts = await SocialPostService._applyDiscoveryBoost(posts);
     const page = posts.slice(0, lim);
     const nextCursor = posts.length > lim ? String(page[page.length - 1].id) : null;
 
     return { posts: page, nextCursor };
+  }
+
+  /**
+   * Stable re-sort by discovery score: online beats offline, PRIME gets a bump
+   * within each online/offline group. Score = (online ? 2 : 0) + (prime ? 1 : 0).
+   * Presence read in one Redis pipeline against `presence:online:<id>` keys
+   * (60s TTL, written by socketHandlers). PRIME read from each post's
+   * author_tier column (no extra query needed — added to the SELECT).
+   * Returns the original array unchanged on any failure.
+   */
+  static async _applyDiscoveryBoost(posts) {
+    if (!Array.isArray(posts) || posts.length <= 1) return posts;
+    try {
+      const { getRedis } = require('../config/redis');
+      const redis = getRedis();
+      const distinctIds = [...new Set(posts.map(p => p.author_id).filter(Boolean).map(String))];
+      if (distinctIds.length === 0) return posts;
+      const pipeline = redis.pipeline();
+      for (const id of distinctIds) pipeline.get(`presence:online:${id}`);
+      const replies = await pipeline.exec();
+      const onlineIds = new Set();
+      replies.forEach(([err, val], idx) => {
+        if (!err && val) onlineIds.add(distinctIds[idx]);
+      });
+      // Stable sort by descending score, preserving original order within ties.
+      const decorated = posts.map((p, idx) => {
+        const isOnline = p.author_id && onlineIds.has(String(p.author_id));
+        const isPrime = String(p.author_tier || '').toUpperCase() === 'PRIME';
+        return { p, idx, score: (isOnline ? 2 : 0) + (isPrime ? 1 : 0) };
+      });
+      decorated.sort((a, b) => (b.score - a.score) || (a.idx - b.idx));
+      return decorated.map(d => d.p);
+    } catch (err) {
+      logger.warn('_applyDiscoveryBoost failed (non-fatal)', { error: err.message });
+      return posts;
+    }
   }
 
   // ── PRIME video carousel injection ────────────────────────────────────────
@@ -436,6 +477,7 @@ class SocialPostService {
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
               u.city as author_city, u.country as author_country,
+              u.tier as author_tier,
               u.creator_status as author_creator_status, u.creator_type as author_creator_type,
               u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,
@@ -491,6 +533,7 @@ class SocialPostService {
               u.id as author_id, u.username as author_username,
               u.first_name as author_first_name, u.photo_file_id as author_photo,
               u.city as author_city, u.country as author_country,
+              u.tier as author_tier,
               u.creator_status as author_creator_status, u.creator_type as author_creator_type,
               u.creator_verified as author_creator_verified, u.creator_price_usd as author_creator_price,
               EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me,

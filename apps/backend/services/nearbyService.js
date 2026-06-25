@@ -353,24 +353,34 @@ class NearbyService {
         }
       });
 
-      // Followers-first ordering: show followed users at the top
+      // Sort: followed → PRIME → distance. Followers are the strongest signal
+      // (you asked to see them); PRIME breaks ties among non-followed users so
+      // paying members get visibility above identical-distance free users.
       try {
-        const followRes = await query(
-          'SELECT following_id FROM user_follows WHERE follower_id=$1',
-          [userId]
-        );
+        const ids = privacyFiltered.map(u => String(u.user_id));
+        const [followRes, tierRes] = await Promise.all([
+          query('SELECT following_id FROM user_follows WHERE follower_id=$1', [userId]),
+          ids.length > 0
+            ? query(`SELECT id::text AS id, tier FROM users WHERE id = ANY($1::text[]) AND tier = 'PRIME'`, [ids])
+            : Promise.resolve({ rows: [] }),
+        ]);
         const followedIds = new Set(followRes.rows.map(r => String(r.following_id)));
+        const primeIds = new Set(tierRes.rows.map(r => String(r.id)));
         privacyFiltered.forEach(u => {
           u.is_followed = followedIds.has(String(u.user_id));
+          u.is_prime = primeIds.has(String(u.user_id));
         });
         privacyFiltered.sort((a, b) => {
           const aF = a.is_followed ? 0 : 1;
           const bF = b.is_followed ? 0 : 1;
           if (aF !== bF) return aF - bF;
+          const aP = a.is_prime ? 0 : 1;
+          const bP = b.is_prime ? 0 : 1;
+          if (aP !== bP) return aP - bP;
           return (a.distance_km ?? 999) - (b.distance_km ?? 999);
         });
       } catch (err) {
-        logger.warn(`Failed to apply followers-first sorting: ${err.message}`);
+        logger.warn(`Failed to apply followers/PRIME sorting: ${err.message}`);
       }
 
       logger.info(`✅ Found ${privacyFiltered.length} nearby users for ${userId}`);

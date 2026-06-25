@@ -83,6 +83,7 @@ import { EventDetailModal } from "@/components/events";
 import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import { MediaUploadButton } from "@/components/hangouts/MediaUploadButton";
+import { UserAvatar } from "@/components/UserAvatar";
 import { VideoCallButton } from "@/components/hangouts/VideoCallButton";
 import LiveKitCallDock from "@/components/hangouts/LiveKitCallDock";
 import { ForwardTargetPicker } from "@/components/forwarding/ForwardTargetPicker";
@@ -735,15 +736,14 @@ function HangoutChatPanel({
                     >
                       {/* Avatar — only for first message in group, linked to profile */}
                       {!isMe && (
-                        <div className="flex-shrink-0 mt-auto w-6" onClick={() => navigate(`/profile/${msg.user_id}`)} role="button" tabIndex={0}>
+                        <div className="flex-shrink-0 mt-auto w-6">
                           {!grouped ? (
-                            isValidPhoto(msg.photo_url) ? (
-                              <img src={msg.photo_url!} alt="" className="w-6 h-6 rounded-full object-cover cursor-pointer" />
-                            ) : (
-                              <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold cursor-pointer" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>
-                                {(msg.first_name || msg.username || "?")[0].toUpperCase()}
-                              </div>
-                            )
+                            <UserAvatar
+                              userId={msg.user_id}
+                              photoUrl={msg.photo_url}
+                              displayName={msg.first_name || msg.username}
+                              size="xs"
+                            />
                           ) : null}
                         </div>
                       )}
@@ -1161,9 +1161,12 @@ function HangoutChatPanel({
                 const name = memberMap[String(uid)] || messages.find(m => String(m.user_id) === String(uid))?.first_name || "Member";
                 return (
                   <div key={uid} className="flex items-center gap-3 py-2">
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>
-                      {name[0]?.toUpperCase() || "?"}
-                    </div>
+                    <UserAvatar
+                      userId={String(uid)}
+                      photoUrl={null}
+                      displayName={name}
+                      size="sm"
+                    />
                     <span className="text-sm text-white">{name}</span>
                   </div>
                 );

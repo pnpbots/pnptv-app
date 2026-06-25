@@ -168,6 +168,7 @@ export interface TelegramAuthResponse {
     city?: string | null;
     country?: string | null;
     email?: string | null;
+    onboarding_complete?: boolean;
   };
   requiresTerms?: boolean;
   error?: string;
@@ -270,6 +271,34 @@ export function apiLogout(): Promise<{ success: boolean }> {
 
 export function oidcLogout(): Promise<{ success: boolean }> {
   return request("/api/webapp/auth/oidc/logout", { method: "POST" });
+}
+
+// ── Onboarding ────────────────────────────────────────────────────────────────
+
+export type OnboardingStepKey = "tiers" | "age" | "terms" | "privacy" | "rules" | "values" | "crypto";
+
+export interface OnboardingStatus {
+  complete: boolean;
+  steps: Record<OnboardingStepKey, boolean>;
+  currentStep: OnboardingStepKey;
+}
+
+export function getOnboardingStatus(): Promise<OnboardingStatus> {
+  return request("/api/webapp/onboarding/status");
+}
+
+export function submitOnboardingStep(
+  step: OnboardingStepKey,
+  payload: Record<string, unknown> = {},
+): Promise<{ ok: true } | { error: string }> {
+  return request("/api/webapp/onboarding/step", {
+    method: "POST",
+    body: { step, payload },
+  });
+}
+
+export function completeOnboarding(): Promise<{ complete: true } | { error: string }> {
+  return request("/api/webapp/onboarding/complete", { method: "POST" });
 }
 
 
@@ -436,8 +465,7 @@ export function initiateRaid(targetChannelRef: string): Promise<{
 }> {
   return request("/api/webapp/live/raid", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ targetChannelRef }),
+    body: { targetChannelRef },
   });
 }
 
@@ -448,8 +476,7 @@ export function setHostedChannel(targetChannelRef: string | null): Promise<{
 }> {
   return request("/api/webapp/live/host", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ targetChannelRef }),
+    body: { targetChannelRef },
   });
 }
 
@@ -489,8 +516,7 @@ export function buySlotTicket(
 }> {
   return request(`/api/webapp/live/slot/${encodeURIComponent(slotId)}/buy-ticket`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ currency }),
+    body: { currency },
   });
 }
 
@@ -3100,9 +3126,9 @@ export interface FeaturedPerformer {
   averageRating: number;
   /** True when the performer has an active webapp session (Socket.IO presence). Used for call availability. */
   isOnline?: boolean;
-  /** Set by the backend when the performer is currently streaming via Restreamer. Disabled — always false. */
+  /** True when the performer's live_channel matches a currently-running Restreamer ingest. Populated by /api/performers/featured. */
   isLive?: boolean;
-  /** Direct HLS playback URL, populated when isLive is true. */
+  /** Direct HLS playback URL, populated when isLive is true. Stripped for unauthenticated viewers. */
   hlsUrl?: string | null;
   live_channel?: string | null;
 }
@@ -5487,7 +5513,7 @@ export function toggleCreatorSubscription(): Promise<{ success: boolean; subscri
 export function saveStreamRules(rules: string): Promise<{ success: boolean; rules: string | null; error?: string }> {
   return request("/api/webapp/live/stream-rules", {
     method: "POST",
-    body: JSON.stringify({ rules }),
+    body: { rules },
   });
 }
 
@@ -7512,7 +7538,7 @@ export function saveTipMenu(
 export function getTipLeaderboard(
   channelRef: string,
   period: "today" | "week"
-): Promise<{ entries: { username: string; total: number; tip_count: number }[] }> {
+): Promise<{ leaderboard: { username: string; total: number; tipCount: number }[] }> {
   return request(
     `/api/proxy/live/tips/leaderboard?channelRef=${encodeURIComponent(channelRef)}&period=${period}`
   );
@@ -7520,7 +7546,7 @@ export function getTipLeaderboard(
 
 export function getCreatorRecordings(creatorId: string): Promise<{
   success: boolean;
-  recordings: { id: string; title: string; hlsUrl: string; createdAt: string; durationSeconds: number | null }[];
+  recordings: { id: string; title: string | null; manifestUrl: string; startedAt: string; endedAt: string | null; durationSeconds: number | null; sizeBytes: number | null; thumbUrl: string | null; requiresSubscription: boolean }[];
 }> {
   return request(`/api/webapp/creators/${encodeURIComponent(creatorId)}/recordings`);
 }

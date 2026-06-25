@@ -149,6 +149,32 @@ const requireSessionAuth = async (req, res, next) => {
 };
 
 /**
+ * Auth-only session check — validates session + ban status but skips the
+ * age/terms consent gate. Use ONLY for onboarding endpoints where the user
+ * must be able to call the API before completing age/terms verification.
+ */
+const requireSessionAuthNoConsent = async (req, res, next) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Not authenticated' });
+  req.user = req.session.user;
+  const userId = req.session.user.id;
+  try {
+    const banKey = `user:banned:${userId}`;
+    const cachedBan = await cache.get(banKey);
+    if (cachedBan === 'true') return res.status(403).json({ success: false, error: 'Account suspended.', code: 'BANNED' });
+    const { rows } = await getPool().query('SELECT role FROM users WHERE id = $1', [userId]);
+    const userRow = rows[0];
+    if (userRow?.role === 'banned') {
+      await cache.set(banKey, 'true', 120);
+      return res.status(403).json({ success: false, error: 'Account suspended.', code: 'BANNED' });
+    }
+  } catch (err) {
+    logger.error('requireSessionAuthNoConsent ban check failed', { userId, error: err.message });
+    return res.status(503).json({ success: false, error: 'Service temporarily unavailable', code: 'SERVICE_UNAVAILABLE' });
+  }
+  next();
+};
+
+/**
  * Soft auth — populates req.user from session if present, never blocks
  */
 const softAuth = (req, res, next) => {
@@ -1263,9 +1289,13 @@ const limiter = rateLimit({
     // Skip rate-limiting for lightweight, high-frequency read endpoints
     // that fire on every single page navigation.  These are cheap DB
     // lookups or session reads and should never block normal usage.
+    // dm/presence is included because the PresenceProvider polls every 20s
+    // for many user IDs at once; if a buggy build loops, it must not be
+    // able to poison the IP bucket and block auth/login attempts.
     const skipPaths = [
       '/api/auth-status',
       '/api/webapp/notifications/counts',
+      '/api/webapp/dm/presence',
     ];
     return skipPaths.includes(req.path);
   },
@@ -7499,6 +7529,55 @@ const mapDirectusPerformer = (p, userPhotoMap) => ({
 
 const DIRECTUS_PERFORMER_FIELDS = ['id', 'name', 'slug', 'bio', 'photo', 'is_featured', 'is_available', 'base_price_cents', 'pnptv_id'];
 
+// Fetch the set of Restreamer ingest reference IDs that are currently `running`.
+// Cached in Redis for 20s to avoid hammering Restreamer on every /featured request.
+// Returns an empty Set on any failure so callers can degrade gracefully.
+async function fetchRunningLiveChannels() {
+  const redis = getRedis();
+  const cacheKey = 'featured:live-channels';
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached !== null && cached !== undefined) {
+      return new Set(JSON.parse(cached));
+    }
+  } catch { /* cache miss is fine */ }
+
+  try {
+    const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
+    const restreamerUser = process.env.RESTREAMER_USER !== undefined ? process.env.RESTREAMER_USER : 'admin';
+    const restreamerPass = process.env.RESTREAMER_PASSWORD !== undefined ? process.env.RESTREAMER_PASSWORD : null;
+
+    let token = null;
+    if (restreamerUser && restreamerPass !== null) {
+      try {
+        const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
+          username: restreamerUser,
+          password: restreamerPass,
+        }, { timeout: 5000 });
+        token = loginResp.data?.access_token;
+      } catch { /* fall through to unauth GET */ }
+    }
+
+    const resp = await axios.get(`${restreamerUrl}/api/v3/process`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      timeout: 5000,
+    });
+    const running = (resp.data || [])
+      .filter(p => p.id?.startsWith('restreamer-ui:ingest:') && p.state?.exec === 'running')
+      .map(p => {
+        const ref = typeof (p.reference || p.id) === 'string' ? (p.reference || p.id) : '';
+        return ref.replace(/[^a-zA-Z0-9\-_.]/g, '');
+      })
+      .filter(Boolean);
+
+    try { await redis.set(cacheKey, JSON.stringify(running), 'EX', 20); } catch { /* non-fatal */ }
+    return new Set(running);
+  } catch (err) {
+    logger.warn(`fetchRunningLiveChannels failed: ${err.message}`);
+    return new Set();
+  }
+}
+
 // Fetch profile pics from users table for performers missing Directus photos
 async function fetchPerformerPhotos(performers) {
   const idsWithoutPhoto = performers
@@ -7543,7 +7622,7 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
       }),
       getPool().query(
         `SELECT id, username, first_name, last_name, photo_file_id, bio,
-                creator_type, creator_status, creator_price_usd, live_channel
+                creator_type, creator_status, creator_price_usd, live_channel, tier
          FROM users
          WHERE creator_status = 'active'
            AND creator_locked = FALSE
@@ -7605,7 +7684,50 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
         basePrice: c.creator_price_usd || 100,
         totalCalls: 0,
         averageRating: 0,
+        isPrime: String(c.tier || '').toUpperCase() === 'PRIME',
       });
+    }
+
+    // Inject live status: cross-reference each performer's live_channel against
+    // the set of currently-running Restreamer ingest processes. Only performers
+    // who are actually streaming get isLive=true and an hlsUrl. The Social-feed
+    // "Featured / LIVE" strip filters on isLive so it never shows offline users.
+    try {
+      const userIds = mapped.map(p => p.userId).filter(Boolean).map(String);
+      if (userIds.length > 0) {
+        const [runningChannels, { rows: userRows }] = await Promise.all([
+          fetchRunningLiveChannels(),
+          getPool().query(
+            `SELECT id::text AS id, live_channel, tier
+               FROM users
+              WHERE id = ANY($1::text[])`,
+            [userIds]
+          ),
+        ]);
+        const userToChannel = new Map();
+        const userToTier = new Map();
+        for (const row of userRows) {
+          if (row.live_channel) userToChannel.set(row.id, row.live_channel);
+          if (row.tier) userToTier.set(row.id, row.tier);
+        }
+        for (const entry of mapped) {
+          if (!entry.userId) continue;
+          const uid = String(entry.userId);
+          // Live check
+          const channel = userToChannel.get(uid);
+          if (channel && runningChannels.has(channel)) {
+            entry.isLive = true;
+            entry.hlsUrl = `${restreamerPublicUrl}/memfs/${channel}.m3u8`;
+          }
+          // PRIME tier (overrides the DB-creator fallback set earlier if needed)
+          const tier = userToTier.get(uid);
+          if (tier && String(tier).toUpperCase() === 'PRIME') {
+            entry.isPrime = true;
+          }
+        }
+      }
+    } catch (liveErr) {
+      logger.warn(`featured: live/tier check failed (non-fatal): ${liveErr.message}`);
     }
 
     // Inject online presence: check Redis Socket.IO active keys for each performer
@@ -7625,14 +7747,12 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
       logger.warn(`featured: presence check failed (non-fatal): ${presenceErr.message}`);
     }
 
-    // Sort: online performers first, then featured, then rest
-    mapped.sort((a, b) => {
-      if (a.isOnline && !b.isOnline) return -1;
-      if (!a.isOnline && b.isOnline) return 1;
-      if (a.isFeatured && !b.isFeatured) return -1;
-      if (!a.isFeatured && b.isFeatured) return 1;
-      return 0;
-    });
+    // Sort by discovery score:
+    //   live=8, online=4, prime=2, featured=1 — stable, online > prime so a
+    //   PRIME-but-offline performer still ranks below an active free user.
+    const scoreOf = (e) =>
+      (e.isLive ? 8 : 0) + (e.isOnline ? 4 : 0) + (e.isPrime ? 2 : 0) + (e.isFeatured ? 1 : 0);
+    mapped.sort((a, b) => scoreOf(b) - scoreOf(a));
 
     // Strip HLS stream URLs for unauthenticated users — prevents public access to stream links.
     const isAuthenticated = !!req.user?.id;
@@ -8225,6 +8345,17 @@ app.post('/api/webapp/events/:id/rsvp', requireSessionAuth, asyncHandler(eventsC
 app.delete('/api/webapp/events/:id/rsvp', requireSessionAuth, asyncHandler(eventsController.unrsvpEvent));
 // PUT /api/webapp/admin/events/:id/feature — Feature/unfeature event (admin)
 app.put('/api/webapp/admin/events/:id/feature', requireSessionAuth, adminGuard, asyncHandler(eventsController.featureEvent));
+
+// ── Onboarding wizard ──────────────────────────────────────────────────────
+const onboardingController = require('./controllers/onboardingController');
+// GET  /api/webapp/onboarding/status  — current step completion state
+// POST /api/webapp/onboarding/step    — record a single step { step, payload? }
+// POST /api/webapp/onboarding/complete — finalize after all steps verified server-side
+// NOTE: these routes intentionally bypass the age/terms consent gate so that
+// new users can complete onboarding before age_verified / terms_accepted are set.
+app.get('/api/webapp/onboarding/status', requireSessionAuthNoConsent, asyncHandler(onboardingController.getStatus));
+app.post('/api/webapp/onboarding/step', requireSessionAuthNoConsent, asyncHandler(onboardingController.markStep));
+app.post('/api/webapp/onboarding/complete', requireSessionAuthNoConsent, asyncHandler(onboardingController.completeOnboarding));
 
 // GET /api/proxy/live/performers — List performers from Directus for tip picker
 app.get('/api/proxy/live/performers', requireSessionAuth, livePerformersLimiter, asyncHandler(async (req, res) => {

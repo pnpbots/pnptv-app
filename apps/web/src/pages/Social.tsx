@@ -11,10 +11,7 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { SocialFeedTabs } from "@/components/social";
-
-function isValidPhotoUrl(photo: string | null | undefined): photo is string {
-  return !!photo && (photo.startsWith("/uploads/") || photo.startsWith("http"));
-}
+import { UserAvatar } from "@/components/UserAvatar";
 
 export default function Social() {
   const { user, isAuthenticated, isAdmin } = useAuth();
@@ -23,13 +20,22 @@ export default function Social() {
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("social");
   const { feed: t } = useI18n();
 
-  // Featured performers
+  // Featured performers — only those actually live-streaming right now.
+  // The backend populates isLive by matching each performer's live_channel
+  // against Restreamer's running ingest processes (20s Redis cache).
   const [featuredPerformers, setFeaturedPerformers] = useState<FeaturedPerformer[]>([]);
 
   useEffect(() => {
-    getFeaturedPerformers()
-      .then((res) => { if (res.success) setFeaturedPerformers(res.performers); })
+    const load = () => getFeaturedPerformers()
+      .then((res) => {
+        if (res.success) {
+          setFeaturedPerformers(res.performers.filter((p) => p.isLive === true));
+        }
+      })
       .catch(() => { /* non-critical */ });
+    load();
+    const id = window.setInterval(load, 30_000);
+    return () => window.clearInterval(id);
   }, []);
 
   // Content disclaimer state (owned here, passed down)
@@ -73,52 +79,25 @@ export default function Social() {
             {featuredPerformers.map((p) => (
               <div
                 key={p.id}
-                onClick={() => p.userId && navigate(`/profile/${p.userId}`)}
-                className={`glass-card-sm p-3 flex-shrink-0 w-28 text-center${
-                  p.userId
-                    ? " cursor-pointer hover:opacity-80 active:scale-95 transition-all"
-                    : ""
-                }`}
+                className="glass-card-sm p-3 flex-shrink-0 w-28 text-center"
                 style={{ borderColor: "rgba(94,209,196,0.18)" }}
               >
-                <div className="relative mx-auto mb-2 w-14 h-14">
-                  {isValidPhotoUrl(p.photoUrl) ? (
-                    <img
-                      src={p.photoUrl}
-                      alt={p.displayName}
-                      className="w-14 h-14 rounded-full object-cover"
-                      style={{ border: "2px solid #5ED1C4" }}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                        const fallback = (e.target as HTMLImageElement)
-                          .nextElementSibling as HTMLElement;
-                        if (fallback) fallback.style.display = "flex";
-                      }}
-                    />
-                  ) : null}
-                  <div
-                    className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold"
-                    style={{
-                      background: "linear-gradient(135deg, #5ED1C4, #D4007A)",
-                      color: "#fff",
-                      border: "2px solid #5ED1C4",
-                      display: isValidPhotoUrl(p.photoUrl) ? "none" : undefined,
-                    }}
-                  >
-                    {p.displayName[0]}
-                  </div>
-                  {/* Availability dot */}
-                  <span
-                    className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2"
-                    style={{
-                      background: p.isAvailable ? "#30D158" : "#8E8E93",
-                      borderColor: "rgba(30,30,30,0.9)",
-                    }}
+                <div className="mx-auto mb-2 flex justify-center">
+                  <UserAvatar
+                    userId={p.userId || undefined}
+                    photoUrl={p.photoUrl}
+                    displayName={p.displayName}
+                    size="lg"
+                    className="border-2 border-[#5ED1C4] rounded-full"
                   />
                 </div>
-                <p className="text-xs font-medium text-white truncate">
+                <button
+                  type="button"
+                  onClick={() => p.userId && navigate(`/profile/${p.userId}`)}
+                  className={`block w-full text-xs font-medium text-white truncate ${p.userId ? "hover:underline" : "cursor-default"}`}
+                >
                   {p.displayName}
-                </p>
+                </button>
                 {p.averageRating > 0 && (
                   <p className="text-[10px] mt-0.5" style={{ color: "#5ED1C4" }}>
                     {"★".repeat(Math.round(p.averageRating))}{" "}

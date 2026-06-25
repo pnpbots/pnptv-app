@@ -5,6 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { getNotificationDeepLink } from "@/lib/notificationDeepLink";
 import { getNotifications as fetchNotificationsApi } from "@/lib/api";
 import type { Notification } from "@/lib/api";
+import { UserAvatar } from "@/components/UserAvatar";
 
 type Category = "all" | "social" | "messaging" | "hangouts" | "other";
 
@@ -290,17 +291,14 @@ export function NotificationDropdown({ onClose, isMobile = false }: Props) {
                   }`}
                 >
                   {/* Actor avatar */}
-                  <div
-                    className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-[#D4007A] to-[#E69138] text-white overflow-hidden cursor-pointer"
-                    aria-hidden="true"
+                  <UserAvatar
+                    userId={notif.actorId}
+                    photoUrl={notif.actorPhotoUrl}
+                    displayName={notif.actorFirstName || notif.actorUsername}
+                    size="md"
                     onClick={(e) => { e.stopPropagation(); onClose(); navigate(`/profile/${notif.actorId}`); }}
-                  >
-                    {notif.actorPhotoUrl ? (
-                      <img src={notif.actorPhotoUrl} alt="" className="w-10 h-10 rounded-full object-cover" />
-                    ) : (
-                      (notif.actorFirstName || notif.actorUsername || "?")[0].toUpperCase()
-                    )}
-                  </div>
+                    linkToProfile={false}
+                  />
 
                   <div className="flex-1 min-w-0">
                     <p className={`text-[13px] leading-snug ${!notif.isRead ? "text-pnp-textPrimary font-medium" : "text-pnp-textSecondary"}`}>

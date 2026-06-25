@@ -33,6 +33,7 @@ import { connectSocket } from "@/lib/socket";
 import { MediaMessage } from "@/components/hangouts/MediaMessage";
 import LiveKitCallPanel from "@/components/hangouts/LiveKitCallDock";
 import { SharedPostCard } from "@/components/social/SharedPostCard";
+import { UserAvatar } from "@/components/UserAvatar";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -1090,17 +1091,13 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <button onClick={() => navigate(`/profile/${userId}`)} className="relative flex-shrink-0 active:scale-95 transition-transform">
-          {isValidPhoto(partnerPhoto) ? (
-            <img src={partnerPhoto!} alt="" className="w-9 h-9 rounded-full object-cover ring-1 ring-white/10" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }} />
-          ) : null}
-          <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A", display: isValidPhoto(partnerPhoto) ? "none" : undefined }}>
-            {(partnerName || "?")[0].toUpperCase()}
-          </div>
-          {partnerOnline && (
-            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-400 ring-2 ring-pnp-background" aria-label="online" />
-          )}
-        </button>
+        <UserAvatar
+          userId={userId}
+          photoUrl={partnerPhoto}
+          displayName={partnerName}
+          size="md"
+          className="ring-1 ring-white/10 rounded-full"
+        />
         <button onClick={() => navigate(`/profile/${userId}`)} className="flex-1 min-w-0 text-left">
           <p className="text-sm font-bold text-pnp-textPrimary truncate leading-tight flex items-center gap-1">
             {partnerName || "Conversation"}
@@ -1390,19 +1387,15 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
                   {!isMe && (
                     isGrouped ? (
                       <div className="w-7 flex-shrink-0" aria-hidden />
-                    ) : partnerPhoto ? (
-                      <img
-                        src={partnerPhoto}
-                        alt=""
-                        className="w-7 h-7 rounded-full object-cover flex-shrink-0 self-end"
-                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                      />
                     ) : (
-                      <div
-                        className="w-7 h-7 rounded-full flex-shrink-0 self-end flex items-center justify-center text-[11px] font-bold text-white"
-                        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-                      >
-                        {(partnerName || "?")[0].toUpperCase()}
+                      <div className="self-end">
+                        <UserAvatar
+                          userId={userId}
+                          photoUrl={partnerPhoto}
+                          displayName={partnerName}
+                          size="sm"
+                          showOnline={false}
+                        />
                       </div>
                     )
                   )}
@@ -2123,11 +2116,13 @@ function ForwardModal({ msg, onClose, onSubmit, myDbId }: { msg: DmMessage; onCl
                 onClick={() => toggle(p.id)}
                 className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
               >
-                {p.photo && (p.photo.startsWith("/") || p.photo.startsWith("http")) ? (
-                  <img src={p.photo} alt="" className="w-10 h-10 rounded-full object-cover" />
-                ) : (
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>{p.name[0]?.toUpperCase() || "?"}</div>
-                )}
+                <UserAvatar
+                  userId={p.id}
+                  photoUrl={p.photo}
+                  displayName={p.name}
+                  size="md"
+                  linkToProfile={false}
+                />
                 <span className="flex-1 min-w-0 text-sm font-semibold text-pnp-textPrimary truncate">{p.name}</span>
                 <span className={`w-5 h-5 rounded-full border flex items-center justify-center ${isPicked ? "border-pnp-accent" : "border-white/30"}`} style={{ background: isPicked ? "linear-gradient(135deg, #D4007A, #E69138)" : "transparent" }}>
                   {isPicked && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
@@ -2492,17 +2487,12 @@ function ThreadListView({ myDbId, onThreadSelect, panelMode }: { myDbId: string;
                   onTouchMove={handleRowTouchEnd}
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left"
                 >
-                  <div className="relative flex-shrink-0">
-                    {isValidPhoto(p.photo) ? (
-                      <img src={p.photo!} alt="" className="w-12 h-12 rounded-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display"); }} />
-                    ) : null}
-                    <div className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A", display: isValidPhoto(p.photo) ? "none" : undefined }}>
-                      {p.name[0]?.toUpperCase() || "?"}
-                    </div>
-                    {thread.online && (
-                      <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-green-400 ring-2 ring-pnp-background" />
-                    )}
-                  </div>
+                  <UserAvatar
+                    userId={p.id}
+                    photoUrl={p.photo}
+                    displayName={p.name}
+                    size="lg"
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-semibold text-pnp-textPrimary truncate flex items-center gap-1">
@@ -2556,11 +2546,13 @@ function ThreadListView({ myDbId, onThreadSelect, panelMode }: { myDbId: string;
                   onClick={() => onThreadSelect ? onThreadSelect(r.partnerId) : navigate(`/dm/${r.partnerId}?jumpTo=${r.id}`)}
                   className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
                 >
-                  {r.partnerPhoto && (r.partnerPhoto.startsWith("/") || r.partnerPhoto.startsWith("http")) ? (
-                    <img src={r.partnerPhoto} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
-                  ) : (
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "rgba(212,0,122,0.2)", color: "#D4007A" }}>{r.partnerName[0]?.toUpperCase() || "?"}</div>
-                  )}
+                  <UserAvatar
+                    userId={r.partnerId}
+                    photoUrl={r.partnerPhoto}
+                    displayName={r.partnerName}
+                    size="md"
+                    linkToProfile={false}
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-semibold text-pnp-textPrimary truncate">{r.partnerName}</p>

@@ -48,7 +48,7 @@ const searchUsers = async (req, res) => {
          AND is_deleted = false
          AND (username ILIKE $2 ESCAPE '\\' OR first_name ILIKE $2 ESCAPE '\\' OR pnptv_id ILIKE $2 ESCAPE '\\')
          AND NOT (id = ANY($4::text[]))
-       ORDER BY first_name ASC
+       ORDER BY (tier = 'PRIME') DESC, first_name ASC
        LIMIT $3`,
       [user.id, `%${safeQ}%`, lim, excludeIds]
     );

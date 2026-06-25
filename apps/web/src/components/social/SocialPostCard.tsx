@@ -4,6 +4,7 @@ import { MentionInput } from "@/components/MentionInput";
 import { SharePostModal } from "@/components/SharePostModal";
 import { NearbyBadge } from "@/components/NearbyBadge";
 import FreeTierOverlay from "@/components/FreeTierOverlay";
+import { UserAvatar } from "@/components/UserAvatar";
 import {
   getReplies,
   createReply,
@@ -141,6 +142,7 @@ export default function SocialPostCard({
   const [deleting, setDeleting] = useState(false);
   const [localReplyCount, setLocalReplyCount] = useState(post.replies_count || 0);
   const optimisticIdRef = useRef(-Date.now());
+  const composerRef = useRef<HTMLDivElement>(null);
   const [wofDeleting, setWofDeleting] = useState(false);
   const [wofDeleted, setWofDeleted] = useState(false);
   const [isWof, setIsWof] = useState(post.is_wof ?? false);
@@ -443,10 +445,7 @@ export default function SocialPostCard({
       }
     >
       {/* Avatar — pinned to upper-left corner */}
-      <button
-        onClick={(e) => { e.stopPropagation(); if (!showPlatformLogo && !post.is_carousel) onNavigate(authorPath); }}
-        className="absolute -top-2 -left-2 z-10 flex-shrink-0"
-      >
+      <div className="absolute -top-2 -left-2 z-10 flex-shrink-0">
         {post.is_carousel ? (
           <div
             className="w-10 h-10 rounded-full flex items-center justify-center ring-2 ring-[#1C1C1E]"
@@ -466,31 +465,16 @@ export default function SocialPostCard({
           />
         ) : post.author_id === "cristina-ai" ? (
           <span className="w-10 h-10 rounded-full flex items-center justify-center text-2xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
-        ) : isValidPhotoUrl(effectiveAuthorPhoto) ? (
-          <img
-            src={effectiveAuthorPhoto}
-            alt={`${post.author_first_name || post.author_username || "User"}'s avatar`}
-            className="w-10 h-10 rounded-full object-cover ring-2 ring-[#1C1C1E]"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = "none";
-              const sib = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
-              if (sib) sib.style.removeProperty("display");
-            }}
+        ) : (
+          <UserAvatar
+            userId={post.author_id}
+            photoUrl={effectiveAuthorPhoto}
+            displayName={post.author_first_name || post.author_username}
+            size="md"
+            className="ring-2 ring-[#1C1C1E] rounded-full"
           />
-        ) : null}
-        {!post.is_carousel && !showPlatformLogo && post.author_id !== "cristina-ai" && (
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ring-2 ring-[#1C1C1E]"
-            style={{
-              background: "linear-gradient(135deg, #D4007A, #E69138)",
-              color: "#fff",
-              display: isValidPhotoUrl(effectiveAuthorPhoto) ? "none" : undefined,
-            }}
-          >
-            {(post.author_first_name || post.author_username || "?")[0].toUpperCase()}
-          </div>
         )}
-      </button>
+      </div>
 
       {/* Content */}
       <div className="min-w-0">
@@ -1307,47 +1291,13 @@ export default function SocialPostCard({
                     const likeState = replyLikes[reply.id] ?? { liked: !!reply.liked_by_me, count: reply.likes_count || 0 };
                     return (
                     <div key={reply.id} className={`flex gap-2 transition-opacity ${pending ? "opacity-60" : ""}`}>
-                      <button
-                        onClick={() =>
-                          !pending && onNavigate(
-                            replyIsOwn
-                              ? "/profile"
-                              : `/profile/${reply.author_id}`
-                          )
-                        }
-                        className="flex-shrink-0"
-                        disabled={pending}
-                      >
-                        {isValidPhotoUrl(replyPhoto) ? (
-                          <img
-                            src={replyPhoto}
-                            alt={`${reply.author_first_name || reply.author_username || "User"}'s avatar`}
-                            className="w-7 h-7 rounded-full object-cover"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = "none";
-                              const sib = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
-                              if (sib) sib.style.removeProperty("display");
-                            }}
-                          />
-                        ) : null}
-                        <div
-                          className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
-                          style={{
-                            background:
-                              "linear-gradient(135deg, #D4007A, #E69138)",
-                            color: "#fff",
-                            display: isValidPhotoUrl(replyPhoto)
-                              ? "none"
-                              : undefined,
-                          }}
-                        >
-                          {(
-                            reply.author_first_name ||
-                            reply.author_username ||
-                            "?"
-                          )[0].toUpperCase()}
-                        </div>
-                      </button>
+                      <UserAvatar
+                        userId={reply.author_id}
+                        photoUrl={replyPhoto}
+                        displayName={reply.author_first_name || reply.author_username}
+                        size="sm"
+                        linkToProfile={!pending}
+                      />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs font-semibold text-white truncate">
@@ -1389,6 +1339,10 @@ export default function SocialPostCard({
                                     const cleaned = prev.replace(/^@\S+\s+/, "");
                                     return mention + cleaned;
                                   });
+                                  setTimeout(() => {
+                                    composerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                                    composerRef.current?.querySelector("textarea")?.focus();
+                                  }, 50);
                                 }}
                                 className="inline-flex items-center gap-1 transition-colors hover:text-white/80"
                                 style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
@@ -1410,7 +1364,7 @@ export default function SocialPostCard({
 
               {/* Reply composer */}
               {currentUserId && (
-                <>
+                <div ref={composerRef}>
                   {/* "Reply to @author" pill — only when composer is empty and post has an author username on non-own posts */}
                   {post.author_username && !replyText.trim() && !isOwn && (
                     <button
@@ -1464,7 +1418,7 @@ export default function SocialPostCard({
                       </button>
                     </div>
                   )}
-                </>
+                </div>
               )}
             </div>
           )}

@@ -6,6 +6,7 @@ import React, {
   KeyboardEvent,
 } from "react";
 import { searchMentions, type MentionUser } from "@/lib/api";
+import { UserAvatar } from "@/components/UserAvatar";
 
 interface MentionInputProps {
   value: string;
@@ -236,23 +237,13 @@ export function MentionInput({
                 }}
                 onMouseEnter={() => setSelectedIndex(idx)}
               >
-                {user.avatar_url ? (
-                  <img
-                    src={user.avatar_url}
-                    alt={user.username}
-                    className="w-7 h-7 rounded-full object-cover flex-shrink-0"
-                  />
-                ) : (
-                  <div
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                    style={{
-                      background: "linear-gradient(135deg, #D4007A, #E69138)",
-                      color: "#fff",
-                    }}
-                  >
-                    {(user.username || "?")[0].toUpperCase()}
-                  </div>
-                )}
+                <UserAvatar
+                  userId={user.id}
+                  photoUrl={user.avatar_url}
+                  displayName={user.username}
+                  size="sm"
+                  linkToProfile={false}
+                />
                 <div className="flex flex-col min-w-0">
                   <span
                     className="text-xs font-semibold truncate"
