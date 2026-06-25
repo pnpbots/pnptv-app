@@ -164,26 +164,41 @@ function dispatchUpdateAvailable(): void {
   }
 }
 
+function applyWaitingWorker(reg: ServiceWorkerRegistration): void {
+  if (reg.waiting) {
+    reg.waiting.postMessage({ type: "SKIP_WAITING" });
+  } else {
+    window.location.reload();
+  }
+}
+
 if (!resetInProgress && "serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((reg) => {
+    let updateAnnounced = false;
+
     const announceWaitingWorker = (origin: string) => {
       if (!reg.waiting) return;
+      if (updateAnnounced) return;
+      updateAnnounced = true;
       markSwUpdatePending();
+
       if (hasActiveRealtimeSession()) {
+        // Realtime session active — show toast and wait for session to end.
         dispatchSwUpdateStatus(`${origin}-deferred-active-session`);
+        dispatchUpdateAvailable();
       } else {
-        dispatchSwUpdateStatus(`${origin}-available`);
+        // No active session — apply silently, user just sees a brief reload.
+        dispatchSwUpdateStatus(`${origin}-silent-apply`);
+        clearSwUpdatePending();
+        applyWaitingWorker(reg);
       }
-      // Modal/toast decides whether to render based on realtime session state
-      // and listens for `pnptv:realtime-session-change` to promote toast → modal.
-      dispatchUpdateAvailable();
     };
 
-    // Poll for updates every 60s while the tab is open
+    // Poll for updates every 30 min while the tab is open
     setInterval(() => {
       reg.update();
       if (reg.waiting) announceWaitingWorker("poll");
-    }, 60_000);
+    }, 1_800_000);
 
     const watchInstalling = (sw: ServiceWorker) => {
       sw.addEventListener("statechange", () => {
@@ -199,10 +214,13 @@ if (!resetInProgress && "serviceWorker" in navigator) {
       if (reg.installing) watchInstalling(reg.installing);
     });
 
-    // When realtime session ends, re-announce so a previously-deferred toast
-    // can promote to the full-screen modal.
+    // When realtime session ends and an update is pending, apply it silently.
     window.addEventListener("pnptv:realtime-session-change", () => {
-      if (reg.waiting) announceWaitingWorker("session-end");
+      if (!hasActiveRealtimeSession() && reg.waiting) {
+        clearSwUpdatePending();
+        dispatchSwUpdateStatus("session-end-silent-apply");
+        applyWaitingWorker(reg);
+      }
     });
   });
 
