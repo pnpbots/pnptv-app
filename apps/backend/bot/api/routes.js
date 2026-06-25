@@ -10263,24 +10263,25 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
 
   let invoiceUrl;
   try {
-    const invoiceResp = await axios.post(`${NOWPAYMENTS_URL}/invoice`, {
+    const paymentResp = await axios.post(`${NOWPAYMENTS_URL}/payment`, {
       price_amount: usdAmount,
       price_currency: 'usd',
+      pay_currency: validPayCurrency || 'usdcsol',
       order_id: orderId,
       order_description: `${planDisplayName} – PNPtv!`,
       ipn_callback_url: `${webappUrl}/api/webhooks/nowpayments`,
-      success_url: `${webappUrl}${returnPath}?nowpayments=success&order=${encodeURIComponent(orderId)}`,
-      cancel_url: `${webappUrl}${returnPath}`,
+      is_fixed_rate: true,
+      is_fee_paid_by_user: false,
       ...(customerEmail ? { customer_email: customerEmail } : {}),
-      ...(validPayCurrency ? { pay_currency: validPayCurrency } : {}),
     }, {
       headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
       timeout: 10000,
     });
-    invoiceUrl = invoiceResp.data?.invoice_url;
-    if (!invoiceUrl) throw new Error('No invoice_url in response');
+    const { payment_id: npPaymentId, purchase_id: npPurchaseId } = paymentResp.data;
+    if (!npPaymentId || !npPurchaseId) throw new Error('No payment_id/purchase_id in response');
+    invoiceUrl = `https://nowpayments.io/payment?iid=${npPurchaseId}&paymentId=${npPaymentId}`;
   } catch (err) {
-    logger.error('[NOWPayments] Subscription invoice creation failed', { userId, planId, payCurrency: validPayCurrency, error: err.response?.data || err.message });
+    logger.error('[NOWPayments] Subscription payment creation failed', { userId, planId, payCurrency: validPayCurrency, error: err.response?.data || err.message });
     return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
   }
 
@@ -10415,29 +10416,27 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
   const orderId = `pnptv-nowp-${userId}-${Date.now()}`;
   const ipnCallbackUrl = `${webappUrl}/api/webhooks/nowpayments`;
 
-  // Create a hosted invoice via NOWPayments API — returns an invoice_url the
-  // user opens directly. The embedded widget CDN (payment-widget.js) no longer
-  // exists, so hosted checkout is the only reliable path.
   let invoiceUrl;
   try {
-    const invoiceResp = await axios.post(`${NOWPAYMENTS_URL}/invoice`, {
+    const paymentResp = await axios.post(`${NOWPAYMENTS_URL}/payment`, {
       price_amount: usdAmount,
       price_currency: 'usd',
+      pay_currency: validPayCurrency || 'usdcsol',
       order_id: orderId,
       order_description: `${planDisplayName} – PNPtv!`,
       ipn_callback_url: ipnCallbackUrl,
-      success_url: `${webappUrl}${returnPath}?nowpayments=success&order=${encodeURIComponent(orderId)}`,
-      cancel_url: `${webappUrl}${returnPath}`,
+      is_fixed_rate: true,
+      is_fee_paid_by_user: false,
       ...(email ? { customer_email: email } : {}),
-      ...(validPayCurrency ? { pay_currency: validPayCurrency } : {}),
     }, {
       headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
       timeout: 10000,
     });
-    invoiceUrl = invoiceResp.data?.invoice_url;
-    if (!invoiceUrl) throw new Error('No invoice_url in response');
+    const { payment_id: npPaymentId, purchase_id: npPurchaseId } = paymentResp.data;
+    if (!npPaymentId || !npPurchaseId) throw new Error('No payment_id/purchase_id in response');
+    invoiceUrl = `https://nowpayments.io/payment?iid=${npPurchaseId}&paymentId=${npPaymentId}`;
   } catch (err) {
-    logger.error('[NOWPayments] Invoice creation failed', { userId, planId, orderId, payCurrency: validPayCurrency, error: err.message });
+    logger.error('[NOWPayments] Payment creation failed', { userId, planId, orderId, payCurrency: validPayCurrency, error: err.message });
     return res.status(502).json({ success: false, error: 'Could not reach NOWPayments. Please try again.', code: 'NOWPAYMENTS_ERROR' });
   }
 
