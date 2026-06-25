@@ -313,7 +313,7 @@ export interface UseStreamerReturn {
 
   // Action handlers
   goLive: () => void;
-  stopStream: () => void;
+  stopStream: () => Promise<void>;
   toggleMute: () => void;
   toggleCamera: () => void;
   toggleScreenShare: () => Promise<void>;
@@ -603,6 +603,9 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Gap 3: Metrics telemetry interval (emits stream:metrics every 5s while live)
   const metricsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Watchdog timer for stream:start — fires if `stream:started` never arrives,
+  // so the UI doesn't spin in "Connecting…" forever after a backend drop.
+  const connectAckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref to always reflect the latest stats without needing stable closure deps
   const latestStatsRef = useRef<StreamStats>({ bitrate: 0, fps: 0, droppedFrames: 0, bytesSent: 0, latency: 0 });
 
@@ -618,6 +621,7 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     if (frameTimerRef.current)     { clearInterval(frameTimerRef.current);     frameTimerRef.current = null; }
     if (pingTimerRef.current)      { clearInterval(pingTimerRef.current);      pingTimerRef.current = null; }
     if (metricsTimerRef.current)   { clearInterval(metricsTimerRef.current);   metricsTimerRef.current = null; }
+    if (connectAckTimerRef.current){ clearTimeout(connectAckTimerRef.current); connectAckTimerRef.current = null; }
   }, []);
 
   const stopRecorder = useCallback((ref: React.MutableRefObject<MediaRecorder | null>) => {
@@ -626,6 +630,39 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     }
     ref.current = null;
   }, []);
+
+  // Async variant — resolves after the recorder's onstop event so any buffered
+  // chunks have already been flushed through ondataavailable. Used by stopStream
+  // so we don't emit stream:stop before the last 250ms of video has been sent.
+  const stopRecorderAsync = useCallback(
+    (ref: React.MutableRefObject<MediaRecorder | null>, timeoutMs = 2000) => {
+      return new Promise<void>((resolve) => {
+        const rec = ref.current;
+        if (!rec || rec.state === "inactive") {
+          ref.current = null;
+          resolve();
+          return;
+        }
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          ref.current = null;
+          resolve();
+        };
+        rec.addEventListener("stop", finish, { once: true });
+        try {
+          rec.stop();
+        } catch {
+          finish();
+          return;
+        }
+        // Safety net in case onstop is never fired (browser quirk / no chunks)
+        setTimeout(finish, timeoutMs);
+      });
+    },
+    []
+  );
 
   /**
    * Build the final MediaStream to send to the recorder.
@@ -737,7 +774,12 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
 
   // ── Start preview on mount ────────────────────────────────────────────────
   useEffect(() => {
-    if (!navigator.mediaDevices?.getUserMedia) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStreamError(
+        "Your browser doesn't support camera access. Use a recent version of Chrome, Firefox, or Edge."
+      );
+      return;
+    }
 
     const preset = state.selectedPreset;
     const mobile = detectMobileDevice();
@@ -766,6 +808,18 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
       })
       .then((stream) => {
         streamRef.current = stream;
+        // Listen for mid-session track termination (camera revoked, device unplugged,
+        // OS muted the device). Browsers don't fire 'ended' for permission revocation
+        // in all cases — but when they do, we surface it so the creator isn't left
+        // broadcasting a black frame.
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.addEventListener("ended", () => {
+            setStreamError(
+              "Camera disconnected. Check your camera and reload to resume."
+            );
+          });
+        }
         // Race-tolerant attach: PreStreamSetup may mount its <video> element
         // after the getUserMedia promise resolves. Retry every 100ms for up to
         // 5s until videoRef.current is available, then call .play() explicitly
@@ -813,6 +867,10 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
 
     const onStarted = () => {
       const now = Date.now();
+      if (connectAckTimerRef.current) {
+        clearTimeout(connectAckTimerRef.current);
+        connectAckTimerRef.current = null;
+      }
       dispatch({ type: "SET_LIVE", payload: true });
       dispatch({ type: "SET_CONNECTING", payload: false });
       dispatch({ type: "SET_STREAM_START", payload: now });
@@ -886,6 +944,10 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     };
 
     const onStreamError = (data: { message?: string }) => {
+      if (connectAckTimerRef.current) {
+        clearTimeout(connectAckTimerRef.current);
+        connectAckTimerRef.current = null;
+      }
       setStreamError(data.message ?? "Stream error occurred.");
       dispatch({ type: "RESET_STREAM" });
       clearAllTimers();
@@ -988,6 +1050,20 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     setStreamError(null);
     dispatch({ type: "SET_CONNECTING", payload: true });
 
+    // Watchdog: if the backend never replies with stream:started (5xx, socket
+    // drop mid-handshake, FFmpeg spawn hang), drop out of "Connecting…" instead
+    // of spinning forever. Cleared by onStarted / onStreamError / RESET_STREAM.
+    if (connectAckTimerRef.current) clearTimeout(connectAckTimerRef.current);
+    connectAckTimerRef.current = setTimeout(() => {
+      setStreamError("Server did not respond. Check your connection and try again.");
+      dispatch({ type: "SET_CONNECTING", payload: false });
+      // Best-effort recorder teardown — don't await, the user is already seeing an error.
+      try { recorderRef.current?.state !== "inactive" && recorderRef.current?.stop(); } catch { /* noop */ }
+      recorderRef.current = null;
+      try { localRecorderRef.current?.state !== "inactive" && localRecorderRef.current?.stop(); } catch { /* noop */ }
+      localRecorderRef.current = null;
+    }, 15000);
+
     socket?.emit("stream:start", {
       channelRef: channel.ref,
       videoBitrate: state.selectedPreset.videoBitrate,
@@ -1066,14 +1142,19 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
   }, [channel, socket, state.selectedPreset, state.stats.droppedFrames, localRecordEnabled, getFinalStream]);
 
   // ── Stop Stream ───────────────────────────────────────────────────────────
-  const stopStream = useCallback(() => {
-    stopRecorder(recorderRef);
-    stopRecorder(localRecorderRef);
+  // Awaits the recorder's onstop event before emitting stream:stop so any
+  // buffered chunks (last ~250ms) reach the backend before FFmpeg's stdin
+  // is closed. Local recorder is stopped in parallel.
+  const stopStream = useCallback(async () => {
+    await Promise.all([
+      stopRecorderAsync(recorderRef),
+      stopRecorderAsync(localRecorderRef),
+    ]);
     socket?.emit("stream:stop");
     clearAllTimers();
     dispatch({ type: "RESET_STREAM" });
     setDurationSec(0);
-  }, [socket, stopRecorder, clearAllTimers]);
+  }, [socket, stopRecorderAsync, clearAllTimers]);
 
   // ── Screen Share ──────────────────────────────────────────────────────────
   const toggleScreenShare = useCallback(async () => {

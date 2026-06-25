@@ -233,9 +233,9 @@ export function PreStreamSetup({
     setConnectionRating(null);
 
     try {
-      // Send a ~200 KB payload and measure round-trip time.
-      // We use a lightweight timing approach: POST to a known endpoint,
-      // or fall back to a HEAD request if the dedicated endpoint doesn't exist.
+      // Send a ~200 KB octet-stream payload and time the round trip locally.
+      // The server echoes `receivedBytes` so we can verify it actually received
+      // the payload (rather than getting a parser short-circuit).
       const PAYLOAD_BYTES = 200 * 1024;
       const blob = new Blob([new Uint8Array(PAYLOAD_BYTES)], {
         type: "application/octet-stream",
@@ -246,37 +246,24 @@ export function PreStreamSetup({
         "https://studio.pnptv.app";
 
       const t0 = performance.now();
-      let responded = false;
+      const res = await fetch(`${API_BASE}/api/webapp/live/connection-test`, {
+        method: "POST",
+        credentials: "include",
+        body: blob,
+        signal: AbortSignal.timeout(8000),
+      });
+      const elapsed = (performance.now() - t0) / 1000; // seconds
 
-      try {
-        const res = await fetch(`${API_BASE}/api/webapp/live/connection-test`, {
-          method: "POST",
-          credentials: "include",
-          body: blob,
-          signal: AbortSignal.timeout(8000),
-        });
-        responded = res.ok || res.status === 404 || res.status === 405;
-      } catch {
-        // Endpoint may not exist — fall through to timing estimate
-      }
-
-      if (!responded) {
-        // Fallback: time a HEAD against the API base
-        const t1 = performance.now();
-        await fetch(`${API_BASE}/api/webapp/live/status`, {
-          method: "HEAD",
-          credentials: "include",
-          signal: AbortSignal.timeout(5000),
-        }).catch(() => null);
-        const latency = performance.now() - t1;
-        // Estimate kbps from latency alone (rough heuristic)
-        const estimatedKbps = latency < 100 ? 5000 : latency < 300 ? 2500 : latency < 600 ? 1000 : 400;
-        setConnectionRating(ratingFromKbps(estimatedKbps));
+      if (!res.ok) {
+        setConnectionRating("poor");
         return;
       }
 
-      const elapsed = (performance.now() - t0) / 1000; // seconds
-      const kbps = (PAYLOAD_BYTES * 8) / 1024 / elapsed;
+      const data = (await res.json().catch(() => ({}))) as { receivedBytes?: number };
+      const verifiedBytes = typeof data.receivedBytes === "number" && data.receivedBytes > 0
+        ? data.receivedBytes
+        : PAYLOAD_BYTES;
+      const kbps = (verifiedBytes * 8) / 1024 / Math.max(elapsed, 0.01);
       setConnectionRating(ratingFromKbps(kbps));
     } catch {
       setConnectionRating("poor");

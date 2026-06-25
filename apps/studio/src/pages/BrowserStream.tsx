@@ -41,11 +41,15 @@ export default function BrowserStream() {
   // ── Eligibility gate ──────────────────────────────────────────────────────
   const [eligibility, setEligibility] = useState<CreatorEligibility | null>(null);
   const [eligibilityLoading, setEligibilityLoading] = useState(true);
+  // Distinguish "checked and not eligible" from "could not check at all" — the
+  // latter must not silently grant studio access. Fall-open behaviour previously
+  // here let any creator with a network blip skip the canGoLive gate.
+  const [eligibilityError, setEligibilityError] = useState(false);
 
   useEffect(() => {
     getCreatorEligibility()
-      .then(setEligibility)
-      .catch(() => setEligibility(null))
+      .then((data) => { setEligibility(data); setEligibilityError(false); })
+      .catch(() => { setEligibility(null); setEligibilityError(true); })
       .finally(() => setEligibilityLoading(false));
   }, []);
 
@@ -320,6 +324,34 @@ export default function BrowserStream() {
       default:
         return null;
     }
+  }
+
+  // ── Eligibility fetch failure — fail closed so a bad network doesn't grant access ──
+  if (!eligibilityLoading && eligibilityError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-pnp-background p-6">
+        <div className="max-w-sm w-full space-y-5 text-center">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto"
+            style={{ background: "rgba(255,214,10,0.12)", border: "1px solid rgba(255,214,10,0.3)" }}>
+            <svg className="w-8 h-8" style={{ color: "#FFD60A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-2.99l-6.93-12a2 2 0 00-3.48 0l-6.93 12A2 2 0 005.07 19z" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-white">Could not verify eligibility</h1>
+            <p className="text-sm mt-1" style={{ color: "var(--pnp-text-secondary)" }}>
+              We couldn't reach the server to check whether you can go live. Check your connection and try again.
+            </p>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="block w-full px-6 py-3 rounded-xl text-sm font-bold text-white btn-gradient"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
   }
 
   // ── Eligibility locked screen ─────────────────────────────────────────────
