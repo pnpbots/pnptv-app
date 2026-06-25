@@ -237,6 +237,7 @@ const S = {
       { q: "Can I pay with other cryptocurrencies (Ethereum, Litecoin, etc.)?", a: "We accept many coins via NowPayments — including ETH, LTC, XMR (Monero), and more. On the checkout page you can select your coin. We highlight Dash, Bitcoin, USDC, and USDT because they're the most practical for our community." },
       { q: "Is the 20% discount applied automatically?", a: "Yes. For most yearly and lifetime plans, the crypto discount is applied automatically when you select any crypto payment method. The Lifetime PRIME $100 offer is already at its fixed crypto price." },
       { q: "What is BTCPay Server?", a: "BTCPay Server is the checkout system we use for Dash payments. It's open-source software we run on our own server — no third party sees your payment data. We self-host it for maximum privacy." },
+      { q: "Can I get a refund on a crypto payment?", a: "Yes. Our refund policy applies to all payments including crypto. You have 24 hours from payment to request a refund. Requests are reviewed and processed within 72 hours. Contact us at pnptv.app/contact with your transaction ID and we'll take care of it." },
     ],
 
     ctaTitle: "Ready to pay?",
@@ -427,6 +428,7 @@ const S = {
       { q: "¿Puedo pagar con otras criptomonedas (Ethereum, Litecoin, etc.)?", a: "Aceptamos muchas monedas a través de NowPayments — incluyendo ETH, LTC, XMR (Monero) y más. En la página de checkout puedes seleccionar tu moneda." },
       { q: "¿El descuento se aplica automáticamente?", a: "Sí. En la mayoría de planes anuales y lifetime, el descuento cripto se aplica automáticamente. La oferta Lifetime PRIME de $100 ya está a su precio cripto fijo." },
       { q: "¿Qué es BTCPay Server?", a: "Es el sistema de checkout que usamos para pagos con Dash. Software de código abierto que ejecutamos en nuestro propio servidor — ningún tercero ve tus datos de pago." },
+      { q: "¿Puedo pedir un reembolso si pagué con cripto?", a: "Sí. Nuestra política de reembolsos aplica a todos los pagos, incluyendo cripto. Tienes 24 horas desde el pago para solicitar un reembolso. Las solicitudes se revisan y procesan dentro de las 72 horas. Contáctanos en pnptv.app/contact con tu ID de transacción y lo resolvemos." },
     ],
 
     ctaTitle: "¿Listo para pagar?",

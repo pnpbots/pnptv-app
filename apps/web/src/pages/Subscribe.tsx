@@ -1357,6 +1357,14 @@ export default function Subscribe() {
         </div>
       )}
 
+      {/* Refund note */}
+      <p className="mt-4 text-center text-[11px] text-pnp-textSecondary/50 leading-relaxed">
+        {t.lang === "es"
+          ? <>Reembolsos disponibles dentro de las 24h de pago — incluyendo cripto. <a href="/contact" className="underline decoration-dotted hover:text-pnp-textSecondary">Contáctanos</a> si tu solicitud cumple los requisitos.</>
+          : <>Refunds available within 24h of payment — crypto included. <a href="/contact" className="underline decoration-dotted hover:text-pnp-textSecondary">Contact us</a> if your request meets our policy.</>
+        }
+      </p>
+
       {/* Back link */}
       <button
         onClick={() => navigate(-1)}
