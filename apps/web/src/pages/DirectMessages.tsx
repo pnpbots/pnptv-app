@@ -1079,7 +1079,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
   };
 
   return (
-    <div className="flex flex-col" style={panelMode ? { height: "100%", minHeight: 0 } : { height: "calc(100dvh - 3.5rem - 4rem)" }}>
+    <div className={panelMode ? "flex flex-col flex-1 min-h-0" : "flex flex-col"} style={panelMode ? undefined : { height: "calc(100dvh - 3.5rem - 4rem)" }}>
       {/* Header — sticky-pinned so the video-call button is always reachable
           even when iOS PWA chrome shifts or the on-screen keyboard reflows
           the chat. The flex-column layout already keeps it from shrinking;

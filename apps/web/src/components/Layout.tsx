@@ -1699,7 +1699,7 @@ export function Layout() {
                 </svg>
               </button>
             </div>
-            <div className="flex-1 overflow-hidden min-h-0">
+            <div className="flex flex-col flex-1 overflow-hidden min-h-0">
               {dmPartnerId ? (
                 <DmChatView
                   userId={dmPartnerId}
