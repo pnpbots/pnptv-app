@@ -452,7 +452,7 @@ export function BookCallModal({
     try {
       // NowPayments — open a centered popup (cannot redirect: breaks iOS + 3rd-party cookie policy)
       if (provider === "nowpayments" || provider === "nowpayments_usdc") {
-        const payCurrency = provider === "nowpayments_usdc" ? "usdcsol" : undefined;
+        const payCurrency = provider === "nowpayments_usdc" ? "usdtbsc" : undefined;
         const npRes = await createCallCheckoutNowPayments(
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
@@ -1268,13 +1268,13 @@ export function BookCallModal({
           <button
             type="button"
             onClick={() => setProvider("nowpayments_usdc")}
-            title="USD Coin on Solana — instant + sub-cent fees"
+            title="Tether (USDT) on BNB Smart Chain — works with MetaMask, Trust Wallet, Binance"
             className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
             style={provider === "nowpayments_usdc"
-              ? { background: "rgba(39,117,202,0.16)", border: "1.5px solid #2775CA", color: "#7FB8FF" }
+              ? { background: "rgba(38,161,123,0.16)", border: "1.5px solid #26a17b", color: "#26a17b" }
               : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
-            ◎ USDC
+            ₮ USDT
           </button>
           {dashAvailable && (
             <button
@@ -1438,7 +1438,7 @@ export function BookCallModal({
               className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
               style={{ background: "linear-gradient(90deg, #26a17b, #00c896)" }}
             >
-              🪙 {provider === "nowpayments_usdc" ? "Open USDC Checkout" : "Open Crypto Checkout"}
+              🪙 {provider === "nowpayments_usdc" ? "Open USDT Checkout" : "Open Crypto Checkout"}
             </button>
           )}
         </div>

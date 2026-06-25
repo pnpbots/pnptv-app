@@ -584,7 +584,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
   };
 
   const handleUsdcClick = () => {
-    handlePay("usdcsol");
+    handlePay("usdtbsc");
   };
 
   const handleDashPay = useCallback(async () => {
@@ -804,7 +804,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
             isSuccess={usdcPaymentSuccess}
             onCancel={cancelNowPayments}
             lang={lang}
-            isSolana={true}
+            payCurrency="usdtbsc"
           />
         )}
 
