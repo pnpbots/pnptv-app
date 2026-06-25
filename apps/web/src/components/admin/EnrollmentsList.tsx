@@ -35,6 +35,7 @@ export default function EnrollmentsList() {
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [notesMap, setNotesMap] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -52,12 +53,13 @@ export default function EnrollmentsList() {
   }, [load]);
 
   const handleApprove = async (id: number) => {
+    setActionError(null);
     setActionLoading(id);
     try {
       await approveCreatorEnrollment(id, notesMap[id]);
       load();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to approve enrollment");
+      setActionError(err instanceof Error ? err.message : "Failed to approve enrollment");
     } finally {
       setActionLoading(null);
     }
@@ -65,15 +67,16 @@ export default function EnrollmentsList() {
 
   const handleReject = async (id: number) => {
     if (!notesMap[id]?.trim()) {
-      alert("Please enter rejection notes before rejecting");
+      setActionError("Please enter rejection notes before rejecting");
       return;
     }
+    setActionError(null);
     setActionLoading(id);
     try {
       await rejectCreatorEnrollment(id, notesMap[id]);
       load();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to reject enrollment");
+      setActionError(err instanceof Error ? err.message : "Failed to reject enrollment");
     } finally {
       setActionLoading(null);
     }
@@ -108,6 +111,16 @@ export default function EnrollmentsList() {
           <button onClick={load} className="ml-2 text-red-400 underline text-xs">
             Retry
           </button>
+        </div>
+      )}
+
+      {actionError && (
+        <div
+          className="mb-4 px-4 py-3 rounded-lg text-sm text-red-300 flex items-center justify-between"
+          style={{ background: "rgba(239,68,68,0.1)" }}
+        >
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="ml-3 text-red-400 text-xs underline">Dismiss</button>
         </div>
       )}
 

@@ -196,6 +196,16 @@ export default function CreatorEnrollmentWizard({
   const handleIdUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+      setSubmitError('Only JPEG, PNG, or WebP images are accepted for ID.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setSubmitError('ID photo must be under 10 MB.');
+      return;
+    }
+    setSubmitError(null);
     setIdFile(file);
     const reader = new FileReader();
     reader.onload = (ev) => setIdPreview(ev.target?.result as string);
@@ -233,7 +243,8 @@ export default function CreatorEnrollmentWizard({
 
   const canProceedStep1 = guidelinesRead;
   const canProceedStep2 = termsAccepted && commitmentAccepted && privacyAccepted;
-  const canProceedStep3 = paymentAddress.trim().length >= 3;
+  const paymentMinLength = paymentMethod === 'meru' ? 7 : 26;
+  const canProceedStep3 = paymentAddress.trim().length >= paymentMinLength;
   const canProceedStep4 = !!idFile && idLegalName.trim().length >= 1 && idDob.length > 0 && idType.length > 0;
   const canProceedStep5 = !!signatureData;
 
@@ -581,7 +592,7 @@ export default function CreatorEnrollmentWizard({
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" />
                     </svg>
                     <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{pr.tapToUploadId}</p>
-                    <input type="file" accept="image/*" className="hidden" onChange={handleIdUpload} />
+                    <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleIdUpload} />
                   </label>
                 )}
               </div>
@@ -598,7 +609,9 @@ export default function CreatorEnrollmentWizard({
 
               <div className="rounded-xl p-3 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
                 <p style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                  {pr.idVerificationExplanation}
+                  {i18n.language === 'es'
+                    ? 'Tu firma confirma que has leído y aceptas los Términos del Programa de Creadores y que toda la información proporcionada en esta solicitud es veraz y precisa.'
+                    : 'Your signature confirms that you have read and agree to the Creator Program Terms and that all information provided in this application is truthful and accurate.'}
                 </p>
               </div>
 

@@ -369,6 +369,18 @@ const changeTier = async (req, res) => {
 const submitEnrollment = async (req, res) => {
   try {
     const { tier, paymentMethod, paymentAddress, paymentNetwork, signatureData, legalName, dateOfBirth, idType } = req.body || {};
+
+    // Required identity fields — cannot be omitted or the 2257 record is skipped
+    if (!legalName?.trim())  return res.status(400).json({ error: 'Legal name is required' });
+    if (!dateOfBirth)         return res.status(400).json({ error: 'Date of birth is required' });
+    if (!idType)              return res.status(400).json({ error: 'ID type is required' });
+
+    // Guard against excessively large base64 signature payloads
+    const MAX_SIG_BYTES = 250 * 1024;
+    if (signatureData && Buffer.byteLength(signatureData, 'utf8') > MAX_SIG_BYTES) {
+      return res.status(400).json({ error: 'Signature data too large' });
+    }
+
     const idDocumentPath = req.file
       ? `/uploads/creator-enrollments/${req.file.filename}`
       : null;
@@ -380,19 +392,18 @@ const submitEnrollment = async (req, res) => {
       ip
     );
 
-    // Auto-create the 2257 identity record from enrollment data so the user
-    // doesn't hit a second ID-upload form on /creators/apply.
-    if (idDocumentPath && legalName && dateOfBirth && idType) {
+    // Auto-create the 2257 identity record — fields are now guaranteed non-empty above
+    if (idDocumentPath) {
       try {
         await IdentityVerificationService.submit2257Record(req.user.id, {
-          legalName,
+          legalName: legalName.trim(),
           dateOfBirth,
           idType,
           idDocumentPath,
           ip,
         });
       } catch (idErr) {
-        // Non-fatal — enrollment is saved. Creator can submit 2257 manually on /creators/apply.
+        // Non-fatal: enrollment saved; creator can resubmit 2257 manually on /creators/apply.
         logger.warn(`submitEnrollment: 2257 auto-create failed for user ${req.user.id}: ${idErr.message}`);
       }
     }

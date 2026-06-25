@@ -102,7 +102,7 @@ function FileUploadBox({
   file,
   previewUrl,
   onSelect,
-  accept = "image/*",
+  accept = "image/jpeg,image/png,image/webp",
 }: {
   label: string;
   file: File | null;
@@ -111,7 +111,17 @@ function FileUploadBox({
   accept?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const preview = file ? URL.createObjectURL(file) : previewUrl || null;
+  const objectUrlRef = useRef<string | null>(null);
+  if (objectUrlRef.current) {
+    URL.revokeObjectURL(objectUrlRef.current);
+    objectUrlRef.current = null;
+  }
+  let preview: string | null = previewUrl || null;
+  if (file) {
+    const url = URL.createObjectURL(file);
+    objectUrlRef.current = url;
+    preview = url;
+  }
 
   return (
     <div
@@ -304,10 +314,10 @@ export default function Apply() {
     if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
     if (age < 18) { setError(t.errorAge); return; }
 
-    if (!data.idFrontFile && !data.idFrontUrl) { setError(t.errorIdFront); return; }
-    if (!data.idBackFile && !data.idBackUrl) { setError(t.errorIdBack); return; }
-
-    if (data.idFrontFile && data.idBackFile) {
+    // If either file was replaced, require both to be present and re-upload both
+    if (data.idFrontFile || data.idBackFile) {
+      if (!data.idFrontFile) { setError(t.errorIdFront); return; }
+      if (!data.idBackFile)  { setError(t.errorIdBack); return; }
       setSubmitting(true);
       try {
         const res = await uploadApplicationIdDocuments(data.idFrontFile, data.idBackFile);
@@ -318,6 +328,10 @@ export default function Apply() {
         return;
       }
       setSubmitting(false);
+    } else {
+      // Both already uploaded in a previous attempt
+      if (!data.idFrontUrl) { setError(t.errorIdFront); return; }
+      if (!data.idBackUrl)  { setError(t.errorIdBack); return; }
     }
     goNext();
   }
@@ -539,7 +553,7 @@ export default function Apply() {
             />
           </div>
           <div className="flex justify-between pt-4">
-            <Button variant="secondary" onClick={goBack}>
+            <Button variant="secondary" onClick={goBack} disabled={submitting}>
               {t.backBtn}
             </Button>
             <Button onClick={handleStep2Continue} loading={submitting}>
@@ -603,7 +617,7 @@ export default function Apply() {
             </div>
           </div>
           <div className="flex justify-between pt-4">
-            <Button variant="secondary" onClick={goBack}>
+            <Button variant="secondary" onClick={goBack} disabled={submitting}>
               {t.backBtn}
             </Button>
             <Button onClick={handleStep3Continue} loading={submitting}>
@@ -648,7 +662,7 @@ export default function Apply() {
             </span>
           </label>
           <div className="flex justify-between pt-4">
-            <Button variant="secondary" onClick={goBack}>
+            <Button variant="secondary" onClick={goBack} disabled={submitting}>
               {t.backBtn}
             </Button>
             <Button

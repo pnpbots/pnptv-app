@@ -37,10 +37,11 @@ const enrollmentUpload = multer({
     destination: (_req, _file, cb) => cb(null, enrollmentUploadDir),
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
-      cb(null, `id-${Date.now()}${ext}`);
+      const uid = req.session?.user?.id || 'u';
+      cb(null, `id-${uid}-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
     },
   }),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024, fieldSize: 250 * 1024 }, // 10 MB file, 250 KB fields
   fileFilter: (_req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/webp'];
     if (allowed.includes(file.mimetype)) cb(null, true);
@@ -73,7 +74,7 @@ const identity2257Upload = multer({
 router.get('/eligibility', authGuard, creatorController.getEligibility);
 
 // Enrollment flow (replaces old /activate for new users)
-router.post('/enroll', authGuard, enrollmentUpload.single('idDocument'), creatorController.submitEnrollment);
+router.post('/enroll', authGuard, identitySubmitLimiter, enrollmentUpload.single('idDocument'), creatorController.submitEnrollment);
 router.get('/enrollment', authGuard, creatorController.getEnrollment);
 
 // Legacy direct activation — admin-only; bypasses KYC enrollment flow

@@ -184,7 +184,7 @@ export default function BecomeModel() {
         <p className="text-sm text-pnp-textSecondary max-w-md mx-auto">{t.ctaBody}</p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <button
-            onClick={() => navigate(isAuthenticated ? (isActiveTierCreator ? "/apply" : "/creator") : "/join")}
+            onClick={() => navigate(isAuthenticated ? (isActiveTierCreator ? "/apply" : "/creators/apply") : "/join")}
             className="px-8 py-3 rounded-xl text-sm font-bold text-white btn-gradient hover:opacity-90 active:scale-[0.98] transition-all"
           >
             {isAuthenticated && !isActiveTierCreator ? t.ctaButtonEnroll : t.ctaButton}
