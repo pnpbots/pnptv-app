@@ -1357,11 +1357,11 @@ export default function Subscribe() {
         </div>
       )}
 
-      {/* Refund note */}
+      {/* Legal footer */}
       <p className="mt-4 text-center text-[11px] text-pnp-textSecondary/50 leading-relaxed">
         {t.lang === "es"
-          ? <>Reembolsos disponibles dentro de las 24h de pago — incluyendo cripto. <a href="/contact" className="underline decoration-dotted hover:text-pnp-textSecondary">Contáctanos</a> si tu solicitud cumple los requisitos.</>
-          : <>Refunds available within 24h of payment — crypto included. <a href="/contact" className="underline decoration-dotted hover:text-pnp-textSecondary">Contact us</a> if your request meets our policy.</>
+          ? <>Al comprar aceptas nuestros <a href="/terms" className="underline decoration-dotted hover:text-pnp-textSecondary">Términos y Condiciones</a>. Reembolsos disponibles dentro de las 24h de pago — incluyendo cripto. <a href="/contact" className="underline decoration-dotted hover:text-pnp-textSecondary">Contáctanos</a> si tu solicitud cumple los requisitos.</>
+          : <>By purchasing you agree to our <a href="/terms" className="underline decoration-dotted hover:text-pnp-textSecondary">Terms & Conditions</a>. Refunds available within 24h of payment — crypto included. <a href="/contact" className="underline decoration-dotted hover:text-pnp-textSecondary">Contact us</a> if your request meets our policy.</>
         }
       </p>
 
