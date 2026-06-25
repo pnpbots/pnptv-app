@@ -1159,7 +1159,10 @@ export function Layout() {
           </button>
           {/* DM */}
           <button
-            onClick={() => navigate("/dm")}
+            onClick={() => {
+              setDmPartnerId(null);
+              setIsDmPanelOpen(v => !v);
+            }}
             className="relative p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
             aria-label="Messages"
           >
