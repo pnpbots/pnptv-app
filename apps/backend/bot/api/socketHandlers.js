@@ -2686,6 +2686,24 @@ function initSocketIO(io) {
         socket.data.ffmpegProcess = ffmpeg;
         socket.data.streamChannelRef = channelRef;
 
+        // Defer stream:started until FFmpeg has either printed its first stderr
+        // line (proves the binary opened the input pipe) or 800 ms has passed.
+        // If FFmpeg's 'error' or 'exit' fires first, the existing handlers emit
+        // stream:error and emitStarted becomes a no-op. Without this, the client
+        // starts MediaRecorder against a pipe that may already be closed.
+        let streamStartedEmitted = false;
+        const emitStarted = () => {
+          if (streamStartedEmitted) return;
+          if (socket.data.ffmpegProcess !== ffmpeg) return; // FFmpeg already died
+          streamStartedEmitted = true;
+          socket.emit('stream:started', { channelRef });
+        };
+        const startedWatchdog = setTimeout(emitStarted, 800);
+        ffmpeg.stderr.once('data', () => {
+          clearTimeout(startedWatchdog);
+          emitStarted();
+        });
+
         let ffmpegStderrLines = 0;
         ffmpeg.stderr.on('data', (chunk) => {
           ffmpegStderrLines++;
@@ -2781,7 +2799,8 @@ function initSocketIO(io) {
 
         // SOCK-H4: Do not send rtmpTarget to the client — it exposes the internal
         // RTMP server address and stream key which are server-side concerns only.
-        socket.emit('stream:started', { channelRef });
+        // stream:started is emitted from emitStarted() above once FFmpeg signals
+        // it has opened the input pipe (or after the 800 ms watchdog).
 
         // Analytics: open a session row and start a 30-second viewer sampler.
         setImmediate(async () => {
@@ -2843,6 +2862,15 @@ function initSocketIO(io) {
       } catch (err) {
         logger.error('stream:start error', { userId: user.id, channelRef, err });
         socket.emit('stream:error', { message: 'Failed to start stream. Please try again.' });
+      } finally {
+        // Release the cross-socket live lock if we exited without spawning FFmpeg
+        // (any validation early-return). Without this, a failed attempt locks the
+        // creator out for the full 600s TTL and they see "already streaming".
+        if (socket.data.liveLockKey && !socket.data.ffmpegProcess) {
+          const redis = getRedis();
+          if (redis) redis.del(socket.data.liveLockKey).catch(() => {});
+          socket.data.liveLockKey = null;
+        }
       }
     });
 
@@ -3046,6 +3074,13 @@ function initSocketIO(io) {
           logger.info(`FFmpeg cleanup on disconnect: user ${user.id}, channel '${channelRef}'`);
         } catch (cleanupErr) {
           logger.warn('FFmpeg disconnect cleanup error', { channelRef, error: cleanupErr.message });
+        }
+        // Tell viewers the stream is over. The ffmpeg.on('close') guard checks
+        // socket.data.ffmpegProcess === ffmpeg, which we null below — so without
+        // this direct emit, viewers stay on a frozen player until Restreamer
+        // times out the dead RTMP ingest.
+        if (channelRef) {
+          io.to(`live:${channelRef}`).emit('live:ended', { channelRef });
         }
         socket.data.ffmpegProcess = null;
         socket.data.streamChannelRef = null;

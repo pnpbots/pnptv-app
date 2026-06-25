@@ -15,6 +15,7 @@
  */
 
 const fs = require('fs');
+const http = require('http');
 const path = require('path');
 const { spawn } = require('child_process');
 const { getPool } = require('../config/postgres');
@@ -22,6 +23,10 @@ const logger = require('../utils/logger');
 
 // Module-level map: recordingId (number) → child_process
 const _activeProcesses = new Map();
+// Recording IDs that are waiting for Restreamer's HLS manifest to appear
+// before spawning ffmpeg. Removed when ffmpeg spawns or when stopRecording
+// is called before the manifest shows up.
+const _pendingStarts = new Set();
 
 const RECORDINGS_BASE = '/app/public/uploads/recordings';
 const RESTREAMER_URL = process.env.RESTREAMER_URL || 'http://restreamer:8080';
@@ -29,9 +34,49 @@ const RESTREAMER_URL = process.env.RESTREAMER_URL || 'http://restreamer:8080';
 // Thumbnail capture timeout (ms) — kills hung ffmpeg snapshot after this long
 const THUMB_FFMPEG_TIMEOUT_MS = 30_000;
 
+// HLS manifest readiness polling. Restreamer publishes /memfs/<channel>.m3u8
+// only after the first RTMP keyframe arrives, which takes ~5–10s after stream
+// start. Polling the manifest before spawning the recording ffmpeg avoids the
+// guaranteed 404 → exit-code-1 → status='failed' that every recording was hitting.
+const MANIFEST_POLL_MAX_MS = 45_000;
+const MANIFEST_POLL_INTERVAL_MS = 1_000;
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * HEAD-check the Restreamer HLS manifest URL once. Resolves true on 200.
+ */
+function _checkManifestOnce(url) {
+  return new Promise((resolve) => {
+    const req = http.request(url, { method: 'HEAD', timeout: 2000 }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
+/**
+ * Poll Restreamer for the channel's HLS manifest until it returns 200 or the
+ * deadline is reached. Cancellable via _pendingStarts.delete(recordingId).
+ *
+ * Returns: 'ready' if manifest appeared, 'cancelled' if recordingId was
+ * removed from _pendingStarts, 'timeout' otherwise.
+ */
+async function _waitForManifest(channelRef, recordingId) {
+  const url = `${RESTREAMER_URL}/memfs/${channelRef}.m3u8`;
+  const deadline = Date.now() + MANIFEST_POLL_MAX_MS;
+  while (Date.now() < deadline) {
+    if (!_pendingStarts.has(recordingId)) return 'cancelled';
+    if (await _checkManifestOnce(url)) return 'ready';
+    await new Promise((r) => setTimeout(r, MANIFEST_POLL_INTERVAL_MS));
+  }
+  return 'timeout';
+}
 
 /**
  * Sum the total size in bytes of all .ts segment files in a directory.
@@ -213,72 +258,97 @@ async function startRecording({ sessionId, creatorId, channelRef }) {
   // Create directory before spawning ffmpeg.
   await fs.promises.mkdir(dir, { recursive: true });
 
-  const ffmpegArgs = [
-    '-i', inputUrl,
-    '-c', 'copy',
-    '-t', '14400',
-    '-f', 'hls',
-    '-hls_time', '6',
-    '-hls_playlist_type', 'vod',
-    '-hls_segment_filename', segmentPattern,
-    manifestPath,
-  ];
+  // Defer the actual ffmpeg spawn until Restreamer's HLS manifest is ready.
+  // Pulling /memfs/<channel>.m3u8 immediately after stream:start always 404s
+  // (no RTMP keyframe yet) and ffmpeg exits code=1. Mark the recording as
+  // pending and return immediately so the caller has the recordingId for
+  // cancellation via stopRecording.
+  _pendingStarts.add(recordingId);
+  logger.info('streamRecording: waiting for manifest', { recordingId, channelRef, inputUrl });
 
-  const ffmpeg = spawn('ffmpeg', ffmpegArgs, {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: false,
-  });
-
-  _activeProcesses.set(recordingId, ffmpeg);
-
-  ffmpeg.stderr.on('data', (chunk) => {
-    // ffmpeg writes progress to stderr — only log warnings/errors
-    const line = chunk.toString();
-    if (line.includes('Error') || line.includes('error') || line.includes('Invalid')) {
-      logger.warn('streamRecording: ffmpeg stderr', { recordingId, line: line.trim().slice(0, 200) });
+  setImmediate(async () => {
+    const result = await _waitForManifest(channelRef, recordingId);
+    if (result !== 'ready') {
+      _pendingStarts.delete(recordingId);
+      const status = result === 'cancelled' ? 'cancelled' : 'failed';
+      logger.warn('streamRecording: manifest never appeared', { recordingId, channelRef, result });
+      try {
+        await pool.query(
+          `UPDATE stream_recordings SET status = $2, ended_at = NOW() WHERE id = $1`,
+          [recordingId, status]
+        );
+      } catch (dbErr) {
+        logger.error('streamRecording: failed to mark recording as failed', { recordingId, error: dbErr.message });
+      }
+      return;
     }
+
+    // Manifest is live — spawn the recording ffmpeg.
+    _pendingStarts.delete(recordingId);
+    const ffmpegArgs = [
+      '-i', inputUrl,
+      '-c', 'copy',
+      '-t', '14400',
+      '-f', 'hls',
+      '-hls_time', '6',
+      '-hls_playlist_type', 'vod',
+      '-hls_segment_filename', segmentPattern,
+      manifestPath,
+    ];
+
+    const ffmpeg = spawn('ffmpeg', ffmpegArgs, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+    });
+
+    _activeProcesses.set(recordingId, ffmpeg);
+
+    ffmpeg.stderr.on('data', (chunk) => {
+      const line = chunk.toString();
+      if (line.includes('Error') || line.includes('error') || line.includes('Invalid')) {
+        logger.warn('streamRecording: ffmpeg stderr', { recordingId, line: line.trim().slice(0, 200) });
+      }
+    });
+
+    ffmpeg.on('close', async (code) => {
+      _activeProcesses.delete(recordingId);
+      const status = code === 0 ? 'completed' : 'failed';
+      const sizeBytes = await _sumSegmentBytes(dir);
+      try {
+        const { rows: durRows } = await pool.query(
+          `UPDATE stream_recordings
+           SET ended_at = NOW(),
+               duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER,
+               size_bytes = $2,
+               status = $3
+           WHERE id = $1
+           RETURNING duration_seconds`,
+          [recordingId, sizeBytes, status]
+        );
+        logger.info('streamRecording: ffmpeg closed', {
+          recordingId,
+          code,
+          status,
+          sizeBytes,
+          durationSeconds: durRows[0]?.duration_seconds,
+        });
+      } catch (dbErr) {
+        logger.error('streamRecording: failed to update row on ffmpeg close', { recordingId, dbErr: dbErr.message });
+      }
+    });
+
+    ffmpeg.on('error', (err) => {
+      logger.error('streamRecording: ffmpeg spawn error', { recordingId, error: err.message });
+      _activeProcesses.delete(recordingId);
+      pool.query(
+        `UPDATE stream_recordings SET status = 'failed', ended_at = NOW() WHERE id = $1`,
+        [recordingId]
+      ).catch(() => {});
+    });
+
+    logger.info('streamRecording: started', { recordingId, creatorId, channelRef, inputUrl });
+    _scheduleThumbCapture(recordingId);
   });
-
-  ffmpeg.on('close', async (code) => {
-    _activeProcesses.delete(recordingId);
-    const status = code === 0 ? 'completed' : 'failed';
-    const sizeBytes = await _sumSegmentBytes(dir);
-    try {
-      const { rows: durRows } = await pool.query(
-        `UPDATE stream_recordings
-         SET ended_at = NOW(),
-             duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER,
-             size_bytes = $2,
-             status = $3
-         WHERE id = $1
-         RETURNING duration_seconds`,
-        [recordingId, sizeBytes, status]
-      );
-      logger.info('streamRecording: ffmpeg closed', {
-        recordingId,
-        code,
-        status,
-        sizeBytes,
-        durationSeconds: durRows[0]?.duration_seconds,
-      });
-    } catch (dbErr) {
-      logger.error('streamRecording: failed to update row on ffmpeg close', { recordingId, dbErr: dbErr.message });
-    }
-  });
-
-  ffmpeg.on('error', (err) => {
-    logger.error('streamRecording: ffmpeg spawn error', { recordingId, error: err.message });
-    _activeProcesses.delete(recordingId);
-    pool.query(
-      `UPDATE stream_recordings SET status = 'failed', ended_at = NOW() WHERE id = $1`,
-      [recordingId]
-    ).catch(() => {});
-  });
-
-  logger.info('streamRecording: started', { recordingId, creatorId, channelRef, inputUrl });
-
-  // Schedule thumbnail capture: attempt at 30s, retry at 90s if first fails.
-  _scheduleThumbCapture(recordingId);
 
   return recordingId;
 }
@@ -295,6 +365,13 @@ async function startRecording({ sessionId, creatorId, channelRef }) {
  */
 async function stopRecording(recordingId) {
   if (!recordingId) return;
+  // Cancel a pending manifest-wait before ffmpeg has spawned. _waitForManifest
+  // checks _pendingStarts each iteration and returns 'cancelled' when removed.
+  if (_pendingStarts.has(recordingId)) {
+    _pendingStarts.delete(recordingId);
+    logger.info('streamRecording: cancelled before manifest ready', { recordingId });
+    return;
+  }
   const proc = _activeProcesses.get(recordingId);
   if (!proc) {
     // Process already exited — ensure row is not stuck in 'recording'.

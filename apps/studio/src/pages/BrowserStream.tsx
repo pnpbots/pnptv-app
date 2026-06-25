@@ -247,12 +247,11 @@ export default function BrowserStream() {
   // Keep the beforeunload ref in sync with the live flag.
   useEffect(() => { isLiveForUnload.current = isLive; }, [isLive]);
 
-  // The raw camera stream for mic input — SceneManager and AudioMixer need the
-  // audio tracks from the raw device stream. sceneStreamRef holds the composed
-  // canvas output (no mic); the raw mic lives in the browser's getUserMedia
-  // result which is not re-exposed. We pass sceneStreamRef.current for
-  // AudioMixer so it can extract audio when available, and null until ready.
-  const micStream = sceneStreamRef.current;
+  // The raw camera stream for mic input — AudioMixer needs the actual microphone
+  // audio tracks from getUserMedia. sceneStreamRef holds the canvas-capture output
+  // which has NO audio tracks (canvas.captureStream is video-only), so passing it
+  // here resulted in viewers hearing silence.
+  const micStream = rawStreamRef.current;
 
   // streamId for chat — use the channel ref as the stream room identifier
   const streamId = channel?.ref ?? null;
