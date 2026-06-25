@@ -494,6 +494,8 @@ function LiveKitCallPanel({
           adaptiveStream: true,
           dynacast: true,
           publishDefaults: { simulcast: true, videoCodec: publishCodec },
+          // Prefer front camera on mobile so private calls don't open with the rear cam.
+          videoCaptureDefaults: { facingMode: "user" },
         }}
         onConnected={handleConnected}
         onDisconnected={handleDisconnected}

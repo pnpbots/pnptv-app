@@ -150,15 +150,28 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
 // ─── Helper functions ─────────────────────────────────────────────────────────
 
 export function getSupportedMimeType(): string | null {
+  // WebM/VP8/VP9 first (Chrome, Firefox, Android, desktop Safari 14+).
+  // MP4/H.264 fallback for iOS Safari (only container it supports for MediaRecorder).
   const candidates = [
     "video/webm;codecs=vp8,opus",
     "video/webm;codecs=vp9,opus",
     "video/webm",
+    "video/mp4;codecs=h264,mp4a.40.2",
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4",
   ];
   for (const t of candidates) {
     if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) return t;
   }
   return null;
+}
+
+/** Detect mobile/touch device — covers iPadOS 13+ which reports as desktop Safari. */
+export function detectMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  if (/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) return true;
+  // iPadOS 13+ reports MacIntel + touch support
+  return navigator.maxTouchPoints > 1;
 }
 
 export function getAdaptivePresetId(conn: any): string {
@@ -290,6 +303,8 @@ export interface UseStreamerReturn {
   // Refs exposed for UI (video preview)
   videoRef: React.RefObject<HTMLVideoElement>;
   sceneStreamRef: React.MutableRefObject<MediaStream | null>;
+  /** Raw camera stream — shared so SceneManager can reuse instead of acquiring a second getUserMedia. */
+  rawStreamRef: React.MutableRefObject<MediaStream | null>;
 
   // Derived
   health: HealthStatus;
@@ -725,14 +740,29 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     if (!navigator.mediaDevices?.getUserMedia) return;
 
     const preset = state.selectedPreset;
-    navigator.mediaDevices
-      .getUserMedia({
-        video: {
-          width: { ideal: preset.width },
-          height: { ideal: preset.height },
-          frameRate: { ideal: preset.fps },
-        },
+    const mobile = detectMobileDevice();
+
+    const tryGetUserMedia = (withResolution: boolean) =>
+      navigator.mediaDevices.getUserMedia({
+        video: withResolution
+          ? {
+              width: { ideal: preset.width },
+              height: { ideal: preset.height },
+              frameRate: { ideal: preset.fps },
+              ...(mobile ? { facingMode: { ideal: "user" } } : {}),
+            }
+          : { facingMode: { ideal: "user" } },
         audio: { echoCancellation: true, noiseSuppression: true },
+      });
+
+    tryGetUserMedia(true)
+      .catch((err: unknown) => {
+        // Only fall back to relaxed constraints for OverconstrainedError —
+        // permission/not-found/in-use errors won't be fixed by relaxing.
+        if (err instanceof Error && err.name === "OverconstrainedError") {
+          return tryGetUserMedia(false);
+        }
+        throw err;
       })
       .then((stream) => {
         streamRef.current = stream;
@@ -741,8 +771,19 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
         }
         enumerateCameras();
       })
-      .catch(() => {
-        setStreamError(null);
+      .catch((err: unknown) => {
+        const name = err instanceof Error ? err.name : "";
+        const msg =
+          name === "NotAllowedError"
+            ? "Camera permission denied. Please allow camera access in your browser settings and reload."
+            : name === "NotFoundError"
+            ? "No camera found. Make sure your camera is connected and not in use by another app."
+            : name === "NotReadableError"
+            ? "Camera is in use by another app. Close other apps using the camera and reload."
+            : name === "OverconstrainedError"
+            ? "Camera doesn't support the requested resolution. Try a lower preset in Settings."
+            : "Could not access camera. Try closing other apps that may be using it and reload.";
+        setStreamError(msg);
       });
 
     return () => {
@@ -917,7 +958,18 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
 
     const mimeType = getSupportedMimeType();
     if (!mimeType) {
-      setStreamError("Your browser does not support WebM recording.");
+      setStreamError("Your browser does not support WebM or MP4 recording.");
+      return;
+    }
+
+    // Use processed stream (scene→filters→audio) when available, else raw camera
+    const finalStream = getFinalStream() || streamRef.current;
+
+    // Guard against starting a recorder with no video tracks — happens when
+    // camera failed to initialize silently or scene compositor hasn't produced
+    // a frame yet. Recording on a 0-track stream produces silent black data.
+    if (!finalStream || finalStream.getVideoTracks().length === 0) {
+      setStreamError("No video source available. Check camera permissions and try again.");
       return;
     }
 
@@ -935,10 +987,10 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
       thumbnailDataUrl: thumbnail,
       // Gap 2: also send persistent URL so backend can prefer it over the data URL
       thumbnailUrl: thumbnailUrl,
+      // Tell backend which container we're sending so FFmpeg picks the right -f flag.
+      // iOS Safari sends MP4; everyone else sends WebM.
+      mimeType,
     });
-
-    // Use processed stream (scene→filters→audio) when available, else raw camera
-    const finalStream = getFinalStream() || streamRef.current;
 
     // Main stream recorder (sends data over socket)
     let recorder: MediaRecorder;
@@ -987,7 +1039,9 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
           }
         };
         localRecorder.onstop = () => {
-          const blob = new Blob(localChunksRef.current, { type: "video/webm" });
+          // Use the same container the recorder produced — webm on Chrome/FF, mp4 on iOS Safari.
+          const blobType = mimeType.startsWith("video/mp4") ? "video/mp4" : "video/webm";
+          const blob = new Blob(localChunksRef.current, { type: blobType });
           setRecordingBlob(blob);
           dispatch({ type: "SET_RECORDING", payload: false });
         };
@@ -1305,6 +1359,7 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     // Refs exposed for UI
     videoRef,
     sceneStreamRef,
+    rawStreamRef: streamRef,
 
     // Derived
     health,

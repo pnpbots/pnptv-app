@@ -2517,7 +2517,7 @@ function initSocketIO(io) {
     // The user's assigned live_channel is verified against channelRef before
     // spawning FFmpeg.
 
-    socket.on('stream:start', async ({ channelRef, videoBitrate, audioBitrate, fps, title, description, tags, thumbnailDataUrl, thumbnailUrl } = {}) => {
+    socket.on('stream:start', async ({ channelRef, videoBitrate, audioBitrate, fps, title, description, tags, thumbnailDataUrl, thumbnailUrl, mimeType } = {}) => {
       // Reject if already streaming — one stream per connection
       if (socket.data.ffmpegProcess) {
         socket.emit('stream:error', { message: 'Already streaming. Stop the current stream first.' });
@@ -2618,17 +2618,22 @@ function initSocketIO(io) {
           ? `rtmp://restreamer:1935/live/${streamKey}?token=${rtmpToken}`
           : `rtmp://restreamer:1935/live/${streamKey}`;
 
-        // Spawn FFmpeg: read webm/opus from stdin, transcode to H.264+AAC, push to RTMP.
+        // Spawn FFmpeg: read webm/opus or mp4/h264 from stdin, transcode to H.264+AAC, push to RTMP.
         // -re is omitted so FFmpeg consumes input as fast as it arrives from the socket.
         // -fflags nobuffer + -flags low_delay minimise latency through the pipeline.
-        // -f webm is required so FFmpeg knows the container format on stdin (without it,
-        // format probing on a pipe is unreliable and causes VP8 keyframe decode errors).
-        // -analyzeduration/-probesize are set low for fast startup on live piped input.
+        // -f <container> is required so FFmpeg knows the format on stdin (probing on a
+        // pipe is unreliable and causes VP8 keyframe decode errors). The client tells
+        // us which container it's sending via the mimeType field — iOS Safari sends MP4,
+        // everyone else sends WebM. Default to webm for backwards compat with old clients.
+        const inputFormat = (typeof mimeType === 'string' && mimeType.startsWith('video/mp4'))
+          ? 'mp4'
+          : 'webm';
+        logger.info(`[stream:start] channel=${channelRef} input=${inputFormat} mimeType=${mimeType || '<legacy>'}`);
         const ffmpeg = spawn('ffmpeg', [
           '-loglevel', 'warning',
           '-fflags', '+nobuffer+discardcorrupt',
           '-flags', 'low_delay',
-          '-f', 'webm',
+          '-f', inputFormat,
           '-analyzeduration', '500000',
           '-probesize', '500000',
           '-i', 'pipe:0',

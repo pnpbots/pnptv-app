@@ -137,6 +137,12 @@ export interface SceneManagerProps {
   micStream: MediaStream | null;
   isLive: boolean;
   compact?: boolean;
+  /**
+   * Shared camera stream from useStreamer. When provided, the default camera
+   * source reuses this stream instead of calling getUserMedia again — avoids
+   * iOS device contention that produced black frames.
+   */
+  sharedCameraStream?: MediaStream | null;
 }
 
 // Canvas resolution
@@ -279,11 +285,15 @@ const SOURCE_TYPE_LABELS: Record<Source["type"], string> = {
 interface CompositorState {
   videoStreams: Map<string, HTMLVideoElement>;
   loadedImages: Map<string, HTMLImageElement>;
+  /** Keys whose video element wraps tracks owned by an external (shared) stream.
+   *  Do NOT call track.stop() on these — useStreamer owns the lifecycle. */
+  sharedKeys: Set<string>;
 }
 
 function useCompositor(
   activeScene: Scene,
-  onCanvasStream: ((stream: MediaStream) => void) | undefined
+  onCanvasStream: ((stream: MediaStream) => void) | undefined,
+  sharedCameraStream: MediaStream | null | undefined,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const offscreenARef = useRef<HTMLCanvasElement | null>(null);
@@ -292,14 +302,29 @@ function useCompositor(
   const stateRef = useRef<CompositorState>({
     videoStreams: new Map(),
     loadedImages: new Map(),
+    sharedKeys: new Set(),
   });
   const streamRef = useRef<MediaStream | null>(null);
   const activeSceneRef = useRef<Scene>(activeScene);
+  const sharedStreamRef = useRef<MediaStream | null | undefined>(sharedCameraStream);
+  useEffect(() => {
+    sharedStreamRef.current = sharedCameraStream;
+  }, [sharedCameraStream]);
 
   // Sync activeScene into ref so RAF closure always reads latest
   useEffect(() => {
     activeSceneRef.current = activeScene;
   }, [activeScene]);
+
+  // Helper: attach a <video> element off-screen so iOS Safari decodes frames
+  // for canvas drawImage (detached elements don't trigger GPU decode on Safari).
+  function attachVideoOffscreen(video: HTMLVideoElement) {
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true;
+    video.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;";
+    document.body.appendChild(video);
+  }
 
   // Acquire / release media streams for sources
   const acquireSourceMedia = useCallback(async (source: Source) => {
@@ -310,18 +335,34 @@ function useCompositor(
       const key = `camera-${source.id}`;
       if (!state.videoStreams.has(key)) {
         try {
-          const constraints: MediaStreamConstraints = {
-            video: deviceId ? { deviceId: { exact: deviceId } } : true,
-            audio: false,
-          };
-          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          // Reuse the shared raw stream from useStreamer when no specific deviceId
+          // is requested. Avoids a second getUserMedia call which on iOS can freeze
+          // the first stream. Only call getUserMedia if a specific camera is asked for.
+          let stream: MediaStream;
+          let isShared = false;
+          if (!deviceId && sharedStreamRef.current && sharedStreamRef.current.getVideoTracks().length > 0) {
+            // Build a video-only MediaStream from the shared stream's video track —
+            // don't share the audio track here (audio is handled by the AudioMixer).
+            stream = new MediaStream(sharedStreamRef.current.getVideoTracks());
+            isShared = true;
+          } else {
+            const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
+            const constraints: MediaStreamConstraints = {
+              video: deviceId
+                ? { deviceId: { exact: deviceId } }
+                : isMobile
+                ? { facingMode: { ideal: "user" } }
+                : true,
+              audio: false,
+            };
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+          }
           const video = document.createElement("video");
           video.srcObject = stream;
-          video.autoplay = true;
-          video.playsInline = true;
-          video.muted = true;
-          await video.play().catch(() => { /* ignore */ });
+          attachVideoOffscreen(video);
+          await video.play().catch(() => { /* ignore — autoplay policy on iOS standalone */ });
           state.videoStreams.set(key, video);
+          if (isShared) state.sharedKeys.add(key);
         } catch {
           // Camera access denied — source will render as empty
         }
@@ -337,9 +378,7 @@ function useCompositor(
           }).getDisplayMedia({ video: true, audio: false });
           const video = document.createElement("video");
           video.srcObject = stream;
-          video.autoplay = true;
-          video.playsInline = true;
-          video.muted = true;
+          attachVideoOffscreen(video);
           await video.play().catch(() => { /* ignore */ });
           // Auto-cleanup when user stops sharing via browser UI
           stream.getVideoTracks()[0].addEventListener("ended", () => {
@@ -347,6 +386,7 @@ function useCompositor(
             if (el) {
               (el.srcObject as MediaStream)?.getTracks().forEach((t) => t.stop());
               el.srcObject = null;
+              if (el.parentNode) el.parentNode.removeChild(el);
             }
             state.videoStreams.delete(key);
           });
@@ -376,9 +416,14 @@ function useCompositor(
     for (const key of [cameraKey, screenKey]) {
       const el = state.videoStreams.get(key);
       if (el) {
-        (el.srcObject as MediaStream | null)?.getTracks().forEach((t) => t.stop());
+        // Only stop tracks we own. Shared tracks are owned by useStreamer.
+        if (!state.sharedKeys.has(key)) {
+          (el.srcObject as MediaStream | null)?.getTracks().forEach((t) => t.stop());
+        }
         el.srcObject = null;
+        if (el.parentNode) el.parentNode.removeChild(el);
         state.videoStreams.delete(key);
+        state.sharedKeys.delete(key);
       }
     }
   }, []);
@@ -509,13 +554,17 @@ function useCompositor(
 
     return () => {
       stopRenderLoop();
-      // Release all media
+      // Release all media. Skip stopping tracks for shared streams (owned by useStreamer).
       const state = stateRef.current;
-      for (const [, el] of state.videoStreams) {
-        (el.srcObject as MediaStream | null)?.getTracks().forEach((t) => t.stop());
+      for (const [key, el] of state.videoStreams) {
+        if (!state.sharedKeys.has(key)) {
+          (el.srcObject as MediaStream | null)?.getTracks().forEach((t) => t.stop());
+        }
         el.srcObject = null;
+        if (el.parentNode) el.parentNode.removeChild(el);
       }
       state.videoStreams.clear();
+      state.sharedKeys.clear();
       state.loadedImages.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1106,6 +1155,7 @@ export default function SceneManager({
   micStream: _micStream,
   isLive,
   compact = false,
+  sharedCameraStream = null,
 }: SceneManagerProps) {
   const initialDeviceId = videoDevices[0]?.deviceId ?? "";
 
@@ -1233,7 +1283,7 @@ export default function SceneManager({
     stopRenderLoop,
     startRenderLoop,
     acquireSourceMedia,
-  } = useCompositor(activeScene, onCanvasStream);
+  } = useCompositor(activeScene, onCanvasStream, sharedCameraStream);
 
   // ── Scene switching with transition ─────────────────────────────────────
   const switchToScene = useCallback(

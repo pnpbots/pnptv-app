@@ -1470,6 +1470,8 @@ export default function MainStage() {
             adaptiveStream: true,
             dynacast: true,
             publishDefaults: { simulcast: true },
+            // Match ROOM_OPTIONS — front cam on mobile.
+            videoCaptureDefaults: { facingMode: "user" },
           }}
           className="contents"
           onMediaDeviceFailure={(failure) => {

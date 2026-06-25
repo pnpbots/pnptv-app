@@ -203,6 +203,11 @@ const ROOM_OPTIONS: RoomOptions = {
   adaptiveStream: true,
   dynacast: true,
   publishDefaults: { simulcast: true },
+  // Prefer the front-facing camera on mobile. Without this, iOS Safari and some
+  // Android browsers default to the rear camera for getUserMedia.
+  videoCaptureDefaults: {
+    facingMode: "user",
+  },
 };
 
 // The Room object is created once outside React so it truly never changes

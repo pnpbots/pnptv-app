@@ -113,6 +113,7 @@ export default function BrowserStream() {
     // Refs
     videoRef,
     sceneStreamRef,
+    rawStreamRef,
 
     // Derived
     health,
@@ -246,6 +247,7 @@ export default function BrowserStream() {
               micStream={micStream}
               isLive={isLive}
               compact={true}
+              sharedCameraStream={rawStreamRef.current}
             />
           </TabPanel>
         );
@@ -507,6 +509,7 @@ export default function BrowserStream() {
               micStream={micStream}
               isLive={isLive}
               compact={true}
+              sharedCameraStream={rawStreamRef.current}
             />
           </TabPanel>
 
