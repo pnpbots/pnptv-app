@@ -12251,14 +12251,16 @@ app.post('/api/webapp/creators/media/upload',
     const filePath = path.join(creatorMediaUploadDir, filename);
     const publicUrl = `/uploads/creator-media/${filename}`;
 
-    await sharp(req.file.buffer)
+    const processedBuf = await sharp(req.file.buffer)
       .rotate()
       .withMetadata(false)
       .resize(1200, null, { fit: 'inside', withoutEnlargement: true })
       .webp({ quality: 85 })
-      .toFile(filePath);
+      .toBuffer();
+    const wmBuf = await require('../../services/watermarkService').applyImageWatermark(processedBuf, user.username);
+    await fs.promises.writeFile(filePath, wmBuf);
 
-    const creatorMediaService = require('../../../services/creatorMediaService');
+    const creatorMediaService = require('../../services/creatorMediaService');
     const caption = typeof req.body.caption === 'string' ? req.body.caption.trim() || null : null;
     const item = await creatorMediaService.addMedia(String(user.id), {
       type: 'photo',
@@ -12291,7 +12293,17 @@ app.post('/api/webapp/creators/media/upload-video',
       await fs.promises.unlink(req.file.path).catch(() => {});
     });
 
-    const creatorMediaService = require('../../../services/creatorMediaService');
+    // Apply username watermark to creator album video
+    try {
+      const wmPath = destPath + '.watermark' + ext;
+      await require('../../services/watermarkService').applyVideoWatermark(destPath, wmPath, user.username);
+      await fs.promises.unlink(destPath).catch(() => {});
+      await fs.promises.rename(wmPath, destPath);
+    } catch (wmErr) {
+      logger.warn('Creator album video watermark failed, keeping original', { userId: user.id, error: wmErr.message });
+    }
+
+    const creatorMediaService = require('../../services/creatorMediaService');
     const caption = typeof req.body.caption === 'string' ? req.body.caption.trim() || null : null;
     const item = await creatorMediaService.addMedia(String(user.id), {
       type: 'video',

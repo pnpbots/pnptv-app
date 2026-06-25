@@ -743,12 +743,16 @@ const createPostWithMedia = async (req, res) => {
         } else {
           filename = `img-${user.id}-${Date.now()}.webp`;
           filePath = path.join(uploadDir, filename);
-          await sharp(imgBuffer, { failOn: 'none' })
+          const processedBuf = await sharp(imgBuffer, { failOn: 'none' })
             .rotate()
             .withMetadata(false)
             .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
             .webp({ quality: 70, progressive: true })
-            .toFile(filePath);
+            .toBuffer();
+          const finalImgBuf = user.creator_status === 'active'
+            ? await require('../../../services/watermarkService').applyImageWatermark(processedBuf, user.username)
+            : processedBuf;
+          await fs.writeFile(filePath, finalImgBuf);
         }
         if (tempPath) await fs.unlink(tempPath).catch(() => {});
         finalFilePath = filePath;
@@ -1073,12 +1077,16 @@ const createPostWithMultiMedia = async (req, res) => {
         } else {
           filename = `img-${user.id}-${timestamp}-${i}.webp`;
           destPath = path.join(uploadDir, filename);
-          await sharp(imgBuffer, { failOn: 'none' })
+          const processedBuf = await sharp(imgBuffer, { failOn: 'none' })
             .rotate()
             .withMetadata(false)
             .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
             .webp({ quality: 70, progressive: true })
-            .toFile(destPath);
+            .toBuffer();
+          const finalImgBuf = user.creator_status === 'active'
+            ? await require('../../../services/watermarkService').applyImageWatermark(processedBuf, user.username)
+            : processedBuf;
+          await fs.writeFile(destPath, finalImgBuf);
         }
         if (fileTempPath) await fs.unlink(fileTempPath).catch(() => {});
         writtenFilePaths.push(destPath);
