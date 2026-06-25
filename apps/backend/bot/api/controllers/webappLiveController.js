@@ -2395,7 +2395,7 @@ const getStreamHealth = async (req, res) => {
  */
 const getCreatorEligibility = async (req, res) => {
   const pool = getPool();
-  const userId = req.session?.userId;
+  const userId = req.session?.user?.id;
   if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
   try {
