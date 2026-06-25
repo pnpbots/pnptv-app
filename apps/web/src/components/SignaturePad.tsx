@@ -6,126 +6,113 @@ interface SignaturePadProps {
   height?: number;
 }
 
+// Renders the typed name onto the canvas in a signature-style font and returns
+// the data URL. The canvas itself stays hidden — it only exists as a serialization
+// mechanism so the stored format (base64 PNG) stays consistent with the rest of
+// the enrollment pipeline.
+function renderToCanvas(
+  canvas: HTMLCanvasElement,
+  name: string,
+  width: number,
+  height: number
+): string {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "rgba(255,255,255,0.04)";
+  ctx.fillRect(0, 0, width, height);
+  if (!name.trim()) return "";
+  const fontSize = Math.min(42, height * 0.52);
+  ctx.font = `italic ${fontSize}px Georgia, 'Times New Roman', serif`;
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  // Trim to fit canvas width
+  let display = name;
+  while (ctx.measureText(display).width > width - 24 && display.length > 1) {
+    display = display.slice(0, -1);
+  }
+  ctx.fillText(display, width / 2, height / 2);
+  return canvas.toDataURL("image/png");
+}
+
 export function SignaturePad({ onSave, width = 320, height = 120 }: SignaturePadProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const isDrawing = useRef(false);
-  const lastPos = useRef<{ x: number; y: number } | null>(null);
-  const hasSigRef = useRef(false);
   const onSaveRef = useRef(onSave);
-  const [hasSig, setHasSig] = useState(false);
+  const [typedName, setTypedName] = useState("");
 
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
 
-  const getPos = (canvas: HTMLCanvasElement, clientX: number, clientY: number) => {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
-  };
-
-  const strokeTo = (canvas: HTMLCanvasElement, x: number, y: number) => {
-    const ctx = canvas.getContext("2d");
-    if (!ctx || !lastPos.current) return;
-    ctx.beginPath();
-    ctx.moveTo(lastPos.current.x, lastPos.current.y);
-    ctx.lineTo(x, y);
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.stroke();
-    lastPos.current = { x, y };
-    hasSigRef.current = true;
-    setHasSig(true);
-  };
-
-  const commitSig = (canvas: HTMLCanvasElement) => {
-    isDrawing.current = false;
-    lastPos.current = null;
-    if (hasSigRef.current) onSaveRef.current(canvas.toDataURL("image/png"));
-  };
-
-  // ── Pointer Events (covers touch + mouse + stylus uniformly) ──────────────
-  // Uses non-passive native listeners so preventDefault() stops page scroll.
-  // setPointerCapture ensures pointermove fires even if finger drifts outside.
-  useEffect(() => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const name = e.target.value;
+    setTypedName(name);
     const canvas = canvasRef.current;
     if (!canvas) return;
-
-    const onDown = (e: PointerEvent) => {
-      e.preventDefault();
-      canvas.setPointerCapture(e.pointerId);
-      isDrawing.current = true;
-      lastPos.current = getPos(canvas, e.clientX, e.clientY);
-    };
-
-    const onMove = (e: PointerEvent) => {
-      e.preventDefault();
-      if (!isDrawing.current) return;
-      const { x, y } = getPos(canvas, e.clientX, e.clientY);
-      strokeTo(canvas, x, y);
-    };
-
-    const onUp = (e: PointerEvent) => {
-      e.preventDefault();
-      commitSig(canvas);
-    };
-
-    const onCancel = () => commitSig(canvas);
-
-    canvas.addEventListener("pointerdown", onDown, { passive: false });
-    canvas.addEventListener("pointermove", onMove, { passive: false });
-    canvas.addEventListener("pointerup", onUp, { passive: false });
-    canvas.addEventListener("pointercancel", onCancel);
-
-    return () => {
-      canvas.removeEventListener("pointerdown", onDown);
-      canvas.removeEventListener("pointermove", onMove);
-      canvas.removeEventListener("pointerup", onUp);
-      canvas.removeEventListener("pointercancel", onCancel);
-    };
-  }, []); // run once — refs handle stable callbacks
-
-  // ── Initial background fill ────────────────────────────────────────────────
-  useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
-    ctx.fillStyle = "rgba(255,255,255,0.04)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  }, []);
+    if (!name.trim()) {
+      onSaveRef.current("");
+      return;
+    }
+    const dataUrl = renderToCanvas(canvas, name, width, height);
+    if (dataUrl) onSaveRef.current(dataUrl);
+  };
 
   const clear = () => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "rgba(255,255,255,0.04)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    hasSigRef.current = false;
-    setHasSig(false);
+    setTypedName("");
     onSaveRef.current("");
   };
 
+  const hasSig = typedName.trim().length > 0;
+
   return (
-    <div className="flex flex-col gap-1.5">
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
-        className="w-full rounded-lg cursor-crosshair touch-none select-none"
+    <div className="flex flex-col gap-2">
+      {/* Hidden canvas — only used to produce the stored data URL */}
+      <canvas ref={canvasRef} width={width} height={height} style={{ display: "none" }} />
+
+      {/* Signature-style text input */}
+      <input
+        type="text"
+        value={typedName}
+        onChange={handleChange}
+        placeholder="Type your full legal name"
+        className="w-full rounded-lg px-3 py-3 text-white outline-none"
         style={{
-          border: "1px solid rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.04)",
-          touchAction: "none",
-          userSelect: "none",
-          WebkitUserSelect: "none",
+          background: "rgba(255,255,255,0.06)",
+          border: `1px solid rgba(255,255,255,${hasSig ? "0.25" : "0.12"})`,
+          fontSize: "16px",
+          fontStyle: "italic",
+          fontFamily: "Georgia, 'Times New Roman', serif",
+          letterSpacing: "0.02em",
         }}
+        autoComplete="name"
+        autoCapitalize="words"
+        inputMode="text"
       />
+
+      {/* Live cursive preview */}
+      {hasSig && (
+        <div
+          className="w-full rounded-lg px-4 py-3 text-center"
+          style={{
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            fontFamily: "Georgia, 'Times New Roman', serif",
+            fontStyle: "italic",
+            fontSize: "22px",
+            color: "#ffffff",
+            letterSpacing: "0.03em",
+            minHeight: 52,
+          }}
+        >
+          {typedName}
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-          {hasSig ? "Signature captured ✓" : "Draw your signature above"}
+          {hasSig ? "Signature captured ✓" : "Type your full legal name above"}
         </p>
         {hasSig && (
-          <button onClick={clear} className="text-xs" style={{ color: "#FF453A" }}>
+          <button onClick={clear} type="button" className="text-xs" style={{ color: "#FF453A" }}>
             Clear
           </button>
         )}
