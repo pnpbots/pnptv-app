@@ -515,13 +515,17 @@ export function BookCallModal({
         if (npRes.invoiceUrl) {
           const safeUrl = assertPaymentUrl(npRes.invoiceUrl);
           setNpInvoiceUrl(safeUrl);
-          const pw = 600, ph = 700;
-          const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
-          const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
-          paymentPopupRef.current = window.open(
-            safeUrl, "nowpayments_call_checkout",
-            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
-          );
+          // USDT BSC: use wallet deeplinks — no popup (blocked on async/mobile)
+          // Generic crypto: open popup so user can pick coin on NowPayments
+          if (provider !== "nowpayments_usdc") {
+            const pw = 600, ph = 700;
+            const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+            const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+            paymentPopupRef.current = window.open(
+              safeUrl, "nowpayments_call_checkout",
+              `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
+            );
+          }
         }
         setDashPaymentId(npRes.paymentId ?? null);
 
@@ -1507,7 +1511,49 @@ export function BookCallModal({
               {t.creator.cancelBtn}
             </button>
           </div>
-          {npInvoiceUrl && (provider === "nowpayments" || provider === "nowpayments_usdc") && (
+          {npInvoiceUrl && provider === "nowpayments_usdc" && (
+            /* USDT BSC: wallet deeplink shortcuts (popup blocked on async/mobile) */
+            <div className="space-y-2">
+              <p className="text-[10px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                {t.lang === "es" ? "Abre directamente en tu billetera:" : "Open directly in your wallet:"}
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                <a
+                  href={`https://metamask.app.link/dapp/${npInvoiceUrl.replace(/^https?:\/\//, '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border transition-colors active:scale-[0.97]"
+                  style={{ borderColor: "rgba(246,133,27,0.3)", background: "rgba(246,133,27,0.08)" }}
+                >
+                  <span className="text-xl leading-none">🦊</span>
+                  <span className="text-[10px] font-bold" style={{ color: "#F6851B" }}>MetaMask</span>
+                </a>
+                <a
+                  href={`https://link.trustwallet.com/open_url?coin_id=20000714&url=${encodeURIComponent(npInvoiceUrl)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border transition-colors active:scale-[0.97]"
+                  style={{ borderColor: "rgba(51,117,187,0.3)", background: "rgba(51,117,187,0.08)" }}
+                >
+                  <span className="text-xl leading-none">🔵</span>
+                  <span className="text-[10px] font-bold" style={{ color: "#3375BB" }}>Trust Wallet</span>
+                </a>
+                <a
+                  href={npInvoiceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border transition-colors active:scale-[0.97]"
+                  style={{ borderColor: "rgba(234,179,8,0.3)", background: "rgba(234,179,8,0.08)" }}
+                >
+                  <span className="text-xl leading-none">🌐</span>
+                  <span className="text-[10px] font-bold" style={{ color: "#EAB308" }}>
+                    {t.lang === "es" ? "Otra" : "Other"}
+                  </span>
+                </a>
+              </div>
+            </div>
+          )}
+          {npInvoiceUrl && provider === "nowpayments" && (
             <button
               type="button"
               onClick={() => {
@@ -1518,9 +1564,9 @@ export function BookCallModal({
                 if (!popup || popup.closed) window.open(npInvoiceUrl, "_blank");
               }}
               className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
-              style={{ background: "linear-gradient(90deg, #26a17b, #00c896)" }}
+              style={{ background: "linear-gradient(90deg, #D4007A, #a8006a)" }}
             >
-              🪙 {provider === "nowpayments_usdc" ? "Open USDT Checkout" : "Open Crypto Checkout"}
+              ⚡ Open Crypto Checkout
             </button>
           )}
         </div>
