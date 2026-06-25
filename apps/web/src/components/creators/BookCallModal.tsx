@@ -23,6 +23,8 @@ import { useI18n } from "@/lib/i18n";
 import {
   getCreatorCallPackages,
   getBookingOptions,
+  getMyCallCredits,
+  bookCallWithCredit,
   createCallCheckoutNowPayments,
   createCallCheckoutBtc,
   createCallCheckoutDash,
@@ -34,6 +36,7 @@ import {
   type CallPackage,
   type BookingSlot,
   type FeaturedPerformer,
+  type MyCallCredit,
 } from "@/lib/api";
 import type { CreatorCardCreator } from "./CreatorCard";
 
@@ -196,6 +199,11 @@ export function BookCallModal({
   const [joinCallError, setJoinCallError] = useState<string | null>(null);
   const [btcAvailable, setBtcAvailable] = useState(false);
   const [dashAvailable, setDashAvailable] = useState(false);
+
+  // Existing paid credits for this creator
+  const [existingCredit, setExistingCredit] = useState<MyCallCredit | null>(null);
+  const [creditBookingLoading, setCreditBookingLoading] = useState(false);
+  const [creditBookingError, setCreditBookingError] = useState<string | null>(null);
 
   useEffect(() => {
     getBtcAvailable().then((r) => setBtcAvailable(r.available === true)).catch(() => {});
@@ -367,6 +375,25 @@ export function BookCallModal({
     loadSlots(0, false);
   }, [step, creator.id, duration]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fetch existing paid credits for this creator when entering SELECT_SLOT
+  useEffect(() => {
+    if (step !== "SELECT_SLOT" || !creator.id) return;
+    let cancelled = false;
+    getMyCallCredits(creator.id)
+      .then((res) => {
+        if (cancelled) return;
+        const usable = (res.credits ?? []).find(
+          (c) =>
+            (c.status === "unused" || c.status === "partial") &&
+            c.duration_minutes === duration &&
+            c.quantity_used + c.quantity_scheduled < c.quantity_total
+        );
+        setExistingCredit(usable ?? null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [step, creator.id, duration]);
+
   const handleSeeMore = () => {
     const newOffset = slotsOffset + 5;
     setSlotsOffset(newOffset);
@@ -442,6 +469,31 @@ export function BookCallModal({
     if (!selectedSlot && !isOnline) return;
     setStep("CHECKOUT");
   }, [selectedSlot, isOnline]);
+
+  const handleBookWithCredit = useCallback(async () => {
+    if (!existingCredit || !selectedSlot || !creator.id) return;
+    setCreditBookingLoading(true);
+    setCreditBookingError(null);
+    try {
+      const res = await bookCallWithCredit({
+        creatorId: creator.id,
+        startAt: selectedSlot.startUtc,
+        creditId: existingCredit.id,
+        durationMinutes: existingCredit.duration_minutes,
+      });
+      if (res.success) {
+        setConfirmedStartAt(selectedSlot.startUtc);
+        setConfirmedBookingId(res.booking?.id ?? null);
+        setStep("SUCCESS");
+      } else {
+        setCreditBookingError(res.error ?? "Booking failed. Please try again.");
+      }
+    } catch (err: any) {
+      setCreditBookingError(err.message ?? "Booking failed. Please try again.");
+    } finally {
+      setCreditBookingLoading(false);
+    }
+  }, [existingCredit, selectedSlot, creator.id]);
 
   const handleCheckout = useCallback(async () => {
     if (checkoutInFlight.current || !activePackage) return;
@@ -1174,15 +1226,45 @@ export function BookCallModal({
         </>
       )}
 
-      <button
-        type="button"
-        disabled={!selectedSlot && !isOnline}
-        onClick={handleNextFromSlot}
-        className="w-full min-h-[48px] rounded-2xl text-base font-bold text-white transition-opacity disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-        style={{ background: "linear-gradient(90deg, #D4007A, #E69138)" }}
-      >
-        {isOnline && !selectedSlot ? t.creator.callNowBtn : t.creator.nextBtn}
-      </button>
+      {/* Existing paid credit — skip payment, book directly */}
+      {existingCredit && (
+        <div
+          className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl"
+          style={{ background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.30)" }}
+        >
+          <svg className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#34C759" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-xs" style={{ color: "#34C759" }}>
+            You have a paid {existingCredit.duration_minutes}-min session credit — no payment needed. Select a time and confirm.
+          </p>
+        </div>
+      )}
+      {creditBookingError && (
+        <p className="text-xs px-1" style={{ color: "#FF453A" }}>{creditBookingError}</p>
+      )}
+
+      {existingCredit ? (
+        <button
+          type="button"
+          disabled={!selectedSlot || creditBookingLoading}
+          onClick={handleBookWithCredit}
+          className="w-full min-h-[48px] rounded-2xl text-base font-bold text-white transition-opacity disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 flex items-center justify-center gap-2"
+          style={{ background: "linear-gradient(90deg, #34C759, #30D158)" }}
+        >
+          {creditBookingLoading ? <Spinner size={18} /> : "✓ Confirm Booking (Credit Applied)"}
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled={!selectedSlot && !isOnline}
+          onClick={handleNextFromSlot}
+          className="w-full min-h-[48px] rounded-2xl text-base font-bold text-white transition-opacity disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+          style={{ background: "linear-gradient(90deg, #D4007A, #E69138)" }}
+        >
+          {isOnline && !selectedSlot ? t.creator.callNowBtn : t.creator.nextBtn}
+        </button>
+      )}
     </div>
   );
 

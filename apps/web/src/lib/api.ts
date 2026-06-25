@@ -6183,6 +6183,34 @@ export function createCallCheckoutDash(
   return request("/api/webapp/book-call/checkout/dash", { method: "POST", body });
 }
 
+export interface MyCallCredit {
+  id: number;
+  creator_id: string;
+  package_id: number;
+  duration_minutes: number;
+  quantity_total: number;
+  quantity_used: number;
+  quantity_scheduled: number;
+  status: "unused" | "partial" | "completed" | "expired" | "refunded";
+  expires_at: string | null;
+}
+
+export function getMyCallCredits(
+  creatorId?: string
+): Promise<{ success: boolean; credits: MyCallCredit[] }> {
+  const qs = creatorId ? `?creatorId=${encodeURIComponent(creatorId)}` : "";
+  return request(`/api/webapp/my-call-credits${qs}`);
+}
+
+export function bookCallWithCredit(data: {
+  creatorId: string;
+  startAt: string;
+  creditId: number;
+  durationMinutes: number;
+}): Promise<{ success: boolean; booking?: { id: string; startAt: string }; error?: string }> {
+  return request("/api/webapp/book-call", { method: "POST", body: data });
+}
+
 export function getBtcAvailable(): Promise<{ available: boolean; configured: boolean }> {
   return request("/api/webapp/payments/btc/available");
 }
