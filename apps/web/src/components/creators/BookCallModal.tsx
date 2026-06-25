@@ -27,7 +27,6 @@ import {
   createCallCheckoutBtc,
   getBtcAvailable,
   getBtcSubscriptionStatus,
-  createCallCheckoutEpayco,
   getBookingPaymentStatus,
   assertPaymentUrl,
   type CallPackage,
@@ -39,7 +38,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "epayco" | "nowpayments" | "btc";
+type Provider = "nowpayments" | "btc";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -444,33 +443,7 @@ export function BookCallModal({
     setCheckoutLoading(true);
     setIsProcessing(true);
     setCheckoutError(null);
-    // Prevents finally from resetting submission guards while the browser is
-    // navigating to the ePayco hosted checkout page. Without this flag the
-    // guards reset before the page unloads, allowing a second submission.
-    let navigatingAway = false;
-
     try {
-      // ePayco — redirect to hosted card checkout
-      if (provider === "epayco") {
-        const epaycoRes = await createCallCheckoutEpayco(
-          activePackage.id,
-          selectedSlot?.startUtc ?? undefined,
-          selectedSlot?.endUtc ?? undefined,
-          email.trim() || undefined,
-          clientNotes.trim() || undefined
-        );
-        if (epaycoRes.checkoutUrl || epaycoRes.paymentUrl) {
-          const url = epaycoRes.checkoutUrl || epaycoRes.paymentUrl;
-          const safeUrl = assertPaymentUrl(url);
-          navigatingAway = true;
-          window.location.href = safeUrl;
-          return;
-        } else {
-          setCheckoutError(t.creator.checkoutFailed);
-        }
-        return;
-      }
-
       // NowPayments — open a centered popup (cannot redirect: breaks iOS + 3rd-party cookie policy)
       if (provider === "nowpayments") {
         const npRes = await createCallCheckoutNowPayments(
@@ -643,11 +616,9 @@ export function BookCallModal({
         });
       }
     } finally {
-      if (!navigatingAway) {
-        setCheckoutLoading(false);
-        setIsProcessing(false);
-        checkoutInFlight.current = false;
-      }
+      setCheckoutLoading(false);
+      setIsProcessing(false);
+      checkoutInFlight.current = false;
     }
   }, [activePackage, provider, email, selectedSlot]);
 
@@ -1201,16 +1172,6 @@ export function BookCallModal({
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setProvider("epayco")}
-            className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
-            style={provider === "epayco"
-              ? { background: "rgba(212,0,122,0.16)", border: "1.5px solid #D4007A", color: "#D4007A" }
-              : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
-          >
-            💳 Card
-          </button>
-          <button
-            type="button"
             onClick={() => setProvider("nowpayments")}
             className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
             style={provider === "nowpayments"
@@ -1381,7 +1342,7 @@ export function BookCallModal({
       {!((provider === "nowpayments" || provider === "btc") && (checkoutLoading || dashTimedOut)) && (
         <button
           type="button"
-          disabled={checkoutLoading || (provider === "epayco" && !email.trim()) || !activePackage}
+          disabled={checkoutLoading || !activePackage}
           onClick={handleCheckout}
           className={clsx(
             "w-full min-h-[48px] rounded-2xl text-base font-bold text-white",

@@ -20,7 +20,7 @@ const S = {
     heroTitle: "Lifetime PRIME",
     heroSubtitle: "Pay once. Full PRIME forever.",
     oldPrice: "$250",
-    badge: "$100 ONE-TIME · CARD OR CRYPTO",
+    badge: "$100 ONE-TIME · CRYPTO",
     benefits: [
       "Pay once — full PRIME access forever, no renewals ever.",
       "PRIME unlocked permanently — all exclusive content from day one.",
@@ -29,7 +29,7 @@ const S = {
       "Priority support, always.",
     ],
     noticeTitle: "Good to know",
-    noticeCryptoOnly: "Pay with your card (ePayco) or crypto — BTC, ETH, USDC and 100+ coins via NowPayments.",
+    noticeCryptoOnly: "Pay with crypto — BTC, ETH, USDC and 100+ coins via NowPayments.",
     noticeEarlyAccess: "You lock in lifetime PRIME — permanent, no renewals, ever.",
     noticeInProgress: "Some screens still in progress — we're moving fast.",
     alreadyPaid: "Need help?",
@@ -41,7 +41,7 @@ const S = {
     heroTitle: "Lifetime PRIME",
     heroSubtitle: "Paga una vez. PRIME completo para siempre.",
     oldPrice: "$250",
-    badge: "$100 PAGO ÚNICO · TARJETA O CRIPTO",
+    badge: "$100 PAGO ÚNICO · CRIPTO",
     benefits: [
       "Paga una vez — acceso PRIME completo para siempre, sin renovaciones.",
       "PRIME desbloqueado permanentemente — todo el contenido exclusivo desde el primer día.",
@@ -50,7 +50,7 @@ const S = {
       "Soporte prioritario, siempre.",
     ],
     noticeTitle: "Bueno saber",
-    noticeCryptoOnly: "Paga con tarjeta (ePayco) o cripto — BTC, ETH, USDC y +100 monedas vía NowPayments.",
+    noticeCryptoOnly: "Paga con cripto — BTC, ETH, USDC y +100 monedas vía NowPayments.",
     noticeEarlyAccess: "Aseguras PRIME de por vida — permanente, sin renovaciones, nunca.",
     noticeInProgress: "Algunas pantallas aún en progreso — avanzando rápido.",
     alreadyPaid: "¿Necesitas ayuda?",
@@ -120,12 +120,11 @@ const SHEET_STRINGS: Record<Lang, SheetStrings> = {
     },
     payments: {
       title: "Payments",
-      lead: "Two ways to pay — both at $100 flat.",
+      lead: "Pay with crypto — 100+ coins accepted.",
       cards: [
-        { e: "💳", t: "Card (ePayco)", b: "Credit or debit card. Safe, discreet checkout. No card stored on our servers." },
         { e: "🪙", t: "Crypto (NowPayments)", b: "Pay with BTC, ETH, USDC and 100+ more coins. Hosted checkout, auto-confirmed." },
       ],
-      fineprint: "🔒 Encrypted · Discreet · No card stored",
+      fineprint: "🔒 Encrypted · Discreet · No personal info required",
     },
     safety: {
       title: "Safety First",
@@ -187,12 +186,11 @@ const SHEET_STRINGS: Record<Lang, SheetStrings> = {
     },
     payments: {
       title: "Pagos",
-      lead: "Dos formas de pagar — ambas a $100 fijo.",
+      lead: "Paga con cripto — más de 100 monedas aceptadas.",
       cards: [
-        { e: "💳", t: "Tarjeta (ePayco)", b: "Tarjeta de crédito o débito. Checkout seguro y discreto. No guardamos tu tarjeta." },
         { e: "🪙", t: "Cripto (NowPayments)", b: "Paga con BTC, ETH, USDC y +100 criptos. Checkout alojado, confirmación automática." },
       ],
-      fineprint: "🔒 Encriptado · Discreto · No guardamos tarjeta",
+      fineprint: "🔒 Encriptado · Discreto · Sin datos personales requeridos",
     },
     safety: {
       title: "Seguridad primero",
@@ -473,7 +471,7 @@ function SheetModal({ sheet, onClose }: { sheet: { title: string; emoji: string;
 
 // ── Payment types ──────────────────────────────────────────────────────────────
 
-type PayMethod = "epayco" | "usdc";
+type PayMethod = "usdc";
 
 // ── Hero view ──────────────────────────────────────────────────────────────────
 
@@ -483,7 +481,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
   const s = S[lang];
   const es = lang === "es";
 
-  const [payMethod, setPayMethod] = useState<PayMethod>("epayco");
+  const [payMethod, setPayMethod] = useState<PayMethod>("usdc");
   const [submitting, setSubmitting] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
@@ -533,15 +531,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
     if (submitting) return;
     setSubmitting(true); setPayError(null);
     try {
-      if (payMethod === "epayco") {
-        const result = await createPayment("lifetime80", "epayco");
-        if (result.success && result.paymentUrl) {
-          window.location.href = result.paymentUrl;
-        } else {
-          setPayError(result.error || (es ? "No se pudo iniciar el pago." : "Failed to initiate payment."));
-        }
-        return;
-      } else {
+      {
         const result = await startNowPayments(PLAN_ID, user?.email || undefined);
         if (!result.success) {
           setPayError(result.error || (es ? "No se pudo iniciar el pago crypto." : "Failed to create crypto payment."));
@@ -552,7 +542,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
         setPayError(err.message || (es ? "Error de pago." : "Payment error."));
       } else { setPayError(err instanceof Error ? err.message : (es ? "Error inesperado." : "Unexpected error.")); }
     } finally { setSubmitting(false); }
-  }, [user, submitting, payMethod, es]);
+  }, [user, submitting, es]);
 
   const handleCtaClick = () => {
     handlePay();
@@ -563,10 +553,6 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
 
   const ctaLabel = (() => {
     if (submitting) return es ? "Procesando…" : "Processing…";
-    if (payMethod === "epayco") {
-      if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
-      return es ? "Pagar con Tarjeta — $100" : "Pay with Card — $100";
-    }
     if (usdcPolling && !usdcPaymentSuccess) return usdcOrder?.confirming ? (es ? "Confirmando pago…" : "Confirming payment…") : (es ? "Esperando pago…" : "Waiting for payment…");
     if (usdcUnavailable) return es ? "Crypto no disponible" : "Crypto unavailable";
     if (!user) return es ? "Iniciar sesión para pagar" : "Log in to pay";
@@ -637,7 +623,7 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
               <span style={{ fontSize: "clamp(56px, 15vw, 72px)", letterSpacing: "-0.02em" }}>100</span>
               <span style={{ fontSize: "clamp(22px, 5vw, 28px)", fontWeight: 700, marginTop: "0.35em", opacity: 0.8 }}>.00</span>
             </div>
-            <span style={{ fontSize: 13, color: "#26a17b", fontWeight: 600, marginTop: 4 }}>💳 {es ? "Tarjeta o cripto" : "Card or crypto"}</span>
+            <span style={{ fontSize: 13, color: "#26a17b", fontWeight: 600, marginTop: 4 }}>🪙 {es ? "Cripto: BTC, ETH, USDC +100" : "Crypto: BTC, ETH, USDC +100"}</span>
           </div>
           <ul style={{ listStyle: "none", padding: 0, margin: 0, textAlign: "left" }}>
             {s.benefits.map((benefit, i) => (
@@ -677,16 +663,6 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
         )}
 
         {/* Info boxes */}
-        {payMethod === "epayco" && (
-          <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(212,0,122,0.30)", background: "rgba(212,0,122,0.06)" }}>
-            <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 700, color: "#D4007A" }}>
-              {es ? "💳 Pago seguro con tarjeta" : "💳 Secure card payment"}
-            </p>
-            <p style={{ margin: 0, fontSize: 12, color: "var(--pnp-text-secondary)" }}>
-              {es ? "Tarjeta de crédito o débito. Checkout discreto vía ePayco — tu info de tarjeta nunca toca nuestros servidores." : "Credit or debit card. Discreet checkout via ePayco — your card info never touches our servers."}
-            </p>
-          </div>
-        )}
         {payMethod === "usdc" && !usdcUnavailable && !usdcOrder && (
           <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(38,161,123,0.30)", background: "rgba(38,161,123,0.06)" }}>
             <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 700, color: "#26a17b" }}>
@@ -751,27 +727,16 @@ function HeroView({ lang, onLangChange, onOpenSheet }: { lang: Lang; onLangChang
             {es ? "¿Cómo quieres pagar?" : "How do you want to pay?"}
           </p>
           <div style={{ display: "flex", gap: 6 }}>
-            {([
-              { id: "epayco" as PayMethod, emoji: "💳", label: es ? "Tarjeta" : "Card", sublabel: "$100 · ePayco", disabled: false },
-              { id: "usdc" as PayMethod, emoji: "🪙", label: es ? "Cripto" : "Crypto", sublabel: "BTC · ETH · USDC +100", disabled: usdcUnavailable },
-            ]).map(({ id, emoji, label, sublabel, disabled }) => {
-              const sel = payMethod === id;
-              return (
-                <button key={id}
-                  onClick={() => { if (!disabled) { setPayMethod(id); setPayError(null); } }}
-                  disabled={disabled}
-                  style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, padding: "8px 4px", borderRadius: 12, border: `1.5px solid ${sel ? "rgba(38,161,123,0.75)" : "rgba(255,255,255,0.10)"}`, background: sel ? "rgba(38,161,123,0.13)" : "rgba(255,255,255,0.03)", color: sel ? "#26a17b" : disabled ? "#636366" : "#cfcfd4", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1, boxShadow: sel ? "0 0 16px rgba(38,161,123,0.22)" : "none", transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s" }}
-                >
-                  <span style={{ fontSize: 18, lineHeight: 1, marginBottom: 2 }}>{emoji}</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>{label}</span>
-                  <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.65, lineHeight: 1.3, textAlign: "center" }}>{sublabel}</span>
-                </button>
-              );
-            })}
+            <button
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, padding: "8px 4px", borderRadius: 12, border: "1.5px solid rgba(38,161,123,0.75)", background: "rgba(38,161,123,0.13)", color: usdcUnavailable ? "#636366" : "#26a17b", cursor: usdcUnavailable ? "not-allowed" : "default", opacity: usdcUnavailable ? 0.45 : 1, boxShadow: "0 0 16px rgba(38,161,123,0.22)" }}
+            >
+              <span style={{ fontSize: 18, lineHeight: 1, marginBottom: 2 }}>🪙</span>
+              <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>{es ? "Cripto" : "Crypto"}</span>
+              <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.65, lineHeight: 1.3, textAlign: "center" }}>BTC · ETH · USDC +100</span>
+            </button>
           </div>
           <p style={{ margin: "6px 0 0", fontSize: 10, color: "rgba(207,207,212,0.45)", textAlign: "center", lineHeight: 1.4, minHeight: 14 }}>
-            {payMethod === "epayco" && (es ? "Tarjeta de crédito o débito — checkout seguro y discreto." : "Credit or debit card — safe, discreet checkout.")}
-            {payMethod === "usdc" && (es ? "BTC, ETH, USDC y +100 criptos vía NowPayments." : "BTC, ETH, USDC and 100+ coins via NowPayments.")}
+            {es ? "BTC, ETH, USDC y +100 criptos vía NowPayments." : "BTC, ETH, USDC and 100+ coins via NowPayments."}
           </p>
           <p style={{ margin: "8px 0 0", textAlign: "center" }}>
             <a href="/crypto-guide" style={{ fontSize: 10, color: "rgba(207,207,212,0.50)", textDecoration: "underline", textDecorationStyle: "dotted" }}>

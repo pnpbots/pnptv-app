@@ -164,8 +164,7 @@ export const sheets: Record<string, { title: string; emoji: string; body: React.
       <div className="space-y-2">
         <p className="text-pnp-textSecondary text-sm mb-3">Multiple ways to pay — pick what works for you.</p>
         {[
-          { e: "💳", t: "Credit & Debit Card", b: "Visa, Mastercard via ePayco. Fast and familiar." },
-          { e: "⚡", t: "Crypto (USDC)", b: "Pay with USDC via NowPayments. Near-instant, low fees." },
+          { e: "⚡", t: "Crypto (USDC/BTC/ETH +100)", b: "Pay with crypto via NowPayments. Near-instant, low fees." },
           { e: "🪙", t: "PNP Tokens", b: "Buy tokens inside the app for tips, subscriptions & exclusive content." },
         ].map(c => (
           <div key={c.t} className="flex gap-3 p-3 rounded-xl bg-pnp-surface border border-pnp-border">

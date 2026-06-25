@@ -741,59 +741,6 @@ export function buyTokensWithNowPayments(packageId: string, payCurrency?: string
   return request("/api/wallet/buy-nowpayments", { method: "POST", body: { packageId, ...(payCurrency ? { payCurrency } : {}) } });
 }
 
-export function buyTokensWithEpayco(packageId: string): Promise<{
-  success: boolean;
-  paymentUrl: string;
-  paymentId: string;
-  tokens?: number;
-  usd?: number;
-  error?: string;
-}> {
-  return request("/api/wallet/buy-card", { method: "POST", body: { packageId } });
-}
-
-/** Alias — same endpoint, preferred name for new call sites. */
-export const buyTokensWithCard = buyTokensWithEpayco;
-
-export function createCallCheckoutEpayco(
-  packageId: number,
-  startTimeUtc?: string,
-  endTimeUtc?: string,
-  email?: string,
-  clientNotes?: string
-): Promise<{
-  success: boolean;
-  paymentId: string;
-  paymentUrl: string;
-  checkoutUrl: string;
-  amount: number;
-  currency: string;
-  sku: string;
-  bookingId?: string;
-}> {
-  const body: Record<string, unknown> = { packageId, provider: "nowpayments" };
-  if (startTimeUtc) body.startTimeUtc = startTimeUtc;
-  if (endTimeUtc) body.endTimeUtc = endTimeUtc;
-  if (email) body.email = email;
-  if (clientNotes) body.clientNotes = clientNotes;
-  return request("/api/webapp/book-call/checkout", {
-    method: "POST",
-    body,
-  }).then((res: {
-    success: boolean;
-    paymentId: string;
-    checkoutUrl?: string;
-    amount: number;
-    currency: string;
-    sku: string;
-    bookingId?: string;
-  }) => ({
-    ...res,
-    paymentUrl: res.checkoutUrl ?? "",
-    checkoutUrl: res.checkoutUrl ?? "",
-  }));
-}
-
 export interface TokenCheckoutData {
   success: boolean;
   provider: "dash";

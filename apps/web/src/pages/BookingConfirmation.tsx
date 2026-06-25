@@ -92,7 +92,7 @@ export default function BookingConfirmation() {
   // Poll payment status after NowPayments or ePayco redirect until booking is confirmed
   useEffect(() => {
     const isPaymentReturn =
-      searchParams.get("nowpayments") === "success" || searchParams.get("epayco") === "success";
+      searchParams.get("nowpayments") === "success";
     if (!isPaymentReturn || !bookingId) return;
     if (!(/^\d+$/.test(bookingId) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingId))) return;
 

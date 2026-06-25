@@ -473,7 +473,7 @@ export default function DashBankPage() {
                 },
                 {
                   q: "Can I pay with other cryptocurrencies?",
-                  a: "Right now, Dash is our only crypto payment option. For non-crypto payments we accept Visa/Mastercard via ePayco on the Subscribe page. Dash offers the strongest privacy.",
+                  a: "We support Dash via BTCPay and 100+ cryptocurrencies via NowPayments (USDC, BTC, ETH, and more). Dash offers the strongest privacy.",
                 },
                 {
                   q: "Do I need to give my email?",

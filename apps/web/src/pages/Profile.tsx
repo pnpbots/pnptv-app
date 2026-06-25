@@ -208,7 +208,7 @@ export default function Profile() {
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [subscribeEmail, setSubscribeEmail] = useState("");
   const [subscribeEmailError, setSubscribeEmailError] = useState<string | null>(null);
-  const [subscribeProvider, setSubscribeProvider] = useState<"usdc" | "epayco" | "dash" | "btc">("usdc");
+  const [subscribeProvider, setSubscribeProvider] = useState<"usdc" | "dash" | "btc">("usdc");
   const [dashAvailable, setDashAvailable] = useState<boolean | null>(null);
   const [btcAvailable, setBtcAvailable] = useState(false);
   const [usdcAvailable, setUsdcAvailable] = useState<boolean | null>(null);
@@ -429,14 +429,11 @@ export default function Profile() {
     loadProfile();
   }, [loadProfile]);
 
-  // M7: Handle return from ePayco payment — check `?payment=confirmed` URL param
+  // Handle return from payment redirect — check `?payment=confirmed` URL param
   useEffect(() => {
     if (searchParams.get("payment") !== "confirmed") return;
     if (!targetUserId) return;
-    // Remove the param from the URL without a full reload
-    const newUrl = window.location.pathname;
-    window.history.replaceState(null, "", newUrl);
-    // Poll subscription status to confirm payment went through
+    window.history.replaceState(null, "", window.location.pathname);
     (async () => {
       for (let i = 0; i < 5; i++) {
         await new Promise(r => setTimeout(r, i === 0 ? 1500 : 3000));
@@ -451,8 +448,6 @@ export default function Profile() {
           }
         } catch (_) { /* continue polling */ }
       }
-      // Clean up sessionStorage regardless
-      try { sessionStorage.removeItem("pnp_epayco_creator_return"); } catch { /* noop */ }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // run once on mount only
@@ -699,17 +694,7 @@ export default function Profile() {
       }
       setSubscribeEmailError(null);
 
-      if (subscribeProvider === "epayco") {
-        const res = await initiateCreatorSubscriptionPayment(creatorId, "epayco", trimmed);
-        if (res.success && res.paymentUrl) {
-          // Store creatorId so we can verify subscription when the user returns
-          try { sessionStorage.setItem("pnp_epayco_creator_return", creatorId); } catch { /* noop */ }
-          window.location.href = assertPaymentUrl(res.paymentUrl);
-          return; // page navigates away
-        } else {
-          setSubscribeError(res.error || p.failedToCreatePayment);
-        }
-      } else if (subscribeProvider === "usdc") {
+      if (subscribeProvider === "usdc") {
         const res = await startNowPayments("creator_monthly", trimmed, creatorId);
         if (!res?.success) {
           setSubscribeError((res as any)?.error || nowpaymentsError || p.failedToCreatePayment);
@@ -1869,16 +1854,6 @@ export default function Profile() {
                         🪙 Crypto −20%
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setSubscribeProvider("epayco")}
-                      className="py-2.5 rounded-lg text-sm font-medium text-center border transition-colors"
-                      style={subscribeProvider === "epayco"
-                        ? { background: "rgba(230,77,77,0.20)", color: "#e64d4d", borderColor: "rgba(230,77,77,0.5)" }
-                        : { background: "rgba(230,77,77,0.06)", color: "#e64d4d", borderColor: "rgba(230,77,77,0.2)" }}
-                    >
-                      💳 ePayco
-                    </button>
                     {dashAvailable !== false && (
                       <button
                         type="button"
