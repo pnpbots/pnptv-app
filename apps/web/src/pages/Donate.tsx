@@ -60,6 +60,7 @@ export default function Donate() {
         } else {
           setError(res.error || (es ? "Error al crear el pago Dash." : "Failed to create Dash payment."));
         }
+      }
     } catch (e: any) {
       setError(e.message || (es ? "Algo salió mal." : "Something went wrong."));
     } finally {
