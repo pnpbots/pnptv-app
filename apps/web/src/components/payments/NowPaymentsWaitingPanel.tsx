@@ -82,6 +82,20 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
         </div>
       )}
 
+      {/* MoonPay delay notice */}
+      <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 mb-2 text-[10px] text-pnp-textSecondary/70 leading-relaxed space-y-1">
+        <p>
+          {es
+            ? "⚠️ Si pagaste con MoonPay, la entrega puede tardar hasta 24 h. Tu suscripción se activará automáticamente cuando llegue el pago."
+            : "⚠️ If you paid via MoonPay, delivery can take up to 24 h. Your subscription activates automatically once the payment arrives."}
+        </p>
+        <p>
+          {es
+            ? "💡 Para evitar esperas, usa crypto que ya tengas en Binance, Coinbase, Kraken u otra billetera — el pago llega en minutos."
+            : "💡 To avoid waiting, send crypto you already own from Binance, Coinbase, Kraken, or any wallet — payment arrives in minutes."}
+        </p>
+      </div>
+
       {/* Fallback + cancel */}
       <div className="flex gap-2 mb-2">
         <a
