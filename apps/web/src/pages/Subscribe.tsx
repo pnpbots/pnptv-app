@@ -72,7 +72,6 @@ export default function Subscribe() {
   const [error, setError] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [showCOP, setShowCOP] = useState(false);
   // Per-plan benefits expand state — plans start collapsed (N-06)
   const [expandedPlans, setExpandedPlans] = useState<Set<string>>(new Set());
   const togglePlanBenefits = (planId: string) => {
@@ -803,16 +802,6 @@ export default function Subscribe() {
         </details>
       )}
 
-      {/* Currency toggle */}
-      <div className="flex justify-center mb-4">
-        <button
-          onClick={() => setShowCOP(!showCOP)}
-          className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors"
-        >
-          {showCOP ? s.showPricesInUSD : s.showPricesInCOP}
-        </button>
-      </div>
-
       {/* Plan cards */}
       <div className="space-y-3 mb-6">
 
@@ -830,13 +819,12 @@ export default function Subscribe() {
         {memberPlans.map((plan) => {
           const isSelected = selectedPlan === plan.id;
           const features = getPlanFeatures(plan, true);
-          const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
+          const displayPrice = formatPrice(plan.priceUSD, "USD");
           const planLabel = getPlanLabel(plan, true);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
           const cryptoDiscount = plan.priceUSD > 50;
           const cryptoPriceUSD = cryptoDiscount ? Math.round(plan.priceUSD * 0.80 * 100) / 100 : plan.priceUSD;
-          const cryptoPriceCOP = cryptoDiscount ? Math.round(plan.priceCOP * 0.80) : plan.priceCOP;
-          const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
+          const cryptoDisplayPrice = formatPrice(cryptoPriceUSD, "USD");
 
           const planDays = plan.duration_days || plan.duration || 30;
           const isBtcPanelActive = !!(btcOrder && selectedPlan === plan.id);
@@ -880,7 +868,6 @@ export default function Subscribe() {
                 </div>
                 <span className="flex flex-col items-end">
                   <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
-                  <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(plan.priceUSD, "USD") : formatPrice(plan.priceCOP, "COP")}</span>
                 </span>
               </div>
               <span
@@ -1055,14 +1042,13 @@ export default function Subscribe() {
           const isSelected = selectedPlan === plan.id;
           const isRecommended = plan.id === RECOMMENDED_PLAN || plan.sku === RECOMMENDED_PLAN;
           const features = getPlanFeatures(plan, false);
-          const displayPrice = showCOP ? formatPrice(plan.priceCOP, "COP") : formatPrice(plan.priceUSD, "USD");
+          const displayPrice = formatPrice(plan.priceUSD, "USD");
           const planLabel = getPlanLabel(plan, false);
           const hasAddOns = plan.addOns && plan.addOns.length > 0;
           const planDays = plan.duration_days || plan.duration || 30;
           const cryptoDiscount = plan.priceUSD > 50;
           const cryptoPriceUSD = cryptoDiscount ? Math.round(plan.priceUSD * 0.80 * 100) / 100 : plan.priceUSD;
-          const cryptoPriceCOP = cryptoDiscount ? Math.round(plan.priceCOP * 0.80) : plan.priceCOP;
-          const cryptoDisplayPrice = showCOP ? formatPrice(cryptoPriceCOP, "COP") : formatPrice(cryptoPriceUSD, "USD");
+          const cryptoDisplayPrice = formatPrice(cryptoPriceUSD, "USD");
 
           const isBtcPanelActive = !!(btcOrder && selectedPlan === plan.id);
           const isDashPanelActive = !!(dashOrder && selectedPlan === plan.id);
@@ -1113,7 +1099,6 @@ export default function Subscribe() {
                 <div className="text-right">
                   <div className="flex flex-col items-end">
                     <span className="text-lg font-bold text-pnp-textPrimary leading-tight">{displayPrice}</span>
-                    <span className="text-[10px] text-pnp-textSecondary leading-none mt-0.5">{showCOP ? formatPrice(plan.priceUSD, "USD") : formatPrice(plan.priceCOP, "COP")}</span>
                   </div>
                   {planDays >= 30 && planDays < 36500 && (
                     <div className="text-[10px] text-pnp-textSecondary">
