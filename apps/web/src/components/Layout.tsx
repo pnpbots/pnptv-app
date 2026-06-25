@@ -1033,22 +1033,33 @@ export function Layout() {
                 {section.label}
               </div>
               <div className="space-y-0.5">
-                {section.links.map((link) => (
-                  <NavLink
-                    key={link.to}
-                    to={link.to}
-                    end={(link as any).end}
-                    className={({ isActive }: { isActive: boolean }) =>
-                      `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        isActive
-                          ? "nav-active"
-                          : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
-                      }`
-                    }
-                  >
-                    {link.label}
-                  </NavLink>
-                ))}
+                {section.links.map((link) =>
+                  link.to === "/dm" ? (
+                    <button
+                      key={link.to}
+                      onClick={() => { setDmPartnerId(null); setIsDmPanelOpen(true); }}
+                      className={`flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors ${isDmPanelOpen ? "nav-active" : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"}`}
+                    >
+                      <span>{link.label}</span>
+                      {dmUnread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#D4007A] text-white text-[10px] font-bold flex items-center justify-center">{dmUnread > 9 ? "9+" : dmUnread}</span>}
+                    </button>
+                  ) : (
+                    <NavLink
+                      key={link.to}
+                      to={link.to}
+                      end={(link as any).end}
+                      className={({ isActive }: { isActive: boolean }) =>
+                        `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isActive
+                            ? "nav-active"
+                            : "text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                        }`
+                      }
+                    >
+                      {link.label}
+                    </NavLink>
+                  )
+                )}
               </div>
             </div>
           ))}
@@ -1326,8 +1337,14 @@ export function Layout() {
                     <svg className="w-3.5 h-3.5 text-pnp-textSecondary/50 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
                   </summary>
                   <div className="mt-1 space-y-0.5">
+                    <button
+                      onClick={() => { setMobileMenuOpen(false); setDmPartnerId(null); setIsDmPanelOpen(true); }}
+                      className="flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface"
+                    >
+                      <span>{t.nav.inbox || "Inbox"}</span>
+                      {dmUnread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#D4007A] text-white text-[10px] font-bold flex items-center justify-center">{dmUnread > 9 ? "9+" : dmUnread}</span>}
+                    </button>
                     {[
-                      { to: "/dm", label: t.nav.inbox || "Inbox", badge: dmUnread > 0 ? (dmUnread > 9 ? "9+" : String(dmUnread)) : null },
                       { to: "/self-care", label: t.nav.selfCare || "Self-Care Center", emoji: "🧘" },
                       { to: "/my-access", label: t.nav.myAccess || "My Access" },
                       { to: "/settings", label: t.nav.settings || "Settings" },
@@ -1343,14 +1360,9 @@ export function Layout() {
                         }
                       >
                         <span className="flex items-center gap-2">
-                          {link.emoji && <span aria-hidden="true">{link.emoji}</span>}
+                          {(link as any).emoji && <span aria-hidden="true">{(link as any).emoji}</span>}
                           {link.label}
                         </span>
-                        {link.badge && (
-                          <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#D4007A] text-white text-[10px] font-bold flex items-center justify-center">
-                            {link.badge}
-                          </span>
-                        )}
                       </NavLink>
                     ))}
                   </div>
