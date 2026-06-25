@@ -1292,12 +1292,17 @@ const limiter = rateLimit({
     // dm/presence is included because the PresenceProvider polls every 20s
     // for many user IDs at once; if a buggy build loops, it must not be
     // able to poison the IP bucket and block auth/login attempts.
+    //
+    // IMPORTANT: this limiter is mounted with app.use('/api/', limiter), which
+    // strips the '/api' prefix from req.path. We use req.originalUrl (full
+    // path) and strip the querystring so the list stays human-readable.
     const skipPaths = [
       '/api/auth-status',
       '/api/webapp/notifications/counts',
       '/api/webapp/dm/presence',
     ];
-    return skipPaths.includes(req.path);
+    const pathOnly = (req.originalUrl || req.url || '').split('?')[0];
+    return skipPaths.includes(pathOnly);
   },
 });
 app.use('/api/', limiter);
