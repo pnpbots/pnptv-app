@@ -315,7 +315,7 @@ export interface UseStreamerReturn {
   isDesktopLayout: boolean;
 
   // Action handlers
-  goLive: () => void;
+  goLive: () => Promise<void>;
   stopStream: () => Promise<void>;
   toggleMute: () => void;
   toggleCamera: () => void;
@@ -1038,7 +1038,7 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
   }, []);
 
   // ── Go Live ───────────────────────────────────────────────────────────────
-  const goLive = useCallback(() => {
+  const goLive = useCallback(async () => {
     if (!channel) {
       setStreamError("No streaming channel assigned. Contact an admin.");
       return;
@@ -1051,20 +1051,6 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     const mimeType = getSupportedMimeType();
     if (!mimeType) {
       setStreamError("Your browser does not support WebM or MP4 recording.");
-      return;
-    }
-
-    // Use processed stream (scene→filters→audio) when available, else raw camera.
-    // Stale refs from a previous session may hold streams with ended tracks — fall
-    // back to the raw camera if no live video tracks are found.
-    let finalStream = getFinalStream();
-    if (!finalStream || !finalStream.getVideoTracks().some((t) => t.readyState === "live")) {
-      finalStream = streamRef.current;
-    }
-
-    // Guard against starting a recorder with no live video tracks.
-    if (!finalStream || !finalStream.getVideoTracks().some((t) => t.readyState === "live")) {
-      setStreamError("No video source available. Check camera permissions and try again.");
       return;
     }
 
@@ -1100,6 +1086,35 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
       // iOS Safari sends MP4; everyone else sends WebM.
       mimeType,
     });
+
+    // C2: SET_CONNECTING above triggers the live layout to mount, which is where
+    // SceneManager/VideoFilters/AudioMixer live. Their useEffects then populate
+    // sceneStreamRef/filteredStreamRef/mixedAudioNodeRef via callbacks. Poll
+    // briefly so getFinalStream() can pick up the composited pipeline instead
+    // of always falling back to the raw camera (which made filters and scenes
+    // decorative-only for every previous broadcast).
+    const pipelineDeadline = Date.now() + 1500;
+    while (Date.now() < pipelineDeadline) {
+      const candidate = filteredStreamRef.current || sceneStreamRef.current;
+      if (candidate && candidate.getVideoTracks().some((t) => t.readyState === "live")) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    // Resolve final stream: prefer filtered > scene > raw camera. Stale refs from
+    // a previous session may hold streams with ended tracks — fall back to raw
+    // if no live video tracks are found in the processed pipeline.
+    let finalStream: MediaStream | null = getFinalStream();
+    if (!finalStream || !finalStream.getVideoTracks().some((t) => t.readyState === "live")) {
+      finalStream = streamRef.current;
+    }
+
+    // Guard against starting a recorder with no live video tracks.
+    if (!finalStream || !finalStream.getVideoTracks().some((t) => t.readyState === "live")) {
+      setStreamError("No video source available. Check camera permissions and try again.");
+      dispatch({ type: "SET_CONNECTING", payload: false });
+      if (connectAckTimerRef.current) { clearTimeout(connectAckTimerRef.current); connectAckTimerRef.current = null; }
+      return;
+    }
 
     // Main stream recorder (sends data over socket)
     let recorder: MediaRecorder;
@@ -1325,7 +1340,7 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     if (state.isLive) {
       setShowStopConfirm(true);
     } else if (!state.isConnecting) {
-      goLive();
+      void goLive();
     }
   }, [state.isLive, state.isConnecting, goLive]);
 
