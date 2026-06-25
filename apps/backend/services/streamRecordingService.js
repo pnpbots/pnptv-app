@@ -46,17 +46,29 @@ const MANIFEST_POLL_INTERVAL_MS = 1_000;
 // ---------------------------------------------------------------------------
 
 /**
- * HEAD-check the Restreamer HLS manifest URL once. Resolves true on 200.
+ * GET the Restreamer HLS manifest and return true only when it represents a
+ * LIVE stream. A 200 response is not enough — Restreamer leaves the previous
+ * session's playlist in memfs with #EXT-X-ENDLIST after the stream ends.
+ * Starting a recording against an ENDLIST playlist makes FFmpeg consume the
+ * stale segments, hit EOF, and exit cleanly in ~150 ms — producing a 1-segment
+ * "completed" recording instead of the actual broadcast.
  */
 function _checkManifestOnce(url) {
   return new Promise((resolve) => {
-    const req = http.request(url, { method: 'HEAD', timeout: 2000 }, (res) => {
-      res.resume();
-      resolve(res.statusCode === 200);
+    const req = http.get(url, { timeout: 2000 }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); resolve(false); return; }
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { body += chunk; if (body.length > 32 * 1024) { res.destroy(); } });
+      res.on('end', () => {
+        const hasSegments = /\.ts\b/.test(body);
+        const isStale = body.includes('#EXT-X-ENDLIST');
+        resolve(hasSegments && !isStale);
+      });
+      res.on('error', () => resolve(false));
     });
     req.on('error', () => resolve(false));
     req.on('timeout', () => { req.destroy(); resolve(false); });
-    req.end();
   });
 }
 
@@ -247,7 +259,16 @@ async function startRecording({ sessionId, creatorId, channelRef }) {
   const manifestPath = path.join(dir, 'index.m3u8');
   const segmentPattern = path.join(dir, 'seg_%05d.ts');
   const manifestUrl = `/uploads/recordings/${recordingId}/index.m3u8`;
-  const inputUrl = `${RESTREAMER_URL}/memfs/${channelRef}.m3u8`;
+  // _waitForManifest still polls Restreamer's HLS to detect when the stream
+  // is actually live (proves RTMP is being ingested). But the recording itself
+  // pulls from RTMP — HLS pulling raced against playlist updates and FFmpeg
+  // EOF'd on stale ENDLIST markers, producing 1-segment "completed" recordings.
+  const rtmpName = channelRef.startsWith('pnptv-') ? channelRef.slice('pnptv-'.length) : channelRef;
+  const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN;
+  const inputUrl = rtmpToken
+    ? `rtmp://restreamer:1935/live/${rtmpName}?token=${rtmpToken}`
+    : `rtmp://restreamer:1935/live/${rtmpName}`;
+  const inputUrlForLog = `rtmp://restreamer:1935/live/${rtmpName}${rtmpToken ? '?token=<redacted>' : ''}`;
 
   // Update file_path to the directory now that we know the id.
   await pool.query(
@@ -264,7 +285,7 @@ async function startRecording({ sessionId, creatorId, channelRef }) {
   // pending and return immediately so the caller has the recordingId for
   // cancellation via stopRecording.
   _pendingStarts.add(recordingId);
-  logger.info('streamRecording: waiting for manifest', { recordingId, channelRef, inputUrl });
+  logger.info('streamRecording: waiting for manifest', { recordingId, channelRef, inputUrl: inputUrlForLog });
 
   setImmediate(async () => {
     const result = await _waitForManifest(channelRef, recordingId);
@@ -286,6 +307,11 @@ async function startRecording({ sessionId, creatorId, channelRef }) {
     // Manifest is live — spawn the recording ffmpeg.
     _pendingStarts.delete(recordingId);
     const ffmpegArgs = [
+      // Be lenient about momentary upstream corruption — Restreamer's RTMP
+      // server can briefly hiccup when the ingest process restarts.
+      '-fflags', '+discardcorrupt',
+      '-err_detect', 'ignore_err',
+      '-rw_timeout', '15000000', // 15 s socket timeout (microseconds)
       '-i', inputUrl,
       '-c', 'copy',
       '-t', '14400',
@@ -346,7 +372,7 @@ async function startRecording({ sessionId, creatorId, channelRef }) {
       ).catch(() => {});
     });
 
-    logger.info('streamRecording: started', { recordingId, creatorId, channelRef, inputUrl });
+    logger.info('streamRecording: started', { recordingId, creatorId, channelRef, inputUrl: inputUrlForLog });
     _scheduleThumbCapture(recordingId);
   });
 
