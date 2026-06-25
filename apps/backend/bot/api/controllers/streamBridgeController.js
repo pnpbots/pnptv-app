@@ -36,18 +36,20 @@ const getMyChannel = async (req, res) => {
       ? channelRef.slice('pnptv-'.length)
       : channelRef;
 
-    const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN;
-    const rtmpUrl = rtmpToken
-      ? `rtmp://restreamer:1935/live/${streamKey}?token=${rtmpToken}`
-      : `rtmp://restreamer:1935/live/${streamKey}`;
+    // Return the PUBLIC RTMP URL so the studio's settings panel can show it
+    // to creators who also want to use external OBS. The internal Docker URL
+    // (rtmp://restreamer:1935/live/...?token=...) is built server-side inside
+    // the stream:start socket handler and never sent to the browser.
+    const restreamerPublicUrl = process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app';
+    const publicHost = restreamerPublicUrl.replace(/^https?:\/\//, '');
+    const rtmpUrl = `rtmp://${publicHost}/live`;
 
     return res.json({
       success: true,
       channel: {
         ref: channelRef,
         streamKey,
-        // rtmpUrl intentionally omitted — contains RESTREAMER_RTMP_TOKEN and is
-        // only needed by the backend FFmpeg bridge, never by the browser client.
+        rtmpUrl,
       },
     });
   } catch (err) {

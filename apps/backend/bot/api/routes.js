@@ -4499,7 +4499,7 @@ const streamerSettingsController = require('./controllers/streamerSettingsContro
 app.get('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.getSettings));
 app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.updateSettings));
 // Gap 2: Persistent thumbnail upload
-app.post('/api/webapp/live/thumbnail', requireSessionAuth, asyncHandler(streamerSettingsController.uploadThumbnail));
+app.post('/api/webapp/live/thumbnail', requireSessionAuth, express.json({ limit: '4mb' }), asyncHandler(streamerSettingsController.uploadThumbnail));
 // MED-02: 6 MB body limit for snapshot uploads (base64-encoded frame); role guard restricts to creators only
 app.post('/api/webapp/live/snapshot', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), express.json({ limit: '6mb' }), asyncHandler(webappLiveController.uploadSnapshot));
 

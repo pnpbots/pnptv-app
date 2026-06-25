@@ -13,8 +13,14 @@
  * Exits 0 on success, 1 on any failure. Run:
  *   node apps/backend/scripts/smoke_studio_live.js [--sid <rawSid>]
  *
- * Defaults target the currently-provisioned "pnptv-creator" test channel
- * (JCBTN session). Override via --sid or env STUDIO_SMOKE_SID.
+ * To mint a fresh test SID for unattended runs:
+ *   docker exec redis-pnptv redis-cli --raw KEYS 'sess:*' | head -1 \
+ *     | sed 's/^sess://' | xargs -I{} STUDIO_SMOKE_SID={} \
+ *     node apps/backend/scripts/smoke_studio_live.js
+ *
+ * The DEFAULT_SID is stale by design — it's a placeholder, not an active
+ * session. Always pass --sid or set STUDIO_SMOKE_SID in CI before running.
+ * Override via --sid or env STUDIO_SMOKE_SID.
  */
 
 'use strict';
@@ -41,10 +47,17 @@ function argValue(flag) {
 }
 
 const rawSid = argValue('--sid') || process.env.STUDIO_SMOKE_SID || DEFAULT_SID;
+const usingDefaultSid = rawSid === DEFAULT_SID;
 
 if (!SESSION_SECRET) {
   console.error('✗ SESSION_SECRET env var required');
   process.exit(1);
+}
+
+if (usingDefaultSid) {
+  console.error('⚠ No --sid passed; falling back to placeholder DEFAULT_SID.');
+  console.error('  This will fail unless that exact session row exists in Redis.');
+  console.error('  Pass --sid <rawSid> or set STUDIO_SMOKE_SID. See header comment for how to mint one.');
 }
 
 // ── Steps ───────────────────────────────────────────────────────────────────

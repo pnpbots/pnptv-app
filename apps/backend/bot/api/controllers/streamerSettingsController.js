@@ -2,9 +2,22 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const logger = require('../../../utils/logger');
 const streamerSettingsService = require('../../../services/streamerSettingsService');
 const { getPool } = require('../../../config/postgres');
+
+// Reject anything that isn't a real JPEG/PNG/WebP/GIF before handing it to sharp.
+// Defeats the trivial "data:image/jpeg;base64,<2MB of nulls>" payload that the
+// previous size-only check accepted.
+function isAllowedImageBuffer(buf) {
+  if (!buf || buf.length < 12) return false;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true; // JPEG
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true; // PNG
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return true; // WebP
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return true; // GIF
+  return false;
+}
 
 // Gap 2: thumbnail storage directory
 const THUMB_UPLOAD_DIR = '/opt/pnptvapp/storage/stream-thumbs';
@@ -63,9 +76,9 @@ const uploadThumbnail = async (req, res) => {
     return res.status(400).json({ success: false, error: 'dataUrl is required' });
   }
 
-  // Strip data URI prefix: "data:image/jpeg;base64,..."
+  // Strip data URI prefix and require it actually declares an image MIME type.
   const commaIdx = dataUrl.indexOf(',');
-  if (commaIdx === -1) {
+  if (commaIdx === -1 || !dataUrl.slice(0, commaIdx).startsWith('data:image/')) {
     return res.status(400).json({ success: false, error: 'Invalid dataUrl format' });
   }
   const b64 = dataUrl.slice(commaIdx + 1);
@@ -76,7 +89,12 @@ const uploadThumbnail = async (req, res) => {
     return res.status(413).json({ success: false, error: 'Image exceeds 2 MB limit' });
   }
 
-  const filename = `${userId}-${Date.now()}.webp`;
+  if (!isAllowedImageBuffer(imageBuffer)) {
+    return res.status(400).json({ success: false, error: 'Unsupported image format' });
+  }
+
+  // Use a random UUID for the filename so URLs aren't enumerable by (userId, timestamp).
+  const filename = `${crypto.randomUUID()}.webp`;
   const filePath = path.join(THUMB_UPLOAD_DIR, filename);
   const publicUrl = `/static/stream-thumbs/${filename}`;
 

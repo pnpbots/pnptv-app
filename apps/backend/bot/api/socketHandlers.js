@@ -2300,9 +2300,11 @@ function initSocketIO(io) {
           return;
         }
       } catch (banCheckErr) {
-        logger.warn('live:message ban check failed', { streamId, userId: user.id, error: banCheckErr.message });
-        socket.emit('live:error', { code: 'CHAT_ERROR', message: 'Unable to verify chat status. Please try again.' });
-        return;
+        // Fail open on transient DB errors so a slow primary doesn't silence all
+        // legitimate chat — mirrors the rate-limit's documented fail-open posture.
+        // Persistent abuse is caught by rate limiting (or stays caught next time
+        // the ban table is reachable).
+        logger.warn('live:message ban check failed (fail-open)', { streamId, userId: user.id, error: banCheckErr.message });
       }
 
       try {
@@ -2911,9 +2913,21 @@ function initSocketIO(io) {
       const safeFps     = Number.isFinite(Number(fps))      ? Math.max(0, Number(fps))                 : null;
       const safeDropped = Number.isFinite(Number(dropped))  ? Math.max(0, Math.round(Number(dropped))) : null;
       const safeRtt     = Number.isFinite(Number(rtt))      ? Math.max(0, Math.round(Number(rtt)))     : null;
-      const safeSession = typeof sessionId === 'string' ? sessionId.slice(0, 128) : String(socket.data.analyticsSessionId || '');
+      let safeSession = typeof sessionId === 'string' ? sessionId.slice(0, 128) : String(socket.data.analyticsSessionId || '');
 
-      if (!safeSession) return;
+      // The analytics session is created in a setImmediate inside stream:start,
+      // so the very first metrics tick may race ahead of it. Poll briefly
+      // (5 × 200ms) for the session id rather than silently dropping the row.
+      if (!safeSession) {
+        for (let i = 0; i < 5; i++) {
+          await new Promise(r => setTimeout(r, 200));
+          if (socket.data.analyticsSessionId) {
+            safeSession = String(socket.data.analyticsSessionId);
+            break;
+          }
+        }
+        if (!safeSession) return;
+      }
 
       try {
         await query(

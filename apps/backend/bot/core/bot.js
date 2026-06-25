@@ -203,19 +203,33 @@ const startApiServer = (modeLabel) => {
   const server = http.createServer(apiApp);
 
   // Attach Socket.IO for real-time chat/DM
+  // Resolve the allow-list once so both cors.origin and allowRequest can share it.
+  const allowedOrigins = (() => {
+    const defaults = ['https://app.pnptv.app', 'https://pnptv.app', 'https://studio.pnptv.app'];
+    const raw = process.env.WEBAPP_ORIGIN;
+    if (!raw) return defaults;
+    const allowed = raw.split(',').map(o => o.trim()).filter(o => o && o !== '*');
+    return allowed.length > 0 ? allowed : defaults;
+  })();
+  const allowedOriginSet = new Set(allowedOrigins);
+
   const io = new SocketIOServer(server, {
     cors: {
       // H5: Filter out wildcard '*' entries — WEBAPP_ORIGIN must never accept all origins.
       // Default fallback includes studio.pnptv.app so MediaRecorder→FFmpeg streaming
       // works even when WEBAPP_ORIGIN is unset in the environment.
-      origin: (() => {
-        const defaults = ['https://app.pnptv.app', 'https://pnptv.app', 'https://studio.pnptv.app'];
-        const raw = process.env.WEBAPP_ORIGIN;
-        if (!raw) return defaults;
-        const allowed = raw.split(',').map(o => o.trim()).filter(o => o && o !== '*');
-        return allowed.length > 0 ? allowed : defaults;
-      })(),
+      origin: allowedOrigins,
       credentials: true,
+    },
+    // Reject handshakes from non-allow-listed origins outright — the cors.origin
+    // header only governs CORS replies; allowRequest is what actually blocks
+    // non-browser clients (curl, native WS scripts) at handshake time.
+    allowRequest: (req, callback) => {
+      const origin = req.headers.origin;
+      // Same-origin / no-origin (server-to-server, native apps) allowed.
+      if (!origin) return callback(null, true);
+      if (allowedOriginSet.has(origin)) return callback(null, true);
+      callback('origin not allowed', false);
     },
     path: '/socket.io',
   });

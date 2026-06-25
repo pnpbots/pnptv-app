@@ -1970,7 +1970,7 @@ const uploadSnapshot = async (req, res) => {
   }
 
   const commaIdx = dataUrl.indexOf(',');
-  if (commaIdx === -1) {
+  if (commaIdx === -1 || !dataUrl.slice(0, commaIdx).startsWith('data:image/')) {
     return res.status(400).json({ success: false, error: 'Invalid dataUrl format' });
   }
   const imageBuffer = Buffer.from(dataUrl.slice(commaIdx + 1), 'base64');
@@ -1979,11 +1979,24 @@ const uploadSnapshot = async (req, res) => {
     return res.status(413).json({ success: false, error: 'Snapshot exceeds 4 MB limit' });
   }
 
+  // Magic-bytes check — reject anything that isn't a real JPEG/PNG/WebP/GIF
+  // before sharp ever sees it. Defeats the trivial padded-buffer attack.
+  const isImage = imageBuffer.length >= 12 && (
+    (imageBuffer[0] === 0xff && imageBuffer[1] === 0xd8 && imageBuffer[2] === 0xff) ||
+    (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50 && imageBuffer[2] === 0x4e && imageBuffer[3] === 0x47) ||
+    (imageBuffer.toString('ascii', 0, 4) === 'RIFF' && imageBuffer.toString('ascii', 8, 12) === 'WEBP') ||
+    (imageBuffer[0] === 0x47 && imageBuffer[1] === 0x49 && imageBuffer[2] === 0x46 && imageBuffer[3] === 0x38)
+  );
+  if (!isImage) {
+    return res.status(400).json({ success: false, error: 'Unsupported image format' });
+  }
+
   const pool = getPool();
   const fs   = require('fs');
   const path = require('path');
+  const crypto = require('crypto');
 
-  const filename  = `${userId}-${Date.now()}.webp`;
+  const filename  = `${crypto.randomUUID()}.webp`;
   const filePath  = path.join(SNAPSHOT_DIR, filename);
   const publicUrl = `/static/stream-snapshots/${filename}`;
 
